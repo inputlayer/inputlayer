@@ -1,0 +1,44 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock for libraries (keep for binaries)
+Cargo.lock
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local configuration (git-ignored overrides)
+config.local.toml
+
+# Data directory (storage engine data)
+/data/
+
+# Test temporary files
+tmp/
+*.tmp
+
+# GUI (Next.js) - Build artifacts and dependencies
+gui/node_modules/
+gui/.next/
+gui/dist/
+gui/out/
+
+# GUI - Package manager lock files (keep package.json only)
+gui/pnpm-lock.yaml
+gui/package-lock.json
+
+# GUI - Editor/IDE cache
+gui/.turbo/
+gui/.vercel/
+
+rfcs/
+proposals/
+
+.gback/
