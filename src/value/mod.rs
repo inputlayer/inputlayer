@@ -115,3 +115,112 @@ impl DataType {
     }
 }
 
+impl DataType {
+    /// Convert to Arrow `DataType`
+    pub fn to_arrow(&self) -> ArrowDataType {
+        match self {
+            DataType::Int32 => ArrowDataType::Int32,
+            DataType::Int64 => ArrowDataType::Int64,
+            DataType::Float64 => ArrowDataType::Float64,
+            DataType::String => ArrowDataType::Utf8,
+            DataType::Bool => ArrowDataType::Boolean,
+            DataType::Null => ArrowDataType::Null,
+            // Vectors with known dimension use FixedSizeList (preserves dimension info)
+            DataType::Vector { dim: Some(n) } => ArrowDataType::FixedSizeList(
+                Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    ArrowDataType::Float32,
+                    false,
+                )),
+                *n as i32,
+            ),
+            // Vectors with unknown dimension use LargeList (variable length)
+            DataType::Vector { dim: None } => ArrowDataType::LargeList(Arc::new(
+                arrow::datatypes::Field::new("item", ArrowDataType::Float32, false),
+            )),
+            // Int8 vectors with known dimension use FixedSizeList
+            DataType::VectorInt8 { dim: Some(n) } => ArrowDataType::FixedSizeList(
+                Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    ArrowDataType::Int8,
+                    false,
+                )),
+                *n as i32,
+            ),
+            // Int8 vectors with unknown dimension use LargeList
+            DataType::VectorInt8 { dim: None } => ArrowDataType::LargeList(Arc::new(
+                arrow::datatypes::Field::new("item", ArrowDataType::Int8, false),
+            )),
+            // Timestamps stored as Int64 (milliseconds since Unix epoch)
+            DataType::Timestamp => ArrowDataType::Int64,
+        }
+    }
+
+    /// Create from Arrow `DataType`
+    pub fn from_arrow(arrow_type: &ArrowDataType) -> Option<Self> {
+        match arrow_type {
+            ArrowDataType::Int32 => Some(DataType::Int32),
+            ArrowDataType::Int64 => Some(DataType::Int64),
+            ArrowDataType::Float64 => Some(DataType::Float64),
+            ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => Some(DataType::String),
+            ArrowDataType::Boolean => Some(DataType::Bool),
+            ArrowDataType::Null => Some(DataType::Null),
+            // FixedSizeList preserves dimension information
+            ArrowDataType::FixedSizeList(field, size)
+                if matches!(field.data_type(), ArrowDataType::Float32) =>
+            {
+                Some(DataType::Vector {
+                    dim: Some(*size as usize),
+                })
+            }
+            // Variable-length lists have unknown dimension
+            ArrowDataType::LargeList(field) | ArrowDataType::List(field)
+                if matches!(field.data_type(), ArrowDataType::Float32) =>
+            {
+                Some(DataType::Vector { dim: None })
+            }
+            // Int8 FixedSizeList preserves dimension information
+            ArrowDataType::FixedSizeList(field, size)
+                if matches!(field.data_type(), ArrowDataType::Int8) =>
+            {
+                Some(DataType::VectorInt8 {
+                    dim: Some(*size as usize),
+                })
+            }
+            // Int8 variable-length lists have unknown dimension
+            ArrowDataType::LargeList(field) | ArrowDataType::List(field)
+                if matches!(field.data_type(), ArrowDataType::Int8) =>
+            {
+                Some(DataType::VectorInt8 { dim: None })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// A dynamically-typed value that can be stored in a tuple
+#[derive(Debug, Clone)]
+pub enum Value {
+    /// 32-bit signed integer
+    Int32(i32),
+    /// 64-bit signed integer
+    Int64(i64),
+    /// 64-bit floating point
+    Float64(f64),
+    /// UTF-8 string (reference counted for efficient cloning)
+    String(Arc<str>),
+    /// Boolean value
+    Bool(bool),
+    /// Null/missing value
+    Null,
+    /// Vector of f32 values (for embeddings, similarity search)
+    /// Uses f32 for memory efficiency (embeddings rarely need f64 precision)
+    Vector(Arc<Vec<f32>>),
+    /// Vector of i8 values (quantized embeddings for 75% memory savings)
+    /// Uses int8 quantization for large-scale embedding storage
+    VectorInt8(Arc<Vec<i8>>),
+    /// Unix timestamp in milliseconds since epoch (1970-01-01 00:00:00 UTC)
+    /// For temporal operations in spatio-temporal memory systems
+    Timestamp(i64),
+}
+
