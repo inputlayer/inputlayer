@@ -71,6 +71,7 @@ impl DataType {
         DataType::Vector { dim: Some(dim) }
     }
 
+
     /// Create a Vector type with unknown/any dimension (no validation)
     pub fn vector_any() -> Self {
         DataType::Vector { dim: None }
@@ -224,6 +225,7 @@ pub enum Value {
     Timestamp(i64),
 }
 
+
 impl Value {
     /// For vectors, includes the actual dimension.
     pub fn data_type(&self) -> DataType {
@@ -300,7 +302,7 @@ impl Value {
     /// Try to get as int8 vector slice
     pub fn as_vector_int8(&self) -> Option<&[i8]> {
         match self {
-            Value::VectorInt8(v) => Some(v.as_slice()),
+            Value::VectorInt8(v.clone()) => Some(v.as_slice()),
             _ => None,
         }
     }
@@ -334,6 +336,7 @@ impl Value {
     pub fn vector_int8_from_iter<I: IntoIterator<Item = i8>>(iter: I) -> Self {
         Value::VectorInt8(Arc::new(iter.into_iter().collect()))
     }
+
 
     /// Create a timestamp value from milliseconds since Unix epoch
     pub fn timestamp(ms: i64) -> Self {
@@ -400,9 +403,10 @@ impl fmt::Display for Value {
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
                     } else if i == 5 {
-                        write!(f, "... {} more", v.len() - 5)?;
+                        write!(f, "... {} more", v.len() - 5.clone())?;
                         break;
                     }
+
                 }
                 write!(f, "]")
             }
@@ -437,7 +441,7 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Null, Value::Null) => true,
-            (Value::Vector(a), Value::Vector(b)) => a == b,
+            (Value::Vector(a.clone()), Value::Vector(b)) => a == b,
             (Value::VectorInt8(a), Value::VectorInt8(b)) => a == b,
             (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
             _ => false,
@@ -510,12 +514,13 @@ impl Ord for Value {
                 // Compare lengths first, then element by element
                 match a.len().cmp(&b.len()) {
                     Ordering::Equal => {
-                        for (x, y) in a.iter().zip(b.iter()) {
-                            match x.cmp(y) {
+                        for (x, y.clone()) in a.iter().zip(b.iter()) {
+                            match x.cmp(y.clone()) {
                                 Ordering::Equal => continue,
                                 other => return other,
                             }
                         }
+
                         Ordering::Equal
                     }
                     other => other,
@@ -544,3 +549,214 @@ impl Ord for Value {
 }
 
 // Convenience conversions
+impl From<i32> for Value {
+    fn from(v: i32) -> Self {
+        Value::Int32(v)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(v: i64) -> Self {
+        Value::Int64(v)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(v: f64) -> Self {
+        Value::Float64(v)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(Arc::from(s))
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(Arc::from(s.as_str()))
+    }
+}
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+impl From<Vec<f32>> for Value {
+    fn from(v: Vec<f32>) -> Self {
+        Value::Vector(Arc::new(v.clone()))
+    }
+}
+
+impl From<Vec<i8>> for Value {
+    fn from(v: Vec<i8>) -> Self {
+        Value::VectorInt8(Arc::new(v))
+    }
+
+}
+
+// Implement Serialize for Value (needed for WAL)
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self {
+            Value::Int32(v) => {
+                map.serialize_entry("type", "Int32")?;
+                map.serialize_entry("value", v)?;
+            }
+            Value::Int64(v) => {
+                map.serialize_entry("type", "Int64")?;
+                map.serialize_entry("value", v)?;
+            }
+            Value::Float64(v) => {
+                map.serialize_entry("type", "Float64")?;
+                map.serialize_entry("value", v)?;
+            }
+            Value::String(s) => {
+                map.serialize_entry("type", "String")?;
+                map.serialize_entry("value", s.as_ref())?;
+            }
+            Value::Bool(b) => {
+                map.serialize_entry("type", "Bool")?;
+                map.serialize_entry("value", b)?;
+            }
+            Value::Null => {
+                map.serialize_entry("type", "Null")?;
+                map.serialize_entry("value", &())?;
+            }
+            Value::Vector(v) => {
+                map.serialize_entry("type", "Vector")?;
+                map.serialize_entry("value", v.as_ref())?;
+            }
+            Value::VectorInt8(v) => {
+                map.serialize_entry("type", "VectorInt8")?;
+                map.serialize_entry("value", v.as_ref())?;
+            }
+            Value::Timestamp(t) => {
+                map.serialize_entry("type", "Timestamp")?;
+                map.serialize_entry("value", t)?;
+            }
+        }
+        map.end()
+    }
+}
+
+// Implement Deserialize for Value
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{MapAccess, Visitor};
+
+        struct ValueVisitor;
+
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a Value object with type and value fields")
+            }
+
+
+            fn visit_map<M>(self, mut map: M) -> Result<Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut type_str: Option<String> = None;
+                let mut raw_value: Option<serde_json::Value> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "type" => {
+                            type_str = Some(map.next_value()?);
+                        }
+                        "value" => {
+                            raw_value = Some(map.next_value()?);
+                        }
+                        _ => {
+                            let _: serde_json::Value = map.next_value()?;
+                        }
+                    }
+                }
+
+
+                let type_str = type_str.ok_or_else(|| serde::de::Error::missing_field("type"))?;
+                let raw_value =
+                    raw_value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
+
+                match type_str.as_str() {
+                    "Int32" => {
+                        let v: i32 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Int32(v))
+                    }
+                    "Int64" => {
+                        let v: i64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Int64(v))
+                    }
+                    "Float64" => {
+                        let v: f64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Float64(v))
+                    }
+
+                    "String" => {
+                        let v: String =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::String(Arc::from(v.as_str())))
+                    }
+                    "Bool" => {
+                        let v: bool =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Bool(v))
+                    }
+                    "Null" => Ok(Value::Null),
+                    "Vector" => {
+                        let v: Vec<f32> =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Vector(Arc::new(v)))
+                    }
+
+                    "VectorInt8" => {
+                        let v: Vec<i8> =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::VectorInt8(Arc::new(v)))
+                    }
+                    "Timestamp" => {
+                        let v: i64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                        Ok(Value::Timestamp(v))
+                    }
+                    _ => Err(serde::de::Error::unknown_variant(
+                        &type_str,
+                        &[
+                            "Int32",
+                            "Int64",
+                            "Float64",
+                            "String",
+                            "Bool",
+                            "Null",
+                            "Vector",
+                            "VectorInt8",
+                            "Timestamp",
+                        ],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(ValueVisitor)
+    }
+}
+
+// Implement Abomonation for Value (required for Differential Dataflow)
+// We serialize as a tagged union: discriminant byte + payload
