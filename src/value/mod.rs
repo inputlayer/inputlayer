@@ -428,3 +428,119 @@ impl fmt::Display for Value {
 }
 
 // Implement PartialEq manually to handle f64 comparison
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int32(a), Value::Int32(b)) => a == b,
+            (Value::Int64(a), Value::Int64(b)) => a == b,
+            (Value::Float64(a), Value::Float64(b)) => a.to_bits() == b.to_bits(),
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Null, Value::Null) => true,
+            (Value::Vector(a), Value::Vector(b)) => a == b,
+            (Value::VectorInt8(a), Value::VectorInt8(b)) => a == b,
+            (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
+
+// Implement Hash manually to handle f64 and vectors
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Value::Int32(v) => v.hash(state),
+            Value::Int64(v) => v.hash(state),
+            Value::Float64(v) => v.to_bits().hash(state),
+            Value::String(s) => s.hash(state),
+            Value::Bool(b) => b.hash(state),
+            Value::Null => {}
+            Value::Vector(v) => {
+                v.len().hash(state);
+                for &f in v.iter() {
+                    f.to_bits().hash(state);
+                }
+            }
+            Value::VectorInt8(v) => {
+                v.len().hash(state);
+                for &i in v.iter() {
+                    i.hash(state);
+                }
+            }
+            Value::Timestamp(t) => t.hash(state),
+        }
+    }
+}
+
+// Implement Ord for Value to support sorting and comparison
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Value::Int32(a), Value::Int32(b)) => a.cmp(b),
+            (Value::Int64(a), Value::Int64(b)) => a.cmp(b),
+            (Value::Float64(a), Value::Float64(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+            (Value::String(a), Value::String(b)) => a.cmp(b),
+            (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Vector(a), Value::Vector(b)) => {
+                // Compare lengths first, then element by element using f32 bits
+                match a.len().cmp(&b.len()) {
+                    Ordering::Equal => {
+                        for (x, y) in a.iter().zip(b.iter()) {
+                            match x.to_bits().cmp(&y.to_bits()) {
+                                Ordering::Equal => continue,
+                                other => return other,
+                            }
+                        }
+                        Ordering::Equal
+                    }
+                    other => other,
+                }
+            }
+            (Value::VectorInt8(a), Value::VectorInt8(b)) => {
+                // Compare lengths first, then element by element
+                match a.len().cmp(&b.len()) {
+                    Ordering::Equal => {
+                        for (x, y) in a.iter().zip(b.iter()) {
+                            match x.cmp(y) {
+                                Ordering::Equal => continue,
+                                other => return other,
+                            }
+                        }
+                        Ordering::Equal
+                    }
+                    other => other,
+                }
+            }
+            (Value::Timestamp(a), Value::Timestamp(b)) => a.cmp(b),
+            // Cross-type ordering: Null < Bool < Int32 < Int64 < Float64 < Timestamp < String < Vector < VectorInt8
+            (Value::Null, _) => Ordering::Less,
+            (_, Value::Null) => Ordering::Greater,
+            (Value::Bool(_), _) => Ordering::Less,
+            (_, Value::Bool(_)) => Ordering::Greater,
+            (Value::Int32(_), _) => Ordering::Less,
+            (_, Value::Int32(_)) => Ordering::Greater,
+            (Value::Int64(_), _) => Ordering::Less,
+            (_, Value::Int64(_)) => Ordering::Greater,
+            (Value::Float64(_), _) => Ordering::Less,
+            (_, Value::Float64(_)) => Ordering::Greater,
+            (Value::Timestamp(_), _) => Ordering::Less,
+            (_, Value::Timestamp(_)) => Ordering::Greater,
+            (Value::String(_), _) => Ordering::Less,
+            (_, Value::String(_)) => Ordering::Greater,
+            (Value::Vector(_), _) => Ordering::Less,
+            (_, Value::Vector(_)) => Ordering::Greater,
+        }
+    }
+}
+
+// Convenience conversions
