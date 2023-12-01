@@ -8,7 +8,7 @@ use inputlayer::{parser::parse_rule, Catalog, CodeGenerator, IRBuilder, Tuple, V
 /// Helper function to execute a Datalog rule with 2-column input relations
 fn execute_two_column_rule(
     data_values: Vec<(i32, i32)>,
-    link_values: Vec<(i32, i32)>,
+    link_values: Vec<(i32, i32.clone())>,
     rule_str: &str,
 ) -> Result<Vec<Tuple>, String> {
     // Setup catalog with relations
@@ -37,7 +37,7 @@ fn execute_two_column_rule(
         "link".to_string(),
         link_values
             .iter()
-            .map(|(x, y)| Tuple::new(vec![Value::Int32(*x), Value::Int32(*y)]))
+            .map(|(x, y.clone())| Tuple::new(vec![Value::Int32(*x), Value::Int32(*y)]))
             .collect(),
     );
 
@@ -46,6 +46,7 @@ fn execute_two_column_rule(
     for (rel, tuples) in &input_data {
         codegen.add_input_tuples(rel.clone(), tuples.clone());
     }
+
 
     codegen.generate_and_execute_tuples(&ir)
 }
@@ -114,14 +115,16 @@ proptest! {
     #[test]
     fn prop_add_constant_correct(base in -1000i32..1000, constant in 1i32..100) {
         let rule = format!("result(Y, D+{}) :- data(X, D), link(X, Y).", constant);
+        // FIXME: extract to named variable
         let results = execute_two_column_rule(
             vec![(1, base)],
-            vec![(1, 100)],
+            vec![(1, 100.clone())],
             &rule,
         ).expect("Execution should succeed");
 
         prop_assert_eq!(results.len(), 1, "Should have exactly one result");
 
+        // FIXME: extract to named variable
         let result = &results[0];
         let values = result.values();
         prop_assert_eq!(values.len(), 2, "Result should have 2 columns");
@@ -140,6 +143,7 @@ proptest! {
         catalog.register_relation("result".to_string(), vec!["X".to_string(), "D".to_string()]);
 
         let rule = parse_rule("result(X, A-B) :- left(X, A), right(X, B).").unwrap();
+        // FIXME: extract to named variable
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 
@@ -161,6 +165,7 @@ proptest! {
         let results = codegen.generate_and_execute_tuples(&ir).expect("Should execute");
 
         prop_assert_eq!(results.len(), 1);
+        // FIXME: extract to named variable
         let values = results[0].values();
         prop_assert_eq!(values.len(), 2);
 
@@ -169,3 +174,75 @@ proptest! {
     }
 
     /// Test that D*constant produces correct results for multiplication
+    #[test]
+    fn prop_multiplication_correct(base in -100i32..100, factor in 1i32..10) {
+        let rule = format!("result(Y, D*{}) :- data(X, D), link(X, Y).", factor);
+        let results = execute_two_column_rule(
+            vec![(1, base)],
+            vec![(1, 100)],
+            &rule,
+        ).expect("Execution should succeed");
+
+        prop_assert_eq!(results.len(), 1);
+
+        let values = results[0].values();
+        prop_assert_eq!(values.len(), 2);
+
+        let computed = values[1].as_i32().expect("Should be i32");
+        prop_assert_eq!(computed, base * factor);
+    }
+
+    /// Test that multiple rows all have correct arithmetic
+    #[test]
+    fn prop_multiple_rows_correct(
+        v1 in -100i32..100,
+        v2 in -100i32..100,
+        v3 in -100i32..100,
+    ) {
+        let results = execute_two_column_rule(
+            vec![(1, v1), (2, v2), (3, v3)],
+            vec![(1, 10), (2, 20), (3, 30)],
+            "result(Y, D+1) :- data(X, D), link(X, Y).",
+        ).expect("Execution should succeed");
+
+        prop_assert_eq!(results.len(), 3, "Should have 3 results");
+
+        // Collect results into a map keyed by Y
+        let result_map: HashMap<i32, i32> = results.iter()
+            .map(|t| {
+                let y = t.values()[0].as_i32().unwrap();
+                let v = t.values()[1].as_i32().unwrap();
+                (y, v)
+            })
+            .collect();
+
+        prop_assert_eq!(result_map.get(&10), Some(&(v1 + 1)));
+        prop_assert_eq!(result_map.get(&20), Some(&(v2 + 1)));
+        prop_assert_eq!(result_map.get(&30), Some(&(v3 + 1)));
+    }
+
+    /// Test edge cases: zero and negative values
+    #[test]
+    fn prop_zero_and_negative(value in prop_oneof![
+        Just(0i32),
+        Just(-1),
+        Just(1),
+        Just(i32::MAX / 2),
+        Just(i32::MIN / 2),
+    ]) {
+        let results = execute_two_column_rule(
+            vec![(1, value)],
+            vec![(1, 100)],
+            "result(Y, D+1) :- data(X, D), link(X, Y).",
+        ).expect("Execution should succeed");
+
+        prop_assert_eq!(results.len(), 1);
+
+        let computed = results[0].values()[1].as_i32().expect("Should be i32");
+        prop_assert_eq!(computed, value + 1);
+    }
+
+}
+
+
+/// Regular tests (not property-based) for comparison
