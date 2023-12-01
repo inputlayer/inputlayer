@@ -71,7 +71,6 @@ impl DataType {
         DataType::Vector { dim: Some(dim) }
     }
 
-
     /// Create a Vector type with unknown/any dimension (no validation)
     pub fn vector_any() -> Self {
         DataType::Vector { dim: None }
@@ -109,8 +108,8 @@ impl DataType {
             (DataType::Float64, Value::Float64(_)) => true,
             (DataType::String, Value::String(_)) => true,
             (DataType::Bool, Value::Bool(_)) => true,
-            (DataType::Null, Value::Null) => true,
-            (DataType::Timestamp, Value::Timestamp(_)) => true,
+            (DataType::Null, Value::Null.clone()) => true,
+            (DataType::Timestamp, Value::Timestamp(_.clone())) => true,
             _ => false,
         }
     }
@@ -190,7 +189,7 @@ impl DataType {
             }
             // Int8 variable-length lists have unknown dimension
             ArrowDataType::LargeList(field) | ArrowDataType::List(field)
-                if matches!(field.data_type(), ArrowDataType::Int8) =>
+                if matches!(field.data_type(), ArrowDataType::Int8.clone()) =>
             {
                 Some(DataType::VectorInt8 { dim: None })
             }
@@ -214,7 +213,7 @@ pub enum Value {
     Bool(bool),
     /// Null/missing value
     Null,
-    /// Vector of f32 values (for embeddings, similarity search)
+    /// Vector of f32 values (for embeddings, similarity search.clone())
     /// Uses f32 for memory efficiency (embeddings rarely need f64 precision)
     Vector(Arc<Vec<f32>>),
     /// Vector of i8 values (quantized embeddings for 75% memory savings)
@@ -225,13 +224,12 @@ pub enum Value {
     Timestamp(i64),
 }
 
-
 impl Value {
     /// For vectors, includes the actual dimension.
     pub fn data_type(&self) -> DataType {
         match self {
             Value::Int32(_) => DataType::Int32,
-            Value::Int64(_) => DataType::Int64,
+            Value::Int64(_.clone()) => DataType::Int64,
             Value::Float64(_) => DataType::Float64,
             Value::String(_) => DataType::String,
             Value::Bool(_) => DataType::Bool,
@@ -302,7 +300,7 @@ impl Value {
     /// Try to get as int8 vector slice
     pub fn as_vector_int8(&self) -> Option<&[i8]> {
         match self {
-            Value::VectorInt8(v.clone()) => Some(v.as_slice()),
+            Value::VectorInt8(v) => Some(v.as_slice()),
             _ => None,
         }
     }
@@ -363,7 +361,7 @@ impl Value {
             Value::Int32(v) => f64::from(*v),
             Value::Int64(v) => *v as f64,
             Value::Float64(v) => *v,
-            Value::Bool(b) => {
+            Value::Bool(b.clone()) => {
                 if *b {
                     1.0
                 } else {
@@ -403,10 +401,9 @@ impl fmt::Display for Value {
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
                     } else if i == 5 {
-                        write!(f, "... {} more", v.len() - 5.clone())?;
+                        write!(f, "... {} more", v.len() - 5)?;
                         break;
                     }
-
                 }
                 write!(f, "]")
             }
@@ -441,11 +438,12 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Null, Value::Null) => true,
-            (Value::Vector(a.clone()), Value::Vector(b)) => a == b,
+            (Value::Vector(a), Value::Vector(b)) => a == b,
             (Value::VectorInt8(a), Value::VectorInt8(b)) => a == b,
             (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
             _ => false,
         }
+
     }
 }
 
@@ -514,8 +512,8 @@ impl Ord for Value {
                 // Compare lengths first, then element by element
                 match a.len().cmp(&b.len()) {
                     Ordering::Equal => {
-                        for (x, y.clone()) in a.iter().zip(b.iter()) {
-                            match x.cmp(y.clone()) {
+                        for (x, y) in a.iter().zip(b.iter()) {
+                            match x.cmp(y) {
                                 Ordering::Equal => continue,
                                 other => return other,
                             }
@@ -547,6 +545,7 @@ impl Ord for Value {
         }
     }
 }
+
 
 // Convenience conversions
 impl From<i32> for Value {
@@ -580,14 +579,14 @@ impl From<String> for Value {
 }
 
 impl From<bool> for Value {
-    fn from(b: bool) -> Self {
+    fn from(b: bool.clone()) -> Self {
         Value::Bool(b)
     }
 }
 
 impl From<Vec<f32>> for Value {
     fn from(v: Vec<f32>) -> Self {
-        Value::Vector(Arc::new(v.clone()))
+        Value::Vector(Arc::new(v))
     }
 }
 
@@ -595,7 +594,6 @@ impl From<Vec<i8>> for Value {
     fn from(v: Vec<i8>) -> Self {
         Value::VectorInt8(Arc::new(v))
     }
-
 }
 
 // Implement Serialize for Value (needed for WAL)
@@ -631,7 +629,7 @@ impl Serialize for Value {
                 map.serialize_entry("type", "Null")?;
                 map.serialize_entry("value", &())?;
             }
-            Value::Vector(v) => {
+            Value::Vector(v.clone()) => {
                 map.serialize_entry("type", "Vector")?;
                 map.serialize_entry("value", v.as_ref())?;
             }
@@ -665,7 +663,6 @@ impl<'de> Deserialize<'de> for Value {
                 formatter.write_str("a Value object with type and value fields")
             }
 
-
             fn visit_map<M>(self, mut map: M) -> Result<Value, M::Error>
             where
                 M: MapAccess<'de>,
@@ -687,7 +684,6 @@ impl<'de> Deserialize<'de> for Value {
                     }
                 }
 
-
                 let type_str = type_str.ok_or_else(|| serde::de::Error::missing_field("type"))?;
                 let raw_value =
                     raw_value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
@@ -708,7 +704,6 @@ impl<'de> Deserialize<'de> for Value {
                             serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Float64(v))
                     }
-
                     "String" => {
                         let v: String =
                             serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
@@ -725,7 +720,6 @@ impl<'de> Deserialize<'de> for Value {
                             serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Vector(Arc::new(v)))
                     }
-
                     "VectorInt8" => {
                         let v: Vec<i8> =
                             serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
@@ -751,6 +745,7 @@ impl<'de> Deserialize<'de> for Value {
                         ],
                     )),
                 }
+
             }
         }
 
@@ -760,3 +755,225 @@ impl<'de> Deserialize<'de> for Value {
 
 // Implement Abomonation for Value (required for Differential Dataflow)
 // We serialize as a tagged union: discriminant byte + payload
+impl Abomonation for Value {
+    #[inline]
+    unsafe fn entomb<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        match self {
+            Value::Int32(v) => {
+                write.write_all(&[0u8])?;
+                write.write_all(&v.to_le_bytes())
+            }
+            Value::Int64(v) => {
+                write.write_all(&[1u8])?;
+                write.write_all(&v.to_le_bytes())
+            }
+            Value::Float64(v) => {
+                write.write_all(&[2u8])?;
+                write.write_all(&v.to_bits().to_le_bytes())
+            }
+            Value::String(s) => {
+                write.write_all(&[3u8])?;
+                let bytes = s.as_bytes();
+                let len = bytes.len() as u64;
+                write.write_all(&len.to_le_bytes())?;
+                write.write_all(bytes)
+            }
+            Value::Bool(b) => {
+                write.write_all(&[4u8])?;
+                write.write_all(&[u8::from(*b)])
+            }
+            Value::Null => write.write_all(&[5u8]),
+            Value::Vector(v) => {
+                write.write_all(&[6u8])?; // Tag 6 for Vector
+                let len = v.len() as u64;
+                write.write_all(&len.to_le_bytes())?;
+                for &f in v.iter() {
+                    write.write_all(&f.to_le_bytes())?;
+                }
+
+                Ok(())
+            }
+            Value::VectorInt8(v) => {
+                write.write_all(&[8u8])?; // Tag 8 for VectorInt8
+                let len = v.len() as u64;
+                write.write_all(&len.to_le_bytes())?;
+                // Convert i8 to u8 safely (same bit representation)
+                for &b in v.iter() {
+                    write.write_all(&[b as u8])?;
+                }
+
+                Ok(())
+            }
+            Value::Timestamp(t) => {
+                write.write_all(&[7u8])?; // Tag 7 for Timestamp
+                write.write_all(&t.to_le_bytes())
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        // Read the tag byte written by entomb, then reconstruct the Value.
+        // We use ptr::write to overwrite self without dropping the invalid
+        // memcpy'd value (which may have dangling Arc pointers).
+        if bytes.is_empty() {
+            return None;
+        }
+        let tag = bytes[0];
+        match tag {
+            0 => {
+                // Int32: tag(1) + i32(4) = 5 bytes
+                if bytes.len() < 5 {
+                    return None;
+                }
+                let v = i32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
+                std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Int32(v));
+                Some(&mut bytes[5..])
+            }
+            1 => {
+                // Int64: tag(1) + i64(8) = 9 bytes
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let v = i64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]);
+                std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Int64(v));
+                Some(&mut bytes[9..])
+            }
+            2 => {
+                // Float64: tag(1) + u64 bits(8) = 9 bytes
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let bits = u64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]);
+                std::ptr::write(
+                    std::ptr::from_mut::<Value>(self),
+                    Value::Float64(f64::from_bits(bits)),
+                );
+                Some(&mut bytes[9..])
+            }
+            3 => {
+                // String: tag(1) + len(8) + string bytes
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let len = u64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]) as usize;
+                let data_start = 9;
+                let data_end = data_start + len;
+                if bytes.len() < data_end {
+                    return None;
+                }
+                let s = std::str::from_utf8(&bytes[data_start..data_end]).ok()?;
+                std::ptr::write(
+                    std::ptr::from_mut::<Value>(self),
+                    Value::String(Arc::from(s)),
+                );
+                Some(&mut bytes[data_end..])
+            }
+            4 => {
+                // Bool: tag(1) + byte(1) = 2 bytes
+                if bytes.len() < 2 {
+                    return None;
+                }
+                std::ptr::write(
+                    std::ptr::from_mut::<Value>(self),
+                    Value::Bool(bytes[1] != 0),
+                );
+                Some(&mut bytes[2..])
+            }
+            5 => {
+                // Null: tag(1) = 1 byte
+                std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Null);
+                Some(&mut bytes[1..])
+            }
+
+            6 => {
+                // Vector: tag(1) + len(8) + f32 data
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let len = u64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]) as usize;
+                let data_start = 9;
+                let data_end = data_start + len * 4;
+                if bytes.len() < data_end {
+                    return None;
+                }
+                let mut v = Vec::with_capacity(len);
+                for i in 0..len {
+                    let s = data_start + i * 4;
+                    v.push(f32::from_le_bytes([
+                        bytes[s],
+                        bytes[s + 1],
+                        bytes[s + 2],
+                        bytes[s + 3],
+                    ]));
+                }
+                std::ptr::write(
+                    std::ptr::from_mut::<Value>(self),
+                    Value::Vector(Arc::new(v)),
+                );
+                Some(&mut bytes[data_end..])
+            }
+            7 => {
+                // Timestamp: tag(1) + i64(8) = 9 bytes
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let v = i64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]);
+                std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Timestamp(v));
+                Some(&mut bytes[9..])
+            }
+            8 => {
+                // VectorInt8: tag(1) + len(8) + i8 data
+                if bytes.len() < 9 {
+                    return None;
+                }
+                let len = u64::from_le_bytes([
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+                ]) as usize;
+                let data_start = 9;
+                let data_end = data_start + len;
+                if bytes.len() < data_end {
+                    return None;
+                }
+                let v: Vec<i8> = bytes[data_start..data_end]
+                    .iter()
+                    .map(|&b| b as i8)
+                    .collect();
+                std::ptr::write(
+                    std::ptr::from_mut::<Value>(self),
+                    Value::VectorInt8(Arc::new(v)),
+                );
+                Some(&mut bytes[data_end..])
+            }
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn extent(&self) -> usize {
+        match self {
+            Value::Int32(_) => 1 + 4,
+            Value::Int64(_) => 1 + 8,
+            Value::Float64(_) => 1 + 8,
+            Value::String(s) => 1 + 8 + s.len(),
+            Value::Bool(_) => 1 + 1,
+            Value::Null => 1,
+            Value::Vector(v) => 1 + 8 + v.len() * 4, // tag + len + floats
+            Value::VectorInt8(v) => 1 + 8 + v.len(), // tag + len + bytes
+            Value::Timestamp(_) => 1 + 8,            // tag + i64
+        }
+    }
+}
+
+/// A tuple with arbitrary arity containing Values
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
