@@ -224,3 +224,207 @@ pub enum Value {
     Timestamp(i64),
 }
 
+impl Value {
+    /// For vectors, includes the actual dimension.
+    pub fn data_type(&self) -> DataType {
+        match self {
+            Value::Int32(_) => DataType::Int32,
+            Value::Int64(_) => DataType::Int64,
+            Value::Float64(_) => DataType::Float64,
+            Value::String(_) => DataType::String,
+            Value::Bool(_) => DataType::Bool,
+            Value::Null => DataType::Null,
+            Value::Vector(v) => DataType::Vector { dim: Some(v.len()) },
+            Value::VectorInt8(v) => DataType::VectorInt8 { dim: Some(v.len()) },
+            Value::Timestamp(_) => DataType::Timestamp,
+        }
+    }
+
+    /// Try to get as i32
+    pub fn as_i32(&self) -> Option<i32> {
+        match self {
+            Value::Int32(v) => Some(*v),
+            Value::Int64(v) => (*v).try_into().ok(),
+            _ => None,
+        }
+    }
+
+    /// Try to get as i64
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Value::Int32(v) => Some(i64::from(*v)),
+            Value::Int64(v) => Some(*v),
+            Value::Timestamp(t) => Some(*t),
+            _ => None,
+        }
+    }
+
+    /// Try to get as f64
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Float64(v) => Some(*v),
+            Value::Int32(v) => Some(f64::from(*v)),
+            Value::Int64(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
+
+    /// Try to get as string reference
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Try to get as bool
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
+    /// Try to get as vector slice
+    pub fn as_vector(&self) -> Option<&[f32]> {
+        match self {
+            Value::Vector(v) => Some(v.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Try to get as int8 vector slice
+    pub fn as_vector_int8(&self) -> Option<&[i8]> {
+        match self {
+            Value::VectorInt8(v) => Some(v.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// Try to get as timestamp (milliseconds since Unix epoch)
+    /// Also accepts Int64 for flexibility in temporal operations
+    pub fn as_timestamp(&self) -> Option<i64> {
+        match self {
+            Value::Timestamp(t) => Some(*t),
+            Value::Int64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn string(s: &str) -> Self {
+        Value::String(Arc::from(s))
+    }
+
+    pub fn vector(data: Vec<f32>) -> Self {
+        Value::Vector(Arc::new(data))
+    }
+
+    pub fn vector_from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
+        Value::Vector(Arc::new(iter.into_iter().collect()))
+    }
+
+    pub fn vector_int8(data: Vec<i8>) -> Self {
+        Value::VectorInt8(Arc::new(data))
+    }
+
+    pub fn vector_int8_from_iter<I: IntoIterator<Item = i8>>(iter: I) -> Self {
+        Value::VectorInt8(Arc::new(iter.into_iter().collect()))
+    }
+
+    /// Create a timestamp value from milliseconds since Unix epoch
+    pub fn timestamp(ms: i64) -> Self {
+        Value::Timestamp(ms)
+    }
+
+    /// Convert to i64 (for aggregation operations)
+    /// Returns 0 for non-numeric types
+    pub fn to_i64(&self) -> i64 {
+        match self {
+            Value::Int32(v) => i64::from(*v),
+            Value::Int64(v) => *v,
+            Value::Float64(v) => *v as i64,
+            Value::Bool(b) => i64::from(*b),
+            Value::Timestamp(t) => *t,
+            _ => 0,
+        }
+    }
+
+    /// Convert to f64 (for aggregation operations)
+    /// Returns 0.0 for non-numeric types
+    pub fn to_f64(&self) -> f64 {
+        match self {
+            Value::Int32(v) => f64::from(*v),
+            Value::Int64(v) => *v as f64,
+            Value::Float64(v) => *v,
+            Value::Bool(b) => {
+                if *b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Value::Timestamp(t) => *t as f64,
+            _ => 0.0,
+        }
+    }
+}
+
+/// Format an f64 consistently across platforms.
+/// Rust's default Display for f64 produces `1e+20` on Linux but `1e20` on macOS.
+/// This normalizes to always omit the redundant `+` in exponents.
+fn format_f64(v: f64) -> String {
+    let s = format!("{v}");
+    s.replace("e+", "e")
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int32(v) => write!(f, "{v}"),
+            Value::Int64(v) => write!(f, "{v}"),
+            Value::Float64(v) => write!(f, "{}", format_f64(*v)),
+            Value::String(s) => write!(f, "\"{s}\""),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Null => write!(f, "NULL"),
+            Value::Vector(v) => {
+                write!(f, "[")?;
+                for (i, val) in v.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    // Show first 5 elements, then "... N more" for large vectors
+                    if i < 5 || v.len() <= 6 {
+                        write!(f, "{val:.4}")?;
+                    } else if i == 5 {
+                        write!(f, "... {} more", v.len() - 5)?;
+                        break;
+                    }
+                }
+                write!(f, "]")
+            }
+            Value::VectorInt8(v) => {
+                write!(f, "[")?;
+                for (i, val) in v.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    // Show first 5 elements, then "... N more" for large vectors
+                    if i < 5 || v.len() <= 6 {
+                        write!(f, "{val}")?;
+                    } else if i == 5 {
+                        write!(f, "... {} more", v.len() - 5)?;
+                        break;
+                    }
+                }
+                write!(f, "]i8")
+            }
+            Value::Timestamp(ts) => write!(f, "{ts}ms"),
+        }
+    }
+}
+
+// Implement PartialEq manually to handle f64 comparison
