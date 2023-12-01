@@ -1,0 +1,46 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bounds_n11t07
+Knowledge graph 'test_bounds_n11t07' created.
+Switched to knowledge graph: test_bounds_n11t07
+> .kg use test_bounds_n11t07
+Switched to knowledge graph: test_bounds_n11t07
+> +large_pos[(1, 1000000), (2, 2000000), (3, 999999999)].
+Inserted 3 fact(s) into 'large_pos'.
+> +large_neg[(1, -1000000), (2, -2000000)].
+Inserted 2 fact(s) into 'large_neg'.
+> ?- large_pos(Id, Val).
+3 rows:
+  (1, 1000000)
+  (2, 2000000)
+  (3, 999999999)
+> ?- large_neg(Id, Val).
+2 rows:
+  (1, -1000000)
+  (2, -2000000)
+> +large_sum(Id, V+1) :- large_pos(Id, V).
+Rule 'large_sum' registered.
+> ?- large_sum(X, Y).
+3 rows:
+  (1, 1000001)
+  (2, 2000001)
+  (3, 1000000000)
+> +big_enough(Id, V) :- large_pos(Id, V), V > 1500000.
+Rule 'big_enough' registered.
+> ?- big_enough(X, Y).
+2 rows:
+  (2, 2000000)
+  (3, 999999999)
+> +total_large(sum<V>) :- large_pos(_, V).
+Rule 'total_large' registered.
+> ?- total_large(S).
+1 rows:
+  (1002999999)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bounds_n11t07
+Knowledge graph 'test_bounds_n11t07' dropped.

@@ -1,0 +1,26 @@
+% Test: String Data Types
+% Description: Tests string values in facts, queries, and joins
+
+.kg create test_str_n11t01
+.kg use test_str_n11t01
+
+% Insert facts with string values
++person[("alice", 25), ("bob", 30), ("charlie", 35)].
+
+% Query all persons
+?- person(Name, Age).
+
+% Insert related data with strings
++city[("alice", "new_york"), ("bob", "boston"), ("charlie", "chicago")].
+
+% Join on string column
++person_city(Name, Age, City) :- person(Name, Age), city(Name, City).
+?- person_city(N, A, C).
+
+% Filter with string equality
++in_boston(Name, Age) :- person(Name, Age), city(Name, "boston").
+?- in_boston(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_str_n11t01

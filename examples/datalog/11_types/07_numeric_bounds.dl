@@ -1,0 +1,33 @@
+% Test: Numeric Bounds
+% Description: Tests behavior with large numeric values
+
+.kg create test_bounds_n11t07
+.kg use test_bounds_n11t07
+
+% Large positive integers
++large_pos[(1, 1000000), (2, 2000000), (3, 999999999)].
+
+% Large negative integers (if supported)
++large_neg[(1, -1000000), (2, -2000000)].
+
+% Query large positives
+?- large_pos(Id, Val).
+
+% Query large negatives
+?- large_neg(Id, Val).
+
+% Arithmetic on large numbers - arithmetic in head
++large_sum(Id, V+1) :- large_pos(Id, V).
+?- large_sum(X, Y).
+
+% Compare large values
++big_enough(Id, V) :- large_pos(Id, V), V > 1500000.
+?- big_enough(X, Y).
+
+% Aggregation on large numbers
++total_large(sum<V>) :- large_pos(_, V).
+?- total_large(S).
+
+% Cleanup
+.kg use default
+.kg drop test_bounds_n11t07
