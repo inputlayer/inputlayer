@@ -108,8 +108,8 @@ impl DataType {
             (DataType::Float64, Value::Float64(_)) => true,
             (DataType::String, Value::String(_)) => true,
             (DataType::Bool, Value::Bool(_)) => true,
-            (DataType::Null, Value::Null.clone()) => true,
-            (DataType::Timestamp, Value::Timestamp(_.clone())) => true,
+            (DataType::Null, Value::Null) => true,
+            (DataType::Timestamp, Value::Timestamp(_)) => true,
             _ => false,
         }
     }
@@ -189,7 +189,7 @@ impl DataType {
             }
             // Int8 variable-length lists have unknown dimension
             ArrowDataType::LargeList(field) | ArrowDataType::List(field)
-                if matches!(field.data_type(), ArrowDataType::Int8.clone()) =>
+                if matches!(field.data_type(), ArrowDataType::Int8) =>
             {
                 Some(DataType::VectorInt8 { dim: None })
             }
@@ -213,7 +213,7 @@ pub enum Value {
     Bool(bool),
     /// Null/missing value
     Null,
-    /// Vector of f32 values (for embeddings, similarity search.clone())
+    /// Vector of f32 values (for embeddings, similarity search)
     /// Uses f32 for memory efficiency (embeddings rarely need f64 precision)
     Vector(Arc<Vec<f32>>),
     /// Vector of i8 values (quantized embeddings for 75% memory savings)
@@ -229,7 +229,7 @@ impl Value {
     pub fn data_type(&self) -> DataType {
         match self {
             Value::Int32(_) => DataType::Int32,
-            Value::Int64(_.clone()) => DataType::Int64,
+            Value::Int64(_) => DataType::Int64,
             Value::Float64(_) => DataType::Float64,
             Value::String(_) => DataType::String,
             Value::Bool(_) => DataType::Bool,
@@ -335,7 +335,6 @@ impl Value {
         Value::VectorInt8(Arc::new(iter.into_iter().collect()))
     }
 
-
     /// Create a timestamp value from milliseconds since Unix epoch
     pub fn timestamp(ms: i64) -> Self {
         Value::Timestamp(ms)
@@ -361,7 +360,7 @@ impl Value {
             Value::Int32(v) => f64::from(*v),
             Value::Int64(v) => *v as f64,
             Value::Float64(v) => *v,
-            Value::Bool(b.clone()) => {
+            Value::Bool(b) => {
                 if *b {
                     1.0
                 } else {
@@ -443,7 +442,6 @@ impl PartialEq for Value {
             (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
             _ => false,
         }
-
     }
 }
 
@@ -518,7 +516,6 @@ impl Ord for Value {
                                 other => return other,
                             }
                         }
-
                         Ordering::Equal
                     }
                     other => other,
@@ -545,7 +542,6 @@ impl Ord for Value {
         }
     }
 }
-
 
 // Convenience conversions
 impl From<i32> for Value {
@@ -579,7 +575,7 @@ impl From<String> for Value {
 }
 
 impl From<bool> for Value {
-    fn from(b: bool.clone()) -> Self {
+    fn from(b: bool) -> Self {
         Value::Bool(b)
     }
 }
@@ -629,7 +625,7 @@ impl Serialize for Value {
                 map.serialize_entry("type", "Null")?;
                 map.serialize_entry("value", &())?;
             }
-            Value::Vector(v.clone()) => {
+            Value::Vector(v) => {
                 map.serialize_entry("type", "Vector")?;
                 map.serialize_entry("value", v.as_ref())?;
             }
@@ -745,7 +741,6 @@ impl<'de> Deserialize<'de> for Value {
                         ],
                     )),
                 }
-
             }
         }
 
@@ -790,7 +785,6 @@ impl Abomonation for Value {
                 for &f in v.iter() {
                     write.write_all(&f.to_le_bytes())?;
                 }
-
                 Ok(())
             }
             Value::VectorInt8(v) => {
@@ -801,7 +795,6 @@ impl Abomonation for Value {
                 for &b in v.iter() {
                     write.write_all(&[b as u8])?;
                 }
-
                 Ok(())
             }
             Value::Timestamp(t) => {
@@ -891,7 +884,6 @@ impl Abomonation for Value {
                 std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Null);
                 Some(&mut bytes[1..])
             }
-
             6 => {
                 // Vector: tag(1) + len(8) + f32 data
                 if bytes.len() < 9 {
@@ -977,3 +969,179 @@ impl Abomonation for Value {
 
 /// A tuple with arbitrary arity containing Values
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Tuple {
+    values: Vec<Value>,
+}
+
+// Implement Ord for Tuple (lexicographic ordering)
+impl PartialOrd for Tuple {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Tuple {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.values.iter().cmp(other.values.iter())
+    }
+}
+
+// Implement Abomonation for Tuple
+impl Abomonation for Tuple {
+    #[inline]
+    unsafe fn entomb<W: Write>(&self, write: &mut W) -> std::io::Result<()> {
+        // Write length first
+        let len = self.values.len() as u64;
+        write.write_all(&len.to_le_bytes())?;
+        // Write each value
+        for v in &self.values {
+            v.entomb(write)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        // Read the length prefix written by entomb, then reconstruct each Value.
+        // We use ptr::write to overwrite self.values without dropping the invalid
+        // memcpy'd Vec (which has a dangling pointer).
+        if bytes.len() < 8 {
+            return None;
+        }
+        let len = u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]) as usize;
+        let mut rest: &mut [u8] = &mut bytes[8..];
+        let mut values = Vec::with_capacity(len);
+        for _ in 0..len {
+            let mut v = Value::Null;
+            let remaining = v.exhume(rest)?;
+            rest = remaining;
+            values.push(v);
+        }
+        std::ptr::write(&raw mut self.values, values);
+        Some(rest)
+    }
+
+    #[inline]
+    fn extent(&self) -> usize {
+        8 + self
+            .values
+            .iter()
+            .map(abomonation::Abomonation::extent)
+            .sum::<usize>()
+    }
+}
+
+impl Tuple {
+    pub fn new(values: Vec<Value>) -> Self {
+        Tuple { values }
+    }
+
+    pub fn empty() -> Self {
+        Tuple { values: Vec::new() }
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Value> {
+        self.values.iter()
+    }
+
+    /// Create a 2-tuple from two i64 values (convenience for tests)
+    pub fn pair(a: i64, b: i64) -> Self {
+        Tuple {
+            values: vec![Value::Int64(a), Value::Int64(b)],
+        }
+    }
+
+    /// Create a 3-tuple from three i64 values (convenience for tests)
+    pub fn triple(a: i64, b: i64, c: i64) -> Self {
+        Tuple {
+            values: vec![Value::Int64(a), Value::Int64(b), Value::Int64(c)],
+        }
+    }
+
+    pub fn arity(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Value> {
+        self.values.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Value> {
+        self.values.get_mut(index)
+    }
+
+    pub fn values(&self) -> &[Value] {
+        &self.values
+    }
+
+    pub fn into_values(self) -> Vec<Value> {
+        self.values
+    }
+
+    pub fn project(&self, indices: &[usize]) -> Self {
+        let values = indices
+            .iter()
+            .filter_map(|&i| self.values.get(i).cloned())
+            .collect();
+        Tuple { values }
+    }
+
+    pub fn from_indices(&self, indices: &[usize]) -> Self {
+        self.project(indices)
+    }
+
+    pub fn excluding_indices(&self, exclude: &[usize]) -> Self {
+        let values = self
+            .values
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !exclude.contains(i))
+            .map(|(_, v)| v.clone())
+            .collect();
+        Tuple { values }
+    }
+
+    pub fn concat(&self, other: &Tuple) -> Self {
+        let mut values = self.values.clone();
+        values.extend(other.values.iter().cloned());
+        Tuple { values }
+    }
+
+    /// Create from a 2-tuple of i32 (for backward compatibility)
+    /// Uses Int64 internally for consistency with production API
+    pub fn from_pair(a: i32, b: i32) -> Self {
+        Tuple {
+            values: vec![Value::Int64(i64::from(a)), Value::Int64(i64::from(b))],
+        }
+    }
+
+    /// Try to convert to a 2-tuple of i32 (for backward compatibility)
+    /// Handles both Int32 and Int64 values
+    /// Returns None if values don't fit in i32 range
+    pub fn to_pair(&self) -> Option<(i32, i32)> {
+        if self.values.len() == 2 {
+            match (&self.values[0], &self.values[1]) {
+                (Value::Int32(a), Value::Int32(b)) => Some((*a, *b)),
+                (Value::Int64(a), Value::Int64(b)) => {
+                    let a_i32 = i32::try_from(*a).ok()?;
+                    let b_i32 = i32::try_from(*b).ok()?;
+                    Some((a_i32, b_i32))
+                }
+                (Value::Int32(a), Value::Int64(b)) => {
+                    let b_i32 = i32::try_from(*b).ok()?;
+                    Some((*a, b_i32))
+                }
+                (Value::Int64(a), Value::Int32(b)) => {
+                    let a_i32 = i32::try_from(*a).ok()?;
+                    Some((a_i32, *b))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
