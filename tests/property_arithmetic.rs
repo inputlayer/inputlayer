@@ -8,7 +8,7 @@ use inputlayer::{parser::parse_rule, Catalog, CodeGenerator, IRBuilder, Tuple, V
 /// Helper function to execute a Datalog rule with 2-column input relations
 fn execute_two_column_rule(
     data_values: Vec<(i32, i32)>,
-    link_values: Vec<(i32, i32.clone())>,
+    link_values: Vec<(i32, i32)>,
     rule_str: &str,
 ) -> Result<Vec<Tuple>, String> {
     // Setup catalog with relations
@@ -37,7 +37,7 @@ fn execute_two_column_rule(
         "link".to_string(),
         link_values
             .iter()
-            .map(|(x, y.clone())| Tuple::new(vec![Value::Int32(*x), Value::Int32(*y)]))
+            .map(|(x, y)| Tuple::new(vec![Value::Int32(*x), Value::Int32(*y)]))
             .collect(),
     );
 
@@ -46,7 +46,6 @@ fn execute_two_column_rule(
     for (rel, tuples) in &input_data {
         codegen.add_input_tuples(rel.clone(), tuples.clone());
     }
-
 
     codegen.generate_and_execute_tuples(&ir)
 }
@@ -115,16 +114,14 @@ proptest! {
     #[test]
     fn prop_add_constant_correct(base in -1000i32..1000, constant in 1i32..100) {
         let rule = format!("result(Y, D+{}) :- data(X, D), link(X, Y).", constant);
-        // FIXME: extract to named variable
         let results = execute_two_column_rule(
             vec![(1, base)],
-            vec![(1, 100.clone())],
+            vec![(1, 100)],
             &rule,
         ).expect("Execution should succeed");
 
         prop_assert_eq!(results.len(), 1, "Should have exactly one result");
 
-        // FIXME: extract to named variable
         let result = &results[0];
         let values = result.values();
         prop_assert_eq!(values.len(), 2, "Result should have 2 columns");
@@ -143,7 +140,6 @@ proptest! {
         catalog.register_relation("result".to_string(), vec!["X".to_string(), "D".to_string()]);
 
         let rule = parse_rule("result(X, A-B) :- left(X, A), right(X, B).").unwrap();
-        // FIXME: extract to named variable
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 
@@ -165,7 +161,6 @@ proptest! {
         let results = codegen.generate_and_execute_tuples(&ir).expect("Should execute");
 
         prop_assert_eq!(results.len(), 1);
-        // FIXME: extract to named variable
         let values = results[0].values();
         prop_assert_eq!(values.len(), 2);
 
@@ -241,8 +236,91 @@ proptest! {
         let computed = results[0].values()[1].as_i32().expect("Should be i32");
         prop_assert_eq!(computed, value + 1);
     }
-
 }
 
-
 /// Regular tests (not property-based) for comparison
+#[cfg(test)]
+mod deterministic_tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_increment() {
+        let results = execute_two_column_rule(
+            vec![(1, 5)],
+            vec![(1, 100)],
+            "result(Y, D+1) :- data(X, D), link(X, Y).",
+        )
+        .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+        let values = results[0].values();
+        assert_eq!(values[0].as_i32().unwrap(), 100);
+        assert_eq!(values[1].as_i32().unwrap(), 6);
+    }
+
+    #[test]
+    fn test_negative_increment() {
+        let results = execute_two_column_rule(
+            vec![(1, -5)],
+            vec![(1, 100)],
+            "result(Y, D+1) :- data(X, D), link(X, Y).",
+        )
+        .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+        let values = results[0].values();
+        assert_eq!(values[1].as_i32().unwrap(), -4);
+    }
+
+    #[test]
+    fn test_zero_increment() {
+        let results = execute_two_column_rule(
+            vec![(1, 0)],
+            vec![(1, 100)],
+            "result(Y, D+1) :- data(X, D), link(X, Y).",
+        )
+        .expect("Should succeed");
+
+        assert_eq!(results.len(), 1);
+        let values = results[0].values();
+        assert_eq!(values[1].as_i32().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_subtraction_variable() {
+        // Test A-B where both are variables
+        let mut catalog = Catalog::new();
+        catalog.register_relation("left".to_string(), vec!["X".to_string(), "A".to_string()]);
+        catalog.register_relation("right".to_string(), vec!["X".to_string(), "B".to_string()]);
+        catalog.register_relation("result".to_string(), vec!["X".to_string(), "D".to_string()]);
+
+        let rule = parse_rule("result(X, A-B) :- left(X, A), right(X, B).").unwrap();
+        let builder = IRBuilder::new(catalog);
+        let ir = builder.build_ir(&rule).unwrap();
+
+        let mut input_data: HashMap<String, Vec<Tuple>> = HashMap::new();
+        input_data.insert(
+            "left".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(100)])],
+        );
+        input_data.insert(
+            "right".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(30)])],
+        );
+
+        let mut codegen = CodeGenerator::new();
+        for (rel, tuples) in &input_data {
+            codegen.add_input_tuples(rel.clone(), tuples.clone());
+        }
+
+        let results = codegen
+            .generate_and_execute_tuples(&ir)
+            .expect("Should execute");
+
+        assert_eq!(results.len(), 1);
+        let values = results[0].values();
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].as_i32().unwrap(), 1); // X
+        assert_eq!(values[1].as_i32().unwrap(), 70); // A-B = 100-30 = 70
+    }
+}
