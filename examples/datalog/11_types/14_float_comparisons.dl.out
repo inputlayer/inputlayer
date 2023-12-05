@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_cmp_n11t14
+Knowledge graph 'test_float_cmp_n11t14' created.
+Switched to knowledge graph: test_float_cmp_n11t14
+> .kg use test_float_cmp_n11t14
+Switched to knowledge graph: test_float_cmp_n11t14
+> +nums[(1, 0.5), (2, 1.5), (3, 2.5), (4, 3.0)].
+Inserted 4 fact(s) into 'nums'.
+> ?- nums(X, Y), Y < 2.
+2 rows:
+  (1, 0.5)
+  (2, 1.5)
+> ?- nums(X, Y), Y >= 1.5.
+3 rows:
+  (2, 1.5)
+  (3, 2.5)
+  (4, 3.0)
+> ?- nums(X, Y), Y == 1.5.
+1 rows:
+  (2, 1.5)
+> ?- nums(X, Y), Y != 0.5.
+3 rows:
+  (2, 1.5)
+  (3, 2.5)
+  (4, 3.0)
+> +small(X, Y) :- nums(X, Y), Y < 2.
+Rule 'small' registered.
+> ?- small(X, Y).
+2 rows:
+  (1, 0.5)
+  (2, 1.5)
+> +medium(X, Y) :- nums(X, Y), Y >= 1.5, Y <= 2.5.
+Rule 'medium' registered.
+> ?- medium(X, Y).
+2 rows:
+  (2, 1.5)
+  (3, 2.5)
+> +large(X, Y) :- nums(X, Y), Y > 2.0.
+Rule 'large' registered.
+> ?- large(X, Y).
+2 rows:
+  (3, 2.5)
+  (4, 3.0)
+> +in_range(X, Y) :- nums(X, Y), Y >= 1.0, Y < 3.0.
+Rule 'in_range' registered.
+> ?- in_range(X, Y).
+2 rows:
+  (2, 1.5)
+  (3, 2.5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_float_cmp_n11t14
+Knowledge graph 'test_float_cmp_n11t14' dropped.

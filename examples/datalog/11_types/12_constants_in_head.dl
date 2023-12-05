@@ -1,0 +1,28 @@
+% Test: Constants in Rule Head
+% Description: Tests that constants (int, float, string) in rule heads work correctly
+
+.kg create test_const_head_n11t12
+.kg use test_const_head_n11t12
+
+% Create base data
++data[(1, "apple"), (2, "banana"), (3, "cherry")].
+
+% Test integer constant in head - adds a status code
++with_status(Id, Name, 200) :- data(Id, Name).
+?- with_status(X, Y, Z).
+
+% Test float constant in head - adds a weight
++with_weight(Id, Name, 1.5) :- data(Id, Name).
+?- with_weight(X, Y, Z).
+
+% Test string constant in head - adds a category
++with_category(Id, Name, "fruit") :- data(Id, Name).
+?- with_category(X, Y, Z).
+
+% Test mixed constants in head
++full_record(Id, Name, 100, 2.5, "active") :- data(Id, Name).
+?- full_record(A, B, C, D, E).
+
+% Cleanup
+.kg use default
+.kg drop test_const_head_n11t12

@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(self) -> Option<bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1213,4 +1213,204 @@ pub enum SchemaValidationError {
 pub struct TupleSchema {
     fields: Vec<(String, DataType)>,
 }
+
+impl TupleSchema {
+    pub fn new(fields: Vec<(String, DataType)>) -> Self {
+        TupleSchema { fields }
+    }
+
+    pub fn empty() -> Self {
+        TupleSchema { fields: Vec::new() }
+    }
+
+    /// Create a schema with just column names (types inferred as Int32 for compatibility)
+    pub fn from_names(names: Vec<String>) -> Self {
+        let fields = names
+            .into_iter()
+            .map(|name| (name, DataType::Int32))
+            .collect();
+        TupleSchema { fields }
+    }
+
+    /// Get the number of fields
+    pub fn arity(&self) -> usize {
+        self.fields.len()
+    }
+
+    /// Get field name by index
+    pub fn field_name(&self, index: usize) -> Option<&str> {
+        self.fields.get(index).map(|(name, _)| name.as_str())
+    }
+
+    /// Get field type by index
+    pub fn field_type(&self, index: usize) -> Option<&DataType> {
+        self.fields.get(index).map(|(_, ty)| ty)
+    }
+
+    /// Get field index by name
+    pub fn field_index(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|(n, _)| n == name)
+    }
+
+    /// Get all field names
+    pub fn field_names(&self) -> Vec<&str> {
+        self.fields.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    /// Get all fields
+    pub fn fields(&self) -> &[(String, DataType)] {
+        &self.fields
+    }
+
+    /// Convert to Arrow schema
+    pub fn to_arrow(&self) -> arrow::datatypes::Schema {
+        let fields: Vec<arrow::datatypes::Field> = self
+            .fields
+            .iter()
+            .map(|(name, ty)| arrow::datatypes::Field::new(name, ty.to_arrow(), true))
+            .collect();
+        arrow::datatypes::Schema::new(fields)
+    }
+
+    /// Create from Arrow schema
+    pub fn from_arrow(schema: &arrow::datatypes::Schema) -> Option<Self> {
+        let fields: Option<Vec<_>> = schema
+            .fields()
+            .iter()
+            .map(|f| DataType::from_arrow(f.data_type()).map(|ty| (f.name().clone(), ty)))
+            .collect();
+        fields.map(TupleSchema::new)
+    }
+
+    /// Create a schema for a projection
+    pub fn project(&self, indices: &[usize]) -> Self {
+        let fields = indices
+            .iter()
+            .filter_map(|&i| self.fields.get(i).cloned())
+            .collect();
+        TupleSchema { fields }
+    }
+
+    /// Concatenate two schemas (for join output)
+    pub fn concat(&self, other: &TupleSchema) -> Self {
+        let mut fields = self.fields.clone();
+        fields.extend(other.fields.iter().cloned());
+        TupleSchema { fields }
+    }
+
+    /// Validate a tuple against this schema, including vector dimensions
+    pub fn validate(&self, tuple: &Tuple) -> Result<(), SchemaValidationError> {
+        if tuple.arity() != self.arity() {
+            return Err(SchemaValidationError::ArityMismatch {
+                expected: self.arity(),
+                got: tuple.arity(),
+            });
+        }
+
+        for (i, (name, dtype)) in self.fields.iter().enumerate() {
+            if let Some(value) = tuple.get(i) {
+                // Specific vector dimension check with clear error message
+                if let (
+                    DataType::Vector {
+                        dim: Some(expected),
+                    },
+                    Value::Vector(v),
+                ) = (dtype, value)
+                {
+                    if v.len() != *expected {
+                        return Err(SchemaValidationError::VectorDimensionMismatch {
+                            column: name.clone(),
+                            expected: *expected,
+                            got: v.len(),
+                        });
+                    }
+                }
+                // VectorInt8 dimension check
+                if let (
+                    DataType::VectorInt8 {
+                        dim: Some(expected),
+                    },
+                    Value::VectorInt8(v),
+                ) = (dtype, value)
+                {
+                    if v.len() != *expected {
+                        return Err(SchemaValidationError::VectorInt8DimensionMismatch {
+                            column: name.clone(),
+                            expected: *expected,
+                            got: v.len(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Infer vector dimensions from the first tuple and update schema
+    /// This converts Vector { dim: None } to Vector { dim: Some(n) }
+    /// and `VectorInt8` { dim: None } to `VectorInt8` { dim: Some(n) }
+    pub fn infer_vector_dimensions(&mut self, tuples: &[Tuple]) {
+        if tuples.is_empty() {
+            return;
+        }
+
+        for (i, (_, dtype)) in self.fields.iter_mut().enumerate() {
+            if let DataType::Vector { dim: None } = dtype {
+                if let Some(Value::Vector(v)) = tuples[0].get(i) {
+                    *dtype = DataType::Vector { dim: Some(v.len()) };
+                }
+            }
+            if let DataType::VectorInt8 { dim: None } = dtype {
+                if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
+                    *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_types() {
+        let int_val = Value::Int32(42);
+        let str_val = Value::string("hello");
+        let float_val = Value::Float64(3.14);
+
+        assert_eq!(int_val.as_i32(), Some(42));
+        assert_eq!(str_val.as_str(), Some("hello"));
+        assert!((float_val.as_f64().unwrap() - 3.14).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_value_equality() {
+        assert_eq!(Value::Int32(42), Value::Int32(42));
+        assert_ne!(Value::Int32(42), Value::Int64(42));
+        assert_eq!(Value::string("hello"), Value::string("hello"));
+    }
+
+    #[test]
+    fn test_tuple_creation() {
+        let tuple = Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("test"),
+            Value::Float64(2.5),
+        ]);
+
+        assert_eq!(tuple.arity(), 3);
+        assert_eq!(tuple.get(0), Some(&Value::Int32(1)));
+        assert_eq!(tuple.get(1).and_then(|v| v.as_str()), Some("test"));
+    }
+
+    #[test]
+    fn test_tuple_project() {
+        let tuple = Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]);
+
+        let projected = tuple.project(&[2, 0]);
+        assert_eq!(projected.arity(), 2);
+        assert_eq!(projected.get(0), Some(&Value::Int32(3)));
+        assert_eq!(projected.get(1), Some(&Value::Int32(1)));
+    }
 
