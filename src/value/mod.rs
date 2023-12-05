@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn as_bool(self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1143,5 +1143,74 @@ impl Tuple {
             None
         }
     }
+}
+
+impl fmt::Display for Tuple {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        for (i, v) in self.values.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{v}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+// Allow iterating over tuple values
+impl<'a> IntoIterator for &'a Tuple {
+    type Item = &'a Value;
+    type IntoIter = std::slice::Iter<'a, Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.iter()
+    }
+}
+
+impl IntoIterator for Tuple {
+    type Item = Value;
+    type IntoIter = std::vec::IntoIter<Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.into_iter()
+    }
+}
+
+/// Error type for schema validation
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SchemaValidationError {
+    /// Tuple has wrong number of columns
+    #[error("Arity mismatch: expected {expected} columns, got {got}")]
+    ArityMismatch { expected: usize, got: usize },
+    /// Column has wrong type
+    #[error("Type mismatch in column '{column}': expected {expected:?}, got {got:?}")]
+    TypeMismatch {
+        column: String,
+        expected: DataType,
+        got: DataType,
+    },
+    /// Vector column has wrong dimension
+    #[error(
+        "Vector dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim"
+    )]
+    VectorDimensionMismatch {
+        column: String,
+        expected: usize,
+        got: usize,
+    },
+    /// `VectorInt8` column has wrong dimension
+    #[error("VectorInt8 dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim")]
+    VectorInt8DimensionMismatch {
+        column: String,
+        expected: usize,
+        got: usize,
+    },
+}
+
+/// Schema definition for a relation's tuples
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TupleSchema {
+    fields: Vec<(String, DataType)>,
 }
 
