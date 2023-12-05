@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bool_n11t11
+Knowledge graph 'test_bool_n11t11' created.
+Switched to knowledge graph: test_bool_n11t11
+> .kg use test_bool_n11t11
+Switched to knowledge graph: test_bool_n11t11
+> +user[(1, "alice", true), (2, "bob", false), (3, "charlie", true)].
+Inserted 3 fact(s) into 'user'.
+> ?- user(Id, Name, Active).
+3 rows:
+  (1, "alice", "true")
+  (2, "bob", "false")
+  (3, "charlie", "true")
+> +active_user(Id, Name) :- user(Id, Name, true).
+Rule 'active_user' registered.
+> ?- active_user(X, Y).
+2 rows:
+  (1, "alice")
+  (3, "charlie")
+> +inactive_user(Id, Name) :- user(Id, Name, false).
+Rule 'inactive_user' registered.
+> ?- inactive_user(X, Y).
+1 rows:
+  (2, "bob")
+> +feature[(1, "premium", true), (2, "basic", false)].
+Inserted 2 fact(s) into 'feature'.
+> +premium(Id, Name) :- feature(Id, Name, true).
+Rule 'premium' registered.
+> ?- premium(X, Y).
+1 rows:
+  (1, "premium")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bool_n11t11
+Knowledge graph 'test_bool_n11t11' dropped.
