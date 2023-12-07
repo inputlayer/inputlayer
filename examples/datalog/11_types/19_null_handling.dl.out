@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_null_n11t19
+Knowledge graph 'test_null_n11t19' created.
+Switched to knowledge graph: test_null_n11t19
+> .kg use test_null_n11t19
+Switched to knowledge graph: test_null_n11t19
+> +nums[(10,), (20,), (0,)].
+Inserted 3 fact(s) into 'nums'.
+> div_result(X, Y) :- nums(X), Y = 100 / X.
+3 rows:
+  (0, null)
+  (10, 10.0)
+  (20, 5.0)
+(session: 1 rule(s))
+> ?- div_result(X, Y).
+3 rows:
+  (0, null)
+  (10, 10.0)
+  (20, 5.0)
+> non_null(X, Y) :- div_result(X, Y), Y != 0.
+3 rows:
+  (0, null)
+  (10, 10.0)
+  (20, 5.0)
+(session: 2 rule(s))
+> ?- non_null(X, Y).
+3 rows:
+  (0, null)
+  (10, 10.0)
+  (20, 5.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_null_n11t19
+Knowledge graph 'test_null_n11t19' dropped.

@@ -1,0 +1,20 @@
+% Test: Boolean values in comparisons
+
+.kg create test_bool_cmp_n11t17
+.kg use test_bool_cmp_n11t17
+
+% Boolean data
++flags[(1, true), (2, false), (3, true), (4, false)].
+
+% Filter by boolean value
+active(Id) :- flags(Id, Val), Val = true.
+
+?- active(Id).
+
+% Filter inactive
+inactive(Id) :- flags(Id, Val), Val = false.
+
+?- inactive(Id).
+
+.kg use default
+.kg drop test_bool_cmp_n11t17

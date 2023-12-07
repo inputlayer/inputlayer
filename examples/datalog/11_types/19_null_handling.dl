@@ -1,0 +1,19 @@
+% Test: NULL/missing value handling
+
+.kg create test_null_n11t19
+.kg use test_null_n11t19
+
+% Division by zero produces NULL
++nums[(10,), (20,), (0,)].
+
+div_result(X, Y) :- nums(X), Y = 100 / X.
+
+?- div_result(X, Y).
+
+% Filter on non-null result
+non_null(X, Y) :- div_result(X, Y), Y != 0.
+
+?- non_null(X, Y).
+
+.kg use default
+.kg drop test_null_n11t19
