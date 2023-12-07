@@ -1,0 +1,17 @@
+% Test: Boolean values in facts
+
+.kg create test_bool_n11t20
+.kg use test_bool_n11t20
+
++flags[("feature_a", true), ("feature_b", false), ("feature_c", true)].
+
+% Query all flags
+?- flags(Name, Value).
+
+% Query enabled flags
+enabled(Name) :- flags(Name, true).
+
+?- enabled(Name).
+
+.kg use default
+.kg drop test_bool_n11t20

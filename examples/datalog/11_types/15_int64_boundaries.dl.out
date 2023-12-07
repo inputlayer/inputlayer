@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int64_bounds_n11t15
+Knowledge graph 'test_int64_bounds_n11t15' created.
+Switched to knowledge graph: test_int64_bounds_n11t15
+> .kg use test_int64_bounds_n11t15
+Switched to knowledge graph: test_int64_bounds_n11t15
+> +max_int[(9223372036854775807)].
+Inserted 1 fact(s) into 'max_int'.
+> ?- max_int(X).
+1 rows:
+  (9223372036854775807)
+> +min_int[(-9223372036854775808)].
+Inserted 1 fact(s) into 'min_int'.
+> ?- min_int(X).
+1 rows:
+  (-9223372036854775808)
+> +near_max[(9223372036854775806)].
+Inserted 1 fact(s) into 'near_max'.
+> +near_min[(-9223372036854775807)].
+Inserted 1 fact(s) into 'near_min'.
+> ?- near_max(X).
+1 rows:
+  (9223372036854775806)
+> ?- near_min(X).
+1 rows:
+  (-9223372036854775807)
+> +zero[(0)].
+Inserted 1 fact(s) into 'zero'.
+> ?- zero(X).
+1 rows:
+  (0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int64_bounds_n11t15
+Knowledge graph 'test_int64_bounds_n11t15' dropped.

@@ -1,0 +1,29 @@
+% Test: INT64 boundary values
+% Tests INT64_MAX and INT64_MIN handling
+
+.kg create test_int64_bounds_n11t15
+.kg use test_int64_bounds_n11t15
+
+% INT64_MAX = 9223372036854775807
+% INT64_MIN = -9223372036854775808
+
+% Test maximum positive value
++max_int[(9223372036854775807)].
+?- max_int(X).
+
+% Test minimum negative value
++min_int[(-9223372036854775808)].
+?- min_int(X).
+
+% Test values near boundaries
++near_max[(9223372036854775806)].
++near_min[(-9223372036854775807)].
+?- near_max(X).
+?- near_min(X).
+
+% Test zero (important boundary)
++zero[(0)].
+?- zero(X).
+
+.kg use default
+.kg drop test_int64_bounds_n11t15

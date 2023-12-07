@@ -1414,3 +1414,49 @@ mod tests {
         assert_eq!(projected.get(1), Some(&Value::Int32(1)));
     }
 
+    #[test]
+    fn test_tuple_concat() {
+        let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+        let t2 = Tuple::new(vec![Value::Int32(3)]);
+
+        let combined = t1.concat(&t2);
+        assert_eq!(combined.arity(), 3);
+        assert_eq!(combined.get(2), Some(&Value::Int32(3)));
+    }
+
+    #[test]
+    fn test_tuple_backward_compat() {
+        let tuple = Tuple::from_pair(1, 2);
+        assert_eq!(tuple.to_pair(), Some((1, 2)));
+
+        let tuple3 = Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]);
+        assert_eq!(tuple3.to_pair(), None);
+    }
+
+    #[test]
+    fn test_schema_creation() {
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("name".to_string(), DataType::String),
+        ]);
+
+        assert_eq!(schema.arity(), 2);
+        assert_eq!(schema.field_name(0), Some("id"));
+        assert_eq!(schema.field_type(1), Some(&DataType::String));
+        assert_eq!(schema.field_index("name"), Some(1));
+    }
+
+    #[test]
+    fn test_schema_project() {
+        let schema = TupleSchema::new(vec![
+            ("a".to_string(), DataType::Int32),
+            ("b".to_string(), DataType::String),
+            ("c".to_string(), DataType::Float64),
+        ]);
+
+        let projected = schema.project(&[2, 0]);
+        assert_eq!(projected.arity(), 2);
+        assert_eq!(projected.field_name(0), Some("c"));
+        assert_eq!(projected.field_name(1), Some("a"));
+    }
+

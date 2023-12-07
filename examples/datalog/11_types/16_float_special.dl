@@ -1,0 +1,22 @@
+% Test: Float special values
+
+.kg create test_float_special_n11t16
+.kg use test_float_special_n11t16
+
+% Very small float
++small_floats[(0.000001), (0.0000001), (0.00000001)].
+
+?- small_floats(X).
+
+% Very large float
++large_floats[(1e10), (1e15), (1e20)].
+
+?- large_floats(X).
+
+% Float with many decimals
++precise_floats[(3.14159265358979), (2.71828182845905)].
+
+?- precise_floats(X).
+
+.kg use default
+.kg drop test_float_special_n11t16
