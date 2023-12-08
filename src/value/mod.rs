@@ -1285,7 +1285,7 @@ impl TupleSchema {
     /// Create a schema for a projection
     pub fn project(&self, indices: &[usize]) -> Self {
         let fields = indices
-            .iter()
+            .iter().cloned()
             .filter_map(|&i| self.fields.get(i).cloned())
             .collect();
         TupleSchema { fields }
@@ -1307,7 +1307,7 @@ impl TupleSchema {
             });
         }
 
-        for (i, (name, dtype)) in self.fields.iter().enumerate() {
+        for (i, (name, dtype)) in self.fields.iter().cloned().enumerate() {
             if let Some(value) = tuple.get(i) {
                 // Specific vector dimension check with clear error message
                 if let (
@@ -1458,5 +1458,48 @@ mod tests {
         assert_eq!(projected.arity(), 2);
         assert_eq!(projected.field_name(0), Some("c"));
         assert_eq!(projected.field_name(1), Some("a"));
+    }
+
+    #[test]
+    fn test_value_ordering() {
+        assert!(Value::Int32(1) < Value::Int32(2));
+        assert!(Value::Null < Value::Int32(0));
+        assert!(Value::string("a") < Value::string("b"));
+    }
+
+    #[test]
+    fn test_value_hash() {
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+        set.insert(Value::Int32(42));
+        set.insert(Value::string("hello"));
+
+        assert!(set.contains(&Value::Int32(42)));
+        assert!(set.contains(&Value::string("hello")));
+        assert!(!set.contains(&Value::Int32(43)));
+    }
+
+    #[test]
+    fn test_vector_creation() {
+        let v = Value::vector(vec![1.0, 2.0, 3.0]);
+        assert_eq!(v.data_type(), DataType::Vector { dim: Some(3) });
+        assert_eq!(v.as_vector(), Some([1.0f32, 2.0, 3.0].as_slice()));
+    }
+
+    #[test]
+    fn test_vector_from_iter() {
+        let v = Value::vector_from_iter([1.0f32, 2.0, 3.0]);
+        assert_eq!(v.as_vector().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_vector_equality() {
+        let v1 = Value::vector(vec![1.0, 2.0, 3.0]);
+        let v2 = Value::vector(vec![1.0, 2.0, 3.0]);
+        let v3 = Value::vector(vec![1.0, 2.0, 4.0]);
+
+        assert_eq!(v1, v2);
+        assert_ne!(v1, v3);
     }
 
