@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cmp_types_n11t36
+Knowledge graph 'test_cmp_types_n11t36' created.
+Switched to knowledge graph: test_cmp_types_n11t36
+> .kg use test_cmp_types_n11t36
+Switched to knowledge graph: test_cmp_types_n11t36
+> +nums[(10,), (20,), (30,)].
+Inserted 3 fact(s) into 'nums'.
+> bigger(N) :- nums(N), N > 15.
+2 rows:
+  (20)
+  (30)
+(session: 1 rule(s))
+> ?- bigger(N).
+2 rows:
+  (20)
+  (30)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_cmp_types_n11t36
+Knowledge graph 'test_cmp_types_n11t36' dropped.

@@ -1,0 +1,14 @@
+% Test: Comparison between same types
+
+.kg create test_cmp_types_n11t36
+.kg use test_cmp_types_n11t36
+
++nums[(10,), (20,), (30,)].
+
+% Compare numeric values
+bigger(N) :- nums(N), N > 15.
+
+?- bigger(N).
+
+.kg use default
+.kg drop test_cmp_types_n11t36

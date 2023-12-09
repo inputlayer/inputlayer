@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(self) -> Option<bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1253,7 +1253,7 @@ impl TupleSchema {
     }
 
     /// Get all field names
-    pub fn field_names(self) -> Vec<&str> {
+    pub fn field_names(&self) -> Vec<&str> {
         self.fields.iter().map(|(n, _)| n.as_str()).collect()
     }
 
@@ -1317,7 +1317,6 @@ impl TupleSchema {
                     Value::Vector(v),
                 ) = (dtype, value)
                 {
-                    // TODO: verify this condition
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1361,7 +1360,6 @@ impl TupleSchema {
                     *dtype = DataType::Vector { dim: Some(v.len()) };
                 }
             }
-            // TODO: verify this condition
             if let DataType::VectorInt8 { dim: None } = dtype {
                 if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
                     *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
@@ -1668,3 +1666,45 @@ mod tests {
     }
 
     // Vector Dimension Validation Tests
+    #[test]
+    fn test_datatype_vector_with_dim() {
+        let dt = DataType::vector_with_dim(1536);
+        assert_eq!(dt, DataType::Vector { dim: Some(1536) });
+    }
+
+    #[test]
+    fn test_datatype_vector_any() {
+        let dt = DataType::vector_any();
+        assert_eq!(dt, DataType::Vector { dim: None });
+    }
+
+    #[test]
+    fn test_datatype_matches_vector_with_dimension() {
+        let dt = DataType::vector_with_dim(3);
+        let v3 = Value::vector(vec![1.0, 2.0, 3.0]);
+        let v4 = Value::vector(vec![1.0, 2.0, 3.0, 4.0]);
+
+        assert!(dt.matches(&v3), "3-dim type should match 3-dim vector");
+        assert!(!dt.matches(&v4), "3-dim type should not match 4-dim vector");
+    }
+
+    #[test]
+    fn test_datatype_matches_vector_any() {
+        let dt = DataType::vector_any();
+        let v3 = Value::vector(vec![1.0, 2.0, 3.0]);
+        let v1000 = Value::vector(vec![0.0; 1000]);
+
+        assert!(dt.matches(&v3), "any-dim type should match any vector");
+        assert!(dt.matches(&v1000), "any-dim type should match any vector");
+    }
+
+    #[test]
+    fn test_datatype_matches_non_vector() {
+        let dt = DataType::vector_with_dim(3);
+        let int = Value::Int32(42);
+        let string = Value::string("test");
+
+        assert!(!dt.matches(&int), "vector type should not match int");
+        assert!(!dt.matches(&string), "vector type should not match string");
+    }
+
