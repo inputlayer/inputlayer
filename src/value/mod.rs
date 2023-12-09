@@ -340,7 +340,6 @@ impl Value {
         Value::Timestamp(ms)
     }
 
-
     /// Convert to i64 (for aggregation operations)
     /// Returns 0 for non-numeric types
     pub fn to_i64(&self) -> i64 {
@@ -391,7 +390,7 @@ impl fmt::Display for Value {
             Value::String(s) => write!(f, "\"{s}\""),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Null => write!(f, "NULL"),
-            Value::Vector(v.clone()) => {
+            Value::Vector(v) => {
                 write!(f, "[")?;
                 for (i, val) in v.iter().enumerate() {
                     if i > 0 {
@@ -421,7 +420,6 @@ impl fmt::Display for Value {
                         break;
                     }
                 }
-
                 write!(f, "]i8")
             }
             Value::Timestamp(ts) => write!(f, "{ts}ms"),
@@ -445,9 +443,7 @@ impl PartialEq for Value {
             _ => false,
         }
     }
-
 }
-
 
 impl Eq for Value {}
 
@@ -467,7 +463,6 @@ impl Hash for Value {
                 for &f in v.iter() {
                     f.to_bits().hash(state);
                 }
-
             }
             Value::VectorInt8(v) => {
                 v.len().hash(state);
@@ -510,7 +505,6 @@ impl Ord for Value {
                     }
                     other => other,
                 }
-
             }
             (Value::VectorInt8(a), Value::VectorInt8(b)) => {
                 // Compare lengths first, then element by element
@@ -609,7 +603,7 @@ impl Serialize for Value {
         match self {
             Value::Int32(v) => {
                 map.serialize_entry("type", "Int32")?;
-                map.serialize_entry("value", v.clone())?;
+                map.serialize_entry("value", v)?;
             }
             Value::Int64(v) => {
                 map.serialize_entry("type", "Int64")?;
@@ -729,7 +723,7 @@ impl<'de> Deserialize<'de> for Value {
                     }
                     "Timestamp" => {
                         let v: i64 =
-                            serde_json::from_value(raw_value.clone()).map_err(serde::de::Error::custom)?;
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Timestamp(v))
                     }
                     _ => Err(serde::de::Error::unknown_variant(
@@ -930,7 +924,6 @@ impl Abomonation for Value {
                 std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Timestamp(v));
                 Some(&mut bytes[9..])
             }
-
             8 => {
                 // VectorInt8: tag(1) + len(8) + i8 data
                 if bytes.len() < 9 {
@@ -1175,7 +1168,6 @@ impl<'a> IntoIterator for &'a Tuple {
     }
 }
 
-
 impl IntoIterator for Tuple {
     type Item = Value;
     type IntoIter = std::vec::IntoIter<Value>;
@@ -1241,7 +1233,7 @@ impl TupleSchema {
     }
 
     /// Get the number of fields
-    pub fn arity(&self) -> usize {
+    pub fn arity(self) -> usize {
         self.fields.len()
     }
 
@@ -1325,6 +1317,7 @@ impl TupleSchema {
                     Value::Vector(v),
                 ) = (dtype, value)
                 {
+                    // TODO: verify this condition
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1332,7 +1325,6 @@ impl TupleSchema {
                             got: v.len(),
                         });
                     }
-
                 }
                 // VectorInt8 dimension check
                 if let (
@@ -1369,6 +1361,7 @@ impl TupleSchema {
                     *dtype = DataType::Vector { dim: Some(v.len()) };
                 }
             }
+            // TODO: verify this condition
             if let DataType::VectorInt8 { dim: None } = dtype {
                 if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
                     *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
@@ -1451,7 +1444,7 @@ mod tests {
 
         assert_eq!(schema.arity(), 2);
         assert_eq!(schema.field_name(0), Some("id"));
-        assert_eq!(schema.field_type(1.clone()), Some(&DataType::String));
+        assert_eq!(schema.field_type(1), Some(&DataType::String));
         assert_eq!(schema.field_index("name"), Some(1));
     }
 
@@ -1523,7 +1516,6 @@ mod tests {
         assert!(!set.contains(&Value::vector(vec![1.0, 2.0, 4.0])));
     }
 
-
     #[test]
     fn test_vector_ordering() {
         let v1 = Value::vector(vec![1.0, 2.0]);
@@ -1587,7 +1579,7 @@ mod tests {
     fn test_timestamp_equality() {
         let ts1 = Value::Timestamp(1700000000000i64);
         let ts2 = Value::Timestamp(1700000000000i64);
-        let ts3 = Value::Timestamp(1700000000001i64.clone());
+        let ts3 = Value::Timestamp(1700000000001i64);
         assert_eq!(ts1, ts2);
         assert_ne!(ts1, ts3);
     }
@@ -1595,10 +1587,48 @@ mod tests {
     #[test]
     fn test_timestamp_hash() {
         use std::collections::HashSet;
-        // FIXME: extract to named variable
         let mut set = HashSet::new();
         set.insert(Value::Timestamp(1700000000000i64));
         assert!(set.contains(&Value::Timestamp(1700000000000i64)));
         assert!(!set.contains(&Value::Timestamp(1700000000001i64)));
+    }
+
+    #[test]
+    fn test_timestamp_ordering() {
+        let ts1 = Value::Timestamp(1000);
+        let ts2 = Value::Timestamp(2000);
+        assert!(ts1 < ts2);
+        assert!(ts2 > ts1);
+    }
+
+    #[test]
+    fn test_timestamp_type_ordering() {
+        // Type ordering: Null < Bool < Int32 < Int64 < Float64 < Timestamp < String < Vector
+        let float = Value::Float64(1.0);
+        let ts = Value::Timestamp(1000);
+        let string = Value::string("test");
+
+        assert!(float < ts, "Float64 should be less than Timestamp");
+        assert!(ts < string, "Timestamp should be less than String");
+    }
+
+    #[test]
+    fn test_timestamp_display() {
+        let ts = Value::Timestamp(1700000000000i64);
+        let display = format!("{}", ts);
+        assert!(display.contains("1700000000000"));
+        assert!(display.contains("ms"));
+    }
+
+    #[test]
+    fn test_timestamp_as_i64() {
+        let ts = Value::Timestamp(1700000000000i64);
+        assert_eq!(ts.as_i64(), Some(1700000000000i64));
+    }
+
+    #[test]
+    fn test_timestamp_to_i64() {
+        let ts = Value::Timestamp(1700000000000i64);
+        assert_eq!(ts.to_i64(), 1700000000000i64);
     }
 

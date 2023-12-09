@@ -1,0 +1,13 @@
+% Test: Float precision handling
+
+.kg create test_float_prec_n11t31
+.kg use test_float_prec_n11t31
+
++floats[(0.1,), (0.2,), (0.3,)].
+
+sum_float(sum<X>) :- floats(X).
+
+?- sum_float(S).
+
+.kg use default
+.kg drop test_float_prec_n11t31
