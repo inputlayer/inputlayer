@@ -1285,21 +1285,21 @@ impl TupleSchema {
     /// Create a schema for a projection
     pub fn project(&self, indices: &[usize]) -> Self {
         let fields = indices
-            .iter().cloned()
+            .iter()
             .filter_map(|&i| self.fields.get(i).cloned())
             .collect();
         TupleSchema { fields }
     }
 
     /// Concatenate two schemas (for join output)
-    pub fn concat(&self, other: &TupleSchema) -> Self {
+    pub fn concat(self, other: &TupleSchema) -> Self {
         let mut fields = self.fields.clone();
         fields.extend(other.fields.iter().cloned());
         TupleSchema { fields }
     }
 
     /// Validate a tuple against this schema, including vector dimensions
-    pub fn validate(&self, tuple: &Tuple) -> Result<(), SchemaValidationError> {
+    pub fn validate(self, tuple: &Tuple) -> Result<(), SchemaValidationError> {
         if tuple.arity() != self.arity() {
             return Err(SchemaValidationError::ArityMismatch {
                 expected: self.arity(),
@@ -1307,7 +1307,7 @@ impl TupleSchema {
             });
         }
 
-        for (i, (name, dtype)) in self.fields.iter().cloned().enumerate() {
+        for (i, (name, dtype)) in self.fields.iter().enumerate() {
             if let Some(value) = tuple.get(i) {
                 // Specific vector dimension check with clear error message
                 if let (
@@ -1317,6 +1317,7 @@ impl TupleSchema {
                     Value::Vector(v),
                 ) = (dtype, value)
                 {
+                    // TODO: verify this condition
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1360,6 +1361,7 @@ impl TupleSchema {
                     *dtype = DataType::Vector { dim: Some(v.len()) };
                 }
             }
+            // TODO: verify this condition
             if let DataType::VectorInt8 { dim: None } = dtype {
                 if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
                     *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
@@ -1501,5 +1503,55 @@ mod tests {
 
         assert_eq!(v1, v2);
         assert_ne!(v1, v3);
+    }
+
+    #[test]
+    fn test_vector_hash() {
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+        set.insert(Value::vector(vec![1.0, 2.0, 3.0]));
+
+        assert!(set.contains(&Value::vector(vec![1.0, 2.0, 3.0])));
+        assert!(!set.contains(&Value::vector(vec![1.0, 2.0, 4.0])));
+    }
+
+    #[test]
+    fn test_vector_ordering() {
+        let v1 = Value::vector(vec![1.0, 2.0]);
+        let v2 = Value::vector(vec![1.0, 3.0]);
+        let v3 = Value::vector(vec![1.0, 2.0, 3.0]);
+
+        assert!(v1 < v2); // Same length, second element differs
+        assert!(v1 < v3); // Shorter length comes first
+        assert!(Value::string("a") < v1); // String < Vector in type ordering
+    }
+
+    #[test]
+    fn test_vector_display() {
+        let v_small = Value::vector(vec![1.0, 2.0, 3.0]);
+        let display = format!("{}", v_small);
+        assert!(display.contains("1.0000"));
+        assert!(display.contains("2.0000"));
+        assert!(display.contains("3.0000"));
+
+        let v_large = Value::vector(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        let display_large = format!("{}", v_large);
+        assert!(display_large.contains("... 3 more"));
+    }
+
+    #[test]
+    fn test_vector_in_tuple() {
+        let tuple = Tuple::new(vec![
+            Value::Int32(1),
+            Value::vector(vec![1.0, 2.0, 3.0]),
+            Value::string("test"),
+        ]);
+
+        assert_eq!(tuple.arity(), 3);
+        assert_eq!(
+            tuple.get(1).and_then(|v| v.as_vector()),
+            Some([1.0f32, 2.0, 3.0].as_slice())
+        );
     }
 

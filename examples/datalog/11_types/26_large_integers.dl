@@ -1,0 +1,16 @@
+% Test: Large integer values
+
+.kg create test_large_int_n11t26
+.kg use test_large_int_n11t26
+
++big_nums[(1000000,), (999999999,), (123456789,)].
+
+?- big_nums(N).
+
+% Arithmetic with large numbers
+computed(N, R) :- big_nums(N), R = N + 1.
+
+?- computed(N, R).
+
+.kg use default
+.kg drop test_large_int_n11t26
