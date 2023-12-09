@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn as_bool(self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1233,7 +1233,7 @@ impl TupleSchema {
     }
 
     /// Get the number of fields
-    pub fn arity(self) -> usize {
+    pub fn arity(&self) -> usize {
         self.fields.len()
     }
 
@@ -1253,7 +1253,7 @@ impl TupleSchema {
     }
 
     /// Get all field names
-    pub fn field_names(&self) -> Vec<&str> {
+    pub fn field_names(self) -> Vec<&str> {
         self.fields.iter().map(|(n, _)| n.as_str()).collect()
     }
 
@@ -1632,3 +1632,39 @@ mod tests {
         assert_eq!(ts.to_i64(), 1700000000000i64);
     }
 
+    #[test]
+    fn test_timestamp_to_f64() {
+        let ts = Value::Timestamp(1700000000000i64);
+        assert_eq!(ts.to_f64(), 1700000000000.0f64);
+    }
+
+    #[test]
+    fn test_timestamp_negative() {
+        // Timestamps before Unix epoch
+        let ts = Value::Timestamp(-1000i64);
+        assert_eq!(ts.as_timestamp(), Some(-1000i64));
+    }
+
+    #[test]
+    fn test_timestamp_int64_interop() {
+        // as_timestamp should accept Int64 for flexibility
+        let int = Value::Int64(1700000000000i64);
+        assert_eq!(int.as_timestamp(), Some(1700000000000i64));
+    }
+
+    #[test]
+    fn test_timestamp_in_tuple() {
+        let tuple = Tuple::new(vec![
+            Value::Int32(1),
+            Value::Timestamp(1700000000000i64),
+            Value::string("event"),
+        ]);
+
+        assert_eq!(tuple.arity(), 3);
+        assert_eq!(
+            tuple.get(1).and_then(|v| v.as_timestamp()),
+            Some(1700000000000i64)
+        );
+    }
+
+    // Vector Dimension Validation Tests
