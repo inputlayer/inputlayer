@@ -1,0 +1,18 @@
+% Test: Boolean true and false
+
+.kg create test_true_false_n11t40
+.kg use test_true_false_n11t40
+
++flags[(1, true), (2, false), (3, true)].
+
+% Filter by true
+is_true(Id) :- flags(Id, true).
+
+% Filter by false
+is_false(Id) :- flags(Id, false).
+
+?- is_true(Id).
+?- is_false(Id).
+
+.kg use default
+.kg drop test_true_false_n11t40

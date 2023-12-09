@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int64_bounds_n11t42
+Knowledge graph 'test_int64_bounds_n11t42' created.
+Switched to knowledge graph: test_int64_bounds_n11t42
+> .kg use test_int64_bounds_n11t42
+Switched to knowledge graph: test_int64_bounds_n11t42
+> +big_vals[(9223372036854775806,), (1,)].
+Inserted 2 fact(s) into 'big_vals'.
+> ?- big_vals(X).
+2 rows:
+  (1)
+  (9223372036854775806)
+> +max_val(9223372036854775807).
+Inserted 1 fact(s) into 'max_val'.
+> ?- max_val(X).
+1 rows:
+  (9223372036854775807)
+> +min_val(-9223372036854775807).
+Inserted 1 fact(s) into 'min_val'.
+> ?- min_val(X).
+1 rows:
+  (-9223372036854775807)
+> +nums[(9223372036854775800,), (10,)].
+Inserted 2 fact(s) into 'nums'.
+> +sum_big(sum<X>) :- nums(X).
+Rule 'sum_big' registered.
+> ?- sum_big(S).
+1 rows:
+  (9223372036854775807)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int64_bounds_n11t42
+Knowledge graph 'test_int64_bounds_n11t42' dropped.

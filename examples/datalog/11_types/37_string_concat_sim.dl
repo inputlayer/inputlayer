@@ -1,0 +1,11 @@
+% Test: String values with special chars
+
+.kg create test_str_special_n11t37
+.kg use test_str_special_n11t37
+
++text[("hello-world",), ("foo_bar",), ("test.case",), ("a/b/c",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_str_special_n11t37
