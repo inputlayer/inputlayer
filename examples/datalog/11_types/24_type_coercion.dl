@@ -1,0 +1,14 @@
+% Test: Type coercion in comparisons
+
+.kg create test_coerce_n11t24
+.kg use test_coerce_n11t24
+
++int_vals[(10,), (20,), (30,)].
++float_vals[(10.0,), (25.0,), (30.0,)].
+
+% Query both
+?- int_vals(X).
+?- float_vals(X).
+
+.kg use default
+.kg drop test_coerce_n11t24

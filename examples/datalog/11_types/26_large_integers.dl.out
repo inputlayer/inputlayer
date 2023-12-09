@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_int_n11t26
+Knowledge graph 'test_large_int_n11t26' created.
+Switched to knowledge graph: test_large_int_n11t26
+> .kg use test_large_int_n11t26
+Switched to knowledge graph: test_large_int_n11t26
+> +big_nums[(1000000,), (999999999,), (123456789,)].
+Inserted 3 fact(s) into 'big_nums'.
+> ?- big_nums(N).
+3 rows:
+  (1000000)
+  (123456789)
+  (999999999)
+> computed(N, R) :- big_nums(N), R = N + 1.
+3 rows:
+  (1000000, 1000001)
+  (123456789, 123456790)
+  (999999999, 1000000000)
+(session: 1 rule(s))
+> ?- computed(N, R).
+3 rows:
+  (1000000, 1000001)
+  (123456789, 123456790)
+  (999999999, 1000000000)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_int_n11t26
+Knowledge graph 'test_large_int_n11t26' dropped.
