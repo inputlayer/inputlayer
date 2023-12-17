@@ -128,3 +128,58 @@ fn test_float_special_zero() {
 
 // String Boundary Tests
 #[test]
+fn test_empty_string() {
+    let tuple = Tuple::new(vec![Value::string("")]);
+    assert_eq!(tuple.get(0).and_then(|v| v.as_str()), Some(""));
+}
+
+#[test]
+fn test_single_char_string() {
+    let tuple = Tuple::new(vec![Value::string("a")]);
+    assert_eq!(tuple.get(0).and_then(|v| v.as_str()), Some("a"));
+}
+
+#[test]
+fn test_long_string_1kb() {
+    let long_str = "a".repeat(1024);
+    let tuple = Tuple::new(vec![Value::string(&long_str)]);
+
+    let retrieved = tuple.get(0).and_then(|v| v.as_str()).unwrap();
+    assert_eq!(retrieved.len(), 1024);
+}
+
+#[test]
+fn test_long_string_100kb() {
+    let long_str = "b".repeat(102400);
+    let tuple = Tuple::new(vec![Value::string(&long_str)]);
+
+    let retrieved = tuple.get(0).and_then(|v| v.as_str()).unwrap();
+    assert_eq!(retrieved.len(), 102400);
+}
+
+#[test]
+fn test_unicode_strings() {
+    let strings = vec!["hello", "héllo", "日本語", "Привет", "مرحبا", "你好世界"];
+
+    for s in strings {
+        let tuple = Tuple::new(vec![Value::string(s)]);
+        assert_eq!(tuple.get(0).and_then(|v| v.as_str()), Some(s));
+    }
+}
+
+#[test]
+fn test_string_with_special_chars() {
+    let special = "hello\nworld\ttab\r\nend";
+    let tuple = Tuple::new(vec![Value::string(special)]);
+    assert_eq!(tuple.get(0).and_then(|v| v.as_str()), Some(special));
+}
+
+#[test]
+fn test_string_with_quotes() {
+    let quoted = r#"say "hello" to 'world'"#;
+    let tuple = Tuple::new(vec![Value::string(quoted)]);
+    assert_eq!(tuple.get(0).and_then(|v| v.as_str()), Some(quoted));
+}
+
+// Arity Boundary Tests
+#[test]

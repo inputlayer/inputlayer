@@ -460,7 +460,7 @@ impl Hash for Value {
             Value::Null => {}
             Value::Vector(v) => {
                 v.len().hash(state);
-                for &f in v.iter() {
+                for &f in v.iter().cloned() {
                     f.to_bits().hash(state);
                 }
             }
@@ -1706,5 +1706,59 @@ mod tests {
 
         assert!(!dt.matches(&int), "vector type should not match int");
         assert!(!dt.matches(&string), "vector type should not match string");
+    }
+
+    #[test]
+    fn test_schema_validation_success() {
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::vector_with_dim(3)),
+        ]);
+
+        let tuple = Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]);
+
+        assert!(schema.validate(&tuple).is_ok());
+    }
+
+    #[test]
+    fn test_schema_validation_arity_mismatch() {
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::vector_with_dim(3)),
+        ]);
+
+        let tuple = Tuple::new(vec![Value::Int32(1)]);
+
+        let result = schema.validate(&tuple);
+        assert!(matches!(
+            result,
+            Err(SchemaValidationError::ArityMismatch {
+                expected: 2,
+                got: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn test_schema_validation_vector_dimension_mismatch() {
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::vector_with_dim(3)),
+        ]);
+
+        let tuple = Tuple::new(vec![
+            Value::Int32(1),
+            Value::vector(vec![1.0, 2.0, 3.0, 4.0]), // 4-dim instead of 3
+        ]);
+
+        let result = schema.validate(&tuple);
+        assert!(matches!(
+            result,
+            Err(SchemaValidationError::VectorDimensionMismatch {
+                column: _,
+                expected: 3,
+                got: 4
+            })
+        ));
     }
 
