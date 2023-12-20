@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_string_lex_n11t57
+Knowledge graph 'test_string_lex_n11t57' created.
+Switched to knowledge graph: test_string_lex_n11t57
+> .kg use test_string_lex_n11t57
+Switched to knowledge graph: test_string_lex_n11t57
+> +words[("apple",), ("banana",), ("cherry",), ("apricot",)].
+Inserted 4 fact(s) into 'words'.
+> ordered(A, B) :- words(A), words(B), A < B.
+No results.
+(session: 1 rule(s))
+> ?- ordered(A, B).
+No results.
+> +min_word(min<W>) :- words(W).
+Rule 'min_word' registered.
+> +max_word(max<W>) :- words(W).
+Rule 'max_word' registered.
+> ?- min_word(M).
+1 rows:
+  ("apple")
+> ?- max_word(M).
+1 rows:
+  ("cherry")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_string_lex_n11t57
+Knowledge graph 'test_string_lex_n11t57' dropped.

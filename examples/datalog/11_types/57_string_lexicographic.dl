@@ -1,0 +1,20 @@
+% Test: String lexicographic comparison
+
+.kg create test_string_lex_n11t57
+.kg use test_string_lex_n11t57
+
++words[("apple",), ("banana",), ("cherry",), ("apricot",)].
+
+% Lexicographic order
+ordered(A, B) :- words(A), words(B), A < B.
+
+?- ordered(A, B).
+
++min_word(min<W>) :- words(W).
++max_word(max<W>) :- words(W).
+
+?- min_word(M).
+?- max_word(M).
+
+.kg use default
+.kg drop test_string_lex_n11t57

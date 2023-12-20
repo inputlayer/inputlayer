@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_type_pres_n11t59
+Knowledge graph 'test_type_pres_n11t59' created.
+Switched to knowledge graph: test_type_pres_n11t59
+> .kg use test_type_pres_n11t59
+Switched to knowledge graph: test_type_pres_n11t59
+> +mixed[(1, "text", 3.14, true)].
+Inserted 1 fact(s) into 'mixed'.
+> pass_through(A, B, C, D) :- mixed(A, B, C, D).
+1 rows:
+  (1, "text", 3.14, "true")
+(session: 1 rule(s))
+> ?- pass_through(A, B, C, D).
+1 rows:
+  (1, "text", 3.14, "true")
+> int_only(X) :- mixed(X, _, _, _).
+1 rows:
+  (1)
+(session: 2 rule(s))
+> str_only(X) :- mixed(_, X, _, _).
+1 rows:
+  ("text")
+(session: 3 rule(s))
+> float_only(X) :- mixed(_, _, X, _).
+1 rows:
+  (3.14)
+(session: 4 rule(s))
+> bool_only(X) :- mixed(_, _, _, X).
+1 rows:
+  ("true")
+(session: 5 rule(s))
+> ?- int_only(X).
+1 rows:
+  (1)
+> ?- str_only(X).
+1 rows:
+  ("text")
+> ?- float_only(X).
+1 rows:
+  (3.14)
+> ?- bool_only(X).
+1 rows:
+  ("true")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_type_pres_n11t59
+Knowledge graph 'test_type_pres_n11t59' dropped.
