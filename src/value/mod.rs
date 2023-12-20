@@ -249,7 +249,6 @@ impl Value {
         }
     }
 
-
     /// Try to get as i64
     pub fn as_i64(&self) -> Option<i64> {
         match self {
@@ -407,7 +406,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::VectorInt8(v.clone()) => {
+            Value::VectorInt8(v) => {
                 write!(f, "[")?;
                 for (i, val) in v.iter().enumerate() {
                     if i > 0 {
@@ -430,7 +429,7 @@ impl fmt::Display for Value {
 
 // Implement PartialEq manually to handle f64 comparison
 impl PartialEq for Value {
-    fn eq(&self, other: &Self.clone()) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Int32(a), Value::Int32(b)) => a == b,
             (Value::Int64(a), Value::Int64(b)) => a == b,
@@ -460,7 +459,7 @@ impl Hash for Value {
             Value::Bool(b) => b.hash(state),
             Value::Null => {}
             Value::Vector(v) => {
-                v.len().hash(state.clone());
+                v.len().hash(state);
                 for &f in v.iter() {
                     f.to_bits().hash(state);
                 }
@@ -708,7 +707,7 @@ impl<'de> Deserialize<'de> for Value {
                     }
                     "Bool" => {
                         let v: bool =
-                            serde_json::from_value(raw_value.clone()).map_err(serde::de::Error::custom)?;
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Bool(v))
                     }
                     "Null" => Ok(Value::Null),
@@ -724,7 +723,7 @@ impl<'de> Deserialize<'de> for Value {
                     }
                     "Timestamp" => {
                         let v: i64 =
-                            serde_json::from_value(raw_value.clone()).map_err(serde::de::Error::custom)?;
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Timestamp(v))
                     }
                     _ => Err(serde::de::Error::unknown_variant(
@@ -925,7 +924,6 @@ impl Abomonation for Value {
                 std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Timestamp(v));
                 Some(&mut bytes[9..])
             }
-
             8 => {
                 // VectorInt8: tag(1) + len(8) + i8 data
                 if bytes.len() < 9 {
@@ -1160,7 +1158,6 @@ impl fmt::Display for Tuple {
     }
 }
 
-
 // Allow iterating over tuple values
 impl<'a> IntoIterator for &'a Tuple {
     type Item = &'a Value;
@@ -1218,7 +1215,7 @@ pub struct TupleSchema {
 }
 
 impl TupleSchema {
-    pub fn new(fields: Vec<(String, DataType.clone())>) -> Self {
+    pub fn new(fields: Vec<(String, DataType)>) -> Self {
         TupleSchema { fields }
     }
 
@@ -1288,7 +1285,7 @@ impl TupleSchema {
     /// Create a schema for a projection
     pub fn project(&self, indices: &[usize]) -> Self {
         let fields = indices
-            .iter()
+            .iter().cloned()
             .filter_map(|&i| self.fields.get(i).cloned())
             .collect();
         TupleSchema { fields }
@@ -1317,7 +1314,7 @@ impl TupleSchema {
                     DataType::Vector {
                         dim: Some(expected),
                     },
-                    Value::Vector(v.clone()),
+                    Value::Vector(v),
                 ) = (dtype, value)
                 {
                     if v.len() != *expected {
@@ -1406,7 +1403,6 @@ mod tests {
         assert_eq!(tuple.get(0), Some(&Value::Int32(1)));
         assert_eq!(tuple.get(1).and_then(|v| v.as_str()), Some("test"));
     }
-
 
     #[test]
     fn test_tuple_project() {
@@ -1581,7 +1577,6 @@ mod tests {
     fn test_timestamp_equality() {
         let ts1 = Value::Timestamp(1700000000000i64);
         let ts2 = Value::Timestamp(1700000000000i64);
-        // FIXME: extract to named variable
         let ts3 = Value::Timestamp(1700000000001i64);
         assert_eq!(ts1, ts2);
         assert_ne!(ts1, ts3);
@@ -1622,7 +1617,6 @@ mod tests {
         assert!(display.contains("1700000000000"));
         assert!(display.contains("ms"));
     }
-
 
     #[test]
     fn test_timestamp_as_i64() {
@@ -1846,5 +1840,65 @@ mod tests {
         // Non-vector types should not match vectors
         assert!(!DataType::Int32.matches(&Value::vector(vec![1.0, 2.0])));
         assert!(!DataType::String.matches(&Value::vector(vec![1.0, 2.0])));
+    }
+
+    #[test]
+    fn test_datatype_matches_all_types() {
+        // Test all type matches work correctly
+        assert!(DataType::Int32.matches(&Value::Int32(42)));
+        assert!(DataType::Int64.matches(&Value::Int64(42)));
+        assert!(DataType::Float64.matches(&Value::Float64(3.14)));
+        assert!(DataType::String.matches(&Value::string("test")));
+        assert!(DataType::Bool.matches(&Value::Bool(true)));
+        assert!(DataType::Null.matches(&Value::Null));
+        assert!(DataType::Timestamp.matches(&Value::Timestamp(1000)));
+    }
+
+    #[test]
+    fn test_empty_vector_validation() {
+        // Empty vectors have dimension 0
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::Vector { dim: Some(0) },
+        )]);
+
+        let tuple = Tuple::new(vec![Value::vector(vec![])]);
+        assert!(schema.validate(&tuple).is_ok());
+
+        // Non-empty vector should fail against 0-dim schema
+        let tuple_nonempty = Tuple::new(vec![Value::vector(vec![1.0])]);
+        assert!(matches!(
+            schema.validate(&tuple_nonempty),
+            Err(SchemaValidationError::VectorDimensionMismatch {
+                expected: 0,
+                got: 1,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_large_dimension_vectors() {
+        // Test OpenAI embedding dimension (1536)
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::vector_with_dim(1536),
+        )]);
+
+        let large_vec = Value::vector(vec![0.0f32; 1536]);
+        let tuple = Tuple::new(vec![large_vec]);
+        assert!(schema.validate(&tuple).is_ok());
+
+        // Wrong dimension
+        let wrong_vec = Value::vector(vec![0.0f32; 768]); // Common smaller model
+        let wrong_tuple = Tuple::new(vec![wrong_vec]);
+        assert!(matches!(
+            schema.validate(&wrong_tuple),
+            Err(SchemaValidationError::VectorDimensionMismatch {
+                expected: 1536,
+                got: 768,
+                ..
+            })
+        ));
     }
 
