@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_floats_n11t55
+Knowledge graph 'test_large_floats_n11t55' created.
+Switched to knowledge graph: test_large_floats_n11t55
+> .kg use test_large_floats_n11t55
+Switched to knowledge graph: test_large_floats_n11t55
+> +huge[(1.0e100,), (2.0e100,), (3.0e100,)].
+Inserted 3 fact(s) into 'huge'.
+> +sum_huge(sum<X>) :- huge(X).
+Rule 'sum_huge' registered.
+> ?- sum_huge(S).
+1 rows:
+  (9223372036854775807)
+> huge_cmp(A, B) :- huge(A), huge(B), A < B.
+3 rows:
+  (1e100, 2e100)
+  (1e100, 3.0000000000000002e100)
+  (2e100, 3.0000000000000002e100)
+(session: 1 rule(s))
+> ?- huge_cmp(A, B).
+3 rows:
+  (1e100, 2e100)
+  (1e100, 3.0000000000000002e100)
+  (2e100, 3.0000000000000002e100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_floats_n11t55
+Knowledge graph 'test_large_floats_n11t55' dropped.
