@@ -183,3 +183,57 @@ fn test_string_with_quotes() {
 
 // Arity Boundary Tests
 #[test]
+fn test_unary_tuple() {
+    let tuple = Tuple::new(vec![Value::Int32(1)]);
+    assert_eq!(tuple.arity(), 1);
+}
+
+#[test]
+fn test_binary_tuple() {
+    let tuple = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+    assert_eq!(tuple.arity(), 2);
+}
+
+#[test]
+fn test_high_arity_tuple_10() {
+    let values: Vec<Value> = (0..10).map(|i| Value::Int32(i)).collect();
+    let tuple = Tuple::new(values);
+    assert_eq!(tuple.arity(), 10);
+}
+
+#[test]
+fn test_high_arity_tuple_20() {
+    let values: Vec<Value> = (0..20).map(|i| Value::Int32(i)).collect();
+    let tuple = Tuple::new(values);
+    assert_eq!(tuple.arity(), 20);
+}
+
+#[test]
+fn test_high_arity_tuple_100() {
+    let values: Vec<Value> = (0..100).map(|i| Value::Int32(i)).collect();
+    let tuple = Tuple::new(values);
+    assert_eq!(tuple.arity(), 100);
+}
+
+// Vector Dimension Tests
+#[test]
+fn test_vector_single_dimension() {
+    let vec: Vec<f32> = vec![1.0];
+    let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec.clone()))]);
+
+    if let Some(Value::Vector(v)) = tuple.get(0) {
+        assert_eq!(v.len(), 1);
+    }
+}
+
+#[test]
+fn test_vector_two_dimensions() {
+    let vec: Vec<f32> = vec![1.0, 2.0];
+    let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec.clone()))]);
+
+    if let Some(Value::Vector(v)) = tuple.get(0) {
+        assert_eq!(v.len(), 2);
+    }
+}
+
+#[test]
