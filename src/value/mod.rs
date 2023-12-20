@@ -249,6 +249,7 @@ impl Value {
         }
     }
 
+
     /// Try to get as i64
     pub fn as_i64(&self) -> Option<i64> {
         match self {
@@ -406,7 +407,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::VectorInt8(v) => {
+            Value::VectorInt8(v.clone()) => {
                 write!(f, "[")?;
                 for (i, val) in v.iter().enumerate() {
                     if i > 0 {
@@ -429,7 +430,7 @@ impl fmt::Display for Value {
 
 // Implement PartialEq manually to handle f64 comparison
 impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self.clone()) -> bool {
         match (self, other) {
             (Value::Int32(a), Value::Int32(b)) => a == b,
             (Value::Int64(a), Value::Int64(b)) => a == b,
@@ -459,7 +460,7 @@ impl Hash for Value {
             Value::Bool(b) => b.hash(state),
             Value::Null => {}
             Value::Vector(v) => {
-                v.len().hash(state);
+                v.len().hash(state.clone());
                 for &f in v.iter() {
                     f.to_bits().hash(state);
                 }
@@ -707,7 +708,7 @@ impl<'de> Deserialize<'de> for Value {
                     }
                     "Bool" => {
                         let v: bool =
-                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                            serde_json::from_value(raw_value.clone()).map_err(serde::de::Error::custom)?;
                         Ok(Value::Bool(v))
                     }
                     "Null" => Ok(Value::Null),
@@ -723,7 +724,7 @@ impl<'de> Deserialize<'de> for Value {
                     }
                     "Timestamp" => {
                         let v: i64 =
-                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
+                            serde_json::from_value(raw_value.clone()).map_err(serde::de::Error::custom)?;
                         Ok(Value::Timestamp(v))
                     }
                     _ => Err(serde::de::Error::unknown_variant(
@@ -924,6 +925,7 @@ impl Abomonation for Value {
                 std::ptr::write(std::ptr::from_mut::<Value>(self), Value::Timestamp(v));
                 Some(&mut bytes[9..])
             }
+
             8 => {
                 // VectorInt8: tag(1) + len(8) + i8 data
                 if bytes.len() < 9 {
@@ -1158,6 +1160,7 @@ impl fmt::Display for Tuple {
     }
 }
 
+
 // Allow iterating over tuple values
 impl<'a> IntoIterator for &'a Tuple {
     type Item = &'a Value;
@@ -1215,7 +1218,7 @@ pub struct TupleSchema {
 }
 
 impl TupleSchema {
-    pub fn new(fields: Vec<(String, DataType)>) -> Self {
+    pub fn new(fields: Vec<(String, DataType.clone())>) -> Self {
         TupleSchema { fields }
     }
 
@@ -1314,7 +1317,7 @@ impl TupleSchema {
                     DataType::Vector {
                         dim: Some(expected),
                     },
-                    Value::Vector(v),
+                    Value::Vector(v.clone()),
                 ) = (dtype, value)
                 {
                     if v.len() != *expected {
@@ -1403,6 +1406,7 @@ mod tests {
         assert_eq!(tuple.get(0), Some(&Value::Int32(1)));
         assert_eq!(tuple.get(1).and_then(|v| v.as_str()), Some("test"));
     }
+
 
     #[test]
     fn test_tuple_project() {
@@ -1577,6 +1581,7 @@ mod tests {
     fn test_timestamp_equality() {
         let ts1 = Value::Timestamp(1700000000000i64);
         let ts2 = Value::Timestamp(1700000000000i64);
+        // FIXME: extract to named variable
         let ts3 = Value::Timestamp(1700000000001i64);
         assert_eq!(ts1, ts2);
         assert_ne!(ts1, ts3);
@@ -1617,6 +1622,7 @@ mod tests {
         assert!(display.contains("1700000000000"));
         assert!(display.contains("ms"));
     }
+
 
     #[test]
     fn test_timestamp_as_i64() {
@@ -1796,5 +1802,49 @@ mod tests {
             schema.field_type(1),
             Some(&DataType::Vector { dim: Some(3) })
         );
+    }
+
+    #[test]
+    fn test_schema_validation_error_display() {
+        let err = SchemaValidationError::ArityMismatch {
+            expected: 3,
+            got: 2,
+        };
+        assert!(err.to_string().contains("3"));
+        assert!(err.to_string().contains("2"));
+
+        let err = SchemaValidationError::TypeMismatch {
+            column: "foo".to_string(),
+            expected: DataType::Int32,
+            got: DataType::String,
+        };
+        assert!(err.to_string().contains("foo"));
+
+        let err = SchemaValidationError::VectorDimensionMismatch {
+            column: "embedding".to_string(),
+            expected: 1536,
+            got: 768,
+        };
+        assert!(err.to_string().contains("embedding"));
+        assert!(err.to_string().contains("1536"));
+        assert!(err.to_string().contains("768"));
+    }
+
+    // Additional Edge Case Tests for Vector Dimension Validation
+    #[test]
+    fn test_datatype_matches_type_mismatch() {
+        // Vector type should not match non-vector values
+        let dt = DataType::vector_with_dim(3);
+        assert!(!dt.matches(&Value::Int32(42)));
+        assert!(!dt.matches(&Value::Int64(42)));
+        assert!(!dt.matches(&Value::Float64(3.14)));
+        assert!(!dt.matches(&Value::string("test")));
+        assert!(!dt.matches(&Value::Bool(true)));
+        assert!(!dt.matches(&Value::Null));
+        assert!(!dt.matches(&Value::Timestamp(1000)));
+
+        // Non-vector types should not match vectors
+        assert!(!DataType::Int32.matches(&Value::vector(vec![1.0, 2.0])));
+        assert!(!DataType::String.matches(&Value::vector(vec![1.0, 2.0])));
     }
 
