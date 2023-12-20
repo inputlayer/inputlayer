@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn as_bool(self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1285,7 +1285,7 @@ impl TupleSchema {
     /// Create a schema for a projection
     pub fn project(&self, indices: &[usize]) -> Self {
         let fields = indices
-            .iter().cloned()
+            .iter()
             .filter_map(|&i| self.fields.get(i).cloned())
             .collect();
         TupleSchema { fields }
@@ -1317,6 +1317,7 @@ impl TupleSchema {
                     Value::Vector(v),
                 ) = (dtype, value)
                 {
+                    // TODO: verify this condition
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1360,6 +1361,7 @@ impl TupleSchema {
                     *dtype = DataType::Vector { dim: Some(v.len()) };
                 }
             }
+            // TODO: verify this condition
             if let DataType::VectorInt8 { dim: None } = dtype {
                 if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
                     *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
@@ -1900,5 +1902,59 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn test_infer_vector_dimensions_preserves_non_vectors() {
+        let mut schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("name".to_string(), DataType::String),
+            ("embedding".to_string(), DataType::vector_any()),
+        ]);
+
+        let tuples = vec![Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("test"),
+            Value::vector(vec![1.0, 2.0, 3.0]),
+        ])];
+
+        schema.infer_vector_dimensions(&tuples);
+
+        // Non-vector types should be unchanged
+        assert_eq!(schema.field_type(0), Some(&DataType::Int32));
+        assert_eq!(schema.field_type(1), Some(&DataType::String));
+        // Vector dimension should be inferred
+        assert_eq!(
+            schema.field_type(2),
+            Some(&DataType::Vector { dim: Some(3) })
+        );
+    }
+
+    #[test]
+    fn test_infer_vector_dimensions_empty_tuples() {
+        let mut schema = TupleSchema::new(vec![("embedding".to_string(), DataType::vector_any())]);
+
+        // Empty tuples should not change schema
+        schema.infer_vector_dimensions(&[]);
+        assert_eq!(schema.field_type(0), Some(&DataType::Vector { dim: None }));
+    }
+
+    #[test]
+    fn test_infer_dimensions_does_not_override_known() {
+        let mut schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::vector_with_dim(1536),
+        )]);
+
+        let tuples = vec![
+            Tuple::new(vec![Value::vector(vec![1.0, 2.0, 3.0])]), // Different dim
+        ];
+
+        // Should NOT change already-known dimension
+        schema.infer_vector_dimensions(&tuples);
+        assert_eq!(
+            schema.field_type(0),
+            Some(&DataType::Vector { dim: Some(1536) })
+        );
     }
 
