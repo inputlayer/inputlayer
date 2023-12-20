@@ -1,0 +1,33 @@
+% Test: String Edge Cases
+% Description: Tests edge cases for string values
+
+.kg create test_str_edge_n11t44
+.kg use test_str_edge_n11t44
+
+% Empty string
++empty[("")].
+?- empty(X).
+
+% String with spaces
++spaces[("hello world")].
+?- spaces(X).
+
+% String with special characters
++special[("@#$%^&*"), ("a,b,c"), ("x=y")].
+?- special(X).
+
+% Very long string
++long[("this_is_a_very_long_string_that_tests_the_handling_of_longer_values")].
+?- long(X).
+
+% Unicode-like strings (ASCII representation)
++unicode[("cafe"), ("naïve")].
+?- unicode(X).
+
+% Numeric-looking strings (should remain strings)
++numstr[("123"), ("45.67"), ("-999")].
+?- numstr(X).
+
+% Cleanup
+.kg use default
+.kg drop test_str_edge_n11t44

@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_strings_n11t46
+Knowledge graph 'test_strings_n11t46' created.
+Switched to knowledge graph: test_strings_n11t46
+> .kg use test_strings_n11t46
+Switched to knowledge graph: test_strings_n11t46
+> +names[("alice",), ("bob",), ("carol",), ("Alice",), ("BOB",)].
+Inserted 5 fact(s) into 'names'.
+> ?- names(N), N = "alice".
+1 rows:
+  ("alice")
+> ?- names(N), N != "alice".
+4 rows:
+  ("Alice")
+  ("BOB")
+  ("bob")
+  ("carol")
+> +people[(1, "John", "Doe"), (2, "Jane", "Smith"), (3, "Bob", "Jones")].
+Inserted 3 fact(s) into 'people'.
+> ?- people(Id, First, Last), First = "Jane".
+1 rows:
+  (2, "Jane", "Smith")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_strings_n11t46
+Knowledge graph 'test_strings_n11t46' dropped.

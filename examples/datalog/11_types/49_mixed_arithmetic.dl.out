@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_arith_n11t49
+Knowledge graph 'test_mixed_arith_n11t49' created.
+Switched to knowledge graph: test_mixed_arith_n11t49
+> .kg use test_mixed_arith_n11t49
+Switched to knowledge graph: test_mixed_arith_n11t49
+> +integers[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'integers'.
+> +floats[(1.5,), (2.5,), (3.5,)].
+Inserted 3 fact(s) into 'floats'.
+> int_doubled(X, D) :- integers(X), D = X * 2.
+3 rows:
+  (1, 2)
+  (2, 4)
+  (3, 6)
+(session: 1 rule(s))
+> ?- int_doubled(X, D).
+3 rows:
+  (1, 2)
+  (2, 4)
+  (3, 6)
+> float_doubled(X, D) :- floats(X), D = X * 2.
+3 rows:
+  (1.5, 3.0)
+  (2.5, 5.0)
+  (3.5, 7.0)
+(session: 2 rule(s))
+> ?- float_doubled(X, D).
+3 rows:
+  (1.5, 3.0)
+  (2.5, 5.0)
+  (3.5, 7.0)
+> int_div(X, D) :- integers(X), D = X / 2.
+3 rows:
+  (1, 0.5)
+  (2, 1.0)
+  (3, 1.5)
+(session: 3 rule(s))
+> ?- int_div(X, D).
+3 rows:
+  (1, 0.5)
+  (2, 1.0)
+  (3, 1.5)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_mixed_arith_n11t49
+Knowledge graph 'test_mixed_arith_n11t49' dropped.

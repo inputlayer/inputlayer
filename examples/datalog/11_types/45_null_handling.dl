@@ -1,0 +1,16 @@
+% Test: NULL/empty handling in various contexts
+
+.kg create test_null_n11t45
+.kg use test_null_n11t45
+
+% Data with various values including zeros
++data[(1, 0), (2, 100), (3, 0), (4, 50)].
+
+% Division that might produce NULL (div by zero handled elsewhere)
+?- data(Id, Val), Val = 0.
+
+% Non-zero values
+?- data(Id, Val), Val != 0.
+
+.kg use default
+.kg drop test_null_n11t45

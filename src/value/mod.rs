@@ -460,7 +460,7 @@ impl Hash for Value {
             Value::Null => {}
             Value::Vector(v) => {
                 v.len().hash(state);
-                for &f in v.iter().cloned() {
+                for &f in v.iter() {
                     f.to_bits().hash(state);
                 }
             }
@@ -1760,5 +1760,41 @@ mod tests {
                 got: 4
             })
         ));
+    }
+
+    #[test]
+    fn test_schema_validation_any_dimension_passes() {
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::vector_any()), // Any dimension
+        ]);
+
+        let tuple_3d = Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]);
+
+        let tuple_1536d = Tuple::new(vec![Value::Int32(2), Value::vector(vec![0.0; 1536])]);
+
+        assert!(schema.validate(&tuple_3d).is_ok());
+        assert!(schema.validate(&tuple_1536d).is_ok());
+    }
+
+    #[test]
+    fn test_infer_vector_dimensions() {
+        let mut schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::vector_any()),
+        ]);
+
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]),
+            Tuple::new(vec![Value::Int32(2), Value::vector(vec![4.0, 5.0, 6.0])]),
+        ];
+
+        schema.infer_vector_dimensions(&tuples);
+
+        // The vector dimension should now be inferred as 3
+        assert_eq!(
+            schema.field_type(1),
+            Some(&DataType::Vector { dim: Some(3) })
+        );
     }
 

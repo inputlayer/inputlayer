@@ -1,0 +1,43 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_special_n11t43
+Knowledge graph 'test_float_special_n11t43' created.
+Switched to knowledge graph: test_float_special_n11t43
+> .kg use test_float_special_n11t43
+Switched to knowledge graph: test_float_special_n11t43
+> +small_float(0.0000001).
+Inserted 1 fact(s) into 'small_float'.
+> +large_float(999999999999.99).
+Inserted 1 fact(s) into 'large_float'.
+> +neg_float(-123.456).
+Inserted 1 fact(s) into 'neg_float'.
+> +near_zero(0.0).
+Inserted 1 fact(s) into 'near_zero'.
+> ?- small_float(X).
+1 rows:
+  (1e-7)
+> ?- large_float(X).
+1 rows:
+  (999999999999.99)
+> ?- neg_float(X).
+1 rows:
+  (-123.456)
+> ?- near_zero(X).
+1 rows:
+  (0.0)
+> float_calc(Y) :- small_float(X), Y = X * 1000000.
+1 rows:
+  (0.1)
+(session: 1 rule(s))
+> ?- float_calc(Y).
+1 rows:
+  (0.1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_float_special_n11t43
+Knowledge graph 'test_float_special_n11t43' dropped.
