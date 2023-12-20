@@ -278,7 +278,7 @@ impl Value {
     }
 
     /// Try to get as bool
-    pub fn as_bool(self) -> Option<bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
             _ => None,
@@ -1317,7 +1317,6 @@ impl TupleSchema {
                     Value::Vector(v),
                 ) = (dtype, value)
                 {
-                    // TODO: verify this condition
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1361,7 +1360,6 @@ impl TupleSchema {
                     *dtype = DataType::Vector { dim: Some(v.len()) };
                 }
             }
-            // TODO: verify this condition
             if let DataType::VectorInt8 { dim: None } = dtype {
                 if let Some(Value::VectorInt8(v)) = tuples[0].get(i) {
                     *dtype = DataType::VectorInt8 { dim: Some(v.len()) };
@@ -1955,6 +1953,60 @@ mod tests {
         assert_eq!(
             schema.field_type(0),
             Some(&DataType::Vector { dim: Some(1536) })
+        );
+    }
+
+    #[test]
+    fn test_empty_schema_validation() {
+        let schema = TupleSchema::empty();
+
+        // Empty tuple against empty schema should succeed
+        let empty_tuple = Tuple::new(vec![]);
+        assert!(schema.validate(&empty_tuple).is_ok());
+
+        // Non-empty tuple should fail
+        let non_empty = Tuple::new(vec![Value::Int32(1)]);
+        assert!(matches!(
+            schema.validate(&non_empty),
+            Err(SchemaValidationError::ArityMismatch {
+                expected: 0,
+                got: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn test_validate_multiple_vector_columns() {
+        let schema = TupleSchema::new(vec![
+            ("query".to_string(), DataType::vector_with_dim(3)),
+            ("doc".to_string(), DataType::vector_with_dim(3)),
+        ]);
+
+        // Both correct
+        let good = Tuple::new(vec![
+            Value::vector(vec![1.0, 2.0, 3.0]),
+            Value::vector(vec![4.0, 5.0, 6.0]),
+        ]);
+        assert!(schema.validate(&good).is_ok());
+
+        // First wrong dimension
+        let bad_first = Tuple::new(vec![
+            Value::vector(vec![1.0, 2.0]), // 2-dim instead of 3
+            Value::vector(vec![4.0, 5.0, 6.0]),
+        ]);
+        let err = schema.validate(&bad_first).unwrap_err();
+        assert!(
+            matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "query")
+        );
+
+        // Second wrong dimension
+        let bad_second = Tuple::new(vec![
+            Value::vector(vec![1.0, 2.0, 3.0]),
+            Value::vector(vec![4.0, 5.0, 6.0, 7.0]), // 4-dim instead of 3
+        ]);
+        let err = schema.validate(&bad_second).unwrap_err();
+        assert!(
+            matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "doc")
         );
     }
 
