@@ -1,0 +1,29 @@
+% Test: Float special values handling
+
+.kg create test_float_special_n11t43
+.kg use test_float_special_n11t43
+
+% Very small float
++small_float(0.0000001).
+
+% Very large float
++large_float(999999999999.99).
+
+% Negative float
++neg_float(-123.456).
+
+% Float near zero
++near_zero(0.0).
+
+% Query and verify
+?- small_float(X).
+?- large_float(X).
+?- neg_float(X).
+?- near_zero(X).
+
+% Arithmetic with floats
+float_calc(Y) :- small_float(X), Y = X * 1000000.
+?- float_calc(Y).
+
+.kg use default
+.kg drop test_float_special_n11t43

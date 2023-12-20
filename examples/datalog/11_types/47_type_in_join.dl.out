@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_type_join_n11t47
+Knowledge graph 'test_type_join_n11t47' created.
+Switched to knowledge graph: test_type_join_n11t47
+> .kg use test_type_join_n11t47
+Switched to knowledge graph: test_type_join_n11t47
+> +int_data[(1, "one"), (2, "two"), (3, "three")].
+Inserted 3 fact(s) into 'int_data'.
+> +desc[(1, "first item"), (2, "second item")].
+Inserted 2 fact(s) into 'desc'.
+> joined(Id, Name, Desc) :- int_data(Id, Name), desc(Id, Desc).
+2 rows:
+  (1, "one", "first item")
+  (2, "two", "second item")
+(session: 1 rule(s))
+> ?- joined(Id, Name, Desc).
+2 rows:
+  (1, "one", "first item")
+  (2, "two", "second item")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_type_join_n11t47
+Knowledge graph 'test_type_join_n11t47' dropped.
