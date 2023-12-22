@@ -2010,3 +2010,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_value_data_type_includes_dimension() {
+        // Value::data_type() should include the actual dimension
+        let v3 = Value::vector(vec![1.0, 2.0, 3.0]);
+        assert_eq!(v3.data_type(), DataType::Vector { dim: Some(3) });
+
+        let v1536 = Value::vector(vec![0.0; 1536]);
+        assert_eq!(v1536.data_type(), DataType::Vector { dim: Some(1536) });
+
+        let v0 = Value::vector(vec![]);
+        assert_eq!(v0.data_type(), DataType::Vector { dim: Some(0) });
+    }
+
+    #[test]
+    fn test_datatype_equality_with_dimension() {
+        // Same dimension should be equal
+        assert_eq!(
+            DataType::Vector { dim: Some(3) },
+            DataType::Vector { dim: Some(3) }
+        );
+
+        // Different dimensions should not be equal
+        assert_ne!(
+            DataType::Vector { dim: Some(3) },
+            DataType::Vector { dim: Some(4) }
+        );
+
+        // None vs Some should not be equal
+        assert_ne!(
+            DataType::Vector { dim: None },
+            DataType::Vector { dim: Some(3) }
+        );
+
+        // Two None should be equal
+        assert_eq!(
+            DataType::Vector { dim: None },
+            DataType::Vector { dim: None }
+        );
+    }
+
+    // Abomonation Roundtrip Tests
+    /// Helper: encode a value, then decode it and verify equality.
+    fn abomonation_roundtrip_value(original: &Value) {
+        let mut bytes = Vec::new();
+        unsafe {
+            abomonation::encode(original, &mut bytes).expect("encode failed");
+        }
+        let (decoded, remaining) =
+            unsafe { abomonation::decode::<Value>(&mut bytes).expect("decode failed") };
+        assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
+        assert!(remaining.is_empty(), "unexpected remaining bytes");
+    }
+
+    /// Helper: encode a tuple, then decode it and verify equality.
+    fn abomonation_roundtrip_tuple(original: &Tuple) {
+        let mut bytes = Vec::new();
+        unsafe {
+            abomonation::encode(original, &mut bytes).expect("encode failed");
+        }
+        let (decoded, remaining) =
+            unsafe { abomonation::decode::<Tuple>(&mut bytes).expect("decode failed") };
+        assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
+        assert!(remaining.is_empty(), "unexpected remaining bytes");
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_int32() {
+        abomonation_roundtrip_value(&Value::Int32(0));
+        abomonation_roundtrip_value(&Value::Int32(42));
+        abomonation_roundtrip_value(&Value::Int32(-1));
+        abomonation_roundtrip_value(&Value::Int32(i32::MAX));
+        abomonation_roundtrip_value(&Value::Int32(i32::MIN));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_int64() {
+        abomonation_roundtrip_value(&Value::Int64(0));
+        abomonation_roundtrip_value(&Value::Int64(42));
+        abomonation_roundtrip_value(&Value::Int64(-1));
+        abomonation_roundtrip_value(&Value::Int64(i64::MAX));
+        abomonation_roundtrip_value(&Value::Int64(i64::MIN));
+    }
+
