@@ -237,3 +237,56 @@ fn test_vector_two_dimensions() {
 }
 
 #[test]
+fn test_vector_128_dimensions() {
+    let vec: Vec<f32> = (0..128).map(|i| i as f32).collect();
+    let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec.clone()))]);
+
+    if let Some(Value::Vector(v)) = tuple.get(0) {
+        assert_eq!(v.len(), 128);
+    }
+}
+
+#[test]
+fn test_vector_256_dimensions() {
+    let vec: Vec<f32> = (0..256).map(|i| i as f32).collect();
+    let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec.clone()))]);
+
+    if let Some(Value::Vector(v)) = tuple.get(0) {
+        assert_eq!(v.len(), 256);
+    }
+}
+
+#[test]
+fn test_vector_1024_dimensions() {
+    let vec: Vec<f32> = (0..1024).map(|i| i as f32).collect();
+    let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec.clone()))]);
+
+    if let Some(Value::Vector(v)) = tuple.get(0) {
+        assert_eq!(v.len(), 1024);
+    }
+}
+
+// Mixed Type Tests
+#[test]
+fn test_tuple_with_all_types() {
+    let vec: Vec<f32> = vec![1.0, 2.0, 3.0];
+    let tuple = Tuple::new(vec![
+        Value::Int32(42),
+        Value::Int64(123456789012345),
+        Value::Float64(3.14159),
+        Value::string("hello"),
+        Value::Bool(true),
+        Value::Vector(Arc::new(vec)),
+    ]);
+
+    assert_eq!(tuple.arity(), 6);
+    assert_eq!(tuple.get(0), Some(&Value::Int32(42)));
+    assert_eq!(tuple.get(1), Some(&Value::Int64(123456789012345)));
+    assert_eq!(tuple.get(4), Some(&Value::Bool(true)));
+}
+
+// Note: Engine integration tests removed - they test DatalogEngine query
+// execution which is already covered by other test files. This file focuses
+// on Value and Tuple boundary conditions.
+// Value Comparison Tests
+#[test]
