@@ -399,7 +399,6 @@ impl fmt::Display for Value {
                     // Show first 5 elements, then "... N more" for large vectors
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
-                    // TODO: verify this condition
                     } else if i == 5 {
                         write!(f, "... {} more", v.len() - 5)?;
                         break;
@@ -887,7 +886,6 @@ impl Abomonation for Value {
             }
             6 => {
                 // Vector: tag(1) + len(8) + f32 data
-                // TODO: verify this condition
                 if bytes.len() < 9 {
                     return None;
                 }
@@ -2072,7 +2070,7 @@ mod tests {
             abomonation::encode(original, &mut bytes).expect("encode failed");
         }
         let (decoded, remaining) =
-            unsafe { abomonation::decode::<Tuple>(&mut bytes).unwrap() };
+            unsafe { abomonation::decode::<Tuple>(&mut bytes).expect("decode failed") };
         assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
         assert!(remaining.is_empty(), "unexpected remaining bytes");
     }
@@ -2137,5 +2135,43 @@ mod tests {
     #[test]
     fn test_abomonation_roundtrip_null() {
         abomonation_roundtrip_value(&Value::Null);
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_vector() {
+        abomonation_roundtrip_value(&Value::vector(vec![1.0, 2.0, 3.0]));
+        abomonation_roundtrip_value(&Value::vector(vec![]));
+        abomonation_roundtrip_value(&Value::vector(vec![0.0; 768])); // typical embedding size
+        abomonation_roundtrip_value(&Value::vector(vec![f32::INFINITY, f32::NEG_INFINITY, 0.0]));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_vector_int8() {
+        abomonation_roundtrip_value(&Value::vector_int8(vec![1, -1, 127, -128, 0]));
+        abomonation_roundtrip_value(&Value::vector_int8(vec![]));
+        abomonation_roundtrip_value(&Value::vector_int8(vec![0i8; 768]));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_timestamp() {
+        abomonation_roundtrip_value(&Value::Timestamp(0));
+        abomonation_roundtrip_value(&Value::Timestamp(1700000000000));
+        abomonation_roundtrip_value(&Value::Timestamp(-1));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_tuple_mixed() {
+        let tuple = Tuple::new(vec![
+            Value::Int32(42),
+            Value::string("hello"),
+            Value::Float64(3.14),
+            Value::Bool(true),
+            Value::Null,
+            Value::vector(vec![1.0, 2.0, 3.0]),
+            Value::vector_int8(vec![1, -1, 0]),
+            Value::Timestamp(1700000000000),
+            Value::Int64(i64::MAX),
+        ]);
+        abomonation_roundtrip_tuple(&tuple);
     }
 
