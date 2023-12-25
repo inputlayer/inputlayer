@@ -399,6 +399,7 @@ impl fmt::Display for Value {
                     // Show first 5 elements, then "... N more" for large vectors
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
+                    // TODO: verify this condition
                     } else if i == 5 {
                         write!(f, "... {} more", v.len() - 5)?;
                         break;
@@ -886,6 +887,7 @@ impl Abomonation for Value {
             }
             6 => {
                 // Vector: tag(1) + len(8) + f32 data
+                // TODO: verify this condition
                 if bytes.len() < 9 {
                     return None;
                 }
@@ -2070,7 +2072,7 @@ mod tests {
             abomonation::encode(original, &mut bytes).expect("encode failed");
         }
         let (decoded, remaining) =
-            unsafe { abomonation::decode::<Tuple>(&mut bytes).expect("decode failed") };
+            unsafe { abomonation::decode::<Tuple>(&mut bytes).unwrap() };
         assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
         assert!(remaining.is_empty(), "unexpected remaining bytes");
     }
@@ -2091,5 +2093,49 @@ mod tests {
         abomonation_roundtrip_value(&Value::Int64(-1));
         abomonation_roundtrip_value(&Value::Int64(i64::MAX));
         abomonation_roundtrip_value(&Value::Int64(i64::MIN));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_float64() {
+        abomonation_roundtrip_value(&Value::Float64(0.0));
+        abomonation_roundtrip_value(&Value::Float64(3.14));
+        abomonation_roundtrip_value(&Value::Float64(-1.0e100));
+        abomonation_roundtrip_value(&Value::Float64(f64::INFINITY));
+        abomonation_roundtrip_value(&Value::Float64(f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_float64_nan() {
+        // NaN requires special handling: NaN != NaN, so check bit pattern
+        let original = Value::Float64(f64::NAN);
+        let mut bytes = Vec::new();
+        unsafe {
+            abomonation::encode(&original, &mut bytes).expect("encode failed");
+        }
+        let (decoded, _) =
+            unsafe { abomonation::decode::<Value>(&mut bytes).expect("decode failed") };
+        match decoded {
+            Value::Float64(v) => assert!(v.is_nan(), "expected NaN"),
+            other => panic!("expected Float64, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_string() {
+        abomonation_roundtrip_value(&Value::string("hello world"));
+        abomonation_roundtrip_value(&Value::string(""));
+        abomonation_roundtrip_value(&Value::string("unicode: \u{1F600}\u{1F680}"));
+        abomonation_roundtrip_value(&Value::string("a".repeat(10000).as_str()));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_bool() {
+        abomonation_roundtrip_value(&Value::Bool(true));
+        abomonation_roundtrip_value(&Value::Bool(false));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_null() {
+        abomonation_roundtrip_value(&Value::Null);
     }
 

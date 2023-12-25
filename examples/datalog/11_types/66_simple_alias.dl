@@ -1,0 +1,23 @@
+% Test: Simple Type Alias
+% Description: Tests basic type alias declarations
+
+.kg create test_type_alias_n11t66
+.kg use test_type_alias_n11t66
+
+% Declare simple type aliases
+type Email: string.
+type UserId: int.
+type Score: int.
+
+% Use types in schema with + prefix
++users(id: UserId, email: Email, score: Score).
+
+% Insert data
++users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)].
+
+% Query
+?- users(X, Y, Z).
+
+% Cleanup
+.kg use default
+.kg drop test_type_alias_n11t66
