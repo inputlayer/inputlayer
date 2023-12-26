@@ -290,3 +290,50 @@ fn test_tuple_with_all_types() {
 // on Value and Tuple boundary conditions.
 // Value Comparison Tests
 #[test]
+fn test_value_equality() {
+    // Same values should be equal
+    assert_eq!(Value::Int32(42), Value::Int32(42));
+    assert_eq!(Value::Int64(123), Value::Int64(123));
+    assert_eq!(Value::string("hello"), Value::string("hello"));
+    assert_eq!(Value::Bool(true), Value::Bool(true));
+}
+
+#[test]
+fn test_value_inequality() {
+    // Different values should not be equal
+    assert_ne!(Value::Int32(1), Value::Int32(2));
+    assert_ne!(Value::string("a"), Value::string("b"));
+}
+
+#[test]
+fn test_tuple_equality() {
+    let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+    let t2 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+    let t3 = Tuple::new(vec![Value::Int32(1), Value::Int32(3)]);
+
+    assert_eq!(t1, t2);
+    assert_ne!(t1, t3);
+}
+
+#[test]
+fn test_tuple_from_pair() {
+    let tuple = Tuple::from_pair(10, 20);
+    assert_eq!(tuple.arity(), 2);
+    // from_pair creates Int64 values
+    assert_eq!(tuple.get(0), Some(&Value::Int64(10)));
+    assert_eq!(tuple.get(1), Some(&Value::Int64(20)));
+}
+
+#[test]
+fn test_tuple_to_pair() {
+    let tuple = Tuple::from_pair(10, 20);
+    let pair = tuple.to_pair();
+    assert_eq!(pair, Some((10, 20)));
+}
+
+#[test]
+fn test_tuple_to_pair_wrong_arity() {
+    let tuple = Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]);
+    let pair = tuple.to_pair();
+    assert_eq!(pair, None); // Wrong arity, can't convert
+}
