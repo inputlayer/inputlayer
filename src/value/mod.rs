@@ -399,6 +399,7 @@ impl fmt::Display for Value {
                     // Show first 5 elements, then "... N more" for large vectors
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
+                    // TODO: verify this condition
                     } else if i == 5 {
                         write!(f, "... {} more", v.len() - 5)?;
                         break;
@@ -886,6 +887,7 @@ impl Abomonation for Value {
             }
             6 => {
                 // Vector: tag(1) + len(8) + f32 data
+                // TODO: verify this condition
                 if bytes.len() < 9 {
                     return None;
                 }
@@ -2070,7 +2072,7 @@ mod tests {
             abomonation::encode(original, &mut bytes).expect("encode failed");
         }
         let (decoded, remaining) =
-            unsafe { abomonation::decode::<Tuple>(&mut bytes).expect("decode failed") };
+            unsafe { abomonation::decode::<Tuple>(&mut bytes).unwrap() };
         assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
         assert!(remaining.is_empty(), "unexpected remaining bytes");
     }
@@ -2175,3 +2177,66 @@ mod tests {
         abomonation_roundtrip_tuple(&tuple);
     }
 
+    #[test]
+    fn test_abomonation_roundtrip_tuple_empty() {
+        abomonation_roundtrip_tuple(&Tuple::empty());
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_tuple_single() {
+        abomonation_roundtrip_tuple(&Tuple::new(vec![Value::Int32(1)]));
+        abomonation_roundtrip_tuple(&Tuple::new(vec![Value::string("solo")]));
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_multiple_sequential() {
+        // Encode multiple values sequentially into one buffer,
+        // then decode them one by one  -  tests that exhume advances correctly.
+        let values = vec![
+            Value::Int32(1),
+            Value::string("test"),
+            Value::vector(vec![1.0, 2.0]),
+            Value::Null,
+            Value::Bool(false),
+        ];
+
+        let mut bytes = Vec::new();
+        for v in &values {
+            unsafe {
+                abomonation::encode(v, &mut bytes).unwrap();
+            }
+        }
+
+        let mut remaining: &mut [u8] = &mut bytes;
+        for original in &values {
+            let (decoded, rest) =
+                unsafe { abomonation::decode::<Value>(remaining).expect("decode failed") };
+            assert_eq!(decoded, original);
+            remaining = rest;
+        }
+    }
+
+    #[test]
+    fn test_abomonation_roundtrip_multiple_tuples() {
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::string("a")]),
+            Tuple::new(vec![Value::Int64(2), Value::vector(vec![1.0])]),
+            Tuple::empty(),
+        ];
+
+        let mut bytes = Vec::new();
+        for t in &tuples {
+            unsafe {
+                abomonation::encode(t, &mut bytes).unwrap();
+            }
+        }
+
+        let mut remaining: &mut [u8] = &mut bytes;
+        for original in &tuples {
+            let (decoded, rest) =
+                unsafe { abomonation::decode::<Tuple>(remaining).expect("decode failed") };
+            assert_eq!(decoded, original);
+            remaining = rest;
+        }
+    }
+}
