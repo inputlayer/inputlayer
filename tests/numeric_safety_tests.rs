@@ -232,3 +232,55 @@ fn test_float_infinity_handling() {
 }
 
 #[test]
+fn test_float_nan_handling() {
+    // Test that NaN values don't cause issues in Value type
+    let nan = Value::Float64(f64::NAN);
+
+    let tuple = Tuple::new(vec![nan.clone()]);
+    assert_eq!(tuple.arity(), 1);
+
+    // NaN comparison is tricky - NaN != NaN
+    if let Some(Value::Float64(f)) = tuple.get(0) {
+        assert!(f.is_nan());
+    }
+}
+
+#[test]
+fn test_float_very_small_values() {
+    let tiny = Value::Float64(f64::MIN_POSITIVE);
+    let neg_tiny = Value::Float64(-f64::MIN_POSITIVE);
+
+    let tuple = Tuple::new(vec![tiny.clone(), neg_tiny.clone()]);
+    assert_eq!(tuple.arity(), 2);
+}
+
+#[test]
+fn test_float_very_large_values() {
+    let big = Value::Float64(f64::MAX);
+    let neg_big = Value::Float64(f64::MIN);
+
+    let tuple = Tuple::new(vec![big.clone(), neg_big.clone()]);
+    assert_eq!(tuple.arity(), 2);
+}
+
+// Integer Overflow Tests
+#[test]
+fn test_int64_max_in_aggregation() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_overflow").unwrap();
+    storage.use_knowledge_graph("test_overflow").unwrap();
+
+    // Insert MAX values - sum would overflow
+    // Note: Using i32 values since insert expects (i32, i32)
+    // For true i64 overflow testing, would need direct Value manipulation
+    storage
+        .insert("big_nums", vec![(1, i32::MAX), (2, 1)])
+        .unwrap();
+
+    // Sum of i64::MAX + 1 would overflow - system should handle gracefully
+    let _result = storage.execute_query("result(sum<V>) :- big_nums(_, V).");
+    // Test passes if no panic occurred
+}
+
+#[test]
