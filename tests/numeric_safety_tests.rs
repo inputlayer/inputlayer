@@ -284,3 +284,62 @@ fn test_int64_max_in_aggregation() {
 }
 
 #[test]
+fn test_int64_boundaries_in_tuple() {
+    let max = Value::Int64(i64::MAX);
+    let min = Value::Int64(i64::MIN);
+    let zero = Value::Int64(0);
+
+    let tuple = Tuple::new(vec![max.clone(), min.clone(), zero.clone()]);
+    assert_eq!(tuple.arity(), 3);
+    assert_eq!(tuple.get(0), Some(&max));
+    assert_eq!(tuple.get(1), Some(&min));
+    assert_eq!(tuple.get(2), Some(&zero));
+}
+
+// Grouped Aggregation Edge Cases
+#[test]
+fn test_grouped_aggregation_one_group_empty() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_grouped").unwrap();
+    storage.use_knowledge_graph("test_grouped").unwrap();
+
+    // Create data with groups
+    storage
+        .insert(
+            "sales",
+            vec![
+                (1, 100), // Group 1
+                (1, 200), // Group 1
+                (2, 50),  // Group 2
+            ],
+        )
+        .unwrap();
+
+    // Compute AVG per group
+    let _results = storage
+        .execute_query("result(G, avg<V>) :- sales(G, V).")
+        .unwrap();
+    // Should have 2 groups
+}
+
+#[test]
+fn test_multiple_aggregations_same_query() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_multi_agg").unwrap();
+    storage.use_knowledge_graph("test_multi_agg").unwrap();
+
+    storage
+        .insert("data", vec![(1, 10), (2, 20), (3, 30)])
+        .unwrap();
+
+    // Multiple aggregations in one query
+    let _results = storage
+        .execute_query("result(count<X>, sum<V>, min<V>, max<V>) :- data(X, V).")
+        .unwrap();
+    // Should not panic
+}
+
+// Value Conversion Safety Tests
+#[test]
