@@ -175,3 +175,60 @@ fn test_min_max_single_value() {
 
 // Arithmetic Division Tests
 #[test]
+fn test_arithmetic_division_normal() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_div").unwrap();
+    storage.use_knowledge_graph("test_div").unwrap();
+
+    storage.insert("nums", vec![(10, 2)]).unwrap();
+
+    // Normal division should work: 10 / 2 = 5
+    let _results = storage
+        .execute_query("result(X / Y) :- nums(X, Y).")
+        .unwrap();
+    // Should not panic
+}
+
+#[test]
+fn test_arithmetic_division_by_zero_no_panic() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_div_zero").unwrap();
+    storage.use_knowledge_graph("test_div_zero").unwrap();
+
+    storage.insert("nums", vec![(10, 0)]).unwrap();
+
+    // Division by zero should not panic - returns inf, null, or filters out
+    let _result = storage.execute_query("result(X / Y) :- nums(X, Y).");
+    // Test passes if no panic occurred
+}
+
+#[test]
+fn test_arithmetic_modulo_by_zero_no_panic() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_mod_zero").unwrap();
+    storage.use_knowledge_graph("test_mod_zero").unwrap();
+
+    storage.insert("nums", vec![(10, 0)]).unwrap();
+
+    // Modulo by zero should not panic
+    let _result = storage.execute_query("result(X % Y) :- nums(X, Y).");
+    // Test passes if no panic occurred
+}
+
+// Float Special Value Tests
+#[test]
+fn test_float_infinity_handling() {
+    // Test that infinity values don't cause issues in Value type
+    let inf = Value::Float64(f64::INFINITY);
+    let neg_inf = Value::Float64(f64::NEG_INFINITY);
+
+    let tuple = Tuple::new(vec![inf.clone(), neg_inf.clone()]);
+    assert_eq!(tuple.arity(), 2);
+    assert_eq!(tuple.get(0), Some(&inf));
+    assert_eq!(tuple.get(1), Some(&neg_inf));
+}
+
+#[test]
