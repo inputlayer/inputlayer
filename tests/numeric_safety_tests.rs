@@ -343,3 +343,22 @@ fn test_multiple_aggregations_same_query() {
 
 // Value Conversion Safety Tests
 #[test]
+fn test_value_to_f64_conversion() {
+    // Test that to_f64() doesn't panic on various value types
+    let values = vec![
+        Value::Int32(42),
+        Value::Int64(i64::MAX),
+        Value::Int64(i64::MIN),
+        Value::Float64(123.456),
+        Value::Float64(f64::NAN),
+        Value::Float64(f64::INFINITY),
+        Value::Null,
+        Value::Bool(true),
+        Value::String("not a number".into()),
+    ];
+
+    for value in values {
+        // to_f64() should not panic
+        let _ = value.to_f64();
+    }
+}
