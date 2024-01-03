@@ -92,7 +92,6 @@ pub fn record_batch_to_tuples(
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
 
-    // FIXME: extract to named variable
     let mut tuples = Vec::with_capacity(num_rows);
 
     for row_idx in 0..num_rows {
@@ -106,7 +105,6 @@ pub fn record_batch_to_tuples(
 
         tuples.push(Tuple::new(values));
     }
-
 
     Ok((tuples, schema))
 }
@@ -137,7 +135,7 @@ fn build_column_array(
                 .iter()
                 .map(|t| t.get(col_idx).and_then(super::Value::as_f64))
                 .collect();
-            Ok(Arc::new(Float64Array::from(values.clone())))
+            Ok(Arc::new(Float64Array::from(values)))
         }
         DataType::String => {
             let values: Vec<Option<&str>> = tuples
@@ -174,7 +172,6 @@ fn build_column_array(
                     }
                 }
                 let values_array = Arc::new(Float32Array::from(all_values));
-                // FIXME: extract to named variable
                 let list_array = arrow::array::FixedSizeListArray::new(
                     field,
                     *fixed_dim as i32,
@@ -187,7 +184,7 @@ fn build_column_array(
                 let mut offsets: Vec<i64> = vec![0];
                 for tuple in tuples {
                     if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector()) {
-                        all_values.extend_from_slice(vec.clone());
+                        all_values.extend_from_slice(vec);
                         offsets.push(all_values.len() as i64);
                     } else {
                         // Null vector - offset stays the same
@@ -203,7 +200,6 @@ fn build_column_array(
         }
         DataType::Timestamp => {
             // Timestamps stored as Int64 (Unix milliseconds)
-            // FIXME: extract to named variable
             let values: Vec<Option<i64>> = tuples
                 .iter()
                 .map(|t| t.get(col_idx).and_then(super::Value::as_timestamp))
@@ -244,7 +240,6 @@ fn build_column_array(
                         // Null vector - offset stays the same
                         offsets.push(all_values.len() as i64);
                     }
-
                 }
                 let values_array = Int8Array::from(all_values);
                 let offset_buffer = OffsetBuffer::new(offsets.into());
@@ -257,3 +252,134 @@ fn build_column_array(
 }
 
 /// Extract a Value from an Arrow array at a given index
+fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, ArrowConvertError> {
+    if array.is_null(row_idx) {
+        return Ok(Value::Null);
+    }
+
+    // Try each array type
+    if let Some(arr) = array.as_any().downcast_ref::<Int32Array>() {
+        return Ok(Value::Int32(arr.value(row_idx)));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Int64Array>() {
+        return Ok(Value::Int64(arr.value(row_idx)));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
+        return Ok(Value::Float64(arr.value(row_idx)));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+        return Ok(Value::String(Arc::from(arr.value(row_idx))));
+    }
+    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+        return Ok(Value::Bool(arr.value(row_idx)));
+    }
+
+    // Handle FixedSizeListArray (vectors with known dimension)
+    if let Some(arr) = array.as_any().downcast_ref::<FixedSizeListArray>() {
+        let values = arr.value(row_idx);
+        // Check for Float32 vectors first
+        if let Some(float_arr) = values.as_any().downcast_ref::<Float32Array>() {
+            let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+            return Ok(Value::vector(vec));
+        }
+        // Check for Int8 vectors
+        if let Some(int8_arr) = values.as_any().downcast_ref::<Int8Array>() {
+            let vec: Vec<i8> = (0..int8_arr.len()).map(|i| int8_arr.value(i)).collect();
+            return Ok(Value::vector_int8(vec));
+        }
+    }
+
+    // Handle LargeListArray (vectors with unknown dimension)
+    if let Some(arr) = array.as_any().downcast_ref::<LargeListArray>() {
+        let values = arr.value(row_idx);
+        // Check for Float32 vectors first
+        if let Some(float_arr) = values.as_any().downcast_ref::<Float32Array>() {
+            let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+            return Ok(Value::vector(vec));
+        }
+        // Check for Int8 vectors
+        if let Some(int8_arr) = values.as_any().downcast_ref::<Int8Array>() {
+            let vec: Vec<i8> = (0..int8_arr.len()).map(|i| int8_arr.value(i)).collect();
+            return Ok(Value::vector_int8(vec));
+        }
+    }
+
+    // Handle ListArray (vectors)
+    if let Some(arr) = array.as_any().downcast_ref::<ListArray>() {
+        let values = arr.value(row_idx);
+        // Check for Float32 vectors first
+        if let Some(float_arr) = values.as_any().downcast_ref::<Float32Array>() {
+            let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
+            return Ok(Value::vector(vec));
+        }
+        // Check for Int8 vectors
+        if let Some(int8_arr) = values.as_any().downcast_ref::<Int8Array>() {
+            let vec: Vec<i8> = (0..int8_arr.len()).map(|i| int8_arr.value(i)).collect();
+            return Ok(Value::vector_int8(vec));
+        }
+    }
+
+    Err(ArrowConvertError::UnsupportedType(format!(
+        "Cannot extract value from array type: {:?}",
+        array.data_type()
+    )))
+}
+
+/// Create an empty array for a given data type
+fn empty_array_for_type(dt: &DataType) -> ArrayRef {
+    match dt {
+        DataType::Int32 => Arc::new(Int32Array::from(Vec::<i32>::new())),
+        DataType::Int64 => Arc::new(Int64Array::from(Vec::<i64>::new())),
+        DataType::Float64 => Arc::new(Float64Array::from(Vec::<f64>::new())),
+        DataType::String => Arc::new(StringArray::from(Vec::<&str>::new())),
+        DataType::Bool => Arc::new(BooleanArray::from(Vec::<bool>::new())),
+        DataType::Null => Arc::new(Int32Array::from(Vec::<Option<i32>>::new())),
+        DataType::Vector { dim } => {
+            let field = Arc::new(Field::new("item", ArrowDataType::Float32, false));
+            if let Some(fixed_dim) = dim {
+                let values_array = Arc::new(Float32Array::from(Vec::<f32>::new()));
+                Arc::new(arrow::array::FixedSizeListArray::new(
+                    field,
+                    *fixed_dim as i32,
+                    values_array,
+                    None,
+                ))
+            } else {
+                let values_array = Float32Array::from(Vec::<f32>::new());
+                let offset_buffer = OffsetBuffer::new(vec![0i64].into());
+                Arc::new(LargeListArray::new(
+                    field,
+                    offset_buffer,
+                    Arc::new(values_array),
+                    None,
+                ))
+            }
+        }
+        DataType::VectorInt8 { dim } => {
+            let field = Arc::new(Field::new("item", ArrowDataType::Int8, false));
+            if let Some(fixed_dim) = dim {
+                let values_array = Arc::new(Int8Array::from(Vec::<i8>::new()));
+                Arc::new(arrow::array::FixedSizeListArray::new(
+                    field,
+                    *fixed_dim as i32,
+                    values_array,
+                    None,
+                ))
+            } else {
+                let values_array = Int8Array::from(Vec::<i8>::new());
+                let offset_buffer = OffsetBuffer::new(vec![0i64].into());
+                Arc::new(LargeListArray::new(
+                    field,
+                    offset_buffer,
+                    Arc::new(values_array),
+                    None,
+                ))
+            }
+        }
+        DataType::Timestamp => Arc::new(Int64Array::from(Vec::<i64>::new())),
+    }
+}
+
+/// Infer schema from a vector of tuples
+///
+/// Uses the first tuple to determine column types
