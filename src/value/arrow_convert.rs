@@ -95,7 +95,7 @@ pub fn record_batch_to_tuples(
     let mut tuples = Vec::with_capacity(num_rows);
 
     for row_idx in 0..num_rows {
-        let mut values = Vec::with_capacity(num_cols);
+        let mut values = Vec::new();
 
         for col_idx in 0..num_cols {
             let column = batch.column(col_idx);
@@ -183,7 +183,6 @@ fn build_column_array(
                 // Use LargeListArray for variable dimensions
                 let mut offsets: Vec<i64> = vec![0];
                 for tuple in tuples {
-                    // TODO: verify this condition
                     if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector()) {
                         all_values.extend_from_slice(vec);
                         offsets.push(all_values.len() as i64);
@@ -254,7 +253,6 @@ fn build_column_array(
 
 /// Extract a Value from an Arrow array at a given index
 fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, ArrowConvertError> {
-    // TODO: verify this condition
     if array.is_null(row_idx) {
         return Ok(Value::Null);
     }
@@ -292,7 +290,6 @@ fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, 
     }
 
     // Handle LargeListArray (vectors with unknown dimension)
-    // TODO: verify this condition
     if let Some(arr) = array.as_any().downcast_ref::<LargeListArray>() {
         let values = arr.value(row_idx);
         // Check for Float32 vectors first
@@ -502,5 +499,89 @@ mod tests {
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
         assert_eq!(batch.num_rows(), 0);
         assert_eq!(batch.num_columns(), 2);
+    }
+
+    #[test]
+    fn test_infer_schema() {
+        let tuples = vec![Tuple::new(vec![Value::Int32(1), Value::string("test")])];
+
+        let schema = infer_schema_from_tuples(&tuples, &["id".to_string(), "name".to_string()]);
+
+        assert_eq!(schema.arity(), 2);
+        assert_eq!(schema.field_type(0), Some(&DataType::Int32));
+        assert_eq!(schema.field_type(1), Some(&DataType::String));
+    }
+
+    #[test]
+    fn test_vector_fixed_size_roundtrip() {
+        // Test that vectors with known dimensions use FixedSizeList and preserve dimension
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]),
+            Tuple::new(vec![Value::Int32(2), Value::vector(vec![4.0, 5.0, 6.0])]),
+        ];
+
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("embedding".to_string(), DataType::Vector { dim: Some(3) }),
+        ]);
+
+        // Convert to Arrow
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        assert_eq!(batch.num_rows(), 2);
+
+        // Convert back
+        let (result, recovered_schema) = record_batch_to_tuples(&batch).unwrap();
+
+        // Verify dimension is preserved in schema
+        assert_eq!(
+            recovered_schema.field_type(1),
+            Some(&DataType::Vector { dim: Some(3) })
+        );
+
+        // Verify data roundtrip
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].get(0), Some(&Value::Int32(1)));
+        assert_eq!(
+            result[0].get(1).and_then(|v| v.as_vector()),
+            Some([1.0f32, 2.0, 3.0].as_slice())
+        );
+        assert_eq!(
+            result[1].get(1).and_then(|v| v.as_vector()),
+            Some([4.0f32, 5.0, 6.0].as_slice())
+        );
+    }
+
+    #[test]
+    fn test_vector_variable_size_roundtrip() {
+        // Test vectors with unknown dimensions use LargeList
+        let tuples = vec![
+            Tuple::new(vec![Value::vector(vec![1.0, 2.0])]),
+            Tuple::new(vec![Value::vector(vec![3.0, 4.0, 5.0])]), // Different size
+        ];
+
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::Vector { dim: None },
+        )]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        let (result, recovered_schema) = record_batch_to_tuples(&batch).unwrap();
+
+        // Variable dimensions don't preserve dimension info
+        assert_eq!(
+            recovered_schema.field_type(0),
+            Some(&DataType::Vector { dim: None })
+        );
+
+        // But data is preserved
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0].get(0).and_then(|v| v.as_vector()),
+            Some([1.0f32, 2.0].as_slice())
+        );
+        assert_eq!(
+            result[1].get(0).and_then(|v| v.as_vector()),
+            Some([3.0f32, 4.0, 5.0].as_slice())
+        );
     }
 
