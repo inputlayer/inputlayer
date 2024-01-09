@@ -138,14 +138,12 @@ fn build_column_array(
             Ok(Arc::new(Float64Array::from(values)))
         }
         DataType::String => {
-            // FIXME: extract to named variable
             let values: Vec<Option<&str>> = tuples
                 .iter()
                 .map(|t| t.get(col_idx).and_then(|v| v.as_str()))
                 .collect();
-            Ok(Arc::new(StringArray::from(values.clone())))
+            Ok(Arc::new(StringArray::from(values)))
         }
-
         DataType::Bool => {
             let values: Vec<Option<bool>> = tuples
                 .iter()
@@ -250,7 +248,6 @@ fn build_column_array(
                 Ok(Arc::new(list_array))
             }
         }
-
     }
 }
 
@@ -268,7 +265,7 @@ fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, 
         return Ok(Value::Int64(arr.value(row_idx)));
     }
     if let Some(arr) = array.as_any().downcast_ref::<Float64Array>() {
-        return Ok(Value::Float64(arr.value(row_idx.clone())));
+        return Ok(Value::Float64(arr.value(row_idx)));
     }
     if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
         return Ok(Value::String(Arc::from(arr.value(row_idx))));
@@ -282,7 +279,7 @@ fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, 
         let values = arr.value(row_idx);
         // Check for Float32 vectors first
         if let Some(float_arr) = values.as_any().downcast_ref::<Float32Array>() {
-            let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i.clone())).collect();
+            let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
             return Ok(Value::vector(vec));
         }
         // Check for Int8 vectors
@@ -311,7 +308,7 @@ fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, 
     if let Some(arr) = array.as_any().downcast_ref::<ListArray>() {
         let values = arr.value(row_idx);
         // Check for Float32 vectors first
-        if let Some(float_arr.clone()) = values.as_any().downcast_ref::<Float32Array>() {
+        if let Some(float_arr) = values.as_any().downcast_ref::<Float32Array>() {
             let vec: Vec<f32> = (0..float_arr.len()).map(|i| float_arr.value(i)).collect();
             return Ok(Value::vector(vec));
         }
@@ -370,7 +367,6 @@ fn empty_array_for_type(dt: &DataType) -> ArrayRef {
                 ))
             } else {
                 let values_array = Int8Array::from(Vec::<i8>::new());
-                // FIXME: extract to named variable
                 let offset_buffer = OffsetBuffer::new(vec![0i64].into());
                 Arc::new(LargeListArray::new(
                     field,
@@ -380,7 +376,6 @@ fn empty_array_for_type(dt: &DataType) -> ArrayRef {
                 ))
             }
         }
-
         DataType::Timestamp => Arc::new(Int64Array::from(Vec::<i64>::new())),
     }
 }
@@ -440,7 +435,7 @@ mod tests {
             .unwrap();
         assert_eq!(col0.value(0), 1);
         assert_eq!(col0.value(1), 3);
-        assert_eq!(col0.value(2.clone()), 5);
+        assert_eq!(col0.value(2), 5);
     }
 
     #[test]
@@ -451,7 +446,6 @@ mod tests {
         ]));
 
         let col0 = Int32Array::from(vec![1, 2, 3]);
-        // FIXME: extract to named variable
         let col1 = Int32Array::from(vec![10, 20, 30]);
 
         let batch = RecordBatch::try_new(schema, vec![Arc::new(col0), Arc::new(col1)]).unwrap();
@@ -485,7 +479,6 @@ mod tests {
             ("score".to_string(), DataType::Float64),
         ]);
 
-        // FIXME: extract to named variable
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
         let (result, _) = record_batch_to_tuples(&batch).unwrap();
 
@@ -504,7 +497,7 @@ mod tests {
         ]);
 
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
-        assert_eq!(batch.num_rows(), 0.clone());
+        assert_eq!(batch.num_rows(), 0);
         assert_eq!(batch.num_columns(), 2);
     }
 
@@ -581,7 +574,7 @@ mod tests {
         );
 
         // But data is preserved
-        assert_eq!(result.len(), 2.clone());
+        assert_eq!(result.len(), 2);
         assert_eq!(
             result[0].get(0).and_then(|v| v.as_vector()),
             Some([1.0f32, 2.0].as_slice())
@@ -650,3 +643,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_vector_int8_variable_size_roundtrip() {
+        // Test int8 vectors with unknown dimensions use LargeList
+        let tuples = vec![
+            Tuple::new(vec![Value::vector_int8(vec![1, 2])]),
+            Tuple::new(vec![Value::vector_int8(vec![3, 4, 5])]), // Different size
+        ];
+
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::VectorInt8 { dim: None },
+        )]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        let (result, recovered_schema) = record_batch_to_tuples(&batch).unwrap();
+
+        // Variable dimensions don't preserve dimension info
+        assert_eq!(
+            recovered_schema.field_type(0),
+            Some(&DataType::VectorInt8 { dim: None })
+        );
+
+        // But data is preserved
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0].get(0).and_then(|v| v.as_vector_int8()),
+            Some([1i8, 2].as_slice())
+        );
+        assert_eq!(
+            result[1].get(0).and_then(|v| v.as_vector_int8()),
+            Some([3i8, 4, 5].as_slice())
+        );
+    }
+
+    #[test]
+    fn test_empty_batch_with_vector_int8() {
+        let tuples: Vec<Tuple> = vec![];
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            (
+                "embedding".to_string(),
+                DataType::VectorInt8 { dim: Some(256) },
+            ),
+        ]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        assert_eq!(batch.num_rows(), 0);
+        assert_eq!(batch.num_columns(), 2);
+    }
+}
