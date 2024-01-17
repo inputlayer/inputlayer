@@ -226,3 +226,109 @@ impl Monoid for MinDiff {
     }
 }
 
+impl From<i8> for MinDiff {
+    #[inline]
+    fn from(v: i8) -> Self {
+        MinDiff(v as i64)
+    }
+}
+
+// Manual Abomonation impl for 8-byte i64 newtype.
+// Safety: MinDiff is repr(transparent)-equivalent over i64 (no padding, no pointers).
+impl abomonation::Abomonation for MinDiff {
+    unsafe fn entomb<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write.write_all(&self.0.to_le_bytes())
+    }
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        if bytes.len() < 8 {
+            None
+        } else {
+            self.0 = i64::from_le_bytes(bytes[..8].try_into().ok()?);
+            Some(&mut bytes[8..])
+        }
+    }
+    fn extent(&self) -> usize {
+        8
+    }
+}
+
+impl DiffType for MinDiff {
+    #[inline]
+    fn one() -> Self {
+        MinDiff(0) // Additive identity for tropical mul (0 + x = x)
+    }
+
+    #[inline]
+    fn to_count(&self) -> isize {
+        // For min semiring, each tuple represents one derivation
+        isize::from(self.0 != i64::MAX)
+    }
+
+    const IS_ABELIAN: bool = false;
+}
+
+// MaxDiff  -  diff type for recursive max aggregation
+/// Diff type for max-semiring: addition is max, zero is -infinity.
+///
+/// Used for recursive aggregation (e.g., widest path) where the code
+/// generator applies early max-aggregation inside the fixpoint loop.
+///
+/// ## Neg implementation
+///
+/// Same caveat as MinDiff: `Neg` exists only for trait compliance.
+/// The code generator MUST NOT call `distinct_core()` on `MaxDiff` collections.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct MaxDiff(pub i64);
+
+impl Default for MaxDiff {
+    fn default() -> Self {
+        MaxDiff(i64::MIN) // Identity for max
+    }
+}
+
+impl std::ops::Neg for MaxDiff {
+    type Output = Self;
+    #[inline]
+    fn neg(self) -> Self {
+        // Max has no mathematical inverse. See MinDiff::neg() for rationale.
+        MaxDiff(self.0.wrapping_neg())
+    }
+}
+
+impl std::ops::Mul for MaxDiff {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: Self) -> Self {
+        // Tropical semiring: multiplication = addition of capacities.
+        MaxDiff(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl AddAssign<&Self> for MaxDiff {
+    #[inline]
+    fn add_assign(&mut self, rhs: &Self) {
+        self.0 = self.0.max(rhs.0);
+    }
+}
+
+impl Semigroup for MaxDiff {
+    #[inline]
+    fn is_zero(&self) -> bool {
+        self.0 == i64::MIN
+    }
+}
+
+impl Monoid for MaxDiff {
+    #[inline]
+    fn zero() -> Self {
+        MaxDiff(i64::MIN)
+    }
+}
+
+impl From<i8> for MaxDiff {
+    #[inline]
+    fn from(v: i8) -> Self {
+        MaxDiff(v as i64)
+    }
+}
+
