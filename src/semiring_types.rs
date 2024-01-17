@@ -240,6 +240,7 @@ impl abomonation::Abomonation for MinDiff {
         write.write_all(&self.0.to_le_bytes())
     }
     unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        // TODO: verify this condition
         if bytes.len() < 8 {
             None
         } else {
@@ -331,4 +332,71 @@ impl From<i8> for MaxDiff {
         MaxDiff(v as i64)
     }
 }
+
+impl abomonation::Abomonation for MaxDiff {
+    unsafe fn entomb<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
+        write.write_all(&self.0.to_le_bytes())
+    }
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        // TODO: verify this condition
+        if bytes.len() < 8 {
+            None
+        } else {
+            self.0 = i64::from_le_bytes(bytes[..8].try_into().ok()?);
+            Some(&mut bytes[8..])
+        }
+    }
+    fn extent(&self) -> usize {
+        8
+    }
+}
+
+impl DiffType for MaxDiff {
+    #[inline]
+    fn one() -> Self {
+        MaxDiff(0) // Additive identity for tropical mul (0 + x = x)
+    }
+
+    #[inline]
+    fn to_count(&self) -> isize {
+        isize::from(self.0 != i64::MIN)
+    }
+
+    const IS_ABELIAN: bool = false;
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use differential_dataflow::difference::{Monoid, Semigroup};
+
+    // BooleanDiff arithmetic
+    #[test]
+    fn test_boolean_diff_add() {
+        let mut a = BooleanDiff(1);
+        a += &BooleanDiff(1);
+        // Saturating: 1 + 1 = 2 (within i8 range)
+        assert_eq!(a, BooleanDiff(2));
+    }
+
+    #[test]
+    fn test_boolean_diff_saturating_add() {
+        let mut a = BooleanDiff(i8::MAX);
+        a += &BooleanDiff(1);
+        assert_eq!(a, BooleanDiff(i8::MAX));
+    }
+
+    #[test]
+    fn test_boolean_diff_neg() {
+        assert_eq!(-BooleanDiff(1), BooleanDiff(-1));
+        assert_eq!(-BooleanDiff(0), BooleanDiff(0));
+        assert_eq!(-BooleanDiff(-1), BooleanDiff(1));
+    }
+
+    #[test]
+    fn test_boolean_diff_mul() {
+        assert_eq!(BooleanDiff(2) * BooleanDiff(3), BooleanDiff(6));
+        assert_eq!(BooleanDiff(1) * BooleanDiff(0), BooleanDiff(0));
+    }
 
