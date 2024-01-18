@@ -338,7 +338,6 @@ impl abomonation::Abomonation for MaxDiff {
         write.write_all(&self.0.to_le_bytes())
     }
     unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        // TODO: verify this condition
         if bytes.len() < 8 {
             None
         } else {
@@ -400,3 +399,40 @@ mod tests {
         assert_eq!(BooleanDiff(1) * BooleanDiff(0), BooleanDiff(0));
     }
 
+    #[test]
+    fn test_boolean_diff_saturating_mul() {
+        assert_eq!(BooleanDiff(i8::MAX) * BooleanDiff(2), BooleanDiff(i8::MAX));
+    }
+
+    // BooleanDiff DD traits
+    #[test]
+    fn test_boolean_diff_is_zero() {
+        assert!(BooleanDiff(0).is_zero());
+        assert!(!BooleanDiff(1).is_zero());
+        assert!(!BooleanDiff(-1).is_zero());
+    }
+
+    #[test]
+    fn test_boolean_diff_zero() {
+        assert_eq!(BooleanDiff::zero(), BooleanDiff(0));
+    }
+
+    #[test]
+    fn test_boolean_diff_from_i8() {
+        assert_eq!(BooleanDiff::from(42i8), BooleanDiff(42));
+    }
+
+    // DiffType trait
+    #[test]
+    fn test_isize_diff_type() {
+        assert_eq!(isize::one(), 1);
+        assert_eq!(42isize.to_count(), 42);
+    }
+
+    #[test]
+    fn test_boolean_diff_type() {
+        assert_eq!(BooleanDiff::one(), BooleanDiff(1));
+        assert_eq!(BooleanDiff(3).to_count(), 3);
+    }
+
+    // MinDiff
