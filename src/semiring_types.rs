@@ -240,7 +240,6 @@ impl abomonation::Abomonation for MinDiff {
         write.write_all(&self.0.to_le_bytes())
     }
     unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        // TODO: verify this condition
         if bytes.len() < 8 {
             None
         } else {
@@ -436,3 +435,43 @@ mod tests {
     }
 
     // MinDiff
+    #[test]
+    fn test_min_diff_plus_equals_takes_min() {
+        let mut a = MinDiff(10);
+        a += &MinDiff(5);
+        assert_eq!(a, MinDiff(5));
+    }
+
+    #[test]
+    fn test_min_diff_zero_is_max() {
+        assert_eq!(MinDiff::zero(), MinDiff(i64::MAX));
+        assert!(MinDiff(i64::MAX).is_zero());
+    }
+
+    #[test]
+    fn test_min_diff_identity() {
+        let mut a = MinDiff(42);
+        a += &MinDiff::zero();
+        assert_eq!(a, MinDiff(42)); // min(42, MAX) = 42
+    }
+
+    // MinDiff extended traits
+    #[test]
+    fn test_min_diff_mul_tropical() {
+        // Tropical semiring: mul = addition of distances
+        assert_eq!(MinDiff(3) * MinDiff(5), MinDiff(8));
+        assert_eq!(MinDiff(0) * MinDiff(10), MinDiff(10));
+    }
+
+    #[test]
+    fn test_min_diff_mul_saturating() {
+        assert_eq!(MinDiff(i64::MAX) * MinDiff(1), MinDiff(i64::MAX));
+    }
+
+    #[test]
+    fn test_min_diff_one() {
+        assert_eq!(MinDiff::one(), MinDiff(0));
+        // one * x = x (additive identity for tropical mul)
+        assert_eq!(MinDiff::one() * MinDiff(42), MinDiff(42));
+    }
+
