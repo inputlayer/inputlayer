@@ -475,3 +475,43 @@ mod tests {
         assert_eq!(MinDiff::one() * MinDiff(42), MinDiff(42));
     }
 
+    #[test]
+    fn test_min_diff_to_count() {
+        assert_eq!(MinDiff(42).to_count(), 1);
+        assert_eq!(MinDiff(0).to_count(), 1);
+        assert_eq!(MinDiff(i64::MAX).to_count(), 0); // zero element
+    }
+
+    #[test]
+    fn test_min_diff_from_i8() {
+        assert_eq!(MinDiff::from(5i8), MinDiff(5));
+        assert_eq!(MinDiff::from(-1i8), MinDiff(-1));
+    }
+
+    #[test]
+    fn test_min_diff_is_not_abelian() {
+        assert!(!MinDiff::IS_ABELIAN);
+    }
+
+    // MaxDiff
+    #[test]
+    fn test_max_diff_plus_equals_takes_max() {
+        let mut a = MaxDiff(5);
+        a += &MaxDiff(10);
+        assert_eq!(a, MaxDiff(10));
+    }
+
+    #[test]
+    fn test_max_diff_zero_is_min() {
+        assert_eq!(MaxDiff::zero(), MaxDiff(i64::MIN));
+        assert!(MaxDiff(i64::MIN).is_zero());
+    }
+
+    #[test]
+    fn test_max_diff_identity() {
+        let mut a = MaxDiff(42);
+        a += &MaxDiff::zero();
+        assert_eq!(a, MaxDiff(42)); // max(42, MIN) = 42
+    }
+
+    // MaxDiff extended traits
