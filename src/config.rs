@@ -88,3 +88,44 @@ pub struct PersistenceConfig {
 
 /// DD-native persist layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistLayerConfig {
+    /// Enable the DD-native persist layer
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Buffer size before flushing to batch file
+    #[serde(default = "default_buffer_size")]
+    pub buffer_size: usize,
+
+    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead)
+    #[serde(default = "default_true")]
+    pub immediate_sync: bool,
+
+    /// Durability mode for writes (immediate, batched, or async)
+    #[serde(default)]
+    pub durability_mode: DurabilityMode,
+
+    /// Compaction window: how much history to retain (0 = keep all)
+    #[serde(default)]
+    pub compaction_window: u64,
+}
+
+fn default_buffer_size() -> usize {
+    10000
+}
+
+impl Default for PersistLayerConfig {
+    fn default() -> Self {
+        PersistLayerConfig {
+            enabled: true,
+            buffer_size: 10000,
+            immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
+            compaction_window: 0,
+        }
+    }
+}
+
+/// Storage format options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
