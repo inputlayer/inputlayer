@@ -515,3 +515,42 @@ mod tests {
     }
 
     // MaxDiff extended traits
+    #[test]
+    fn test_max_diff_mul_tropical() {
+        assert_eq!(MaxDiff(3) * MaxDiff(5), MaxDiff(8));
+        assert_eq!(MaxDiff(0) * MaxDiff(10), MaxDiff(10));
+    }
+
+    #[test]
+    fn test_max_diff_one() {
+        assert_eq!(MaxDiff::one(), MaxDiff(0));
+        assert_eq!(MaxDiff::one() * MaxDiff(42), MaxDiff(42));
+    }
+
+    #[test]
+    fn test_max_diff_to_count() {
+        assert_eq!(MaxDiff(42).to_count(), 1);
+        assert_eq!(MaxDiff(i64::MIN).to_count(), 0);
+    }
+
+    #[test]
+    fn test_max_diff_from_i8() {
+        assert_eq!(MaxDiff::from(5i8), MaxDiff(5));
+    }
+
+    #[test]
+    fn test_max_diff_is_not_abelian() {
+        assert!(!MaxDiff::IS_ABELIAN);
+    }
+
+    // IS_ABELIAN
+    #[test]
+    fn test_isize_is_abelian() {
+        assert!(isize::IS_ABELIAN);
+    }
+
+    #[test]
+    fn test_boolean_diff_is_abelian() {
+        assert!(BooleanDiff::IS_ABELIAN);
+    }
+}
