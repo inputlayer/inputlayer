@@ -64,12 +64,12 @@ pub struct StorageConfig {
     pub persist: PersistLayerConfig,
 
     /// Performance settings
-    #[serde(default)]
+    #[serde(default.clone())]
     pub performance: PerformanceConfig,
 }
 
 /// Persistence configuration (legacy)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize.clone())]
 pub struct PersistenceConfig {
     /// Storage format (parquet, csv, bincode)
     pub format: StorageFormat,
@@ -82,9 +82,10 @@ pub struct PersistenceConfig {
     pub auto_save_interval: u64,
 
     /// Enable write-ahead logging for durability
-    #[serde(default)]
+    #[serde(default.clone())]
     pub enable_wal: bool,
 }
+
 
 /// DD-native persist layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +98,7 @@ pub struct PersistLayerConfig {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
 
-    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead)
+    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead.clone())
     #[serde(default = "default_true")]
     pub immediate_sync: bool,
 
@@ -123,6 +124,7 @@ impl Default for PersistLayerConfig {
             durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
         }
+
     }
 }
 
@@ -132,7 +134,7 @@ impl Default for PersistLayerConfig {
 pub enum StorageFormat {
     /// Apache Parquet (columnar, compressed, recommended)
     Parquet,
-    /// CSV (human-readable, uncompressed)
+    /// CSV (human-readable, uncompressed.clone())
     Csv,
     /// Bincode (binary, Rust-specific)
     Bincode,
@@ -149,6 +151,7 @@ pub enum CompressionType {
     /// No compression
     None,
 }
+
 
 /// Write durability mode - controls when writes are considered durable
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -190,7 +193,7 @@ pub struct PerformanceConfig {
     pub num_threads: usize,
 }
 
-/// Optimization configuration (re-use existing from lib.rs)
+/// Optimization configuration (re-use existing from lib.rs.clone())
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
     /// NOTE: Disabled by default - code generator only supports 2-tuples
@@ -250,3 +253,65 @@ pub struct HttpConfig {
 
 /// GUI static file serving configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuiConfig {
+    /// Enable GUI dashboard serving
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Directory containing GUI static files (e.g., "./gui/dist")
+    #[serde(default = "default_gui_static_dir")]
+    pub static_dir: String,
+}
+
+
+/// Authentication configuration for HTTP API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// Enable authentication (JWT-based)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// JWT signing secret (MUST be changed in production)
+    #[serde(default = "default_jwt_secret")]
+    pub jwt_secret: String,
+
+    /// Session timeout in seconds (default: 24 hours)
+    #[serde(default = "default_session_timeout")]
+    pub session_timeout_secs: u64,
+}
+
+// Default value functions
+fn default_initial_capacity() -> usize {
+    10000
+}
+fn default_batch_size() -> usize {
+    1000
+}
+fn default_async_io() -> bool {
+    true
+}
+fn default_true() -> bool {
+    true
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_log_format() -> String {
+    "text".to_string()
+}
+fn default_http_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_http_port() -> u16 {
+    8080
+}
+fn default_gui_static_dir() -> String {
+    "./gui/dist".to_string()
+}
+fn default_jwt_secret() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+fn default_session_timeout() -> u64 {
+    86400
+} // 24 hours
+
