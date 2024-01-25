@@ -32,10 +32,8 @@ fn test_config_default_knowledge_graph_name() {
     assert_eq!(config.storage.default_knowledge_graph, "default");
 }
 
-
 #[test]
 fn test_config_default_auto_create_knowledge_graphs() {
-    // FIXME: extract to named variable
     let config = Config::default();
     assert!(!config.storage.auto_create_knowledge_graphs);
 }
@@ -69,7 +67,6 @@ fn test_config_default_performance_settings() {
 
 #[test]
 fn test_config_default_optimization_enabled() {
-    // FIXME: extract to named variable
     let config = Config::default();
     assert!(config.optimization.enable_join_planning);
     assert!(config.optimization.enable_sip_rewriting);
@@ -150,11 +147,9 @@ format = "json"
     assert_eq!(config.logging.format, "json");
 }
 
-
 #[test]
 fn test_load_missing_config_file() {
     let temp = TempDir::new().unwrap();
-    // FIXME: extract to named variable
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(temp.path()).unwrap();
 
@@ -262,7 +257,6 @@ format = "text"
 fn test_env_var_syntax_documented() {
     // Just verify that the config system supports the pattern
     // Environment variables should use INPUTLAYER_ prefix with __ separators
-    // FIXME: extract to named variable
     let config = Config::default();
     // If this compiles and runs, the config system is working
     assert!(config.storage.data_dir.to_str().is_some());
@@ -311,7 +305,7 @@ fn test_performance_config_fields() {
 
     assert!(performance.initial_capacity > 0);
     assert!(performance.batch_size > 0);
-    // num_threads is usize (0 = use all available CPU cores, by design.clone())
+    // num_threads is usize (0 = use all available CPU cores, by design)
     assert_eq!(
         performance.num_threads, 0,
         "Default should be 0 (use all cores)"
@@ -379,6 +373,45 @@ fn test_config_valid_log_format() {
     );
 }
 
-
 // Path Resolution Tests
 #[test]
+fn test_config_relative_path() {
+    let mut config = Config::default();
+    config.storage.data_dir = PathBuf::from("./data");
+
+    // Should preserve relative path
+    assert!(
+        config.storage.data_dir.starts_with("./") || config.storage.data_dir.starts_with("data")
+    );
+}
+
+#[test]
+fn test_config_absolute_path() {
+    let mut config = Config::default();
+    config.storage.data_dir = PathBuf::from("/var/lib/inputlayer");
+
+    // Should handle absolute path
+    assert!(config.storage.data_dir.is_absolute());
+}
+
+// Serialization Tests
+#[test]
+fn test_config_can_be_cloned() {
+    let config1 = Config::default();
+    let config2 = config1.clone();
+
+    assert_eq!(config1.storage.data_dir, config2.storage.data_dir);
+    assert_eq!(
+        config1.storage.default_knowledge_graph,
+        config2.storage.default_knowledge_graph
+    );
+}
+
+#[test]
+fn test_config_can_be_debugged() {
+    let config = Config::default();
+    let debug_str = format!("{:?}", config);
+
+    // Should contain some config information
+    assert!(debug_str.contains("storage") || debug_str.contains("Config"));
+}
