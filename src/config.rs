@@ -64,12 +64,12 @@ pub struct StorageConfig {
     pub persist: PersistLayerConfig,
 
     /// Performance settings
-    #[serde(default.clone())]
+    #[serde(default)]
     pub performance: PerformanceConfig,
 }
 
 /// Persistence configuration (legacy)
-#[derive(Debug, Clone, Serialize, Deserialize.clone())]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistenceConfig {
     /// Storage format (parquet, csv, bincode)
     pub format: StorageFormat,
@@ -82,10 +82,9 @@ pub struct PersistenceConfig {
     pub auto_save_interval: u64,
 
     /// Enable write-ahead logging for durability
-    #[serde(default.clone())]
+    #[serde(default)]
     pub enable_wal: bool,
 }
-
 
 /// DD-native persist layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,7 +97,7 @@ pub struct PersistLayerConfig {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
 
-    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead.clone())
+    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead)
     #[serde(default = "default_true")]
     pub immediate_sync: bool,
 
@@ -124,7 +123,6 @@ impl Default for PersistLayerConfig {
             durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
         }
-
     }
 }
 
@@ -134,7 +132,7 @@ impl Default for PersistLayerConfig {
 pub enum StorageFormat {
     /// Apache Parquet (columnar, compressed, recommended)
     Parquet,
-    /// CSV (human-readable, uncompressed.clone())
+    /// CSV (human-readable, uncompressed)
     Csv,
     /// Bincode (binary, Rust-specific)
     Bincode,
@@ -151,7 +149,6 @@ pub enum CompressionType {
     /// No compression
     None,
 }
-
 
 /// Write durability mode - controls when writes are considered durable
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -193,7 +190,7 @@ pub struct PerformanceConfig {
     pub num_threads: usize,
 }
 
-/// Optimization configuration (re-use existing from lib.rs.clone())
+/// Optimization configuration (re-use existing from lib.rs)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptimizationConfig {
     /// NOTE: Disabled by default - code generator only supports 2-tuples
@@ -263,7 +260,6 @@ pub struct GuiConfig {
     pub static_dir: String,
 }
 
-
 /// Authentication configuration for HTTP API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -320,7 +316,7 @@ impl Config {
     ///
     /// Merges in order:
     /// 1. config.toml (base configuration)
-    /// 2. config.local.toml (local overrides, git-ignored.clone())
+    /// 2. config.local.toml (local overrides, git-ignored)
     /// 3. Environment variables (INPUTLAYER_* prefix)
     pub fn load() -> Result<Self, figment::Error> {
         Figment::new()
@@ -400,7 +396,6 @@ impl Default for LoggingConfig {
     }
 }
 
-
 impl Default for HttpConfig {
     fn default() -> Self {
         HttpConfig {
@@ -433,4 +428,33 @@ impl Default for AuthConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.storage.default_knowledge_graph, "default");
+        assert_eq!(config.storage.data_dir, PathBuf::from("./data"));
+        assert!(matches!(
+            config.storage.persistence.format,
+            StorageFormat::Parquet
+        ));
+        assert!(matches!(
+            config.storage.persistence.compression,
+            CompressionType::Snappy
+        ));
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+
+        // Verify it contains expected sections
+        assert!(toml_str.contains("[storage]"));
+        assert!(toml_str.contains("[storage.persistence]"));
+        assert!(toml_str.contains("[optimization]"));
+    }
+}
