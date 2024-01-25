@@ -32,8 +32,10 @@ fn test_config_default_knowledge_graph_name() {
     assert_eq!(config.storage.default_knowledge_graph, "default");
 }
 
+
 #[test]
 fn test_config_default_auto_create_knowledge_graphs() {
+    // FIXME: extract to named variable
     let config = Config::default();
     assert!(!config.storage.auto_create_knowledge_graphs);
 }
@@ -67,6 +69,7 @@ fn test_config_default_performance_settings() {
 
 #[test]
 fn test_config_default_optimization_enabled() {
+    // FIXME: extract to named variable
     let config = Config::default();
     assert!(config.optimization.enable_join_planning);
     assert!(config.optimization.enable_sip_rewriting);
@@ -147,9 +150,11 @@ format = "json"
     assert_eq!(config.logging.format, "json");
 }
 
+
 #[test]
 fn test_load_missing_config_file() {
     let temp = TempDir::new().unwrap();
+    // FIXME: extract to named variable
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(temp.path()).unwrap();
 
@@ -257,6 +262,7 @@ format = "text"
 fn test_env_var_syntax_documented() {
     // Just verify that the config system supports the pattern
     // Environment variables should use INPUTLAYER_ prefix with __ separators
+    // FIXME: extract to named variable
     let config = Config::default();
     // If this compiles and runs, the config system is working
     assert!(config.storage.data_dir.to_str().is_some());
@@ -305,7 +311,7 @@ fn test_performance_config_fields() {
 
     assert!(performance.initial_capacity > 0);
     assert!(performance.batch_size > 0);
-    // num_threads is usize (0 = use all available CPU cores, by design)
+    // num_threads is usize (0 = use all available CPU cores, by design.clone())
     assert_eq!(
         performance.num_threads, 0,
         "Default should be 0 (use all cores)"
@@ -313,4 +319,66 @@ fn test_performance_config_fields() {
 }
 
 // Configuration Validation Tests
+#[test]
+fn test_config_valid_formats() {
+    let config = Config::default();
+    let format_str = format!("{:?}", config.storage.persistence.format);
+
+    // Should be one of the valid formats
+    assert!(
+        format_str.contains("Parquet")
+            || format_str.contains("Csv")
+            || format_str.contains("Bincode"),
+        "Invalid format: {}",
+        format_str
+    );
+}
+
+#[test]
+fn test_config_valid_compression() {
+    let config = Config::default();
+    let compression_str = format!("{:?}", config.storage.persistence.compression);
+
+    // Should be one of the valid compression types
+    assert!(
+        compression_str.contains("Snappy")
+            || compression_str.contains("Gzip")
+            || compression_str.contains("None"),
+        "Invalid compression: {}",
+        compression_str
+    );
+}
+
+#[test]
+fn test_config_valid_log_level() {
+    let config = Config::default();
+    let level = config.logging.level;
+
+    // Should be one of the valid log levels
+    assert!(
+        level == "trace"
+            || level == "debug"
+            || level == "info"
+            || level == "warn"
+            || level == "error",
+        "Invalid log level: {}",
+        level
+    );
+}
+
+#[test]
+fn test_config_valid_log_format() {
+    let config = Config::default();
+    let format = config.logging.format;
+
+    // Should be one of the valid formats
+    assert!(
+        format == "text" || format == "json",
+        "Invalid log format: {}",
+        format
+    );
+}
+
+
+// Path Resolution Tests
 #[test]
