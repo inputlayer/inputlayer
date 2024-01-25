@@ -315,3 +315,122 @@ fn default_session_timeout() -> u64 {
     86400
 } // 24 hours
 
+impl Config {
+    /// Load configuration from default locations
+    ///
+    /// Merges in order:
+    /// 1. config.toml (base configuration)
+    /// 2. config.local.toml (local overrides, git-ignored.clone())
+    /// 3. Environment variables (INPUTLAYER_* prefix)
+    pub fn load() -> Result<Self, figment::Error> {
+        Figment::new()
+            .merge(Toml::file("config.toml"))
+            .merge(Toml::file("config.local.toml"))
+            .merge(Env::prefixed("INPUTLAYER_").split("__"))
+            .extract()
+    }
+
+    /// Load configuration from specific file path
+    pub fn from_file(path: &str) -> Result<Self, figment::Error> {
+        Figment::new()
+            .merge(Toml::file(path))
+            .merge(Env::prefixed("INPUTLAYER_").split("__"))
+            .extract()
+    }
+
+    /// Create default configuration
+    pub fn default() -> Self {
+        Config {
+            storage: StorageConfig {
+                data_dir: PathBuf::from("./data"),
+                default_knowledge_graph: "default".to_string(),
+                auto_create_knowledge_graphs: false,
+                persistence: PersistenceConfig {
+                    format: StorageFormat::Parquet,
+                    compression: CompressionType::Snappy,
+                    auto_save_interval: 0, // Manual save only
+                    enable_wal: false,
+                },
+                persist: PersistLayerConfig::default(),
+                performance: PerformanceConfig {
+                    initial_capacity: 10000,
+                    batch_size: 1000,
+                    async_io: true,
+                    num_threads: 0,
+                },
+            },
+            optimization: OptimizationConfig {
+                enable_join_planning: true,
+                enable_sip_rewriting: true,
+                enable_subplan_sharing: true,
+                enable_boolean_specialization: true,
+            },
+            logging: LoggingConfig {
+                level: "info".to_string(),
+                format: "text".to_string(),
+            },
+            http: HttpConfig::default(),
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        PerformanceConfig {
+            initial_capacity: default_initial_capacity(),
+            batch_size: default_batch_size(),
+            async_io: default_async_io(),
+            num_threads: 0, // 0 = use all available CPU cores
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        LoggingConfig {
+            level: default_log_level(),
+            format: default_log_format(),
+        }
+    }
+}
+
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        HttpConfig {
+            enabled: true,
+            host: default_http_host(),
+            port: default_http_port(),
+            cors_origins: Vec::new(),
+            gui: GuiConfig::default(),
+            auth: AuthConfig::default(),
+        }
+    }
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        GuiConfig {
+            enabled: true,
+            static_dir: default_gui_static_dir(),
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig {
+            enabled: false,
+            jwt_secret: default_jwt_secret(),
+            session_timeout_secs: default_session_timeout(),
+        }
+    }
+}
+
+
