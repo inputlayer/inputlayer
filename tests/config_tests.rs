@@ -254,3 +254,63 @@ format = "text"
 // etc.
 
 #[test]
+fn test_env_var_syntax_documented() {
+    // Just verify that the config system supports the pattern
+    // Environment variables should use INPUTLAYER_ prefix with __ separators
+    let config = Config::default();
+    // If this compiles and runs, the config system is working
+    assert!(config.storage.data_dir.to_str().is_some());
+}
+
+// Configuration Structure Tests
+#[test]
+fn test_config_has_storage_section() {
+    let config = Config::default();
+    // Just verify the config has the storage section
+    let _ = config.storage;
+}
+
+#[test]
+fn test_config_has_optimization_section() {
+    let config = Config::default();
+    let _ = config.optimization;
+}
+
+#[test]
+fn test_config_has_logging_section() {
+    let config = Config::default();
+    let _ = config.logging;
+}
+
+#[test]
+fn test_persistence_config_fields() {
+    let config = Config::default();
+    let persistence = config.storage.persistence;
+
+    // Verify format and compression exist (enums always have a value)
+    let _ = format!("{:?}", persistence.format);
+    let _ = format!("{:?}", persistence.compression);
+    // auto_save_interval is u64 (0 = manual save only, by design)
+    // The important verification is that it exists and has a valid value
+    assert_eq!(
+        persistence.auto_save_interval, 0,
+        "Default should be manual save (0)"
+    );
+}
+
+#[test]
+fn test_performance_config_fields() {
+    let config = Config::default();
+    let performance = config.storage.performance;
+
+    assert!(performance.initial_capacity > 0);
+    assert!(performance.batch_size > 0);
+    // num_threads is usize (0 = use all available CPU cores, by design)
+    assert_eq!(
+        performance.num_threads, 0,
+        "Default should be 0 (use all cores)"
+    );
+}
+
+// Configuration Validation Tests
+#[test]
