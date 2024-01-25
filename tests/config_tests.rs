@@ -67,7 +67,6 @@ fn test_config_default_performance_settings() {
 
 #[test]
 fn test_config_default_optimization_enabled() {
-    // FIXME: extract to named variable
     let config = Config::default();
     assert!(config.optimization.enable_join_planning);
     assert!(config.optimization.enable_sip_rewriting);
@@ -122,7 +121,6 @@ format = "json"
     fs::write(&config_path, config_content).unwrap();
 
     // Change to temp directory to load config
-    // FIXME: extract to named variable
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(temp.path()).unwrap();
 
@@ -134,10 +132,10 @@ format = "json"
     // Verify loaded values
     assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/test_data"));
     assert_eq!(config.storage.default_knowledge_graph, "test_db");
-    assert!(config.storage.auto_create_knowledge_graphs.clone());
+    assert!(config.storage.auto_create_knowledge_graphs);
     // Check format and compression via Debug string
     assert!(format!("{:?}", config.storage.persistence.format).contains("Csv"));
-    assert!(format!("{:?}", config.storage.persistence.compression.clone()).contains("Gzip"));
+    assert!(format!("{:?}", config.storage.persistence.compression).contains("Gzip"));
     assert_eq!(config.storage.persistence.auto_save_interval, 60);
     assert_eq!(config.storage.performance.initial_capacity, 5000);
     assert_eq!(config.storage.performance.batch_size, 500);
@@ -148,5 +146,111 @@ format = "json"
     assert_eq!(config.logging.level, "debug");
     assert_eq!(config.logging.format, "json");
 }
+
+#[test]
+fn test_load_missing_config_file() {
+    let temp = TempDir::new().unwrap();
+    let original_dir = env::current_dir().unwrap();
+    env::set_current_dir(temp.path()).unwrap();
+
+    // Config::load() returns an error when no config file exists
+    // (it doesn't have built-in defaults, so at least one config source is required)
+    let result = Config::load();
+
+    env::set_current_dir(original_dir).unwrap();
+
+    // Config::load() requires at least one config source - returns error if missing
+    // Use Config::default() if you need defaults without a config file
+    assert!(
+        result.is_err(),
+        "Config::load() should return error when no config file exists"
+    );
+}
+
+// Configuration Merging Tests
+#[test]
+#[ignore = "Requires --test-threads=1 due to directory change"]
+fn test_config_local_overrides_base() {
+    let temp = TempDir::new().unwrap();
+
+    // Create base config.toml with complete config
+    let base_config = r#"
+[storage]
+data_dir = "./base_data"
+default_knowledge_graph = "base_db"
+
+[storage.persistence]
+format = "parquet"
+compression = "snappy"
+auto_save_interval = 0
+
+[storage.performance]
+initial_capacity = 10000
+batch_size = 1000
+async_io = true
+num_threads = 0
+
+[optimization]
+enable_join_planning = true
+enable_sip_rewriting = true
+enable_subplan_sharing = true
+enable_boolean_specialization = false
+
+[logging]
+level = "info"
+format = "text"
+"#;
+    fs::write(temp.path().join("config.toml"), base_config).unwrap();
+
+    // Create config.local.toml with partial override (just data_dir)
+    let local_config = r#"
+[storage]
+data_dir = "./local_data"
+default_knowledge_graph = "base_db"
+
+[storage.persistence]
+format = "parquet"
+compression = "snappy"
+
+[storage.performance]
+initial_capacity = 10000
+batch_size = 1000
+async_io = true
+num_threads = 0
+
+[optimization]
+enable_join_planning = true
+enable_sip_rewriting = true
+enable_subplan_sharing = true
+
+[logging]
+level = "info"
+format = "text"
+"#;
+    fs::write(temp.path().join("config.local.toml"), local_config).unwrap();
+
+    let original_dir = env::current_dir().unwrap();
+    env::set_current_dir(temp.path()).unwrap();
+
+    let config = Config::load().unwrap();
+
+    env::set_current_dir(original_dir).unwrap();
+
+    // data_dir should be from config.local.toml
+    assert_eq!(config.storage.data_dir, PathBuf::from("./local_data"));
+    // default_knowledge_graph should be from both (same value)
+    assert_eq!(config.storage.default_knowledge_graph, "base_db");
+}
+
+// Environment Variable Override Tests
+//
+// NOTE: Environment variable override tests are disabled because they
+// interfere with other tests when run in parallel. The functionality
+// is tested by the examples and can be verified manually.
+//
+// The Config::load() function does support env var overrides via Figment:
+// - INPUTLAYER_STORAGE__DATA_DIR=/path
+// - INPUTLAYER_STORAGE__PERFORMANCE__NUM_THREADS=8
+// etc.
 
 #[test]
