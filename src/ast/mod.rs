@@ -184,3 +184,244 @@ pub enum BuiltinFunc {
     MaxVal,
 }
 
+impl BuiltinFunc {
+    /// Parse a built-in function name
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "euclidean" => Some(BuiltinFunc::Euclidean),
+            "cosine" => Some(BuiltinFunc::Cosine),
+            "dot" => Some(BuiltinFunc::DotProduct),
+            "manhattan" => Some(BuiltinFunc::Manhattan),
+            "lsh_bucket" => Some(BuiltinFunc::LshBucket),
+            "normalize" => Some(BuiltinFunc::VecNormalize),
+            "vec_dim" => Some(BuiltinFunc::VecDim),
+            "vec_add" => Some(BuiltinFunc::VecAdd),
+            "vec_scale" => Some(BuiltinFunc::VecScale),
+            // Temporal functions
+            "time_now" => Some(BuiltinFunc::TimeNow),
+            "time_diff" => Some(BuiltinFunc::TimeDiff),
+            "time_add" => Some(BuiltinFunc::TimeAdd),
+            "time_sub" => Some(BuiltinFunc::TimeSub),
+            "time_decay" => Some(BuiltinFunc::TimeDecay),
+            "time_decay_linear" => Some(BuiltinFunc::TimeDecayLinear),
+            "time_before" => Some(BuiltinFunc::TimeBefore),
+            "time_after" => Some(BuiltinFunc::TimeAfter),
+            "time_between" => Some(BuiltinFunc::TimeBetween),
+            "within_last" => Some(BuiltinFunc::WithinLast),
+            "intervals_overlap" => Some(BuiltinFunc::IntervalsOverlap),
+            "interval_contains" => Some(BuiltinFunc::IntervalContains),
+            "interval_duration" => Some(BuiltinFunc::IntervalDuration),
+            "point_in_interval" => Some(BuiltinFunc::PointInInterval),
+            // Quantization functions
+            "quantize_linear" => Some(BuiltinFunc::QuantizeLinear),
+            "quantize_symmetric" => Some(BuiltinFunc::QuantizeSymmetric),
+            "dequantize" => Some(BuiltinFunc::Dequantize),
+            "dequantize_scaled" => Some(BuiltinFunc::DequantizeScaled),
+            // Int8 distance functions
+            "euclidean_int8" => Some(BuiltinFunc::EuclideanInt8),
+            "cosine_int8" => Some(BuiltinFunc::CosineInt8),
+            "dot_int8" => Some(BuiltinFunc::DotProductInt8),
+            "manhattan_int8" => Some(BuiltinFunc::ManhattanInt8),
+            // Multi-probe LSH
+            "lsh_probes" => Some(BuiltinFunc::LshProbes),
+            "lsh_multi_probe" => Some(BuiltinFunc::LshMultiProbe),
+            // Math utilities
+            "abs_int64" | "abs_i64" => Some(BuiltinFunc::AbsInt64),
+            "abs_float64" | "abs_f64" => Some(BuiltinFunc::AbsFloat64),
+            "abs" => Some(BuiltinFunc::Abs),
+            "sqrt" => Some(BuiltinFunc::Sqrt),
+            "pow" | "power" => Some(BuiltinFunc::Pow),
+            "log" | "ln" => Some(BuiltinFunc::Log),
+            "exp" => Some(BuiltinFunc::Exp),
+            "sin" => Some(BuiltinFunc::Sin),
+            "cos" => Some(BuiltinFunc::Cos),
+            "tan" => Some(BuiltinFunc::Tan),
+            "floor" => Some(BuiltinFunc::Floor),
+            "ceil" | "ceiling" => Some(BuiltinFunc::Ceil),
+            "sign" | "signum" => Some(BuiltinFunc::Sign),
+            // String functions
+            "len" | "length" | "strlen" => Some(BuiltinFunc::Len),
+            "upper" | "uppercase" | "toupper" => Some(BuiltinFunc::Upper),
+            "lower" | "lowercase" | "tolower" => Some(BuiltinFunc::Lower),
+            "trim" => Some(BuiltinFunc::Trim),
+            "substr" | "substring" => Some(BuiltinFunc::Substr),
+            "replace" => Some(BuiltinFunc::Replace),
+            "concat" | "string_concat" => Some(BuiltinFunc::Concat),
+            "min_val" | "min_int64" | "min_float64" | "min" => Some(BuiltinFunc::MinVal),
+            "max_val" | "max_int64" | "max_float64" | "max" => Some(BuiltinFunc::MaxVal),
+            "euclidean_distance" => Some(BuiltinFunc::Euclidean),
+            _ => None,
+        }
+    }
+
+    /// Get the expected number of arguments
+    pub fn arity(&self) -> usize {
+        match self {
+            BuiltinFunc::Euclidean
+            | BuiltinFunc::Cosine
+            | BuiltinFunc::DotProduct
+            | BuiltinFunc::Manhattan
+            | BuiltinFunc::VecAdd
+            | BuiltinFunc::VecScale => 2,
+            BuiltinFunc::LshBucket => 3, // (vector, table_idx, num_hyperplanes)
+            BuiltinFunc::VecNormalize | BuiltinFunc::VecDim => 1,
+            // Temporal functions
+            BuiltinFunc::TimeNow => 0,
+            BuiltinFunc::TimeDiff
+            | BuiltinFunc::TimeAdd
+            | BuiltinFunc::TimeSub
+            | BuiltinFunc::TimeBefore
+            | BuiltinFunc::TimeAfter
+            | BuiltinFunc::IntervalDuration => 2,
+            BuiltinFunc::TimeDecay
+            | BuiltinFunc::TimeDecayLinear
+            | BuiltinFunc::TimeBetween
+            | BuiltinFunc::WithinLast
+            | BuiltinFunc::PointInInterval => 3,
+            BuiltinFunc::IntervalsOverlap | BuiltinFunc::IntervalContains => 4,
+            // Quantization functions
+            BuiltinFunc::QuantizeLinear
+            | BuiltinFunc::QuantizeSymmetric
+            | BuiltinFunc::Dequantize => 1,
+            BuiltinFunc::DequantizeScaled => 2,
+            // Int8 distance functions
+            BuiltinFunc::EuclideanInt8
+            | BuiltinFunc::CosineInt8
+            | BuiltinFunc::DotProductInt8
+            | BuiltinFunc::ManhattanInt8 => 2,
+            // Multi-probe LSH
+            BuiltinFunc::LshProbes => 3, // (bucket, num_hp, num_probes)
+            BuiltinFunc::LshMultiProbe => 4, // (v, table_idx, num_hp, num_probes)
+            // Math utilities
+            BuiltinFunc::AbsInt64
+            | BuiltinFunc::AbsFloat64
+            | BuiltinFunc::Abs
+            | BuiltinFunc::Sqrt
+            | BuiltinFunc::Log
+            | BuiltinFunc::Exp
+            | BuiltinFunc::Sin
+            | BuiltinFunc::Cos
+            | BuiltinFunc::Tan
+            | BuiltinFunc::Floor
+            | BuiltinFunc::Ceil
+            | BuiltinFunc::Sign => 1,
+            BuiltinFunc::Pow => 2,
+            // String functions
+            BuiltinFunc::Len | BuiltinFunc::Upper | BuiltinFunc::Lower | BuiltinFunc::Trim => 1,
+            BuiltinFunc::Substr | BuiltinFunc::Replace | BuiltinFunc::Concat => 3, // Concat takes 2-3 args, we report 3 but allow variable
+            BuiltinFunc::MinVal | BuiltinFunc::MaxVal => 2,
+        }
+    }
+
+    /// Get the string representation of the function name
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BuiltinFunc::Euclidean => "euclidean",
+            BuiltinFunc::Cosine => "cosine",
+            BuiltinFunc::DotProduct => "dot",
+            BuiltinFunc::Manhattan => "manhattan",
+            BuiltinFunc::LshBucket => "lsh_bucket",
+            BuiltinFunc::VecNormalize => "normalize",
+            BuiltinFunc::VecDim => "vec_dim",
+            BuiltinFunc::VecAdd => "vec_add",
+            BuiltinFunc::VecScale => "vec_scale",
+            // Temporal functions
+            BuiltinFunc::TimeNow => "time_now",
+            BuiltinFunc::TimeDiff => "time_diff",
+            BuiltinFunc::TimeAdd => "time_add",
+            BuiltinFunc::TimeSub => "time_sub",
+            BuiltinFunc::TimeDecay => "time_decay",
+            BuiltinFunc::TimeDecayLinear => "time_decay_linear",
+            BuiltinFunc::TimeBefore => "time_before",
+            BuiltinFunc::TimeAfter => "time_after",
+            BuiltinFunc::TimeBetween => "time_between",
+            BuiltinFunc::WithinLast => "within_last",
+            BuiltinFunc::IntervalsOverlap => "intervals_overlap",
+            BuiltinFunc::IntervalContains => "interval_contains",
+            BuiltinFunc::IntervalDuration => "interval_duration",
+            BuiltinFunc::PointInInterval => "point_in_interval",
+            // Quantization functions
+            BuiltinFunc::QuantizeLinear => "quantize_linear",
+            BuiltinFunc::QuantizeSymmetric => "quantize_symmetric",
+            BuiltinFunc::Dequantize => "dequantize",
+            BuiltinFunc::DequantizeScaled => "dequantize_scaled",
+            // Int8 distance functions
+            BuiltinFunc::EuclideanInt8 => "euclidean_int8",
+            BuiltinFunc::CosineInt8 => "cosine_int8",
+            BuiltinFunc::DotProductInt8 => "dot_int8",
+            BuiltinFunc::ManhattanInt8 => "manhattan_int8",
+            // Multi-probe LSH
+            BuiltinFunc::LshProbes => "lsh_probes",
+            BuiltinFunc::LshMultiProbe => "lsh_multi_probe",
+            // Math utilities
+            BuiltinFunc::AbsInt64 => "abs_int64",
+            BuiltinFunc::AbsFloat64 => "abs_float64",
+            BuiltinFunc::Abs => "abs",
+            BuiltinFunc::Sqrt => "sqrt",
+            BuiltinFunc::Pow => "pow",
+            BuiltinFunc::Log => "log",
+            BuiltinFunc::Exp => "exp",
+            BuiltinFunc::Sin => "sin",
+            BuiltinFunc::Cos => "cos",
+            BuiltinFunc::Tan => "tan",
+            BuiltinFunc::Floor => "floor",
+            BuiltinFunc::Ceil => "ceil",
+            BuiltinFunc::Sign => "sign",
+            // String functions
+            BuiltinFunc::Len => "len",
+            BuiltinFunc::Upper => "upper",
+            BuiltinFunc::Lower => "lower",
+            BuiltinFunc::Trim => "trim",
+            BuiltinFunc::Substr => "substr",
+            BuiltinFunc::Replace => "replace",
+            BuiltinFunc::Concat => "concat",
+            BuiltinFunc::MinVal => "min_val",
+            BuiltinFunc::MaxVal => "max_val",
+        }
+    }
+}
+
+/// Arithmetic operators for expressions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArithOp {
+    /// Addition (+)
+    Add,
+    /// Subtraction (-)
+    Sub,
+    /// Multiplication (*)
+    Mul,
+    /// Division (/)
+    Div,
+    /// Modulo (%)
+    Mod,
+}
+
+impl ArithOp {
+    /// Parse an arithmetic operator from a string
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "+" => Some(ArithOp::Add),
+            "-" => Some(ArithOp::Sub),
+            "*" => Some(ArithOp::Mul),
+            "/" => Some(ArithOp::Div),
+            "%" => Some(ArithOp::Mod),
+            _ => None,
+        }
+    }
+
+    /// Get the string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ArithOp::Add => "+",
+            ArithOp::Sub => "-",
+            ArithOp::Mul => "*",
+            ArithOp::Div => "/",
+            ArithOp::Mod => "%",
+        }
+    }
+}
+
+/// Arithmetic expression tree
+///
+/// Represents arithmetic expressions like `d + 1` or `x * y + z`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
