@@ -425,3 +425,92 @@ impl ArithOp {
 ///
 /// Represents arithmetic expressions like `d + 1` or `x * y + z`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ArithExpr {
+    /// A variable reference
+    Variable(String),
+    /// A constant value
+    Constant(i64),
+    /// A float constant value (stored as f64 bit pattern to allow Eq/Hash)
+    FloatConstant(u64),
+    /// Binary operation
+    Binary {
+        op: ArithOp,
+        left: Box<ArithExpr>,
+        right: Box<ArithExpr>,
+    },
+}
+
+impl ArithExpr {
+    /// Create a float constant from an f64 value
+    pub fn from_float(f: f64) -> Self {
+        ArithExpr::FloatConstant(f.to_bits())
+    }
+
+    /// Get the f64 value from a FloatConstant
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            ArithExpr::FloatConstant(bits) => Some(f64::from_bits(*bits)),
+            ArithExpr::Constant(i) => Some(*i as f64),
+            _ => None,
+        }
+    }
+
+    /// Get all variables referenced in this expression
+    pub fn variables(&self) -> std::collections::HashSet<String> {
+        let mut vars = std::collections::HashSet::new();
+        self.collect_variables(&mut vars);
+        vars
+    }
+
+    fn collect_variables(&self, vars: &mut std::collections::HashSet<String>) {
+        match self {
+            ArithExpr::Variable(name) => {
+                vars.insert(name.clone());
+            }
+            ArithExpr::Constant(_) | ArithExpr::FloatConstant(_) => {}
+            ArithExpr::Binary { left, right, .. } => {
+                left.collect_variables(vars);
+                right.collect_variables(vars);
+            }
+        }
+    }
+
+    /// Check if this is a simple variable or constant
+    pub fn is_simple(&self) -> bool {
+        matches!(
+            self,
+            ArithExpr::Variable(_) | ArithExpr::Constant(_) | ArithExpr::FloatConstant(_)
+        )
+    }
+
+    /// Try to evaluate as a constant if all values are known
+    pub fn try_eval_constant(&self) -> Option<i64> {
+        match self {
+            ArithExpr::Constant(v) => Some(*v),
+            ArithExpr::FloatConstant(_) => None, // Can't evaluate floats as integer
+            ArithExpr::Variable(_) => None,
+            ArithExpr::Binary { op, left, right } => {
+                let l = left.try_eval_constant()?;
+                let r = right.try_eval_constant()?;
+                Some(match op {
+                    ArithOp::Add => l + r,
+                    ArithOp::Sub => l - r,
+                    ArithOp::Mul => l * r,
+                    ArithOp::Div => {
+                        if r == 0 {
+                            return None;
+                        }
+                        l / r
+                    }
+                    ArithOp::Mod => {
+                        if r == 0 {
+                            return None;
+                        }
+                        l % r
+                    }
+                })
+            }
+        }
+    }
+}
+
