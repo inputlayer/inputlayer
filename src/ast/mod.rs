@@ -514,3 +514,106 @@ impl ArithExpr {
     }
 }
 
+impl AggregateFunc {
+    /// Parse an aggregate function name (for simple aggregates like count, sum, etc.)
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "count" => Some(AggregateFunc::Count),
+            "count_distinct" | "countdistinct" => Some(AggregateFunc::CountDistinct),
+            "sum" => Some(AggregateFunc::Sum),
+            "min" => Some(AggregateFunc::Min),
+            "max" => Some(AggregateFunc::Max),
+            "avg" => Some(AggregateFunc::Avg),
+            _ => None,
+        }
+    }
+
+    /// Parse `top_k` with parameters: `top_k`<10, score> or `top_k`<10, score, desc>
+    pub fn parse_top_k(params: &str) -> Option<Self> {
+        let parts: Vec<&str> = params.split(',').map(str::trim).collect();
+        if parts.len() < 2 {
+            return None;
+        }
+
+        let k: usize = parts[0].parse().ok()?;
+        let order_var = parts[1].to_string();
+        let descending = parts.get(2).is_some_and(|s| s.to_lowercase() == "desc");
+
+        Some(AggregateFunc::TopK {
+            k,
+            order_var,
+            descending,
+        })
+    }
+
+    /// Parse `top_k_threshold` with parameters: `top_k_threshold`<10, score, 0.5> or `top_k_threshold`<10, score, 0.5, desc>
+    pub fn parse_top_k_threshold(params: &str) -> Option<Self> {
+        let parts: Vec<&str> = params.split(',').map(str::trim).collect();
+        if parts.len() < 3 {
+            return None;
+        }
+
+        let k: usize = parts[0].parse().ok()?;
+        let order_var = parts[1].to_string();
+        let threshold: f64 = parts[2].parse().ok()?;
+        let descending = parts.get(3).is_some_and(|s| s.to_lowercase() == "desc");
+
+        Some(AggregateFunc::TopKThreshold {
+            k,
+            order_var,
+            threshold,
+            descending,
+        })
+    }
+
+    /// Parse `within_radius` with parameters: `within_radius`<dist, 0.5>
+    pub fn parse_within_radius(params: &str) -> Option<Self> {
+        let parts: Vec<&str> = params.split(',').map(str::trim).collect();
+        if parts.len() < 2 {
+            return None;
+        }
+
+        let distance_var = parts[0].to_string();
+        let max_distance: f64 = parts[1].parse().ok()?;
+
+        Some(AggregateFunc::WithinRadius {
+            distance_var,
+            max_distance,
+        })
+    }
+
+    /// Check if this is a ranking aggregate (affects output cardinality)
+    pub fn is_ranking(&self) -> bool {
+        matches!(
+            self,
+            AggregateFunc::TopK { .. }
+                | AggregateFunc::TopKThreshold { .. }
+                | AggregateFunc::WithinRadius { .. }
+        )
+    }
+}
+
+/// Represents a variable or constant in Datalog
+#[derive(Debug, Clone, PartialEq)]
+pub enum Term {
+    Variable(String), // e.g., "x", "y", "z"
+    Constant(i64),    // e.g., 42, 100
+    Placeholder,      // For parser - represents "_" in Datalog
+    /// Aggregation term: `count<x>`, `sum<y>`, `min<z>`, `max<z>`, `avg<z>`
+    Aggregate(AggregateFunc, String), // (function, variable_name)
+    /// Arithmetic expression term: `d + 1`, `x * y`, etc.
+    Arithmetic(ArithExpr),
+    /// Function call term: `euclidean(v1, v2)`, `normalize(v)`, etc.
+    FunctionCall(BuiltinFunc, Vec<Term>),
+    /// Vector literal: `[1.0, 2.0, 3.0]`
+    VectorLiteral(Vec<f64>),
+    /// Float constant for function arguments
+    FloatConstant(f64),
+    /// String constant
+    StringConstant(String),
+    /// Field access on a record variable: `U.id`, `P.amount`
+    FieldAccess(Box<Term>, String),
+    /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
+    RecordPattern(Vec<(String, Term)>),
+}
+
