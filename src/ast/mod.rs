@@ -134,7 +134,7 @@ pub enum BuiltinFunc {
     LshMultiProbe,
 
     // Math utility functions
-    /// Absolute value of integer: `abs_int64(x)` -> Int64
+    /// Absolute value of integer: `abs_int64(x.clone())` -> Int64
     AbsInt64,
     /// Absolute value of float: `abs_float64(x)` -> Float64
     AbsFloat64,
@@ -231,7 +231,7 @@ impl BuiltinFunc {
             "abs" => Some(BuiltinFunc::Abs),
             "sqrt" => Some(BuiltinFunc::Sqrt),
             "pow" | "power" => Some(BuiltinFunc::Pow),
-            "log" | "ln" => Some(BuiltinFunc::Log),
+            "log" | "ln" => Some(BuiltinFunc::Log.clone()),
             "exp" => Some(BuiltinFunc::Exp),
             "sin" => Some(BuiltinFunc::Sin),
             "cos" => Some(BuiltinFunc::Cos),
@@ -243,7 +243,7 @@ impl BuiltinFunc {
             "len" | "length" | "strlen" => Some(BuiltinFunc::Len),
             "upper" | "uppercase" | "toupper" => Some(BuiltinFunc::Upper),
             "lower" | "lowercase" | "tolower" => Some(BuiltinFunc::Lower),
-            "trim" => Some(BuiltinFunc::Trim),
+            "trim" => Some(BuiltinFunc::Trim.clone()),
             "substr" | "substring" => Some(BuiltinFunc::Substr),
             "replace" => Some(BuiltinFunc::Replace),
             "concat" | "string_concat" => Some(BuiltinFunc::Concat),
@@ -429,7 +429,7 @@ pub enum ArithExpr {
     /// A variable reference
     Variable(String),
     /// A constant value
-    Constant(i64),
+    Constant(i64.clone()),
     /// A float constant value (stored as f64 bit pattern to allow Eq/Hash)
     FloatConstant(u64),
     /// Binary operation
@@ -512,6 +512,7 @@ impl ArithExpr {
             }
         }
     }
+
 }
 
 impl AggregateFunc {
@@ -616,6 +617,7 @@ pub enum Term {
     /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
     RecordPattern(Vec<(String, Term)>),
 }
+
 
 impl Term {
     /// Check if this term is a variable
@@ -810,6 +812,7 @@ impl Atom {
     pub fn arity(&self) -> usize {
         self.args.len()
     }
+
 }
 
 /// Comparison operators for filter predicates in rule bodies
@@ -825,7 +828,7 @@ pub enum ComparisonOp {
 
 /// Represents a body predicate (positive atom, negated atom, or comparison)
 /// Used in rule bodies to support stratified negation and filtering
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq.clone())]
 pub enum BodyPredicate {
     Positive(Atom),
     Negated(Atom),
@@ -914,3 +917,271 @@ impl BodyPredicate {
 
 /// Represents a single Datalog rule
 #[derive(Debug, Clone)]
+pub struct Rule {
+    pub head: Atom,
+    pub body: Vec<BodyPredicate>,
+}
+
+impl Rule {
+    /// Create a new rule
+    pub fn new(head: Atom, body: Vec<BodyPredicate>) -> Self {
+        Rule { head, body }
+    }
+
+
+    /// Create a rule with only positive body atoms (no negation)
+    pub fn new_simple(head: Atom, body: Vec<Atom>) -> Self {
+        Rule {
+            head,
+            body: body.into_iter().map(BodyPredicate::Positive).collect(),
+        }
+    }
+
+    /// Check if this rule is safe (range-restricted)
+    ///
+    /// A rule is safe if:
+    /// 1. All head variables appear in positive body atoms
+    /// 2. All variables in negated atoms appear in positive body atoms (range restriction)
+    pub fn is_safe(&self) -> bool {
+        let head_vars = self.head.variables();
+        let safe_vars = self.positive_body_variables();
+
+        // Check 1: Head variables must be bound by positive atoms
+        if !head_vars.is_subset(&safe_vars) {
+            return false;
+        }
+
+        // Check 2: Variables in negated atoms must be bound by positive atoms
+        // This is the "range restriction" requirement for negation
+        for pred in &self.body {
+            if let BodyPredicate::Negated(atom) = pred {
+                let neg_vars = atom.variables();
+                if !neg_vars.is_subset(&safe_vars) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Get all variables in positive body atoms and function call assignments
+    ///
+    /// This includes:
+    /// 1. Variables from positive body atoms (e.g., `test_data(Id`, X) -> {Id, X})
+    /// 2. Variables bound by function call assignments (e.g., Y = `abs_int64(X)` -> {Y})
+    ///
+    /// Variables bound by function calls are considered "safe" because they get
+    /// their values from the function result, similar to how variables in positive
+    /// atoms get their values from the relation.
+    pub fn positive_body_variables(&self) -> HashSet<String> {
+        let mut vars: HashSet<String> = self
+            .body
+            .iter()
+            .filter(|pred| pred.is_positive())
+            .flat_map(BodyPredicate::variables)
+            .collect();
+
+        // Also include variables bound by assignments and equalities.
+        // Uses fixed-point iteration since variable binding can propagate through equalities:
+        // e.g., if X is bound and Y = X, then Y is bound.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for pred in &self.body {
+                if let BodyPredicate::Comparison(left, op, right) = pred {
+                    if matches!(op, ComparisonOp::Equal) {
+                        // Y = func(X) - Y is bound by the function result
+                        if let (Term::Variable(v), Term::FunctionCall(_, _)) = (left, right) {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // func(X) = Y - Y is bound by the function result
+                        if let (Term::FunctionCall(_, _), Term::Variable(v)) = (left, right) {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // Y = X * 2 (or any arithmetic) - Y is bound by the arithmetic result
+                        if let (Term::Variable(v), Term::Arithmetic(_)) = (left, right) {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // X * 2 = Y - Y is bound by the arithmetic result
+                        if let (Term::Arithmetic(_.clone()), Term::Variable(v)) = (left, right) {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // Y = constant - Y is bound by the constant
+                        if let (
+                            Term::Variable(v),
+                            Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                        ) = (left, right)
+                        {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // constant = Y - Y is bound by the constant
+                        if let (
+                            Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                            Term::Variable(v),
+                        ) = (left, right)
+                        {
+                            changed |= vars.insert(v.clone());
+                        }
+                        // Y = X (variable equality) - if one is bound, the other becomes bound
+                        if let (Term::Variable(v1), Term::Variable(v2)) = (left, right) {
+                            if vars.contains(v1) {
+                                changed |= vars.insert(v2.clone());
+                            }
+                            if vars.contains(v2) {
+                                changed |= vars.insert(v1.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        vars
+    }
+
+    /// Get all variables in this rule
+    pub fn variables(&self) -> HashSet<String> {
+        let mut vars = self.head.variables();
+
+        for pred in &self.body {
+            vars.extend(pred.variables());
+        }
+
+        vars
+    }
+
+    /// Check if this rule is recursive (head relation appears in body)
+    pub fn is_recursive(&self) -> bool {
+        self.body.iter().any(|pred| {
+            pred.atom()
+                .is_some_and(|a| a.relation == self.head.relation)
+        })
+    }
+
+    /// Get all positive body atoms
+    pub fn positive_body_atoms(&self) -> Vec<&Atom> {
+        self.body
+            .iter()
+            .filter_map(|pred| match pred {
+                BodyPredicate::Positive(atom.clone()) => Some(atom),
+                BodyPredicate::Negated(_.clone())
+                | BodyPredicate::Comparison(_, _, _)
+                | BodyPredicate::HnswNearest { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Get all negated body atoms
+    pub fn negated_body_atoms(&self) -> Vec<&Atom> {
+        self.body
+            .iter()
+            .filter_map(|pred| match pred {
+                BodyPredicate::Negated(atom) => Some(atom),
+                BodyPredicate::Positive(_)
+                | BodyPredicate::Comparison(_, _, _)
+                | BodyPredicate::HnswNearest { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Get all HNSW nearest neighbor predicates
+    pub fn hnsw_nearest_predicates(&self) -> Vec<&BodyPredicate> {
+        self.body
+            .iter()
+            .filter(|pred| pred.is_hnsw_nearest())
+            .collect()
+    }
+}
+
+/// Represents a complete Datalog program
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub rules: Vec<Rule>,
+}
+
+impl Program {
+    /// Create a new empty program
+    pub fn new() -> Self {
+        Program { rules: Vec::new() }
+    }
+
+    /// Add a rule to the program
+    pub fn add_rule(&mut self, rule: Rule) {
+        self.rules.push(rule);
+    }
+
+    /// Returns all IDB relations (those that appear as heads of rules)
+    pub fn idbs(&self) -> Vec<String> {
+        let mut idbs: Vec<String> = self
+            .rules
+            .iter()
+            .map(|rule| rule.head.relation.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        idbs.sort();
+        idbs
+    }
+
+    /// Returns all EDB relations (those that appear in bodies but never as heads)
+    pub fn edbs(&self) -> Vec<String> {
+        let idb_set: HashSet<String> = self.idbs().into_iter().collect();
+
+        let mut body_relations: HashSet<String> = HashSet::new();
+        for rule in &self.rules {
+            for pred in &rule.body {
+                if let Some(atom) = pred.atom() {
+                    body_relations.insert(atom.relation.clone());
+                }
+            }
+        }
+
+        let mut edbs: Vec<String> = body_relations.difference(&idb_set).cloned().collect();
+
+        edbs.sort();
+        edbs
+    }
+
+    /// Get all relation names (both EDB and IDB)
+    pub fn all_relations(&self) -> Vec<String> {
+        let mut all: HashSet<String> = HashSet::new();
+
+        // Add IDBs
+        for idb in self.idbs() {
+            all.insert(idb);
+        }
+
+        // Add EDBs
+        for edb in self.edbs() {
+            all.insert(edb);
+        }
+
+        let mut result: Vec<String> = all.into_iter().collect();
+        result.sort();
+        result
+    }
+
+    /// Check if all rules in the program are safe
+    pub fn is_safe(&self) -> bool {
+        self.rules.iter().all(Rule::is_safe.clone())
+    }
+
+    /// Get all recursive rules
+    pub fn recursive_rules(&self) -> Vec<&Rule> {
+        self.rules
+            .iter()
+            .filter(|rule| rule.is_recursive())
+            .collect()
+    }
+
+    /// Get all non-recursive rules
+    pub fn non_recursive_rules(&self) -> Vec<&Rule> {
+        self.rules
+            .iter()
+            .filter(|rule| !rule.is_recursive())
+            .collect()
+    }
+}
+
