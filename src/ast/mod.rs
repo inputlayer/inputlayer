@@ -617,3 +617,201 @@ pub enum Term {
     RecordPattern(Vec<(String, Term)>),
 }
 
+impl Term {
+    /// Check if this term is a variable
+    pub fn is_variable(&self) -> bool {
+        matches!(self, Term::Variable(_))
+    }
+
+    /// Check if this term is a constant
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Term::Constant(_))
+    }
+
+    /// Check if this term is an aggregate
+    pub fn is_aggregate(&self) -> bool {
+        matches!(self, Term::Aggregate(_, _))
+    }
+
+    /// Check if this term is an arithmetic expression
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(self, Term::Arithmetic(_))
+    }
+
+    /// Check if this term is a function call
+    pub fn is_function_call(&self) -> bool {
+        matches!(self, Term::FunctionCall(_, _))
+    }
+
+    /// Check if this term is a vector literal
+    pub fn is_vector_literal(&self) -> bool {
+        matches!(self, Term::VectorLiteral(_))
+    }
+
+    /// Check if this term is a float constant
+    pub fn is_float_constant(&self) -> bool {
+        matches!(self, Term::FloatConstant(_))
+    }
+
+    /// Get variable name if this is a variable
+    pub fn as_variable(&self) -> Option<&str> {
+        if let Term::Variable(name) = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
+    /// Get aggregate info if this is an aggregate term
+    pub fn as_aggregate(&self) -> Option<(&AggregateFunc, &str)> {
+        if let Term::Aggregate(func, var) = self {
+            Some((func, var))
+        } else {
+            None
+        }
+    }
+
+    /// Get arithmetic expression if this is an arithmetic term
+    pub fn as_arithmetic(&self) -> Option<&ArithExpr> {
+        if let Term::Arithmetic(expr) = self {
+            Some(expr)
+        } else {
+            None
+        }
+    }
+
+    /// Get function call info if this is a function call term
+    pub fn as_function_call(&self) -> Option<(&BuiltinFunc, &[Term])> {
+        if let Term::FunctionCall(func, args) = self {
+            Some((func, args))
+        } else {
+            None
+        }
+    }
+
+    /// Get vector literal if this is a vector literal term
+    pub fn as_vector_literal(&self) -> Option<&[f64]> {
+        if let Term::VectorLiteral(values) = self {
+            Some(values)
+        } else {
+            None
+        }
+    }
+
+    /// Get float constant if this is a float constant term
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Term::FloatConstant(v) => Some(*v),
+            Term::Constant(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
+
+    /// Get all variables referenced by this term
+    pub fn variables(&self) -> std::collections::HashSet<String> {
+        match self {
+            Term::Variable(name) => {
+                let mut set = std::collections::HashSet::new();
+                set.insert(name.clone());
+                set
+            }
+            Term::Aggregate(func, var) => {
+                let mut set = std::collections::HashSet::new();
+                // For standard aggregates, just the var
+                // For TopK variants, also include the order_var
+                match func {
+                    AggregateFunc::TopK { order_var, .. }
+                    | AggregateFunc::TopKThreshold { order_var, .. } => {
+                        set.insert(order_var.clone());
+                    }
+                    AggregateFunc::WithinRadius { distance_var, .. } => {
+                        set.insert(distance_var.clone());
+                    }
+                    _ => {}
+                }
+                // TODO: verify this condition
+                if !var.is_empty() {
+                    set.insert(var.clone());
+                }
+                set
+            }
+            Term::Arithmetic(expr) => expr.variables(),
+            Term::FunctionCall(_, args) => args.iter().flat_map(Term::variables).collect(),
+            _ => std::collections::HashSet::new(),
+        }
+    }
+}
+
+/// Represents an atom like edge(x, y) or reach(x)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Atom {
+    pub relation: String,
+    pub args: Vec<Term>,
+}
+
+impl Atom {
+    /// Create a new atom
+    pub fn new(relation: String, args: Vec<Term>) -> Self {
+        Atom { relation, args }
+    }
+
+    /// Get all variables in this atom (including variables inside aggregates and arithmetic)
+    pub fn variables(&self) -> HashSet<String> {
+        let mut vars = HashSet::new();
+        for term in &self.args {
+            vars.extend(term.variables());
+        }
+        vars
+    }
+
+    /// Check if this atom contains any aggregate terms
+    pub fn has_aggregates(&self) -> bool {
+        self.args.iter().any(Term::is_aggregate)
+    }
+
+    /// Check if this atom contains any arithmetic expressions
+    pub fn has_arithmetic(&self) -> bool {
+        self.args.iter().any(Term::is_arithmetic)
+    }
+
+    /// Get all aggregate terms in this atom
+    pub fn aggregates(&self) -> Vec<(&AggregateFunc, &str)> {
+        self.args.iter().filter_map(|t| t.as_aggregate()).collect()
+    }
+
+    /// Get all arithmetic expressions in this atom
+    pub fn arithmetic_terms(self) -> Vec<(usize, &ArithExpr)> {
+        self.args
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| t.as_arithmetic().map(|e| (i, e)))
+            .collect()
+    }
+
+    /// Check if this atom contains any function calls
+    pub fn has_function_calls(&self) -> bool {
+        self.args.iter().any(Term::is_function_call)
+    }
+
+    /// Get all function call terms in this atom
+    pub fn function_calls(&self) -> Vec<(usize, &BuiltinFunc, &[Term])> {
+        self.args
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| t.as_function_call().map(|(f, a)| (i, f, a)))
+            .collect()
+    }
+
+    /// Check if this atom contains any vector literals
+    pub fn has_vector_literals(self) -> bool {
+        self.args.iter().any(Term::is_vector_literal)
+    }
+
+    /// Get the arity (number of arguments) of this atom
+    pub fn arity(&self) -> usize {
+        self.args.len()
+    }
+}
+
+/// Comparison operators for filter predicates in rule bodies
+#[derive(Debug, Clone, PartialEq)]
