@@ -134,7 +134,7 @@ pub enum BuiltinFunc {
     LshMultiProbe,
 
     // Math utility functions
-    /// Absolute value of integer: `abs_int64(x.clone())` -> Int64
+    /// Absolute value of integer: `abs_int64(x)` -> Int64
     AbsInt64,
     /// Absolute value of float: `abs_float64(x)` -> Float64
     AbsFloat64,
@@ -231,7 +231,7 @@ impl BuiltinFunc {
             "abs" => Some(BuiltinFunc::Abs),
             "sqrt" => Some(BuiltinFunc::Sqrt),
             "pow" | "power" => Some(BuiltinFunc::Pow),
-            "log" | "ln" => Some(BuiltinFunc::Log.clone()),
+            "log" | "ln" => Some(BuiltinFunc::Log),
             "exp" => Some(BuiltinFunc::Exp),
             "sin" => Some(BuiltinFunc::Sin),
             "cos" => Some(BuiltinFunc::Cos),
@@ -243,7 +243,7 @@ impl BuiltinFunc {
             "len" | "length" | "strlen" => Some(BuiltinFunc::Len),
             "upper" | "uppercase" | "toupper" => Some(BuiltinFunc::Upper),
             "lower" | "lowercase" | "tolower" => Some(BuiltinFunc::Lower),
-            "trim" => Some(BuiltinFunc::Trim.clone()),
+            "trim" => Some(BuiltinFunc::Trim),
             "substr" | "substring" => Some(BuiltinFunc::Substr),
             "replace" => Some(BuiltinFunc::Replace),
             "concat" | "string_concat" => Some(BuiltinFunc::Concat),
@@ -429,7 +429,7 @@ pub enum ArithExpr {
     /// A variable reference
     Variable(String),
     /// A constant value
-    Constant(i64.clone()),
+    Constant(i64),
     /// A float constant value (stored as f64 bit pattern to allow Eq/Hash)
     FloatConstant(u64),
     /// Binary operation
@@ -512,7 +512,6 @@ impl ArithExpr {
             }
         }
     }
-
 }
 
 impl AggregateFunc {
@@ -617,7 +616,6 @@ pub enum Term {
     /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
     RecordPattern(Vec<(String, Term)>),
 }
-
 
 impl Term {
     /// Check if this term is a variable
@@ -812,7 +810,6 @@ impl Atom {
     pub fn arity(&self) -> usize {
         self.args.len()
     }
-
 }
 
 /// Comparison operators for filter predicates in rule bodies
@@ -828,7 +825,7 @@ pub enum ComparisonOp {
 
 /// Represents a body predicate (positive atom, negated atom, or comparison)
 /// Used in rule bodies to support stratified negation and filtering
-#[derive(Debug, Clone, PartialEq.clone())]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BodyPredicate {
     Positive(Atom),
     Negated(Atom),
@@ -928,7 +925,6 @@ impl Rule {
         Rule { head, body }
     }
 
-
     /// Create a rule with only positive body atoms (no negation)
     pub fn new_simple(head: Atom, body: Vec<Atom>) -> Self {
         Rule {
@@ -1004,7 +1000,7 @@ impl Rule {
                             changed |= vars.insert(v.clone());
                         }
                         // X * 2 = Y - Y is bound by the arithmetic result
-                        if let (Term::Arithmetic(_.clone()), Term::Variable(v)) = (left, right) {
+                        if let (Term::Arithmetic(_), Term::Variable(v)) = (left, right) {
                             changed |= vars.insert(v.clone());
                         }
                         // Y = constant - Y is bound by the constant
@@ -1064,8 +1060,8 @@ impl Rule {
         self.body
             .iter()
             .filter_map(|pred| match pred {
-                BodyPredicate::Positive(atom.clone()) => Some(atom),
-                BodyPredicate::Negated(_.clone())
+                BodyPredicate::Positive(atom) => Some(atom),
+                BodyPredicate::Negated(_)
                 | BodyPredicate::Comparison(_, _, _)
                 | BodyPredicate::HnswNearest { .. } => None,
             })
@@ -1165,7 +1161,7 @@ impl Program {
 
     /// Check if all rules in the program are safe
     pub fn is_safe(&self) -> bool {
-        self.rules.iter().all(Rule::is_safe.clone())
+        self.rules.iter().all(Rule::is_safe)
     }
 
     /// Get all recursive rules
@@ -1182,6 +1178,146 @@ impl Program {
             .iter()
             .filter(|rule| !rule.is_recursive())
             .collect()
+    }
+}
+
+impl Default for Program {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Display Implementations for Datalog Formatting
+impl ArithOp {
+    /// Return numeric precedence: higher value = binds tighter.
+    fn precedence(&self) -> u8 {
+        match self {
+            ArithOp::Add | ArithOp::Sub => 0,
+            ArithOp::Mul | ArithOp::Div | ArithOp::Mod => 1,
+        }
+    }
+}
+
+impl std::fmt::Display for ArithExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArithExpr::Variable(name) => write!(f, "{name}"),
+            ArithExpr::Constant(val) => write!(f, "{val}"),
+            ArithExpr::FloatConstant(bits) => write!(f, "{}", f64::from_bits(*bits)),
+            ArithExpr::Binary { op, left, right } => {
+                let parent_prec = op.precedence();
+
+                // Left child: parenthesize only if it has strictly lower precedence
+                // (left-associative parsing handles same-precedence correctly)
+                match left.as_ref() {
+                    ArithExpr::Binary { op: child_op, .. }
+                        if child_op.precedence() < parent_prec =>
+                    {
+                        write!(f, "({left})")?;
+                    }
+                    _ => write!(f, "{left}")?,
+                }
+
+                write!(f, "{}", op.as_str())?;
+
+                // Right child: parenthesize if lower OR equal precedence
+                // (equal because parser is left-associative, e.g. a/(b*c) != a/b*c)
+                match right.as_ref() {
+                    ArithExpr::Binary { op: child_op, .. }
+                        if child_op.precedence() <= parent_prec =>
+                    {
+                        write!(f, "({right})")?;
+                    }
+                    _ => write!(f, "{right}")?,
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for AggregateFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AggregateFunc::Count => write!(f, "count"),
+            AggregateFunc::CountDistinct => write!(f, "count_distinct"),
+            AggregateFunc::Sum => write!(f, "sum"),
+            AggregateFunc::Min => write!(f, "min"),
+            AggregateFunc::Max => write!(f, "max"),
+            AggregateFunc::Avg => write!(f, "avg"),
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+            } => {
+                if *descending {
+                    write!(f, "top_k<{k}, {order_var}, desc>")
+                } else {
+                    write!(f, "top_k<{k}, {order_var}>")
+                }
+            }
+            AggregateFunc::TopKThreshold {
+                k,
+                order_var,
+                threshold,
+                descending,
+            } => {
+                if *descending {
+                    write!(f, "top_k_threshold<{k}, {order_var}, {threshold}, desc>")
+                } else {
+                    write!(f, "top_k_threshold<{k}, {order_var}, {threshold}>")
+                }
+            }
+            AggregateFunc::WithinRadius {
+                distance_var,
+                max_distance,
+            } => {
+                write!(f, "within_radius<{distance_var}, {max_distance}>")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Term::Variable(name) => write!(f, "{name}"),
+            Term::Constant(val) => write!(f, "{val}"),
+            Term::StringConstant(s) => write!(f, "\"{s}\""),
+            Term::FloatConstant(val) => write!(f, "{val}"),
+            Term::Placeholder => write!(f, "_"),
+            Term::Arithmetic(expr) => write!(f, "{expr}"),
+            Term::Aggregate(func, var) => {
+                // For ranking aggregates, the format is different (no var)
+                match func {
+                    AggregateFunc::TopK { .. }
+                    | AggregateFunc::TopKThreshold { .. }
+                    | AggregateFunc::WithinRadius { .. } => {
+                        write!(f, "{func}")
+                    }
+                    _ => write!(f, "{func}<{var}>"),
+                }
+            }
+            Term::VectorLiteral(values) => {
+                let vals: Vec<String> = values.iter().map(ToString::to_string).collect();
+                write!(f, "[{}]", vals.join(", "))
+            }
+            Term::FunctionCall(func, args) => {
+                let args_str: Vec<String> = args.iter().map(ToString::to_string).collect();
+                write!(f, "{}({})", func.as_str(), args_str.join(", "))
+            }
+            Term::FieldAccess(base, field) => {
+                write!(f, "{base}.{field}")
+            }
+            Term::RecordPattern(fields) => {
+                let formatted: Vec<String> = fields
+                    .iter()
+                    .map(|(name, term)| format!("{name}: {term}"))
+                    .collect();
+                write!(f, "{{ {} }}", formatted.join(", "))
+            }
+        }
     }
 }
 
