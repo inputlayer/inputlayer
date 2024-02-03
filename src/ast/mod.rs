@@ -729,7 +729,6 @@ impl Term {
                     }
                     _ => {}
                 }
-                // TODO: verify this condition
                 if !var.is_empty() {
                     set.insert(var.clone());
                 }
@@ -780,7 +779,7 @@ impl Atom {
     }
 
     /// Get all arithmetic expressions in this atom
-    pub fn arithmetic_terms(self) -> Vec<(usize, &ArithExpr)> {
+    pub fn arithmetic_terms(&self) -> Vec<(usize, &ArithExpr)> {
         self.args
             .iter()
             .enumerate()
@@ -803,7 +802,7 @@ impl Atom {
     }
 
     /// Check if this atom contains any vector literals
-    pub fn has_vector_literals(self) -> bool {
+    pub fn has_vector_literals(&self) -> bool {
         self.args.iter().any(Term::is_vector_literal)
     }
 
@@ -815,3 +814,103 @@ impl Atom {
 
 /// Comparison operators for filter predicates in rule bodies
 #[derive(Debug, Clone, PartialEq)]
+pub enum ComparisonOp {
+    Equal,          // =
+    NotEqual,       // !=
+    LessThan,       // <
+    LessOrEqual,    // <=
+    GreaterThan,    // >
+    GreaterOrEqual, // >=
+}
+
+/// Represents a body predicate (positive atom, negated atom, or comparison)
+/// Used in rule bodies to support stratified negation and filtering
+#[derive(Debug, Clone, PartialEq)]
+pub enum BodyPredicate {
+    Positive(Atom),
+    Negated(Atom),
+    /// Comparison predicate: left op right (e.g., X = Y, X < 5)
+    Comparison(Term, ComparisonOp, Term),
+    /// HNSW nearest neighbor search: hnsw_nearest(index, query, k, id_var, dist_var)
+    /// Example: hnsw_nearest("doc_idx", QueryVec, 10, Id, Distance)
+    HnswNearest {
+        /// Name of the index (string literal)
+        index_name: String,
+        /// Query vector (can be a variable, vector literal, or column reference)
+        query: Term,
+        /// Number of neighbors to return
+        k: usize,
+        /// Variable to bind result tuple IDs
+        id_var: String,
+        /// Variable to bind distances
+        distance_var: String,
+        /// Optional ef_search override
+        ef_search: Option<usize>,
+    },
+}
+
+impl BodyPredicate {
+    /// Get the underlying atom (returns None for Comparison/HnswNearest predicates)
+    pub fn atom(&self) -> Option<&Atom> {
+        match self {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => Some(atom),
+            BodyPredicate::Comparison(_, _, _) | BodyPredicate::HnswNearest { .. } => None,
+        }
+    }
+
+    /// Check if this is a positive atom
+    pub fn is_positive(&self) -> bool {
+        matches!(self, BodyPredicate::Positive(_))
+    }
+
+    /// Check if this is a negated atom
+    pub fn is_negated(&self) -> bool {
+        matches!(self, BodyPredicate::Negated(_))
+    }
+
+    /// Check if this is a comparison predicate
+    pub fn is_comparison(&self) -> bool {
+        matches!(self, BodyPredicate::Comparison(_, _, _))
+    }
+
+    /// Check if this is an HNSW nearest neighbor predicate
+    pub fn is_hnsw_nearest(&self) -> bool {
+        matches!(self, BodyPredicate::HnswNearest { .. })
+    }
+
+    /// Get all variables in this predicate
+    pub fn variables(&self) -> HashSet<String> {
+        match self {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => atom.variables(),
+            BodyPredicate::Comparison(left, _, right) => {
+                let mut vars = HashSet::new();
+                if let Term::Variable(v) = left {
+                    vars.insert(v.clone());
+                }
+                if let Term::Variable(v) = right {
+                    vars.insert(v.clone());
+                }
+                vars
+            }
+            BodyPredicate::HnswNearest {
+                query,
+                id_var,
+                distance_var,
+                ..
+            } => {
+                let mut vars = HashSet::new();
+                // Query might be a variable
+                if let Term::Variable(v) = query {
+                    vars.insert(v.clone());
+                }
+                // id_var and distance_var are bound by this predicate
+                vars.insert(id_var.clone());
+                vars.insert(distance_var.clone());
+                vars
+            }
+        }
+    }
+}
+
+/// Represents a single Datalog rule
+#[derive(Debug, Clone)]
