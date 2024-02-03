@@ -1000,6 +1000,7 @@ impl Rule {
                             changed |= vars.insert(v.clone());
                         }
                         // X * 2 = Y - Y is bound by the arithmetic result
+                        // TODO: verify this condition
                         if let (Term::Arithmetic(_), Term::Variable(v)) = (left, right) {
                             changed |= vars.insert(v.clone());
                         }
@@ -1320,4 +1321,123 @@ impl std::fmt::Display for Term {
         }
     }
 }
+
+impl std::fmt::Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let args: Vec<String> = self.args.iter().map(ToString::to_string).collect();
+        write!(f, "{}({})", self.relation, args.join(", "))
+    }
+}
+
+impl std::fmt::Display for ComparisonOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            ComparisonOp::Equal => "=",
+            ComparisonOp::NotEqual => "!=",
+            ComparisonOp::LessThan => "<",
+            ComparisonOp::LessOrEqual => "<=",
+            ComparisonOp::GreaterThan => ">",
+            ComparisonOp::GreaterOrEqual => ">=",
+        };
+        write!(f, "{op_str}")
+    }
+}
+
+impl std::fmt::Display for BodyPredicate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BodyPredicate::Positive(atom) => write!(f, "{atom}"),
+            BodyPredicate::Negated(atom) => write!(f, "!{atom}"),
+            BodyPredicate::Comparison(left, op, right) => {
+                write!(f, "{left} {op} {right}")
+            }
+            BodyPredicate::HnswNearest {
+                index_name,
+                query,
+                k,
+                id_var,
+                distance_var,
+                ef_search,
+            } => {
+                if let Some(ef) = ef_search {
+                    write!(
+                        f,
+                        "hnsw_nearest(\"{index_name}\", {query}, {k}, {id_var}, {distance_var}, {ef})"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "hnsw_nearest(\"{index_name}\", {query}, {k}, {id_var}, {distance_var})"
+                    )
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.body.is_empty() {
+            write!(f, "{}.", self.head)
+        } else {
+            let body_str: Vec<String> = self.body.iter().map(ToString::to_string).collect();
+            write!(f, "{} :- {}.", self.head, body_str.join(", "))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_aggregate_func_parse() {
+        assert_eq!(AggregateFunc::parse("count"), Some(AggregateFunc::Count));
+        assert_eq!(AggregateFunc::parse("sum"), Some(AggregateFunc::Sum));
+        assert_eq!(AggregateFunc::parse("min"), Some(AggregateFunc::Min));
+        assert_eq!(AggregateFunc::parse("max"), Some(AggregateFunc::Max));
+        assert_eq!(AggregateFunc::parse("avg"), Some(AggregateFunc::Avg));
+    }
+
+    #[test]
+    fn test_term_is_variable() {
+        assert!(Term::Variable("x".to_string()).is_variable());
+        assert!(!Term::Constant(42).is_variable());
+    }
+
+    #[test]
+    fn test_atom_creation() {
+        let atom = Atom::new(
+            "edge".to_string(),
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Variable("y".to_string()),
+            ],
+        );
+
+        assert_eq!(atom.relation, "edge");
+        assert_eq!(atom.arity(), 2);
+    }
+
+    #[test]
+    fn test_rule_safety() {
+        let head = Atom::new("reach".to_string(), vec![Term::Variable("y".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "reach".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )),
+        ];
+
+        let rule = Rule::new(head, body);
+        assert!(rule.is_safe());
+        assert!(rule.is_recursive());
+    }
 
