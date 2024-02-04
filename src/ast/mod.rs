@@ -1000,7 +1000,6 @@ impl Rule {
                             changed |= vars.insert(v.clone());
                         }
                         // X * 2 = Y - Y is bound by the arithmetic result
-                        // TODO: verify this condition
                         if let (Term::Arithmetic(_), Term::Variable(v)) = (left, right) {
                             changed |= vars.insert(v.clone());
                         }
@@ -1441,3 +1440,36 @@ mod tests {
         assert!(rule.is_recursive());
     }
 
+    #[test]
+    fn test_program_edbs_idbs() {
+        let mut program = Program::new();
+
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("y".to_string())]),
+            vec![
+                Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+            ],
+        ));
+
+        let idbs = program.idbs();
+        let edbs = program.edbs();
+
+        assert_eq!(idbs, vec!["reach"]);
+        assert_eq!(edbs, vec!["edge", "source"]);
+    }
+}
