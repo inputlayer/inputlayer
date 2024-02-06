@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_cmd_n01t04
+Knowledge graph 'test_session_cmd_n01t04' created.
+Switched to knowledge graph: test_session_cmd_n01t04
+> .kg use test_session_cmd_n01t04
+Switched to knowledge graph: test_session_cmd_n01t04
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'edge'.
+> reachable(X, Y) :- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+(session: 1 rule(s))
+> reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
+6 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 3)
+  (2, 4)
+  (3, 4)
+(session: 2 rule(s))
+> .session
+Session rules (2):
+  1. reachable(X, Y) :- edge(X, Y).
+  2. reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
+> ?- reachable(1, X).
+3 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+> .session clear
+Cleared 0 session fact(s), 2 session rule(s).
+> .session
+No session data defined.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_cmd_n01t04
+Knowledge graph 'test_session_cmd_n01t04' dropped.
