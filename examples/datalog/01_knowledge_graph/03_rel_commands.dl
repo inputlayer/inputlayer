@@ -1,0 +1,29 @@
+% Test: Relation Meta Commands
+% Description: Tests .rel command for listing and describing relations
+
+.kg create test_rel_cmd_n01t03
+.kg use test_rel_cmd_n01t03
+
+% Create some relations with data
++users[(1, "Alice"), (2, "Bob")].
++products[(100, "Widget", 9.99), (200, "Gadget", 19.99)].
+
+% List all relations
+.rel
+
+% Describe specific relation
+.rel users
+.rel products
+
+% Create a schema-defined relation
++orders(id: int, user_id: int, product_id: int).
++orders[(1, 1, 100), (2, 2, 200)].
+
+% List relations again (should include orders)
+.rel
+
+% Describe schema relation
+.rel orders
+
+.kg use default
+.kg drop test_rel_cmd_n01t03

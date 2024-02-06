@@ -269,3 +269,162 @@ fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
 
 /// Parse a term for comparison - uses full `parse_term` for complete support
 /// This allows function calls, arithmetic, vectors, etc. on either side
+fn parse_comparison_term(s: &str) -> Result<Term, String> {
+    // Delegate to the full term parser which handles all term types
+    parse_term(s)
+}
+
+/// Split a string by commas, but only those outside parentheses and angle brackets
+///
+/// Note: Angle brackets in aggregates (count<x>) are tracked specially.
+/// We only track angle depth for potential aggregates: when < immediately follows
+/// a word character (no space).
+fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth: i32 = 0;
+    let mut angle_depth: i32 = 0;
+    let chars = s.chars().peekable();
+
+    for ch in chars {
+        match ch {
+            '(' => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                // Clamp to 0 to handle malformed input with extra closing parens
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+            '<' => {
+                // Only track angle depth if this looks like aggregate syntax:
+                // previous char was alphanumeric (word char), no space before <
+                let prev_is_word = current
+                    .chars()
+                    .last()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
+                if prev_is_word {
+                    angle_depth += 1;
+                }
+                current.push(ch);
+            }
+            '>' => {
+                current.push(ch);
+                // Only decrement angle depth if we're in an aggregate
+                if angle_depth > 0 {
+                    angle_depth -= 1;
+                }
+            }
+            ',' if paren_depth == 0 && angle_depth == 0 => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Parse an atom like "edge(x, y)" or "result(x, count<y>)"
+fn parse_atom(s: &str) -> Result<Atom, String> {
+    let s = s.trim();
+
+    // Find opening parenthesis
+    let paren_pos = s.find('(').ok_or_else(|| format!("Invalid atom: {s}"))?;
+
+    let relation = s[..paren_pos].trim().to_string();
+
+    // Extract arguments - find matching closing parenthesis
+    let args_str = s[paren_pos + 1..].trim_end_matches(')').trim();
+
+    let args = if args_str.is_empty() {
+        vec![]
+    } else {
+        // Use smart split to handle aggregates like count<x>
+        split_args_respecting_angles(args_str)
+            .into_iter()
+            .map(|arg| parse_term(arg.trim()))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    Ok(Atom::new(relation, args))
+}
+
+/// Split atom arguments, respecting angle brackets, parentheses, and square brackets
+fn split_args_respecting_angles(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut angle_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+
+    for ch in s.chars() {
+        match ch {
+            '<' => {
+                angle_depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                // Clamp to 0 to handle malformed input
+                angle_depth = (angle_depth - 1).max(0);
+                current.push(ch);
+            }
+            '(' => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+            '[' => {
+                bracket_depth += 1;
+                current.push(ch);
+            }
+            ']' => {
+                // Clamp to 0 to handle malformed input
+                bracket_depth = (bracket_depth - 1).max(0);
+                current.push(ch);
+            }
+            ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Parse a term (variable, constant, aggregate, function call, vector literal, or arithmetic expression)
+///
+/// Supports:
+/// - Variables: x, y, foo
+/// - Integer constants: 42, -10
+/// - Float constants: 3.14, -0.5
+/// - Placeholder: _
+/// - Standard aggregates: `count<x>`, `sum<y>`, `min<z>`, `max<z>`, `avg<z>`
+/// - Ranking aggregates: `top_k`<10, score>, `top_k_threshold`<10, score, 0.5>, `within_radius`<dist, 0.5>
+/// - Arithmetic expressions: d+1, x*y, (a+b)*c
+/// - Function calls: euclidean(v1, v2), normalize(v)
+/// - Vector literals: [1.0, 2.0, 3.0]
+/// - String constants: "hello"
+/// Parse a single term from a string
+/// This handles variables, constants, strings, aggregates, function calls,
+/// and arithmetic expressions.

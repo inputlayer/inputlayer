@@ -1,0 +1,25 @@
+% Test: Knowledge Graph Create, Use, Drop
+% Description: Tests basic knowledge graph lifecycle operations
+
+% Create and use a knowledge graph
+.kg create test_kg_n01t01
+.kg use test_kg_n01t01
+
+% Show current knowledge graph
+.kg
+
+% List knowledge graphs (should show default and test_kg_n01t01)
+.kg list
+
+% Insert some data to verify kg is usable
++edge(1, 2).
+
+% Query to verify
+?- edge(X, Y).
+
+% Switch away and drop
+.kg use default
+.kg drop test_kg_n01t01
+
+% Verify it's gone (should only show 'default')
+.kg list
