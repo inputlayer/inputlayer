@@ -169,3 +169,79 @@ impl RuleBuilder {
 
 // Convenience functions
 /// Create a simple fact (rule with no body): rel(args...).
+pub fn fact<I, S>(relation: impl Into<String>, args: I) -> Rule
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    RuleBuilder::new(relation).head_vars(args).build()
+}
+
+/// Create a simple rule: head(vars...) :- body(vars...).
+pub fn simple_rule<I1, S1, I2, S2>(
+    head_rel: impl Into<String>,
+    head_vars: I1,
+    body_rel: impl Into<String>,
+    body_vars: I2,
+) -> Rule
+where
+    I1: IntoIterator<Item = S1>,
+    S1: Into<String>,
+    I2: IntoIterator<Item = S2>,
+    S2: Into<String>,
+{
+    RuleBuilder::new(head_rel)
+        .head_vars(head_vars)
+        .body_atom(body_rel, body_vars)
+        .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_atom_builder_basic() {
+        let atom = AtomBuilder::new("edge").var("x").var("y").build();
+
+        assert_eq!(atom.relation, "edge");
+        assert_eq!(atom.args.len(), 2);
+        assert_eq!(atom.args[0], Term::Variable("x".to_string()));
+        assert_eq!(atom.args[1], Term::Variable("y".to_string()));
+    }
+
+    #[test]
+    fn test_atom_builder_vars() {
+        let atom = AtomBuilder::new("path").vars(["a", "b", "c"]).build();
+
+        assert_eq!(atom.relation, "path");
+        assert_eq!(atom.args.len(), 3);
+    }
+
+    #[test]
+    fn test_atom_builder_mixed() {
+        let atom = AtomBuilder::new("relation")
+            .var("x")
+            .int(42)
+            .placeholder()
+            .build();
+
+        assert_eq!(atom.args.len(), 3);
+        assert_eq!(atom.args[0], Term::Variable("x".to_string()));
+        assert_eq!(atom.args[1], Term::Constant(42));
+        assert_eq!(atom.args[2], Term::Placeholder);
+    }
+
+    #[test]
+    fn test_rule_builder_basic() {
+        // path(x, y) :- edge(x, y).
+        let rule = RuleBuilder::new("path")
+            .head_vars(["x", "y"])
+            .body_atom("edge", ["x", "y"])
+            .build();
+
+        assert_eq!(rule.head.relation, "path");
+        assert_eq!(rule.head.args.len(), 2);
+        assert_eq!(rule.body.len(), 1);
+    }
+
