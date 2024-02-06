@@ -136,3 +136,136 @@ fn find_comment_start(line: &str) -> Option<usize> {
 }
 
 /// Parse a single rule
+pub fn parse_rule(line: &str) -> Result<Rule, String> {
+    // Remove trailing period if present
+    let line = line.trim_end_matches('.').trim();
+
+    // Split by ":-"
+    let parts: Vec<&str> = line.split(":-").collect();
+
+    if parts.len() == 1 {
+        // Fact: just a head atom
+        let head = parse_atom(parts[0].trim())?;
+        return Ok(Rule::new(head, vec![]));
+    }
+
+    if parts.len() != 2 {
+        return Err(format!("Invalid rule: {line}"));
+    }
+
+    // Parse head
+    let head = parse_atom(parts[0].trim())?;
+
+    // Parse body (comma-separated atoms)
+    let body_str = parts[1].trim();
+    let body = parse_body(body_str)?;
+
+    // Check: if body is empty but head has variables, this is an invalid rule
+    // A rule with ":-" must have at least one body predicate
+    if body.is_empty() {
+        // Check if head has any variables
+        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
+        if has_head_vars {
+            return Err("Empty rule body with head variables is not allowed. \
+                 Use 'foo(constant).' for facts, or add body predicates."
+                .to_string());
+        }
+    }
+
+    Ok(Rule::new(head, body))
+}
+
+/// Parse rule body (atoms and comparison predicates)
+fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
+    let mut body = Vec::new();
+
+    // Split by commas, but respect parentheses
+    let parts = split_by_comma_outside_parens(body_str);
+
+    for part in parts {
+        let part = part.trim();
+
+        if part.starts_with('!') {
+            // Negated atom
+            let atom_str = part.trim_start_matches('!').trim();
+            let atom = parse_atom(atom_str)?;
+            body.push(BodyPredicate::Negated(atom));
+        } else if let Some(comparison) = try_parse_comparison(part)? {
+            // Comparison predicate (X = Y, X < 5, etc.)
+            body.push(comparison);
+        } else {
+            // Positive atom
+            let atom = parse_atom(part)?;
+            body.push(BodyPredicate::Positive(atom));
+        }
+    }
+
+    Ok(body)
+}
+
+/// Try to parse a comparison predicate (X = Y, X != 5, X < Y, etc.)
+/// Returns None if this is not a comparison, Ok(Some(...)) if it is
+fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
+    // Check for comparison operators (order matters: check multi-char ops before single-char)
+    // Important: == must come before = to prevent partial matching
+    let operators = [
+        ("!=", ComparisonOp::NotEqual),
+        ("<=", ComparisonOp::LessOrEqual),
+        (">=", ComparisonOp::GreaterOrEqual),
+        ("==", ComparisonOp::Equal), // Must come before "="
+        ("<", ComparisonOp::LessThan),
+        (">", ComparisonOp::GreaterThan),
+        ("=", ComparisonOp::Equal),
+    ];
+
+    for (op_str, op) in operators {
+        // Find the operator, but not inside parentheses
+        if let Some(pos) = find_operator_outside_parens(s, op_str) {
+            let left_str = s[..pos].trim();
+            let right_str = s[pos + op_str.len()..].trim();
+
+            // Parse left and right as terms
+            let left = parse_comparison_term(left_str)?;
+            let right = parse_comparison_term(right_str)?;
+
+            return Ok(Some(BodyPredicate::Comparison(left, op, right)));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Find an operator outside parentheses
+fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
+    let mut paren_depth: i32 = 0;
+    let chars: Vec<char> = s.chars().collect();
+    let op_chars: Vec<char> = op.chars().collect();
+
+    for i in 0..chars.len() {
+        match chars[i] {
+            '(' => paren_depth += 1,
+            // Clamp to 0 to handle malformed input with extra closing parens
+            ')' => paren_depth = (paren_depth - 1).max(0),
+            _ => {}
+        }
+
+        if paren_depth == 0 {
+            // Check if operator matches at this position
+            let mut matches = true;
+            for (j, &op_char) in op_chars.iter().enumerate() {
+                if i + j >= chars.len() || chars[i + j] != op_char {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                return Some(i);
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse a term for comparison - uses full `parse_term` for complete support
+/// This allows function calls, arithmetic, vectors, etc. on either side
