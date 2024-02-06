@@ -245,3 +245,45 @@ mod tests {
         assert_eq!(rule.body.len(), 1);
     }
 
+    #[test]
+    fn test_rule_builder_recursive() {
+        // path(x, z) :- path(x, y), edge(y, z).
+        let rule = RuleBuilder::new("path")
+            .head_vars(["x", "z"])
+            .body_atom("path", ["x", "y"])
+            .body_atom("edge", ["y", "z"])
+            .build();
+
+        assert_eq!(rule.body.len(), 2);
+    }
+
+    #[test]
+    fn test_rule_builder_with_negation() {
+        // result(x) :- source(x), !excluded(x).
+        let rule = RuleBuilder::new("result")
+            .head_vars(["x"])
+            .body_atom("source", ["x"])
+            .negated_atom("excluded", ["x"])
+            .build();
+
+        assert_eq!(rule.body.len(), 2);
+        assert!(matches!(&rule.body[0], BodyPredicate::Positive(_)));
+        assert!(matches!(&rule.body[1], BodyPredicate::Negated(_)));
+    }
+
+    #[test]
+    fn test_fact_helper() {
+        let rule = fact("person", ["alice"]);
+
+        assert_eq!(rule.head.relation, "person");
+        assert!(rule.body.is_empty());
+    }
+
+    #[test]
+    fn test_simple_rule_helper() {
+        let rule = simple_rule("path", ["x", "y"], "edge", ["x", "y"]);
+
+        assert_eq!(rule.head.relation, "path");
+        assert_eq!(rule.body.len(), 1);
+    }
+}
