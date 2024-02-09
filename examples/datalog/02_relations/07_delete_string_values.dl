@@ -1,0 +1,27 @@
+% Test: Delete with String Values
+% Description: Tests deleting tuples with string values
+
+.kg create test_del_str_n02t07
+.kg use test_del_str_n02t07
+
+% Insert facts with strings
++person[("alice", 25), ("bob", 30), ("charlie", 35)].
+
+% Verify initial data
+?- person(X, Y).
+
+% Delete a specific person by name
+-person[("bob", 30)].
+
+% Verify delete worked
+?- person(X, Y).
+
+% Delete remaining
+-person[("alice", 25), ("charlie", 35)].
+
+% Verify all deleted
+?- person(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_del_str_n02t07

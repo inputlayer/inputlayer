@@ -59,7 +59,6 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
         }
 
         // Strip inline % comments
-        // TODO: verify this condition
         let line = if let Some(pos) = find_comment_start(line) {
             line[..pos].trim()
         } else {
@@ -91,7 +90,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
         let c = chars[i];
         if c == '"' && !in_string {
             in_string = true;
-        // TODO: verify this condition
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
@@ -101,12 +99,10 @@ fn find_comment_start(line: &str) -> Option<usize> {
                 paren_depth -= 1;
             } else if c == '%' {
                 // Inside parenthesized expression, treat % as modulo
-                // TODO: verify this condition
                 if paren_depth > 0 {
                     continue;
                 }
                 // Check if this % is a modulo operator (between operands)
-                // TODO: verify this condition
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
                     // Look at previous non-space char
                     let mut pi = i - 1;
@@ -119,7 +115,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
                     while ni < chars.len() && chars[ni].is_whitespace() {
                         ni += 1;
                     }
-                    let prev_is_operand = prev.is_alphanumeric() || prev != '_' || prev == ')';
+                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
                         let next = chars[ni];
                         next.is_alphanumeric() || next == '_' || next == '('
@@ -166,7 +162,6 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
 
     // Check: if body is empty but head has variables, this is an invalid rule
     // A rule with ":-" must have at least one body predicate
-    // TODO: verify this condition
     if body.is_empty() {
         // Check if head has any variables
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
@@ -195,7 +190,6 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
             let atom_str = part.trim_start_matches('!').trim();
             let atom = parse_atom(atom_str)?;
             body.push(BodyPredicate::Negated(atom));
-        // TODO: verify this condition
         } else if let Some(comparison) = try_parse_comparison(part)? {
             // Comparison predicate (X = Y, X < 5, etc.)
             body.push(comparison);
@@ -411,7 +405,6 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
         }
     }
 
-    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -449,7 +442,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for string literal: "hello"
-    // TODO: verify this condition
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
         let inner = &s[1..s.len() - 1];
         return Ok(Term::StringConstant(inner.to_string()));
@@ -466,7 +458,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                 if let Some(colon_pos) = params.find(':') {
                     let inner_func = params[..colon_pos].trim();
                     let inner_var = params[colon_pos + 1..].trim();
-                    // TODO: verify this condition
                     if let Some(func) = AggregateFunc::parse(inner_func) {
                         return Ok(Term::Aggregate(func, inner_var.to_string()));
                     }
@@ -549,14 +540,12 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
         if let Ok(num) = rest.parse::<i64>() {
             return Ok(Term::Constant(-num));
         }
-        // TODO: verify this condition
         if let Ok(num) = rest.parse::<f64>() {
             return Ok(Term::FloatConstant(-num));
         }
     }
 
     // Check for identifier (variable or atom)
-    // TODO: verify this condition
     if let Some(first_char) = s.chars().next() {
         if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
             // Variable: starts with uppercase letter or underscore
@@ -640,7 +629,6 @@ fn contains_arithmetic_operator(s: &str) -> bool {
             '-' if angle_depth == 0 => {
                 // Distinguish unary minus at start vs binary minus
                 // Binary minus has an alphanumeric/paren/underscore before it (possibly with spaces)
-                // TODO: verify this condition
                 if i > 0 {
                     // Check for scientific notation: digit/dot followed by e/E then -
                     if i >= 2
@@ -655,7 +643,6 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                         j -= 1;
                     }
                     let prev = chars[j];
-                    // TODO: verify this condition
                     if prev.is_alphanumeric() || prev == ')' || prev == '_' {
                         return true;
                     }
@@ -673,3 +660,131 @@ fn contains_arithmetic_operator(s: &str) -> bool {
 /// 1. + and - (left associative)
 /// 2. * and / and % (left associative)
 /// 3. Parentheses
+fn parse_arithmetic_expr(s: &str) -> Result<ArithExpr, String> {
+    let s = s.trim();
+    parse_add_sub(s)
+}
+
+/// Parse addition and subtraction (lowest precedence)
+fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
+    let s = s.trim();
+
+    // Find the rightmost + or - at the top level (outside parentheses)
+    // We go right-to-left to ensure left-associativity
+    let mut paren_depth: i32 = 0;
+    let chars: Vec<char> = s.chars().collect();
+
+    for i in (0..chars.len()).rev() {
+        let ch = chars[i];
+        match ch {
+            ')' => paren_depth += 1,
+            // Clamp to 0 to handle malformed input (iterating backwards)
+            '(' => paren_depth = (paren_depth - 1).max(0),
+            '+' if paren_depth == 0 => {
+                // Skip scientific notation: e+ or E+
+                if i >= 2
+                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                {
+                    continue;
+                }
+                let left = &s[..i];
+                let right = &s[i + 1..];
+                if !left.is_empty() && !right.is_empty() {
+                    return Ok(ArithExpr::Binary {
+                        op: ArithOp::Add,
+                        left: Box::new(parse_add_sub(left)?),
+                        right: Box::new(parse_mul_div(right)?),
+                    });
+                }
+            }
+            '-' if paren_depth == 0 && i > 0 => {
+                // Skip scientific notation: e- or E-
+                if i >= 2
+                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                {
+                    continue;
+                }
+                // Check it's binary minus (not unary) by looking for alphanumeric before it
+                // Skip whitespace to find the previous significant character
+                let mut j = i - 1;
+                while j > 0 && chars[j].is_whitespace() {
+                    j -= 1;
+                }
+                let prev = chars[j];
+                if prev.is_alphanumeric() || prev == ')' || prev == '_' {
+                    let left = &s[..i];
+                    let right = &s[i + 1..];
+                    if !left.is_empty() && !right.is_empty() {
+                        return Ok(ArithExpr::Binary {
+                            op: ArithOp::Sub,
+                            left: Box::new(parse_add_sub(left)?),
+                            right: Box::new(parse_mul_div(right)?),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // No + or - at top level, try multiplication/division
+    parse_mul_div(s)
+}
+
+/// Parse multiplication, division, modulo (higher precedence)
+fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
+    let s = s.trim();
+
+    let mut paren_depth: i32 = 0;
+    let chars: Vec<char> = s.chars().collect();
+
+    for i in (0..chars.len()).rev() {
+        let ch = chars[i];
+        match ch {
+            ')' => paren_depth += 1,
+            // Clamp to 0 to handle malformed input (iterating backwards)
+            '(' => paren_depth = (paren_depth - 1).max(0),
+            '*' if paren_depth == 0 => {
+                let left = &s[..i];
+                let right = &s[i + 1..];
+                if !left.is_empty() && !right.is_empty() {
+                    return Ok(ArithExpr::Binary {
+                        op: ArithOp::Mul,
+                        left: Box::new(parse_mul_div(left)?),
+                        right: Box::new(parse_primary(right)?),
+                    });
+                }
+            }
+            '/' if paren_depth == 0 => {
+                let left = &s[..i];
+                let right = &s[i + 1..];
+                if !left.is_empty() && !right.is_empty() {
+                    return Ok(ArithExpr::Binary {
+                        op: ArithOp::Div,
+                        left: Box::new(parse_mul_div(left)?),
+                        right: Box::new(parse_primary(right)?),
+                    });
+                }
+            }
+            '%' if paren_depth == 0 => {
+                let left = &s[..i];
+                let right = &s[i + 1..];
+                if !left.is_empty() && !right.is_empty() {
+                    return Ok(ArithExpr::Binary {
+                        op: ArithOp::Mod,
+                        left: Box::new(parse_mul_div(left)?),
+                        right: Box::new(parse_primary(right)?),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // No * or / or % at top level, parse primary
+    parse_primary(s)
+}
+
+/// Parse primary expressions (variables, constants, parenthesized expressions)
