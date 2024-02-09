@@ -59,6 +59,7 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
         }
 
         // Strip inline % comments
+        // TODO: verify this condition
         let line = if let Some(pos) = find_comment_start(line) {
             line[..pos].trim()
         } else {
@@ -90,6 +91,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         let c = chars[i];
         if c == '"' && !in_string {
             in_string = true;
+        // TODO: verify this condition
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
@@ -99,10 +101,12 @@ fn find_comment_start(line: &str) -> Option<usize> {
                 paren_depth -= 1;
             } else if c == '%' {
                 // Inside parenthesized expression, treat % as modulo
+                // TODO: verify this condition
                 if paren_depth > 0 {
                     continue;
                 }
                 // Check if this % is a modulo operator (between operands)
+                // TODO: verify this condition
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
                     // Look at previous non-space char
                     let mut pi = i - 1;
@@ -115,7 +119,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
                     while ni < chars.len() && chars[ni].is_whitespace() {
                         ni += 1;
                     }
-                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
+                    let prev_is_operand = prev.is_alphanumeric() || prev != '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
                         let next = chars[ni];
                         next.is_alphanumeric() || next == '_' || next == '('
@@ -162,6 +166,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
 
     // Check: if body is empty but head has variables, this is an invalid rule
     // A rule with ":-" must have at least one body predicate
+    // TODO: verify this condition
     if body.is_empty() {
         // Check if head has any variables
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
@@ -190,6 +195,7 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
             let atom_str = part.trim_start_matches('!').trim();
             let atom = parse_atom(atom_str)?;
             body.push(BodyPredicate::Negated(atom));
+        // TODO: verify this condition
         } else if let Some(comparison) = try_parse_comparison(part)? {
             // Comparison predicate (X = Y, X < 5, etc.)
             body.push(comparison);
@@ -405,6 +411,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -428,3 +435,241 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
 /// Parse a single term from a string
 /// This handles variables, constants, strings, aggregates, function calls,
 /// and arithmetic expressions.
+pub fn parse_term(s: &str) -> Result<Term, String> {
+    let s = s.trim();
+
+    // Placeholder is "_"
+    if s == "_" {
+        return Ok(Term::Placeholder);
+    }
+
+    // Check for vector literal: [1.0, 2.0, 3.0]
+    if s.starts_with('[') && s.ends_with(']') {
+        return parse_vector_literal(s);
+    }
+
+    // Check for string literal: "hello"
+    // TODO: verify this condition
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        let inner = &s[1..s.len() - 1];
+        return Ok(Term::StringConstant(inner.to_string()));
+    }
+
+    // Check for aggregate syntax: func<params> or <func:var>
+    if let Some(angle_pos) = s.find('<') {
+        if s.ends_with('>') {
+            let func_name = s[..angle_pos].trim();
+            let params = &s[angle_pos + 1..s.len() - 1];
+
+            // Handle <FUNC:VAR> syntax (function name inside angle brackets with colon)
+            if func_name.is_empty() && params.contains(':') {
+                if let Some(colon_pos) = params.find(':') {
+                    let inner_func = params[..colon_pos].trim();
+                    let inner_var = params[colon_pos + 1..].trim();
+                    // TODO: verify this condition
+                    if let Some(func) = AggregateFunc::parse(inner_func) {
+                        return Ok(Term::Aggregate(func, inner_var.to_string()));
+                    }
+                    return Err(format!("Unknown aggregate function: {inner_func}"));
+                }
+            }
+
+            // Try standard aggregates first: func<params>
+            if let Some(func) = AggregateFunc::parse(func_name) {
+                return Ok(Term::Aggregate(func, params.trim().to_string()));
+            }
+
+            // Try new ranking aggregates
+            let func_lower = func_name.to_lowercase();
+            match func_lower.as_str() {
+                "top_k" => {
+                    if let Some(func) = AggregateFunc::parse_top_k(params) {
+                        // For ranking aggregates, the "var" field is used to identify the group
+                        // We'll use an empty string and rely on the aggregate's internal fields
+                        return Ok(Term::Aggregate(func, String::new()));
+                    }
+                    return Err(format!("Invalid top_k parameters: {params}"));
+                }
+                "top_k_threshold" => {
+                    if let Some(func) = AggregateFunc::parse_top_k_threshold(params) {
+                        return Ok(Term::Aggregate(func, String::new()));
+                    }
+                    return Err(format!("Invalid top_k_threshold parameters: {params}"));
+                }
+                "within_radius" => {
+                    if let Some(func) = AggregateFunc::parse_within_radius(params) {
+                        return Ok(Term::Aggregate(func, String::new()));
+                    }
+                    return Err(format!("Invalid within_radius parameters: {params}"));
+                }
+                _ => {
+                    return Err(format!("Unknown aggregate function: {func_name}"));
+                }
+            }
+        }
+    }
+
+    // Check for function call: func(args)
+    // Must check before arithmetic to avoid confusing func(x) with multiplication
+    if let Some(paren_pos) = s.find('(') {
+        if s.ends_with(')') {
+            let func_name = s[..paren_pos].trim();
+            // Check if this is a known built-in function
+            if let Some(builtin) = BuiltinFunc::parse(func_name) {
+                let args_str = &s[paren_pos + 1..s.len() - 1];
+                let args = parse_function_args(args_str)?;
+                return Ok(Term::FunctionCall(builtin, args));
+            }
+            // If not a known function, fall through to check if it could be something else
+            // (like a parenthesized arithmetic expression)
+        }
+    }
+
+    // Try to parse as integer first (before arithmetic check)
+    if let Ok(num) = s.parse::<i64>() {
+        return Ok(Term::Constant(num));
+    }
+
+    // Try to parse as float (before arithmetic check, to handle scientific notation like 1.0e-3)
+    if let Ok(num) = s.parse::<f64>() {
+        if num.is_finite() {
+            return Ok(Term::FloatConstant(num));
+        }
+    }
+
+    // Check for arithmetic expression (contains +, -, *, /, %)
+    if contains_arithmetic_operator(s) {
+        let expr = parse_arithmetic_expr(s)?;
+        return Ok(Term::Arithmetic(expr));
+    }
+
+    // Handle negative numbers with spaces
+    if s.starts_with('-') {
+        let rest = s[1..].trim();
+        if let Ok(num) = rest.parse::<i64>() {
+            return Ok(Term::Constant(-num));
+        }
+        // TODO: verify this condition
+        if let Ok(num) = rest.parse::<f64>() {
+            return Ok(Term::FloatConstant(-num));
+        }
+    }
+
+    // Check for identifier (variable or atom)
+    // TODO: verify this condition
+    if let Some(first_char) = s.chars().next() {
+        if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            // Variable: starts with uppercase letter or underscore
+            // Examples: X, Y, Foo, _temp
+            if first_char.is_uppercase() || first_char == '_' {
+                return Ok(Term::Variable(s.to_string()));
+            }
+
+            // Boolean literals: true and false are special constants
+            if s == "true" || s == "false" {
+                return Ok(Term::StringConstant(s.to_string()));
+            }
+
+            // Lowercase identifier - reject with helpful error message
+            // Users must use quoted strings: "alice" not alice
+            if first_char.is_lowercase() {
+                return Err(format!(
+                    "Unquoted atom '{s}' is not allowed. Use \"{s}\" (quoted string) instead."
+                ));
+            }
+        }
+    }
+
+    Err(format!("Invalid term: '{s}'"))
+}
+
+/// Parse a vector literal like [1.0, 2.0, 3.0]
+fn parse_vector_literal(s: &str) -> Result<Term, String> {
+    let inner = s[1..s.len() - 1].trim();
+    if inner.is_empty() {
+        return Ok(Term::VectorLiteral(vec![]));
+    }
+
+    let values: Result<Vec<f64>, String> = inner
+        .split(',')
+        .map(|v| {
+            v.trim()
+                .parse::<f64>()
+                .map_err(|_| format!("Invalid vector element: '{}'", v.trim()))
+        })
+        .collect();
+
+    Ok(Term::VectorLiteral(values?))
+}
+
+/// Parse function arguments (comma-separated terms)
+fn parse_function_args(s: &str) -> Result<Vec<Term>, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Split by commas, respecting nested structures
+    split_args_respecting_angles(s)
+        .into_iter()
+        .map(|arg| parse_term(arg.trim()))
+        .collect()
+}
+
+/// Check if string contains arithmetic operators (but not inside angle brackets).
+/// Handles scientific notation: `e-` or `E-` in numbers is NOT a binary minus.
+fn contains_arithmetic_operator(s: &str) -> bool {
+    let mut angle_depth = 0;
+    let chars: Vec<char> = s.chars().collect();
+
+    for (i, &ch) in chars.iter().enumerate() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            '+' if angle_depth == 0 => {
+                // Check for scientific notation: digit/dot followed by e/E then +
+                if i >= 2
+                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                {
+                    continue;
+                }
+                return true;
+            }
+            '*' | '/' | '%' if angle_depth == 0 => return true,
+            '-' if angle_depth == 0 => {
+                // Distinguish unary minus at start vs binary minus
+                // Binary minus has an alphanumeric/paren/underscore before it (possibly with spaces)
+                // TODO: verify this condition
+                if i > 0 {
+                    // Check for scientific notation: digit/dot followed by e/E then -
+                    if i >= 2
+                        && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
+                        && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                    {
+                        continue;
+                    }
+                    // Look backwards skipping whitespace to find the previous significant char
+                    let mut j = i - 1;
+                    while j > 0 && chars[j].is_whitespace() {
+                        j -= 1;
+                    }
+                    let prev = chars[j];
+                    // TODO: verify this condition
+                    if prev.is_alphanumeric() || prev == ')' || prev == '_' {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Parse an arithmetic expression with proper precedence
+///
+/// Precedence (lowest to highest):
+/// 1. + and - (left associative)
+/// 2. * and / and % (left associative)
+/// 3. Parentheses

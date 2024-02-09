@@ -13,3 +13,94 @@ use inputlayer::{
 use tempfile::TempDir;
 
 // Test Helpers
+fn create_test_config(data_dir: std::path::PathBuf) -> Config {
+    let mut config = Config::default();
+    config.storage.data_dir = data_dir;
+    config.storage.performance.num_threads = 2;
+    config
+}
+
+fn create_test_storage() -> (StorageEngine, TempDir) {
+    let temp = TempDir::new().unwrap();
+    let config = create_test_config(temp.path().to_path_buf());
+    let storage = StorageEngine::new(config).unwrap();
+    (storage, temp)
+}
+
+// Statement Parser Integration Tests
+#[test]
+fn test_parse_meta_commands() {
+    // Knowledge graph commands
+    assert!(matches!(
+        parse_statement(".kg").unwrap(),
+        Statement::Meta(MetaCommand::KgShow)
+    ));
+    assert!(matches!(
+        parse_statement(".kg list").unwrap(),
+        Statement::Meta(MetaCommand::KgList)
+    ));
+    assert!(matches!(
+        parse_statement(".kg create mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgCreate(name)) if name == "mykg"
+    ));
+    assert!(matches!(
+        parse_statement(".kg use mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgUse(name)) if name == "mykg"
+    ));
+    assert!(matches!(
+        parse_statement(".kg drop mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgDrop(name)) if name == "mykg"
+    ));
+
+    // Relation commands
+    assert!(matches!(
+        parse_statement(".rel").unwrap(),
+        Statement::Meta(MetaCommand::RelList)
+    ));
+    assert!(matches!(
+        parse_statement(".rel edge").unwrap(),
+        Statement::Meta(MetaCommand::RelDescribe(name)) if name == "edge"
+    ));
+
+    // Rule commands
+    assert!(matches!(
+        parse_statement(".rule").unwrap(),
+        Statement::Meta(MetaCommand::RuleList)
+    ));
+    assert!(matches!(
+        parse_statement(".rule path").unwrap(),
+        Statement::Meta(MetaCommand::RuleQuery(name)) if name == "path"
+    ));
+    assert!(matches!(
+        parse_statement(".rule def path").unwrap(),
+        Statement::Meta(MetaCommand::RuleShowDef(name)) if name == "path"
+    ));
+    assert!(matches!(
+        parse_statement(".rule drop path").unwrap(),
+        Statement::Meta(MetaCommand::RuleDrop(name)) if name == "path"
+    ));
+
+    // System commands
+    assert!(matches!(
+        parse_statement(".compact").unwrap(),
+        Statement::Meta(MetaCommand::Compact)
+    ));
+    assert!(matches!(
+        parse_statement(".status").unwrap(),
+        Statement::Meta(MetaCommand::Status)
+    ));
+    assert!(matches!(
+        parse_statement(".help").unwrap(),
+        Statement::Meta(MetaCommand::Help)
+    ));
+    assert!(matches!(
+        parse_statement(".quit").unwrap(),
+        Statement::Meta(MetaCommand::Quit)
+    ));
+    assert!(matches!(
+        parse_statement(".exit").unwrap(),
+        Statement::Meta(MetaCommand::Quit)
+    ));
+}
+
+#[test]
