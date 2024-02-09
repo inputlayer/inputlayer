@@ -1,0 +1,27 @@
+% Test: Delete Operations
+% Description: Tests single and conditional delete
+
+.kg create test_del_n02t03
+.kg use test_del_n02t03
+
+% Insert initial data
++edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+
+% Show initial state
+?- edge(X, Y).
+
+% Delete single fact
+-edge(3, 4).
+
+% Show after single delete
+?- edge(X, Y).
+
+% Conditional delete: remove edges where X > 3
+-edge(X, Y) :- edge(X, Y), X > 3.
+
+% Show final state
+?- edge(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_del_n02t03

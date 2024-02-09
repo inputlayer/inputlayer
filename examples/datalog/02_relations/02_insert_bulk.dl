@@ -1,0 +1,15 @@
+% Test: Bulk Insert
+% Description: Tests bulk insert syntax with multiple tuples
+
+.kg create test_bulk_n02t02
+.kg use test_bulk_n02t02
+
+% Bulk insert
++edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+
+% Verify count
+?- edge(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_bulk_n02t02
