@@ -104,3 +104,64 @@ fn test_parse_meta_commands() {
 }
 
 #[test]
+fn test_parse_insert_operations() {
+    // Single insert
+    let stmt = parse_statement("+edge(1, 2).").unwrap();
+    if let Statement::Insert(op) = stmt {
+        assert_eq!(op.relation, "edge");
+        assert_eq!(op.tuples.len(), 1);
+    } else {
+        panic!("Expected Insert statement");
+    }
+
+    // Bulk insert
+    let stmt = parse_statement("+edge[(1, 2), (3, 4), (5, 6)].").unwrap();
+    if let Statement::Insert(op) = stmt {
+        assert_eq!(op.relation, "edge");
+        assert_eq!(op.tuples.len(), 3);
+    } else {
+        panic!("Expected Insert statement");
+    }
+}
+
+#[test]
+fn test_parse_delete_operations() {
+    // Single delete
+    let stmt = parse_statement("-edge(1, 2).").unwrap();
+    if let Statement::Delete(op) = stmt {
+        assert_eq!(op.relation, "edge");
+        assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
+    } else {
+        panic!("Expected Delete statement");
+    }
+
+    // Conditional delete - use valid atom syntax instead of constraint
+    let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
+    if let Statement::Delete(op) = stmt {
+        assert_eq!(op.relation, "edge");
+        assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
+    } else {
+        panic!("Expected Delete statement");
+    }
+}
+
+#[test]
+fn test_parse_persistent_rule() {
+    // Simple persistent rule (new syntax using + prefix)
+    let stmt = parse_statement("+path(X, Y) :- edge(X, Y).").unwrap();
+    if let Statement::PersistentRule(rule) = stmt {
+        assert_eq!(rule.head.relation, "path");
+    } else {
+        panic!("Expected PersistentRule statement");
+    }
+
+    // Persistent rule with join - use valid atom syntax instead of constraint
+    let stmt = parse_statement("+adult(N, A) :- person(N, A), ages(N, A).").unwrap();
+    if let Statement::PersistentRule(rule) = stmt {
+        assert_eq!(rule.head.relation, "adult");
+    } else {
+        panic!("Expected PersistentRule statement");
+    }
+}
+
+#[test]
