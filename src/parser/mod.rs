@@ -973,3 +973,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_parse_aggregation_rule() {
+        let rule =
+            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
+        assert_eq!(rule.head.relation, "total_sales");
+        assert_eq!(rule.head.args.len(), 2);
+        assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Category"));
+        assert!(
+            matches!(rule.head.args[1], Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount")
+        );
+        assert_eq!(rule.body.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_count_rule() {
+        let rule =
+            parse_rule("item_count(Category, count<Item>) :- inventory(Category, Item).").unwrap();
+        assert_eq!(rule.head.relation, "item_count");
+        assert!(rule.head.has_aggregates());
+        assert_eq!(rule.head.aggregates().len(), 1);
+    }
+
+    // Arithmetic Expression Tests
+    #[test]
+    fn test_parse_arithmetic_simple_add() {
+        let term = parse_term("D+1").unwrap();
+        if let Term::Arithmetic(expr) = term {
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Add,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected arithmetic term, got {:?}", term);
+        }
+    }
+
