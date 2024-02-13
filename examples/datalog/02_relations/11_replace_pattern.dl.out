@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_replace_n02t11
+Knowledge graph 'test_replace_n02t11' created.
+Switched to knowledge graph: test_replace_n02t11
+> .kg use test_replace_n02t11
+Switched to knowledge graph: test_replace_n02t11
+> +config[(1, "value1"), (2, "value2")].
+Inserted 2 fact(s) into 'config'.
+> ?- config(Id, Val).
+2 rows:
+  (1, "value1")
+  (2, "value2")
+> -config(1, "value1").
+Deleted 1 facts from 'config'.
+> +config(1, "new_value1").
+Inserted 1 fact(s) into 'config'.
+> ?- config(Id, Val).
+2 rows:
+  (1, "new_value1")
+  (2, "value2")
+> -config(2, "value2").
+Deleted 1 facts from 'config'.
+> +config(2, "new_value2").
+Inserted 1 fact(s) into 'config'.
+> ?- config(Id, Val).
+2 rows:
+  (1, "new_value1")
+  (2, "new_value2")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_replace_n02t11
+Knowledge graph 'test_replace_n02t11' dropped.
