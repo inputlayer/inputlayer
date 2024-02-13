@@ -59,7 +59,6 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
         }
 
         // Strip inline % comments
-        // TODO: verify this condition
         let line = if let Some(pos) = find_comment_start(line) {
             line[..pos].trim()
         } else {
@@ -91,7 +90,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
         let c = chars[i];
         if c == '"' && !in_string {
             in_string = true;
-        // TODO: verify this condition
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
@@ -101,7 +99,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
                 paren_depth -= 1;
             } else if c == '%' {
                 // Inside parenthesized expression, treat % as modulo
-                // TODO: verify this condition
                 if paren_depth > 0 {
                     continue;
                 }
@@ -118,7 +115,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
                     while ni < chars.len() && chars[ni].is_whitespace() {
                         ni += 1;
                     }
-                    let prev_is_operand = prev.is_alphanumeric() || prev != '_' || prev == ')';
+                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
                         let next = chars[ni];
                         next.is_alphanumeric() || next == '_' || next == '('
@@ -165,7 +162,6 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
 
     // Check: if body is empty but head has variables, this is an invalid rule
     // A rule with ":-" must have at least one body predicate
-    // TODO: verify this condition
     if body.is_empty() {
         // Check if head has any variables
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
@@ -194,7 +190,6 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
             let atom_str = part.trim_start_matches('!').trim();
             let atom = parse_atom(atom_str)?;
             body.push(BodyPredicate::Negated(atom));
-        // TODO: verify this condition
         } else if let Some(comparison) = try_parse_comparison(part)? {
             // Comparison predicate (X = Y, X < 5, etc.)
             body.push(comparison);
@@ -447,7 +442,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for string literal: "hello"
-    // TODO: verify this condition
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
         let inner = &s[1..s.len() - 1];
         return Ok(Term::StringConstant(inner.to_string()));
@@ -464,7 +458,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                 if let Some(colon_pos) = params.find(':') {
                     let inner_func = params[..colon_pos].trim();
                     let inner_var = params[colon_pos + 1..].trim();
-                    // TODO: verify this condition
                     if let Some(func) = AggregateFunc::parse(inner_func) {
                         return Ok(Term::Aggregate(func, inner_var.to_string()));
                     }
@@ -547,7 +540,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
         if let Ok(num) = rest.parse::<i64>() {
             return Ok(Term::Constant(-num));
         }
-        // TODO: verify this condition
         if let Ok(num) = rest.parse::<f64>() {
             return Ok(Term::FloatConstant(-num));
         }
@@ -706,7 +698,6 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                     });
                 }
             }
-            // TODO: verify this condition
             '-' if paren_depth == 0 && i > 0 => {
                 // Skip scientific notation: e- or E-
                 if i >= 2
@@ -758,7 +749,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '*' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
-                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mul,
@@ -767,7 +757,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                     });
                 }
             }
-            // TODO: verify this condition
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
@@ -814,7 +803,6 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
                 '(' => depth += 1,
                 ')' => {
                     depth -= 1;
-                    // TODO: verify this condition
                     if depth == 0 && i < chars.len() - 1 {
                         matched_at_end = false;
                         break;
@@ -830,7 +818,6 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
     }
 
     // Try to parse as constant
-    // TODO: verify this condition
     if let Ok(num) = s.parse::<i64>() {
         return Ok(ArithExpr::Constant(num));
     }
@@ -841,7 +828,6 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
     }
 
     // Handle negative numbers
-    // TODO: verify this condition
     if s.starts_with('-') {
         if let Ok(num) = s[1..].trim().parse::<i64>() {
             return Ok(ArithExpr::Constant(-num));
@@ -852,7 +838,6 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
     }
 
     // Must be a variable
-    // TODO: verify this condition
     if s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.is_empty() {
         return Ok(ArithExpr::Variable(s.to_string()));
     }
@@ -894,5 +879,44 @@ mod tests {
         let rule = parse_rule("path(X, Z) :- edge(X, Y), edge(Y, Z)").unwrap();
         assert_eq!(rule.head.relation, "path");
         assert_eq!(rule.body.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program() {
+        let source = "
+            path(X, Y) :- edge(X, Y).
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_with_negation() {
+        let rule = parse_rule("unreachable(X) :- node(X), !reach(X)").unwrap();
+        assert_eq!(rule.body.len(), 2);
+        assert!(rule.body[0].is_positive());
+        assert!(rule.body[1].is_negated());
+    }
+
+    #[test]
+    fn test_parse_fact() {
+        let rule = parse_rule("edge(1, 2)").unwrap();
+        assert_eq!(rule.head.relation, "edge");
+        assert_eq!(rule.body.len(), 0); // Facts have empty body
+    }
+
+    // Aggregation Tests
+    #[test]
+    fn test_parse_aggregate_term_count() {
+        let term = parse_term("count<X>").unwrap();
+        assert!(matches!(term, Term::Aggregate(AggregateFunc::Count, ref v) if v == "X"));
+    }
+
+    #[test]
+    fn test_parse_aggregate_term_sum() {
+        let term = parse_term("sum<Amount>").unwrap();
+        assert!(matches!(term, Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount"));
     }
 

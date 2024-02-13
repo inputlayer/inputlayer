@@ -1,0 +1,18 @@
+% Test: Delete with wildcard patterns
+
+.kg create test_delete_wildcard_n02t12
+.kg use test_delete_wildcard_n02t12
+
++items[(1, "a", 100), (2, "b", 200), (3, "a", 300), (4, "c", 400)].
+
+?- items(Id, Cat, Val).
+
+% Delete all items with category "a"
+-items(Id, "a", Val).
+
+?- items(Id, Cat, Val).
+
+% Verify only "b" and "c" items remain
+
+.kg use default
+.kg drop test_delete_wildcard_n02t12
