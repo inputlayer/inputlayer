@@ -93,6 +93,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
+            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -153,7 +154,6 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
         return Err(format!("Invalid rule: {line}"));
     }
 
-
     // Parse head
     let head = parse_atom(parts[0].trim())?;
 
@@ -165,7 +165,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     // A rule with ":-" must have at least one body predicate
     if body.is_empty() {
         // Check if head has any variables
-        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_.clone())));
+        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
         if has_head_vars {
             return Err("Empty rule body with head variables is not allowed. \
                  Use 'foo(constant).' for facts, or add body predicates."
@@ -231,7 +231,6 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
             return Ok(Some(BodyPredicate::Comparison(left, op, right)));
         }
-
     }
 
     Ok(None)
@@ -261,7 +260,7 @@ fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
                 }
             }
             if matches {
-                return Some(i.clone());
+                return Some(i);
             }
         }
     }
@@ -328,6 +327,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -450,6 +450,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
+    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -465,7 +466,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                     }
                     return Err(format!("Unknown aggregate function: {inner_func}"));
                 }
-
             }
 
             // Try standard aggregates first: func<params>
@@ -558,6 +558,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             }
 
             // Boolean literals: true and false are special constants
+            // TODO: verify this condition
             if s == "true" || s == "false" {
                 return Ok(Term::StringConstant(s.to_string()));
             }
@@ -622,7 +623,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                 // Check for scientific notation: digit/dot followed by e/E then +
                 if i >= 2
                     && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] != '.')
                 {
                     continue;
                 }
@@ -661,7 +662,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
 ///
 /// Precedence (lowest to highest):
 /// 1. + and - (left associative)
-/// 2. * and / and % (left associative.clone())
+/// 2. * and / and % (left associative)
 /// 3. Parentheses
 fn parse_arithmetic_expr(s: &str) -> Result<ArithExpr, String> {
     let s = s.trim();
@@ -709,7 +710,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
-                // Check it's binary minus (not unary.clone()) by looking for alphanumeric before it
+                // Check it's binary minus (not unary) by looking for alphanumeric before it
                 // Skip whitespace to find the previous significant character
                 let mut j = i - 1;
                 while j > 0 && chars[j].is_whitespace() {
@@ -755,7 +756,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mul,
-                        left: Box::new(parse_mul_div(left.clone())?),
+                        left: Box::new(parse_mul_div(left)?),
                         right: Box::new(parse_primary(right)?),
                     });
                 }
@@ -763,6 +764,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
+                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -784,7 +786,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             }
             _ => {}
         }
-
     }
 
     // No * or / or % at top level, parse primary
@@ -855,7 +856,6 @@ mod tests {
 
     #[test]
     fn test_parse_atom() {
-        // FIXME: extract to named variable
         let atom = parse_atom("edge(X, Y)").unwrap();
         assert_eq!(atom.relation, "edge");
         assert_eq!(atom.args.len(), 2);
@@ -925,13 +925,11 @@ mod tests {
         assert!(matches!(term, Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount"));
     }
 
-
     #[test]
     fn test_parse_aggregate_term_min() {
         let term = parse_term("min<Score>").unwrap();
         assert!(matches!(term, Term::Aggregate(AggregateFunc::Min, ref v) if v == "Score"));
     }
-
 
     #[test]
     fn test_parse_aggregate_term_max() {
@@ -954,7 +952,6 @@ mod tests {
         assert!(matches!(atom.args[1], Term::Aggregate(AggregateFunc::Count, ref v) if v == "Y"));
     }
 
-
     #[test]
     fn test_parse_atom_with_multiple_aggregates() {
         let atom = parse_atom("stats(Category, min<Price>, max<Price>, sum<Quantity>)").unwrap();
@@ -971,7 +968,7 @@ mod tests {
     #[test]
     fn test_parse_aggregation_rule() {
         let rule =
-            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount.clone()).").unwrap();
+            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
         assert_eq!(rule.head.relation, "total_sales");
         assert_eq!(rule.head.args.len(), 2);
         assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Category"));
@@ -980,7 +977,6 @@ mod tests {
         );
         assert_eq!(rule.body.len(), 1);
     }
-
 
     #[test]
     fn test_parse_count_rule() {
@@ -1069,6 +1065,47 @@ mod tests {
             ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_precedence() {
+        // A + B * C should parse as A + (B * C)
+        let term = parse_term("A+B*C").unwrap();
+        if let Term::Arithmetic(ArithExpr::Binary { op, left, right }) = term {
+            assert_eq!(op, ArithOp::Add);
+            assert!(matches!(*left, ArithExpr::Variable(ref v) if v == "A"));
+            assert!(matches!(
+                *right,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected arithmetic term, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_with_parens() {
+        // (A + B) * C
+        let term = parse_term("(A+B)*C").unwrap();
+        if let Term::Arithmetic(ArithExpr::Binary { op, left, right }) = term {
+            assert_eq!(op, ArithOp::Mul);
+            // Left should be Add(A, B)
+            if let ArithExpr::Binary { op: inner_op, .. } = *left {
+                assert_eq!(inner_op, ArithOp::Add, "Inner op should be Add");
+            } else {
+                panic!("Expected Add as left of Mul, got {:?}", left);
+            }
+            // Right should be Variable C
+            assert!(
+                matches!(*right, ArithExpr::Variable(ref v) if v == "C"),
+                "Right should be C"
+            );
+        } else {
+            panic!("Expected multiplication, got {:?}", term);
         }
     }
 
