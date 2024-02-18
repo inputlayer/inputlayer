@@ -93,6 +93,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
+            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -326,8 +327,9 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
-        result.push(current.clone());
+        result.push(current);
     }
 
     result
@@ -393,7 +395,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
             ']' => {
                 // Clamp to 0 to handle malformed input
                 bracket_depth = (bracket_depth - 1).max(0);
-                current.push(ch.clone());
+                current.push(ch);
             }
             ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
                 result.push(current.clone());
@@ -448,6 +450,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
+    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -619,7 +622,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                 // Check for scientific notation: digit/dot followed by e/E then +
                 if i >= 2
                     && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] != '.')
                 {
                     continue;
                 }
@@ -760,6 +763,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
+                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -1234,3 +1238,54 @@ mod tests {
         assert_eq!(expr5.to_string(), "A/(B*C)");
     }
 
+    #[test]
+    fn test_parse_arithmetic_constant_eval() {
+        // Expression with only constants should be evaluable
+        let term = parse_term("2+3*4").unwrap();
+        if let Term::Arithmetic(expr) = term {
+            // 2 + 3*4 = 2 + 12 = 14
+            assert_eq!(expr.try_eval_constant(), Some(14));
+        } else {
+            panic!("Expected arithmetic term");
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_with_spaces() {
+        let term = parse_term("D + 1").unwrap();
+        if let Term::Arithmetic(ArithExpr::Binary {
+            op: ArithOp::Add, ..
+        }) = term
+        {
+            // Good
+        } else {
+            panic!("Expected Add expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_complex() {
+        // A * B + C * D
+        let term = parse_term("A*B+C*D").unwrap();
+        if let Term::Arithmetic(ArithExpr::Binary { op, left, right }) = term {
+            assert_eq!(op, ArithOp::Add);
+            assert!(matches!(
+                *left,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                *right,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected Add of two Mul expressions");
+        }
+    }
+
+    // Vector Literal Tests

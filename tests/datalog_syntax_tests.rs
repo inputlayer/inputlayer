@@ -165,3 +165,90 @@ fn test_parse_persistent_rule() {
 }
 
 #[test]
+fn test_parse_transient_rule() {
+    // Use valid atom syntax instead of constraint
+    let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
+    if let Statement::SessionRule(rule) = stmt {
+        assert_eq!(rule.head.relation, "result");
+    } else {
+        panic!("Expected TransientRule statement");
+    }
+}
+
+#[test]
+fn test_parse_query() {
+    let stmt = parse_statement("?- edge(1, X).").unwrap();
+    if let Statement::Query(goal) = stmt {
+        assert_eq!(goal.goal.relation, "edge");
+    } else {
+        panic!("Expected Query statement");
+    }
+}
+
+#[test]
+fn test_parse_update_operation() {
+    // Use valid atom syntax instead of constraint
+    let stmt = parse_statement(
+        "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
+    )
+    .unwrap();
+    if let Statement::Update(op) = stmt {
+        assert_eq!(op.deletes.len(), 1);
+        assert_eq!(op.inserts.len(), 1);
+        assert_eq!(op.deletes[0].relation, "person");
+        assert_eq!(op.inserts[0].relation, "person");
+    } else {
+        panic!("Expected Update statement");
+    }
+}
+
+#[test]
+fn test_parse_rule_definition_function() {
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    assert_eq!(rule_def.name, "path");
+
+    let rule = rule_def.rule.to_rule();
+    assert_eq!(rule.head.relation, "path");
+    assert_eq!(rule.body.len(), 1);
+}
+
+// Rule Catalog Integration Tests
+#[test]
+fn test_rule_catalog_with_storage_engine() {
+    let (mut storage, _temp) = create_test_storage();
+
+    // Create knowledge_graph
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert base data
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    // Register a rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&rule_def).unwrap();
+
+    // List rules
+    let rules = storage.list_rules().unwrap();
+    assert!(rules.contains(&"path".to_string()));
+
+    // Describe rule
+    let desc = storage.describe_rule("path").unwrap();
+    assert!(desc.is_some());
+    assert!(desc.unwrap().contains("path"));
+
+    // Execute query using rule
+    let results = storage
+        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .unwrap();
+    assert_eq!(results.len(), 3);
+
+    // Drop rule
+    storage.drop_rule("path").unwrap();
+    let rules = storage.list_rules().unwrap();
+    assert!(!rules.contains(&"path".to_string()));
+}
+
+#[test]
