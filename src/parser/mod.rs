@@ -93,7 +93,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
-            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -327,9 +326,8 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
-    // TODO: verify this condition
     if !current.is_empty() {
-        result.push(current);
+        result.push(current.clone());
     }
 
     result
@@ -395,7 +393,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
             ']' => {
                 // Clamp to 0 to handle malformed input
                 bracket_depth = (bracket_depth - 1).max(0);
-                current.push(ch);
+                current.push(ch.clone());
             }
             ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
                 result.push(current.clone());
@@ -450,7 +448,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
-    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -558,7 +555,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             }
 
             // Boolean literals: true and false are special constants
-            // TODO: verify this condition
             if s == "true" || s == "false" {
                 return Ok(Term::StringConstant(s.to_string()));
             }
@@ -623,7 +619,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                 // Check for scientific notation: digit/dot followed by e/E then +
                 if i >= 2
                     && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] != '.')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
                 {
                     continue;
                 }
@@ -764,7 +760,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
-                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -1107,5 +1102,135 @@ mod tests {
         } else {
             panic!("Expected multiplication, got {:?}", term);
         }
+    }
+
+    #[test]
+    fn test_parse_rule_with_parens_in_body() {
+        // result_paren(X, R) :- nums(X), R = (X + 5) * 2.
+        let rule = parse_rule("result_paren(X, R) :- nums(X), R = (X + 5) * 2.").unwrap();
+        assert_eq!(rule.head.relation, "result_paren");
+        assert_eq!(rule.body.len(), 2);
+        // Second body predicate should be a comparison R = Arithmetic(Mul(Add(X, 5), 2))
+        if let BodyPredicate::Comparison(ref left, ComparisonOp::Equal, ref right) = rule.body[1] {
+            assert!(
+                matches!(left, Term::Variable(ref v) if v == "R"),
+                "Left should be R, got {:?}",
+                left
+            );
+            if let Term::Arithmetic(ArithExpr::Binary {
+                op: ArithOp::Mul,
+                ref left,
+                ref right,
+            }) = right
+            {
+                // Left of Mul should be Add(X, 5)
+                if let ArithExpr::Binary {
+                    op: ArithOp::Add,
+                    left: ref add_left,
+                    right: ref add_right,
+                } = **left
+                {
+                    assert!(
+                        matches!(**add_left, ArithExpr::Variable(ref v) if v == "X"),
+                        "Should be X"
+                    );
+                    assert!(matches!(**add_right, ArithExpr::Constant(5)), "Should be 5");
+                } else {
+                    panic!("Expected Add(X, 5) as left of Mul, got {:?}", left);
+                }
+                // Right of Mul should be Constant(2)
+                assert!(
+                    matches!(**right, ArithExpr::Constant(2)),
+                    "Should be 2, got {:?}",
+                    right
+                );
+            } else {
+                panic!("Expected Arithmetic Mul, got {:?}", right);
+            }
+        } else {
+            panic!("Expected Comparison, got {:?}", rule.body[1]);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_rule() {
+        // dist(Y, D+1) :- dist(X, D), edge(X, Y).
+        let rule = parse_rule("next_dist(Y, D+1) :- dist(X, D), edge(X, Y).").unwrap();
+        assert_eq!(rule.head.relation, "next_dist");
+        assert_eq!(rule.head.args.len(), 2);
+        assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Y"));
+        assert!(matches!(rule.head.args[1], Term::Arithmetic(_)));
+    }
+
+    #[test]
+    fn test_arith_display_roundtrip() {
+        use crate::ast::{ArithExpr, ArithOp};
+        // (X + 5) * 2 should display with parens and roundtrip correctly
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Mul,
+            left: Box::new(ArithExpr::Binary {
+                op: ArithOp::Add,
+                left: Box::new(ArithExpr::Variable("X".into())),
+                right: Box::new(ArithExpr::Constant(5)),
+            }),
+            right: Box::new(ArithExpr::Constant(2)),
+        };
+        assert_eq!(expr.to_string(), "(X+5)*2");
+
+        // Total + Total/10 should NOT add unnecessary parens
+        let expr2 = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Variable("Total".into())),
+            right: Box::new(ArithExpr::Binary {
+                op: ArithOp::Div,
+                left: Box::new(ArithExpr::Variable("Total".into())),
+                right: Box::new(ArithExpr::Constant(10)),
+            }),
+        };
+        assert_eq!(expr2.to_string(), "Total+Total/10");
+
+        // ((X + 1) * 2 + 3) * 4 should preserve all needed parens
+        let expr3 = ArithExpr::Binary {
+            op: ArithOp::Mul,
+            left: Box::new(ArithExpr::Binary {
+                op: ArithOp::Add,
+                left: Box::new(ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    left: Box::new(ArithExpr::Binary {
+                        op: ArithOp::Add,
+                        left: Box::new(ArithExpr::Variable("X".into())),
+                        right: Box::new(ArithExpr::Constant(1)),
+                    }),
+                    right: Box::new(ArithExpr::Constant(2)),
+                }),
+                right: Box::new(ArithExpr::Constant(3)),
+            }),
+            right: Box::new(ArithExpr::Constant(4)),
+        };
+        assert_eq!(expr3.to_string(), "((X+1)*2+3)*4");
+
+        // X * 5 + 2 should NOT parenthesize (mul has higher prec)
+        let expr4 = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Binary {
+                op: ArithOp::Mul,
+                left: Box::new(ArithExpr::Variable("X".into())),
+                right: Box::new(ArithExpr::Constant(5)),
+            }),
+            right: Box::new(ArithExpr::Constant(2)),
+        };
+        assert_eq!(expr4.to_string(), "X*5+2");
+
+        // a / (b * c) should parenthesize right child (same precedence)
+        let expr5 = ArithExpr::Binary {
+            op: ArithOp::Div,
+            left: Box::new(ArithExpr::Variable("A".into())),
+            right: Box::new(ArithExpr::Binary {
+                op: ArithOp::Mul,
+                left: Box::new(ArithExpr::Variable("B".into())),
+                right: Box::new(ArithExpr::Variable("C".into())),
+            }),
+        };
+        assert_eq!(expr5.to_string(), "A/(B*C)");
     }
 
