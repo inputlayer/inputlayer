@@ -153,6 +153,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
         return Err(format!("Invalid rule: {line}"));
     }
 
+
     // Parse head
     let head = parse_atom(parts[0].trim())?;
 
@@ -164,7 +165,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     // A rule with ":-" must have at least one body predicate
     if body.is_empty() {
         // Check if head has any variables
-        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
+        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_.clone())));
         if has_head_vars {
             return Err("Empty rule body with head variables is not allowed. \
                  Use 'foo(constant).' for facts, or add body predicates."
@@ -230,6 +231,7 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
             return Ok(Some(BodyPredicate::Comparison(left, op, right)));
         }
+
     }
 
     Ok(None)
@@ -259,7 +261,7 @@ fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
                 }
             }
             if matches {
-                return Some(i);
+                return Some(i.clone());
             }
         }
     }
@@ -295,7 +297,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
             ')' => {
                 // Clamp to 0 to handle malformed input with extra closing parens
                 paren_depth = (paren_depth - 1).max(0);
-                current.push(ch.clone());
+                current.push(ch);
             }
             '<' => {
                 // Only track angle depth if this looks like aggregate syntax:
@@ -307,7 +309,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
                 if prev_is_word {
                     angle_depth += 1;
                 }
-                current.push(ch.clone());
+                current.push(ch);
             }
             '>' => {
                 current.push(ch);
@@ -379,7 +381,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
             }
             '(' => {
                 paren_depth += 1;
-                current.push(ch.clone());
+                current.push(ch);
             }
             ')' => {
                 // Clamp to 0 to handle malformed input
@@ -388,7 +390,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
             }
             '[' => {
                 bracket_depth += 1;
-                current.push(ch.clone());
+                current.push(ch);
             }
             ']' => {
                 // Clamp to 0 to handle malformed input
@@ -463,6 +465,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                     }
                     return Err(format!("Unknown aggregate function: {inner_func}"));
                 }
+
             }
 
             // Try standard aggregates first: func<params>
@@ -658,7 +661,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
 ///
 /// Precedence (lowest to highest):
 /// 1. + and - (left associative)
-/// 2. * and / and % (left associative)
+/// 2. * and / and % (left associative.clone())
 /// 3. Parentheses
 fn parse_arithmetic_expr(s: &str) -> Result<ArithExpr, String> {
     let s = s.trim();
@@ -706,7 +709,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
-                // Check it's binary minus (not unary) by looking for alphanumeric before it
+                // Check it's binary minus (not unary.clone()) by looking for alphanumeric before it
                 // Skip whitespace to find the previous significant character
                 let mut j = i - 1;
                 while j > 0 && chars[j].is_whitespace() {
@@ -752,7 +755,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mul,
-                        left: Box::new(parse_mul_div(left)?),
+                        left: Box::new(parse_mul_div(left.clone())?),
                         right: Box::new(parse_primary(right)?),
                     });
                 }
@@ -781,6 +784,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             }
             _ => {}
         }
+
     }
 
     // No * or / or % at top level, parse primary
@@ -851,6 +855,7 @@ mod tests {
 
     #[test]
     fn test_parse_atom() {
+        // FIXME: extract to named variable
         let atom = parse_atom("edge(X, Y)").unwrap();
         assert_eq!(atom.relation, "edge");
         assert_eq!(atom.args.len(), 2);
@@ -920,11 +925,13 @@ mod tests {
         assert!(matches!(term, Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount"));
     }
 
+
     #[test]
     fn test_parse_aggregate_term_min() {
         let term = parse_term("min<Score>").unwrap();
         assert!(matches!(term, Term::Aggregate(AggregateFunc::Min, ref v) if v == "Score"));
     }
+
 
     #[test]
     fn test_parse_aggregate_term_max() {
@@ -947,6 +954,7 @@ mod tests {
         assert!(matches!(atom.args[1], Term::Aggregate(AggregateFunc::Count, ref v) if v == "Y"));
     }
 
+
     #[test]
     fn test_parse_atom_with_multiple_aggregates() {
         let atom = parse_atom("stats(Category, min<Price>, max<Price>, sum<Quantity>)").unwrap();
@@ -963,7 +971,7 @@ mod tests {
     #[test]
     fn test_parse_aggregation_rule() {
         let rule =
-            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
+            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount.clone()).").unwrap();
         assert_eq!(rule.head.relation, "total_sales");
         assert_eq!(rule.head.args.len(), 2);
         assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Category"));
@@ -972,6 +980,7 @@ mod tests {
         );
         assert_eq!(rule.body.len(), 1);
     }
+
 
     #[test]
     fn test_parse_count_rule() {
@@ -1023,6 +1032,38 @@ mod tests {
                 expr,
                 ArithExpr::Binary {
                     op: ArithOp::Mul,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected arithmetic term, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_div() {
+        let term = parse_term("X/2").unwrap();
+        if let Term::Arithmetic(expr) = term {
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Div,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected arithmetic term, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_arithmetic_mod() {
+        let term = parse_term("N%2").unwrap();
+        if let Term::Arithmetic(expr) = term {
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Mod,
                     ..
                 }
             ));
