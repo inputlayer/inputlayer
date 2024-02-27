@@ -99,7 +99,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".exit").unwrap(),
-        Statement::Meta(MetaCommand::Quit.clone())
+        Statement::Meta(MetaCommand::Quit)
     ));
 }
 
@@ -128,6 +128,7 @@ fn test_parse_insert_operations() {
 fn test_parse_delete_operations() {
     // Single delete
     let stmt = parse_statement("-edge(1, 2).").unwrap();
+    // TODO: verify this condition
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -167,7 +168,6 @@ fn test_parse_persistent_rule() {
 #[test]
 fn test_parse_transient_rule() {
     // Use valid atom syntax instead of constraint
-    // FIXME: extract to named variable
     let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
     if let Statement::SessionRule(rule) = stmt {
         assert_eq!(rule.head.relation, "result");
@@ -189,7 +189,6 @@ fn test_parse_query() {
 #[test]
 fn test_parse_update_operation() {
     // Use valid atom syntax instead of constraint
-    // FIXME: extract to named variable
     let stmt = parse_statement(
         "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
     )
@@ -237,13 +236,11 @@ fn test_rule_catalog_with_storage_engine() {
     assert!(rules.contains(&"path".to_string()));
 
     // Describe rule
-    // FIXME: extract to named variable
     let desc = storage.describe_rule("path").unwrap();
     assert!(desc.is_some());
     assert!(desc.unwrap().contains("path"));
 
     // Execute query using rule
-    // FIXME: extract to named variable
     let results = storage
         .execute_query_with_rules("result(X, Y) :- path(X, Y).")
         .unwrap();
@@ -307,7 +304,72 @@ fn test_rule_persistence() {
         let rules = storage.list_rules().unwrap();
         assert!(rules.contains(&"derived".to_string()));
     }
-
 }
 
+#[test]
+fn test_rule_catalog_standalone() {
+    let temp = TempDir::new().unwrap();
+
+    let mut catalog = RuleCatalog::new(temp.path().to_path_buf()).unwrap();
+
+    // Register rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    catalog.register_rule(&rule_def).unwrap();
+
+    assert!(catalog.exists("path"));
+    assert_eq!(catalog.len(), 1);
+
+    // Get rules
+    let rules = catalog.all_rules();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].head.relation, "path");
+
+    // Reload and verify persistence
+    let catalog2 = RuleCatalog::new(temp.path().to_path_buf()).unwrap();
+    assert!(catalog2.exists("path"));
+}
+
+// Storage Engine Rule Integration Tests
+#[test]
+fn test_storage_engine_list_relations() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Initially empty
+    let relations = storage.list_relations().unwrap();
+    assert!(relations.is_empty());
+
+    // Add some data
+    storage.insert("edge", vec![(1, 2)]).unwrap();
+    storage.insert("node", vec![(1, 1)]).unwrap();
+
+    let relations = storage.list_relations().unwrap();
+    assert!(relations.contains(&"edge".to_string()));
+    assert!(relations.contains(&"node".to_string()));
+}
+
+#[test]
+fn test_execute_query_with_rules() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert data
+    storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+    // Register rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&rule_def).unwrap();
+
+    // Query that uses the rule
+    let results = storage
+        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .unwrap();
+    assert_eq!(results.len(), 2);
+}
+
+// Error Handling Tests
 #[test]
