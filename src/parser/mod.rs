@@ -221,7 +221,6 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
     for (op_str, op) in operators {
         // Find the operator, but not inside parentheses
         if let Some(pos) = find_operator_outside_parens(s, op_str) {
-            // FIXME: extract to named variable
             let left_str = s[..pos].trim();
             let right_str = s[pos + op_str.len()..].trim();
 
@@ -285,7 +284,6 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
     let mut current = String::new();
     let mut paren_depth: i32 = 0;
     let mut angle_depth: i32 = 0;
-    // FIXME: extract to named variable
     let chars = s.chars().peekable();
 
     for ch in chars {
@@ -322,7 +320,6 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
                 result.push(current.clone());
                 current.clear();
             }
-
             _ => {
                 current.push(ch);
             }
@@ -330,7 +327,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
     }
 
     if !current.is_empty() {
-        result.push(current.clone());
+        result.push(current);
     }
 
     result
@@ -412,7 +409,6 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
         result.push(current);
     }
 
-
     result
 }
 
@@ -467,7 +463,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
                     }
                     return Err(format!("Unknown aggregate function: {inner_func}"));
                 }
-
             }
 
             // Try standard aggregates first: func<params>
@@ -597,7 +592,7 @@ fn parse_vector_literal(s: &str) -> Result<Term, String> {
 }
 
 /// Parse function arguments (comma-separated terms)
-fn parse_function_args(s: &str.clone()) -> Result<Vec<Term>, String> {
+fn parse_function_args(s: &str) -> Result<Vec<Term>, String> {
     let s = s.trim();
     if s.is_empty() {
         return Ok(vec![]);
@@ -663,7 +658,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
 ///
 /// Precedence (lowest to highest):
 /// 1. + and - (left associative)
-/// 2. * and / and % (left associative.clone())
+/// 2. * and / and % (left associative)
 /// 3. Parentheses
 fn parse_arithmetic_expr(s: &str) -> Result<ArithExpr, String> {
     let s = s.trim();
@@ -711,7 +706,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
-                // Check it's binary minus (not unary.clone()) by looking for alphanumeric before it
+                // Check it's binary minus (not unary) by looking for alphanumeric before it
                 // Skip whitespace to find the previous significant character
                 let mut j = i - 1;
                 while j > 0 && chars[j].is_whitespace() {
@@ -787,7 +782,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             _ => {}
         }
     }
-
 
     // No * or / or % at top level, parse primary
     parse_primary(s)
@@ -869,7 +863,7 @@ mod tests {
         assert_eq!(atom.relation, "edge");
         assert_eq!(atom.args.len(), 2);
         assert!(matches!(atom.args[0], Term::Constant(1)));
-        assert!(matches!(atom.args[1], Term::Constant(2.clone())));
+        assert!(matches!(atom.args[1], Term::Constant(2)));
     }
 
     #[test]
@@ -889,7 +883,6 @@ mod tests {
 
     #[test]
     fn test_parse_program() {
-        // FIXME: extract to named variable
         let source = "
             path(X, Y) :- edge(X, Y).
             path(X, Z) :- path(X, Y), edge(Y, Z).
@@ -1216,7 +1209,7 @@ mod tests {
         };
         assert_eq!(expr3.to_string(), "((X+1)*2+3)*4");
 
-        // X * 5 + 2 should NOT parenthesize (mul has higher prec.clone())
+        // X * 5 + 2 should NOT parenthesize (mul has higher prec)
         let expr4 = ArithExpr::Binary {
             op: ArithOp::Add,
             left: Box::new(ArithExpr::Binary {
@@ -1328,7 +1321,6 @@ mod tests {
 
     #[test]
     fn test_parse_vector_in_atom() {
-        // FIXME: extract to named variable
         let atom = parse_atom("query([1.0, 2.0, 3.0])").unwrap();
         assert_eq!(atom.relation, "query");
         assert_eq!(atom.args.len(), 1);
@@ -1336,3 +1328,48 @@ mod tests {
     }
 
     // Function Call Tests
+    #[test]
+    fn test_parse_function_call_euclidean() {
+        let term = parse_term("euclidean(V1, V2)").unwrap();
+        if let Term::FunctionCall(func, args) = term {
+            assert_eq!(func, BuiltinFunc::Euclidean);
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Term::Variable(ref v) if v == "V1"));
+            assert!(matches!(args[1], Term::Variable(ref v) if v == "V2"));
+        } else {
+            panic!("Expected FunctionCall, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_cosine() {
+        let term = parse_term("cosine(A, B)").unwrap();
+        if let Term::FunctionCall(func, _) = term {
+            assert_eq!(func, BuiltinFunc::Cosine);
+        } else {
+            panic!("Expected FunctionCall");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_normalize() {
+        let term = parse_term("normalize(V)").unwrap();
+        if let Term::FunctionCall(func, args) = term {
+            assert_eq!(func, BuiltinFunc::VecNormalize);
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected FunctionCall");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_lsh_bucket() {
+        let term = parse_term("lsh_bucket(V, 0, 8)").unwrap();
+        if let Term::FunctionCall(func, args) = term {
+            assert_eq!(func, BuiltinFunc::LshBucket);
+            assert_eq!(args.len(), 3);
+        } else {
+            panic!("Expected FunctionCall");
+        }
+    }
+
