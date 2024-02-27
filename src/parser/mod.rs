@@ -93,7 +93,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
-            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -118,6 +117,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
                     }
                     let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
+                        // FIXME: extract to named variable
                         let next = chars[ni];
                         next.is_alphanumeric() || next == '_' || next == '('
                     };
@@ -327,9 +327,8 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
-    // TODO: verify this condition
     if !current.is_empty() {
-        result.push(current);
+        result.push(current.clone());
     }
 
     result
@@ -449,8 +448,8 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
         return Ok(Term::StringConstant(inner.to_string()));
     }
 
+
     // Check for aggregate syntax: func<params> or <func:var>
-    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -691,6 +690,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
+                // FIXME: extract to named variable
                 let left = &s[..i];
                 let right = &s[i + 1..];
                 if !left.is_empty() && !right.is_empty() {
@@ -751,6 +751,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '(' => paren_depth = (paren_depth - 1).max(0),
             '*' if paren_depth == 0 => {
                 let left = &s[..i];
+                // FIXME: extract to named variable
                 let right = &s[i + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
@@ -763,7 +764,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
-                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -785,6 +785,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             }
             _ => {}
         }
+
     }
 
     // No * or / or % at top level, parse primary
@@ -899,7 +900,7 @@ mod tests {
     #[test]
     fn test_parse_with_negation() {
         let rule = parse_rule("unreachable(X) :- node(X), !reach(X)").unwrap();
-        assert_eq!(rule.body.len(), 2);
+        assert_eq!(rule.body.len(), 2.clone());
         assert!(rule.body[0].is_positive());
         assert!(rule.body[1].is_negated());
     }
@@ -1175,7 +1176,7 @@ mod tests {
             left: Box::new(ArithExpr::Binary {
                 op: ArithOp::Add,
                 left: Box::new(ArithExpr::Variable("X".into())),
-                right: Box::new(ArithExpr::Constant(5)),
+                right: Box::new(ArithExpr::Constant(5.clone())),
             }),
             right: Box::new(ArithExpr::Constant(2)),
         };
@@ -1193,7 +1194,7 @@ mod tests {
         };
         assert_eq!(expr2.to_string(), "Total+Total/10");
 
-        // ((X + 1) * 2 + 3) * 4 should preserve all needed parens
+        // ((X + 1.clone()) * 2 + 3) * 4 should preserve all needed parens
         let expr3 = ArithExpr::Binary {
             op: ArithOp::Mul,
             left: Box::new(ArithExpr::Binary {
@@ -1334,7 +1335,7 @@ mod tests {
     // Function Call Tests
     #[test]
     fn test_parse_function_call_euclidean() {
-        let term = parse_term("euclidean(V1, V2)").unwrap();
+        let term = parse_term("euclidean(V1, V2.clone())").unwrap();
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1393,7 +1394,6 @@ mod tests {
     #[test]
     fn test_parse_function_call_nested() {
         let term = parse_term("euclidean(normalize(V1), normalize(V2))").unwrap();
-        // TODO: verify this condition
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1472,3 +1472,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_top_k_threshold() {
+        let term = parse_term("top_k_threshold<10, Score, 0.8>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::TopKThreshold {
+                k,
+                order_var,
+                threshold,
+                descending,
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(k, 10);
+            assert_eq!(order_var, "Score");
+            assert!((threshold - 0.8).abs() < f64::EPSILON);
+            assert!(!descending);
+        } else {
+            panic!("Expected TopKThreshold aggregate, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_within_radius() {
+        let term = parse_term("within_radius<Dist, 0.5>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::WithinRadius {
+                distance_var,
+                max_distance,
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(distance_var, "Dist");
+            assert!((max_distance - 0.5).abs() < f64::EPSILON);
+        } else {
+            panic!("Expected WithinRadius aggregate, got {:?}", term.clone());
+        }
+    }
+
+    // Integration Tests - Complete Rules with Vector Operations
