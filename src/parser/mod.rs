@@ -93,6 +93,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
+            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -326,6 +327,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -448,6 +450,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
+    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -760,6 +763,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
+                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -1389,6 +1393,7 @@ mod tests {
     #[test]
     fn test_parse_function_call_nested() {
         let term = parse_term("euclidean(normalize(V1), normalize(V2))").unwrap();
+        // TODO: verify this condition
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1427,3 +1432,43 @@ mod tests {
     }
 
     // New Aggregate Tests (TopK, TopKThreshold, WithinRadius)
+    #[test]
+    fn test_parse_top_k_aggregate() {
+        let term = parse_term("top_k<10, Score>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(k, 10);
+            assert_eq!(order_var, "Score");
+            assert!(!descending);
+        } else {
+            panic!("Expected TopK aggregate, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_descending() {
+        let term = parse_term("top_k<5, Dist, desc>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(k, 5);
+            assert_eq!(order_var, "Dist");
+            assert!(descending);
+        } else {
+            panic!("Expected TopK aggregate");
+        }
+    }
+
