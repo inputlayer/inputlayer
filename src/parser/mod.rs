@@ -1373,3 +1373,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_function_call_with_vector_literal() {
+        let term = parse_term("euclidean(V, [1.0, 2.0, 3.0])").unwrap();
+        if let Term::FunctionCall(func, args) = term {
+            assert_eq!(func, BuiltinFunc::Euclidean);
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Term::Variable(_)));
+            assert!(matches!(args[1], Term::VectorLiteral(_)));
+        } else {
+            panic!("Expected FunctionCall");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_call_nested() {
+        let term = parse_term("euclidean(normalize(V1), normalize(V2))").unwrap();
+        if let Term::FunctionCall(func, args) = term {
+            assert_eq!(func, BuiltinFunc::Euclidean);
+            assert_eq!(args.len(), 2);
+            assert!(matches!(
+                args[0],
+                Term::FunctionCall(BuiltinFunc::VecNormalize, _)
+            ));
+            assert!(matches!(
+                args[1],
+                Term::FunctionCall(BuiltinFunc::VecNormalize, _)
+            ));
+        } else {
+            panic!("Expected nested FunctionCall");
+        }
+    }
+
+    // Float Constant Tests
+    #[test]
+    fn test_parse_float_constant() {
+        let term = parse_term("3.14").unwrap();
+        if let Term::FloatConstant(v) = term {
+            assert!((v - 3.14).abs() < f64::EPSILON);
+        } else {
+            panic!("Expected FloatConstant, got {:?}", term);
+        }
+    }
+
+    #[test]
+    fn test_parse_negative_float() {
+        let term = parse_term("-0.5").unwrap();
+        if let Term::FloatConstant(v) = term {
+            assert!((v - (-0.5)).abs() < f64::EPSILON);
+        } else {
+            panic!("Expected FloatConstant, got {:?}", term);
+        }
+    }
+
+    // New Aggregate Tests (TopK, TopKThreshold, WithinRadius)
