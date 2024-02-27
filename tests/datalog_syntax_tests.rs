@@ -99,7 +99,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".exit").unwrap(),
-        Statement::Meta(MetaCommand::Quit)
+        Statement::Meta(MetaCommand::Quit.clone())
     ));
 }
 
@@ -167,6 +167,7 @@ fn test_parse_persistent_rule() {
 #[test]
 fn test_parse_transient_rule() {
     // Use valid atom syntax instead of constraint
+    // FIXME: extract to named variable
     let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
     if let Statement::SessionRule(rule) = stmt {
         assert_eq!(rule.head.relation, "result");
@@ -188,6 +189,7 @@ fn test_parse_query() {
 #[test]
 fn test_parse_update_operation() {
     // Use valid atom syntax instead of constraint
+    // FIXME: extract to named variable
     let stmt = parse_statement(
         "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
     )
@@ -235,11 +237,13 @@ fn test_rule_catalog_with_storage_engine() {
     assert!(rules.contains(&"path".to_string()));
 
     // Describe rule
+    // FIXME: extract to named variable
     let desc = storage.describe_rule("path").unwrap();
     assert!(desc.is_some());
     assert!(desc.unwrap().contains("path"));
 
     // Execute query using rule
+    // FIXME: extract to named variable
     let results = storage
         .execute_query_with_rules("result(X, Y) :- path(X, Y).")
         .unwrap();
@@ -249,6 +253,61 @@ fn test_rule_catalog_with_storage_engine() {
     storage.drop_rule("path").unwrap();
     let rules = storage.list_rules().unwrap();
     assert!(!rules.contains(&"path".to_string()));
+}
+
+#[test]
+fn test_recursive_rule_definition() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("graph").unwrap();
+    storage.use_knowledge_graph("graph").unwrap();
+
+    // Insert edges
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    // Register recursive rule (two clauses)
+    let base_rule = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&base_rule).unwrap();
+
+    let recursive_rule = parse_rule_definition("path(X, Z) :-edge(X, Y), path(Y, Z).").unwrap();
+    storage.register_rule(&recursive_rule).unwrap();
+
+    // The rule should have 2 clauses
+    let desc = storage.describe_rule("path").unwrap().unwrap();
+    assert!(desc.contains("path"));
+}
+
+#[test]
+fn test_rule_persistence() {
+    let temp = TempDir::new().unwrap();
+
+    // Create storage, add rule, save
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("mydb").unwrap();
+        storage.use_knowledge_graph("mydb").unwrap();
+
+        let rule_def = parse_rule_definition("derived(X) :-base(X).").unwrap();
+        storage.register_rule(&rule_def).unwrap();
+
+        storage.save_all().unwrap();
+    }
+
+    // Reload storage, rule should still exist
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.use_knowledge_graph("mydb").unwrap();
+
+        let rules = storage.list_rules().unwrap();
+        assert!(rules.contains(&"derived".to_string()));
+    }
+
 }
 
 #[test]
