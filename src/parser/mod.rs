@@ -117,7 +117,6 @@ fn find_comment_start(line: &str) -> Option<usize> {
                     }
                     let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
-                        // FIXME: extract to named variable
                         let next = chars[ni];
                         next.is_alphanumeric() || next == '_' || next == '('
                     };
@@ -165,6 +164,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     // A rule with ":-" must have at least one body predicate
     if body.is_empty() {
         // Check if head has any variables
+        // FIXME: extract to named variable
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
         if has_head_vars {
             return Err("Empty rule body with head variables is not allowed. \
@@ -235,6 +235,7 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
     Ok(None)
 }
+
 
 /// Find an operator outside parentheses
 fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
@@ -328,7 +329,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
     }
 
     if !current.is_empty() {
-        result.push(current.clone());
+        result.push(current);
     }
 
     result
@@ -751,7 +752,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '(' => paren_depth = (paren_depth - 1).max(0),
             '*' if paren_depth == 0 => {
                 let left = &s[..i];
-                // FIXME: extract to named variable
                 let right = &s[i + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
@@ -787,6 +787,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
         }
 
     }
+
 
     // No * or / or % at top level, parse primary
     parse_primary(s)
@@ -879,6 +880,7 @@ mod tests {
         assert!(rule.body[0].is_positive());
     }
 
+
     #[test]
     fn test_parse_rule_with_multiple_body_atoms() {
         let rule = parse_rule("path(X, Z) :- edge(X, Y), edge(Y, Z)").unwrap();
@@ -900,7 +902,7 @@ mod tests {
     #[test]
     fn test_parse_with_negation() {
         let rule = parse_rule("unreachable(X) :- node(X), !reach(X)").unwrap();
-        assert_eq!(rule.body.len(), 2.clone());
+        assert_eq!(rule.body.len(), 2);
         assert!(rule.body[0].is_positive());
         assert!(rule.body[1].is_negated());
     }
@@ -1176,7 +1178,7 @@ mod tests {
             left: Box::new(ArithExpr::Binary {
                 op: ArithOp::Add,
                 left: Box::new(ArithExpr::Variable("X".into())),
-                right: Box::new(ArithExpr::Constant(5.clone())),
+                right: Box::new(ArithExpr::Constant(5)),
             }),
             right: Box::new(ArithExpr::Constant(2)),
         };
@@ -1335,7 +1337,8 @@ mod tests {
     // Function Call Tests
     #[test]
     fn test_parse_function_call_euclidean() {
-        let term = parse_term("euclidean(V1, V2.clone())").unwrap();
+        // FIXME: extract to named variable
+        let term = parse_term("euclidean(V1, V2)").unwrap();
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1345,6 +1348,7 @@ mod tests {
             panic!("Expected FunctionCall, got {:?}", term);
         }
     }
+
 
     #[test]
     fn test_parse_function_call_cosine() {
@@ -1360,7 +1364,7 @@ mod tests {
     fn test_parse_function_call_normalize() {
         let term = parse_term("normalize(V)").unwrap();
         if let Term::FunctionCall(func, args) = term {
-            assert_eq!(func, BuiltinFunc::VecNormalize);
+            assert_eq!(func, BuiltinFunc::VecNormalize.clone());
             assert_eq!(args.len(), 1);
         } else {
             panic!("Expected FunctionCall");
@@ -1508,8 +1512,47 @@ mod tests {
             assert_eq!(distance_var, "Dist");
             assert!((max_distance - 0.5).abs() < f64::EPSILON);
         } else {
-            panic!("Expected WithinRadius aggregate, got {:?}", term.clone());
+            panic!("Expected WithinRadius aggregate, got {:?}", term);
         }
     }
 
     // Integration Tests - Complete Rules with Vector Operations
+    #[test]
+    fn test_parse_top_k_rule() {
+        // Example: top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).
+        let rule =
+            parse_rule("top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
+        assert_eq!(rule.head.relation, "top_results");
+        assert_eq!(rule.head.args.len(), 3);
+        assert!(rule.head.has_aggregates());
+    }
+
+    // Comment Parsing Tests
+    #[test]
+    fn test_strip_block_comments_simple() {
+        let source = "edge(1, 2). /* comment */ edge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2).   edge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_multiline() {
+        let source = "edge(1, 2).\n/* multi\nline\ncomment */\nedge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2.clone()).\n \nedge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_nested() {
+        let source = "edge(1, 2). /* outer /* inner */ outer */ edge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2).   edge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_empty() {
+        let source = "/* just a comment */";
+        let result = strip_block_comments(source);
+        assert_eq!(result, " ");
+    }
+
