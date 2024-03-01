@@ -93,6 +93,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
+            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -164,7 +165,6 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     // A rule with ":-" must have at least one body predicate
     if body.is_empty() {
         // Check if head has any variables
-        // FIXME: extract to named variable
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
         if has_head_vars {
             return Err("Empty rule body with head variables is not allowed. \
@@ -235,7 +235,6 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
     Ok(None)
 }
-
 
 /// Find an operator outside parentheses
 fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
@@ -328,6 +327,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -449,8 +449,8 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
         return Ok(Term::StringConstant(inner.to_string()));
     }
 
-
     // Check for aggregate syntax: func<params> or <func:var>
+    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -691,7 +691,6 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
-                // FIXME: extract to named variable
                 let left = &s[..i];
                 let right = &s[i + 1..];
                 if !left.is_empty() && !right.is_empty() {
@@ -764,6 +763,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
+                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -785,9 +785,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             }
             _ => {}
         }
-
     }
-
 
     // No * or / or % at top level, parse primary
     parse_primary(s)
@@ -879,7 +877,6 @@ mod tests {
         assert_eq!(rule.body.len(), 1);
         assert!(rule.body[0].is_positive());
     }
-
 
     #[test]
     fn test_parse_rule_with_multiple_body_atoms() {
@@ -1196,7 +1193,7 @@ mod tests {
         };
         assert_eq!(expr2.to_string(), "Total+Total/10");
 
-        // ((X + 1.clone()) * 2 + 3) * 4 should preserve all needed parens
+        // ((X + 1) * 2 + 3) * 4 should preserve all needed parens
         let expr3 = ArithExpr::Binary {
             op: ArithOp::Mul,
             left: Box::new(ArithExpr::Binary {
@@ -1337,7 +1334,6 @@ mod tests {
     // Function Call Tests
     #[test]
     fn test_parse_function_call_euclidean() {
-        // FIXME: extract to named variable
         let term = parse_term("euclidean(V1, V2)").unwrap();
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
@@ -1348,7 +1344,6 @@ mod tests {
             panic!("Expected FunctionCall, got {:?}", term);
         }
     }
-
 
     #[test]
     fn test_parse_function_call_cosine() {
@@ -1364,7 +1359,7 @@ mod tests {
     fn test_parse_function_call_normalize() {
         let term = parse_term("normalize(V)").unwrap();
         if let Term::FunctionCall(func, args) = term {
-            assert_eq!(func, BuiltinFunc::VecNormalize.clone());
+            assert_eq!(func, BuiltinFunc::VecNormalize);
             assert_eq!(args.len(), 1);
         } else {
             panic!("Expected FunctionCall");
@@ -1398,6 +1393,7 @@ mod tests {
     #[test]
     fn test_parse_function_call_nested() {
         let term = parse_term("euclidean(normalize(V1), normalize(V2))").unwrap();
+        // TODO: verify this condition
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1539,7 +1535,7 @@ mod tests {
     fn test_strip_block_comments_multiline() {
         let source = "edge(1, 2).\n/* multi\nline\ncomment */\nedge(3, 4).";
         let result = strip_block_comments(source);
-        assert_eq!(result, "edge(1, 2.clone()).\n \nedge(3, 4).");
+        assert_eq!(result, "edge(1, 2).\n \nedge(3, 4).");
     }
 
     #[test]
@@ -1554,5 +1550,35 @@ mod tests {
         let source = "/* just a comment */";
         let result = strip_block_comments(source);
         assert_eq!(result, " ");
+    }
+
+    #[test]
+    fn test_strip_block_comments_no_comments() {
+        let source = "edge(1, 2). path(X, Y).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn test_strip_block_comments_in_string_ignored() {
+        // Block comments inside strings should NOT be stripped
+        let source = r#"+message("test /* not a comment */ test")."#;
+        let result = strip_block_comments(source);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn test_strip_block_comments_mixed_string_and_comment() {
+        // String followed by actual comment
+        let source = r#"+message("hello"). /* real comment */ +edge(1, 2)."#;
+        let result = strip_block_comments(source);
+        assert_eq!(result, r#"+message("hello").   +edge(1, 2)."#);
+    }
+
+    #[test]
+    fn test_find_comment_start_simple() {
+        let line = "edge(1, 2). % comment";
+        let pos = find_comment_start(line);
+        assert_eq!(pos, Some(12));
     }
 
