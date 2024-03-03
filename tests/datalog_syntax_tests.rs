@@ -550,3 +550,63 @@ fn test_query_with_all_constants() {
 }
 
 #[test]
+fn test_query_with_constant_on_base_relation() {
+    // Test query with constant directly on base relation (no view)
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert edges
+    storage
+        .insert("edge", vec![(1, 2), (1, 3), (2, 4)])
+        .unwrap();
+
+    // Query: ?- edge(1, X). - use constant directly in atom
+    let results = storage
+        .execute_query_with_rules("__query__(1, X) :- edge(1, X).")
+        .unwrap();
+
+    // From 1, direct edges are: (1,2), (1,3)
+    assert_eq!(results.len(), 2);
+    assert!(results.contains(&(1, 2)));
+    assert!(results.contains(&(1, 3)));
+}
+
+#[test]
+fn test_query_constant_second_arg() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert edges
+    storage
+        .insert("edge", vec![(1, 3), (2, 3), (4, 5)])
+        .unwrap();
+
+    // Query: ?- edge(X, 3). - use constant directly in atom
+    let results = storage
+        .execute_query_with_rules("__query__(X, 3) :- edge(X, 3).")
+        .unwrap();
+
+    // Should return (1, 3) and (2, 3)
+    assert_eq!(results.len(), 2);
+    assert!(results.contains(&(1, 3)));
+    assert!(results.contains(&(2, 3)));
+}
+
+// Unquoted Atom Rejection Tests
+#[test]
+fn test_unquoted_atom_rejected_in_insert() {
+    // Unquoted lowercase identifier should be rejected - use quoted strings instead
+    let result = parse_statement("+person(alice, 30).");
+    assert!(result.is_err(), "Unquoted atom 'alice' should be rejected");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("Unquoted atom") || err.contains("alice"),
+        "Error should mention unquoted atom: {err}"
+    );
+}
+
+#[test]
