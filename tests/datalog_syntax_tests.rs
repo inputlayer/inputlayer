@@ -610,3 +610,69 @@ fn test_unquoted_atom_rejected_in_insert() {
 }
 
 #[test]
+fn test_quoted_string_accepted_in_insert() {
+    // Quoted string should work
+    let result = parse_statement("+person(\"alice\", 30).");
+    assert!(
+        result.is_ok(),
+        "Quoted string should be accepted: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_unquoted_atom_rejected_in_fact() {
+    // Session fact with unquoted atom should be rejected
+    let result = parse_statement("person(bob, 25).");
+    assert!(result.is_err(), "Unquoted atom 'bob' should be rejected");
+}
+
+#[test]
+fn test_quoted_string_accepted_in_fact() {
+    // Session fact with quoted string should work
+    let result = parse_statement("person(\"bob\", 25).");
+    assert!(
+        result.is_ok(),
+        "Quoted string should be accepted: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_unquoted_atom_rejected_in_query() {
+    // Query with unquoted atom constant should be rejected
+    let result = parse_statement("?- person(alice, X).");
+    assert!(
+        result.is_err(),
+        "Unquoted atom 'alice' in query should be rejected"
+    );
+}
+
+#[test]
+fn test_variables_still_work_in_query() {
+    // Variables (uppercase) should still work fine
+    let result = parse_statement("?- person(X, Y).");
+    assert!(result.is_ok(), "Variables should work: {:?}", result.err());
+}
+
+#[test]
+fn test_mixed_quoted_and_variables() {
+    // Mix of quoted strings and variables should work
+    let result = parse_statement("?- person(\"alice\", Age).");
+    assert!(
+        result.is_ok(),
+        "Mix of quoted string and variable should work: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_unquoted_atom_error_message_helpful() {
+    let result = parse_statement("+person(alice, 30).");
+    let err = result.unwrap_err();
+    // Error should suggest using quotes
+    assert!(
+        err.contains("\"alice\"") || err.contains("quoted"),
+        "Error should suggest using quotes: {err}"
+    );
+}
