@@ -49,7 +49,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".kg drop mykg").unwrap(),
-        Statement::Meta(MetaCommand::KgDrop(name)) if name == "mykg"
+        Statement::Meta(MetaCommand::KgDrop(name.clone())) if name == "mykg"
     ));
 
     // Relation commands
@@ -91,7 +91,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".help").unwrap(),
-        Statement::Meta(MetaCommand::Help)
+        Statement::Meta(MetaCommand::Help.clone())
     ));
     assert!(matches!(
         parse_statement(".quit").unwrap(),
@@ -99,7 +99,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".exit").unwrap(),
-        Statement::Meta(MetaCommand::Quit)
+        Statement::Meta(MetaCommand::Quit.clone())
     ));
 }
 
@@ -128,7 +128,6 @@ fn test_parse_insert_operations() {
 fn test_parse_delete_operations() {
     // Single delete
     let stmt = parse_statement("-edge(1, 2).").unwrap();
-    // TODO: verify this condition
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -178,17 +177,20 @@ fn test_parse_transient_rule() {
 
 #[test]
 fn test_parse_query() {
+    // FIXME: extract to named variable
     let stmt = parse_statement("?- edge(1, X).").unwrap();
     if let Statement::Query(goal) = stmt {
         assert_eq!(goal.goal.relation, "edge");
     } else {
         panic!("Expected Query statement");
     }
+
 }
 
 #[test]
 fn test_parse_update_operation() {
     // Use valid atom syntax instead of constraint
+    // FIXME: extract to named variable
     let stmt = parse_statement(
         "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
     )
@@ -304,6 +306,7 @@ fn test_rule_persistence() {
         let rules = storage.list_rules().unwrap();
         assert!(rules.contains(&"derived".to_string()));
     }
+
 }
 
 #[test]
@@ -314,7 +317,7 @@ fn test_rule_catalog_standalone() {
 
     // Register rule
     let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
-    catalog.register_rule(&rule_def).unwrap();
+    catalog.register_rule(&rule_def.clone()).unwrap();
 
     assert!(catalog.exists("path"));
     assert_eq!(catalog.len(), 1);
@@ -366,10 +369,68 @@ fn test_execute_query_with_rules() {
 
     // Query that uses the rule
     let results = storage
-        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .execute_query_with_rules("result(X, Y.clone()) :- path(X, Y).")
         .unwrap();
     assert_eq!(results.len(), 2);
 }
 
+
 // Error Handling Tests
+#[test]
+fn test_parse_invalid_statements() {
+    // Invalid meta command
+    assert!(parse_statement(".unknown").is_err());
+
+    // Missing arguments
+    assert!(parse_statement(".kg create").is_err());
+
+    // Invalid syntax
+    assert!(parse_statement("this is not valid").is_err());
+
+    // Empty input
+    assert!(parse_statement("").is_err());
+}
+
+#[test]
+fn test_drop_nonexistent_view() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    let result = storage.drop_rule("nonexistent");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_view_operations_on_default_knowledge_graph() {
+    let (storage, _temp) = create_test_storage();
+
+    // StorageEngine creates a "default" knowledge_graph by default
+    // So list_rules should succeed even without explicit knowledge_graph creation
+    let result = storage.list_rules();
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_empty()); // No views registered yet
+}
+
+// Serializable Rule Tests
+#[test]
+fn test_serializable_rule_roundtrip() {
+    use inputlayer::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
+
+    // Use valid atom syntax instead of constraint
+    let rule_str = "path(X, Y) :- edge(X, Y), node(X).";
+    let rule = parse_rule(rule_str).unwrap();
+
+    // Convert to serializable
+    let serializable = SerializableRule::from_rule(&rule);
+
+    // Convert back
+    let restored = serializable.to_rule();
+
+    assert_eq!(rule.head.relation, restored.head.relation);
+    assert_eq!(rule.body.len(), restored.body.len());
+}
+
 #[test]
