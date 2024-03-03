@@ -128,7 +128,6 @@ fn test_parse_insert_operations() {
 fn test_parse_delete_operations() {
     // Single delete
     let stmt = parse_statement("-edge(1, 2).").unwrap();
-    // TODO: verify this condition
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -497,4 +496,57 @@ fn test_multiple_views() {
 }
 
 // Query with Constants Tests (Phase 0 fix)
+#[test]
+fn test_query_with_constant_first_arg() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert parent relationships
+    storage
+        .insert("parent", vec![(1, 2), (1, 3), (2, 4)])
+        .unwrap();
+
+    // Query: ?- parent(1, X). - use constant directly in atom
+    let results = storage
+        .execute_query_with_rules("__query__(1, X) :- parent(1, X).")
+        .unwrap();
+
+    // Should return (1, 2) and (1, 3) - children of parent 1
+    assert_eq!(results.len(), 2);
+    assert!(results.contains(&(1, 2)));
+    assert!(results.contains(&(1, 3)));
+}
+
+#[test]
+fn test_query_with_all_constants() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert data
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    // Query: ?- edge(1, 2). - use constants directly in atom
+    let results = storage
+        .execute_query_with_rules("__query__(1, 2) :- edge(1, 2).")
+        .unwrap();
+
+    // Should return (1, 2) since that fact exists
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], (1, 2));
+
+    // Query: ?- edge(1, 99). - fact doesn't exist
+    let results = storage
+        .execute_query_with_rules("__query__(1, 99) :- edge(1, 99).")
+        .unwrap();
+
+    // Should return empty since (1, 99) doesn't exist
+    assert_eq!(results.len(), 0);
+}
+
 #[test]
