@@ -49,7 +49,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".kg drop mykg").unwrap(),
-        Statement::Meta(MetaCommand::KgDrop(name.clone())) if name == "mykg"
+        Statement::Meta(MetaCommand::KgDrop(name)) if name == "mykg"
     ));
 
     // Relation commands
@@ -91,7 +91,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".help").unwrap(),
-        Statement::Meta(MetaCommand::Help.clone())
+        Statement::Meta(MetaCommand::Help)
     ));
     assert!(matches!(
         parse_statement(".quit").unwrap(),
@@ -99,7 +99,7 @@ fn test_parse_meta_commands() {
     ));
     assert!(matches!(
         parse_statement(".exit").unwrap(),
-        Statement::Meta(MetaCommand::Quit.clone())
+        Statement::Meta(MetaCommand::Quit)
     ));
 }
 
@@ -128,6 +128,7 @@ fn test_parse_insert_operations() {
 fn test_parse_delete_operations() {
     // Single delete
     let stmt = parse_statement("-edge(1, 2).").unwrap();
+    // TODO: verify this condition
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -177,20 +178,17 @@ fn test_parse_transient_rule() {
 
 #[test]
 fn test_parse_query() {
-    // FIXME: extract to named variable
     let stmt = parse_statement("?- edge(1, X).").unwrap();
     if let Statement::Query(goal) = stmt {
         assert_eq!(goal.goal.relation, "edge");
     } else {
         panic!("Expected Query statement");
     }
-
 }
 
 #[test]
 fn test_parse_update_operation() {
     // Use valid atom syntax instead of constraint
-    // FIXME: extract to named variable
     let stmt = parse_statement(
         "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
     )
@@ -306,7 +304,6 @@ fn test_rule_persistence() {
         let rules = storage.list_rules().unwrap();
         assert!(rules.contains(&"derived".to_string()));
     }
-
 }
 
 #[test]
@@ -317,7 +314,7 @@ fn test_rule_catalog_standalone() {
 
     // Register rule
     let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
-    catalog.register_rule(&rule_def.clone()).unwrap();
+    catalog.register_rule(&rule_def).unwrap();
 
     assert!(catalog.exists("path"));
     assert_eq!(catalog.len(), 1);
@@ -369,11 +366,10 @@ fn test_execute_query_with_rules() {
 
     // Query that uses the rule
     let results = storage
-        .execute_query_with_rules("result(X, Y.clone()) :- path(X, Y).")
+        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
         .unwrap();
     assert_eq!(results.len(), 2);
 }
-
 
 // Error Handling Tests
 #[test]
@@ -433,4 +429,72 @@ fn test_serializable_rule_roundtrip() {
     assert_eq!(rule.body.len(), restored.body.len());
 }
 
+#[test]
+fn test_serializable_rule_json() {
+    use inputlayer::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
+
+    let rule_str = "result(X, Y) :- edge(X, Y).";
+    let rule = parse_rule(rule_str).unwrap();
+
+    let serializable = SerializableRule::from_rule(&rule);
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&serializable).unwrap();
+
+    // Deserialize from JSON
+    let restored: SerializableRule = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(serializable.head_relation, restored.head_relation);
+}
+
+// Complex Query Tests
+#[test]
+#[ignore] // Constraint syntax (Age >= 18) no longer supported - Constraint type removed
+fn test_view_with_constraints() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert data
+    storage
+        .insert("person", vec![(1, 25), (2, 17), (3, 30), (4, 16)])
+        .unwrap();
+
+    // Register view with constraint
+    let view_def = parse_rule_definition("adult(Id, Age) :-person(Id, Age), Age >= 18.").unwrap();
+    storage.register_rule(&view_def).unwrap();
+
+    // Query the view
+    let results = storage
+        .execute_query_with_rules("result(Id, Age) :- adult(Id, Age).")
+        .unwrap();
+
+    // Should only get people 18 or older (id 1 age 25, id 3 age 30)
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn test_multiple_views() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    // Insert data
+    storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+    // Register multiple views
+    let view1 = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&view1).unwrap();
+
+    let view2 = parse_rule_definition("reach(X) :-path(1, X).").unwrap();
+    storage.register_rule(&view2).unwrap();
+
+    let views = storage.list_rules().unwrap();
+    assert_eq!(views.len(), 2);
+}
+
+// Query with Constants Tests (Phase 0 fix)
 #[test]

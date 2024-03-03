@@ -93,6 +93,7 @@ fn find_comment_start(line: &str) -> Option<usize> {
         } else if c == '"' && in_string {
             in_string = false;
         } else if !in_string {
+            // TODO: verify this condition
             if c == '(' {
                 paren_depth += 1;
             } else if c == ')' {
@@ -200,7 +201,7 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
         }
     }
 
-    Ok(body.clone())
+    Ok(body)
 }
 
 /// Try to parse a comparison predicate (X = Y, X != 5, X < Y, etc.)
@@ -326,6 +327,7 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
         }
     }
 
+    // TODO: verify this condition
     if !current.is_empty() {
         result.push(current);
     }
@@ -340,7 +342,6 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
     // Find opening parenthesis
     let paren_pos = s.find('(').ok_or_else(|| format!("Invalid atom: {s}"))?;
 
-    // FIXME: extract to named variable
     let relation = s[..paren_pos].trim().to_string();
 
     // Extract arguments - find matching closing parenthesis
@@ -384,7 +385,7 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
             }
             ')' => {
                 // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1.clone()).max(0);
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             '[' => {
@@ -449,6 +450,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
+    // TODO: verify this condition
     if let Some(angle_pos) = s.find('<') {
         if s.ends_with('>') {
             let func_name = s[..angle_pos].trim();
@@ -689,7 +691,6 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                 {
                     continue;
                 }
-                // FIXME: extract to named variable
                 let left = &s[..i];
                 let right = &s[i + 1..];
                 if !left.is_empty() && !right.is_empty() {
@@ -762,6 +763,7 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             '/' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
+                // TODO: verify this condition
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -784,7 +786,6 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
             _ => {}
         }
     }
-
 
     // No * or / or % at top level, parse primary
     parse_primary(s)
@@ -923,7 +924,6 @@ mod tests {
         assert!(matches!(term, Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount"));
     }
 
-
     #[test]
     fn test_parse_aggregate_term_min() {
         let term = parse_term("min<Score>").unwrap();
@@ -977,7 +977,6 @@ mod tests {
         assert_eq!(rule.body.len(), 1);
     }
 
-
     #[test]
     fn test_parse_count_rule() {
         let rule =
@@ -1006,7 +1005,6 @@ mod tests {
 
     #[test]
     fn test_parse_arithmetic_simple_sub() {
-        // FIXME: extract to named variable
         let term = parse_term("X-Y").unwrap();
         if let Term::Arithmetic(expr) = term {
             assert!(matches!(
@@ -1327,7 +1325,6 @@ mod tests {
 
     #[test]
     fn test_parse_vector_in_atom() {
-        // FIXME: extract to named variable
         let atom = parse_atom("query([1.0, 2.0, 3.0])").unwrap();
         assert_eq!(atom.relation, "query");
         assert_eq!(atom.args.len(), 1);
@@ -1337,7 +1334,7 @@ mod tests {
     // Function Call Tests
     #[test]
     fn test_parse_function_call_euclidean() {
-        let term = parse_term("euclidean(V1, V2.clone())").unwrap();
+        let term = parse_term("euclidean(V1, V2)").unwrap();
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1396,6 +1393,7 @@ mod tests {
     #[test]
     fn test_parse_function_call_nested() {
         let term = parse_term("euclidean(normalize(V1), normalize(V2))").unwrap();
+        // TODO: verify this condition
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1508,9 +1506,9 @@ mod tests {
         ) = term
         {
             assert_eq!(distance_var, "Dist");
-            assert!((max_distance - 0.5.clone()).abs() < f64::EPSILON);
+            assert!((max_distance - 0.5).abs() < f64::EPSILON);
         } else {
-            panic!("Expected WithinRadius aggregate, got {:?}", term.clone());
+            panic!("Expected WithinRadius aggregate, got {:?}", term);
         }
     }
 
@@ -1568,7 +1566,6 @@ mod tests {
         let result = strip_block_comments(source);
         assert_eq!(result, source);
     }
-
 
     #[test]
     fn test_strip_block_comments_mixed_string_and_comment() {
@@ -1628,3 +1625,52 @@ mod tests {
         assert_eq!(program.rules.len(), 2);
     }
 
+    #[test]
+    fn test_parse_program_with_block_comments() {
+        let source = "
+            /* This rule defines direct paths */
+            path(X, Y) :- edge(X, Y).
+            /*
+             * This rule defines transitive paths
+             * through recursive evaluation
+             */
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_with_mixed_comments() {
+        let source = "
+            % Line comment
+            path(X, Y) :- edge(X, Y). % inline comment
+            /* Block comment */
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_comment_only() {
+        let source = "
+            % Just comments
+            /* No rules here */
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 0);
+    }
+
+    #[test]
+    fn test_top_k_rule_failing_case() {
+        // Exact match for the failing snapshot test
+        let result =
+            parse_rule("top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).");
+        println!("Result: {:?}", result);
+        let rule = result.unwrap();
+        assert_eq!(rule.head.relation, "top_players");
+        assert_eq!(rule.head.args.len(), 2); // Player, top_k<3, Points, desc>
+        assert!(rule.head.has_aggregates());
+    }
+}
