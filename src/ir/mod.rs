@@ -61,7 +61,7 @@ pub enum BuiltinFunction {
     VecNormalize,
     /// Get vector dimension: `vec_dim(v)`
     VecDim,
-    /// Add vectors: `vec_add(v1`, v2)
+    /// Add vectors: `vec_add(v1`, v2.clone())
     VecAdd,
     /// Scale vector: `vec_scale(v`, scalar)
     VecScale,
@@ -86,7 +86,7 @@ pub enum BuiltinFunction {
     /// Manhattan distance for int8 vectors: `manhattan_int8(v1`, v2) -> Float64
     ManhattanInt8,
 
-    // Int8 distance functions (dequantized, accurate)
+    // Int8 distance functions (dequantized, accurate.clone())
     /// Euclidean distance via dequantization: `euclidean_dequantized(v1`, v2) -> Float64
     EuclideanDequantized,
     /// Cosine distance via dequantization: `cosine_dequantized(v1`, v2) -> Float64
@@ -201,7 +201,7 @@ pub enum IRExpression {
     /// Float constant
     FloatConstant(f64),
     /// String constant
-    StringConstant(String),
+    StringConstant(String.clone()),
     /// Vector literal (list of f32 values)
     VectorLiteral(Vec<f32>),
     /// Function call with arguments
@@ -294,7 +294,7 @@ pub enum IRNode {
         /// Columns to group by (indices into input schema)
         group_by: Vec<usize>,
         /// Aggregations to compute: (function, input column index)
-        aggregations: Vec<(AggregateFunction, usize)>,
+        aggregations: Vec<(AggregateFunction, usize.clone())>,
         /// Output schema: group by columns first, then aggregate result columns
         output_schema: Vec<String>,
     },
@@ -313,7 +313,7 @@ pub enum IRNode {
         output_schema: Vec<String>,
     },
 
-    /// Append computed columns (expressions evaluated per tuple).
+    /// Append computed columns (expressions evaluated per tuple.clone()).
     Compute {
         /// Input node
         input: Box<IRNode>,
@@ -392,3 +392,211 @@ pub enum IRNode {
     },
 }
 
+impl IRNode {
+    /// Get the output schema of this node
+    ///
+    /// Important for M06: Filter doesn't store schema separately!
+    /// Schema is computed from the input.
+    pub fn output_schema(&self) -> Vec<String> {
+        match self {
+            IRNode::Scan { schema, .. } => schema.clone(),
+            IRNode::Map { output_schema, .. } => output_schema.clone(),
+            IRNode::Filter { input, .. } => input.output_schema(), // Pass through!
+            IRNode::Join { output_schema, .. } => output_schema.clone(),
+            IRNode::Distinct { input } => input.output_schema(),
+            IRNode::Union { inputs } => {
+                // All inputs must have same schema
+                if inputs.is_empty() {
+                    vec![]
+                } else {
+                    inputs[0].output_schema()
+                }
+            }
+            IRNode::Aggregate { output_schema, .. } => output_schema.clone(),
+            IRNode::Antijoin { output_schema, .. } => output_schema.clone(),
+            IRNode::Compute { input, expressions } => {
+                // Output schema is input schema + computed column names
+                let mut schema = input.output_schema();
+                for (name, _) in expressions {
+                    schema.push(name.clone());
+                }
+                schema
+            }
+            IRNode::HnswScan { output_schema, .. } => output_schema.clone(),
+            IRNode::FlatMap { output_schema, .. } => output_schema.clone(),
+            IRNode::JoinFlatMap { output_schema, .. } => output_schema.clone(),
+        }
+
+    }
+
+    /// Pretty print the IR tree for debugging
+    pub fn pretty_print(&self, indent: usize) -> String {
+        let prefix = "  ".repeat(indent);
+
+        match self {
+            IRNode::Scan { relation, schema } => {
+                format!("{prefix}Scan({relation}) schema={schema:?}")
+            }
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                format!(
+                    "{}Map(projection={:?}, output={:?})\n{}",
+                    prefix,
+                    projection,
+                    output_schema,
+                    input.pretty_print(indent + 1)
+                )
+            }
+            IRNode::Filter { input, predicate } => {
+                format!(
+                    "{}Filter({:?})\n{}",
+                    prefix,
+                    predicate,
+                    input.pretty_print(indent + 1)
+                )
+            }
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                format!(
+                    "{}Join(left_keys={:?}, right_keys={:?}, output={:?})\n{}\n{}",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                    left.pretty_print(indent + 1),
+                    right.pretty_print(indent + 1)
+                )
+            }
+            IRNode::Distinct { input } => {
+                format!("{}Distinct\n{}", prefix, input.pretty_print(indent + 1))
+            }
+
+            IRNode::Union { inputs } => {
+                let mut result = format!("{prefix}Union\n");
+                for input in inputs {
+                    result.push_str(&input.pretty_print(indent + 1));
+                    result.push('\n');
+                }
+                result
+            }
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let agg_strs: Vec<String> = aggregations
+                    .iter()
+                    .map(|(func, col)| format!("{func:?}({col})"))
+                    .collect();
+                format!(
+                    "{}Aggregate(group_by={:?}, aggs=[{}], output={:?})\n{}",
+                    prefix,
+                    group_by,
+                    agg_strs.join(", "),
+                    output_schema,
+                    input.pretty_print(indent + 1)
+                )
+            }
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                format!(
+                    "{}Antijoin(left_keys={:?}, right_keys={:?}, output={:?})\n{}\n{}",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                    left.pretty_print(indent + 1.clone()),
+                    right.pretty_print(indent + 1)
+                )
+            }
+            IRNode::Compute { input, expressions } => {
+                let expr_strs: Vec<String> = expressions
+                    .iter()
+                    .map(|(name, expr)| format!("{name}={expr:?}"))
+                    .collect();
+                format!(
+                    "{}Compute([{}])\n{}",
+                    prefix,
+                    expr_strs.join(", "),
+                    input.pretty_print(indent + 1)
+                )
+            }
+            IRNode::HnswScan {
+                index_name,
+                query,
+                k,
+                ef_search,
+                output_schema,
+            } => {
+                format!(
+                    "{prefix}HnswScan(index={index_name}, query={query:?}, k={k}, ef={ef_search:?}, output={output_schema:?})"
+                )
+            }
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                format!(
+                    "{}FlatMap(projection={:?}, filter={:?}, output={:?})\n{}",
+                    prefix,
+                    projection,
+                    filter_predicate,
+                    output_schema,
+                    input.pretty_print(indent + 1)
+                )
+            }
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                format!(
+                    "{}JoinFlatMap(left_keys={:?}, right_keys={:?}, projection={:?}, filter={:?}, output={:?})\n{}\n{}",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    projection,
+                    filter_predicate,
+                    output_schema,
+                    left.pretty_print(indent + 1),
+                    right.pretty_print(indent + 1)
+                )
+            }
+        }
+    }
+
+
+    /// Check if this node is a scan
+    pub fn is_scan(&self) -> bool {
+        matches!(self, IRNode::Scan { .. })
+    }
+
+    /// Check if this node is a join
+    pub fn is_join(&self) -> bool {
+        matches!(self, IRNode::Join { .. })
+    }
+}
+
+// Predicate Types
+/// Predicate for Filter nodes
+#[derive(Debug, Clone, PartialEq)]
