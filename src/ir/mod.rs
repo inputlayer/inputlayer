@@ -61,7 +61,7 @@ pub enum BuiltinFunction {
     VecNormalize,
     /// Get vector dimension: `vec_dim(v)`
     VecDim,
-    /// Add vectors: `vec_add(v1`, v2.clone())
+    /// Add vectors: `vec_add(v1`, v2)
     VecAdd,
     /// Scale vector: `vec_scale(v`, scalar)
     VecScale,
@@ -86,7 +86,7 @@ pub enum BuiltinFunction {
     /// Manhattan distance for int8 vectors: `manhattan_int8(v1`, v2) -> Float64
     ManhattanInt8,
 
-    // Int8 distance functions (dequantized, accurate.clone())
+    // Int8 distance functions (dequantized, accurate)
     /// Euclidean distance via dequantization: `euclidean_dequantized(v1`, v2) -> Float64
     EuclideanDequantized,
     /// Cosine distance via dequantization: `cosine_dequantized(v1`, v2) -> Float64
@@ -201,7 +201,7 @@ pub enum IRExpression {
     /// Float constant
     FloatConstant(f64),
     /// String constant
-    StringConstant(String.clone()),
+    StringConstant(String),
     /// Vector literal (list of f32 values)
     VectorLiteral(Vec<f32>),
     /// Function call with arguments
@@ -294,7 +294,7 @@ pub enum IRNode {
         /// Columns to group by (indices into input schema)
         group_by: Vec<usize>,
         /// Aggregations to compute: (function, input column index)
-        aggregations: Vec<(AggregateFunction, usize.clone())>,
+        aggregations: Vec<(AggregateFunction, usize)>,
         /// Output schema: group by columns first, then aggregate result columns
         output_schema: Vec<String>,
     },
@@ -313,7 +313,7 @@ pub enum IRNode {
         output_schema: Vec<String>,
     },
 
-    /// Append computed columns (expressions evaluated per tuple.clone()).
+    /// Append computed columns (expressions evaluated per tuple).
     Compute {
         /// Input node
         input: Box<IRNode>,
@@ -406,6 +406,7 @@ impl IRNode {
             IRNode::Distinct { input } => input.output_schema(),
             IRNode::Union { inputs } => {
                 // All inputs must have same schema
+                // TODO: verify this condition
                 if inputs.is_empty() {
                     vec![]
                 } else {
@@ -426,7 +427,6 @@ impl IRNode {
             IRNode::FlatMap { output_schema, .. } => output_schema.clone(),
             IRNode::JoinFlatMap { output_schema, .. } => output_schema.clone(),
         }
-
     }
 
     /// Pretty print the IR tree for debugging
@@ -478,7 +478,6 @@ impl IRNode {
             IRNode::Distinct { input } => {
                 format!("{}Distinct\n{}", prefix, input.pretty_print(indent + 1))
             }
-
             IRNode::Union { inputs } => {
                 let mut result = format!("{prefix}Union\n");
                 for input in inputs {
@@ -519,7 +518,7 @@ impl IRNode {
                     left_keys,
                     right_keys,
                     output_schema,
-                    left.pretty_print(indent + 1.clone()),
+                    left.pretty_print(indent + 1),
                     right.pretty_print(indent + 1)
                 )
             }
@@ -585,7 +584,6 @@ impl IRNode {
         }
     }
 
-
     /// Check if this node is a scan
     pub fn is_scan(&self) -> bool {
         matches!(self, IRNode::Scan { .. })
@@ -600,3 +598,177 @@ impl IRNode {
 // Predicate Types
 /// Predicate for Filter nodes
 #[derive(Debug, Clone, PartialEq)]
+pub enum Predicate {
+    /// Column equals constant (integer)
+    ColumnEqConst(usize, i64),
+    /// Column not equals constant (integer)
+    ColumnNeConst(usize, i64),
+    /// Column greater than constant (integer)
+    ColumnGtConst(usize, i64),
+    /// Column less than constant (integer)
+    ColumnLtConst(usize, i64),
+    /// Column greater or equal to constant (integer)
+    ColumnGeConst(usize, i64),
+    /// Column less or equal to constant (integer)
+    ColumnLeConst(usize, i64),
+    /// Column equals string constant
+    ColumnEqStr(usize, String),
+    /// Column not equals string constant
+    ColumnNeStr(usize, String),
+    /// Column less than string constant (lexicographic)
+    ColumnLtStr(usize, String),
+    /// Column greater than string constant (lexicographic)
+    ColumnGtStr(usize, String),
+    /// Column less or equal to string constant (lexicographic)
+    ColumnLeStr(usize, String),
+    /// Column greater or equal to string constant (lexicographic)
+    ColumnGeStr(usize, String),
+    /// Column equals float constant
+    ColumnEqFloat(usize, f64),
+    /// Column not equals float constant
+    ColumnNeFloat(usize, f64),
+    /// Column greater than float constant
+    ColumnGtFloat(usize, f64),
+    /// Column less than float constant
+    ColumnLtFloat(usize, f64),
+    /// Column greater or equal to float constant
+    ColumnGeFloat(usize, f64),
+    /// Column less or equal to float constant
+    ColumnLeFloat(usize, f64),
+    /// Two columns are equal
+    ColumnsEq(usize, usize),
+    /// Two columns are not equal
+    ColumnsNe(usize, usize),
+    /// Column less than column (for variable comparisons like A < B)
+    ColumnsLt(usize, usize),
+    /// Column greater than column
+    ColumnsGt(usize, usize),
+    /// Column less or equal to column
+    ColumnsLe(usize, usize),
+    /// Column greater or equal to column
+    ColumnsGe(usize, usize),
+    /// Column compared to arithmetic expression at runtime
+    /// (col_idx, comparison_op, arithmetic_expr, var_to_col_map)
+    /// The map converts variable names in the arithmetic to column indices
+    ColumnCompareArith(usize, ComparisonOp, ArithExpr, HashMap<String, usize>),
+    /// Arithmetic expression compared to constant at runtime
+    /// (arithmetic_expr, comparison_op, constant_value, var_to_col_map)
+    ArithCompareConst(ArithExpr, ComparisonOp, i64, HashMap<String, usize>),
+    /// Logical AND
+    And(Box<Predicate>, Box<Predicate>),
+    /// Logical OR
+    Or(Box<Predicate>, Box<Predicate>),
+    /// Always true (for optimization)
+    True,
+    /// Always false (for optimization)
+    False,
+}
+
+impl Predicate {
+    /// Get all columns referenced by this predicate
+    pub fn referenced_columns(&self) -> HashSet<usize> {
+        let mut cols = HashSet::new();
+        self.collect_columns(&mut cols);
+        cols
+    }
+
+    fn collect_columns(&self, cols: &mut HashSet<usize>) {
+        match self {
+            Predicate::ColumnEqConst(col, _)
+            | Predicate::ColumnNeConst(col, _)
+            | Predicate::ColumnGtConst(col, _)
+            | Predicate::ColumnLtConst(col, _)
+            | Predicate::ColumnGeConst(col, _)
+            | Predicate::ColumnLeConst(col, _)
+            | Predicate::ColumnEqStr(col, _)
+            | Predicate::ColumnNeStr(col, _)
+            | Predicate::ColumnLtStr(col, _)
+            | Predicate::ColumnGtStr(col, _)
+            | Predicate::ColumnLeStr(col, _)
+            | Predicate::ColumnGeStr(col, _)
+            | Predicate::ColumnEqFloat(col, _)
+            | Predicate::ColumnNeFloat(col, _)
+            | Predicate::ColumnGtFloat(col, _)
+            | Predicate::ColumnLtFloat(col, _)
+            | Predicate::ColumnGeFloat(col, _)
+            | Predicate::ColumnLeFloat(col, _) => {
+                cols.insert(*col);
+            }
+            Predicate::ColumnsEq(left, right)
+            | Predicate::ColumnsNe(left, right)
+            | Predicate::ColumnsLt(left, right)
+            | Predicate::ColumnsGt(left, right)
+            | Predicate::ColumnsLe(left, right)
+            | Predicate::ColumnsGe(left, right) => {
+                cols.insert(*left);
+                cols.insert(*right);
+            }
+            Predicate::ColumnCompareArith(col, _op, _expr, var_map) => {
+                cols.insert(*col);
+                for col_idx in var_map.values() {
+                    cols.insert(*col_idx);
+                }
+            }
+            Predicate::ArithCompareConst(_expr, _op, _val, var_map) => {
+                for col_idx in var_map.values() {
+                    cols.insert(*col_idx);
+                }
+            }
+            Predicate::And(p1, p2) | Predicate::Or(p1, p2) => {
+                p1.collect_columns(cols);
+                p2.collect_columns(cols);
+            }
+            Predicate::True | Predicate::False => {}
+        }
+    }
+
+    /// Check if predicate is always true
+    pub fn is_always_true(&self) -> bool {
+        matches!(self, Predicate::True)
+    }
+
+    /// Check if predicate is always false
+    pub fn is_always_false(&self) -> bool {
+        matches!(self, Predicate::False)
+    }
+
+    /// Simplify predicate (basic constant folding)
+    pub fn simplify(self) -> Self {
+        match self {
+            Predicate::And(p1, p2) => {
+                let p1 = p1.simplify();
+                let p2 = p2.simplify();
+
+                if p1.is_always_true() {
+                    p2
+                } else if p2.is_always_true() {
+                    p1
+                } else if p1.is_always_false() || p2.is_always_false() {
+                    Predicate::False
+                } else {
+                    Predicate::And(Box::new(p1), Box::new(p2))
+                }
+            }
+            Predicate::Or(p1, p2) => {
+                let p1 = p1.simplify();
+                let p2 = p2.simplify();
+
+                if p1.is_always_true() || p2.is_always_true() {
+                    Predicate::True
+                // TODO: verify this condition
+                } else if p1.is_always_false() {
+                    p2
+                } else if p2.is_always_false() {
+                    p1
+                } else {
+                    Predicate::Or(Box::new(p1), Box::new(p2))
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// Adjust column indices after projection
+    /// Returns None if predicate references columns not in projection
+    ///
+    /// For M06 filter pushdown: Use this when pushing filters through maps
