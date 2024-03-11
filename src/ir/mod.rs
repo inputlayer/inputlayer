@@ -406,7 +406,6 @@ impl IRNode {
             IRNode::Distinct { input } => input.output_schema(),
             IRNode::Union { inputs } => {
                 // All inputs must have same schema
-                // TODO: verify this condition
                 if inputs.is_empty() {
                     vec![]
                 } else {
@@ -755,7 +754,6 @@ impl Predicate {
 
                 if p1.is_always_true() || p2.is_always_true() {
                     Predicate::True
-                // TODO: verify this condition
                 } else if p1.is_always_false() {
                     p2
                 } else if p2.is_always_false() {
@@ -772,3 +770,245 @@ impl Predicate {
     /// Returns None if predicate references columns not in projection
     ///
     /// For M06 filter pushdown: Use this when pushing filters through maps
+    pub fn adjust_for_projection(&self, projection: &[usize]) -> Option<Self> {
+        // Helper: find new index of old column
+        let find_new_index =
+            |old_idx: usize| -> Option<usize> { projection.iter().position(|&idx| idx == old_idx) };
+
+        match self {
+            Predicate::ColumnEqConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnEqConst(new_col, *val))
+            }
+            Predicate::ColumnNeConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnNeConst(new_col, *val))
+            }
+            Predicate::ColumnGtConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGtConst(new_col, *val))
+            }
+            Predicate::ColumnLtConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLtConst(new_col, *val))
+            }
+            Predicate::ColumnGeConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGeConst(new_col, *val))
+            }
+            Predicate::ColumnLeConst(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLeConst(new_col, *val))
+            }
+            // String predicates
+            Predicate::ColumnEqStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnEqStr(new_col, val.clone()))
+            }
+            Predicate::ColumnNeStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnNeStr(new_col, val.clone()))
+            }
+            Predicate::ColumnLtStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLtStr(new_col, val.clone()))
+            }
+            Predicate::ColumnGtStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGtStr(new_col, val.clone()))
+            }
+            Predicate::ColumnLeStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLeStr(new_col, val.clone()))
+            }
+            Predicate::ColumnGeStr(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGeStr(new_col, val.clone()))
+            }
+            // Float predicates
+            Predicate::ColumnEqFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnEqFloat(new_col, *val))
+            }
+            Predicate::ColumnNeFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnNeFloat(new_col, *val))
+            }
+            Predicate::ColumnGtFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGtFloat(new_col, *val))
+            }
+            Predicate::ColumnLtFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLtFloat(new_col, *val))
+            }
+            Predicate::ColumnGeFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnGeFloat(new_col, *val))
+            }
+            Predicate::ColumnLeFloat(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnLeFloat(new_col, *val))
+            }
+            Predicate::ColumnsEq(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsEq(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsNe(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsNe(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsLt(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsLt(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsGt(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsGt(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsLe(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsLe(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsGe(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsGe(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnCompareArith(col, op, expr, var_map) => {
+                let new_col = find_new_index(*col)?;
+                let new_var_map: Option<HashMap<String, usize>> = var_map
+                    .iter()
+                    .map(|(name, idx)| find_new_index(*idx).map(|new_idx| (name.clone(), new_idx)))
+                    .collect();
+                let new_var_map = new_var_map?;
+                Some(Predicate::ColumnCompareArith(
+                    new_col,
+                    op.clone(),
+                    expr.clone(),
+                    new_var_map,
+                ))
+            }
+            Predicate::ArithCompareConst(expr, op, val, var_map) => {
+                let new_var_map: Option<HashMap<String, usize>> = var_map
+                    .iter()
+                    .map(|(name, idx)| find_new_index(*idx).map(|new_idx| (name.clone(), new_idx)))
+                    .collect();
+                let new_var_map = new_var_map?;
+                Some(Predicate::ArithCompareConst(
+                    expr.clone(),
+                    op.clone(),
+                    *val,
+                    new_var_map,
+                ))
+            }
+            Predicate::And(p1, p2) => {
+                match (
+                    p1.adjust_for_projection(projection),
+                    p2.adjust_for_projection(projection),
+                ) {
+                    (Some(new_p1), Some(new_p2)) => {
+                        Some(Predicate::And(Box::new(new_p1), Box::new(new_p2)))
+                    }
+                    (Some(new_p1), None) => Some(new_p1),
+                    (None, Some(new_p2)) => Some(new_p2),
+                    (None, None) => None,
+                }
+            }
+            Predicate::Or(p1, p2) => {
+                // For OR, we need BOTH predicates to be adjustable
+                match (
+                    p1.adjust_for_projection(projection),
+                    p2.adjust_for_projection(projection),
+                ) {
+                    (Some(new_p1), Some(new_p2)) => {
+                        Some(Predicate::Or(Box::new(new_p1), Box::new(new_p2)))
+                    }
+                    _ => None, // Can't push OR if either side doesn't have all columns
+                }
+            }
+            Predicate::True => Some(Predicate::True),
+            Predicate::False => Some(Predicate::False),
+        }
+    }
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // AggregateFunction Tests
+    #[test]
+    fn test_aggregate_function_clone_eq() {
+        let funcs = vec![
+            AggregateFunction::Count,
+            AggregateFunction::Sum,
+            AggregateFunction::Min,
+            AggregateFunction::Max,
+            AggregateFunction::Avg,
+        ];
+
+        for func in &funcs {
+            let cloned = func.clone();
+            assert_eq!(func, &cloned);
+        }
+    }
+
+    #[test]
+    fn test_aggregate_function_debug() {
+        assert_eq!(format!("{:?}", AggregateFunction::Count), "Count");
+        assert_eq!(format!("{:?}", AggregateFunction::Sum), "Sum");
+        assert_eq!(format!("{:?}", AggregateFunction::Min), "Min");
+        assert_eq!(format!("{:?}", AggregateFunction::Max), "Max");
+        assert_eq!(format!("{:?}", AggregateFunction::Avg), "Avg");
+    }
+
+    #[test]
+    fn test_aggregate_function_equality() {
+        // AggregateFunction no longer implements Hash (due to f64 fields in TopKThreshold, WithinRadius)
+        // Test equality via PartialEq instead
+        let count1 = AggregateFunction::Count;
+        let count2 = AggregateFunction::Count;
+        let sum = AggregateFunction::Sum;
+
+        assert_eq!(count1, count2);
+        assert_ne!(count1, sum);
+
+        // Test new variants
+        let topk = AggregateFunction::TopK {
+            k: 5,
+            order_col: 1,
+            descending: true,
+        };
+        let topk2 = AggregateFunction::TopK {
+            k: 5,
+            order_col: 1,
+            descending: true,
+        };
+        let topk3 = AggregateFunction::TopK {
+            k: 10,
+            order_col: 1,
+            descending: true,
+        };
+        assert_eq!(topk, topk2);
+        assert_ne!(topk, topk3);
+    }
+
+    // IRNode::Scan Tests
+    #[test]
+    fn test_scan_output_schema() {
+        let scan = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        assert_eq!(scan.output_schema(), vec!["x", "y"]);
+        assert!(scan.is_scan());
+        assert!(!scan.is_join());
+    }
+
