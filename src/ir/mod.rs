@@ -1050,3 +1050,35 @@ mod tests {
         assert!(!filter.is_join());
     }
 
+    #[test]
+    fn test_filter_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let filter = IRNode::Filter {
+            input: Box::new(scan),
+            predicate: Predicate::ColumnGtConst(0, 10),
+        };
+        let output = filter.pretty_print(0);
+        assert!(output.contains("Filter"));
+        assert!(output.contains("Scan"));
+    }
+
+    // IRNode::Map Tests
+    #[test]
+    fn test_map_reorders_schema() {
+        let scan = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let map = IRNode::Map {
+            input: Box::new(scan),
+            projection: vec![1, 0],
+            output_schema: vec!["y".to_string(), "x".to_string()],
+        };
+
+        assert_eq!(map.output_schema(), vec!["y", "x"]);
+    }
+
