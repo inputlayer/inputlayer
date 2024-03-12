@@ -1012,3 +1012,41 @@ mod tests {
         assert!(!scan.is_join());
     }
 
+    #[test]
+    fn test_scan_empty_schema() {
+        let scan = IRNode::Scan {
+            relation: "empty".to_string(),
+            schema: vec![],
+        };
+        assert_eq!(scan.output_schema(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_scan_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "users".to_string(),
+            schema: vec!["id".to_string(), "name".to_string()],
+        };
+        let output = scan.pretty_print(0);
+        assert!(output.contains("Scan(users)"));
+        assert!(output.contains("schema="));
+    }
+
+    // IRNode::Filter Tests
+    #[test]
+    fn test_filter_passes_through_schema() {
+        let scan = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let filter = IRNode::Filter {
+            input: Box::new(scan),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        assert_eq!(filter.output_schema(), vec!["x", "y"]);
+        assert!(!filter.is_scan());
+        assert!(!filter.is_join());
+    }
+
