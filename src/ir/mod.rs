@@ -1082,3 +1082,37 @@ mod tests {
         assert_eq!(map.output_schema(), vec!["y", "x"]);
     }
 
+    #[test]
+    fn test_map_projection_subset() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        };
+
+        let map = IRNode::Map {
+            input: Box::new(scan),
+            projection: vec![0, 2],
+            output_schema: vec!["a".to_string(), "c".to_string()],
+        };
+
+        assert_eq!(map.output_schema(), vec!["a", "c"]);
+    }
+
+    #[test]
+    fn test_map_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let map = IRNode::Map {
+            input: Box::new(scan),
+            projection: vec![1],
+            output_schema: vec!["y".to_string()],
+        };
+        let output = map.pretty_print(0);
+        assert!(output.contains("Map"));
+        assert!(output.contains("projection="));
+        assert!(output.contains("output="));
+    }
+
+    // IRNode::Join Tests
