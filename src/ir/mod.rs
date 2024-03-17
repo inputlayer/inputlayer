@@ -1273,3 +1273,50 @@ mod tests {
         assert_eq!(union.output_schema(), vec!["x"]);
     }
 
+    #[test]
+    fn test_union_pretty_print() {
+        let scan1 = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let scan2 = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let union = IRNode::Union {
+            inputs: vec![scan1, scan2],
+        };
+        let output = union.pretty_print(0);
+        assert!(output.contains("Union"));
+    }
+
+    // IRNode::Aggregate Tests
+    #[test]
+    fn test_aggregate_output_schema() {
+        let scan = IRNode::Scan {
+            relation: "sales".to_string(),
+            schema: vec![
+                "product".to_string(),
+                "region".to_string(),
+                "amount".to_string(),
+            ],
+        };
+
+        let aggregate = IRNode::Aggregate {
+            input: Box::new(scan),
+            group_by: vec![0, 1],
+            aggregations: vec![(AggregateFunction::Sum, 2), (AggregateFunction::Count, 2)],
+            output_schema: vec![
+                "product".to_string(),
+                "region".to_string(),
+                "total_amount".to_string(),
+                "count".to_string(),
+            ],
+        };
+
+        assert_eq!(
+            aggregate.output_schema(),
+            vec!["product", "region", "total_amount", "count"]
+        );
+    }
+
