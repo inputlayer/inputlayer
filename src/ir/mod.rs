@@ -1238,3 +1238,38 @@ mod tests {
     }
 
     // IRNode::Union Tests
+    #[test]
+    fn test_union_uses_first_input_schema() {
+        let scan1 = IRNode::Scan {
+            relation: "edge1".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let scan2 = IRNode::Scan {
+            relation: "edge2".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let union = IRNode::Union {
+            inputs: vec![scan1, scan2],
+        };
+
+        assert_eq!(union.output_schema(), vec!["x", "y"]);
+    }
+
+    #[test]
+    fn test_empty_union_schema() {
+        let union = IRNode::Union { inputs: vec![] };
+        assert_eq!(union.output_schema(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_union_single_input() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let union = IRNode::Union { inputs: vec![scan] };
+        assert_eq!(union.output_schema(), vec!["x"]);
+    }
+
