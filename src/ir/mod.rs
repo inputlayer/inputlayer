@@ -1116,3 +1116,72 @@ mod tests {
     }
 
     // IRNode::Join Tests
+    #[test]
+    fn test_join_output_schema() {
+        let left = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let right = IRNode::Scan {
+            relation: "node".to_string(),
+            schema: vec!["id".to_string(), "label".to_string()],
+        };
+
+        let join = IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec![
+                "a".to_string(),
+                "b".to_string(),
+                "id".to_string(),
+                "label".to_string(),
+            ],
+        };
+
+        assert_eq!(join.output_schema(), vec!["a", "b", "id", "label"]);
+        assert!(join.is_join());
+        assert!(!join.is_scan());
+    }
+
+    #[test]
+    fn test_join_multi_key() {
+        let left = IRNode::Scan {
+            relation: "orders".to_string(),
+            schema: vec![
+                "order_id".to_string(),
+                "customer_id".to_string(),
+                "product_id".to_string(),
+            ],
+        };
+
+        let right = IRNode::Scan {
+            relation: "order_details".to_string(),
+            schema: vec![
+                "detail_order_id".to_string(),
+                "detail_product_id".to_string(),
+                "quantity".to_string(),
+            ],
+        };
+
+        let join = IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0, 2],
+            right_keys: vec![0, 1],
+            output_schema: vec![
+                "order_id".to_string(),
+                "customer_id".to_string(),
+                "product_id".to_string(),
+                "detail_order_id".to_string(),
+                "detail_product_id".to_string(),
+                "quantity".to_string(),
+            ],
+        };
+
+        assert_eq!(join.output_schema().len(), 6);
+        assert!(join.is_join());
+    }
+
