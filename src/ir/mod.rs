@@ -1185,3 +1185,56 @@ mod tests {
         assert!(join.is_join());
     }
 
+    #[test]
+    fn test_join_pretty_print() {
+        let left = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let right = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["y".to_string()],
+        };
+        let join = IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let output = join.pretty_print(0);
+        assert!(output.contains("Join"));
+        assert!(output.contains("left_keys="));
+        assert!(output.contains("right_keys="));
+    }
+
+    // IRNode::Distinct Tests
+    #[test]
+    fn test_distinct_passes_through_schema() {
+        let scan = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let distinct = IRNode::Distinct {
+            input: Box::new(scan),
+        };
+
+        assert_eq!(distinct.output_schema(), vec!["x", "y"]);
+    }
+
+    #[test]
+    fn test_distinct_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let distinct = IRNode::Distinct {
+            input: Box::new(scan),
+        };
+        let output = distinct.pretty_print(0);
+        assert!(output.contains("Distinct"));
+        assert!(output.contains("Scan"));
+    }
+
+    // IRNode::Union Tests
