@@ -1456,3 +1456,50 @@ mod tests {
         assert_eq!(antijoin.output_schema(), vec!["x", "y", "data"]);
     }
 
+    #[test]
+    fn test_antijoin_pretty_print() {
+        let left = IRNode::Scan {
+            relation: "all_nodes".to_string(),
+            schema: vec!["id".to_string()],
+        };
+        let right = IRNode::Scan {
+            relation: "visited".to_string(),
+            schema: vec!["node_id".to_string()],
+        };
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["id".to_string()],
+        };
+        let output = antijoin.pretty_print(0);
+        assert!(output.contains("Antijoin"));
+        assert!(output.contains("left_keys="));
+        assert!(output.contains("right_keys="));
+        assert!(output.contains("all_nodes"));
+        assert!(output.contains("visited"));
+    }
+
+    #[test]
+    fn test_antijoin_is_not_join() {
+        let left = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let right = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["y".to_string()],
+        };
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert!(!antijoin.is_join());
+        assert!(!antijoin.is_scan());
+    }
+
+    // IRNode Clone and Eq Tests
