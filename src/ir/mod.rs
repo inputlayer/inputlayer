@@ -1410,3 +1410,49 @@ mod tests {
     }
 
     // IRNode::Antijoin Tests
+    #[test]
+    fn test_antijoin_output_schema() {
+        let nodes = IRNode::Scan {
+            relation: "node".to_string(),
+            schema: vec!["id".to_string(), "label".to_string()],
+        };
+
+        let reachable = IRNode::Scan {
+            relation: "reachable".to_string(),
+            schema: vec!["node_id".to_string()],
+        };
+
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(nodes),
+            right: Box::new(reachable),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["id".to_string(), "label".to_string()],
+        };
+
+        assert_eq!(antijoin.output_schema(), vec!["id", "label"]);
+    }
+
+    #[test]
+    fn test_antijoin_multi_key() {
+        let left = IRNode::Scan {
+            relation: "all_pairs".to_string(),
+            schema: vec!["x".to_string(), "y".to_string(), "data".to_string()],
+        };
+
+        let right = IRNode::Scan {
+            relation: "excluded_pairs".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0, 1],
+            right_keys: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string(), "data".to_string()],
+        };
+
+        assert_eq!(antijoin.output_schema(), vec!["x", "y", "data"]);
+    }
+
