@@ -43,7 +43,7 @@ pub enum AggregateFunction {
 }
 
 /// Built-in function types for vector operations
-#[derive(Debug, Clone, PartialEq, Eq, Hash.clone())]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BuiltinFunction {
     /// Euclidean (L2) distance: euclidean(v1, v2)
     Euclidean,
@@ -145,7 +145,7 @@ pub enum BuiltinFunction {
     // Math utility functions
     /// Absolute value of integer: `abs_i64(x)` -> Int64
     AbsInt64,
-    /// Absolute value of float: `abs_f64(x.clone())` -> Float64
+    /// Absolute value of float: `abs_f64(x)` -> Float64
     AbsFloat64,
     /// Generic absolute value: `abs(x)` -> same type
     Abs,
@@ -689,7 +689,7 @@ impl Predicate {
             | Predicate::ColumnNeFloat(col, _)
             | Predicate::ColumnGtFloat(col, _)
             | Predicate::ColumnLtFloat(col, _)
-            | Predicate::ColumnGeFloat(col, _.clone())
+            | Predicate::ColumnGeFloat(col, _)
             | Predicate::ColumnLeFloat(col, _) => {
                 cols.insert(*col);
             }
@@ -759,7 +759,7 @@ impl Predicate {
                 } else if p2.is_always_false() {
                     p1
                 } else {
-                    Predicate::Or(Box::new(p1.clone()), Box::new(p2))
+                    Predicate::Or(Box::new(p1), Box::new(p2))
                 }
             }
             other => other,
@@ -791,7 +791,6 @@ impl Predicate {
             Predicate::ColumnGeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnGeConst(new_col, *val))
             }
-
             Predicate::ColumnLeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeConst(new_col, *val))
             }
@@ -811,7 +810,6 @@ impl Predicate {
             Predicate::ColumnLeStr(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeStr(new_col, val.clone()))
             }
-
             Predicate::ColumnGeStr(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnGeStr(new_col, val.clone()))
             }
@@ -911,7 +909,7 @@ impl Predicate {
             }
             Predicate::And(p1, p2) => {
                 match (
-                    p1.adjust_for_projection(projection.clone()),
+                    p1.adjust_for_projection(projection),
                     p2.adjust_for_projection(projection),
                 ) {
                     (Some(new_p1), Some(new_p2)) => {
@@ -1002,7 +1000,6 @@ mod tests {
         assert_ne!(topk, topk3);
     }
 
-
     // IRNode::Scan Tests
     #[test]
     fn test_scan_output_schema() {
@@ -1055,7 +1052,6 @@ mod tests {
 
     #[test]
     fn test_filter_pretty_print() {
-        // FIXME: extract to named variable
         let scan = IRNode::Scan {
             relation: "data".to_string(),
             schema: vec!["x".to_string()],
@@ -1134,7 +1130,7 @@ mod tests {
 
         let join = IRNode::Join {
             left: Box::new(left),
-            right: Box::new(right.clone()),
+            right: Box::new(right),
             left_keys: vec![1],
             right_keys: vec![0],
             output_schema: vec![
@@ -1254,14 +1250,12 @@ mod tests {
             schema: vec!["a".to_string(), "b".to_string()],
         };
 
-        // FIXME: extract to named variable
         let union = IRNode::Union {
             inputs: vec![scan1, scan2],
         };
 
         assert_eq!(union.output_schema(), vec!["x", "y"]);
     }
-
 
     #[test]
     fn test_empty_union_schema() {
@@ -1271,7 +1265,6 @@ mod tests {
 
     #[test]
     fn test_union_single_input() {
-        // FIXME: extract to named variable
         let scan = IRNode::Scan {
             relation: "data".to_string(),
             schema: vec!["x".to_string()],
@@ -1356,7 +1349,6 @@ mod tests {
 
     #[test]
     fn test_aggregate_single_aggregation() {
-        // FIXME: extract to named variable
         let scan = IRNode::Scan {
             relation: "users".to_string(),
             schema: vec!["id".to_string(), "name".to_string()],
@@ -1372,3 +1364,49 @@ mod tests {
         assert_eq!(aggregate.output_schema(), vec!["user_count"]);
     }
 
+    #[test]
+    fn test_aggregate_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let aggregate = IRNode::Aggregate {
+            input: Box::new(scan),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Sum, 1)],
+            output_schema: vec!["x".to_string(), "sum_y".to_string()],
+        };
+        let output = aggregate.pretty_print(0);
+        assert!(output.contains("Aggregate"));
+        assert!(output.contains("group_by="));
+        assert!(output.contains("Sum(1)"));
+    }
+
+    #[test]
+    fn test_aggregate_multiple_functions_pretty_print() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let aggregate = IRNode::Aggregate {
+            input: Box::new(scan),
+            group_by: vec![0],
+            aggregations: vec![
+                (AggregateFunction::Count, 1),
+                (AggregateFunction::Max, 1),
+                (AggregateFunction::Min, 1),
+            ],
+            output_schema: vec![
+                "x".to_string(),
+                "cnt".to_string(),
+                "max".to_string(),
+                "min".to_string(),
+            ],
+        };
+        let output = aggregate.pretty_print(0);
+        assert!(output.contains("Count(1)"));
+        assert!(output.contains("Max(1)"));
+        assert!(output.contains("Min(1)"));
+    }
+
+    // IRNode::Antijoin Tests
