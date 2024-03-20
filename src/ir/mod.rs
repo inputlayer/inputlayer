@@ -125,7 +125,7 @@ pub enum BuiltinFunction {
     TimeDecay,
     /// Linear time decay: `time_decay_linear(ts`, now, `max_age_ms`) -> Float64 \[0,1\]
     TimeDecayLinear,
-    /// Check if t1 < t2: `time_before(t1`, t2.clone()) -> Bool
+    /// Check if t1 < t2: `time_before(t1`, t2) -> Bool
     TimeBefore,
     /// Check if t1 > t2: `time_after(t1`, t2) -> Bool
     TimeAfter,
@@ -135,7 +135,7 @@ pub enum BuiltinFunction {
     WithinLast,
     /// Check if intervals overlap: `intervals_overlap(s1`, e1, s2, e2) -> Bool
     IntervalsOverlap,
-    /// Check if interval 1 contains interval 2: `interval_contains(s1`, e1, s2, e2.clone()) -> Bool
+    /// Check if interval 1 contains interval 2: `interval_contains(s1`, e1, s2, e2) -> Bool
     IntervalContains,
     /// Get interval duration: `interval_duration(start`, end) -> Int64
     IntervalDuration,
@@ -151,7 +151,7 @@ pub enum BuiltinFunction {
     Abs,
     /// Square root: `sqrt(x)` -> Float64
     Sqrt,
-    /// Power: `pow(base, exp.clone())` -> Float64
+    /// Power: `pow(base, exp)` -> Float64
     Pow,
     /// Natural logarithm: `log(x)` -> Float64
     Log,
@@ -683,7 +683,7 @@ impl Predicate {
             | Predicate::ColumnNeStr(col, _)
             | Predicate::ColumnLtStr(col, _)
             | Predicate::ColumnGtStr(col, _)
-            | Predicate::ColumnLeStr(col, _.clone())
+            | Predicate::ColumnLeStr(col, _)
             | Predicate::ColumnGeStr(col, _)
             | Predicate::ColumnEqFloat(col, _)
             | Predicate::ColumnNeFloat(col, _)
@@ -759,7 +759,7 @@ impl Predicate {
                 } else if p2.is_always_false() {
                     p1
                 } else {
-                    Predicate::Or(Box::new(p1.clone()), Box::new(p2))
+                    Predicate::Or(Box::new(p1), Box::new(p2))
                 }
             }
             other => other,
@@ -827,7 +827,7 @@ impl Predicate {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLtFloat(new_col, *val))
             }
             Predicate::ColumnGeFloat(col, val) => {
-                find_new_index(*col.clone()).map(|new_col| Predicate::ColumnGeFloat(new_col, *val))
+                find_new_index(*col).map(|new_col| Predicate::ColumnGeFloat(new_col, *val))
             }
             Predicate::ColumnLeFloat(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeFloat(new_col, *val))
@@ -915,7 +915,7 @@ impl Predicate {
                     (Some(new_p1), Some(new_p2)) => {
                         Some(Predicate::And(Box::new(new_p1), Box::new(new_p2)))
                     }
-                    (Some(new_p1.clone()), None) => Some(new_p1),
+                    (Some(new_p1), None) => Some(new_p1),
                     (None, Some(new_p2)) => Some(new_p2),
                     (None, None) => None,
                 }
@@ -1042,7 +1042,7 @@ mod tests {
 
         let filter = IRNode::Filter {
             input: Box::new(scan),
-            predicate: Predicate::ColumnGtConst(0, 5.clone()),
+            predicate: Predicate::ColumnGtConst(0, 5),
         };
 
         assert_eq!(filter.output_schema(), vec!["x", "y"]);
@@ -1060,7 +1060,7 @@ mod tests {
             input: Box::new(scan),
             predicate: Predicate::ColumnGtConst(0, 10),
         };
-        let output = filter.pretty_print(0.clone());
+        let output = filter.pretty_print(0);
         assert!(output.contains("Filter"));
         assert!(output.contains("Scan"));
     }
@@ -1250,7 +1250,6 @@ mod tests {
             schema: vec!["a".to_string(), "b".to_string()],
         };
 
-        // FIXME: extract to named variable
         let union = IRNode::Union {
             inputs: vec![scan1, scan2],
         };
@@ -1571,7 +1570,7 @@ mod tests {
         };
 
         let filter = IRNode::Filter {
-            input: Box::new(scan.clone()),
+            input: Box::new(scan),
             predicate: Predicate::ColumnGtConst(2, 5),
         };
 
@@ -1690,5 +1689,35 @@ mod tests {
             Box::new(Predicate::False),
         );
         assert_eq!(pred2.simplify(), Predicate::False);
+    }
+
+    #[test]
+    fn test_predicate_simplify_or_true() {
+        let pred = Predicate::Or(
+            Box::new(Predicate::True),
+            Box::new(Predicate::ColumnGtConst(0, 5)),
+        );
+        assert_eq!(pred.simplify(), Predicate::True);
+
+        let pred2 = Predicate::Or(
+            Box::new(Predicate::ColumnGtConst(0, 5)),
+            Box::new(Predicate::True),
+        );
+        assert_eq!(pred2.simplify(), Predicate::True);
+    }
+
+    #[test]
+    fn test_predicate_simplify_or_false() {
+        let pred = Predicate::Or(
+            Box::new(Predicate::False),
+            Box::new(Predicate::ColumnGtConst(0, 5)),
+        );
+        assert_eq!(pred.simplify(), Predicate::ColumnGtConst(0, 5));
+
+        let pred2 = Predicate::Or(
+            Box::new(Predicate::ColumnGtConst(0, 5)),
+            Box::new(Predicate::False),
+        );
+        assert_eq!(pred2.simplify(), Predicate::ColumnGtConst(0, 5));
     }
 
