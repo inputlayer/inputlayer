@@ -1611,3 +1611,41 @@ mod tests {
         assert!(cols.contains(&2));
     }
 
+    #[test]
+    fn test_predicate_referenced_columns_or() {
+        let pred = Predicate::Or(
+            Box::new(Predicate::ColumnLtConst(3, 10)),
+            Box::new(Predicate::ColumnsNe(4, 5)),
+        );
+
+        let cols = pred.referenced_columns();
+        assert_eq!(cols.len(), 3);
+        assert!(cols.contains(&3));
+        assert!(cols.contains(&4));
+        assert!(cols.contains(&5));
+    }
+
+    #[test]
+    fn test_predicate_referenced_columns_true_false() {
+        assert!(Predicate::True.referenced_columns().is_empty());
+        assert!(Predicate::False.referenced_columns().is_empty());
+    }
+
+    #[test]
+    fn test_predicate_referenced_columns_all_types() {
+        let predicates = vec![
+            Predicate::ColumnEqConst(0, 1),
+            Predicate::ColumnNeConst(1, 2),
+            Predicate::ColumnGtConst(2, 3),
+            Predicate::ColumnLtConst(3, 4),
+            Predicate::ColumnGeConst(4, 5),
+            Predicate::ColumnLeConst(5, 6),
+        ];
+
+        for (i, pred) in predicates.iter().enumerate() {
+            let cols = pred.referenced_columns();
+            assert_eq!(cols.len(), 1);
+            assert!(cols.contains(&i));
+        }
+    }
+
