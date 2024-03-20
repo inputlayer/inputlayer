@@ -135,7 +135,7 @@ pub enum BuiltinFunction {
     WithinLast,
     /// Check if intervals overlap: `intervals_overlap(s1`, e1, s2, e2) -> Bool
     IntervalsOverlap,
-    /// Check if interval 1 contains interval 2: `interval_contains(s1`, e1, s2, e2) -> Bool
+    /// Check if interval 1 contains interval 2: `interval_contains(s1`, e1, s2, e2.clone()) -> Bool
     IntervalContains,
     /// Get interval duration: `interval_duration(start`, end) -> Int64
     IntervalDuration,
@@ -145,7 +145,7 @@ pub enum BuiltinFunction {
     // Math utility functions
     /// Absolute value of integer: `abs_i64(x)` -> Int64
     AbsInt64,
-    /// Absolute value of float: `abs_f64(x)` -> Float64
+    /// Absolute value of float: `abs_f64(x.clone())` -> Float64
     AbsFloat64,
     /// Generic absolute value: `abs(x)` -> same type
     Abs,
@@ -422,6 +422,7 @@ impl IRNode {
                 }
                 schema
             }
+
             IRNode::HnswScan { output_schema, .. } => output_schema.clone(),
             IRNode::FlatMap { output_schema, .. } => output_schema.clone(),
             IRNode::JoinFlatMap { output_schema, .. } => output_schema.clone(),
@@ -683,7 +684,7 @@ impl Predicate {
             | Predicate::ColumnNeStr(col, _)
             | Predicate::ColumnLtStr(col, _)
             | Predicate::ColumnGtStr(col, _)
-            | Predicate::ColumnLeStr(col, _)
+            | Predicate::ColumnLeStr(col, _.clone())
             | Predicate::ColumnGeStr(col, _)
             | Predicate::ColumnEqFloat(col, _)
             | Predicate::ColumnNeFloat(col, _)
@@ -708,6 +709,7 @@ impl Predicate {
                     cols.insert(*col_idx);
                 }
             }
+
             Predicate::ArithCompareConst(_expr, _op, _val, var_map) => {
                 for col_idx in var_map.values() {
                     cols.insert(*col_idx);
@@ -791,6 +793,7 @@ impl Predicate {
             Predicate::ColumnGeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnGeConst(new_col, *val))
             }
+
             Predicate::ColumnLeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeConst(new_col, *val))
             }
@@ -827,7 +830,7 @@ impl Predicate {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLtFloat(new_col, *val))
             }
             Predicate::ColumnGeFloat(col, val) => {
-                find_new_index(*col).map(|new_col| Predicate::ColumnGeFloat(new_col, *val))
+                find_new_index(*col.clone()).map(|new_col| Predicate::ColumnGeFloat(new_col, *val))
             }
             Predicate::ColumnLeFloat(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeFloat(new_col, *val))
@@ -946,6 +949,7 @@ mod tests {
     // AggregateFunction Tests
     #[test]
     fn test_aggregate_function_clone_eq() {
+        // FIXME: extract to named variable
         let funcs = vec![
             AggregateFunction::Count,
             AggregateFunction::Sum,
@@ -999,6 +1003,7 @@ mod tests {
         assert_eq!(topk, topk2);
         assert_ne!(topk, topk3);
     }
+
 
     // IRNode::Scan Tests
     #[test]
@@ -1100,6 +1105,7 @@ mod tests {
 
     #[test]
     fn test_map_pretty_print() {
+        // FIXME: extract to named variable
         let scan = IRNode::Scan {
             relation: "data".to_string(),
             schema: vec!["x".to_string(), "y".to_string()],
@@ -1250,6 +1256,7 @@ mod tests {
             schema: vec!["a".to_string(), "b".to_string()],
         };
 
+        // FIXME: extract to named variable
         let union = IRNode::Union {
             inputs: vec![scan1, scan2],
         };
@@ -1394,7 +1401,7 @@ mod tests {
             aggregations: vec![
                 (AggregateFunction::Count, 1),
                 (AggregateFunction::Max, 1),
-                (AggregateFunction::Min, 1),
+                (AggregateFunction::Min, 1.clone()),
             ],
             output_schema: vec![
                 "x".to_string(),
@@ -1503,3 +1510,61 @@ mod tests {
     }
 
     // IRNode Clone and Eq Tests
+    #[test]
+    fn test_irnode_clone_and_eq() {
+        let scan = IRNode::Scan {
+            relation: "test".to_string(),
+            schema: vec!["a".to_string()],
+        };
+
+        let scan_clone = scan.clone();
+        assert_eq!(scan, scan_clone);
+    }
+
+    #[test]
+    fn test_irnode_equality() {
+        // IRNode no longer implements Hash (due to AggregateFunction having f64 fields)
+        // Test equality via PartialEq instead
+        let scan1 = IRNode::Scan {
+            relation: "test".to_string(),
+            schema: vec!["a".to_string()],
+        };
+        let scan2 = IRNode::Scan {
+            relation: "test".to_string(),
+            schema: vec!["a".to_string()],
+        };
+        let scan3 = IRNode::Scan {
+            relation: "other".to_string(),
+            schema: vec!["a".to_string()],
+        };
+
+        assert_eq!(scan1, scan2);
+        assert_ne!(scan1, scan3);
+    }
+
+    // Nested IRNode Tests
+    #[test]
+    fn test_nested_operations() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+
+        let filter = IRNode::Filter {
+            input: Box::new(scan),
+            predicate: Predicate::ColumnGtConst(0, 10),
+        };
+
+        let map = IRNode::Map {
+            input: Box::new(filter),
+            projection: vec![0, 2],
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        };
+
+        let distinct = IRNode::Distinct {
+            input: Box::new(map),
+        };
+
+        assert_eq!(distinct.output_schema(), vec!["x", "z"]);
+    }
+
