@@ -1721,3 +1721,43 @@ mod tests {
         assert_eq!(pred2.simplify(), Predicate::ColumnGtConst(0, 5));
     }
 
+    #[test]
+    fn test_predicate_simplify_nested() {
+        let pred = Predicate::And(
+            Box::new(Predicate::Or(
+                Box::new(Predicate::False),
+                Box::new(Predicate::ColumnEqConst(0, 1)),
+            )),
+            Box::new(Predicate::True),
+        );
+        assert_eq!(pred.simplify(), Predicate::ColumnEqConst(0, 1));
+    }
+
+    #[test]
+    fn test_predicate_simplify_no_change() {
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnGtConst(0, 5)),
+            Box::new(Predicate::ColumnLtConst(0, 10)),
+        );
+        let simplified = pred.clone().simplify();
+        assert_eq!(simplified, pred);
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_simple() {
+        let projection = vec![1, 0, 2];
+        let pred = Predicate::ColumnGtConst(1, 5);
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, Some(Predicate::ColumnGtConst(0, 5)));
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_missing_column() {
+        let projection = vec![0, 2];
+        let pred = Predicate::ColumnGtConst(1, 5);
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, None);
+    }
+
