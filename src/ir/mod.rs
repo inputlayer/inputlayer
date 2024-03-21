@@ -1851,3 +1851,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_predicate_adjust_true_false() {
+        let projection = vec![0];
+        assert_eq!(
+            Predicate::True.adjust_for_projection(&projection),
+            Some(Predicate::True)
+        );
+        assert_eq!(
+            Predicate::False.adjust_for_projection(&projection),
+            Some(Predicate::False)
+        );
+    }
+
+    #[test]
+    fn test_predicate_adjust_all_comparison_types() {
+        let projection = vec![1, 0];
+
+        let predicates = vec![
+            (
+                Predicate::ColumnEqConst(0, 1),
+                Predicate::ColumnEqConst(1, 1),
+            ),
+            (
+                Predicate::ColumnNeConst(0, 1),
+                Predicate::ColumnNeConst(1, 1),
+            ),
+            (
+                Predicate::ColumnGtConst(0, 1),
+                Predicate::ColumnGtConst(1, 1),
+            ),
+            (
+                Predicate::ColumnLtConst(0, 1),
+                Predicate::ColumnLtConst(1, 1),
+            ),
+            (
+                Predicate::ColumnGeConst(0, 1),
+                Predicate::ColumnGeConst(1, 1),
+            ),
+            (
+                Predicate::ColumnLeConst(0, 1),
+                Predicate::ColumnLeConst(1, 1),
+            ),
+        ];
+
+        for (input, expected) in predicates {
+            let adjusted = input.adjust_for_projection(&projection);
+            assert_eq!(adjusted, Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_predicate_clone_and_eq() {
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 1)),
+            Box::new(Predicate::True),
+        );
+
+        let pred_clone = pred.clone();
+        assert_eq!(pred, pred_clone);
+    }
+
+    // Note: Predicate does not implement Hash due to f64 fields in float predicates.
+    // Use Vec with dedup or other approaches instead of HashSet when needed.
+
+    #[test]
+    fn test_predicate_debug() {
+        let pred = Predicate::ColumnEqConst(0, 42);
+        let debug_str = format!("{:?}", pred);
+        assert!(debug_str.contains("ColumnEqConst"));
+        assert!(debug_str.contains("42"));
+    }
+
+    // Integration / Complex Scenario Tests
