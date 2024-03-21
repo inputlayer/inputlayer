@@ -1761,3 +1761,39 @@ mod tests {
         assert_eq!(adjusted, None);
     }
 
+    #[test]
+    fn test_predicate_adjust_for_projection_columns_eq() {
+        let projection = vec![2, 0, 1];
+        let pred = Predicate::ColumnsEq(0, 1);
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, Some(Predicate::ColumnsEq(1, 2)));
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_columns_ne() {
+        let projection = vec![2, 0, 1];
+        let pred = Predicate::ColumnsNe(0, 1);
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, Some(Predicate::ColumnsNe(1, 2)));
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_and() {
+        let projection = vec![1, 0];
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 5)),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
+        );
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(
+            adjusted,
+            Some(Predicate::And(
+                Box::new(Predicate::ColumnEqConst(1, 5)),
+                Box::new(Predicate::ColumnGtConst(0, 10)),
+            ))
+        );
+    }
+
