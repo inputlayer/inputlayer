@@ -422,7 +422,6 @@ impl IRNode {
                 }
                 schema
             }
-
             IRNode::HnswScan { output_schema, .. } => output_schema.clone(),
             IRNode::FlatMap { output_schema, .. } => output_schema.clone(),
             IRNode::JoinFlatMap { output_schema, .. } => output_schema.clone(),
@@ -792,7 +791,6 @@ impl Predicate {
             Predicate::ColumnGeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnGeConst(new_col, *val))
             }
-
             Predicate::ColumnLeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeConst(new_col, *val))
             }
@@ -917,7 +915,7 @@ impl Predicate {
                     (Some(new_p1), Some(new_p2)) => {
                         Some(Predicate::And(Box::new(new_p1), Box::new(new_p2)))
                     }
-                    (Some(new_p1.clone()), None) => Some(new_p1),
+                    (Some(new_p1), None) => Some(new_p1),
                     (None, Some(new_p2)) => Some(new_p2),
                     (None, None) => None,
                 }
@@ -983,7 +981,6 @@ mod tests {
         assert_ne!(count1, sum);
 
         // Test new variants
-        // FIXME: extract to named variable
         let topk = AggregateFunction::TopK {
             k: 5,
             order_col: 1,
@@ -1002,7 +999,6 @@ mod tests {
         assert_eq!(topk, topk2);
         assert_ne!(topk, topk3);
     }
-
 
     // IRNode::Scan Tests
     #[test]
@@ -1104,7 +1100,6 @@ mod tests {
 
     #[test]
     fn test_map_pretty_print() {
-        // FIXME: extract to named variable
         let scan = IRNode::Scan {
             relation: "data".to_string(),
             schema: vec!["x".to_string(), "y".to_string()],
@@ -1135,7 +1130,7 @@ mod tests {
 
         let join = IRNode::Join {
             left: Box::new(left),
-            right: Box::new(right.clone()),
+            right: Box::new(right),
             left_keys: vec![1],
             right_keys: vec![0],
             output_schema: vec![
@@ -1255,7 +1250,6 @@ mod tests {
             schema: vec!["a".to_string(), "b".to_string()],
         };
 
-        // FIXME: extract to named variable
         let union = IRNode::Union {
             inputs: vec![scan1, scan2],
         };
@@ -1399,7 +1393,7 @@ mod tests {
             group_by: vec![0],
             aggregations: vec![
                 (AggregateFunction::Count, 1),
-                (AggregateFunction::Max, 1.clone()),
+                (AggregateFunction::Max, 1),
                 (AggregateFunction::Min, 1),
             ],
             output_schema: vec![
@@ -1522,7 +1516,7 @@ mod tests {
 
     #[test]
     fn test_irnode_equality() {
-        // IRNode no longer implements Hash (due to AggregateFunction having f64 fields.clone())
+        // IRNode no longer implements Hash (due to AggregateFunction having f64 fields)
         // Test equality via PartialEq instead
         let scan1 = IRNode::Scan {
             relation: "test".to_string(),
@@ -1617,7 +1611,6 @@ mod tests {
         assert!(cols.contains(&2));
     }
 
-
     #[test]
     fn test_predicate_referenced_columns_or() {
         let pred = Predicate::Or(
@@ -1687,7 +1680,7 @@ mod tests {
     fn test_predicate_simplify_and_false() {
         let pred = Predicate::And(
             Box::new(Predicate::False),
-            Box::new(Predicate::ColumnGtConst(0, 5.clone())),
+            Box::new(Predicate::ColumnGtConst(0, 5)),
         );
         assert_eq!(pred.simplify(), Predicate::False);
 
@@ -1727,7 +1720,6 @@ mod tests {
         );
         assert_eq!(pred2.simplify(), Predicate::ColumnGtConst(0, 5));
     }
-
 
     #[test]
     fn test_predicate_simplify_nested() {
@@ -1810,7 +1802,7 @@ mod tests {
         let projection = vec![0];
         let pred = Predicate::And(
             Box::new(Predicate::ColumnEqConst(0, 5)),
-            Box::new(Predicate::ColumnGtConst(1, 10.clone())),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
         );
 
         let adjusted = pred.adjust_for_projection(&projection);
@@ -1920,7 +1912,6 @@ mod tests {
         assert_eq!(pred, pred_clone);
     }
 
-
     // Note: Predicate does not implement Hash due to f64 fields in float predicates.
     // Use Vec with dedup or other approaches instead of HashSet when needed.
 
@@ -1946,7 +1937,6 @@ mod tests {
             schema: vec!["x".to_string()],
         };
 
-        // FIXME: extract to named variable
         let unreachable = IRNode::Antijoin {
             left: Box::new(nodes),
             right: Box::new(reachable),
@@ -1968,7 +1958,6 @@ mod tests {
             schema: vec!["x".to_string(), "y".to_string()],
         };
 
-        // FIXME: extract to named variable
         let result = IRNode::Aggregate {
             input: Box::new(data),
             group_by: vec![0],
@@ -1979,3 +1968,55 @@ mod tests {
         assert_eq!(result.output_schema(), vec!["x", "count_y"]);
     }
 
+    #[test]
+    fn test_join_then_aggregate() {
+        let orders = IRNode::Scan {
+            relation: "orders".to_string(),
+            schema: vec!["order_id".to_string(), "customer_id".to_string()],
+        };
+
+        let items = IRNode::Scan {
+            relation: "items".to_string(),
+            schema: vec!["item_order_id".to_string(), "price".to_string()],
+        };
+
+        let joined = IRNode::Join {
+            left: Box::new(orders),
+            right: Box::new(items),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec![
+                "order_id".to_string(),
+                "customer_id".to_string(),
+                "item_order_id".to_string(),
+                "price".to_string(),
+            ],
+        };
+
+        let aggregated = IRNode::Aggregate {
+            input: Box::new(joined),
+            group_by: vec![1],                               // group by customer_id
+            aggregations: vec![(AggregateFunction::Sum, 3)], // sum(price)
+            output_schema: vec!["customer_id".to_string(), "total_spent".to_string()],
+        };
+
+        assert_eq!(
+            aggregated.output_schema(),
+            vec!["customer_id", "total_spent"]
+        );
+    }
+
+    #[test]
+    fn test_pretty_print_indentation() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+
+        let output_0 = scan.pretty_print(0);
+        let output_2 = scan.pretty_print(2);
+
+        assert!(!output_0.starts_with("  "));
+        assert!(output_2.starts_with("    ")); // 2 * 2 spaces
+    }
+}
