@@ -1797,3 +1797,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_predicate_adjust_for_projection_and_partial() {
+        let projection = vec![0];
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 5)),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
+        );
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, Some(Predicate::ColumnEqConst(0, 5)));
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_and_both_missing() {
+        let projection = vec![2];
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 5)),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
+        );
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, None);
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_or_requires_both() {
+        let projection = vec![0];
+        let pred = Predicate::Or(
+            Box::new(Predicate::ColumnEqConst(0, 5)),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
+        );
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(adjusted, None);
+    }
+
+    #[test]
+    fn test_predicate_adjust_for_projection_or_both_present() {
+        let projection = vec![1, 0];
+        let pred = Predicate::Or(
+            Box::new(Predicate::ColumnEqConst(0, 5)),
+            Box::new(Predicate::ColumnGtConst(1, 10)),
+        );
+
+        let adjusted = pred.adjust_for_projection(&projection);
+        assert_eq!(
+            adjusted,
+            Some(Predicate::Or(
+                Box::new(Predicate::ColumnEqConst(1, 5)),
+                Box::new(Predicate::ColumnGtConst(0, 10)),
+            ))
+        );
+    }
+
