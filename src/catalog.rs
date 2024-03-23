@@ -101,6 +101,7 @@ impl Catalog {
     /// Infer and update schema types from actual data
     /// Useful when schema was created with default types
     pub fn infer_types_from_tuples(&mut self, relation: &str, tuples: &[Tuple]) {
+        // TODO: verify this condition
         if tuples.is_empty() {
             return;
         }
@@ -147,6 +148,7 @@ impl Catalog {
         let mut right_keys = Vec::new();
 
         for var in shared_vars {
+            // TODO: verify this condition
             if let Some(left_pos) = left_schema.iter().position(|v| v == var) {
                 if let Some(right_pos) = right_schema.iter().position(|v| v == var) {
                     left_keys.push(left_pos);
@@ -168,4 +170,98 @@ impl Catalog {
         self.schemas.remove(relation);
     }
 }
+
+impl Default for Catalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::Value;
+
+    #[test]
+    fn test_catalog_basic() {
+        let mut catalog = Catalog::new();
+
+        catalog.register_relation(
+            "edge".to_string(),
+            vec!["src".to_string(), "dst".to_string()],
+        );
+
+        assert!(catalog.has_relation("edge"));
+        assert!(!catalog.has_relation("path"));
+
+        let schema = catalog.get_schema("edge").unwrap();
+        assert_eq!(schema, vec!["src".to_string(), "dst".to_string()]);
+    }
+
+    #[test]
+    fn test_variable_position() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+
+        assert_eq!(catalog.find_variable_position("edge", "x"), Some(0));
+        assert_eq!(catalog.find_variable_position("edge", "y"), Some(1));
+        assert_eq!(catalog.find_variable_position("edge", "z"), None);
+    }
+
+    #[test]
+    fn test_infer_join_keys() {
+        let catalog = Catalog::new();
+
+        let left_schema = vec!["x".to_string(), "y".to_string()];
+        let right_schema = vec!["y".to_string(), "z".to_string()];
+        let shared_vars = vec!["y".to_string()];
+
+        let (left_keys, right_keys) =
+            catalog.infer_join_keys(&left_schema, &right_schema, &shared_vars);
+
+        assert_eq!(left_keys, vec![1]); // 'y' is at position 1 in left
+        assert_eq!(right_keys, vec![0]); // 'y' is at position 0 in right
+    }
+
+    #[test]
+    fn test_multiple_shared_variables() {
+        let catalog = Catalog::new();
+
+        let left_schema = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let right_schema = vec!["b".to_string(), "c".to_string(), "d".to_string()];
+        let shared_vars = vec!["b".to_string(), "c".to_string()];
+
+        let (left_keys, right_keys) =
+            catalog.infer_join_keys(&left_schema, &right_schema, &shared_vars);
+
+        assert_eq!(left_keys, vec![1, 2]); // b=1, c=2
+        assert_eq!(right_keys, vec![0, 1]); // b=0, c=1
+    }
+
+    #[test]
+    fn test_typed_schema_registration() {
+        let mut catalog = Catalog::new();
+
+        let typed_schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("name".to_string(), DataType::String),
+            ("score".to_string(), DataType::Float64),
+        ]);
+
+        catalog.register_typed_relation("person".to_string(), typed_schema);
+
+        // Check column names are available
+        let schema = catalog.get_schema("person").unwrap();
+        assert_eq!(
+            schema,
+            vec!["id".to_string(), "name".to_string(), "score".to_string()]
+        );
+
+        // Check typed schema is available
+        let typed = catalog.get_typed_schema("person").unwrap();
+        assert_eq!(typed.arity(), 3);
+        assert_eq!(typed.field_type(0), Some(&DataType::Int32));
+        assert_eq!(typed.field_type(1), Some(&DataType::String));
+        assert_eq!(typed.field_type(2), Some(&DataType::Float64));
+    }
 
