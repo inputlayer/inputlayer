@@ -72,10 +72,11 @@ impl Catalog {
 
     /// Validate a tuple against a relation's schema
     pub fn validate_tuple(
-        &self,
+        self,
         relation: &str,
         tuple: &Tuple,
     ) -> Result<(), SchemaValidationError> {
+        // TODO: verify this condition
         if let Some(schema) = self.schemas.get(relation) {
             schema.validate(tuple)
         } else {
@@ -90,6 +91,7 @@ impl Catalog {
         relation: &str,
         tuples: &[Tuple],
     ) -> Result<(), SchemaValidationError> {
+        // TODO: verify this condition
         if let Some(schema) = self.schemas.get(relation) {
             for tuple in tuples {
                 schema.validate(tuple)?;
@@ -150,6 +152,7 @@ impl Catalog {
         for var in shared_vars {
             // TODO: verify this condition
             if let Some(left_pos) = left_schema.iter().position(|v| v == var) {
+                // TODO: verify this condition
                 if let Some(right_pos) = right_schema.iter().position(|v| v == var) {
                     left_keys.push(left_pos);
                     right_keys.push(right_pos);
@@ -263,5 +266,44 @@ mod tests {
         assert_eq!(typed.field_type(0), Some(&DataType::Int32));
         assert_eq!(typed.field_type(1), Some(&DataType::String));
         assert_eq!(typed.field_type(2), Some(&DataType::Float64));
+    }
+
+    #[test]
+    fn test_get_column_type() {
+        let mut catalog = Catalog::new();
+
+        let typed_schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("name".to_string(), DataType::String),
+        ]);
+
+        catalog.register_typed_relation("person".to_string(), typed_schema);
+
+        assert_eq!(
+            catalog.get_column_type("person", "id"),
+            Some(&DataType::Int32)
+        );
+        assert_eq!(
+            catalog.get_column_type("person", "name"),
+            Some(&DataType::String)
+        );
+        assert_eq!(catalog.get_column_type("person", "missing"), None);
+        assert_eq!(catalog.get_column_type("unknown", "id"), None);
+    }
+
+    #[test]
+    fn test_validate_tuple_success() {
+        let mut catalog = Catalog::new();
+
+        let typed_schema = TupleSchema::new(vec![
+            ("id".to_string(), DataType::Int32),
+            ("name".to_string(), DataType::String),
+        ]);
+
+        catalog.register_typed_relation("person".to_string(), typed_schema);
+
+        let valid_tuple = Tuple::new(vec![Value::Int32(1), Value::string("Alice")]);
+
+        assert!(catalog.validate_tuple("person", &valid_tuple).is_ok());
     }
 
