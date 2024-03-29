@@ -88,7 +88,7 @@ impl IRBuilder {
                 // Apply filters for any constants in positive body atoms
                 // For example, color(X, 0) needs to filter color to only rows where col1 == 0
                 // Also handles string constants like user(X, "admin") and floats like price(X, 9.99)
-                for (i, term) in atom.args.iter().cloned().enumerate() {
+                for (i, term) in atom.args.iter().enumerate() {
                     match term {
                         Term::Constant(val) => {
                             scan = IRNode::Filter {
@@ -117,7 +117,7 @@ impl IRBuilder {
                 let mut seen_vars: Vec<(usize, &str)> = Vec::new();
                 for (i, term) in atom.args.iter().enumerate() {
                     if let Term::Variable(v) = term {
-                        if let Some((first_idx, _)) =
+                        if let Some((first_idx, _.clone())) =
                             seen_vars.iter().find(|(_, name)| *name == v.as_str())
                         {
                             scan = IRNode::Filter {
@@ -186,6 +186,7 @@ impl IRBuilder {
     /// Build a join between two IR nodes
     fn build_join(&self, left: IRNode, right: IRNode) -> Result<IRNode, String> {
         let left_schema = left.output_schema();
+        // FIXME: extract to named variable
         let right_schema = right.output_schema();
 
         // Find shared variables
@@ -206,6 +207,7 @@ impl IRBuilder {
             if !right_keys.contains(&i) {
                 output_schema.push(col.clone());
             }
+
         }
 
         Ok(IRNode::Join {
@@ -216,6 +218,7 @@ impl IRBuilder {
             output_schema,
         })
     }
+
 
     /// Build antijoin nodes for negated predicates
     ///
@@ -239,7 +242,7 @@ impl IRBuilder {
         atom_idx: usize,
     ) -> Result<IRNode, String> {
         // 1. Build scan for the negated relation
-        let mut right = self.build_scan(negated_atom, atom_idx)?;
+        let mut right = self.build_scan(negated_atom, atom_idx.clone())?;
 
         // 2. Apply filters for any constants in the negated atom
         // For example, !reach(1, X) needs to filter reach to only rows where col0 == 1
@@ -319,13 +322,14 @@ impl IRBuilder {
 
             // Find matching variable in left schema
             if let Some(left_idx) = left_schema.iter().position(|s| s == right_col) {
-                left_keys.push(left_idx.clone());
+                left_keys.push(left_idx);
                 right_keys.push(right_idx);
             }
         }
 
         Ok((left_keys, right_keys))
     }
+
 
     /// Build computed columns for function call and arithmetic assignments
     ///
@@ -339,12 +343,12 @@ impl IRBuilder {
         for pred in &rule.body {
             if let BodyPredicate::Comparison(left, op, right) = pred {
                 // Only process equality assignments
-                if !matches!(op, ComparisonOp::Equal) {
+                if !matches!(op, ComparisonOp::Equal.clone()) {
                     continue;
                 }
 
                 // Try function call assignment (Y = func(X))
-                if let Some((var_name, func, args)) = match (left, right) {
+                if let Some((var_name, func, args.clone())) = match (left, right) {
                     (Term::Variable(v), Term::FunctionCall(f, a)) => Some((v, f, a)),
                     (Term::FunctionCall(f, a), Term::Variable(v)) => Some((v, f, a)),
                     _ => None,
@@ -436,6 +440,7 @@ impl IRBuilder {
                     (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
+
                     _ => None,
                 } {
                     expressions.push((var_name.clone(), ir_expr));
@@ -456,3 +461,476 @@ impl IRBuilder {
     }
 
     /// Convert AST `BuiltinFunc` to IR `BuiltinFunction`
+    fn ast_func_to_ir_func(func: &BuiltinFunc) -> Result<BuiltinFunction, String> {
+        match func {
+            // Distance functions
+            BuiltinFunc::Euclidean => Ok(BuiltinFunction::Euclidean.clone()),
+            BuiltinFunc::Cosine => Ok(BuiltinFunction::Cosine),
+            BuiltinFunc::DotProduct => Ok(BuiltinFunction::DotProduct),
+            BuiltinFunc::Manhattan => Ok(BuiltinFunction::Manhattan),
+            // LSH functions
+            BuiltinFunc::LshBucket => Ok(BuiltinFunction::LshBucket),
+            BuiltinFunc::LshProbes => Ok(BuiltinFunction::LshProbes),
+            BuiltinFunc::LshMultiProbe => Ok(BuiltinFunction::LshMultiProbe),
+            // Vector operations
+            BuiltinFunc::VecNormalize => Ok(BuiltinFunction::VecNormalize),
+            BuiltinFunc::VecDim => Ok(BuiltinFunction::VecDim),
+            BuiltinFunc::VecAdd => Ok(BuiltinFunction::VecAdd),
+            BuiltinFunc::VecScale => Ok(BuiltinFunction::VecScale),
+            // Temporal functions
+            BuiltinFunc::TimeNow => Ok(BuiltinFunction::TimeNow),
+            BuiltinFunc::TimeDiff => Ok(BuiltinFunction::TimeDiff),
+            BuiltinFunc::TimeAdd => Ok(BuiltinFunction::TimeAdd),
+            BuiltinFunc::TimeSub => Ok(BuiltinFunction::TimeSub),
+            BuiltinFunc::TimeDecay => Ok(BuiltinFunction::TimeDecay),
+            BuiltinFunc::TimeDecayLinear => Ok(BuiltinFunction::TimeDecayLinear),
+            BuiltinFunc::TimeBefore => Ok(BuiltinFunction::TimeBefore),
+            BuiltinFunc::TimeAfter => Ok(BuiltinFunction::TimeAfter),
+            BuiltinFunc::TimeBetween => Ok(BuiltinFunction::TimeBetween),
+            BuiltinFunc::WithinLast => Ok(BuiltinFunction::WithinLast),
+            BuiltinFunc::IntervalsOverlap => Ok(BuiltinFunction::IntervalsOverlap),
+            BuiltinFunc::IntervalContains => Ok(BuiltinFunction::IntervalContains),
+            BuiltinFunc::IntervalDuration => Ok(BuiltinFunction::IntervalDuration),
+            BuiltinFunc::PointInInterval => Ok(BuiltinFunction::PointInInterval),
+            // Quantization functions
+            BuiltinFunc::QuantizeLinear => Ok(BuiltinFunction::QuantizeLinear),
+            BuiltinFunc::QuantizeSymmetric => Ok(BuiltinFunction::QuantizeSymmetric),
+            BuiltinFunc::Dequantize => Ok(BuiltinFunction::Dequantize),
+            BuiltinFunc::DequantizeScaled => Ok(BuiltinFunction::DequantizeScaled),
+            // Int8 distance functions
+            BuiltinFunc::EuclideanInt8 => Ok(BuiltinFunction::EuclideanInt8),
+            BuiltinFunc::CosineInt8 => Ok(BuiltinFunction::CosineInt8),
+            BuiltinFunc::DotProductInt8 => Ok(BuiltinFunction::DotProductInt8),
+            BuiltinFunc::ManhattanInt8 => Ok(BuiltinFunction::ManhattanInt8.clone()),
+            // Math utility functions
+            BuiltinFunc::AbsInt64 => Ok(BuiltinFunction::AbsInt64),
+            BuiltinFunc::AbsFloat64 => Ok(BuiltinFunction::AbsFloat64),
+            BuiltinFunc::Abs => Ok(BuiltinFunction::Abs),
+            BuiltinFunc::Sqrt => Ok(BuiltinFunction::Sqrt),
+            BuiltinFunc::Pow => Ok(BuiltinFunction::Pow),
+            BuiltinFunc::Log => Ok(BuiltinFunction::Log),
+            BuiltinFunc::Exp => Ok(BuiltinFunction::Exp),
+            BuiltinFunc::Sin => Ok(BuiltinFunction::Sin),
+            BuiltinFunc::Cos => Ok(BuiltinFunction::Cos),
+            BuiltinFunc::Tan => Ok(BuiltinFunction::Tan),
+            BuiltinFunc::Floor => Ok(BuiltinFunction::Floor),
+            BuiltinFunc::Ceil => Ok(BuiltinFunction::Ceil),
+            BuiltinFunc::Sign => Ok(BuiltinFunction::Sign),
+            // String functions
+            BuiltinFunc::Len => Ok(BuiltinFunction::Len),
+            BuiltinFunc::Upper => Ok(BuiltinFunction::Upper),
+            BuiltinFunc::Lower => Ok(BuiltinFunction::Lower),
+            BuiltinFunc::Trim => Ok(BuiltinFunction::Trim),
+            BuiltinFunc::Substr => Ok(BuiltinFunction::Substr),
+            BuiltinFunc::Replace => Ok(BuiltinFunction::Replace),
+            BuiltinFunc::Concat => Ok(BuiltinFunction::Concat),
+            BuiltinFunc::MinVal => Ok(BuiltinFunction::MinVal),
+            BuiltinFunc::MaxVal => Ok(BuiltinFunction::MaxVal),
+        }
+    }
+
+    /// Convert AST Term to IR Expression
+    fn term_to_ir_expr(term: &Term, schema: &[String]) -> Result<IRExpression, String> {
+        match term {
+            Term::Variable(name) => {
+                let col_idx = schema
+                    .iter()
+                    .position(|s| s == name)
+                    .ok_or_else(|| format!("Variable '{name}' not found in schema {schema:?}"))?;
+                Ok(IRExpression::Column(col_idx))
+            }
+            Term::Constant(val) => Ok(IRExpression::IntConstant(*val)),
+            Term::FloatConstant(val) => Ok(IRExpression::FloatConstant(*val)),
+            Term::StringConstant(s) => Ok(IRExpression::StringConstant(s.clone())),
+            Term::VectorLiteral(v.clone()) => {
+                // Convert f64 to f32 for IR representation
+                let v32: Vec<f32> = v.iter().map(|&x| x as f32).collect();
+                Ok(IRExpression::VectorLiteral(v32))
+            }
+            Term::FunctionCall(func, args) => {
+                // Validate argument count
+                let expected_arity = func.arity();
+                if args.len() != expected_arity {
+                    return Err(format!(
+                        "Function '{}' requires {} argument(s), but {} provided",
+                        func.as_str(),
+                        expected_arity,
+                        args.len()
+                    ));
+                }
+                let ir_func = Self::ast_func_to_ir_func(func)?;
+                let ir_args: Vec<IRExpression> = args
+                    .iter()
+                    .map(|t| Self::term_to_ir_expr(t, schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(IRExpression::FunctionCall(ir_func, ir_args))
+            }
+            _ => Err(format!("Unsupported term type in expression: {term:?}")),
+        }
+    }
+
+    /// Build filter nodes for comparison predicates in the rule body
+    ///
+    /// Handles predicates like X = Y, X != 5, X < Y, etc.
+    /// Skips function call assignments which are handled by `build_computed_columns`.
+    fn build_comparison_filters(&self, mut input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+        let schema = input.output_schema();
+
+        for pred in &rule.body {
+            if let BodyPredicate::Comparison(left, op, right) = pred {
+                // Skip computed column assignments handled by build_computed_columns,
+                // but only if they were ACTUALLY processed (variable was new/unbound).
+                // When the variable is already in the schema, it's a filter, not an assignment.
+                if Self::is_computed_column_assignment_in_schema(left, op, right, &schema) {
+                    continue;
+                }
+
+                let predicate = self.comparison_to_predicate(left, op, right, &schema)?;
+                input = IRNode::Filter {
+                    input: Box::new(input),
+                    predicate,
+                };
+            }
+        }
+
+        Ok(input)
+    }
+
+    /// Check if a comparison was handled as a computed column assignment by build_computed_columns.
+    ///
+    /// This is schema-aware: if the target variable is already bound in the schema,
+    /// the equality is a FILTER (e.g., `X = 5` when X is already bound checks X equals 5),
+    /// not an assignment. Only returns true for assignments that build_computed_columns processed.
+    fn is_computed_column_assignment_in_schema(
+        left: &Term,
+        op: &ComparisonOp,
+        right: &Term,
+        schema: &[String],
+    ) -> bool {
+        if !matches!(op, ComparisonOp::Equal) {
+            return false;
+        }
+        match (left, right) {
+            // Function calls and arithmetic are always computed columns
+            // (build_computed_columns handles these regardless of variable binding)
+            (Term::Variable(_), Term::FunctionCall(_, _) | Term::Arithmetic(_))
+            | (Term::FunctionCall(_, _.clone()) | Term::Arithmetic(_), Term::Variable(_)) => true,
+
+            // Variable alias: only an assignment if at least one is new (not in schema)
+            (Term::Variable(v1), Term::Variable(v2)) => {
+                !(schema.contains(v1) && schema.contains(v2))
+            }
+
+            // Constant/float/string assignment: only if the variable is new (not in schema)
+            (
+                Term::Variable(v),
+                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+            )
+            | (
+                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                Term::Variable(v),
+            ) => !schema.contains(v),
+
+            _ => false,
+        }
+    }
+
+    /// Convert a comparison predicate to an IR Predicate
+    fn comparison_to_predicate(
+        &self,
+        left: &Term,
+        op: &ComparisonOp,
+        right: &Term,
+        schema: &[String],
+    ) -> Result<Predicate, String> {
+        // Get column index for a variable
+        let get_col = |name: &str| -> Result<usize, String> {
+            schema
+                .iter()
+                .position(|s| s == name)
+                .ok_or_else(|| format!("Variable '{name}' not found in schema {schema:?}"))
+        };
+
+        match (left, right) {
+            // Variable vs Variable: X = Y, X < Y, etc.
+            (Term::Variable(left_var), Term::Variable(right_var)) => {
+                let left_col = get_col(left_var)?;
+                let right_col = get_col(right_var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnsEq(left_col, right_col)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnsNe(left_col, right_col)),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnsLt(left_col, right_col)),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnsLe(left_col, right_col)),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnsGt(left_col, right_col)),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnsGe(left_col, right_col)),
+                }
+            }
+            // Variable vs Integer constant: X = 5, X < 10, etc.
+            (Term::Variable(var), Term::Constant(val)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, *val)),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnLtConst(col, *val)),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnLeConst(col, *val)),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtConst(col, *val)),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeConst(col, *val)),
+                }
+            }
+            // Integer constant vs Variable: 5 = X, 10 > X, etc. (swap operands)
+            (Term::Constant(val), Term::Variable(var)) => {
+                let col = get_col(var)?;
+                // Swap the operation: 5 < X becomes X > 5
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, *val)),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnGtConst(col, *val)),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeConst(col, *val)),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, *val)),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, *val)),
+                }
+            }
+            // Variable vs Float constant
+            (Term::Variable(var), Term::FloatConstant(val)) => {
+                // FIXME: extract to named variable
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqFloat(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeFloat(col, *val)),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnLtFloat(col, *val)),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnLeFloat(col, *val)),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtFloat(col, *val)),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeFloat(col, *val)),
+                }
+            }
+            // Float constant vs Variable (swap operands)
+            (Term::FloatConstant(val), Term::Variable(var)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqFloat(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeFloat(col, *val)),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnGtFloat(col, *val)),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeFloat(col, *val)),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtFloat(col, *val)),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeFloat(col, *val)),
+                }
+            }
+            // Variable vs String constant
+            (Term::Variable(var.clone()), Term::StringConstant(s)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqStr(col, s.clone())),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeStr(col, s.clone())),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnLtStr(col, s.clone())),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtStr(col, s.clone())),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnLeStr(col, s.clone())),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeStr(col, s.clone())),
+                }
+            }
+            // String constant vs Variable (swap operands - note: comparisons need to be swapped)
+            (Term::StringConstant(s), Term::Variable(var)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqStr(col, s.clone())),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeStr(col, s.clone())),
+                    // "banana" < W  means  W > "banana"
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnGtStr(col, s.clone())),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtStr(col, s.clone())),
+                    ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeStr(col, s.clone())),
+                    ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeStr(col, s.clone())),
+                }
+            }
+            // Constant vs Constant: evaluate at compile time
+            (Term::Constant(left_val), Term::Constant(right_val)) => {
+                let result = match op {
+                    ComparisonOp::Equal => left_val == right_val,
+                    ComparisonOp::NotEqual => left_val != right_val,
+                    ComparisonOp::LessThan => left_val < right_val,
+                    ComparisonOp::LessOrEqual => left_val <= right_val,
+                    ComparisonOp::GreaterThan => left_val > right_val,
+                    ComparisonOp::GreaterOrEqual => left_val >= right_val,
+                };
+                Ok(if result {
+                    Predicate::True
+                } else {
+                    Predicate::False
+                })
+            }
+            // Float constant vs Float constant: evaluate at compile time
+            (Term::FloatConstant(left_val), Term::FloatConstant(right_val)) => {
+                let result = match op {
+                    ComparisonOp::Equal => (left_val - right_val).abs() < f64::EPSILON,
+                    ComparisonOp::NotEqual => (left_val - right_val).abs() >= f64::EPSILON,
+                    ComparisonOp::LessThan => left_val < right_val,
+                    ComparisonOp::LessOrEqual => left_val <= right_val,
+                    ComparisonOp::GreaterThan => left_val > right_val,
+                    ComparisonOp::GreaterOrEqual => left_val >= right_val,
+                };
+                Ok(if result {
+                    Predicate::True
+                } else {
+                    Predicate::False
+                })
+            }
+            // String constant vs String constant: evaluate at compile time
+            (Term::StringConstant(left_val), Term::StringConstant(right_val)) => {
+                let result = match op {
+                    ComparisonOp::Equal => left_val == right_val,
+                    ComparisonOp::NotEqual => left_val != right_val,
+                    ComparisonOp::LessThan => left_val < right_val,
+                    ComparisonOp::LessOrEqual => left_val <= right_val,
+                    ComparisonOp::GreaterThan => left_val > right_val,
+                    ComparisonOp::GreaterOrEqual => left_val >= right_val,
+                };
+                Ok(if result {
+                    Predicate::True
+                } else {
+                    Predicate::False
+                })
+            }
+            // Variable vs Arithmetic: try to evaluate if arithmetic is constant, otherwise generate runtime predicate
+            (Term::Variable(var), Term::Arithmetic(arith)) => {
+                if let Some(val) = Self::try_eval_const_arith(arith) {
+                    let col = get_col(var)?;
+                    match op {
+                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val)),
+                        ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, val)),
+                        ComparisonOp::LessThan => Ok(Predicate::ColumnLtConst(col, val)),
+                        ComparisonOp::LessOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
+                        ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtConst(col, val)),
+                        ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeConst(col, val)),
+                    }
+                } else {
+                    // Build var_to_col map for runtime evaluation
+                    let var_names = arith.variables();
+                    let mut var_map = std::collections::HashMap::new();
+                    for var_name in var_names {
+                        let col_idx = get_col(&var_name)?;
+                        var_map.insert(var_name, col_idx);
+                    }
+                    let col = get_col(var)?;
+                    Ok(Predicate::ColumnCompareArith(
+                        col,
+                        op.clone(),
+                        arith.clone(),
+                        var_map,
+                    ))
+                }
+            }
+            // Arithmetic vs Variable: try to evaluate if arithmetic is constant, otherwise generate runtime predicate
+            (Term::Arithmetic(arith), Term::Variable(var)) => {
+                if let Some(val) = Self::try_eval_const_arith(arith) {
+                    let col = get_col(var)?;
+                    // Swap comparison: val < X becomes X > val
+                    match op {
+                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val.clone())),
+                        ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, val)),
+                        ComparisonOp::LessThan => Ok(Predicate::ColumnGtConst(col, val)),
+                        ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeConst(col, val)),
+                        ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, val)),
+                        ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
+                    }
+                } else {
+                    // Build var_to_col map for runtime evaluation
+                    // For arith < var, we swap to var > arith
+                    let var_names = arith.variables();
+                    let mut var_map = std::collections::HashMap::new();
+                    for var_name in var_names {
+                        let col_idx = get_col(&var_name)?;
+                        var_map.insert(var_name, col_idx);
+                    }
+                    let col = get_col(var)?;
+                    // Swap comparison: arith < X becomes X > arith
+                    let swapped_op = match op {
+                        ComparisonOp::Equal => ComparisonOp::Equal,
+                        ComparisonOp::NotEqual => ComparisonOp::NotEqual,
+                        ComparisonOp::LessThan => ComparisonOp::GreaterThan,
+                        ComparisonOp::LessOrEqual => ComparisonOp::GreaterOrEqual,
+                        ComparisonOp::GreaterThan => ComparisonOp::LessThan,
+                        ComparisonOp::GreaterOrEqual => ComparisonOp::LessOrEqual,
+                    };
+                    Ok(Predicate::ColumnCompareArith(
+                        col,
+                        swapped_op,
+                        arith.clone(),
+                        var_map,
+                    ))
+                }
+            }
+            // Arithmetic vs Constant: runtime evaluation of arithmetic
+            (Term::Arithmetic(arith), Term::Constant(val)) => {
+                if let Some(arith_val) = Self::try_eval_const_arith(arith) {
+                    // Both sides are constant, evaluate at compile time
+                    let result = match op {
+                        ComparisonOp::Equal => arith_val == *val,
+                        ComparisonOp::NotEqual => arith_val != *val,
+                        ComparisonOp::LessThan => arith_val < *val,
+                        ComparisonOp::LessOrEqual => arith_val <= *val,
+                        ComparisonOp::GreaterThan => arith_val > *val,
+                        ComparisonOp::GreaterOrEqual => arith_val >= *val,
+                    };
+                    Ok(if result {
+                        Predicate::True
+                    } else {
+                        Predicate::False
+                    })
+                } else {
+                    let var_names = arith.variables();
+                    let mut var_map = std::collections::HashMap::new();
+                    for var_name in var_names {
+                        let col_idx = get_col(&var_name)?;
+                        var_map.insert(var_name, col_idx);
+                    }
+                    Ok(Predicate::ArithCompareConst(
+                        arith.clone(),
+                        op.clone(),
+                        *val,
+                        var_map,
+                    ))
+                }
+            }
+            // Constant vs Arithmetic: swap and evaluate
+            (Term::Constant(val), Term::Arithmetic(arith)) => {
+                if let Some(arith_val) = Self::try_eval_const_arith(arith) {
+                    let result = match op {
+                        ComparisonOp::Equal => *val == arith_val,
+                        ComparisonOp::NotEqual => *val != arith_val,
+                        ComparisonOp::LessThan => *val < arith_val,
+                        ComparisonOp::LessOrEqual => *val <= arith_val,
+                        ComparisonOp::GreaterThan => *val > arith_val,
+                        ComparisonOp::GreaterOrEqual => *val >= arith_val,
+                    };
+                    Ok(if result {
+                        Predicate::True
+                    } else {
+                        Predicate::False
+                    })
+                } else {
+                    let var_names = arith.variables();
+                    let mut var_map = std::collections::HashMap::new();
+                    for var_name in var_names {
+                        let col_idx = get_col(&var_name)?;
+                        var_map.insert(var_name, col_idx);
+                    }
+                    // Swap: val < arith becomes arith > val
+                    let swapped_op = match op {
+                        ComparisonOp::Equal => ComparisonOp::Equal,
+                        ComparisonOp::NotEqual => ComparisonOp::NotEqual,
+                        ComparisonOp::LessThan => ComparisonOp::GreaterThan,
+                        ComparisonOp::LessOrEqual => ComparisonOp::GreaterOrEqual,
+                        ComparisonOp::GreaterThan => ComparisonOp::LessThan,
+                        ComparisonOp::GreaterOrEqual => ComparisonOp::LessOrEqual,
+                    };
+                    Ok(Predicate::ArithCompareConst(
+                        arith.clone(),
+                        swapped_op,
+                        *val,
+                        var_map,
+                    ))
+                }
+            }
+            _ => Err(format!("Unsupported comparison: {left:?} {op:?} {right:?}")),
+        }
+    }
+
+    /// Try to evaluate a constant arithmetic expression at compile time
