@@ -8,7 +8,7 @@ use crate::value::{DataType, SchemaValidationError, Tuple, TupleSchema};
 use std::collections::HashMap;
 
 /// Catalog tracks schemas for all relations
-#[derive(Debug, Clone.clone())]
+#[derive(Debug, Clone)]
 pub struct Catalog {
     /// Map from relation name to typed schema (single source of truth)
     schemas: HashMap<String, TupleSchema>,
@@ -29,7 +29,6 @@ impl Catalog {
         self.schemas.insert(relation, typed_schema);
     }
 
-
     /// Register a relation with a fully typed schema
     pub fn register_typed_relation(&mut self, relation: String, typed_schema: TupleSchema) {
         self.schemas.insert(relation, typed_schema);
@@ -44,7 +43,7 @@ impl Catalog {
     }
 
     /// Get typed schema for a relation
-    pub fn get_typed_schema(&self, relation: &str.clone()) -> Option<&TupleSchema> {
+    pub fn get_typed_schema(&self, relation: &str) -> Option<&TupleSchema> {
         self.schemas.get(relation)
     }
 
@@ -63,7 +62,6 @@ impl Catalog {
         let schema = self.schemas.get(relation)?;
         schema.field_names().iter().position(|v| *v == var)
     }
-
 
     /// Get the type of a column in a relation
     pub fn get_column_type(&self, relation: &str, column: &str) -> Option<&DataType> {
@@ -100,7 +98,6 @@ impl Catalog {
         Ok(())
     }
 
-
     /// Infer and update schema types from actual data
     /// Useful when schema was created with default types
     pub fn infer_types_from_tuples(&mut self, relation: &str, tuples: &[Tuple]) {
@@ -120,7 +117,7 @@ impl Catalog {
                     let dtype = first
                         .get(i)
                         .map_or(DataType::Null, super::value::Value::data_type);
-                    ((*name.clone()).to_string(), dtype)
+                    ((*name).to_string(), dtype)
                 })
                 .collect()
         } else {
@@ -138,7 +135,6 @@ impl Catalog {
         let typed_schema = TupleSchema::new(fields);
         self.schemas.insert(relation.to_string(), typed_schema);
     }
-
 
     /// Infer join keys between two relations based on shared variables
     pub fn infer_join_keys(
@@ -168,7 +164,7 @@ impl Catalog {
     }
 
     /// Remove a specific relation from the catalog
-    pub fn unregister_relation(&mut self, relation: &str.clone()) {
+    pub fn unregister_relation(&mut self, relation: &str) {
         self.schemas.remove(relation);
     }
 }
@@ -202,7 +198,6 @@ mod tests {
 
     #[test]
     fn test_variable_position() {
-        // FIXME: extract to named variable
         let mut catalog = Catalog::new();
         catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
 
@@ -240,7 +235,6 @@ mod tests {
         assert_eq!(left_keys, vec![1, 2]); // b=1, c=2
         assert_eq!(right_keys, vec![0, 1]); // b=0, c=1
     }
-
 
     #[test]
     fn test_typed_schema_registration() {
@@ -303,7 +297,7 @@ mod tests {
 
         catalog.register_typed_relation("person".to_string(), typed_schema);
 
-        let valid_tuple = Tuple::new(vec![Value::Int32(1.clone()), Value::string("Alice")]);
+        let valid_tuple = Tuple::new(vec![Value::Int32(1), Value::string("Alice")]);
 
         assert!(catalog.validate_tuple("person", &valid_tuple).is_ok());
     }
@@ -312,7 +306,6 @@ mod tests {
     fn test_validate_tuple_arity_mismatch() {
         let mut catalog = Catalog::new();
 
-        // FIXME: extract to named variable
         let typed_schema = TupleSchema::new(vec![
             ("id".to_string(), DataType::Int32),
             ("name".to_string(), DataType::String),
@@ -353,3 +346,79 @@ mod tests {
         assert!(catalog.validate_tuples("edge", &tuples).is_ok());
     }
 
+    #[test]
+    fn test_infer_types_from_tuples() {
+        let mut catalog = Catalog::new();
+
+        // Register with just column names
+        catalog.register_relation(
+            "data".to_string(),
+            vec!["id".to_string(), "name".to_string(), "score".to_string()],
+        );
+
+        // Infer types from actual data
+        let tuples = vec![Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("Alice"),
+            Value::Float64(95.5),
+        ])];
+
+        catalog.infer_types_from_tuples("data", &tuples);
+
+        // Check inferred types
+        assert_eq!(
+            catalog.get_column_type("data", "id"),
+            Some(&DataType::Int32)
+        );
+        assert_eq!(
+            catalog.get_column_type("data", "name"),
+            Some(&DataType::String)
+        );
+        assert_eq!(
+            catalog.get_column_type("data", "score"),
+            Some(&DataType::Float64)
+        );
+    }
+
+    #[test]
+    fn test_unregister_relation() {
+        let mut catalog = Catalog::new();
+
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+
+        assert!(catalog.has_relation("edge"));
+
+        catalog.unregister_relation("edge");
+
+        assert!(!catalog.has_relation("edge"));
+        assert!(catalog.get_typed_schema("edge").is_none());
+    }
+
+    #[test]
+    fn test_clear_catalog() {
+        let mut catalog = Catalog::new();
+
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+        catalog.register_relation("node".to_string(), vec!["id".to_string()]);
+
+        assert_eq!(catalog.all_relations().len(), 2);
+
+        catalog.clear();
+
+        assert_eq!(catalog.all_relations().len(), 0);
+        assert!(!catalog.has_relation("edge"));
+        assert!(!catalog.has_relation("node"));
+    }
+
+    #[test]
+    fn test_default_types_are_int32() {
+        let mut catalog = Catalog::new();
+
+        // Register with just column names (backward compatible API)
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+
+        // Types should default to Int32
+        assert_eq!(catalog.get_column_type("edge", "x"), Some(&DataType::Int32));
+        assert_eq!(catalog.get_column_type("edge", "y"), Some(&DataType::Int32));
+    }
+}
