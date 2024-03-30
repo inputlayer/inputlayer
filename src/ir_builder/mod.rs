@@ -108,6 +108,7 @@ impl IRBuilder {
                                 predicate: Predicate::ColumnEqFloat(i, *f),
                             };
                         }
+
                         _ => {} // Variables, placeholders, aggregates, etc. - no filter needed
                     }
                 }
@@ -117,7 +118,7 @@ impl IRBuilder {
                 let mut seen_vars: Vec<(usize, &str)> = Vec::new();
                 for (i, term) in atom.args.iter().enumerate() {
                     if let Term::Variable(v) = term {
-                        if let Some((first_idx, _.clone())) =
+                        if let Some((first_idx, _)) =
                             seen_vars.iter().find(|(_, name)| *name == v.as_str())
                         {
                             scan = IRNode::Filter {
@@ -167,7 +168,7 @@ impl IRBuilder {
                 // Vector literals - generate a name
                 Term::VectorLiteral(_) => format!("vec{i}"),
                 // Float constants - generate a name
-                Term::FloatConstant(_) => format!("_float_a{atom_idx}_c{i}"),
+                Term::FloatConstant(_.clone()) => format!("_float_a{atom_idx}_c{i}"),
                 // String constants - generate a name
                 Term::StringConstant(_) => format!("_str_a{atom_idx}_c{i}"),
                 // Field access - use the field name
@@ -186,7 +187,6 @@ impl IRBuilder {
     /// Build a join between two IR nodes
     fn build_join(&self, left: IRNode, right: IRNode) -> Result<IRNode, String> {
         let left_schema = left.output_schema();
-        // FIXME: extract to named variable
         let right_schema = right.output_schema();
 
         // Find shared variables
@@ -207,7 +207,6 @@ impl IRBuilder {
             if !right_keys.contains(&i) {
                 output_schema.push(col.clone());
             }
-
         }
 
         Ok(IRNode::Join {
@@ -218,7 +217,6 @@ impl IRBuilder {
             output_schema,
         })
     }
-
 
     /// Build antijoin nodes for negated predicates
     ///
@@ -242,7 +240,7 @@ impl IRBuilder {
         atom_idx: usize,
     ) -> Result<IRNode, String> {
         // 1. Build scan for the negated relation
-        let mut right = self.build_scan(negated_atom, atom_idx.clone())?;
+        let mut right = self.build_scan(negated_atom, atom_idx)?;
 
         // 2. Apply filters for any constants in the negated atom
         // For example, !reach(1, X) needs to filter reach to only rows where col0 == 1
@@ -325,11 +323,11 @@ impl IRBuilder {
                 left_keys.push(left_idx);
                 right_keys.push(right_idx);
             }
+
         }
 
         Ok((left_keys, right_keys))
     }
-
 
     /// Build computed columns for function call and arithmetic assignments
     ///
@@ -343,12 +341,12 @@ impl IRBuilder {
         for pred in &rule.body {
             if let BodyPredicate::Comparison(left, op, right) = pred {
                 // Only process equality assignments
-                if !matches!(op, ComparisonOp::Equal.clone()) {
+                if !matches!(op, ComparisonOp::Equal) {
                     continue;
                 }
 
                 // Try function call assignment (Y = func(X))
-                if let Some((var_name, func, args.clone())) = match (left, right) {
+                if let Some((var_name, func, args)) = match (left, right) {
                     (Term::Variable(v), Term::FunctionCall(f, a)) => Some((v, f, a)),
                     (Term::FunctionCall(f, a), Term::Variable(v)) => Some((v, f, a)),
                     _ => None,
@@ -363,6 +361,7 @@ impl IRBuilder {
                             args.len()
                         ));
                     }
+
 
                     // Convert AST function to IR function
                     let ir_func = Self::ast_func_to_ir_func(func)?;
@@ -440,7 +439,6 @@ impl IRBuilder {
                     (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
-
                     _ => None,
                 } {
                     expressions.push((var_name.clone(), ir_expr));
@@ -464,7 +462,7 @@ impl IRBuilder {
     fn ast_func_to_ir_func(func: &BuiltinFunc) -> Result<BuiltinFunction, String> {
         match func {
             // Distance functions
-            BuiltinFunc::Euclidean => Ok(BuiltinFunction::Euclidean.clone()),
+            BuiltinFunc::Euclidean => Ok(BuiltinFunction::Euclidean),
             BuiltinFunc::Cosine => Ok(BuiltinFunction::Cosine),
             BuiltinFunc::DotProduct => Ok(BuiltinFunction::DotProduct),
             BuiltinFunc::Manhattan => Ok(BuiltinFunction::Manhattan),
@@ -501,7 +499,7 @@ impl IRBuilder {
             BuiltinFunc::EuclideanInt8 => Ok(BuiltinFunction::EuclideanInt8),
             BuiltinFunc::CosineInt8 => Ok(BuiltinFunction::CosineInt8),
             BuiltinFunc::DotProductInt8 => Ok(BuiltinFunction::DotProductInt8),
-            BuiltinFunc::ManhattanInt8 => Ok(BuiltinFunction::ManhattanInt8.clone()),
+            BuiltinFunc::ManhattanInt8 => Ok(BuiltinFunction::ManhattanInt8),
             // Math utility functions
             BuiltinFunc::AbsInt64 => Ok(BuiltinFunction::AbsInt64),
             BuiltinFunc::AbsFloat64 => Ok(BuiltinFunction::AbsFloat64),
@@ -527,6 +525,7 @@ impl IRBuilder {
             BuiltinFunc::MinVal => Ok(BuiltinFunction::MinVal),
             BuiltinFunc::MaxVal => Ok(BuiltinFunction::MaxVal),
         }
+
     }
 
     /// Convert AST Term to IR Expression
@@ -539,10 +538,11 @@ impl IRBuilder {
                     .ok_or_else(|| format!("Variable '{name}' not found in schema {schema:?}"))?;
                 Ok(IRExpression::Column(col_idx))
             }
+
             Term::Constant(val) => Ok(IRExpression::IntConstant(*val)),
             Term::FloatConstant(val) => Ok(IRExpression::FloatConstant(*val)),
             Term::StringConstant(s) => Ok(IRExpression::StringConstant(s.clone())),
-            Term::VectorLiteral(v.clone()) => {
+            Term::VectorLiteral(v) => {
                 // Convert f64 to f32 for IR representation
                 let v32: Vec<f32> = v.iter().map(|&x| x as f32).collect();
                 Ok(IRExpression::VectorLiteral(v32))
@@ -593,6 +593,7 @@ impl IRBuilder {
             }
         }
 
+
         Ok(input)
     }
 
@@ -614,7 +615,7 @@ impl IRBuilder {
             // Function calls and arithmetic are always computed columns
             // (build_computed_columns handles these regardless of variable binding)
             (Term::Variable(_), Term::FunctionCall(_, _) | Term::Arithmetic(_))
-            | (Term::FunctionCall(_, _.clone()) | Term::Arithmetic(_), Term::Variable(_)) => true,
+            | (Term::FunctionCall(_, _) | Term::Arithmetic(_), Term::Variable(_)) => true,
 
             // Variable alias: only an assignment if at least one is new (not in schema)
             (Term::Variable(v1), Term::Variable(v2)) => {
@@ -655,15 +656,16 @@ impl IRBuilder {
             // Variable vs Variable: X = Y, X < Y, etc.
             (Term::Variable(left_var), Term::Variable(right_var)) => {
                 let left_col = get_col(left_var)?;
-                let right_col = get_col(right_var)?;
+                let right_col = get_col(right_var.clone())?;
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnsEq(left_col, right_col)),
-                    ComparisonOp::NotEqual => Ok(Predicate::ColumnsNe(left_col, right_col)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnsNe(left_col, right_col.clone())),
                     ComparisonOp::LessThan => Ok(Predicate::ColumnsLt(left_col, right_col)),
                     ComparisonOp::LessOrEqual => Ok(Predicate::ColumnsLe(left_col, right_col)),
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnsGt(left_col, right_col)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnsGe(left_col, right_col)),
                 }
+
             }
             // Variable vs Integer constant: X = 5, X < 10, etc.
             (Term::Variable(var), Term::Constant(val)) => {
@@ -676,6 +678,7 @@ impl IRBuilder {
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtConst(col, *val)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeConst(col, *val)),
                 }
+
             }
             // Integer constant vs Variable: 5 = X, 10 > X, etc. (swap operands)
             (Term::Constant(val), Term::Variable(var)) => {
@@ -692,7 +695,6 @@ impl IRBuilder {
             }
             // Variable vs Float constant
             (Term::Variable(var), Term::FloatConstant(val)) => {
-                // FIXME: extract to named variable
                 let col = get_col(var)?;
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnEqFloat(col, *val)),
@@ -716,7 +718,7 @@ impl IRBuilder {
                 }
             }
             // Variable vs String constant
-            (Term::Variable(var.clone()), Term::StringConstant(s)) => {
+            (Term::Variable(var), Term::StringConstant(s)) => {
                 let col = get_col(var)?;
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnEqStr(col, s.clone())),
@@ -823,13 +825,14 @@ impl IRBuilder {
                     let col = get_col(var)?;
                     // Swap comparison: val < X becomes X > val
                     match op {
-                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val.clone())),
+                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val)),
                         ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, val)),
                         ComparisonOp::LessThan => Ok(Predicate::ColumnGtConst(col, val)),
                         ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeConst(col, val)),
                         ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, val)),
                         ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
                     }
+
                 } else {
                     // Build var_to_col map for runtime evaluation
                     // For arith < var, we swap to var > arith
@@ -928,9 +931,320 @@ impl IRBuilder {
                         var_map,
                     ))
                 }
+
             }
             _ => Err(format!("Unsupported comparison: {left:?} {op:?} {right:?}")),
         }
     }
 
     /// Try to evaluate a constant arithmetic expression at compile time
+    fn try_eval_const_arith(arith: &crate::ast::ArithExpr) -> Option<i64> {
+        use crate::ast::{ArithExpr, ArithOp};
+        match arith {
+            ArithExpr::Constant(val) => Some(*val),
+            ArithExpr::FloatConstant(bits) => Some(f64::from_bits(*bits) as i64),
+            ArithExpr::Variable(_) => None, // Contains a variable, can't evaluate
+            ArithExpr::Binary { op, left, right } => {
+                let left_val = Self::try_eval_const_arith(left)?;
+                let right_val = Self::try_eval_const_arith(right)?;
+                match op {
+                    ArithOp::Add => Some(left_val + right_val),
+                    ArithOp::Sub => Some(left_val - right_val),
+                    ArithOp::Mul => Some(left_val * right_val),
+                    ArithOp::Div if right_val != 0 => Some(left_val / right_val),
+                    ArithOp::Mod if right_val != 0 => Some(left_val % right_val),
+                    _ => None, // Division by zero
+                }
+            }
+        }
+    }
+
+    /// Convert an AST `ArithExpr` to an IR `IRExpression`
+    fn arith_expr_to_ir_expression(
+        expr: &crate::ast::ArithExpr,
+        schema: &[String],
+    ) -> Result<crate::ir::IRExpression, String> {
+        use crate::ast::ArithExpr;
+        use crate::ir::IRExpression;
+
+        match expr {
+            ArithExpr::Variable(name) => {
+                let col_idx = schema.iter().position(|s| s == name).ok_or_else(|| {
+                    format!("Variable '{name}' not found in schema for arithmetic")
+                })?;
+                Ok(IRExpression::Column(col_idx))
+            }
+            ArithExpr::Constant(val) => Ok(IRExpression::IntConstant(*val)),
+            ArithExpr::FloatConstant(bits) => {
+                Ok(IRExpression::FloatConstant(f64::from_bits(*bits)))
+            }
+            ArithExpr::Binary { op, left, right } => {
+                let left_ir = Self::arith_expr_to_ir_expression(left, schema)?;
+                let right_ir = Self::arith_expr_to_ir_expression(right, schema)?;
+                // Convert from AST ArithOp to IR ArithOp
+                let ir_op = Self::convert_arith_op(op);
+                Ok(IRExpression::Arithmetic {
+                    op: ir_op,
+                    left: Box::new(left_ir),
+                    right: Box::new(right_ir),
+                })
+            }
+        }
+    }
+
+    /// Convert AST `ArithOp` to IR `ArithOp`
+    fn convert_arith_op(op: &crate::ast::ArithOp) -> crate::ir::ArithOp {
+        use crate::ast::ArithOp as AstOp;
+        use crate::ir::ArithOp as IrOp;
+        match op {
+            AstOp::Add => IrOp::Add,
+            AstOp::Sub => IrOp::Sub,
+            AstOp::Mul => IrOp::Mul,
+            AstOp::Div => IrOp::Div,
+            AstOp::Mod => IrOp::Mod,
+        }
+    }
+
+    /// Build projection to match rule head
+    /// If the head contains aggregates, builds an Aggregate IR node
+    /// If the head contains arithmetic or constants, builds a Compute + Map pipeline
+    fn build_projection(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+        let input_schema = input.output_schema();
+        let head = &rule.head;
+
+        // Check if head contains any aggregates
+        if head.has_aggregates() {
+            return self.build_aggregation(input, rule);
+        }
+
+        // Check if head contains any arithmetic expressions or constants
+        // Constants in the head need to be computed as new columns
+        let has_constants = head.args.iter().any(|t| {
+            matches!(
+                t,
+                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_)
+            )
+        });
+        if head.has_arithmetic() || has_constants {
+            return self.build_projection_with_computed(input, rule);
+        }
+
+        // Build output schema and projection mapping
+        let mut projection = Vec::new();
+        let mut output_schema = Vec::new();
+
+        for (i, term) in head.args.iter().enumerate() {
+            match term {
+                Term::Variable(v) => {
+                    // Find this variable in input schema
+                    let pos = input_schema
+                        .iter()
+                        .position(|s| s == v)
+                        .ok_or_else(|| format!("Variable {v} not found in schema"))?;
+
+                    projection.push(pos);
+                    output_schema.push(v.clone());
+                }
+                Term::Constant(_) => {
+                    // Should not reach here - handled by has_constants check above
+                    unreachable!("Constants should be handled by build_projection_with_computed");
+                }
+                Term::Placeholder => {
+                    // Use positional name
+                    projection.push(i);
+                    output_schema.push(format!("col{i}"));
+                }
+                Term::Aggregate(_, _) => {
+                    // Should not reach here - handled by has_aggregates() check above
+                    unreachable!("Aggregates should be handled by build_aggregation");
+                }
+                Term::Arithmetic(_) => {
+                    // Should not reach here - handled by has_arithmetic() check above
+                    unreachable!("Arithmetic should be handled by build_projection_with_computed");
+                }
+                Term::FunctionCall(_, _) => {
+                    // Function calls in head require computing a new column via Compute node
+                    return Err("Function calls in rule head not yet fully supported. Use Compute node directly.".to_string());
+                }
+                Term::VectorLiteral(_) => {
+                    // Vector literals in head - could be supported as constants
+                    return Err("Vector literals in rule head not yet supported.".to_string());
+                }
+                Term::FloatConstant(_) => {
+                    // Should not reach here - handled by has_constants check above
+                    unreachable!(
+                        "Float constants should be handled by build_projection_with_computed"
+                    );
+                }
+                Term::StringConstant(_) => {
+                    // Should not reach here - handled by has_constants check above
+                    unreachable!(
+                        "String constants should be handled by build_projection_with_computed"
+                    );
+                }
+                Term::FieldAccess(_, _) => {
+                    return Err("Field access in rule head not yet supported.".to_string());
+                }
+                Term::RecordPattern(_) => {
+                    return Err("Record patterns in rule head not yet supported.".to_string());
+                }
+
+            }
+        }
+
+        // Check if projection is identity
+        let is_identity = projection.iter().enumerate().all(|(i, &p)| i == p)
+            && projection.len() == input_schema.len();
+
+        if is_identity {
+            // No projection needed
+            Ok(input)
+        } else {
+            Ok(IRNode::Map {
+                input: Box::new(input),
+                projection,
+                output_schema,
+            })
+        }
+    }
+
+    /// Build projection with computed expressions (arithmetic or constants) in the head
+    /// Creates a Compute node to evaluate expressions, then a Map to project
+    fn build_projection_with_computed(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+        use crate::ir::IRExpression;
+
+        let input_schema = input.output_schema();
+        let head = &rule.head;
+
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!("DEBUG build_projection_with_computed:");
+            eprintln!("  input_schema = {input_schema:?}");
+            eprintln!("  head = {:?}", head.args);
+        }
+
+        // Collect: which head terms are variables (project) vs computed (arithmetic/constant)
+        let mut compute_expressions: Vec<(String, IRExpression)> = Vec::new();
+        let mut final_projection: Vec<usize> = Vec::new();
+        let mut final_output_schema: Vec<String> = Vec::new();
+
+        // Track the schema after computing new columns
+        let mut extended_schema = input_schema.clone();
+
+        for (head_idx, term) in head.args.iter().enumerate() {
+            match term {
+                Term::Variable(v) => {
+                    // Find in input schema - project this column
+                    let pos = input_schema.iter().position(|s| s == v).ok_or_else(|| {
+                        format!("Variable '{v}' not found in schema {input_schema:?}")
+                    })?;
+                    final_projection.push(pos);
+                    final_output_schema.push(v.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!("  head[{head_idx}] Variable({v}) -> project col {pos}");
+                    }
+                }
+                Term::Arithmetic(expr) => {
+                    // Convert AST expression to IR expression
+                    let ir_expr = Self::arith_expr_to_ir_expression(expr, &input_schema)?;
+
+                    // Generate a name for the computed column
+                    let col_name = format!("_computed_{head_idx}");
+                    compute_expressions.push((col_name.clone(), ir_expr));
+
+                    // The computed column will be appended at the end of extended schema
+                    let computed_col_idx = extended_schema.len();
+                    extended_schema.push(col_name.clone());
+                    final_projection.push(computed_col_idx);
+                    final_output_schema.push(col_name.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "  head[{head_idx}] Arithmetic -> compute col {computed_col_idx} ({col_name})"
+                        );
+                    }
+                }
+                Term::Constant(val) => {
+                    // Constants in head are computed as constant columns
+                    let ir_expr = IRExpression::IntConstant(*val);
+
+                    // Generate a name for the constant column
+                    let col_name = format!("_const_{head_idx}");
+                    compute_expressions.push((col_name.clone(), ir_expr));
+
+                    // The computed column will be appended at the end of extended schema
+                    let computed_col_idx = extended_schema.len();
+                    extended_schema.push(col_name.clone());
+                    final_projection.push(computed_col_idx);
+                    final_output_schema.push(col_name.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "  head[{head_idx}] Constant({val}) -> compute col {computed_col_idx} ({col_name})"
+                        );
+                    }
+                }
+
+                Term::FloatConstant(val) => {
+                    // Float constants in head are computed as constant columns
+                    let ir_expr = IRExpression::FloatConstant(*val);
+
+                    // Generate a name for the constant column
+                    let col_name = format!("_fconst_{head_idx}");
+                    compute_expressions.push((col_name.clone(), ir_expr));
+
+                    // The computed column will be appended at the end of extended schema
+                    let computed_col_idx = extended_schema.len();
+                    extended_schema.push(col_name.clone());
+                    final_projection.push(computed_col_idx);
+                    final_output_schema.push(col_name.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "  head[{head_idx}] FloatConstant({val}) -> compute col {computed_col_idx} ({col_name})"
+                        );
+                    }
+                }
+                Term::StringConstant(s) => {
+                    // String constants in head are computed as constant columns
+                    let ir_expr = IRExpression::StringConstant(s.clone());
+
+                    // Generate a name for the constant column
+                    let col_name = format!("_sconst_{head_idx}");
+                    compute_expressions.push((col_name.clone(), ir_expr));
+
+                    // The computed column will be appended at the end of extended schema
+                    let computed_col_idx = extended_schema.len();
+                    extended_schema.push(col_name.clone());
+                    final_projection.push(computed_col_idx);
+                    final_output_schema.push(col_name.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "  head[{head_idx}] StringConstant({s}) -> compute col {computed_col_idx} ({col_name})"
+                        );
+                    }
+                }
+                Term::Placeholder => {
+                    // Placeholders in head are semantically invalid (head defines output
+                    // columns, not "don't care" positions). Skip them gracefully.
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!("  head[{head_idx}] Placeholder -> SKIPPED (invalid in head)");
+                    }
+                    // Don't add anything to projection - placeholders in head are ignored
+                    continue;
+                }
+                _ => {
+                    return Err(format!(
+                        "Unsupported term type in head with computed expressions: {term:?}"
+                    ));
+                }
+
+            }
+        }
+
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!("  extended_schema = {extended_schema:?}");
+            eprintln!("  final_projection = {final_projection:?}");
+            eprintln!("  final_output_schema = {final_output_schema:?}");
+        }
+
+        // Build the Compute node if we have expressions
+        let computed = if compute_expressions.is_empty() {
+            input
+        } else {
