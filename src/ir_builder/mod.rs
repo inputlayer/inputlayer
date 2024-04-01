@@ -108,7 +108,6 @@ impl IRBuilder {
                                 predicate: Predicate::ColumnEqFloat(i, *f),
                             };
                         }
-
                         _ => {} // Variables, placeholders, aggregates, etc. - no filter needed
                     }
                 }
@@ -168,7 +167,7 @@ impl IRBuilder {
                 // Vector literals - generate a name
                 Term::VectorLiteral(_) => format!("vec{i}"),
                 // Float constants - generate a name
-                Term::FloatConstant(_.clone()) => format!("_float_a{atom_idx}_c{i}"),
+                Term::FloatConstant(_) => format!("_float_a{atom_idx}_c{i}"),
                 // String constants - generate a name
                 Term::StringConstant(_) => format!("_str_a{atom_idx}_c{i}"),
                 // Field access - use the field name
@@ -323,7 +322,6 @@ impl IRBuilder {
                 left_keys.push(left_idx);
                 right_keys.push(right_idx);
             }
-
         }
 
         Ok((left_keys, right_keys))
@@ -361,7 +359,6 @@ impl IRBuilder {
                             args.len()
                         ));
                     }
-
 
                     // Convert AST function to IR function
                     let ir_func = Self::ast_func_to_ir_func(func)?;
@@ -525,7 +522,6 @@ impl IRBuilder {
             BuiltinFunc::MinVal => Ok(BuiltinFunction::MinVal),
             BuiltinFunc::MaxVal => Ok(BuiltinFunction::MaxVal),
         }
-
     }
 
     /// Convert AST Term to IR Expression
@@ -538,7 +534,6 @@ impl IRBuilder {
                     .ok_or_else(|| format!("Variable '{name}' not found in schema {schema:?}"))?;
                 Ok(IRExpression::Column(col_idx))
             }
-
             Term::Constant(val) => Ok(IRExpression::IntConstant(*val)),
             Term::FloatConstant(val) => Ok(IRExpression::FloatConstant(*val)),
             Term::StringConstant(s) => Ok(IRExpression::StringConstant(s.clone())),
@@ -592,7 +587,6 @@ impl IRBuilder {
                 };
             }
         }
-
 
         Ok(input)
     }
@@ -656,16 +650,15 @@ impl IRBuilder {
             // Variable vs Variable: X = Y, X < Y, etc.
             (Term::Variable(left_var), Term::Variable(right_var)) => {
                 let left_col = get_col(left_var)?;
-                let right_col = get_col(right_var.clone())?;
+                let right_col = get_col(right_var)?;
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnsEq(left_col, right_col)),
-                    ComparisonOp::NotEqual => Ok(Predicate::ColumnsNe(left_col, right_col.clone())),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnsNe(left_col, right_col)),
                     ComparisonOp::LessThan => Ok(Predicate::ColumnsLt(left_col, right_col)),
                     ComparisonOp::LessOrEqual => Ok(Predicate::ColumnsLe(left_col, right_col)),
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnsGt(left_col, right_col)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnsGe(left_col, right_col)),
                 }
-
             }
             // Variable vs Integer constant: X = 5, X < 10, etc.
             (Term::Variable(var), Term::Constant(val)) => {
@@ -678,7 +671,6 @@ impl IRBuilder {
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtConst(col, *val)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeConst(col, *val)),
                 }
-
             }
             // Integer constant vs Variable: 5 = X, 10 > X, etc. (swap operands)
             (Term::Constant(val), Term::Variable(var)) => {
@@ -832,7 +824,6 @@ impl IRBuilder {
                         ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, val)),
                         ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
                     }
-
                 } else {
                     // Build var_to_col map for runtime evaluation
                     // For arith < var, we swap to var > arith
@@ -931,7 +922,6 @@ impl IRBuilder {
                         var_map,
                     ))
                 }
-
             }
             _ => Err(format!("Unsupported comparison: {left:?} {op:?} {right:?}")),
         }
@@ -1088,7 +1078,6 @@ impl IRBuilder {
                 Term::RecordPattern(_) => {
                     return Err("Record patterns in rule head not yet supported.".to_string());
                 }
-
             }
         }
 
@@ -1181,7 +1170,6 @@ impl IRBuilder {
                         );
                     }
                 }
-
                 Term::FloatConstant(val) => {
                     // Float constants in head are computed as constant columns
                     let ir_expr = IRExpression::FloatConstant(*val);
@@ -1234,7 +1222,6 @@ impl IRBuilder {
                         "Unsupported term type in head with computed expressions: {term:?}"
                     ));
                 }
-
             }
         }
 
@@ -1248,3 +1235,234 @@ impl IRBuilder {
         let computed = if compute_expressions.is_empty() {
             input
         } else {
+            IRNode::Compute {
+                input: Box::new(input),
+                expressions: compute_expressions,
+            }
+        };
+
+        // Check if projection is identity on the extended schema
+        let is_identity = final_projection.iter().enumerate().all(|(i, &p)| i == p)
+            && final_projection.len() == extended_schema.len();
+
+        if is_identity {
+            Ok(computed)
+        } else {
+            Ok(IRNode::Map {
+                input: Box::new(computed),
+                projection: final_projection,
+                output_schema: final_output_schema,
+            })
+        }
+    }
+
+    /// Build an Aggregate IR node for rules with aggregates in the head
+    fn build_aggregation(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+        use crate::ast::AggregateFunc;
+        use crate::ir::AggregateFunction;
+
+        let input_schema = input.output_schema();
+        let head = &rule.head;
+
+        // Check if this is a ranking aggregate (TopK, TopKThreshold, WithinRadius)
+        // Ranking aggregates should NOT group by head variables - they select globally
+        let has_ranking_agg = head.args.iter().any(|term| {
+            matches!(
+                term,
+                Term::Aggregate(
+                    AggregateFunc::TopK { .. }
+                        | AggregateFunc::TopKThreshold { .. }
+                        | AggregateFunc::WithinRadius { .. },
+                    _
+                )
+            )
+        });
+
+        // Separate group-by variables from aggregate terms
+        let mut group_by = Vec::new();
+        let mut aggregations = Vec::new();
+        let mut output_schema = Vec::new();
+
+        for term in &head.args {
+            match term {
+                Term::Variable(v) => {
+                    // Find the column position for this variable
+                    let pos = input_schema
+                        .iter()
+                        .position(|s| s == v)
+                        .ok_or_else(|| format!("Variable {v} not found in schema"))?;
+
+                    // For ranking aggregates, don't add to group_by (process globally)
+                    // For standard aggregates, this is a group-by variable
+                    if !has_ranking_agg {
+                        group_by.push(pos);
+                    }
+                    output_schema.push(v.clone());
+                }
+                Term::Aggregate(func, var_name) => {
+                    // Handle ranking aggregates specially - they store their order variable
+                    // internally and don't use the var_name parameter (which is empty)
+                    let (ir_func, agg_col_pos, agg_var_name) = match func {
+                        // Standard aggregates use var_name
+                        AggregateFunc::Count
+                        | AggregateFunc::CountDistinct
+                        | AggregateFunc::Sum
+                        | AggregateFunc::Min
+                        | AggregateFunc::Max
+                        | AggregateFunc::Avg => {
+                            let col_pos = input_schema
+                                .iter()
+                                .position(|s| s == var_name)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Variable {var_name} not found in schema for aggregation"
+                                    )
+                                })?;
+                            let ir_func = match func {
+                                AggregateFunc::Count => AggregateFunction::Count,
+                                AggregateFunc::CountDistinct => AggregateFunction::CountDistinct,
+                                AggregateFunc::Sum => AggregateFunction::Sum,
+                                AggregateFunc::Min => AggregateFunction::Min,
+                                AggregateFunc::Max => AggregateFunction::Max,
+                                AggregateFunc::Avg => AggregateFunction::Avg,
+                                _ => unreachable!(),
+                            };
+                            (ir_func, col_pos, var_name.clone())
+                        }
+                        // Ranking aggregates extract order_var from the function itself
+                        AggregateFunc::TopK {
+                            k,
+                            order_var,
+                            descending,
+                        } => {
+                            let order_col = input_schema
+                                .iter()
+                                .position(|s| s == order_var)
+                                .ok_or_else(|| {
+                                    format!("Variable {order_var} not found in schema for top_k")
+                                })?;
+                            (
+                                AggregateFunction::TopK {
+                                    k: *k,
+                                    order_col,
+                                    descending: *descending,
+                                },
+                                order_col,
+                                order_var.clone(),
+                            )
+                        }
+                        AggregateFunc::TopKThreshold {
+                            k,
+                            order_var,
+                            threshold,
+                            descending,
+                        } => {
+                            let order_col = input_schema
+                                .iter()
+                                .position(|s| s == order_var)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Variable {order_var} not found in schema for top_k_threshold"
+                                    )
+                                })?;
+                            (
+                                AggregateFunction::TopKThreshold {
+                                    k: *k,
+                                    order_col,
+                                    threshold: *threshold,
+                                    descending: *descending,
+                                },
+                                order_col,
+                                order_var.clone(),
+                            )
+                        }
+                        AggregateFunc::WithinRadius {
+                            distance_var,
+                            max_distance,
+                        } => {
+                            let dist_col = input_schema
+                                .iter()
+                                .position(|s| s == distance_var)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Variable {distance_var} not found in schema for within_radius"
+                                    )
+                                })?;
+                            (
+                                AggregateFunction::WithinRadius {
+                                    distance_col: dist_col,
+                                    max_distance: *max_distance,
+                                },
+                                dist_col,
+                                distance_var.clone(),
+                            )
+                        }
+                    };
+
+                    aggregations.push((ir_func, agg_col_pos));
+                    // Name the output column
+                    // For ranking aggregates, use just the variable name (since output is the value)
+                    // For standard aggregates, use func_var format (e.g., "count_X")
+                    if has_ranking_agg {
+                        output_schema.push(agg_var_name);
+                    } else {
+                        output_schema.push(format!("{}_{}", func_to_str(func), agg_var_name));
+                    }
+                }
+                Term::Constant(_) => {
+                    return Err("Constants in aggregation head not supported".to_string());
+                }
+                Term::Placeholder => {
+                    return Err("Placeholders in aggregation head not supported".to_string());
+                }
+                Term::Arithmetic(_) => {
+                    return Err(
+                        "Arithmetic expressions in aggregation head not yet supported".to_string(),
+                    );
+                }
+                Term::FunctionCall(_, _) => {
+                    return Err("Function calls in aggregation head not yet supported".to_string());
+                }
+                Term::VectorLiteral(_) => {
+                    return Err("Vector literals in aggregation head not supported".to_string());
+                }
+                Term::FloatConstant(_) => {
+                    return Err("Float constants in aggregation head not supported".to_string());
+                }
+                Term::StringConstant(_) => {
+                    return Err("String constants in aggregation head not supported".to_string());
+                }
+                Term::FieldAccess(_, _) => {
+                    return Err("Field access in aggregation head not supported".to_string());
+                }
+                Term::RecordPattern(_) => {
+                    return Err("Record patterns in aggregation head not supported".to_string());
+                }
+            }
+        }
+
+        Ok(IRNode::Aggregate {
+            input: Box::new(input),
+            group_by,
+            aggregations,
+            output_schema,
+        })
+    }
+}
+
+/// Helper function to convert aggregate function to string
+fn func_to_str(func: &crate::ast::AggregateFunc) -> &'static str {
+    use crate::ast::AggregateFunc;
+    match func {
+        AggregateFunc::Count => "count",
+        AggregateFunc::CountDistinct => "count_distinct",
+        AggregateFunc::Sum => "sum",
+        AggregateFunc::Min => "min",
+        AggregateFunc::Max => "max",
+        AggregateFunc::Avg => "avg",
+        AggregateFunc::TopK { .. } => "top_k",
+        AggregateFunc::TopKThreshold { .. } => "top_k_threshold",
+        AggregateFunc::WithinRadius { .. } => "within_radius",
+    }
+}
+
