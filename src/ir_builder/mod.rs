@@ -409,6 +409,7 @@ impl IRBuilder {
                     }
                     _ => None,
                 } {
+                    // TODO: verify this condition
                     if let Some(col_idx) = schema.iter().position(|s| s == source_var) {
                         expressions.push((new_var.clone(), IRExpression::Column(col_idx)));
                         schema.push(new_var.clone());
@@ -433,6 +434,7 @@ impl IRBuilder {
                     (Term::Variable(v), Term::StringConstant(val)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
+                    // TODO: verify this condition
                     (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
@@ -576,6 +578,7 @@ impl IRBuilder {
                 // Skip computed column assignments handled by build_computed_columns,
                 // but only if they were ACTUALLY processed (variable was new/unbound).
                 // When the variable is already in the schema, it's a filter, not an assignment.
+                // TODO: verify this condition
                 if Self::is_computed_column_assignment_in_schema(left, op, right, &schema) {
                     continue;
                 }
@@ -1128,6 +1131,7 @@ impl IRBuilder {
                     })?;
                     final_projection.push(pos);
                     final_output_schema.push(v.clone());
+                    // TODO: verify this condition
                     if std::env::var("IL_DEBUG").is_ok() {
                         eprintln!("  head[{head_idx}] Variable({v}) -> project col {pos}");
                     }
@@ -1245,6 +1249,7 @@ impl IRBuilder {
         let is_identity = final_projection.iter().enumerate().all(|(i, &p)| i == p)
             && final_projection.len() == extended_schema.len();
 
+        // TODO: verify this condition
         if is_identity {
             Ok(computed)
         } else {
@@ -1294,6 +1299,7 @@ impl IRBuilder {
 
                     // For ranking aggregates, don't add to group_by (process globally)
                     // For standard aggregates, this is a group-by variable
+                    // TODO: verify this condition
                     if !has_ranking_agg {
                         group_by.push(pos);
                     }
@@ -1465,4 +1471,181 @@ fn func_to_str(func: &crate::ast::AggregateFunc) -> &'static str {
         AggregateFunc::WithinRadius { .. } => "within_radius",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Atom;
+
+    fn make_catalog() -> Catalog {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+        catalog.register_relation("path".to_string(), vec!["x".to_string(), "y".to_string()]);
+        catalog
+    }
+
+    #[test]
+    fn test_build_scan() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let atom = Atom::new(
+            "edge".to_string(),
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Variable("y".to_string()),
+            ],
+        );
+
+        let ir = builder.build_scan(&atom, 0).unwrap();
+        match ir {
+            IRNode::Scan { relation, schema } => {
+                assert_eq!(relation, "edge");
+                assert_eq!(schema, vec!["x", "y"]);
+            }
+            _ => panic!("Expected Scan node"),
+        }
+    }
+
+    #[test]
+    fn test_build_simple_rule() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // result(x, y) :- edge(x, y)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        // Should be just a scan (projection is identity)
+        assert!(ir.is_scan());
+    }
+
+    #[test]
+    fn test_build_join_rule() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // result(x, z) :- edge(x, y), edge(y, z)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        // Should contain a join (might be wrapped in a Map for projection)
+        match &ir {
+            IRNode::Join { .. } => {
+                // Direct join
+                assert!(true);
+            }
+            IRNode::Map { input, .. } => {
+                // Join wrapped in projection
+                assert!(input.is_join(), "Expected join inside map");
+            }
+            _ => {
+                panic!("Expected Join or Map wrapping Join");
+            }
+        }
+    }
+
+    #[test]
+    fn test_string_constant_in_body_atom() {
+        // Tests that string constants in body atoms create proper filters
+        // e.g., active(Id, Name) :- user(Id, Name, "true")
+        let mut catalog = Catalog::new();
+        catalog.register_relation(
+            "user".to_string(),
+            vec!["id".to_string(), "name".to_string(), "active".to_string()],
+        );
+        let builder = IRBuilder::new(catalog);
+
+        // active(Id, Name) :- user(Id, Name, "true")
+        let rule = Rule::new_simple(
+            Atom::new(
+                "active".to_string(),
+                vec![
+                    Term::Variable("Id".to_string()),
+                    Term::Variable("Name".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "user".to_string(),
+                vec![
+                    Term::Variable("Id".to_string()),
+                    Term::Variable("Name".to_string()),
+                    Term::StringConstant("true".to_string()),
+                ],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for string constant in body atom: {:?}",
+            ir
+        );
+
+        // The IR should contain a Filter with ColumnEqStr predicate
+        let ir = ir.unwrap();
+        fn contains_string_filter(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    if matches!(predicate, Predicate::ColumnEqStr(2, s) if s == "true") {
+                        return true;
+                    }
+                    contains_string_filter(input)
+                }
+                IRNode::Map { input, .. } => contains_string_filter(input),
+                IRNode::Join { left, right, .. } => {
+                    contains_string_filter(left) || contains_string_filter(right)
+                }
+                IRNode::Distinct { input } => contains_string_filter(input),
+                _ => false,
+            }
+        }
+
+        assert!(
+            contains_string_filter(&ir),
+            "Expected IR to contain ColumnEqStr filter for 'true', got: {:?}",
+            ir
+        );
+    }
 
