@@ -110,11 +110,10 @@ impl IRBuilder {
                         }
                         _ => {} // Variables, placeholders, aggregates, etc. - no filter needed
                     }
-
                 }
 
                 // Apply equality filters for repeated variables in the same atom.
-                // For example, edge(X, X) must filter to rows where col0 == col1.
+                // For example, edge(X, X) must filter to rows where col0 != col1.
                 let mut seen_vars: Vec<(usize, &str)> = Vec::new();
                 for (i, term) in atom.args.iter().enumerate() {
                     if let Term::Variable(v) = term {
@@ -274,7 +273,7 @@ impl IRBuilder {
         let right_schema = right.output_schema();
 
         // 4. Find join keys by matching variable names between left and negated atom
-        let (left_keys, right_keys.clone()) = self.infer_antijoin_keys(&left_schema, &right_schema)?;
+        let (left_keys, right_keys) = self.infer_antijoin_keys(&left_schema, &right_schema)?;
 
         if left_keys.is_empty() {
             return Err(format!(
@@ -287,7 +286,7 @@ impl IRBuilder {
         // 5. Build Antijoin node - output schema is same as left (we're filtering left)
         Ok(IRNode::Antijoin {
             left: Box::new(left),
-            right: Box::new(right.clone()),
+            right: Box::new(right),
             left_keys,
             right_keys,
             output_schema: left_schema,
@@ -351,7 +350,6 @@ impl IRBuilder {
                     _ => None,
                 } {
                     // Validate argument count
-                    // FIXME: extract to named variable
                     let expected_arity = func.arity();
                     if args.len() != expected_arity {
                         return Err(format!(
@@ -361,7 +359,6 @@ impl IRBuilder {
                             args.len()
                         ));
                     }
-
 
                     // Convert AST function to IR function
                     let ir_func = Self::ast_func_to_ir_func(func)?;
@@ -412,6 +409,7 @@ impl IRBuilder {
                     }
                     _ => None,
                 } {
+                    // TODO: verify this condition
                     if let Some(col_idx) = schema.iter().position(|s| s == source_var) {
                         expressions.push((new_var.clone(), IRExpression::Column(col_idx)));
                         schema.push(new_var.clone());
@@ -436,7 +434,8 @@ impl IRBuilder {
                     (Term::Variable(v), Term::StringConstant(val)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
-                    (Term::StringConstant(val.clone()), Term::Variable(v)) if !schema.contains(v) => {
+                    // TODO: verify this condition
+                    (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
                     _ => None,
@@ -471,7 +470,7 @@ impl IRBuilder {
             BuiltinFunc::LshProbes => Ok(BuiltinFunction::LshProbes),
             BuiltinFunc::LshMultiProbe => Ok(BuiltinFunction::LshMultiProbe),
             // Vector operations
-            BuiltinFunc::VecNormalize => Ok(BuiltinFunction::VecNormalize.clone()),
+            BuiltinFunc::VecNormalize => Ok(BuiltinFunction::VecNormalize),
             BuiltinFunc::VecDim => Ok(BuiltinFunction::VecDim),
             BuiltinFunc::VecAdd => Ok(BuiltinFunction::VecAdd),
             BuiltinFunc::VecScale => Ok(BuiltinFunction::VecScale),
@@ -525,7 +524,6 @@ impl IRBuilder {
             BuiltinFunc::MinVal => Ok(BuiltinFunction::MinVal),
             BuiltinFunc::MaxVal => Ok(BuiltinFunction::MaxVal),
         }
-
     }
 
     /// Convert AST Term to IR Expression
@@ -551,7 +549,7 @@ impl IRBuilder {
                 let expected_arity = func.arity();
                 if args.len() != expected_arity {
                     return Err(format!(
-                        "Function '{}' requires {} argument(s.clone()), but {} provided",
+                        "Function '{}' requires {} argument(s), but {} provided",
                         func.as_str(),
                         expected_arity,
                         args.len()
@@ -580,7 +578,7 @@ impl IRBuilder {
                 // Skip computed column assignments handled by build_computed_columns,
                 // but only if they were ACTUALLY processed (variable was new/unbound).
                 // When the variable is already in the schema, it's a filter, not an assignment.
-                if Self::is_computed_column_assignment_in_schema(left, op, right, &schema.clone()) {
+                if Self::is_computed_column_assignment_in_schema(left, op, right, &schema) {
                     continue;
                 }
 
@@ -654,7 +652,6 @@ impl IRBuilder {
             // Variable vs Variable: X = Y, X < Y, etc.
             (Term::Variable(left_var), Term::Variable(right_var)) => {
                 let left_col = get_col(left_var)?;
-                // FIXME: extract to named variable
                 let right_col = get_col(right_var)?;
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnsEq(left_col, right_col)),
@@ -664,7 +661,6 @@ impl IRBuilder {
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnsGt(left_col, right_col)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnsGe(left_col, right_col)),
                 }
-
             }
             // Variable vs Integer constant: X = 5, X < 10, etc.
             (Term::Variable(var), Term::Constant(val)) => {
@@ -687,7 +683,7 @@ impl IRBuilder {
                     ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, *val)),
                     ComparisonOp::LessThan => Ok(Predicate::ColumnGtConst(col, *val)),
                     ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeConst(col, *val)),
-                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, *val.clone())),
+                    ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, *val)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, *val)),
                 }
             }
@@ -709,7 +705,7 @@ impl IRBuilder {
                 match op {
                     ComparisonOp::Equal => Ok(Predicate::ColumnEqFloat(col, *val)),
                     ComparisonOp::NotEqual => Ok(Predicate::ColumnNeFloat(col, *val)),
-                    ComparisonOp::LessThan => Ok(Predicate::ColumnGtFloat(col, *val.clone())),
+                    ComparisonOp::LessThan => Ok(Predicate::ColumnGtFloat(col, *val)),
                     ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeFloat(col, *val)),
                     ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtFloat(col, *val)),
                     ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeFloat(col, *val)),
@@ -836,7 +832,7 @@ impl IRBuilder {
                     let var_names = arith.variables();
                     let mut var_map = std::collections::HashMap::new();
                     for var_name in var_names {
-                        let col_idx = get_col(&var_name.clone())?;
+                        let col_idx = get_col(&var_name)?;
                         var_map.insert(var_name, col_idx);
                     }
                     let col = get_col(var)?;
@@ -928,7 +924,6 @@ impl IRBuilder {
                         var_map,
                     ))
                 }
-
             }
             _ => Err(format!("Unsupported comparison: {left:?} {op:?} {right:?}")),
         }
@@ -1085,7 +1080,6 @@ impl IRBuilder {
                 Term::RecordPattern(_) => {
                     return Err("Record patterns in rule head not yet supported.".to_string());
                 }
-
             }
         }
 
@@ -1136,6 +1130,7 @@ impl IRBuilder {
                     })?;
                     final_projection.push(pos);
                     final_output_schema.push(v.clone());
+                    // TODO: verify this condition
                     if std::env::var("IL_DEBUG").is_ok() {
                         eprintln!("  head[{head_idx}] Variable({v}) -> project col {pos}");
                     }
@@ -1253,6 +1248,7 @@ impl IRBuilder {
         let is_identity = final_projection.iter().enumerate().all(|(i, &p)| i == p)
             && final_projection.len() == extended_schema.len();
 
+        // TODO: verify this condition
         if is_identity {
             Ok(computed)
         } else {
@@ -1302,6 +1298,7 @@ impl IRBuilder {
 
                     // For ranking aggregates, don't add to group_by (process globally)
                     // For standard aggregates, this is a group-by variable
+                    // TODO: verify this condition
                     if !has_ranking_agg {
                         group_by.push(pos);
                     }
@@ -1753,5 +1750,123 @@ mod tests {
             "Expected IR to contain Compute with FloatConstant(3.14), got: {:?}",
             ir
         );
+    }
+
+    #[test]
+    fn test_string_constant_in_head() {
+        // Tests that string constants in rule heads create Compute nodes
+        // e.g., result(X, "active") :- data(X)
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+
+        let builder = IRBuilder::new(catalog);
+
+        // result(X, "active") :- data(X).
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::StringConstant("active".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "data".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for string constant in head: {:?}",
+            ir
+        );
+
+        // The IR should contain a Compute node with StringConstant expression
+        let ir = ir.unwrap();
+        fn contains_compute_string_constant(node: &IRNode) -> bool {
+            match node {
+                IRNode::Compute { expressions, input } => {
+                    let has_str_const = expressions.iter().any(|(_, expr)| {
+                        matches!(expr, crate::ir::IRExpression::StringConstant(s) if s == "active")
+                    });
+                    has_str_const || contains_compute_string_constant(input)
+                }
+                IRNode::Map { input, .. } => contains_compute_string_constant(input),
+                IRNode::Filter { input, .. } => contains_compute_string_constant(input),
+                IRNode::Distinct { input } => contains_compute_string_constant(input),
+                _ => false,
+            }
+        }
+
+        assert!(
+            contains_compute_string_constant(&ir),
+            "Expected IR to contain Compute with StringConstant(\"active\"), got: {:?}",
+            ir
+        );
+    }
+
+    #[test]
+    fn test_mixed_constants_in_head() {
+        // Tests that mixed constant types in rule heads all work together
+        // e.g., result(X, 42, 3.14, "label") :- data(X)
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+
+        let builder = IRBuilder::new(catalog);
+
+        // result(X, 42, 3.14, "label") :- data(X).
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Constant(42),
+                    Term::FloatConstant(3.14),
+                    Term::StringConstant("label".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "data".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for mixed constants in head: {:?}",
+            ir
+        );
+
+        // The IR should contain a Compute node with all three constant types
+        let ir = ir.unwrap();
+        fn count_constants(node: &IRNode) -> (bool, bool, bool) {
+            match node {
+                IRNode::Compute { expressions, input } => {
+                    let has_int = expressions
+                        .iter()
+                        .any(|(_, expr)| matches!(expr, crate::ir::IRExpression::IntConstant(42)));
+                    let has_float = expressions.iter().any(|(_, expr)| {
+                        matches!(expr, crate::ir::IRExpression::FloatConstant(f) if (*f - 3.14).abs() < 0.001)
+                    });
+                    let has_str = expressions.iter().any(|(_, expr)| {
+                        matches!(expr, crate::ir::IRExpression::StringConstant(s) if s == "label")
+                    });
+                    let (i, f, s) = count_constants(input);
+                    (has_int || i, has_float || f, has_str || s)
+                }
+                IRNode::Map { input, .. } => count_constants(input),
+                IRNode::Filter { input, .. } => count_constants(input),
+                IRNode::Distinct { input } => count_constants(input),
+                _ => (false, false, false),
+            }
+        }
+
+        let (has_int, has_float, has_str) = count_constants(&ir);
+        assert!(has_int, "Expected IR to contain IntConstant(42)");
+        assert!(has_float, "Expected IR to contain FloatConstant(3.14)");
+        assert!(has_str, "Expected IR to contain StringConstant(\"label\")");
     }
 
