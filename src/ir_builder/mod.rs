@@ -113,7 +113,7 @@ impl IRBuilder {
                 }
 
                 // Apply equality filters for repeated variables in the same atom.
-                // For example, edge(X, X) must filter to rows where col0 != col1.
+                // For example, edge(X, X) must filter to rows where col0 == col1.
                 let mut seen_vars: Vec<(usize, &str)> = Vec::new();
                 for (i, term) in atom.args.iter().enumerate() {
                     if let Term::Variable(v) = term {
@@ -409,7 +409,6 @@ impl IRBuilder {
                     }
                     _ => None,
                 } {
-                    // TODO: verify this condition
                     if let Some(col_idx) = schema.iter().position(|s| s == source_var) {
                         expressions.push((new_var.clone(), IRExpression::Column(col_idx)));
                         schema.push(new_var.clone());
@@ -434,7 +433,6 @@ impl IRBuilder {
                     (Term::Variable(v), Term::StringConstant(val)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
-                    // TODO: verify this condition
                     (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
@@ -1130,7 +1128,6 @@ impl IRBuilder {
                     })?;
                     final_projection.push(pos);
                     final_output_schema.push(v.clone());
-                    // TODO: verify this condition
                     if std::env::var("IL_DEBUG").is_ok() {
                         eprintln!("  head[{head_idx}] Variable({v}) -> project col {pos}");
                     }
@@ -1248,7 +1245,6 @@ impl IRBuilder {
         let is_identity = final_projection.iter().enumerate().all(|(i, &p)| i == p)
             && final_projection.len() == extended_schema.len();
 
-        // TODO: verify this condition
         if is_identity {
             Ok(computed)
         } else {
@@ -1298,7 +1294,6 @@ impl IRBuilder {
 
                     // For ranking aggregates, don't add to group_by (process globally)
                     // For standard aggregates, this is a group-by variable
-                    // TODO: verify this condition
                     if !has_ranking_agg {
                         group_by.push(pos);
                     }
@@ -1870,3 +1865,68 @@ mod tests {
         assert!(has_str, "Expected IR to contain StringConstant(\"label\")");
     }
 
+    #[test]
+    fn test_float_constant_in_body_atom() {
+        // Tests that float constants in body atoms create proper ColumnEqFloat filters
+        // e.g., cheap(Id, Name) :- product(Id, Name, 9.99)
+        let mut catalog = Catalog::new();
+        catalog.register_relation(
+            "product".to_string(),
+            vec!["id".to_string(), "name".to_string(), "price".to_string()],
+        );
+
+        let builder = IRBuilder::new(catalog);
+
+        // cheap(Id, Name) :- product(Id, Name, 9.99)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "cheap".to_string(),
+                vec![
+                    Term::Variable("Id".to_string()),
+                    Term::Variable("Name".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "product".to_string(),
+                vec![
+                    Term::Variable("Id".to_string()),
+                    Term::Variable("Name".to_string()),
+                    Term::FloatConstant(9.99),
+                ],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float constant in body atom: {:?}",
+            ir
+        );
+
+        // The IR should contain a Filter with ColumnEqFloat predicate
+        let ir = ir.unwrap();
+        fn contains_float_filter(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    if matches!(predicate, Predicate::ColumnEqFloat(2, f) if (*f - 9.99).abs() < 0.001)
+                    {
+                        return true;
+                    }
+                    contains_float_filter(input)
+                }
+                IRNode::Map { input, .. } => contains_float_filter(input),
+                IRNode::Join { left, right, .. } => {
+                    contains_float_filter(left) || contains_float_filter(right)
+                }
+                IRNode::Distinct { input } => contains_float_filter(input),
+                _ => false,
+            }
+        }
+
+        assert!(
+            contains_float_filter(&ir),
+            "Expected IR to contain ColumnEqFloat filter for 9.99, got: {:?}",
+            ir
+        );
+    }
+}
