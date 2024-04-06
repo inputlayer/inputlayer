@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inc_multi_n15t06
+Knowledge graph 'test_inc_multi_n15t06' created.
+Switched to knowledge graph: test_inc_multi_n15t06
+> .kg use test_inc_multi_n15t06
+Switched to knowledge graph: test_inc_multi_n15t06
+> +node[(1, 10), (2, 20), (3, 30), (4, 40)].
+Inserted 4 fact(s) into 'node'.
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'edge'.
+> +dist[(1, 0)].
+Inserted 1 fact(s) into 'dist'.
+> result(Y, T, D+1) :- dist(X, D), edge(X, Y), node(Y, T).
+1 rows:
+  (2, 20, 1)
+(session: 1 rule(s))
+> ?- result(A, B, C).
+1 rows:
+  (2, 20, 1)
+> +attr[(1, 100), (2, 200), (3, 300), (4, 400)].
+Inserted 4 fact(s) into 'attr'.
+> combined(Y, T, V, D+1) :- dist(X, D), edge(X, Y), node(Y, T), attr(Y, V).
+1 rows:
+  (2, 20, 200, 1)
+(session: 2 rule(s))
+> ?- combined(A, B, C, D).
+1 rows:
+  (2, 20, 200, 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_inc_multi_n15t06
+Knowledge graph 'test_inc_multi_n15t06' dropped.
