@@ -514,7 +514,6 @@ impl CodeGenerator {
                 aggregations,
                 ..
             } => {
-                // TODO: verify this condition
                 if aggregations.len() != 1 {
                     return None;
                 }
@@ -598,7 +597,6 @@ impl CodeGenerator {
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
 
-        // TODO: verify this condition
         if std::env::var("IL_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
                 eprintln!(
@@ -1061,7 +1059,6 @@ impl CodeGenerator {
     {
         // Check live collections first (for recursive relations in iterative scopes)
         if let Some(live_map) = live {
-            // TODO: verify this condition
             if let Some(collection) = live_map.get(relation) {
                 if std::env::var("IL_DEBUG").is_ok() {
                     eprintln!("DEBUG Scan '{relation}': using live collection");
@@ -1084,3 +1081,470 @@ impl CodeGenerator {
     }
 
     /// Generate map node (production: arbitrary projection)
+    fn generate_map_tuples<G, R: DiffType>(
+        scope: &mut G,
+        input: &IRNode,
+        projection: &[usize],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let input_coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+        let projection = projection.to_vec();
+
+        input_coll.map(move |tuple| tuple.project(&projection))
+    }
+
+    /// Generate filter node (production)
+    fn generate_filter_tuples<G, R: DiffType>(
+        scope: &mut G,
+        input: &IRNode,
+        predicate: &Predicate,
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let input_coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+        let pred_fn = Self::predicate_to_tuple_fn(predicate);
+        input_coll.filter(move |tuple| pred_fn(tuple))
+    }
+
+    /// Convert predicate to filter function (production: Tuple)
+    fn predicate_to_tuple_fn(
+        predicate: &Predicate,
+    ) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
+        match predicate.clone() {
+            // Integer comparisons (with float fallback for mixed numeric types)
+            Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i == val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return (f - (val as f64)).abs() < f64::EPSILON;
+                    }
+                }
+                false
+            }),
+            Predicate::ColumnNeConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i != val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return (f - (val as f64)).abs() >= f64::EPSILON;
+                    }
+                }
+                true
+            }),
+            Predicate::ColumnGtConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i > val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f > (val as f64);
+                    }
+                }
+                false
+            }),
+            Predicate::ColumnLtConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i < val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f < (val as f64);
+                    }
+                }
+                false
+            }),
+            Predicate::ColumnGeConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i >= val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f >= (val as f64);
+                    }
+                }
+                false
+            }),
+            Predicate::ColumnLeConst(col, val) => Box::new(move |tuple: &Tuple| {
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i <= val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f <= (val as f64);
+                    }
+                }
+                false
+            }),
+            // String comparisons
+            Predicate::ColumnEqStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s == val)
+            }),
+            Predicate::ColumnNeStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_none_or(|s| s != val)
+            }),
+            Predicate::ColumnLtStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s < val.as_str())
+            }),
+            Predicate::ColumnGtStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s > val.as_str())
+            }),
+            Predicate::ColumnLeStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s <= val.as_str())
+            }),
+            Predicate::ColumnGeStr(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s >= val.as_str())
+            }),
+            // Float comparisons
+            Predicate::ColumnEqFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_some_and(|f| (f - val).abs() < f64::EPSILON)
+            }),
+            Predicate::ColumnNeFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_none_or(|f| (f - val).abs() >= f64::EPSILON)
+            }),
+            Predicate::ColumnGtFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_some_and(|f| f > val)
+            }),
+            Predicate::ColumnLtFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_some_and(|f| f < val)
+            }),
+            Predicate::ColumnGeFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_some_and(|f| f >= val)
+            }),
+            Predicate::ColumnLeFloat(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_f64)
+                    .is_some_and(|f| f <= val)
+            }),
+            // Column comparisons
+            Predicate::ColumnsEq(left, right) => Box::new(move |tuple: &Tuple| {
+                let lv = tuple.get(left);
+                let rv = tuple.get(right);
+                lv == rv
+            }),
+            Predicate::ColumnsNe(left, right) => Box::new(move |tuple: &Tuple| {
+                let lv = tuple.get(left);
+                let rv = tuple.get(right);
+                lv != rv
+            }),
+            // Column-to-column ordering comparisons
+            Predicate::ColumnsLt(left, right) => Box::new(move |tuple: &Tuple| {
+                match (tuple.get(left), tuple.get(right)) {
+                    (Some(lv), Some(rv)) => {
+                        // Try integer comparison first
+                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                            return li < ri;
+                        }
+                        // Fall back to float comparison
+                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                            return lf < rf;
+                        }
+                        false
+                    }
+                    _ => false,
+                }
+            }),
+            Predicate::ColumnsGt(left, right) => {
+                Box::new(
+                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
+                        (Some(lv), Some(rv)) => {
+                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                                return li > ri;
+                            }
+                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                                return lf > rf;
+                            }
+                            false
+                        }
+                        _ => false,
+                    },
+                )
+            }
+            Predicate::ColumnsLe(left, right) => {
+                Box::new(
+                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
+                        (Some(lv), Some(rv)) => {
+                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                                return li <= ri;
+                            }
+                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                                return lf <= rf;
+                            }
+                            false
+                        }
+                        _ => false,
+                    },
+                )
+            }
+            Predicate::ColumnsGe(left, right) => {
+                Box::new(
+                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
+                        (Some(lv), Some(rv)) => {
+                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                                return li >= ri;
+                            }
+                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                                return lf >= rf;
+                            }
+                            false
+                        }
+                        _ => false,
+                    },
+                )
+            }
+            // Logical combinations
+            Predicate::And(p1, p2) => {
+                let f1 = Self::predicate_to_tuple_fn(&p1);
+                let f2 = Self::predicate_to_tuple_fn(&p2);
+                Box::new(move |tuple| f1(tuple) && f2(tuple))
+            }
+            Predicate::Or(p1, p2) => {
+                let f1 = Self::predicate_to_tuple_fn(&p1);
+                let f2 = Self::predicate_to_tuple_fn(&p2);
+                Box::new(move |tuple| f1(tuple) || f2(tuple))
+            }
+            // Runtime arithmetic comparison
+            Predicate::ColumnCompareArith(col, cmp_op, arith_expr, var_map) => {
+                Box::new(move |tuple: &Tuple| {
+                    // Evaluate the arithmetic expression with runtime values
+                    let arith_val = Self::eval_arith_runtime(&arith_expr, tuple, &var_map);
+                    let Some(arith_val) = arith_val else {
+                        return false; // Could not evaluate
+                    };
+
+                    // Get the column value to compare against
+                    let Some(col_val) = tuple.get(col) else {
+                        return false;
+                    };
+
+                    // Try integer comparison
+                    if let Some(col_i) = col_val.as_i64() {
+                        return match cmp_op {
+                            crate::ast::ComparisonOp::Equal => col_i == arith_val,
+                            crate::ast::ComparisonOp::NotEqual => col_i != arith_val,
+                            crate::ast::ComparisonOp::LessThan => col_i < arith_val,
+                            crate::ast::ComparisonOp::LessOrEqual => col_i <= arith_val,
+                            crate::ast::ComparisonOp::GreaterThan => col_i > arith_val,
+                            crate::ast::ComparisonOp::GreaterOrEqual => col_i >= arith_val,
+                        };
+                    }
+
+                    // Fall back to float comparison
+                    if let Some(col_f) = col_val.as_f64() {
+                        let arith_f = arith_val as f64;
+                        return match cmp_op {
+                            crate::ast::ComparisonOp::Equal => {
+                                (col_f - arith_f).abs() < f64::EPSILON
+                            }
+                            crate::ast::ComparisonOp::NotEqual => {
+                                (col_f - arith_f).abs() >= f64::EPSILON
+                            }
+                            crate::ast::ComparisonOp::LessThan => col_f < arith_f,
+                            crate::ast::ComparisonOp::LessOrEqual => col_f <= arith_f,
+                            crate::ast::ComparisonOp::GreaterThan => col_f > arith_f,
+                            crate::ast::ComparisonOp::GreaterOrEqual => col_f >= arith_f,
+                        };
+                    }
+
+                    false
+                })
+            }
+            // Runtime arithmetic compared to constant
+            Predicate::ArithCompareConst(arith_expr, cmp_op, const_val, var_map) => {
+                Box::new(move |tuple: &Tuple| {
+                    let Some(arith_val) = Self::eval_arith_runtime(&arith_expr, tuple, &var_map)
+                    else {
+                        return false;
+                    };
+                    match cmp_op {
+                        crate::ast::ComparisonOp::Equal => arith_val == const_val,
+                        crate::ast::ComparisonOp::NotEqual => arith_val != const_val,
+                        crate::ast::ComparisonOp::LessThan => arith_val < const_val,
+                        crate::ast::ComparisonOp::LessOrEqual => arith_val <= const_val,
+                        crate::ast::ComparisonOp::GreaterThan => arith_val > const_val,
+                        crate::ast::ComparisonOp::GreaterOrEqual => arith_val >= const_val,
+                    }
+                })
+            }
+            Predicate::True => Box::new(|_| true),
+            Predicate::False => Box::new(|_| false),
+        }
+    }
+
+    /// Evaluate an arithmetic expression at runtime using tuple values
+    fn eval_arith_runtime(
+        expr: &crate::ast::ArithExpr,
+        tuple: &Tuple,
+        var_map: &std::collections::HashMap<String, usize>,
+    ) -> Option<i64> {
+        use crate::ast::{ArithExpr, ArithOp};
+        match expr {
+            ArithExpr::Constant(val) => Some(*val),
+            ArithExpr::FloatConstant(bits) => Some(f64::from_bits(*bits) as i64),
+            ArithExpr::Variable(name) => {
+                let col_idx = var_map.get(name)?;
+                tuple.get(*col_idx)?.as_i64()
+            }
+            ArithExpr::Binary { op, left, right } => {
+                let left_val = Self::eval_arith_runtime(left, tuple, var_map)?;
+                let right_val = Self::eval_arith_runtime(right, tuple, var_map)?;
+                match op {
+                    ArithOp::Add => Some(left_val + right_val),
+                    ArithOp::Sub => Some(left_val - right_val),
+                    ArithOp::Mul => Some(left_val * right_val),
+                    ArithOp::Div if right_val != 0 => Some(left_val / right_val),
+                    ArithOp::Mod if right_val != 0 => Some(left_val % right_val),
+                    _ => None, // Division by zero
+                }
+            }
+        }
+    }
+
+    /// Generate join node (production: multi-column keys)
+    ///
+    /// Output schema follows IR builder convention:
+    /// - All columns from left in their original order
+    /// - Non-key columns from right
+    fn generate_join_tuples<G, R: DiffType>(
+        scope: &mut G,
+        left: &IRNode,
+        right: &IRNode,
+        left_keys: &[usize],
+        right_keys: &[usize],
+        _output_schema: &[String],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let left_coll = Self::generate_collection_tuples::<G, R>(scope, left, input_data, live);
+        let right_coll = Self::generate_collection_tuples::<G, R>(scope, right, input_data, live);
+
+        // CARTESIAN PRODUCT FIX: When both key arrays are empty, we need a
+        // Cartesian product (cross join). Using empty tuples as keys causes
+        // issues in Differential Dataflow, so we use a sentinel value instead.
+        let is_cartesian = left_keys.is_empty() && right_keys.is_empty();
+
+        if is_cartesian {
+            // All tuples keyed by the same constant = full Cartesian product
+            let sentinel = Tuple::new(vec![Value::Int64(0)]);
+
+            let left_keyed = left_coll.map(move |tuple| (sentinel.clone(), tuple));
+
+            let sentinel2 = Tuple::new(vec![Value::Int64(0)]);
+            let right_keyed = right_coll.map(move |tuple| (sentinel2.clone(), tuple));
+
+            // For Cartesian product, concatenate ALL columns from both sides
+            left_keyed
+                .join(&right_keyed)
+                .map(|(_key, (left_tuple, right_tuple))| left_tuple.concat(&right_tuple))
+        } else {
+            // Normal join with actual keys
+            let left_keys = left_keys.to_vec();
+            let right_keys = right_keys.to_vec();
+            let right_keys_clone = right_keys.clone();
+
+            // Map to (key, full_tuple) format - keep full tuples for correct reconstruction
+            let left_keyed = left_coll.map(move |tuple| {
+                let key = tuple.from_indices(&left_keys);
+                (key, tuple)
+            });
+
+            let right_keyed = right_coll.map(move |tuple| {
+                let key = tuple.from_indices(&right_keys_clone);
+                (key, tuple)
+            });
+
+            // Join and reconstruct: all of left + non-key columns of right
+            let right_keys_for_map = right_keys.clone();
+            left_keyed
+                .join(&right_keyed)
+                .map(move |(_key, (left_tuple, right_tuple))| {
+                    // Output schema: all columns from left, then non-key columns from right
+                    let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
+                    left_tuple.concat(&right_non_keys)
+                })
+        }
+    }
+
+    /// Generate antijoin node (negation): Left - (Left JOIN Right)
+    ///
+    /// Implements stratified negation by computing:
+    /// - All tuples from left that do NOT have a matching tuple in right
+    ///
+    /// ## DD Implementation
+    ///
+    /// For stratified negation, the right side is always fully computed before
+    /// the antijoin. We collect all right keys into a set, then filter the left
+    /// collection to exclude tuples whose keys are in the right set.
+    ///
+    /// The key insight is that for stratified negation, we can safely collect
+    /// the right side into memory first since it's already materialized.
+    ///
+    /// ## Example
+    /// ```text
+    /// unreachable(x) :- node(x), !reach(x).
+    ///
+    /// left (node):  [(1,), (2,), (3,), (4,)]
+    /// right (reach): [(1,), (2,)]
+    /// antijoin:      [(3,), (4,)]  // nodes not in reach
+    /// ```
