@@ -507,3 +507,341 @@ impl CodeGenerator {
     /// Extract min/max aggregation info from a single recursive input IR node.
     /// Returns (group_by_indices, agg_col_index, is_min) if the top-level node
     /// is an Aggregate with a single Min or Max function.
+    fn extract_minmax_aggregation(ir: &IRNode) -> Option<(Vec<usize>, usize, bool)> {
+        match ir {
+            IRNode::Aggregate {
+                group_by,
+                aggregations,
+                ..
+            } => {
+                if aggregations.len() != 1 {
+                    return None;
+                }
+                match &aggregations[0] {
+                    (AggregateFunction::Min, col) => Some((group_by.clone(), *col, true)),
+                    (AggregateFunction::Max, col) => Some((group_by.clone(), *col, false)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Strip the top-level Aggregate node from an IR, returning the inner input.
+    /// Used when we want to apply aggregation at a different point (e.g., in the
+    /// fixpoint loop instead of inside the recursive body).
+    fn strip_top_aggregate(ir: &IRNode) -> &IRNode {
+        match ir {
+            IRNode::Aggregate { input, .. } => input,
+            _ => ir,
+        }
+    }
+
+    fn execute_recursive_dd_iterative_typed<R: DiffType>(
+        &self,
+        base_inputs: &[IRNode],
+        recursive_inputs: &[IRNode],
+        recursive_rel: &str,
+    ) -> Result<Vec<Tuple>, String> {
+        // Check if we can use aggregation-in-loop optimization for min/max.
+        // If ALL recursive inputs have a top-level min or max aggregate with the
+        // same group_by and agg_col, we strip the aggregate from the recursive body
+        // and apply it to the combined (base + recursive) result in the loop.
+        // This prunes non-optimal paths early, reducing intermediate data.
+        let agg_in_loop = if recursive_inputs.len() == 1 {
+            Self::extract_minmax_aggregation(&recursive_inputs[0])
+        } else {
+            // For multiple recursive inputs, check if ALL have the same aggregation
+            let first = Self::extract_minmax_aggregation(&recursive_inputs[0]);
+            if let Some(ref first_agg) = first {
+                let all_same = recursive_inputs[1..].iter().all(|ri| {
+                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a == *first_agg)
+                });
+                if all_same {
+                    first
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Build the recursive IR, optionally stripping the aggregate
+        let effective_recursive_inputs: Vec<IRNode> = if agg_in_loop.is_some() {
+            recursive_inputs
+                .iter()
+                .map(|ri| Self::strip_top_aggregate(ri).clone())
+                .collect()
+        } else {
+            recursive_inputs.to_vec()
+        };
+
+        let base_ir = if base_inputs.len() == 1 {
+            base_inputs[0].clone()
+        } else {
+            IRNode::Union {
+                inputs: base_inputs.to_vec(),
+            }
+        };
+        let recursive_ir = if effective_recursive_inputs.len() == 1 {
+            effective_recursive_inputs[0].clone()
+        } else {
+            IRNode::Union {
+                inputs: effective_recursive_inputs,
+            }
+        };
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let results_clone = Arc::clone(&results);
+        let input_data = self.input_tuples.clone();
+        let rec_rel = recursive_rel.to_string();
+
+        if std::env::var("IL_DEBUG").is_ok() {
+            if let Some(ref agg) = agg_in_loop {
+                eprintln!(
+                    "DEBUG: recursive min/max aggregation-in-loop: group_by={:?}, agg_col={}, is_min={}",
+                    agg.0, agg.1, agg.2
+                );
+            }
+        }
+
+        timely::execute_directly(move |worker| {
+            let mut probe = ProbeHandle::new();
+
+            worker.dataflow::<(), _, _>(|scope| {
+                // Generate base case collection from static input data
+                let base_collection =
+                    Self::generate_collection_tuples::<_, R>(scope, &base_ir, &input_data, None);
+
+                // Use DD's iterative scope for proper semi-naive fixpoint evaluation
+                let result = scope.iterative::<Iter, _, _>(|inner| {
+                    // Create SemigroupVariable for the recursive relation
+                    let variable: SemigroupVariable<_, Tuple, R> =
+                        SemigroupVariable::new(inner, Product::new((), 1));
+
+                    // Build live collections map:
+                    // - All base relations entered into the iterative scope
+                    // - The recursive relation backed by the SemigroupVariable
+                    let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
+                    for (name, tuples) in &input_data {
+                        let coll: Collection<_, Tuple, R> = Collection::new(
+                            tuples
+                                .clone()
+                                .to_stream(inner)
+                                .map(|x| (x, Product::default(), R::one())),
+                        );
+                        live.insert(name.clone(), coll);
+                    }
+                    // Override the recursive relation with the SemigroupVariable
+                    live.insert(rec_rel.clone(), (*variable).clone());
+
+                    // Generate recursive body using live collections
+                    // The code generator will use the SemigroupVariable's collection
+                    // when scanning the recursive relation.
+                    // Pass input_data so antijoin's eager collection can read base relations.
+                    let recursive_result = Self::generate_collection_tuples::<_, R>(
+                        inner,
+                        &recursive_ir,
+                        &input_data,
+                        Some(&live),
+                    );
+
+                    // Enter base case into iterative scope
+                    let base_in_scope = base_collection.enter(inner);
+
+                    // Combine base + recursive results
+                    let combined = base_in_scope.concat(&recursive_result);
+
+                    // Apply deduplication strategy based on aggregation mode
+                    let next = if let Some((ref group_by, agg_col, is_min)) = agg_in_loop {
+                        // Min/Max aggregation-in-loop: instead of distinct(), apply
+                        // reduce() with min/max logic. This prunes non-optimal paths
+                        // at each iteration, reducing intermediate data volume.
+                        let group_by = group_by.clone();
+                        combined
+                            .map(move |tuple| {
+                                let key: Vec<Value> = group_by
+                                    .iter()
+                                    .map(|&i| tuple.get(i).cloned().unwrap_or(Value::Null))
+                                    .collect();
+                                (Tuple::new(key), tuple)
+                            })
+                            .reduce(move |_key, input, output| {
+                                // Find the tuple with min/max value at agg_col
+                                let best = if is_min {
+                                    input.iter().min_by(|(a, _), (b, _)| {
+                                        let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
+                                        let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
+                                        va.cmp(&vb)
+                                    })
+                                } else {
+                                    input.iter().max_by(|(a, _), (b, _)| {
+                                        let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
+                                        let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
+                                        va.cmp(&vb)
+                                    })
+                                };
+                                if let Some((tuple, _count)) = best {
+                                    output.push(((*tuple).clone(), R::one()));
+                                }
+                            })
+                            .map(|(_key, tuple)| tuple)
+                    } else {
+                        // Standard deduplication with distinct
+                        combined.distinct_core::<R>()
+                    };
+
+                    // Set variable for next iteration
+                    variable.set(&next);
+
+                    // Leave scope with final result
+                    next.leave()
+                });
+
+                // Capture results
+                result
+                    .inner
+                    .inspect(move |(data, _time, _diff)| {
+                        results_clone.lock().push(data.clone());
+                    })
+                    .probe_with(&mut probe);
+            });
+
+            // Wait for computation to complete
+            while !probe.done() {
+                worker.step();
+            }
+        });
+
+        let final_results = Arc::try_unwrap(results)
+            .map_err(|_| "Failed to extract results")?
+            .into_inner();
+
+        Ok(final_results)
+    }
+
+    /// Execute a recursive query using fixpoint iteration
+    ///
+    /// This is the public API for recursive execution from lib.rs.
+    /// Dispatches to `BooleanDiff` or `isize` based on the semiring type.
+    pub fn execute_recursive(
+        &self,
+        ir: &IRNode,
+        recursive_rel: &str,
+    ) -> Result<Vec<Tuple>, String> {
+        self.execute_recursive_fixpoint_tuples(ir, recursive_rel)
+    }
+
+    /// Execute with Rayon-based parallelism. Falls back to single-worker for joins
+    /// (data must be co-located). Scan/filter/map queries partition data across workers.
+    pub fn execute_with_config(
+        &self,
+        ir: &IRNode,
+        config: ExecutionConfig,
+    ) -> Result<Vec<Tuple>, String> {
+        use rayon::prelude::*;
+        use std::collections::HashSet;
+
+        if config.num_workers == 1 {
+            // Fall back to direct execution for single worker
+            return self.generate_and_execute_tuples(ir);
+        }
+
+        // Check if the IR contains joins - if so, use single-worker for correctness
+        // Joins require coordinated data exchange which our simple partitioning doesn't handle
+        if Self::contains_join(ir) {
+            return self.generate_and_execute_tuples(ir);
+        }
+
+        // For queries without joins, we can partition and process in parallel
+        let num_workers = config.num_workers;
+
+        // Partition input data across workers
+        let partitioned_inputs: Vec<HashMap<String, Vec<Tuple>>> = (0..num_workers)
+            .map(|worker_idx| {
+                Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers)
+            })
+            .collect();
+
+        let ir_clone = ir.clone();
+        let semiring_type = self.semiring_type;
+
+        // Execute in parallel using Rayon
+        let all_results: Vec<Vec<Tuple>> = partitioned_inputs
+            .into_par_iter()
+            .map(|partition| {
+                // Create a temporary code generator with this partition
+                let mut temp_codegen = CodeGenerator::new();
+                temp_codegen.set_semiring_type(semiring_type);
+                for (relation, tuples) in partition {
+                    temp_codegen.add_input_tuples(relation, tuples);
+                }
+                temp_codegen
+                    .generate_and_execute_tuples(&ir_clone)
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        // Merge and deduplicate results
+        let mut combined: HashSet<Tuple> = HashSet::new();
+        for results in all_results {
+            combined.extend(results);
+        }
+
+        Ok(combined.into_iter().collect())
+    }
+
+    /// Check if IR tree contains any join operations
+    fn contains_join(ir: &IRNode) -> bool {
+        match ir {
+            IRNode::Scan { .. } => false,
+            IRNode::HnswScan { .. } => false,
+            IRNode::Map { input, .. } => Self::contains_join(input),
+            IRNode::Filter { input, .. } => Self::contains_join(input),
+            IRNode::Join { .. } => true,
+            IRNode::Distinct { input } => Self::contains_join(input),
+            IRNode::Union { inputs } => inputs.iter().any(Self::contains_join),
+            IRNode::Aggregate { input, .. } => Self::contains_join(input),
+            IRNode::Antijoin { .. } => true, // Antijoin is also a join-like operation
+            IRNode::Compute { input, .. } => Self::contains_join(input),
+            IRNode::FlatMap { input, .. } => Self::contains_join(input),
+            IRNode::JoinFlatMap { .. } => true,
+        }
+    }
+
+    /// Execute with the number of workers equal to CPU cores
+    pub fn execute_parallel(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
+        self.execute_with_config(ir, ExecutionConfig::all_cores())
+    }
+
+    /// Partition input data for a specific worker
+    ///
+    /// Each worker gets tuples where `hash(tuple) % num_workers == worker_index`
+    fn partition_data_for_worker(
+        input_data: &HashMap<String, Vec<Tuple>>,
+        worker_index: usize,
+        num_workers: usize,
+    ) -> HashMap<String, Vec<Tuple>> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        input_data
+            .iter()
+            .map(|(relation, tuples)| {
+                let partitioned: Vec<Tuple> = tuples
+                    .iter()
+                    .filter(|tuple| {
+                        let mut hasher = DefaultHasher::new();
+                        tuple.hash(&mut hasher);
+                        let hash = hasher.finish() as usize;
+                        hash % num_workers == worker_index
+                    })
+                    .cloned()
+                    .collect();
+                (relation.clone(), partitioned)
+            })
+            .collect()
+    }
+
+    /// Generate DD collection from IR (production: Tuple)

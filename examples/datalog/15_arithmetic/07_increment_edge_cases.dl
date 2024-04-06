@@ -1,0 +1,39 @@
+% Test: Increment Edge Cases
+% Description: Tests arithmetic with edge case values: negatives, zero, large numbers
+
+.kg create test_inc_edge_n15t07
+.kg use test_inc_edge_n15t07
+
+% Test 1: Increment from zero
++zero_base[(1, 0)].
++link1[(1, 2)].
+from_zero(Y, D+1) :- zero_base(X, D), link1(X, Y).
+?- from_zero(A, B).
+
+% Test 2: Increment negative numbers
++neg_base[(1, -5), (2, -1)].
++link2[(1, 10), (2, 20)].
+from_neg(Y, D+1) :- neg_base(X, D), link2(X, Y).
+?- from_neg(A, B).
+
+% Test 3: Decrement (D-1)
++dec_base[(1, 10), (2, 5)].
++link3[(1, 100), (2, 200)].
+decremented(Y, D-1) :- dec_base(X, D), link3(X, Y).
+?- decremented(A, B).
+
+% Test 4: Large number increment
++large_base[(1, 1000000)].
++link4[(1, 2)].
+large_inc(Y, D+1) :- large_base(X, D), link4(X, Y).
+?- large_inc(A, B).
+
+% Test 5: Multiple rows with same increment
++multi_base[(1, 0), (2, 0), (3, 0)].
++link5[(1, 10), (2, 20), (3, 30)].
+multi_inc(Y, D+1) :- multi_base(X, D), link5(X, Y).
+?- multi_inc(A, B).
+
+% Cleanup
+.kg use default
+.kg drop test_inc_edge_n15t07

@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arith_mul_n15t02
+Knowledge graph 'test_arith_mul_n15t02' created.
+Switched to knowledge graph: test_arith_mul_n15t02
+> .kg use test_arith_mul_n15t02
+Switched to knowledge graph: test_arith_mul_n15t02
+> +item[(1, 10), (2, 25), (3, 15)].
+Inserted 3 fact(s) into 'item'.
+> double_price(Id, Price*2) :- item(Id, Price).
+3 rows:
+  (1, 20)
+  (2, 50)
+  (3, 30)
+(session: 1 rule(s))
+> ?- double_price(X, Y).
+3 rows:
+  (1, 20)
+  (2, 50)
+  (3, 30)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_arith_mul_n15t02
+Knowledge graph 'test_arith_mul_n15t02' dropped.
