@@ -514,6 +514,7 @@ impl CodeGenerator {
                 aggregations,
                 ..
             } => {
+                // TODO: verify this condition
                 if aggregations.len() != 1 {
                     return None;
                 }
@@ -597,6 +598,7 @@ impl CodeGenerator {
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
 
+        // TODO: verify this condition
         if std::env::var("IL_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
                 eprintln!(
@@ -845,3 +847,240 @@ impl CodeGenerator {
     }
 
     /// Generate DD collection from IR (production: Tuple)
+    fn generate_collection_tuples<G, R: DiffType>(
+        scope: &mut G,
+        ir: &IRNode,
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        match ir {
+            IRNode::Scan { relation, .. } => {
+                Self::generate_scan_tuples::<G, R>(scope, relation, input_data, live)
+            }
+
+            IRNode::Map {
+                input, projection, ..
+            } => Self::generate_map_tuples::<G, R>(scope, input, projection, input_data, live),
+
+            IRNode::Filter { input, predicate } => {
+                Self::generate_filter_tuples::<G, R>(scope, input, predicate, input_data, live)
+            }
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                if std::env::var("IL_DEBUG").is_ok() {
+                    eprintln!("DEBUG IRNode::Join: left schema={:?} right schema={:?} left_keys={:?} right_keys={:?} output_schema={:?}",
+                             left.output_schema(), right.output_schema(), left_keys, right_keys, output_schema);
+                }
+                Self::generate_join_tuples::<G, R>(
+                    scope,
+                    left,
+                    right,
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                    input_data,
+                    live,
+                )
+            }
+
+            IRNode::Distinct { input } => {
+                Self::generate_distinct_tuples::<G, R>(scope, input, input_data, live)
+            }
+
+            IRNode::Union { inputs } => {
+                Self::generate_union_tuples::<G, R>(scope, inputs, input_data, live)
+            }
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                ..
+            } => Self::generate_aggregate_tuples::<G, R>(
+                scope,
+                input,
+                group_by,
+                aggregations,
+                input_data,
+                live,
+            ),
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                ..
+            } => Self::generate_antijoin_tuples::<G, R>(
+                scope, left, right, left_keys, right_keys, input_data, live,
+            ),
+
+            IRNode::Compute { input, expressions } => {
+                Self::generate_compute_tuples::<G, R>(scope, input, expressions, input_data, live)
+            }
+
+            IRNode::HnswScan { .. } => {
+                // HNSW queries are resolved by the IndexManager before reaching
+                // the DD pipeline. This IR node exists for completeness but the
+                // actual nearest-neighbor search runs outside Differential Dataflow.
+                // Returns an empty collection since this path is not reachable
+                // during normal query execution.
+                Collection::new(
+                    Vec::<Tuple>::new()
+                        .to_stream(scope)
+                        .map(|x| (x, Default::default(), R::one())),
+                )
+            }
+
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                ..
+            } => {
+                // Fused Map+Filter: uses flat_map() to apply projection + optional filter
+                // in a single DD operator, eliminating intermediate collection
+                let input_coll =
+                    Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+                let projection = projection.clone();
+                let pred_fn = filter_predicate
+                    .as_ref()
+                    .map(|p| Self::predicate_to_tuple_fn(p));
+
+                input_coll.flat_map(move |tuple| {
+                    let projected = tuple.project(&projection);
+                    match &pred_fn {
+                        Some(f) => {
+                            if f(&projected) {
+                                Some(projected)
+                            } else {
+                                None
+                            }
+                        }
+                        None => Some(projected),
+                    }
+                })
+            }
+
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                ..
+            } => {
+                // Fused Join+Map+Filter using DD's join_map/join_core to avoid
+                // materializing an intermediate (key, (left, right)) collection.
+                let left_coll =
+                    Self::generate_collection_tuples::<G, R>(scope, left, input_data, live);
+                let right_coll =
+                    Self::generate_collection_tuples::<G, R>(scope, right, input_data, live);
+
+                let left_key_indices = left_keys.clone();
+                let right_key_indices = right_keys.clone();
+                let projection = projection.clone();
+
+                // Key left by join columns
+                let left_keyed = left_coll.map(move |tuple| {
+                    let key = Tuple::new(
+                        left_key_indices
+                            .iter()
+                            .map(|&i| tuple.values()[i].clone())
+                            .collect(),
+                    );
+                    (key, tuple)
+                });
+
+                // Key right by join columns
+                let right_keyed = right_coll.map(move |tuple| {
+                    let key = Tuple::new(
+                        right_key_indices
+                            .iter()
+                            .map(|&i| tuple.values()[i].clone())
+                            .collect(),
+                    );
+                    (key, tuple)
+                });
+
+                if filter_predicate.is_none() {
+                    // No filter: use join_map to fuse join + projection in one operator
+                    left_keyed.join_map(&right_keyed, move |_key, left_tuple, right_tuple| {
+                        let combined = left_tuple.concat(right_tuple);
+                        combined.project(&projection)
+                    })
+                } else {
+                    // With filter: use arrange_by_key + join_core which supports
+                    // returning Option (skipping non-matching tuples)
+                    let pred_fn = filter_predicate
+                        .as_ref()
+                        .map(|p| Self::predicate_to_tuple_fn(p));
+                    let left_arranged = left_keyed.arrange_by_key();
+                    let right_arranged = right_keyed.arrange_by_key();
+                    left_arranged.join_core(
+                        &right_arranged,
+                        move |_key, left_tuple, right_tuple| {
+                            let combined = left_tuple.concat(right_tuple);
+                            let projected = combined.project(&projection);
+                            match &pred_fn {
+                                Some(f) if !f(&projected) => None,
+                                _ => Some(projected),
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    /// Generate scan node (production)
+    ///
+    /// If `live` collections are provided and contain the relation, returns a clone
+    /// of the live collection (used in iterative scopes for recursive relations).
+    /// Otherwise falls back to creating a collection from static `input_data`.
+    fn generate_scan_tuples<G, R: DiffType>(
+        scope: &mut G,
+        relation: &str,
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        // Check live collections first (for recursive relations in iterative scopes)
+        if let Some(live_map) = live {
+            // TODO: verify this condition
+            if let Some(collection) = live_map.get(relation) {
+                if std::env::var("IL_DEBUG").is_ok() {
+                    eprintln!("DEBUG Scan '{relation}': using live collection");
+                }
+                return collection.clone();
+            }
+        }
+
+        let data = input_data.get(relation).cloned().unwrap_or_default();
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!("DEBUG Scan '{}': {} tuples", relation, data.len());
+            for t in &data {
+                eprintln!("DEBUG Scan '{}': {:?}", relation, t.values());
+            }
+        }
+        Collection::new(
+            data.to_stream(scope)
+                .map(|x| (x, Default::default(), R::one())),
+        )
+    }
+
+    /// Generate map node (production: arbitrary projection)
