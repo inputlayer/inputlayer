@@ -1,0 +1,97 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_4col_n15t13
+Knowledge graph 'test_arity_4col_n15t13' created.
+Switched to knowledge graph: test_arity_4col_n15t13
+> .kg use test_arity_4col_n15t13
+Switched to knowledge graph: test_arity_4col_n15t13
+> +src4[(1, 5, 100, 1000), (2, 10, 200, 2000), (3, 0, 300, 3000)].
+Inserted 3 fact(s) into 'src4'.
+> +link[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'link'.
+> inc_col1(Y, A+1) :- src4(X, A, _, _), link(X, Y).
+3 rows:
+  (10, 6)
+  (20, 11)
+  (30, 1)
+(session: 1 rule(s))
+> ?- inc_col1(A, B).
+3 rows:
+  (10, 6)
+  (20, 11)
+  (30, 1)
+> inc_col2(Y, B+1) :- src4(X, _, B, _), link(X, Y).
+3 rows:
+  (10, 101)
+  (20, 201)
+  (30, 301)
+(session: 2 rule(s))
+> ?- inc_col2(A, B).
+3 rows:
+  (10, 101)
+  (20, 201)
+  (30, 301)
+> inc_col3(Y, C+1) :- src4(X, _, _, C), link(X, Y).
+3 rows:
+  (10, 1001)
+  (20, 2001)
+  (30, 3001)
+(session: 3 rule(s))
+> ?- inc_col3(A, B).
+3 rows:
+  (10, 1001)
+  (20, 2001)
+  (30, 3001)
+> inc_all_bound4(Y, A+1) :- src4(X, A, B, C), link(X, Y).
+3 rows:
+  (10, 6)
+  (20, 11)
+  (30, 1)
+(session: 4 rule(s))
+> ?- inc_all_bound4(A, B).
+3 rows:
+  (10, 6)
+  (20, 11)
+  (30, 1)
+> multi_arith(Y, A+1, B+2, C+3) :- src4(X, A, B, C), link(X, Y).
+3 rows:
+  (10, 6, 102, 1003)
+  (20, 11, 202, 2003)
+  (30, 1, 302, 3003)
+(session: 5 rule(s))
+> ?- multi_arith(A, B, C, D).
+3 rows:
+  (10, 6, 102, 1003)
+  (20, 11, 202, 2003)
+  (30, 1, 302, 3003)
+> +src4b[(1, 5, 100, 1000), (2, 10, 200, 2000)].
+Inserted 2 fact(s) into 'src4b'.
+> inc_key(Y, X+1, A) :- src4b(X, A, _, _), link(X, Y).
+2 rows:
+  (10, 2, 5)
+  (20, 3, 10)
+(session: 6 rule(s))
+> ?- inc_key(A, B, C).
+2 rows:
+  (10, 2, 5)
+  (20, 3, 10)
+> only_arith(A+1) :- src4(_, A, _, _).
+3 rows:
+  (1)
+  (6)
+  (11)
+(session: 7 rule(s))
+> ?- only_arith(A).
+3 rows:
+  (1)
+  (6)
+  (11)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 7 session rule(s), 0 session fact(s))
+> .kg drop test_arity_4col_n15t13
+Knowledge graph 'test_arity_4col_n15t13' dropped.

@@ -1,0 +1,60 @@
+% Wildcard Interaction Tests for Arithmetic
+% Systematically tests all combinations of bound variables and wildcards
+% Documents the bug where wildcards cause arithmetic columns to disappear
+
+.kg create test_wildcard_patterns_n15t15
+.kg use test_wildcard_patterns_n15t15
+
+% 3-column source relation: (id, value, extra)
++r3[(1, 10, 100), (2, 20, 200), (3, 30, 300)].
++link[(1, 1000), (2, 2000), (3, 3000)].
+
+% Pattern 1: Wildcard at end (position 2)
+p1(Y, D+1) :- r3(X, D, _), link(X, Y).
+?- p1(A, B).
+
+% Pattern 2: Wildcard at middle (position 1)
+p2(Y, Z+1) :- r3(X, _, Z), link(X, Y).
+?- p2(A, B).
+
+% Pattern 3: Wildcard at start (position 0)
+% Need different source structure for this
++r3b[(100, 1, 10), (200, 2, 20), (300, 3, 30)].
++link_b[(1, 1000), (2, 2000), (3, 3000)].
+p3(Y, D+1) :- r3b(_, X, D), link_b(X, Y).
+?- p3(A, B).
+
+% Pattern 4: All variables bound - should always work
+p4(Y, D+1) :- r3(X, D, Z), link(X, Y).
+?- p4(A, B).
+
+% Pattern 5: Two wildcards, middle position has arithmetic var
+p5(D+1) :- r3(_, D, _).
+?- p5(A).
+
+% Pattern 6: Project extra column with wildcard on arithmetic var
+% This should work since we're not using the wildcard var in output
+p6(Y, Z) :- r3(X, _, Z), link(X, Y).
+?- p6(A, B).
+
+% 4-column source for more patterns
++r4[(1, 10, 100, 1000), (2, 20, 200, 2000)].
+
+% Pattern 7: Arithmetic on col1, wildcards elsewhere
+p7(Y, A+1) :- r4(X, A, _, _), link(X, Y).
+?- p7(A, B).
+
+% Pattern 8: Arithmetic on col2, wildcards elsewhere
+p8(Y, B+1) :- r4(X, _, B, _), link(X, Y).
+?- p8(A, B).
+
+% Pattern 9: Arithmetic on col3, wildcards elsewhere
+p9(Y, C+1) :- r4(X, _, _, C), link(X, Y).
+?- p9(A, B).
+
+% Pattern 10: Multiple arithmetic expressions with all bound vars
+p10(Y, A+1, B+2) :- r4(X, A, B, C), link(X, Y).
+?- p10(A, B, C).
+
+.kg use default
+.kg drop test_wildcard_patterns_n15t15
