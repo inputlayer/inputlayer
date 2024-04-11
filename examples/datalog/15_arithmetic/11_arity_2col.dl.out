@@ -1,0 +1,85 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_2col_n15t11
+Knowledge graph 'test_arity_2col_n15t11' created.
+Switched to knowledge graph: test_arity_2col_n15t11
+> .kg use test_arity_2col_n15t11
+Switched to knowledge graph: test_arity_2col_n15t11
+> +src2[(1, 5), (2, 10), (3, 0), (4, -5)].
+Inserted 4 fact(s) into 'src2'.
+> +link[(1, 100), (2, 200), (3, 300), (4, 400)].
+Inserted 4 fact(s) into 'link'.
+> inc_result(Y, D+1) :- src2(X, D), link(X, Y).
+4 rows:
+  (100, 6)
+  (200, 11)
+  (300, 1)
+  (400, -4)
+(session: 1 rule(s))
+> ?- inc_result(A, B).
+4 rows:
+  (100, 6)
+  (200, 11)
+  (300, 1)
+  (400, -4)
+> dec_result(Y, D-1) :- src2(X, D), link(X, Y).
+4 rows:
+  (100, 4)
+  (200, 9)
+  (300, -1)
+  (400, -6)
+(session: 2 rule(s))
+> ?- dec_result(A, B).
+4 rows:
+  (100, 4)
+  (200, 9)
+  (300, -1)
+  (400, -6)
+> mul_result(Y, D*2) :- src2(X, D), link(X, Y).
+4 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+  (400, -10)
+(session: 3 rule(s))
+> ?- mul_result(A, B).
+4 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+  (400, -10)
+> add_result(Y, D+10) :- src2(X, D), link(X, Y).
+4 rows:
+  (100, 15)
+  (200, 20)
+  (300, 10)
+  (400, 5)
+(session: 4 rule(s))
+> ?- add_result(A, B).
+4 rows:
+  (100, 15)
+  (200, 20)
+  (300, 10)
+  (400, 5)
+> full_bind(X, Y, D+1) :- src2(X, D), link(X, Y).
+4 rows:
+  (1, 100, 6)
+  (2, 200, 11)
+  (3, 300, 1)
+  (4, 400, -4)
+(session: 5 rule(s))
+> ?- full_bind(A, B, C).
+4 rows:
+  (1, 100, 6)
+  (2, 200, 11)
+  (3, 300, 1)
+  (4, 400, -4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_arity_2col_n15t11
+Knowledge graph 'test_arity_2col_n15t11' dropped.

@@ -1548,3 +1548,301 @@ impl CodeGenerator {
     /// right (reach): [(1,), (2,)]
     /// antijoin:      [(3,), (4,)]  // nodes not in reach
     /// ```
+    fn generate_antijoin_tuples<G, R: DiffType>(
+        scope: &mut G,
+        left: &IRNode,
+        right: &IRNode,
+        left_keys: &[usize],
+        right_keys: &[usize],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        use std::collections::HashSet;
+
+        // For stratified negation, collect right keys eagerly
+        // This is correct because the right side is already fully computed
+        let right_keys_set: HashSet<Tuple> = {
+            let mut set = HashSet::new();
+            // Recursively collect all tuples from the right IR node
+            Self::collect_tuples_from_ir(right, input_data, right_keys, &mut set);
+            set
+        };
+
+        let left_coll = Self::generate_collection_tuples::<G, R>(scope, left, input_data, live);
+        let left_keys_vec = left_keys.to_vec();
+
+        // Filter left to only keep tuples whose key is NOT in right set
+        left_coll.filter(move |tuple| {
+            let key = tuple.from_indices(&left_keys_vec);
+            !right_keys_set.contains(&key)
+        })
+    }
+
+    /// Helper function to recursively collect tuples from an IR node into a `HashSet`
+    fn collect_tuples_from_ir(
+        node: &IRNode,
+        input_data: &HashMap<String, Vec<Tuple>>,
+        key_indices: &[usize],
+        result: &mut std::collections::HashSet<Tuple>,
+    ) {
+        match node {
+            IRNode::Scan { relation, .. } => {
+                if let Some(tuples) = input_data.get(relation) {
+                    for tuple in tuples {
+                        let key = tuple.from_indices(key_indices);
+                        result.insert(key);
+                    }
+                }
+            }
+            IRNode::Filter { input, .. } => {
+                // For filter, we need to generate and filter tuples
+                // This is a simplified version - full implementation would evaluate the filter
+                Self::collect_tuples_from_ir(input, input_data, key_indices, result);
+            }
+            IRNode::Map { input, .. } => {
+                Self::collect_tuples_from_ir(input, input_data, key_indices, result);
+            }
+            IRNode::Distinct { input } => {
+                Self::collect_tuples_from_ir(input, input_data, key_indices, result);
+            }
+            IRNode::Union { inputs } => {
+                for input in inputs {
+                    Self::collect_tuples_from_ir(input, input_data, key_indices, result);
+                }
+            }
+            // For complex nodes like Join, we fall back to executing the dataflow
+            // This is needed for computed views
+            _ => {
+                // Execute the node to get its tuples
+                let tuples = Self::execute_subquery_for_antijoin(node, input_data);
+                for tuple in tuples {
+                    let key = tuple.from_indices(key_indices);
+                    result.insert(key);
+                }
+            }
+        }
+    }
+
+    /// Execute a subquery to collect tuples for antijoin
+    fn execute_subquery_for_antijoin(
+        node: &IRNode,
+        input_data: &HashMap<String, Vec<Tuple>>,
+    ) -> Vec<Tuple> {
+        // Use timely to execute the subquery and collect results
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let results_clone = Arc::clone(&results);
+        let node_clone = node.clone();
+        let input_data_clone = input_data.clone();
+
+        timely::execute_directly(move |worker| {
+            worker.dataflow::<(), _, _>(|scope| {
+                let coll = Self::generate_collection_tuples::<_, isize>(
+                    scope,
+                    &node_clone,
+                    &input_data_clone,
+                    None,
+                );
+                let results_ref = Arc::clone(&results_clone);
+                coll.inner.inspect(move |(tuple, _time, diff)| {
+                    if *diff > 0 {
+                        results_ref.lock().push(tuple.clone());
+                    }
+                });
+            });
+            // Step until complete
+            while worker.step() {}
+        });
+
+        // Safely extract results from Arc<Mutex<Vec<Tuple>>>
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
+        match Arc::try_unwrap(results) {
+            Ok(mutex) => mutex.into_inner(),
+            Err(arc) => {
+                // Arc still has references (shouldn't happen, but handle gracefully)
+                arc.lock().clone()
+            }
+        }
+    }
+
+    /// Generate distinct node (production)
+    fn generate_distinct_tuples<G, R: DiffType>(
+        scope: &mut G,
+        input: &IRNode,
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let input_coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+        input_coll.distinct_core::<R>()
+    }
+
+    /// Generate union node (production)
+    ///
+    /// Note: This handles simple unions by concatenation. Recursive queries
+    /// (transitive closure, etc.) are handled at a higher level via iterative
+    /// execution in `generate_and_execute_recursive`.
+    fn generate_union_tuples<G, R: DiffType>(
+        scope: &mut G,
+        inputs: &[IRNode],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        if inputs.is_empty() {
+            return Collection::new(
+                Vec::<Tuple>::new()
+                    .to_stream(scope)
+                    .map(|x| (x, Default::default(), R::one())),
+            );
+        }
+
+        let mut result =
+            Self::generate_collection_tuples::<G, R>(scope, &inputs[0], input_data, live);
+
+        for input in &inputs[1..] {
+            let coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+            result = result.concat(&coll);
+        }
+
+        result
+    }
+
+    /// Check if an IR node references (scans) a particular relation
+    pub fn references_relation(ir: &IRNode, relation: &str) -> bool {
+        match ir {
+            IRNode::Scan { relation: rel, .. } => rel == relation,
+            IRNode::HnswScan { index_name, .. } => index_name == relation,
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::Aggregate { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => Self::references_relation(input, relation),
+            IRNode::Join { left, right, .. }
+            | IRNode::Antijoin { left, right, .. }
+            | IRNode::JoinFlatMap { left, right, .. } => {
+                Self::references_relation(left, relation)
+                    || Self::references_relation(right, relation)
+            }
+            IRNode::Union { inputs } => inputs
+                .iter()
+                .any(|inp| Self::references_relation(inp, relation)),
+        }
+    }
+
+    /// Detect recursive relations in a Union node
+    ///
+    /// Returns the name of the recursive relation if found, along with
+    /// partitioned inputs (base cases vs recursive cases)
+    pub fn detect_recursive_union(inputs: &[IRNode]) -> Option<(String, Vec<usize>, Vec<usize>)> {
+        Self::detect_recursive_union_for_relation(inputs, None)
+    }
+
+    /// Detect recursion for a specific relation in a Union node
+    ///
+    /// If `expected_relation` is Some, only that relation is considered for recursion.
+    /// This is used when we know the head relation of the Union (e.g., from the rule head).
+    ///
+    /// Returns partitioned inputs (base cases vs recursive cases)
+    pub fn detect_recursive_union_for_relation(
+        inputs: &[IRNode],
+        expected_relation: Option<&str>,
+    ) -> Option<(String, Vec<usize>, Vec<usize>)> {
+        // Find all relations that are scanned by each input
+        let mut scan_relations: HashMap<String, Vec<usize>> = HashMap::new();
+
+        fn collect_scans(ir: &IRNode, scans: &mut Vec<String>) {
+            match ir {
+                IRNode::Scan { relation, .. } => {
+                    scans.push(relation.clone());
+                }
+                IRNode::HnswScan { index_name, .. } => {
+                    scans.push(index_name.clone());
+                }
+                IRNode::Map { input, .. }
+                | IRNode::Filter { input, .. }
+                | IRNode::Distinct { input }
+                | IRNode::Aggregate { input, .. }
+                | IRNode::Compute { input, .. }
+                | IRNode::FlatMap { input, .. } => {
+                    collect_scans(input, scans);
+                }
+                IRNode::Join { left, right, .. }
+                | IRNode::Antijoin { left, right, .. }
+                | IRNode::JoinFlatMap { left, right, .. } => {
+                    collect_scans(left, scans);
+                    collect_scans(right, scans);
+                }
+                IRNode::Union { inputs } => {
+                    for inp in inputs {
+                        collect_scans(inp, scans);
+                    }
+                }
+            }
+        }
+
+        for (i, input) in inputs.iter().enumerate() {
+            let mut scans = Vec::new();
+            collect_scans(input, &mut scans);
+            for rel in scans {
+                scan_relations.entry(rel).or_default().push(i);
+            }
+        }
+
+        // DEBUG: Log what we found
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!(
+                "DEBUG detect_recursive_union: {} inputs, scan_relations = {:?}",
+                inputs.len(),
+                scan_relations
+            );
+            if let Some(expected) = expected_relation {
+                eprintln!("DEBUG: expected_relation = {expected}");
+            }
+        }
+
+        // If we have an expected relation, only check that one
+        if let Some(expected) = expected_relation {
+            if let Some(indices) = scan_relations.get(expected) {
+                let appears_in = indices.len();
+                if appears_in > 0 && appears_in < inputs.len() {
+                    // This is the recursive relation
+                    let base_indices: Vec<usize> =
+                        (0..inputs.len()).filter(|i| !indices.contains(i)).collect();
+                    let recursive_indices = indices.clone();
+                    return Some((expected.to_string(), base_indices, recursive_indices));
+                }
+            }
+            return None;
+        }
+
+        // A recursive relation is scanned by some but not all inputs
+        // (the base case doesn't scan it, recursive cases do)
+        for (rel, indices) in &scan_relations {
+            let appears_in = indices.len();
+            if appears_in > 0 && appears_in < inputs.len() {
+                // This might be recursive - the inputs that don't scan it are base cases
+                let base_indices: Vec<usize> =
+                    (0..inputs.len()).filter(|i| !indices.contains(i)).collect();
+                let recursive_indices = indices.clone();
+                return Some((rel.clone(), base_indices, recursive_indices));
+            }
+        }
+
+        None
+    }
+
+    /// Generate aggregate node (production)
+    ///
+    /// Implements GROUP BY with aggregation functions (count, sum, min, max, avg).
+    /// Uses Differential Dataflow's reduce operator for efficient aggregation.

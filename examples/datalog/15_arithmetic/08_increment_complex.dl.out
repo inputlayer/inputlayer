@@ -1,0 +1,70 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inc_complex_n15t08
+Knowledge graph 'test_inc_complex_n15t08' created.
+Switched to knowledge graph: test_inc_complex_n15t08
+> .kg use test_inc_complex_n15t08
+Switched to knowledge graph: test_inc_complex_n15t08
+> +data1[(1, 5), (2, 10), (3, 0)].
+Inserted 3 fact(s) into 'data1'.
+> +link1[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'link1'.
+> scaled(Y, A*2) :- data1(X, A), link1(X, Y).
+3 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+(session: 1 rule(s))
+> ?- scaled(X, Y).
+3 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+> +minuend[(1, 100), (2, 50)].
+Inserted 2 fact(s) into 'minuend'.
+> +subtrahend[(1, 30), (2, 25)].
+Inserted 2 fact(s) into 'subtrahend'.
+> difference(X, A-B) :- minuend(X, A), subtrahend(X, B).
+2 rows:
+  (1, 70)
+  (2, 25)
+(session: 2 rule(s))
+> ?- difference(X, Y).
+2 rows:
+  (1, 70)
+  (2, 25)
+> +base3[(1, 0), (2, 5)].
+Inserted 2 fact(s) into 'base3'.
+> +link3[(1, 10), (2, 20)].
+Inserted 2 fact(s) into 'link3'.
+> plus_ten(Y, D+10) :- base3(X, D), link3(X, Y).
+2 rows:
+  (10, 10)
+  (20, 15)
+(session: 3 rule(s))
+> ?- plus_ten(X, Y).
+2 rows:
+  (10, 10)
+  (20, 15)
+> +base4[(1, 20), (2, 10)].
+Inserted 2 fact(s) into 'base4'.
+> +link4[(1, 30), (2, 40)].
+Inserted 2 fact(s) into 'link4'.
+> minus_five(Y, D-5) :- base4(X, D), link4(X, Y).
+2 rows:
+  (30, 15)
+  (40, 5)
+(session: 4 rule(s))
+> ?- minus_five(X, Y).
+2 rows:
+  (30, 15)
+  (40, 5)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_inc_complex_n15t08
+Knowledge graph 'test_inc_complex_n15t08' dropped.
