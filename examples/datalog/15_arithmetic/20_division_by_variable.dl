@@ -1,0 +1,14 @@
+% Test: Division with variable divisor
+
+.kg create test_div_var_n15t20
+.kg use test_div_var_n15t20
+
++data[(100, 10), (200, 20), (150, 5), (80, 8)].
+
+% Divide first column by second
+computed(A, B, Result) :- data(A, B), Result = A / B.
+
+?- computed(A, B, R).
+
+.kg use default
+.kg drop test_div_var_n15t20

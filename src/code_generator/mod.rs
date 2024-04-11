@@ -347,6 +347,7 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
+                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -555,7 +556,7 @@ impl CodeGenerator {
             let first = Self::extract_minmax_aggregation(&recursive_inputs[0]);
             if let Some(ref first_agg) = first {
                 let all_same = recursive_inputs[1..].iter().all(|ri| {
-                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a == *first_agg)
+                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a != *first_agg)
                 });
                 if all_same {
                     first
@@ -568,6 +569,7 @@ impl CodeGenerator {
         };
 
         // Build the recursive IR, optionally stripping the aggregate
+        // TODO: verify this condition
         let effective_recursive_inputs: Vec<IRNode> = if agg_in_loop.is_some() {
             recursive_inputs
                 .iter()
@@ -584,6 +586,7 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
+        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -1124,6 +1127,7 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
+                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1180,6 +1184,7 @@ impl CodeGenerator {
                         return i >= val;
                     }
                     // Fall back to float comparison for Float64 values
+                    // TODO: verify this condition
                     if let Some(f) = v.as_f64() {
                         return f >= (val as f64);
                     }
@@ -1375,6 +1380,7 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
+                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1591,6 +1597,7 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
+                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1932,6 +1939,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1941,6 +1949,7 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
+                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2163,3 +2172,213 @@ impl CodeGenerator {
     /// Generate compute node (production: vector functions and expressions)
     ///
     /// Computes new columns from expressions and appends them to input tuples.
+    fn generate_compute_tuples<G, R: DiffType>(
+        scope: &mut G,
+        input: &IRNode,
+        expressions: &[(String, IRExpression)],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let input_coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+        let expressions = expressions.to_vec();
+
+        input_coll.map(move |tuple| {
+            // Evaluate each expression and append to tuple
+            // Use a growing tuple so chained computed columns work:
+            // e.g., Q = quantize(V), D = dequantize(Q) - D needs to see Q
+            let mut current_tuple = tuple.clone();
+
+            if std::env::var("IL_DEBUG").is_ok() {
+                eprintln!("DEBUG Compute: input tuple = {:?}", current_tuple.values());
+            }
+
+            for (name, expr) in &expressions {
+                let value = Self::evaluate_expression(expr, &current_tuple);
+                if std::env::var("IL_DEBUG").is_ok() {
+                    eprintln!("DEBUG Compute: expr='{name}' => {value:?}");
+                }
+                // Extend the current tuple with the computed value
+                // so subsequent expressions can reference it
+                let mut values: Vec<Value> = current_tuple.values().to_vec();
+                values.push(value);
+                current_tuple = Tuple::new(values);
+            }
+
+            // TODO: verify this condition
+            if std::env::var("IL_DEBUG").is_ok() {
+                eprintln!("DEBUG Compute: output = {:?}", current_tuple.values());
+            }
+
+            current_tuple
+        })
+    }
+
+    /// Evaluate an IR expression against a tuple
+    fn evaluate_expression(expr: &IRExpression, tuple: &Tuple) -> Value {
+        match expr {
+            IRExpression::Column(idx) => tuple.get(*idx).cloned().unwrap_or(Value::Null),
+            IRExpression::IntConstant(val) => Value::Int64(*val),
+            IRExpression::FloatConstant(val) => Value::Float64(*val),
+            IRExpression::StringConstant(s) => Value::String(s.clone().into()),
+            IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
+            IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
+            IRExpression::Arithmetic { op, left, right } => {
+                let left_val = Self::evaluate_expression(left, tuple);
+                let right_val = Self::evaluate_expression(right, tuple);
+                Self::evaluate_arithmetic(*op, &left_val, &right_val)
+            }
+        }
+    }
+
+    /// Evaluate a built-in function call
+    fn evaluate_function(func: &BuiltinFunction, args: &[IRExpression], tuple: &Tuple) -> Value {
+        // Evaluate arguments
+        let arg_values: Vec<Value> = args
+            .iter()
+            .map(|arg| Self::evaluate_expression(arg, tuple))
+            .collect();
+
+        match func {
+            BuiltinFunction::Euclidean => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
+                        let dist = vector_ops::euclidean_distance(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::Cosine => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
+                        let dist = vector_ops::cosine_distance(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::DotProduct => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
+                        let dot = vector_ops::dot_product(v1, v2);
+                        return Value::Float64(dot);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::Manhattan => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
+                        let dist = vector_ops::manhattan_distance(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::Hamming => {
+                // hamming(a, b) - Hamming distance between two integers
+                if arg_values.len() >= 2 {
+                    let a = arg_values[0].to_i64();
+                    let b = arg_values[1].to_i64();
+                    return Value::Int64(vector_ops::hamming_distance(a, b));
+                }
+                Value::Null
+            }
+            BuiltinFunction::LshBucket => {
+                // lsh_bucket(vector, table_idx, num_hyperplanes)
+                if arg_values.len() >= 3 {
+                    if let Some(v) = arg_values[0].as_vector() {
+                        let table_idx = arg_values[1].to_i64();
+                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let bucket = vector_ops::lsh_bucket(v, table_idx, num_hyperplanes);
+                        return Value::Int64(bucket);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::VecNormalize => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector()) {
+                    let normalized = vector_ops::normalize(v);
+                    return Value::vector(normalized);
+                }
+                Value::Null
+            }
+            BuiltinFunction::VecDim => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector()) {
+                    return Value::Int64(v.len() as i64);
+                }
+                Value::Null
+            }
+            BuiltinFunction::VecAdd => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
+                        if v1.len() == v2.len() {
+                            let result: Vec<f32> =
+                                v1.iter().zip(v2.iter()).map(|(a, b)| a + b).collect();
+                            return Value::vector(result);
+                        }
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::VecScale => {
+                // vec_scale(vector, scalar)
+                if arg_values.len() >= 2 {
+                    if let Some(v) = arg_values[0].as_vector() {
+                        let scalar = arg_values[1].to_f64() as f32;
+                        let result: Vec<f32> = v.iter().map(|x| x * scalar).collect();
+                        return Value::vector(result);
+                    }
+                }
+                Value::Null
+            }
+
+            // Int8 quantization functions
+            BuiltinFunction::QuantizeLinear => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector()) {
+                    let quantized = vector_ops::quantize_vector_linear(v);
+                    return Value::vector_int8(quantized);
+                }
+                Value::Null
+            }
+            BuiltinFunction::QuantizeSymmetric => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector()) {
+                    let quantized = vector_ops::quantize_vector_symmetric(v);
+                    return Value::vector_int8(quantized);
+                }
+                Value::Null
+            }
+            BuiltinFunction::Dequantize => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector_int8()) {
+                    let dequantized = vector_ops::dequantize_vector(v);
+                    return Value::vector(dequantized);
+                }
+                Value::Null
+            }
+            BuiltinFunction::DequantizeScaled => {
+                // dequantize_scaled(vector_int8, scale)
+                if arg_values.len() >= 2 {
+                    if let Some(v) = arg_values[0].as_vector_int8() {
+                        let scale = arg_values[1].to_f64() as f32;
+                        let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
+                        return Value::vector(dequantized);
+                    }
+                }
+                Value::Null
+            }
+
+            // Int8 distance functions (native, fast)

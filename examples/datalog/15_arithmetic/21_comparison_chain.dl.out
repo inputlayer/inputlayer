@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cmp_chain_n15t21
+Knowledge graph 'test_cmp_chain_n15t21' created.
+Switched to knowledge graph: test_cmp_chain_n15t21
+> .kg use test_cmp_chain_n15t21
+Switched to knowledge graph: test_cmp_chain_n15t21
+> +values[(1,), (5,), (10,), (15,), (20,)].
+Inserted 5 fact(s) into 'values'.
+> in_range(X) :- values(X), X >= 5, X <= 15.
+3 rows:
+  (5)
+  (10)
+  (15)
+(session: 1 rule(s))
+> ?- in_range(X).
+3 rows:
+  (5)
+  (10)
+  (15)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_cmp_chain_n15t21
+Knowledge graph 'test_cmp_chain_n15t21' dropped.
