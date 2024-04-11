@@ -1846,3 +1846,320 @@ impl CodeGenerator {
     ///
     /// Implements GROUP BY with aggregation functions (count, sum, min, max, avg).
     /// Uses Differential Dataflow's reduce operator for efficient aggregation.
+    fn generate_aggregate_tuples<G, R: DiffType>(
+        scope: &mut G,
+        input: &IRNode,
+        group_by: &[usize],
+        aggregations: &[(AggregateFunction, usize)],
+        input_data: &HashMap<String, Vec<Tuple>>,
+        live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord + Default,
+    {
+        let input_coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
+        let group_by = group_by.to_vec();
+        let aggregations = aggregations.to_vec();
+
+        // Map to (group_key, value_tuple) pairs
+        let keyed = input_coll.map(move |tuple| {
+            // Extract group-by columns as key
+            let key = tuple.project(&group_by);
+            // Keep entire tuple as value for aggregation
+            (key, tuple)
+        });
+
+        // Use reduce to compute aggregations
+        // reduce returns Collection<G, (K, V)> so we need to extract just the result tuple
+        let aggs_clone = aggregations.clone();
+
+        keyed.reduce(move |key, input, output| {
+            // input: slice of (&Tuple, R) pairs
+            // We need to compute aggregations over all tuples with this key
+
+            // Collect all tuples (accounting for multiplicities)
+            let mut tuples: Vec<&Tuple> = Vec::new();
+            for (tuple, count) in input {
+                for _ in 0..count.to_count() {
+                    tuples.push(*tuple);
+                }
+            }
+
+            if tuples.is_empty() {
+                return;
+            }
+
+            // Check for ranking aggregates (TopK, TopKThreshold, WithinRadius)
+            // These return multiple rows per group instead of a single aggregate value
+            let has_ranking_agg = aggs_clone.iter().any(|(func, _)| {
+                matches!(func,
+                    AggregateFunction::TopK { .. } |
+                    AggregateFunction::TopKThreshold { .. } |
+                    AggregateFunction::WithinRadius { .. }
+                )
+            });
+
+            if has_ranking_agg {
+                // Handle ranking aggregates - output multiple rows per group
+                // Only one ranking aggregate should be present per query
+                for (func, _col_idx) in &aggs_clone {
+                    match func {
+                        AggregateFunction::TopK { k, order_col, descending } => {
+                            // O(n log k) heap-based top-k selection
+                            use std::cmp::Reverse;
+                            use std::collections::BinaryHeap;
+
+                            // Local OrdF64 wrapper for heap ordering
+                            #[derive(Clone, Copy, PartialEq)]
+                            struct OrdF64(f64);
+                            impl Eq for OrdF64 {}
+                            impl PartialOrd for OrdF64 {
+                                fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                                    Some(self.cmp(other))
+                                }
+                            }
+                            impl Ord for OrdF64 {
+                                fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                                    self.0.partial_cmp(&other.0).unwrap_or_else(|| {
+                                        match (self.0.is_nan(), other.0.is_nan()) {
+                                            (true, true) => std::cmp::Ordering::Equal,
+                                            (true, false) => std::cmp::Ordering::Less,
+                                            (false, true) => std::cmp::Ordering::Greater,
+                                            (false, false) => unreachable!(),
+                                        }
+                                    })
+                                }
+                            }
+
+                            if *descending {
+                                // Top k largest: use min-heap via Reverse
+                                let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
+
+                                for t in &tuples {
+                                    let score = OrdF64(t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64));
+                                    if heap.len() < *k {
+                                        heap.push(Reverse((score, *t)));
+                                    } else if let Some(&Reverse((min_score, _))) = heap.peek() {
+                                        if score > min_score {
+                                            heap.pop();
+                                            heap.push(Reverse((score, *t)));
+                                        }
+                                    }
+                                }
+
+                                // Extract, sort descending, and output
+                                let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
+                                result.sort_by(|a, b| b.0.cmp(&a.0));
+                                for (_, tuple) in result {
+                                    output.push((tuple.clone(), R::one()));
+                                }
+                            } else {
+                                // Top k smallest: use max-heap
+                                let mut heap: BinaryHeap<(OrdF64, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
+
+                                for t in &tuples {
+                                    let score = OrdF64(t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64));
+                                    if heap.len() < *k {
+                                        heap.push((score, *t));
+                                    } else if let Some(&(max_score, _)) = heap.peek() {
+                                        if score < max_score {
+                                            heap.pop();
+                                            heap.push((score, *t));
+                                        }
+                                    }
+                                }
+
+                                // Extract, sort ascending, and output
+                                let mut result: Vec<_> = heap.into_iter().collect();
+                                result.sort_by(|a, b| a.0.cmp(&b.0));
+                                for (_, tuple) in result {
+                                    output.push((tuple.clone(), R::one()));
+                                }
+                            }
+                        }
+                        AggregateFunction::TopKThreshold { k, order_col, threshold, descending } => {
+                            // O(n log k) heap-based top-k selection with threshold filtering
+                            use std::cmp::Reverse;
+                            use std::collections::BinaryHeap;
+
+                            // Local OrdF64 wrapper for heap ordering
+                            #[derive(Clone, Copy, PartialEq)]
+                            struct OrdF64(f64);
+                            impl Eq for OrdF64 {}
+                            impl PartialOrd for OrdF64 {
+                                fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                                    Some(self.cmp(other))
+                                }
+                            }
+                            impl Ord for OrdF64 {
+                                fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                                    self.0.partial_cmp(&other.0).unwrap_or_else(|| {
+                                        match (self.0.is_nan(), other.0.is_nan()) {
+                                            (true, true) => std::cmp::Ordering::Equal,
+                                            (true, false) => std::cmp::Ordering::Less,
+                                            (false, true) => std::cmp::Ordering::Greater,
+                                            (false, false) => unreachable!(),
+                                        }
+                                    })
+                                }
+                            }
+
+                            if *descending {
+                                // Top k largest with threshold: use min-heap via Reverse
+                                let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
+
+                                for t in &tuples {
+                                    let score_val = t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64);
+                                    // Filter: keep if score >= threshold
+                                    if score_val < *threshold {
+                                        continue;
+                                    }
+                                    let score = OrdF64(score_val);
+                                    if heap.len() < *k {
+                                        heap.push(Reverse((score, *t)));
+                                    } else if let Some(&Reverse((min_score, _))) = heap.peek() {
+                                        if score > min_score {
+                                            heap.pop();
+                                            heap.push(Reverse((score, *t)));
+                                        }
+                                    }
+                                }
+
+                                // Extract, sort descending, and output
+                                let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
+                                result.sort_by(|a, b| b.0.cmp(&a.0));
+                                for (_, tuple) in result {
+                                    output.push((tuple.clone(), R::one()));
+                                }
+                            } else {
+                                // Top k smallest with threshold: use max-heap
+                                let mut heap: BinaryHeap<(OrdF64, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
+
+                                for t in &tuples {
+                                    let score_val = t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64);
+                                    // Filter: keep if score <= threshold
+                                    if score_val > *threshold {
+                                        continue;
+                                    }
+                                    let score = OrdF64(score_val);
+                                    if heap.len() < *k {
+                                        heap.push((score, *t));
+                                    } else if let Some(&(max_score, _)) = heap.peek() {
+                                        if score < max_score {
+                                            heap.pop();
+                                            heap.push((score, *t));
+                                        }
+                                    }
+                                }
+
+                                // Extract, sort ascending, and output
+                                let mut result: Vec<_> = heap.into_iter().collect();
+                                result.sort_by(|a, b| a.0.cmp(&b.0));
+                                for (_, tuple) in result {
+                                    output.push((tuple.clone(), R::one()));
+                                }
+                            }
+                        }
+                        AggregateFunction::WithinRadius { distance_col, max_distance } => {
+                            // Keep all tuples where distance_col <= max_distance
+                            for tuple in &tuples {
+                                let dist = tuple.get(*distance_col)
+                                    .map_or(f64::INFINITY, super::value::Value::to_f64);
+                                if dist <= *max_distance {
+                                    output.push(((*tuple).clone(), R::one()));
+                                }
+                            }
+                        }
+                        _ => {} // Standard aggregates handled below
+                    }
+                }
+            } else {
+                // Standard aggregation - output one row per group
+                let mut agg_values: Vec<Value> = Vec::new();
+
+                for (func, col_idx) in &aggs_clone {
+                    let agg_result = match func {
+                        AggregateFunction::Count => {
+                            Value::Int64(tuples.len() as i64)
+                        }
+                        AggregateFunction::CountDistinct => {
+                            // Count unique values in the column
+                            let unique_values: std::collections::HashSet<_> = tuples
+                                .iter()
+                                .filter_map(|t| t.get(*col_idx).cloned())
+                                .collect();
+                            Value::Int64(unique_values.len() as i64)
+                        }
+                        AggregateFunction::Sum => {
+                            // Use saturating arithmetic to handle overflow safely
+                            // This processes ALL tuples and saturates at boundaries
+                            let mut sum: i64 = 0;
+                            let mut overflow = false;
+                            for t in &tuples {
+                                let val = t.get(*col_idx).map_or(0, super::value::Value::to_i64);
+                                let old_sum = sum;
+                                sum = sum.saturating_add(val);
+                                // Detect if saturation occurred
+                                if !overflow && sum != old_sum.wrapping_add(val) {
+                                    overflow = true;
+                                }
+                            }
+                            if overflow {
+                                // Log warning but continue with saturated value
+                                // This matches SQL behavior for overflow
+                                eprintln!("Warning: Integer overflow in SUM aggregation, result saturated");
+                            }
+                            Value::Int64(sum)
+                        }
+                        AggregateFunction::Min => {
+                            let min = tuples
+                                .iter()
+                                .filter_map(|t| t.get(*col_idx))
+                                .min()
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            min
+                        }
+                        AggregateFunction::Max => {
+                            let max = tuples
+                                .iter()
+                                .filter_map(|t| t.get(*col_idx))
+                                .max()
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            max
+                        }
+                        AggregateFunction::Avg => {
+                            let count = tuples.len() as f64;
+                            if count == 0.0 {
+                                Value::Null // Guard against division by zero
+                            } else {
+                                let sum: f64 = tuples
+                                    .iter()
+                                    .map(|t| t.get(*col_idx).map_or(0.0, super::value::Value::to_f64))
+                                    .sum();
+                                Value::Float64(sum / count)
+                            }
+                        }
+                        // Ranking aggregates handled above
+                        _ => continue,
+                    };
+                    agg_values.push(agg_result);
+                }
+
+                // Build output tuple: group key columns + aggregate values
+                let mut result_values: Vec<Value> = key.values().to_vec();
+                result_values.extend(agg_values);
+                let result = Tuple::new(result_values);
+
+                output.push((result, R::one()));
+            }
+        })
+        // Extract just the result tuple from (key, result) pairs
+        .map(|(_key, result)| result)
+    }
+
+    /// Generate compute node (production: vector functions and expressions)
+    ///
+    /// Computes new columns from expressions and appends them to input tuples.
