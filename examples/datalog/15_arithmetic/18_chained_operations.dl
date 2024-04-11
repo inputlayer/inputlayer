@@ -1,0 +1,25 @@
+% Test: Chained arithmetic operations
+
+.kg create test_chained_n15t18
+.kg use test_chained_n15t18
+
++values[(10,), (20,), (30,)].
+
+% Chained addition: X + 1 + 2 + 3
+result_add(X, Y) :- values(X), Y = X + 1 + 2 + 3.
+?- result_add(X, Y).
+
+% Chained subtraction: X - 5 - 3
+result_sub(X, Y) :- values(X), Y = X - 5 - 3.
+?- result_sub(X, Y).
+
+% Mixed operations: X + 10 - 5 + 2
+result_mixed(X, Y) :- values(X), Y = X + 10 - 5 + 2.
+?- result_mixed(X, Y).
+
+% Multiplication chain: X * 2 * 3
+result_mul(X, Y) :- values(X), Y = X * 2 * 3.
+?- result_mul(X, Y).
+
+.kg use default
+.kg drop test_chained_n15t18
