@@ -556,7 +556,7 @@ impl CodeGenerator {
             let first = Self::extract_minmax_aggregation(&recursive_inputs[0]);
             if let Some(ref first_agg) = first {
                 let all_same = recursive_inputs[1..].iter().all(|ri| {
-                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a != *first_agg)
+                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a == *first_agg)
                 });
                 if all_same {
                     first
@@ -2208,7 +2208,6 @@ impl CodeGenerator {
                 current_tuple = Tuple::new(values);
             }
 
-            // TODO: verify this condition
             if std::env::var("IL_DEBUG").is_ok() {
                 eprintln!("DEBUG Compute: output = {:?}", current_tuple.values());
             }
@@ -2382,3 +2381,215 @@ impl CodeGenerator {
             }
 
             // Int8 distance functions (native, fast)
+            BuiltinFunction::EuclideanInt8 => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dist = vector_ops::euclidean_distance_int8(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::CosineInt8 => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dist = vector_ops::cosine_distance_int8(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::DotProductInt8 => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dot = vector_ops::dot_product_int8(v1, v2);
+                        return Value::Float64(dot);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::ManhattanInt8 => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dist = vector_ops::manhattan_distance_int8(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+
+            // Int8 distance functions (dequantized, accurate)
+            BuiltinFunction::EuclideanDequantized => {
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dist = vector_ops::euclidean_distance_dequantized(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::CosineDequantized => {
+                // TODO: verify this condition
+                if arg_values.len() >= 2 {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
+                        let dist = vector_ops::cosine_distance_dequantized(v1, v2);
+                        return Value::Float64(dist);
+                    }
+                }
+                Value::Null
+            }
+
+            // Int8 LSH
+            BuiltinFunction::LshBucketInt8 => {
+                // lsh_bucket_int8(vector_int8, table_idx, num_hyperplanes)
+                if arg_values.len() >= 3 {
+                    if let Some(v) = arg_values[0].as_vector_int8() {
+                        let table_idx = arg_values[1].to_i64();
+                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let bucket = vector_ops::lsh_bucket_int8(v, table_idx, num_hyperplanes);
+                        return Value::Int64(bucket);
+                    }
+                }
+                Value::Null
+            }
+
+            // Multi-probe LSH
+            BuiltinFunction::LshProbes => {
+                // lsh_probes(bucket, num_hyperplanes, num_probes) -> Vec<Int64>
+                if arg_values.len() >= 3 {
+                    let bucket = arg_values[0].to_i64();
+                    let num_hyperplanes = arg_values[1].to_i64() as usize;
+                    let num_probes = arg_values[2].to_i64() as usize;
+                    let probes = vector_ops::lsh_probes(bucket, num_hyperplanes, num_probes);
+                    // Return as a vector of f32 (since we don't have Vec<i64> Value type)
+                    // The caller can cast as needed
+                    let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
+                    return Value::vector(probes_f32);
+                }
+                Value::Null
+            }
+            BuiltinFunction::LshBucketWithDistances => {
+                // lsh_bucket_with_distances(vector, table_idx, num_hyperplanes) -> (bucket, distances)
+                // Returns bucket as Int64; distances need separate handling
+                // Returns the bucket; use lsh_multi_probe for full multi-probe functionality
+                if arg_values.len() >= 3 {
+                    if let Some(v) = arg_values[0].as_vector() {
+                        let table_idx = arg_values[1].to_i64();
+                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let (bucket, _distances) =
+                            vector_ops::lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+                        return Value::Int64(bucket);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::LshProbesRanked => {
+                // lsh_probes_ranked(bucket, distances_vec, num_probes) -> Vec<Int64>
+                // Note: distances are provided as a Vector (f32) since that's our available type
+                if arg_values.len() >= 3 {
+                    let bucket = arg_values[0].to_i64();
+                    let num_probes = arg_values[2].to_i64() as usize;
+                    if let Some(distances_f32) = arg_values[1].as_vector() {
+                        let distances: Vec<f64> =
+                            distances_f32.iter().map(|&d| f64::from(d)).collect();
+                        let probes = vector_ops::lsh_probes_ranked(bucket, &distances, num_probes);
+                        let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
+                        return Value::vector(probes_f32);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::LshMultiProbe => {
+                // lsh_multi_probe(vector, table_idx, num_hyperplanes, num_probes) -> Vec<Int64>
+                if arg_values.len() >= 4 {
+                    if let Some(v) = arg_values[0].as_vector() {
+                        let table_idx = arg_values[1].to_i64();
+                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let num_probes = arg_values[3].to_i64() as usize;
+                        let probes =
+                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
+                        let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
+                        return Value::vector(probes_f32);
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::LshMultiProbeInt8 => {
+                // lsh_multi_probe_int8(vector_int8, table_idx, num_hyperplanes, num_probes) -> Vec<Int64>
+                if arg_values.len() >= 4 {
+                    if let Some(v) = arg_values[0].as_vector_int8() {
+                        let table_idx = arg_values[1].to_i64();
+                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let num_probes = arg_values[3].to_i64() as usize;
+                        let probes = vector_ops::lsh_multi_probe_int8(
+                            v,
+                            table_idx,
+                            num_hyperplanes,
+                            num_probes,
+                        );
+                        let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
+                        return Value::vector(probes_f32);
+                    }
+                }
+                Value::Null
+            }
+
+            // Int8 vector utilities
+            BuiltinFunction::VecDimInt8 => {
+                if let Some(v) = arg_values.first().and_then(|v| v.as_vector_int8()) {
+                    return Value::Int64(v.len() as i64);
+                }
+                Value::Null
+            }
+
+            // Temporal functions
+            BuiltinFunction::TimeNow => Value::Timestamp(temporal_ops::time_now()),
+            BuiltinFunction::TimeDiff => {
+                if arg_values.len() >= 2 {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
+                        return Value::Int64(temporal_ops::time_diff(t1, t2));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeAdd => {
+                if arg_values.len() >= 2 {
+                    if let (Some(ts), Some(dur)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_i64())
+                    {
+                        return Value::Timestamp(temporal_ops::time_add(ts, dur));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeSub => {
+                // TODO: verify this condition
+                if arg_values.len() >= 2 {
+                    if let (Some(ts), Some(dur)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_i64())
+                    {
+                        return Value::Timestamp(temporal_ops::time_sub(ts, dur));
+                    }
+                }
+                Value::Null
+            }
