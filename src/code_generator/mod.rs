@@ -347,7 +347,6 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
-                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -569,7 +568,6 @@ impl CodeGenerator {
         };
 
         // Build the recursive IR, optionally stripping the aggregate
-        // TODO: verify this condition
         let effective_recursive_inputs: Vec<IRNode> = if agg_in_loop.is_some() {
             recursive_inputs
                 .iter()
@@ -586,7 +584,6 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
-        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -1127,7 +1124,6 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
-                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1184,7 +1180,6 @@ impl CodeGenerator {
                         return i >= val;
                     }
                     // Fall back to float comparison for Float64 values
-                    // TODO: verify this condition
                     if let Some(f) = v.as_f64() {
                         return f >= (val as f64);
                     }
@@ -1380,7 +1375,6 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
-                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1597,7 +1591,6 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
-                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1939,7 +1932,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1949,7 +1941,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2444,7 +2435,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::CosineDequantized => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) = (
                         arg_values[0].as_vector_int8(),
@@ -2583,7 +2573,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -2593,3 +2582,217 @@ impl CodeGenerator {
                 }
                 Value::Null
             }
+            BuiltinFunction::TimeDecay => {
+                if arg_values.len() >= 3 {
+                    if let (Some(ts), Some(now), Some(half_life)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_i64(),
+                    ) {
+                        return Value::Float64(temporal_ops::time_decay(ts, now, half_life));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeDecayLinear => {
+                if arg_values.len() >= 3 {
+                    if let (Some(ts), Some(now), Some(max_age)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_i64(),
+                    ) {
+                        return Value::Float64(temporal_ops::time_decay_linear(ts, now, max_age));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeBefore => {
+                if arg_values.len() >= 2 {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
+                        return Value::Bool(temporal_ops::time_before(t1, t2));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeAfter => {
+                if arg_values.len() >= 2 {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
+                        return Value::Bool(temporal_ops::time_after(t1, t2));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::TimeBetween => {
+                if arg_values.len() >= 3 {
+                    if let (Some(ts), Some(start), Some(end)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_timestamp(),
+                    ) {
+                        return Value::Bool(temporal_ops::time_between(ts, start, end));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::WithinLast => {
+                if arg_values.len() >= 3 {
+                    if let (Some(ts), Some(now), Some(dur)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_i64(),
+                    ) {
+                        return Value::Bool(temporal_ops::within_last(ts, now, dur));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::IntervalsOverlap => {
+                if arg_values.len() >= 4 {
+                    if let (Some(s1), Some(e1), Some(s2), Some(e2)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_timestamp(),
+                        arg_values[3].as_timestamp(),
+                    ) {
+                        return Value::Bool(temporal_ops::intervals_overlap(s1, e1, s2, e2));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::IntervalContains => {
+                if arg_values.len() >= 4 {
+                    if let (Some(s1), Some(e1), Some(s2), Some(e2)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_timestamp(),
+                        arg_values[3].as_timestamp(),
+                    ) {
+                        return Value::Bool(temporal_ops::interval_contains(s1, e1, s2, e2));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::IntervalDuration => {
+                if arg_values.len() >= 2 {
+                    if let (Some(start), Some(end)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
+                        return Value::Int64(temporal_ops::interval_duration(start, end));
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::PointInInterval => {
+                if arg_values.len() >= 3 {
+                    if let (Some(ts), Some(start), Some(end)) = (
+                        arg_values[0].as_timestamp(),
+                        arg_values[1].as_timestamp(),
+                        arg_values[2].as_timestamp(),
+                    ) {
+                        return Value::Bool(temporal_ops::point_in_interval(ts, start, end));
+                    }
+                }
+                Value::Null
+            }
+
+            // Math utility functions
+            BuiltinFunction::AbsInt64 => {
+                if let Some(x) = arg_values.first().and_then(super::value::Value::as_i64) {
+                    return Value::Int64(vector_ops::abs_i64(x));
+                }
+                // Also handle timestamp as i64
+                if let Some(x) = arg_values
+                    .first()
+                    .and_then(super::value::Value::as_timestamp)
+                {
+                    return Value::Int64(vector_ops::abs_i64(x));
+                }
+                Value::Null
+            }
+            BuiltinFunction::AbsFloat64 => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Float64(vector_ops::abs_f64(x))
+            }
+
+            // Generic math functions
+            BuiltinFunction::Abs => {
+                if let Some(val) = arg_values.first() {
+                    // Handle both int and float
+                    if let Some(x) = val.as_i64() {
+                        return Value::Int64(x.abs());
+                    }
+                    let x = val.to_f64();
+                    return Value::Float64(x.abs());
+                }
+                Value::Null
+            }
+            BuiltinFunction::Sqrt => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                if x < 0.0 {
+                    Value::Null
+                } else {
+                    Value::Float64(x.sqrt())
+                }
+            }
+            BuiltinFunction::Pow => {
+                if arg_values.len() >= 2 {
+                    let base = arg_values[0].to_f64();
+                    let exp = arg_values[1].to_f64();
+                    return Value::Float64(base.powf(exp));
+                }
+                Value::Null
+            }
+            BuiltinFunction::Log => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                if x <= 0.0 {
+                    Value::Null
+                } else {
+                    Value::Float64(x.ln())
+                }
+            }
+            BuiltinFunction::Exp => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Float64(x.exp())
+            }
+            BuiltinFunction::Sin => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Float64(x.sin())
+            }
+            BuiltinFunction::Cos => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Float64(x.cos())
+            }
+            BuiltinFunction::Tan => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Float64(x.tan())
+            }
+            BuiltinFunction::Floor => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Int64(x.floor() as i64)
+            }
+            BuiltinFunction::Ceil => {
+                let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
+                Value::Int64(x.ceil() as i64)
+            }
+            BuiltinFunction::Sign => {
+                if let Some(val) = arg_values.first() {
+                    if let Some(x) = val.as_i64() {
+                        return Value::Int64(x.signum());
+                    }
+                    let x = val.to_f64();
+                    if x == 0.0 {
+                        return Value::Int64(0);
+                    } else if x > 0.0 {
+                        return Value::Int64(1);
+                    } else {
+                        return Value::Int64(-1);
+                    }
+                }
+                Value::Null
+            }
+
+            // String functions
