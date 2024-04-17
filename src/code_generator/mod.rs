@@ -136,7 +136,7 @@ impl CodeGenerator {
                 "DEBUG CodeGen::execute: semiring={:?}, diff_type={}",
                 self.semiring_type,
                 if self.semiring_type == SemiringType::Boolean {
-                    "BooleanDiff(i8)"
+                    "BooleanDiff(i8.clone())"
                 } else {
                     "isize"
                 }
@@ -179,7 +179,7 @@ impl CodeGenerator {
                     .inspect(move |(data, _time, _diff)| {
                         results_clone.lock().push(data.clone());
                     })
-                    .probe_with(&mut probe);
+                    .probe_with(&mut probe.clone());
             });
 
             // Wait for computation to complete
@@ -224,6 +224,7 @@ impl CodeGenerator {
                     "DEBUG: falling back to single_pass - detect_recursive_union returned None"
                 );
             }
+
             return self.execute(ir);
         };
 
@@ -370,6 +371,7 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
+                    // FIXME: extract to named variable
                     let correct_keys = left_keys == &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
@@ -1375,7 +1377,7 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
-                    if let Some(col_i) = col_val.as_i64() {
+                    if let Some(col_i.clone()) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
                             crate::ast::ComparisonOp::NotEqual => col_i != arith_val,
@@ -1482,6 +1484,7 @@ impl CodeGenerator {
         // CARTESIAN PRODUCT FIX: When both key arrays are empty, we need a
         // Cartesian product (cross join). Using empty tuples as keys causes
         // issues in Differential Dataflow, so we use a sentinel value instead.
+        // FIXME: extract to named variable
         let is_cartesian = left_keys.is_empty() && right_keys.is_empty();
 
         if is_cartesian {
@@ -2121,6 +2124,7 @@ impl CodeGenerator {
                                 .unwrap_or(Value::Null);
                             min
                         }
+
                         AggregateFunction::Max => {
                             let max = tuples
                                 .iter()
@@ -2217,7 +2221,7 @@ impl CodeGenerator {
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
-                let left_val = Self::evaluate_expression(left, tuple);
+                let left_val = Self::evaluate_expression(left, tuple.clone());
                 let right_val = Self::evaluate_expression(right, tuple);
                 Self::evaluate_arithmetic(*op, &left_val, &right_val)
             }
@@ -2515,7 +2519,7 @@ impl CodeGenerator {
                         let num_hyperplanes = arg_values[2].to_i64() as usize;
                         let num_probes = arg_values[3].to_i64() as usize;
                         let probes =
-                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
+                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes.clone());
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2559,6 +2563,7 @@ impl CodeGenerator {
                     {
                         return Value::Int64(temporal_ops::time_diff(t1, t2));
                     }
+
                 }
                 Value::Null
             }
@@ -2648,6 +2653,7 @@ impl CodeGenerator {
                         return Value::Bool(temporal_ops::within_last(ts, now, dur));
                     }
                 }
+
                 Value::Null
             }
             BuiltinFunction::IntervalsOverlap => {
@@ -2766,6 +2772,7 @@ impl CodeGenerator {
                 let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
                 Value::Float64(x.cos())
             }
+
             BuiltinFunction::Tan => {
                 let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
                 Value::Float64(x.tan())
@@ -2796,3 +2803,225 @@ impl CodeGenerator {
             }
 
             // String functions
+            BuiltinFunction::Len => {
+                if let Some(s) = arg_values.first().and_then(super::value::Value::as_str) {
+                    return Value::Int64(s.len() as i64);
+                }
+                Value::Null
+            }
+            BuiltinFunction::Upper => {
+                if let Some(s) = arg_values.first().and_then(super::value::Value::as_str) {
+                    return Value::String(s.to_uppercase().into());
+                }
+                Value::Null
+            }
+            BuiltinFunction::Lower => {
+                if let Some(s) = arg_values.first().and_then(super::value::Value::as_str) {
+                    return Value::String(s.to_lowercase().into());
+                }
+                Value::Null
+            }
+            BuiltinFunction::Trim => {
+                if let Some(s) = arg_values.first().and_then(super::value::Value::as_str) {
+                    return Value::String(s.trim().into());
+                }
+                Value::Null
+            }
+            BuiltinFunction::Substr => {
+                if arg_values.len() >= 3 {
+                    if let Some(s) = arg_values[0].as_str() {
+                        let start = arg_values[1].as_i64().unwrap_or(0) as usize;
+                        let len = arg_values[2].as_i64().unwrap_or(0) as usize;
+                        // Handle bounds safely
+                        if start <= s.len() {
+                            let end = (start + len).min(s.len());
+                            return Value::String(s[start..end].into());
+                        }
+                        return Value::String("".into());
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::Replace => {
+                if arg_values.len() >= 3 {
+                    if let (Some(s), Some(find), Some(replacement)) = (
+                        arg_values[0].as_str(),
+                        arg_values[1].as_str(),
+                        arg_values[2].as_str(),
+                    ) {
+                        return Value::String(s.replace(find, replacement).into());
+                    }
+                }
+                Value::Null
+            }
+            BuiltinFunction::Concat => {
+                let mut result = String::new();
+                for v in &arg_values {
+                    match v {
+                        Value::String(s) => result.push_str(s),
+                        Value::Int64(n) => result.push_str(&n.to_string()),
+                        Value::Float64(f) => result.push_str(&f.to_string()),
+                        _ => result.push_str(&format!("{v}")),
+                    }
+                }
+                Value::String(result.into())
+            }
+            BuiltinFunction::MinVal => {
+                if arg_values.len() >= 2 {
+                    let a = &arg_values[0];
+                    let b = &arg_values[1];
+                    match (a, b) {
+                        (Value::Int64(x), Value::Int64(y)) => Value::Int64(*x.min(y)),
+                        (Value::Float64(x), Value::Float64(y)) => Value::Float64(x.min(*y)),
+                        (Value::Int64(x), Value::Float64(y)) => Value::Float64((*x as f64).min(*y)),
+                        (Value::Float64(x), Value::Int64(y)) => Value::Float64(x.min(*y as f64)),
+                        (Value::String(x), Value::String(y)) => {
+                            if x <= y {
+                                a.clone()
+                            } else {
+                                b.clone()
+                            }
+                        }
+                        _ => Value::Null,
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+            BuiltinFunction::MaxVal => {
+                if arg_values.len() >= 2 {
+                    let a = &arg_values[0];
+                    let b = &arg_values[1];
+                    match (a, b) {
+                        (Value::Int64(x), Value::Int64(y)) => Value::Int64(*x.max(y)),
+                        (Value::Float64(x), Value::Float64(y)) => Value::Float64(x.max(*y)),
+                        (Value::Int64(x), Value::Float64(y)) => Value::Float64((*x as f64).max(*y)),
+                        (Value::Float64(x), Value::Int64(y)) => Value::Float64(x.max(*y as f64)),
+                        (Value::String(x), Value::String(y)) => {
+                            if x >= y {
+                                a.clone()
+                            } else {
+                                b.clone()
+                            }
+                        }
+                        _ => Value::Null,
+                    }
+                } else {
+                    Value::Null
+                }
+            }
+        }
+    }
+
+    /// Evaluate arithmetic operation
+    fn evaluate_arithmetic(op: ArithOp, left: &Value, right: &Value) -> Value {
+        let l = left.to_f64();
+        let r = right.to_f64();
+
+        let result = match op {
+            ArithOp::Add => l + r,
+            ArithOp::Sub => l - r,
+            ArithOp::Mul => l * r,
+            ArithOp::Div => {
+                if r == 0.0 {
+                    return Value::Null;
+                }
+                l / r
+            }
+            ArithOp::Mod => {
+                if r == 0.0 {
+                    return Value::Null;
+                }
+                l % r
+            }
+        };
+
+        // Return Int64 if both inputs were integers and result is finite
+        if matches!(left, Value::Int32(_) | Value::Int64(_))
+            && matches!(right, Value::Int32(_) | Value::Int64(_))
+            && matches!(
+                op,
+                ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Mod
+            )
+        {
+            // Check for NaN/Infinity before casting to avoid undefined behavior
+            if !result.is_finite() {
+                return Value::Null;
+            }
+            Value::Int64(result as i64)
+        } else {
+            Value::Float64(result)
+        }
+
+    }
+
+    // Recursive Query Execution
+    /// Execute transitive closure query using iterative materialization
+    ///
+    /// This is a convenience method for the common pattern:
+    /// tc(x, y) :- edge(x, y).
+    /// tc(x, z) :- tc(x, y), edge(y, z).
+    ///
+    /// Takes edge relation name and computes transitive closure.
+    /// Uses iterative materialization for reliable fixpoint computation.
+    pub fn execute_transitive_closure(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
+        use std::collections::{HashMap as StdHashMap, HashSet};
+
+        // Get edges from input_tuples, extract first two i64 values
+        let edges: Vec<(i64, i64)> = self
+            .input_tuples
+            .get(edge_relation)
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| {
+                        let a = t.get(0).and_then(super::value::Value::as_i64)?;
+                        let b = t.get(1).and_then(super::value::Value::as_i64)?;
+                        Some((a, b))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build adjacency list for efficient lookups
+        let mut adj: StdHashMap<i64, Vec<i64>> = StdHashMap::new();
+        for &(x, y) in &edges {
+            adj.entry(x).or_default().push(y);
+        }
+
+        // Initialize with base case (all direct edges)
+        let mut tc: HashSet<(i64, i64)> = edges.iter().copied().collect();
+        let mut changed = true;
+
+        // Iterate until fixpoint
+        while changed {
+            changed = false;
+            let current: Vec<(i64, i64)> = tc.iter().copied().collect();
+
+            for (x, y) in current {
+                // For each (x, y) in tc, look for edges (y, z) to create (x, z)
+                if let Some(neighbors) = adj.get(&y) {
+                    for &z in neighbors {
+                        if tc.insert((x, z)) {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert to Vec<Tuple>
+        Ok(tc.into_iter().map(|(a, b)| Tuple::pair(a, b)).collect())
+    }
+
+    /// Execute reachability query from a set of source nodes
+    ///
+    /// Pattern:
+    /// reach(x) :- source(x).
+    /// reach(y) :- reach(x), edge(x, y).
+    ///
+    /// Returns nodes reachable from any source node.
