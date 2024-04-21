@@ -136,7 +136,7 @@ impl CodeGenerator {
                 "DEBUG CodeGen::execute: semiring={:?}, diff_type={}",
                 self.semiring_type,
                 if self.semiring_type == SemiringType::Boolean {
-                    "BooleanDiff(i8.clone())"
+                    "BooleanDiff(i8)"
                 } else {
                     "isize"
                 }
@@ -179,7 +179,7 @@ impl CodeGenerator {
                     .inspect(move |(data, _time, _diff)| {
                         results_clone.lock().push(data.clone());
                     })
-                    .probe_with(&mut probe.clone());
+                    .probe_with(&mut probe);
             });
 
             // Wait for computation to complete
@@ -224,7 +224,6 @@ impl CodeGenerator {
                     "DEBUG: falling back to single_pass - detect_recursive_union returned None"
                 );
             }
-
             return self.execute(ir);
         };
 
@@ -348,6 +347,7 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
+                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -371,7 +371,6 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
-                    // FIXME: extract to named variable
                     let correct_keys = left_keys == &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
@@ -586,6 +585,7 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
+        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -1126,6 +1126,7 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
+                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1377,7 +1378,8 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
-                    if let Some(col_i.clone()) = col_val.as_i64() {
+                    // TODO: verify this condition
+                    if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
                             crate::ast::ComparisonOp::NotEqual => col_i != arith_val,
@@ -1484,7 +1486,6 @@ impl CodeGenerator {
         // CARTESIAN PRODUCT FIX: When both key arrays are empty, we need a
         // Cartesian product (cross join). Using empty tuples as keys causes
         // issues in Differential Dataflow, so we use a sentinel value instead.
-        // FIXME: extract to named variable
         let is_cartesian = left_keys.is_empty() && right_keys.is_empty();
 
         if is_cartesian {
@@ -1594,6 +1595,7 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
+                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1935,6 +1937,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1944,6 +1947,7 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
+                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2124,7 +2128,6 @@ impl CodeGenerator {
                                 .unwrap_or(Value::Null);
                             min
                         }
-
                         AggregateFunction::Max => {
                             let max = tuples
                                 .iter()
@@ -2221,7 +2224,7 @@ impl CodeGenerator {
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
-                let left_val = Self::evaluate_expression(left, tuple.clone());
+                let left_val = Self::evaluate_expression(left, tuple);
                 let right_val = Self::evaluate_expression(right, tuple);
                 Self::evaluate_arithmetic(*op, &left_val, &right_val)
             }
@@ -2519,7 +2522,7 @@ impl CodeGenerator {
                         let num_hyperplanes = arg_values[2].to_i64() as usize;
                         let num_probes = arg_values[3].to_i64() as usize;
                         let probes =
-                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes.clone());
+                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2563,7 +2566,6 @@ impl CodeGenerator {
                     {
                         return Value::Int64(temporal_ops::time_diff(t1, t2));
                     }
-
                 }
                 Value::Null
             }
@@ -2578,6 +2580,7 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
+                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -2653,7 +2656,6 @@ impl CodeGenerator {
                         return Value::Bool(temporal_ops::within_last(ts, now, dur));
                     }
                 }
-
                 Value::Null
             }
             BuiltinFunction::IntervalsOverlap => {
@@ -2772,7 +2774,6 @@ impl CodeGenerator {
                 let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
                 Value::Float64(x.cos())
             }
-
             BuiltinFunction::Tan => {
                 let x = arg_values.first().map_or(0.0, super::value::Value::to_f64);
                 Value::Float64(x.tan())
@@ -2952,7 +2953,6 @@ impl CodeGenerator {
         } else {
             Value::Float64(result)
         }
-
     }
 
     // Recursive Query Execution
@@ -3004,6 +3004,7 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
+                // TODO: verify this condition
                 if let Some(neighbors) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
@@ -3025,3 +3026,306 @@ impl CodeGenerator {
     /// reach(y) :- reach(x), edge(x, y).
     ///
     /// Returns nodes reachable from any source node.
+    pub fn execute_reachability(
+        &self,
+        source_relation: &str,
+        edge_relation: &str,
+    ) -> Result<Vec<i64>, String> {
+        use std::collections::{HashMap as StdHashMap, HashSet, VecDeque};
+
+        // Get source nodes (first column only)
+        let sources: Vec<i64> = self
+            .input_tuples
+            .get(source_relation)
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| t.get(0).and_then(super::value::Value::as_i64))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Get edges from input_tuples
+        let edges: Vec<(i64, i64)> = self
+            .input_tuples
+            .get(edge_relation)
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| {
+                        let a = t.get(0).and_then(super::value::Value::as_i64)?;
+                        let b = t.get(1).and_then(super::value::Value::as_i64)?;
+                        Some((a, b))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build adjacency list
+        let mut adj: StdHashMap<i64, Vec<i64>> = StdHashMap::new();
+        for &(x, y) in &edges {
+            adj.entry(x).or_default().push(y);
+        }
+
+        // BFS from all sources
+        let mut reachable: HashSet<i64> = sources.iter().copied().collect();
+        let mut queue: VecDeque<i64> = sources.iter().copied().collect();
+
+        while let Some(node) = queue.pop_front() {
+            if let Some(neighbors) = adj.get(&node) {
+                for &neighbor in neighbors {
+                    if reachable.insert(neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+
+        Ok(reachable.into_iter().collect())
+    }
+
+    // True DD Recursion (Production Implementation)
+    /// Execute transitive closure using TRUE Differential Dataflow recursion
+    ///
+    /// This is the production-grade implementation that uses DD's `.iterative()` scope
+    /// with `SemigroupVariable` for proper semi-naive evaluation.
+    ///
+    /// ## DD Pattern
+    ///
+    /// ```text
+    /// scope.iterative::<Iter, _, _>(|inner| {
+    ///     // Create SemigroupVariable for recursive IDB
+    ///     let variable = SemigroupVariable::new(inner, Product::new((), 1));
+    ///
+    ///     // Enter base case into scope
+    ///     let base = edges.enter(inner);
+    ///
+    ///     // Recursive step: tc(x,z) :- tc(x,y), edge(y,z)
+    ///     let recursive = variable.join(&edges_keyed).map(|(y, (x, z))| (x, z));
+    ///
+    ///     // Combine base and recursive, set variable
+    ///     let next = base.concat(&recursive).distinct();
+    ///     variable.set(&next);
+    ///
+    ///     // Leave scope
+    ///     next.leave()
+    /// })
+    /// ```
+    ///
+    /// ## Why This Matters
+    ///
+    /// Unlike the manual while-loop implementation, this:
+    /// - Leverages DD's incremental computation
+    /// - Only processes NEW tuples each iteration (semi-naive)
+    /// - Properly handles timestamps and convergence
+    /// - Is the same pattern used in production `InputLayer`
+    pub fn execute_transitive_closure_dd(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let results_clone = Arc::clone(&results);
+
+        // Get edge data
+        let edges: Vec<Tuple> = self
+            .input_tuples
+            .get(edge_relation)
+            .cloned()
+            .unwrap_or_default();
+
+        if edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let edge_data = edges.clone();
+
+        // Execute DD computation with TRUE recursion
+        timely::execute_directly(move |worker| {
+            let mut probe = ProbeHandle::new();
+
+            worker.dataflow::<(), _, _>(|scope| {
+                // Load edge data as base collection
+                let edge_collection: Collection<_, Tuple, isize> =
+                    Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+
+                // Use iterative scope for recursion
+                let tc_result = scope.iterative::<Iter, _, _>(|inner| {
+                    // Create SemigroupVariable for transitive closure
+                    let variable: SemigroupVariable<_, Tuple, isize> =
+                        SemigroupVariable::new(inner, Product::new((), 1));
+
+                    // Enter edge collection into iterative scope
+                    let edges_in_scope = edge_collection.enter(inner);
+
+                    // Base case: tc(x, y) :- edge(x, y)
+                    // (already have edges in scope)
+
+                    // Recursive case: tc(x, z) :- tc(x, y), edge(y, z)
+                    // Key tc by second column (y) for join with edge(y, z)
+                    let tc_keyed = variable.map(|tuple| {
+                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                        let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                        (Tuple::new(vec![y]), x) // Key by y, value is x
+                    });
+
+                    // Key edges by first column (y) for join
+                    let edges_keyed = edges_in_scope.map(|tuple| {
+                        let y = tuple.get(0).cloned().unwrap_or(Value::Null);
+                        let z = tuple.get(1).cloned().unwrap_or(Value::Null);
+                        (Tuple::new(vec![y]), z) // Key by y, value is z
+                    });
+
+                    // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
+                    let recursive = tc_keyed
+                        .join(&edges_keyed)
+                        .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+
+                    // Combine base case and recursive case
+                    let next = edges_in_scope.concat(&recursive).distinct();
+
+                    // Set variable for next iteration
+                    variable.set(&next);
+
+                    // Leave scope with final result
+                    next.leave()
+                });
+
+                // Capture results
+                tc_result
+                    .inner
+                    .inspect(move |(data, _time, _diff)| {
+                        results_clone.lock().push(data.clone());
+                    })
+                    .probe_with(&mut probe);
+            });
+
+            // Wait for computation to complete
+            while !probe.done() {
+                worker.step();
+            }
+        });
+
+        // Extract results
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
+        let final_results = Arc::try_unwrap(results)
+            .map_err(|_| "Failed to extract results")?
+            .into_inner();
+
+        Ok(final_results)
+    }
+
+    /// Execute reachability using TRUE Differential Dataflow recursion
+    ///
+    /// Pattern:
+    /// reach(x) :- source(x).
+    /// reach(y) :- reach(x), edge(x, y).
+    ///
+    /// Uses DD's `.iterative()` scope for proper semi-naive evaluation.
+    pub fn execute_reachability_dd(
+        &self,
+        source_relation: &str,
+        edge_relation: &str,
+    ) -> Result<Vec<Tuple>, String> {
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let results_clone = Arc::clone(&results);
+
+        // Get source nodes
+        let sources: Vec<Tuple> = self
+            .input_tuples
+            .get(source_relation)
+            .cloned()
+            .unwrap_or_default();
+
+        // Get edges
+        let edges: Vec<Tuple> = self
+            .input_tuples
+            .get(edge_relation)
+            .cloned()
+            .unwrap_or_default();
+
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let source_data = sources.clone();
+        let edge_data = edges.clone();
+
+        // Execute DD computation with TRUE recursion
+        timely::execute_directly(move |worker| {
+            let mut probe = ProbeHandle::new();
+
+            worker.dataflow::<(), _, _>(|scope| {
+                // Load source and edge collections
+                let source_collection: Collection<_, Tuple, isize> =
+                    Collection::new(source_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+                let edge_collection: Collection<_, Tuple, isize> =
+                    Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+
+                // Use iterative scope for recursion
+                let reach_result = scope.iterative::<Iter, _, _>(|inner| {
+                    // Create SemigroupVariable for reachable nodes
+                    let variable: SemigroupVariable<_, Tuple, isize> =
+                        SemigroupVariable::new(inner, Product::new((), 1));
+
+                    // Enter collections into iterative scope
+                    let sources_in_scope = source_collection.enter(inner);
+                    let edges_in_scope = edge_collection.enter(inner);
+
+                    // Base case: reach(x) :- source(x)
+                    // (sources_in_scope is the base case)
+
+                    // Recursive case: reach(y) :- reach(x), edge(x, y)
+                    // Key reach by its value (x) for join with edge(x, y)
+                    let reach_keyed = variable.map(|tuple| {
+                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                        (Tuple::new(vec![x.clone()]), x) // Key and value are both x
+                    });
+
+                    // Key edges by first column (x) for join
+                    let edges_keyed = edges_in_scope.map(|tuple| {
+                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                        let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                        (Tuple::new(vec![x]), y) // Key by x, value is y
+                    });
+
+                    // Join: reach(x) JOIN edge(x, y) -> reach(y)
+                    let recursive = reach_keyed
+                        .join(&edges_keyed)
+                        .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
+
+                    // Combine base case and recursive case
+                    let next = sources_in_scope.concat(&recursive).distinct();
+
+                    // Set variable for next iteration
+                    variable.set(&next);
+
+                    // Leave scope with final result
+                    next.leave()
+                });
+
+                // Capture results
+                reach_result
+                    .inner
+                    .inspect(move |(data, _time, _diff)| {
+                        results_clone.lock().push(data.clone());
+                    })
+                    .probe_with(&mut probe);
+            });
+
+            // Wait for computation to complete
+            while !probe.done() {
+                worker.step();
+            }
+        });
+
+        // Extract results
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
+        let final_results = Arc::try_unwrap(results)
+            .map_err(|_| "Failed to extract results")?
+            .into_inner();
+
+        Ok(final_results)
+    }
+}
+
