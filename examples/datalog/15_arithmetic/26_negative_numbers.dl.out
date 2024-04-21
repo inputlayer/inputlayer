@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_negative_n15t26
+Knowledge graph 'test_negative_n15t26' created.
+Switched to knowledge graph: test_negative_n15t26
+> .kg use test_negative_n15t26
+Switched to knowledge graph: test_negative_n15t26
+> +nums[(-5,), (0,), (5,)].
+Inserted 3 fact(s) into 'nums'.
+> doubled(X, Y) :- nums(X), Y = X * 2.
+3 rows:
+  (-5, -10)
+  (0, 0)
+  (5, 10)
+(session: 1 rule(s))
+> inverted(X, Y) :- nums(X), Y = 0 - X.
+3 rows:
+  (-5, 5)
+  (0, 0)
+  (5, -5)
+(session: 2 rule(s))
+> ?- doubled(X, Y).
+3 rows:
+  (-5, -10)
+  (0, 0)
+  (5, 10)
+> ?- inverted(X, Y).
+3 rows:
+  (-5, 5)
+  (0, 0)
+  (5, -5)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_negative_n15t26
+Knowledge graph 'test_negative_n15t26' dropped.
