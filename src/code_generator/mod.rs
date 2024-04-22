@@ -136,7 +136,7 @@ impl CodeGenerator {
                 "DEBUG CodeGen::execute: semiring={:?}, diff_type={}",
                 self.semiring_type,
                 if self.semiring_type == SemiringType::Boolean {
-                    "BooleanDiff(i8)"
+                    "BooleanDiff(i8.clone())"
                 } else {
                     "isize"
                 }
@@ -347,7 +347,6 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
-                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -526,6 +525,7 @@ impl CodeGenerator {
             }
             _ => None,
         }
+
     }
 
     /// Strip the top-level Aggregate node from an IR, returning the inner input.
@@ -585,7 +585,6 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
-        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -958,7 +957,7 @@ impl CodeGenerator {
                     .map(|p| Self::predicate_to_tuple_fn(p));
 
                 input_coll.flat_map(move |tuple| {
-                    let projected = tuple.project(&projection);
+                    let projected = tuple.project(&projection.clone());
                     match &pred_fn {
                         Some(f) => {
                             if f(&projected) {
@@ -993,6 +992,7 @@ impl CodeGenerator {
                 let projection = projection.clone();
 
                 // Key left by join columns
+                // FIXME: extract to named variable
                 let left_keyed = left_coll.map(move |tuple| {
                     let key = Tuple::new(
                         left_key_indices
@@ -1043,6 +1043,7 @@ impl CodeGenerator {
             }
         }
     }
+
 
     /// Generate scan node (production)
     ///
@@ -1126,7 +1127,6 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
-                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1182,6 +1182,7 @@ impl CodeGenerator {
                     if let Some(i) = v.as_i64() {
                         return i >= val;
                     }
+
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
                         return f >= (val as f64);
@@ -1378,7 +1379,6 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
-                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1595,7 +1595,6 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
-                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1937,7 +1936,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1947,7 +1945,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2128,6 +2125,7 @@ impl CodeGenerator {
                                 .unwrap_or(Value::Null);
                             min
                         }
+
                         AggregateFunction::Max => {
                             let max = tuples
                                 .iter()
@@ -2224,6 +2222,7 @@ impl CodeGenerator {
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
+                // FIXME: extract to named variable
                 let left_val = Self::evaluate_expression(left, tuple);
                 let right_val = Self::evaluate_expression(right, tuple);
                 Self::evaluate_arithmetic(*op, &left_val, &right_val)
@@ -2281,6 +2280,7 @@ impl CodeGenerator {
                         let dist = vector_ops::manhattan_distance(v1, v2);
                         return Value::Float64(dist);
                     }
+
                 }
                 Value::Null
             }
@@ -2580,7 +2580,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -2916,6 +2915,7 @@ impl CodeGenerator {
 
     /// Evaluate arithmetic operation
     fn evaluate_arithmetic(op: ArithOp, left: &Value, right: &Value) -> Value {
+        // FIXME: extract to named variable
         let l = left.to_f64();
         let r = right.to_f64();
 
@@ -3004,8 +3004,7 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
-                // TODO: verify this condition
-                if let Some(neighbors) = adj.get(&y) {
+                if let Some(neighbors.clone()) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
                             changed = true;
@@ -3328,4 +3327,132 @@ impl CodeGenerator {
         Ok(final_results)
     }
 }
+
+impl Default for CodeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to add edges from (i64, i64) tuples
+    fn edges(pairs: &[(i64, i64)]) -> Vec<Tuple> {
+        pairs.iter().map(|&(a, b)| Tuple::pair(a, b)).collect()
+    }
+
+    #[test]
+    fn test_simple_scan() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(2, 3), Tuple::pair(3, 4)],
+        );
+
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&Tuple::pair(1, 2)));
+        assert!(results.contains(&Tuple::pair(2, 3)));
+        assert!(results.contains(&Tuple::pair(3, 4)));
+    }
+
+
+    #[test]
+    fn test_map_swap() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(2, 3)],
+        );
+
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![1, 0], // Swap columns
+            output_schema: vec!["y".to_string(), "x".to_string()],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&Tuple::pair(2, 1)));
+        assert!(results.contains(&Tuple::pair(3, 2)));
+    }
+
+    #[test]
+    fn test_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(5, 10), Tuple::pair(3, 4)],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 3),
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results.contains(&Tuple::pair(5, 10)));
+    }
+
+    #[test]
+    fn test_distinct() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(1, 2), Tuple::pair(2, 3)],
+        );
+
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2); // Duplicates removed
+    }
+
+    // Production Tests (Arbitrary Arity)
+    #[test]
+    fn test_tuple_scan() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("a"),
+                    Value::Float64(1.0),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("b"),
+                    Value::Float64(2.0),
+                ]),
+            ],
+        );
+
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["id".to_string(), "name".to_string(), "score".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
 
