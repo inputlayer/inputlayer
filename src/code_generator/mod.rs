@@ -136,7 +136,7 @@ impl CodeGenerator {
                 "DEBUG CodeGen::execute: semiring={:?}, diff_type={}",
                 self.semiring_type,
                 if self.semiring_type == SemiringType::Boolean {
-                    "BooleanDiff(i8.clone())"
+                    "BooleanDiff(i8)"
                 } else {
                     "isize"
                 }
@@ -525,7 +525,6 @@ impl CodeGenerator {
             }
             _ => None,
         }
-
     }
 
     /// Strip the top-level Aggregate node from an IR, returning the inner input.
@@ -957,7 +956,7 @@ impl CodeGenerator {
                     .map(|p| Self::predicate_to_tuple_fn(p));
 
                 input_coll.flat_map(move |tuple| {
-                    let projected = tuple.project(&projection.clone());
+                    let projected = tuple.project(&projection);
                     match &pred_fn {
                         Some(f) => {
                             if f(&projected) {
@@ -992,7 +991,6 @@ impl CodeGenerator {
                 let projection = projection.clone();
 
                 // Key left by join columns
-                // FIXME: extract to named variable
                 let left_keyed = left_coll.map(move |tuple| {
                     let key = Tuple::new(
                         left_key_indices
@@ -1043,7 +1041,6 @@ impl CodeGenerator {
             }
         }
     }
-
 
     /// Generate scan node (production)
     ///
@@ -1182,7 +1179,6 @@ impl CodeGenerator {
                     if let Some(i) = v.as_i64() {
                         return i >= val;
                     }
-
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
                         return f >= (val as f64);
@@ -2125,7 +2121,6 @@ impl CodeGenerator {
                                 .unwrap_or(Value::Null);
                             min
                         }
-
                         AggregateFunction::Max => {
                             let max = tuples
                                 .iter()
@@ -2222,7 +2217,6 @@ impl CodeGenerator {
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
-                // FIXME: extract to named variable
                 let left_val = Self::evaluate_expression(left, tuple);
                 let right_val = Self::evaluate_expression(right, tuple);
                 Self::evaluate_arithmetic(*op, &left_val, &right_val)
@@ -2280,7 +2274,6 @@ impl CodeGenerator {
                         let dist = vector_ops::manhattan_distance(v1, v2);
                         return Value::Float64(dist);
                     }
-
                 }
                 Value::Null
             }
@@ -2915,7 +2908,6 @@ impl CodeGenerator {
 
     /// Evaluate arithmetic operation
     fn evaluate_arithmetic(op: ArithOp, left: &Value, right: &Value) -> Value {
-        // FIXME: extract to named variable
         let l = left.to_f64();
         let r = right.to_f64();
 
@@ -3004,7 +2996,7 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
-                if let Some(neighbors.clone()) = adj.get(&y) {
+                if let Some(neighbors) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
                             changed = true;
@@ -3363,7 +3355,6 @@ mod tests {
         assert!(results.contains(&Tuple::pair(3, 4)));
     }
 
-
     #[test]
     fn test_map_swap() {
         let mut codegen = CodeGenerator::new();
@@ -3454,5 +3445,67 @@ mod tests {
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_tuple_projection() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(5), Value::Int32(6)]),
+            ],
+        );
+
+        // Project to [2, 0] - third column, then first column
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            }),
+            projection: vec![2, 0],
+            output_schema: vec!["c".to_string(), "a".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // First tuple: (1,2,3) projected to (3,1)
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(3)) && t.get(1) == Some(&Value::Int32(1))));
+        // Second tuple: (4,5,6) projected to (6,4)
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(6)) && t.get(1) == Some(&Value::Int32(4))));
+    }
+
+    #[test]
+    fn test_tuple_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(50)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 2),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+        // Should contain (5, 50) and (3, 30), not (1, 10)
+        assert!(results
+            .iter()
+            .all(|t| t.get(0).and_then(|v| v.as_i32()).unwrap_or(0) > 2));
     }
 
