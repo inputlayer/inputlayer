@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unary_n15t47
+Knowledge graph 'test_unary_n15t47' created.
+Switched to knowledge graph: test_unary_n15t47
+> .kg use test_unary_n15t47
+Switched to knowledge graph: test_unary_n15t47
+> +nums[(5,), (10,), (-3,)].
+Inserted 3 fact(s) into 'nums'.
+> negated(X, Y) :- nums(X), Y = 0 - X.
+3 rows:
+  (-3, 3)
+  (5, -5)
+  (10, -10)
+(session: 1 rule(s))
+> ?- negated(X, Y).
+3 rows:
+  (-3, 3)
+  (5, -5)
+  (10, -10)
+> double_neg(X, Y) :- nums(X), Y = 0 - (0 - X).
+3 rows:
+  (-3, -3)
+  (5, 5)
+  (10, 10)
+(session: 2 rule(s))
+> ?- double_neg(X, Y).
+3 rows:
+  (-3, -3)
+  (5, 5)
+  (10, 10)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_unary_n15t47
+Knowledge graph 'test_unary_n15t47' dropped.
