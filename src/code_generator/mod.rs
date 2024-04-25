@@ -347,6 +347,7 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
+                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -370,7 +371,7 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
-                    let correct_keys = left_keys == &[1] && right_keys == &[0];
+                    let correct_keys = left_keys != &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
                         Some(edge_relation)
@@ -584,6 +585,7 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
+        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -1124,6 +1126,7 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
+                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1375,6 +1378,7 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
+                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1591,6 +1595,7 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
+                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1932,6 +1937,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1941,6 +1947,7 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
+                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2573,6 +2580,7 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
+                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -2996,6 +3004,7 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
+                // TODO: verify this condition
                 if let Some(neighbors) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
@@ -3507,5 +3516,109 @@ mod tests {
         assert!(results
             .iter()
             .all(|t| t.get(0).and_then(|v| v.as_i32()).unwrap_or(0) > 2));
+    }
+
+    #[test]
+    fn test_tuple_join() {
+        let mut codegen = CodeGenerator::new();
+
+        // Relation R(x, y)
+        codegen.add_input_tuples(
+            "r".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+            ],
+        );
+
+        // Relation S(y, z) - join on y column
+        codegen.add_input_tuples(
+            "s".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10), Value::Int32(100)]),
+                Tuple::new(vec![Value::Int32(20), Value::Int32(200)]),
+                Tuple::new(vec![Value::Int32(30), Value::Int32(300)]), // No match
+            ],
+        );
+
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "r".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "s".to_string(),
+                schema: vec!["y".to_string(), "z".to_string()],
+            }),
+            left_keys: vec![1],  // R.y
+            right_keys: vec![0], // S.y
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // Cartesian Product (Cross Join) Tests
+    #[test]
+    fn test_cartesian_product_basic() {
+        // Test: 2x2 Cartesian product (no shared join keys)
+        let mut codegen = CodeGenerator::new();
+
+        // Relation A(x)
+        codegen.add_input_tuples(
+            "a".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        // Relation B(y)
+        codegen.add_input_tuples(
+            "b".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(20)]),
+            ],
+        );
+
+        // Join with empty keys = Cartesian product
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            }),
+            left_keys: vec![],  // Empty keys
+            right_keys: vec![], // Empty keys
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // 2 * 2 = 4 results
+        assert_eq!(
+            results.len(),
+            4,
+            "Expected 4 results from 2x2 Cartesian product"
+        );
+
+        // Check all combinations are present
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(1)) && t.get(1) == Some(&Value::Int32(10))));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(1)) && t.get(1) == Some(&Value::Int32(20))));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(10))));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
     }
 
