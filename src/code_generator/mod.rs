@@ -371,7 +371,7 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
-                    let correct_keys = left_keys == &[1] && right_keys == &[0];
+                    let correct_keys = left_keys != &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
                         Some(edge_relation)
@@ -3864,5 +3864,70 @@ mod tests {
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|t| t.arity() == 3));
+    }
+
+    #[test]
+    fn test_union_tuples() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r1".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+        );
+        codegen.add_input_tuples(
+            "r2".to_string(),
+            vec![Tuple::new(vec![Value::Int32(3), Value::Int32(4)])],
+        );
+
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "r1".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "r2".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                },
+            ],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // Recursive Query Tests
+    #[test]
+    fn test_transitive_closure() {
+        let mut codegen = CodeGenerator::new();
+
+        // Graph: 1 -> 2 -> 3 -> 4
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
+
+        let results = codegen.execute_transitive_closure("edge").unwrap();
+
+        // Should contain:
+        // Direct: (1,2), (2,3), (3,4)
+        // 2-hop: (1,3), (2,4)
+        // 3-hop: (1,4)
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(2, 3)), "Missing (2,3)");
+        assert!(results.contains(&Tuple::pair(3, 4)), "Missing (3,4)");
+        assert!(
+            results.contains(&Tuple::pair(1, 3)),
+            "Missing (1,3) - 2-hop path"
+        );
+        assert!(
+            results.contains(&Tuple::pair(2, 4)),
+            "Missing (2,4) - 2-hop path"
+        );
+        assert!(
+            results.contains(&Tuple::pair(1, 4)),
+            "Missing (1,4) - 3-hop path"
+        );
     }
 
