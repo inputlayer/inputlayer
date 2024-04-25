@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_comb_expr_n15t41
+Knowledge graph 'test_comb_expr_n15t41' created.
+Switched to knowledge graph: test_comb_expr_n15t41
+> .kg use test_comb_expr_n15t41
+Switched to knowledge graph: test_comb_expr_n15t41
+> +data[(5, 2), (10, 3), (15, 4)].
+Inserted 3 fact(s) into 'data'.
+> big_product(A, B) :- data(A, B), A * B > 20.
+2 rows:
+  (10, 3)
+  (15, 4)
+(session: 1 rule(s))
+> ?- big_product(A, B).
+2 rows:
+  (10, 3)
+  (15, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_comb_expr_n15t41
+Knowledge graph 'test_comb_expr_n15t41' dropped.

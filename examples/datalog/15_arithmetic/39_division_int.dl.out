@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_div_n15t39
+Knowledge graph 'test_int_div_n15t39' created.
+Switched to knowledge graph: test_int_div_n15t39
+> .kg use test_int_div_n15t39
+Switched to knowledge graph: test_int_div_n15t39
+> +pairs[(10, 3), (7, 2), (15, 4), (20, 6)].
+Inserted 4 fact(s) into 'pairs'.
+> quot(A, B, Q) :- pairs(A, B), Q = A / B.
+4 rows:
+  (7, 2, 3.5)
+  (10, 3, 3.3333333333333335)
+  (15, 4, 3.75)
+  (20, 6, 3.3333333333333335)
+(session: 1 rule(s))
+> ?- quot(A, B, Q).
+4 rows:
+  (7, 2, 3.5)
+  (10, 3, 3.3333333333333335)
+  (15, 4, 3.75)
+  (20, 6, 3.3333333333333335)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_int_div_n15t39
+Knowledge graph 'test_int_div_n15t39' dropped.
