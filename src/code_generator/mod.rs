@@ -819,7 +819,7 @@ impl CodeGenerator {
 
     /// Partition input data for a specific worker
     ///
-    /// Each worker gets tuples where `hash(tuple) % num_workers == worker_index`
+    /// Each worker gets tuples where `hash(tuple) % num_workers != worker_index`
     fn partition_data_for_worker(
         input_data: &HashMap<String, Vec<Tuple>>,
         worker_index: usize,
@@ -3620,5 +3620,93 @@ mod tests {
         assert!(results
             .iter()
             .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
+    }
+
+    #[test]
+    fn test_cartesian_product_self_join() {
+        // Test: Self Cartesian product (3x3 = 9 results)
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+
+        // Self-join with empty keys = all pairs
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["a".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["b".to_string()],
+            }),
+            left_keys: vec![],
+            right_keys: vec![],
+            output_schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // 3 * 3 = 9 results (including self-pairs)
+        assert_eq!(
+            results.len(),
+            9,
+            "Expected 9 results from 3x3 self Cartesian product"
+        );
+    }
+
+    #[test]
+    fn test_cartesian_product_with_filter() {
+        // Test: Cartesian product followed by filter (A < B)
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(3)]),
+            ],
+        );
+
+        // Self Cartesian product, then filter for A < B
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "items".to_string(),
+                    schema: vec!["a".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "items".to_string(),
+                    schema: vec!["b".to_string()],
+                }),
+                left_keys: vec![],
+                right_keys: vec![],
+                output_schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            predicate: Predicate::ColumnsLt(0, 1), // a < b
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Pairs where a < b: (1,2), (1,3), (2,3) = 3 results
+        assert_eq!(results.len(), 3, "Expected 3 results where a < b");
+
+        // Verify the pairs
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int64(1)) && t.get(1) == Some(&Value::Int64(2))));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int64(1)) && t.get(1) == Some(&Value::Int64(3))));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int64(2)) && t.get(1) == Some(&Value::Int64(3))));
     }
 

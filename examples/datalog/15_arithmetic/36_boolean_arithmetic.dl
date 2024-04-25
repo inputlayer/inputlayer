@@ -1,0 +1,12 @@
+% Test: Boolean in arithmetic context
+
+.kg create test_bool_arith_n15t36
+.kg use test_bool_arith_n15t36
+
++flags[(1, true), (2, false), (3, true)].
+
+% Just query the flags
+?- flags(Id, Val).
+
+.kg use default
+.kg drop test_bool_arith_n15t36

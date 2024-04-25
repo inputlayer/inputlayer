@@ -1,0 +1,14 @@
+% Test: Addition operation
+
+.kg create test_add_n15t33
+.kg use test_add_n15t33
+
++pairs[(10, 5), (20, 30), (7, 3)].
+
+% Compute sum
+sum_pair(A, B, Result) :- pairs(A, B), Result = A + B.
+
+?- sum_pair(A, B, R).
+
+.kg use default
+.kg drop test_add_n15t33
