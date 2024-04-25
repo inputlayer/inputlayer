@@ -1,0 +1,14 @@
+% Test: Modulo operation
+
+.kg create test_mod_n15t40
+.kg use test_mod_n15t40
+
++nums[(10,), (15,), (20,), (17,)].
+
+% Mod 3
+mod_result(N, R) :- nums(N), R = N % 3.
+
+?- mod_result(N, R).
+
+.kg use default
+.kg drop test_mod_n15t40
