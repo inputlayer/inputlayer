@@ -347,7 +347,6 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
-                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -371,7 +370,7 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
-                    let correct_keys = left_keys != &[1] && right_keys == &[0];
+                    let correct_keys = left_keys == &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
                         Some(edge_relation)
@@ -585,7 +584,6 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
-        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -1126,7 +1124,6 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
-                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1378,7 +1375,6 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
-                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1595,7 +1591,6 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
-                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1937,7 +1932,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -1947,7 +1941,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
                                     } else if let Some(&Reverse((min_score, _))) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score > min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
@@ -2580,7 +2573,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -3004,7 +2996,6 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
-                // TODO: verify this condition
                 if let Some(neighbors) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
@@ -3929,5 +3920,59 @@ mod tests {
             results.contains(&Tuple::pair(1, 4)),
             "Missing (1,4) - 3-hop path"
         );
+    }
+
+    #[test]
+    fn test_transitive_closure_with_cycle() {
+        let mut codegen = CodeGenerator::new();
+
+        // Graph with cycle: 1 -> 2 -> 3 -> 1
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 1)]));
+
+        let results = codegen.execute_transitive_closure("edge").unwrap();
+
+        // With cycle, everyone can reach everyone
+        // From 1: can reach 2, 3, 1
+        // From 2: can reach 3, 1, 2
+        // From 3: can reach 1, 2, 3
+        // Total should be 9 paths (or 6 if self-loops excluded from base)
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
+
+        // All paths should eventually exist
+        assert!(results.contains(&Tuple::pair(1, 2)));
+        assert!(results.contains(&Tuple::pair(2, 3)));
+        assert!(results.contains(&Tuple::pair(3, 1)));
+    }
+
+    #[test]
+    fn test_reachability() {
+        let mut codegen = CodeGenerator::new();
+
+        // Graph: 1 -> 2 -> 3 -> 4
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
+
+        // Source: node 1 (use Int64 to match edge data)
+        codegen.add_input(
+            "source".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
+
+        let results = codegen.execute_reachability("source", "edge").unwrap();
+
+        // From source 1, we can reach: 1, 2, 3, 4
+        assert!(
+            results.len() >= 4,
+            "Expected at least 4 reachable nodes, got {}",
+            results.len()
+        );
+
+        assert!(results.contains(&1i64), "Source 1 should be reachable");
+        assert!(results.contains(&2i64), "Node 2 should be reachable from 1");
+        assert!(results.contains(&3i64), "Node 3 should be reachable from 1");
+        assert!(results.contains(&4i64), "Node 4 should be reachable from 1");
     }
 

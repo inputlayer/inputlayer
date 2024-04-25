@@ -1,0 +1,14 @@
+% Test: Modulo with negative numbers
+
+.kg create test_mod_neg_n15t46
+.kg use test_mod_neg_n15t46
+
++numbers[(-7,), (-5,), (0,), (5,), (7,)].
+
+% Modulo 3 for all numbers
+mod_result(X, Y) :- numbers(X), Y = X % 3.
+
+?- mod_result(X, Y).
+
+.kg use default
+.kg drop test_mod_neg_n15t46

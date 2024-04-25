@@ -1,0 +1,25 @@
+% Test: Unary minus and negative operations
+
+.kg create test_unary_minus_n15t44
+.kg use test_unary_minus_n15t44
+
+% Base data
++vals[(5,), (10,), (15,)].
+
+% Subtract to get negative
+neg_result(X, Y) :- vals(X), Y = X - 20.
+
+?- neg_result(X, Y).
+
+% Multiply by -1
+negate(X, Y) :- vals(X), Y = X * -1.
+
+?- negate(X, Y).
+
+% Double negative operation
+double_neg(X, Y) :- vals(X), Y = 0 - (0 - X).
+
+?- double_neg(X, Y).
+
+.kg use default
+.kg drop test_unary_minus_n15t44
