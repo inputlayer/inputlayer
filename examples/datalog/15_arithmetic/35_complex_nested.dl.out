@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested_arith_n15t35
+Knowledge graph 'test_nested_arith_n15t35' created.
+Switched to knowledge graph: test_nested_arith_n15t35
+> .kg use test_nested_arith_n15t35
+Switched to knowledge graph: test_nested_arith_n15t35
+> +base[(2,)].
+Inserted 1 fact(s) into 'base'.
+> nested(X, Y) :- base(X), Y = ((X + 1) * 2 + 3) * 4.
+1 rows:
+  (2, 36)
+(session: 1 rule(s))
+> ?- nested(X, Y).
+1 rows:
+  (2, 36)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_nested_arith_n15t35
+Knowledge graph 'test_nested_arith_n15t35' dropped.

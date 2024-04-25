@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compare_n15t30
+Knowledge graph 'test_compare_n15t30' created.
+Switched to knowledge graph: test_compare_n15t30
+> .kg use test_compare_n15t30
+Switched to knowledge graph: test_compare_n15t30
+> +pairs[(10, 5), (3, 7), (5, 5), (8, 2)].
+Inserted 4 fact(s) into 'pairs'.
+> first_bigger(A, B) :- pairs(A, B), A > B.
+2 rows:
+  (8, 2)
+  (10, 5)
+(session: 1 rule(s))
+> equal_vals(A, B) :- pairs(A, B), A = B.
+1 rows:
+  (5, 5)
+(session: 2 rule(s))
+> ?- first_bigger(A, B).
+2 rows:
+  (8, 2)
+  (10, 5)
+> ?- equal_vals(A, B).
+1 rows:
+  (5, 5)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_compare_n15t30
+Knowledge graph 'test_compare_n15t30' dropped.
