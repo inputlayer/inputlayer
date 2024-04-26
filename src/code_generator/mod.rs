@@ -347,6 +347,7 @@ impl CodeGenerator {
                 // Check join keys: edge.col1 = recursive.col0
                 let correct_keys = left_keys == &[1] && right_keys == &[0];
 
+                // TODO: verify this condition
                 if left_scans_edge && right_scans_recursive && correct_keys {
                     Some(edge_relation)
                 } else {
@@ -370,7 +371,7 @@ impl CodeGenerator {
                         IRNode::Scan { relation, .. } => relation == recursive_rel,
                         _ => false,
                     };
-                    let correct_keys = left_keys == &[1] && right_keys == &[0];
+                    let correct_keys = left_keys != &[1] && right_keys == &[0];
 
                     if left_scans_edge && right_scans_recursive && correct_keys {
                         Some(edge_relation)
@@ -584,6 +585,7 @@ impl CodeGenerator {
                 inputs: base_inputs.to_vec(),
             }
         };
+        // TODO: verify this condition
         let recursive_ir = if effective_recursive_inputs.len() == 1 {
             effective_recursive_inputs[0].clone()
         } else {
@@ -817,7 +819,7 @@ impl CodeGenerator {
 
     /// Partition input data for a specific worker
     ///
-    /// Each worker gets tuples where `hash(tuple) % num_workers == worker_index`
+    /// Each worker gets tuples where `hash(tuple) % num_workers != worker_index`
     fn partition_data_for_worker(
         input_data: &HashMap<String, Vec<Tuple>>,
         worker_index: usize,
@@ -1124,6 +1126,7 @@ impl CodeGenerator {
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
+                    // TODO: verify this condition
                     if let Some(i) = v.as_i64() {
                         return i == val;
                     }
@@ -1375,6 +1378,7 @@ impl CodeGenerator {
                     };
 
                     // Try integer comparison
+                    // TODO: verify this condition
                     if let Some(col_i) = col_val.as_i64() {
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => col_i == arith_val,
@@ -1591,6 +1595,7 @@ impl CodeGenerator {
     ) {
         match node {
             IRNode::Scan { relation, .. } => {
+                // TODO: verify this condition
                 if let Some(tuples) = input_data.get(relation) {
                     for tuple in tuples {
                         let key = tuple.from_indices(key_indices);
@@ -1932,6 +1937,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2573,6 +2579,7 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::TimeSub => {
+                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(ts), Some(dur)) =
                         (arg_values[0].as_timestamp(), arg_values[1].as_i64())
@@ -2996,6 +3003,7 @@ impl CodeGenerator {
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
+                // TODO: verify this condition
                 if let Some(neighbors) = adj.get(&y) {
                     for &z in neighbors {
                         if tc.insert((x, z)) {
@@ -4031,5 +4039,55 @@ mod tests {
                 y
             );
         }
+    }
+
+    #[test]
+    fn test_transitive_closure_dd_branching() {
+        let mut codegen = CodeGenerator::new();
+
+        // Tree: 1 -> 2, 1 -> 3, 2 -> 4, 3 -> 5
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (1, 3), (2, 4), (3, 5)]));
+
+        let results = codegen.execute_transitive_closure_dd("edge").unwrap();
+
+        // Direct: (1,2), (1,3), (2,4), (3,5)
+        // 2-hop: (1,4), (1,5)
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
+
+        // All paths from node 1
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3)");
+        assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4)");
+        assert!(results.contains(&Tuple::pair(1, 5)), "Missing (1,5)");
+    }
+
+    #[test]
+    fn test_transitive_closure_dd_cycle() {
+        let mut codegen = CodeGenerator::new();
+
+        // Cycle: 1 -> 2 -> 3 -> 1
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 1)]));
+
+        let results = codegen.execute_transitive_closure_dd("edge").unwrap();
+
+        // With cycle, everyone can reach everyone (including themselves via cycle)
+        // All 9 pairs should be reachable
+        assert!(
+            results.len() >= 9,
+            "Expected at least 9 paths in cycle, got {}",
+            results.len()
+        );
+
+        // Check that 1 can reach all nodes
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3)");
+        assert!(
+            results.contains(&Tuple::pair(1, 1)),
+            "Missing (1,1) - cycle!"
+        );
     }
 

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_n10t01
+Knowledge graph 'test_empty_n10t01' created.
+Switched to knowledge graph: test_empty_n10t01
+> .kg use test_empty_n10t01
+Switched to knowledge graph: test_empty_n10t01
+> +empty_view(X, Y) :- nonexistent(X, Y).
+Rule 'empty_view' registered.
+> ?- empty_view(X, Y).
+No results.
+> +edge[(1,2)].
+Inserted 1 fact(s) into 'edge'.
+> ?- nonexistent(X, Y).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_n10t01
+Knowledge graph 'test_empty_n10t01' dropped.

@@ -1,0 +1,20 @@
+% Test: Same Relation Twice in Rule
+% Description: Tests using the same relation multiple times in a rule body
+
+.kg create test_same_rel_n10t05
+.kg use test_same_rel_n10t05
+
+% Insert facts
++knows[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)].
+
+% Find mutual friends: A knows B and B knows C (path of 2)
++mutual(A, C) :- knows(A, B), knows(B, C).
+?- mutual(X, Y).
+
+% Find people who know someone in common with themselves (A knows B, A knows C)
++shared_contact(A, B, C) :- knows(A, B), knows(A, C), B != C.
+?- shared_contact(1, X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_same_rel_n10t05
