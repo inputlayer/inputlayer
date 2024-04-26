@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested_chain_n10t100
+Knowledge graph 'test_nested_chain_n10t100' created.
+Switched to knowledge graph: test_nested_chain_n10t100
+> .kg use test_nested_chain_n10t100
+Switched to knowledge graph: test_nested_chain_n10t100
+> +base[(1,)].
+Inserted 1 fact(s) into 'base'.
+> step1(X, Y) :- base(X), Y = X + 1.
+1 rows:
+  (1, 2)
+(session: 1 rule(s))
+> step2(X, Y) :- step1(X, A), Y = A + 1.
+1 rows:
+  (1, 3)
+(session: 2 rule(s))
+> step3(X, Y) :- step2(X, A), Y = A + 1.
+1 rows:
+  (1, 4)
+(session: 3 rule(s))
+> step4(X, Y) :- step3(X, A), Y = A + 1.
+1 rows:
+  (1, 5)
+(session: 4 rule(s))
+> step5(X, Y) :- step4(X, A), Y = A + 1.
+1 rows:
+  (1, 6)
+(session: 5 rule(s))
+> ?- step5(X, Y).
+1 rows:
+  (1, 6)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_nested_chain_n10t100
+Knowledge graph 'test_nested_chain_n10t100' dropped.

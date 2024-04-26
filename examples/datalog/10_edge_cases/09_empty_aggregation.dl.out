@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_agg_n10t09
+Knowledge graph 'test_empty_agg_n10t09' created.
+Switched to knowledge graph: test_empty_agg_n10t09
+> .kg use test_empty_agg_n10t09
+Switched to knowledge graph: test_empty_agg_n10t09
+> +total(count<X>) :- sales(X, _).
+Rule 'total' registered.
+> ?- total(N).
+No results.
+> +total_sum(sum<V>) :- sales(_, V).
+Rule 'total_sum' registered.
+> ?- total_sum(S).
+No results.
+> +sales[(1, 100), (2, 200), (3, 150)].
+Inserted 3 fact(s) into 'sales'.
+> ?- total(N).
+1 rows:
+  (3)
+> ?- total_sum(S).
+1 rows:
+  (450)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_agg_n10t09
+Knowledge graph 'test_empty_agg_n10t09' dropped.

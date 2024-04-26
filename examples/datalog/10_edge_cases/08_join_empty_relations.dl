@@ -1,0 +1,51 @@
+% Test: Joins with Empty Relations
+% Verifies: Joins behave correctly when one side is empty
+% CRITICAL: Empty joins should produce empty results, not errors
+
+.kg create test_empty_join_n10t08
+.kg use test_empty_join_n10t08
+
+% Non-empty relation
++data[(1, 100), (2, 200), (3, 300)].
+
+% Empty relation
++empty[].
+
+% Empty relation with schema
++empty_pairs[].
+
+% Test 1: Join where right side is empty
++join_empty_right(X, Y) :- data(X, Y), empty_pairs(X, _).
+?- join_empty_right(X, Y).
+
+% Test 2: Join where left side is empty (different from right)
++join_empty_left(X, Y) :- empty_pairs(X, _), data(X, Y).
+?- join_empty_left(X, Y).
+
+% Test 3: Filter that produces empty intermediate
++filtered(X, Y) :- data(X, Y), Y > 1000.
++join_filtered(X, Y, Z) :- data(X, Y), filtered(Y, Z).
+?- filtered(X, Y).
+?- join_filtered(X, Y, Z).
+
+% Test 4: Aggregation over empty join result
++empty_join_count(count<X>) :- join_empty_right(X, _).
+?- empty_join_count(C).
+
+% Test 5: Recursion starting from empty base
++empty_path(X, Y) :- empty_pairs(X, Y).
++empty_path(X, Z) :- empty_path(X, Y), data(Y, Z).
+?- empty_path(X, Y).
+
+% Test 6: Non-empty to verify system works
++normal_join(X, Y) :- data(X, Y), data(Y, _).
+?- normal_join(X, Y).
+
+% Test 7: Self-join on data
++pairs[(1, 2), (2, 3), (3, 1)].
++chain(X, Z) :- pairs(X, Y), pairs(Y, Z).
+?- chain(X, Z).
+
+% Cleanup
+.kg use default
+.kg drop test_empty_join_n10t08

@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n10t101
+Knowledge graph 'test_multi_agg_n10t101' created.
+Switched to knowledge graph: test_multi_agg_n10t101
+> .kg use test_multi_agg_n10t101
+Switched to knowledge graph: test_multi_agg_n10t101
+> +values[(10,), (20,), (30,), (40,), (50,)].
+Inserted 5 fact(s) into 'values'.
+> sum_val(sum<X>) :- values(X).
+1 rows:
+  (150)
+(session: 1 rule(s))
+> count_val(count<X>) :- values(X).
+1 rows:
+  (5)
+(session: 2 rule(s))
+> min_val(min<X>) :- values(X).
+1 rows:
+  (10)
+(session: 3 rule(s))
+> max_val(max<X>) :- values(X).
+1 rows:
+  (50)
+(session: 4 rule(s))
+> avg_val(avg<X>) :- values(X).
+1 rows:
+  (30.0)
+(session: 5 rule(s))
+> ?- sum_val(S).
+1 rows:
+  (150)
+> ?- count_val(C).
+1 rows:
+  (5)
+> ?- min_val(Mi).
+1 rows:
+  (10)
+> ?- max_val(Ma).
+1 rows:
+  (50)
+> ?- avg_val(A).
+1 rows:
+  (30.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_multi_agg_n10t101
+Knowledge graph 'test_multi_agg_n10t101' dropped.

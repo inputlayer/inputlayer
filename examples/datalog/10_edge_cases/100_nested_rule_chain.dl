@@ -1,0 +1,17 @@
+% Test: Deeply nested rule chain
+
+.kg create test_nested_chain_n10t100
+.kg use test_nested_chain_n10t100
+
++base[(1,)].
+
+step1(X, Y) :- base(X), Y = X + 1.
+step2(X, Y) :- step1(X, A), Y = A + 1.
+step3(X, Y) :- step2(X, A), Y = A + 1.
+step4(X, Y) :- step3(X, A), Y = A + 1.
+step5(X, Y) :- step4(X, A), Y = A + 1.
+
+?- step5(X, Y).
+
+.kg use default
+.kg drop test_nested_chain_n10t100
