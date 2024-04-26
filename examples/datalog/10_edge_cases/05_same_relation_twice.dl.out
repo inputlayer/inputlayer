@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_same_rel_n10t05
+Knowledge graph 'test_same_rel_n10t05' created.
+Switched to knowledge graph: test_same_rel_n10t05
+> .kg use test_same_rel_n10t05
+Switched to knowledge graph: test_same_rel_n10t05
+> +knows[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)].
+Inserted 5 fact(s) into 'knows'.
+> +mutual(A, C) :- knows(A, B), knows(B, C).
+Rule 'mutual' registered.
+> ?- mutual(X, Y).
+3 rows:
+  (1, 3)
+  (1, 4)
+  (2, 4)
+> +shared_contact(A, B, C) :- knows(A, B), knows(A, C), B != C.
+Rule 'shared_contact' registered.
+> ?- shared_contact(1, X, Y).
+2 rows:
+  (1, 2, 3)
+  (1, 3, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_same_rel_n10t05
+Knowledge graph 'test_same_rel_n10t05' dropped.
