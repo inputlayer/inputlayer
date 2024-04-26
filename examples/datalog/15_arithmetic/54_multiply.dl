@@ -1,0 +1,14 @@
+% Test: Multiplication operation
+
+.kg create test_multiply_n15t54
+.kg use test_multiply_n15t54
+
++factors[(2, 3), (5, 4), (10, 10)].
+
+% Compute product
+product(A, B, Result) :- factors(A, B), Result = A * B.
+
+?- product(A, B, R).
+
+.kg use default
+.kg drop test_multiply_n15t54

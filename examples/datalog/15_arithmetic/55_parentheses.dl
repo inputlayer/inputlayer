@@ -1,0 +1,14 @@
+% Test: Parentheses in expressions
+
+.kg create test_parens_n15t55
+.kg use test_parens_n15t55
+
++val[(10,)].
+
+% Without and with parentheses
+result(V, R1, R2) :- val(V), R1 = V + 2 * 3, R2 = (V + 2) * 3.
+
+?- result(V, R1, R2).
+
+.kg use default
+.kg drop test_parens_n15t55

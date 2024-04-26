@@ -3976,3 +3976,60 @@ mod tests {
         assert!(results.contains(&4i64), "Node 4 should be reachable from 1");
     }
 
+    #[test]
+    fn test_reachability_multiple_sources() {
+        let mut codegen = CodeGenerator::new();
+
+        // Two disconnected components: 1 -> 2 and 3 -> 4
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (3, 4)]));
+
+        // Sources: nodes 1 and 3 (use Int64 to match edge data)
+        codegen.add_input(
+            "source".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(3)]),
+            ],
+        );
+
+        let results = codegen.execute_reachability("source", "edge").unwrap();
+
+        // From sources 1 and 3, we can reach: 1, 2, 3, 4
+        assert!(results.contains(&1i64));
+        assert!(results.contains(&2i64));
+        assert!(results.contains(&3i64));
+        assert!(results.contains(&4i64));
+    }
+
+    // True DD Recursion Tests (Using SemigroupVariable + .iterative())
+    #[test]
+    fn test_transitive_closure_dd_linear() {
+        let mut codegen = CodeGenerator::new();
+
+        // Graph: 1 -> 2 -> 3 -> 4 (linear chain)
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
+
+        let results = codegen.execute_transitive_closure_dd("edge").unwrap();
+
+        // Should contain:
+        // Direct: (1,2), (2,3), (3,4)
+        // 2-hop: (1,3), (2,4)
+        // 3-hop: (1,4)
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
+
+        // Check all expected paths using Tuple
+        let expected_pairs: Vec<(i64, i64)> = vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (1, 4)];
+        for (x, y) in expected_pairs {
+            assert!(
+                results.contains(&Tuple::pair(x, y)),
+                "Missing path ({}, {})",
+                x,
+                y
+            );
+        }
+    }
+
