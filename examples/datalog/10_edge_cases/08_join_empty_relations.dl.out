@@ -1,0 +1,60 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_join_n10t08
+Knowledge graph 'test_empty_join_n10t08' created.
+Switched to knowledge graph: test_empty_join_n10t08
+> .kg use test_empty_join_n10t08
+Switched to knowledge graph: test_empty_join_n10t08
+> +data[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'data'.
+> +empty[].
+Inserted 0 fact(s) into 'empty'.
+> +empty_pairs[].
+Inserted 0 fact(s) into 'empty_pairs'.
+> +join_empty_right(X, Y) :- data(X, Y), empty_pairs(X, _).
+Rule 'join_empty_right' registered.
+> ?- join_empty_right(X, Y).
+No results.
+> +join_empty_left(X, Y) :- empty_pairs(X, _), data(X, Y).
+Rule 'join_empty_left' registered.
+> ?- join_empty_left(X, Y).
+No results.
+> +filtered(X, Y) :- data(X, Y), Y > 1000.
+Rule 'filtered' registered.
+> +join_filtered(X, Y, Z) :- data(X, Y), filtered(Y, Z).
+Rule 'join_filtered' registered.
+> ?- filtered(X, Y).
+No results.
+> ?- join_filtered(X, Y, Z).
+No results.
+> +empty_join_count(count<X>) :- join_empty_right(X, _).
+Rule 'empty_join_count' registered.
+> ?- empty_join_count(C).
+No results.
+> +empty_path(X, Y) :- empty_pairs(X, Y).
+Rule 'empty_path' registered.
+> +empty_path(X, Z) :- empty_path(X, Y), data(Y, Z).
+Rule 'empty_path' registered.
+> ?- empty_path(X, Y).
+No results.
+> +normal_join(X, Y) :- data(X, Y), data(Y, _).
+Rule 'normal_join' registered.
+> ?- normal_join(X, Y).
+No results.
+> +pairs[(1, 2), (2, 3), (3, 1)].
+Inserted 3 fact(s) into 'pairs'.
+> +chain(X, Z) :- pairs(X, Y), pairs(Y, Z).
+Rule 'chain' registered.
+> ?- chain(X, Z).
+3 rows:
+  (1, 3)
+  (2, 1)
+  (3, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_join_n10t08
+Knowledge graph 'test_empty_join_n10t08' dropped.

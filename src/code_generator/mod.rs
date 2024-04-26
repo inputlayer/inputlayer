@@ -4129,3 +4129,78 @@ mod tests {
         assert!(results.contains(&Tuple::pair(1, 1)), "Missing (1,1)");
     }
 
+    #[test]
+    fn test_reachability_dd_linear() {
+        let mut codegen = CodeGenerator::new();
+
+        // Graph: 1 -> 2 -> 3 -> 4
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
+
+        // Source: node 1 (use Int64 to match edge data)
+        codegen.add_input(
+            "source".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
+
+        let results = codegen.execute_reachability_dd("source", "edge").unwrap();
+
+        // From source 1, we can reach: 1, 2, 3, 4
+        assert!(
+            results.len() >= 4,
+            "Expected at least 4 reachable nodes, got {}",
+            results.len()
+        );
+
+        let reachable_ints: Vec<i64> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
+            .collect();
+
+        assert!(reachable_ints.contains(&1), "Source 1 should be reachable");
+        assert!(
+            reachable_ints.contains(&2),
+            "Node 2 should be reachable from 1"
+        );
+        assert!(
+            reachable_ints.contains(&3),
+            "Node 3 should be reachable from 1"
+        );
+        assert!(
+            reachable_ints.contains(&4),
+            "Node 4 should be reachable from 1"
+        );
+    }
+
+    #[test]
+    fn test_reachability_dd_multiple_sources() {
+        let mut codegen = CodeGenerator::new();
+
+        // Two disconnected components: 1 -> 2 and 10 -> 20
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (10, 20)]));
+
+        // Sources: nodes 1 and 10 (use Int64 to match edge data)
+        codegen.add_input(
+            "source".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(10)]),
+            ],
+        );
+
+        let results = codegen.execute_reachability_dd("source", "edge").unwrap();
+
+        let reachable_ints: Vec<i64> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
+            .collect();
+
+        // From sources 1 and 10, we can reach: 1, 2, 10, 20
+        assert!(reachable_ints.contains(&1), "Source 1 should be reachable");
+        assert!(reachable_ints.contains(&2), "Node 2 should be reachable");
+        assert!(
+            reachable_ints.contains(&10),
+            "Source 10 should be reachable"
+        );
+        assert!(reachable_ints.contains(&20), "Node 20 should be reachable");
+    }
+
