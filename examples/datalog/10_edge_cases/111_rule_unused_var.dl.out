@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unused_var_n10t111
+Knowledge graph 'test_unused_var_n10t111' created.
+Switched to knowledge graph: test_unused_var_n10t111
+> .kg use test_unused_var_n10t111
+Switched to knowledge graph: test_unused_var_n10t111
+> +data[(1, "a", 100), (2, "b", 200), (3, "c", 300)].
+Inserted 3 fact(s) into 'data'.
+> ids_only(Id) :- data(Id, _, _).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 1 rule(s))
+> ?- ids_only(Id).
+3 rows:
+  (1)
+  (2)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_unused_var_n10t111
+Knowledge graph 'test_unused_var_n10t111' dropped.

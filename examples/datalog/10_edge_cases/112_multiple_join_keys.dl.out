@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_join_key_n10t112
+Knowledge graph 'test_multi_join_key_n10t112' created.
+Switched to knowledge graph: test_multi_join_key_n10t112
+> .kg use test_multi_join_key_n10t112
+Switched to knowledge graph: test_multi_join_key_n10t112
+> +left[(1, "A", "X"), (2, "B", "Y"), (3, "A", "Z")].
+Inserted 3 fact(s) into 'left'.
+> +right[(1, "A", 100), (2, "B", 200), (1, "B", 150)].
+Inserted 3 fact(s) into 'right'.
+> joined(K1, K2, Val1, Val2) :- left(K1, K2, Val1), right(K1, K2, Val2).
+2 rows:
+  (1, "A", "X", 100)
+  (2, "B", "Y", 200)
+(session: 1 rule(s))
+> ?- joined(K1, K2, Val1, Val2).
+2 rows:
+  (1, "A", "X", 100)
+  (2, "B", "Y", 200)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multi_join_key_n10t112
+Knowledge graph 'test_multi_join_key_n10t112' dropped.
