@@ -1125,7 +1125,7 @@ impl CodeGenerator {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
                     if let Some(i) = v.as_i64() {
-                        return i != val;
+                        return i == val;
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
@@ -1648,7 +1648,6 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
-                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2006,7 +2005,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2048,7 +2046,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2315,7 +2312,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2366,7 +2362,6 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
-                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -4269,3 +4264,101 @@ mod tests {
     }
 
     // Antijoin (Negation) Tests
+    #[test]
+    fn test_antijoin_simple() {
+        // Test: unreachable(x) :- node(x), !reach(x)
+        // Nodes: 1, 2, 3, 4, 5
+        // Reachable: 1, 2
+        // Expected unreachable: 3, 4, 5
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "node".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(4)]),
+                Tuple::new(vec![Value::Int32(5)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "reach".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        // Build IR: node(x) antijoin reach(x)
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "node".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "reach".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Should get nodes 3, 4, 5 (not in reach)
+        assert_eq!(results.len(), 3, "Expected 3 unreachable nodes");
+
+        let result_ints: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+
+        assert!(result_ints.contains(&3), "Node 3 should be unreachable");
+        assert!(result_ints.contains(&4), "Node 4 should be unreachable");
+        assert!(result_ints.contains(&5), "Node 5 should be unreachable");
+        assert!(!result_ints.contains(&1), "Node 1 should NOT be in result");
+        assert!(!result_ints.contains(&2), "Node 2 should NOT be in result");
+    }
+
+    #[test]
+    fn test_antijoin_empty_right() {
+        // When right side is empty, all left tuples pass through
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![], // Empty!
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // All left tuples should pass through
+        assert_eq!(results.len(), 3, "All left tuples should remain");
+    }
+
