@@ -4362,3 +4362,98 @@ mod tests {
         assert_eq!(results.len(), 3, "All left tuples should remain");
     }
 
+    #[test]
+    fn test_antijoin_full_filter() {
+        // When right contains all keys from left, result is empty
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]), // Extra, doesn't matter
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // All left tuples have matches, so result is empty
+        assert_eq!(results.len(), 0, "All left tuples were filtered out");
+    }
+
+    #[test]
+    fn test_antijoin_multi_column_left() {
+        // Antijoin with multi-column left tuples, single-column key
+        // left: (x, name)
+        // right: (x)
+        // Result: left tuples where x is NOT in right
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "person".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::String("Alice".into())]),
+                Tuple::new(vec![Value::Int32(2), Value::String("Bob".into())]),
+                Tuple::new(vec![Value::Int32(3), Value::String("Carol".into())]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "banned".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(2)]), // Bob is banned
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "person".to_string(),
+                schema: vec!["id".to_string(), "name".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "banned".to_string(),
+                schema: vec!["id".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["id".to_string(), "name".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Alice and Carol should remain (not banned)
+        assert_eq!(results.len(), 2, "Expected 2 non-banned people");
+
+        let names: Vec<&str> = results
+            .iter()
+            .filter_map(|t| t.get(1).and_then(|v| v.as_str()))
+            .collect();
+
+        assert!(names.contains(&"Alice"), "Alice should be in result");
+        assert!(names.contains(&"Carol"), "Carol should be in result");
+        assert!(!names.contains(&"Bob"), "Bob should NOT be in result");
+    }
+
