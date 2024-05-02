@@ -1125,7 +1125,7 @@ impl CodeGenerator {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
                     if let Some(i) = v.as_i64() {
-                        return i == val;
+                        return i != val;
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
@@ -4576,5 +4576,94 @@ mod tests {
 
         assert!(x_values.contains(&3), "Row with x=3 should remain");
         assert!(x_values.contains(&4), "Row with x=4 should remain");
+    }
+
+    #[test]
+    fn test_antijoin_empty_left() {
+        // When left is empty, result is empty
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![], // Empty!
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        assert_eq!(results.len(), 0, "Empty left produces empty result");
+    }
+
+    #[test]
+    fn test_antijoin_duplicates_in_right() {
+        // Duplicates in right should not affect result
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(1)]), // Duplicate!
+                Tuple::new(vec![Value::Int32(1)]), // Another duplicate!
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Only 1 is filtered, 2 and 3 remain
+        assert_eq!(results.len(), 2, "Expected 2 rows");
+
+        let values: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+
+        assert!(values.contains(&2), "2 should remain");
+        assert!(values.contains(&3), "3 should remain");
+        assert!(!values.contains(&1), "1 should be filtered");
     }
 
