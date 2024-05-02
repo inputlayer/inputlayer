@@ -1,0 +1,11 @@
+% Test: Very long string values
+
+.kg create test_long_str_n10t125
+.kg use test_long_str_n10t125
+
++texts[("short",), ("medium length string here",), ("this is a somewhat longer string that tests handling of moderate length text values",)].
+
+?- texts(T).
+
+.kg use default
+.kg drop test_long_str_n10t125

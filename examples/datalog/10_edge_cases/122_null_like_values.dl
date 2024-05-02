@@ -1,0 +1,18 @@
+% Test: Null-like value handling
+
+.kg create test_nullish_n10t122
+.kg use test_nullish_n10t122
+
++data[(1, "", 0), (2, "value", 100), (3, "", 50), (4, "other", 0)].
+
+% Find rows with empty string
+empty_name(Id) :- data(Id, "", _).
+
+% Find rows with zero amount
+zero_amount(Id) :- data(Id, _, 0).
+
+?- empty_name(Id).
+?- zero_amount(Id).
+
+.kg use default
+.kg drop test_nullish_n10t122

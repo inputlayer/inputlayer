@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_agg_n10t123
+Knowledge graph 'test_single_agg_n10t123' created.
+Switched to knowledge graph: test_single_agg_n10t123
+> .kg use test_single_agg_n10t123
+Switched to knowledge graph: test_single_agg_n10t123
+> +single[(42,)].
+Inserted 1 fact(s) into 'single'.
+> single_sum(sum<X>) :- single(X).
+1 rows:
+  (42)
+(session: 1 rule(s))
+> single_avg(avg<X>) :- single(X).
+1 rows:
+  (42.0)
+(session: 2 rule(s))
+> single_count(count<X>) :- single(X).
+1 rows:
+  (1)
+(session: 3 rule(s))
+> ?- single_sum(S).
+1 rows:
+  (42)
+> ?- single_avg(A).
+1 rows:
+  (42.0)
+> ?- single_count(C).
+1 rows:
+  (1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_single_agg_n10t123
+Knowledge graph 'test_single_agg_n10t123' dropped.
