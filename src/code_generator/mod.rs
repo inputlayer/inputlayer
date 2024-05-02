@@ -1648,6 +1648,7 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
+                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2005,6 +2006,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2046,6 +2048,7 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
+                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2312,6 +2315,7 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
+                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2362,6 +2366,7 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
+                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -4455,5 +4460,121 @@ mod tests {
         assert!(names.contains(&"Alice"), "Alice should be in result");
         assert!(names.contains(&"Carol"), "Carol should be in result");
         assert!(!names.contains(&"Bob"), "Bob should NOT be in result");
+    }
+
+    #[test]
+    fn test_antijoin_multi_column_key() {
+        // Antijoin on multiple join columns
+        // left: (x, y, data)
+        // right: (x, y)
+        // Join on both x and y
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(1), Value::Int32(100)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(200)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(1), Value::Int32(300)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(1)]), // Matches first row
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string(), "y".to_string(), "data".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            left_keys: vec![0, 1],
+            right_keys: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string(), "data".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // (1,1,100) is filtered out, (1,2,200) and (2,1,300) remain
+        assert_eq!(results.len(), 2, "Expected 2 rows after antijoin");
+
+        let data_values: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(2).and_then(|v| v.as_i32()))
+            .collect();
+
+        assert!(
+            data_values.contains(&200),
+            "Row with data 200 should remain"
+        );
+        assert!(
+            data_values.contains(&300),
+            "Row with data 300 should remain"
+        );
+        assert!(
+            !data_values.contains(&100),
+            "Row with data 100 should be filtered"
+        );
+    }
+
+    #[test]
+    fn test_antijoin_with_filter() {
+        // Antijoin combined with filter
+        // First filter left, then antijoin
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(40)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "excluded".to_string(),
+            vec![Tuple::new(vec![Value::Int32(2)])],
+        );
+
+        // Filter: x > 1, then antijoin to remove excluded
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                predicate: Predicate::ColumnGtConst(0, 1), // x > 1
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "excluded".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // After filter: (2,20), (3,30), (4,40)
+        // After antijoin (remove 2): (3,30), (4,40)
+        assert_eq!(results.len(), 2, "Expected 2 rows");
+
+        let x_values: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+
+        assert!(x_values.contains(&3), "Row with x=3 should remain");
+        assert!(x_values.contains(&4), "Row with x=4 should remain");
     }
 

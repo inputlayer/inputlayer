@@ -1,0 +1,11 @@
+% Test: Unicode string handling
+
+.kg create test_unicode_n10t126
+.kg use test_unicode_n10t126
+
++names[("Alice",), ("Böb",), ("日本語",), ("émoji",)].
+
+?- names(N).
+
+.kg use default
+.kg drop test_unicode_n10t126

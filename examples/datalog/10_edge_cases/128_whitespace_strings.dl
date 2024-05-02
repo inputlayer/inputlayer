@@ -1,0 +1,11 @@
+% Test: Strings with whitespace
+
+.kg create test_whitespace_n10t128
+.kg use test_whitespace_n10t128
+
++text[("  leading",), ("trailing  ",), ("  both  ",), ("no spaces",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_whitespace_n10t128
