@@ -1,0 +1,11 @@
+% Test: Integer boundary values
+
+.kg create test_boundary_n10t134
+.kg use test_boundary_n10t134
+
++nums[(0,), (1,), (-1,), (2147483647,), (-2147483648,)].
+
+?- nums(N).
+
+.kg use default
+.kg drop test_boundary_n10t134

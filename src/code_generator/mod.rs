@@ -1125,7 +1125,7 @@ impl CodeGenerator {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
                     if let Some(i) = v.as_i64() {
-                        return i != val;
+                        return i == val;
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
@@ -1648,7 +1648,6 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
-                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2006,7 +2005,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2048,7 +2046,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2315,7 +2312,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2366,7 +2362,6 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
-                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -4665,5 +4660,98 @@ mod tests {
         assert!(values.contains(&2), "2 should remain");
         assert!(values.contains(&3), "3 should remain");
         assert!(!values.contains(&1), "1 should be filtered");
+    }
+
+    #[test]
+    fn test_antijoin_new_edges() {
+        // Pattern: new_edge(x,y) :- candidate(x,y), !edge(x,y)
+        // Find edges that are candidates but not already in graph
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "candidate".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(5)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]), // Already exists
+                Tuple::new(vec![Value::Int32(3), Value::Int32(4)]), // Already exists
+            ],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "candidate".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            left_keys: vec![0, 1],
+            right_keys: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // New edges: (2,3) and (4,5)
+        assert_eq!(results.len(), 2, "Expected 2 new edges");
+
+        let pairs: Vec<(i32, i32)> = results.iter().filter_map(|t| t.to_pair()).collect();
+
+        assert!(pairs.contains(&(2, 3)), "Edge (2,3) should be new");
+        assert!(pairs.contains(&(4, 5)), "Edge (4,5) should be new");
+    }
+
+    // Multi-Worker Execution Tests
+    #[test]
+    fn test_multi_worker_simple_scan() {
+        // Test that multi-worker execution produces same results as single-worker
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(40)]),
+            ],
+        );
+
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        // Single worker
+        let single_results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Multi-worker (2 workers)
+        let config = ExecutionConfig::with_workers(2);
+        let multi_results = codegen.execute_with_config(&ir, config).unwrap();
+
+        // Results should have same length
+        assert_eq!(
+            single_results.len(),
+            multi_results.len(),
+            "Multi-worker should produce same number of results"
+        );
+
+        // Sort both for comparison (order may differ)
+        let mut sorted_single: Vec<_> = single_results.iter().collect();
+        let mut sorted_multi: Vec<_> = multi_results.iter().collect();
+        sorted_single.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        sorted_multi.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+
+        assert_eq!(sorted_single, sorted_multi, "Results should match");
     }
 
