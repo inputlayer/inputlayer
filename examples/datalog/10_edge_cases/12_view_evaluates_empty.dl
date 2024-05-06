@@ -1,0 +1,32 @@
+% Test: View Evaluates to Empty
+% Description: Tests views that evaluate to empty due to filter conditions
+
+.kg create test_view_empty_n10t12
+.kg use test_view_empty_n10t12
+
+% Insert data
++numbers[(1), (2), (3), (4), (5)].
+
+% View with impossible filter - always empty
++impossible(X) :- numbers(X), X > 100.
+?- impossible(X).
+
+% View that uses impossible view
++uses_impossible(X) :- impossible(X).
+?- uses_impossible(X).
+
+% View with contradictory conditions
++contradictory(X) :- numbers(X), X > 3, X < 2.
+?- contradictory(X).
+
+% View that starts empty but becomes non-empty
++threshold(X) :- numbers(X), X > 10.
+?- threshold(X).
+
+% Add data that matches
++numbers[(15), (20)].
+?- threshold(X).
+
+% Cleanup
+.kg use default
+.kg drop test_view_empty_n10t12
