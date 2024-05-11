@@ -1648,6 +1648,7 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
+                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2005,6 +2006,7 @@ impl CodeGenerator {
                                 }
                             }
 
+                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2046,6 +2048,7 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
+                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2312,6 +2315,7 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
+                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2362,6 +2366,7 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
+                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -4753,5 +4758,90 @@ mod tests {
         sorted_multi.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
 
         assert_eq!(sorted_single, sorted_multi, "Results should match");
+    }
+
+    #[test]
+    fn test_multi_worker_filter() {
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(40)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(50)]),
+                Tuple::new(vec![Value::Int32(6), Value::Int32(60)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 3), // x > 3
+        };
+
+        // Multi-worker (2 workers)
+        let config = ExecutionConfig::with_workers(2);
+        let results = codegen.execute_with_config(&ir, config).unwrap();
+
+        // Should have 3 results: (4,40), (5,50), (6,60)
+        assert_eq!(results.len(), 3, "Expected 3 rows where x > 3");
+
+        let x_values: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+
+        for x in [4, 5, 6] {
+            assert!(x_values.contains(&x), "Row with x={} should be present", x);
+        }
+    }
+
+    #[test]
+    fn test_multi_worker_join() {
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(100)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(200)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(300)]),
+            ],
+        );
+
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(40)]),
+            ],
+        );
+
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["x".to_string(), "a".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["x".to_string(), "b".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "a".to_string(), "b".to_string()],
+        };
+
+        // Multi-worker (2 workers)
+        let config = ExecutionConfig::with_workers(2);
+        let results = codegen.execute_with_config(&ir, config).unwrap();
+
+        // Should have 2 results: keys 2 and 3 match
+        assert_eq!(results.len(), 2, "Expected 2 join results");
     }
 
