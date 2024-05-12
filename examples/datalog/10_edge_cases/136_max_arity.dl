@@ -1,0 +1,16 @@
+% Test: Maximum arity tuple
+
+.kg create test_max_arity_n10t136
+.kg use test_max_arity_n10t136
+
++wide[(1, 2, 3, 4, 5, 6, 7, 8)].
+
+?- wide(A, B, C, D, E, F, G, H).
+
+% Project subset
+subset(A, D, H) :- wide(A, _, _, D, _, _, _, H).
+
+?- subset(A, D, H).
+
+.kg use default
+.kg drop test_max_arity_n10t136

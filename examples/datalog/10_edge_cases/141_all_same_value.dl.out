@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_same_val_n10t141
+Knowledge graph 'test_same_val_n10t141' created.
+Switched to knowledge graph: test_same_val_n10t141
+> .kg use test_same_val_n10t141
+Switched to knowledge graph: test_same_val_n10t141
+> +data[(1, 100), (2, 100), (3, 100)].
+Inserted 3 fact(s) into 'data'.
+> +sum_same(sum<V>) :- data(_, V).
+Rule 'sum_same' registered.
+> +count_same(count<Id>) :- data(Id, _).
+Rule 'count_same' registered.
+> +avg_same(avg<V>) :- data(_, V).
+Rule 'avg_same' registered.
+> ?- sum_same(S).
+1 rows:
+  (300)
+> ?- count_same(C).
+1 rows:
+  (3)
+> ?- avg_same(A).
+1 rows:
+  (100.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_same_val_n10t141
+Knowledge graph 'test_same_val_n10t141' dropped.

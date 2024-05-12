@@ -1,0 +1,15 @@
+% Test: Join with empty relation
+
+.kg create test_empty_join_n10t140
+.kg use test_empty_join_n10t140
+
++left[(1, "a"), (2, "b")].
++right[(10, 100), (20, 200)].
+
+% No matching keys - empty result
+joined(L, R) :- left(K, L), right(K, R).
+
+?- joined(L, R).
+
+.kg use default
+.kg drop test_empty_join_n10t140

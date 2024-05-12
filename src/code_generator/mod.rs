@@ -1648,7 +1648,6 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
-                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2006,7 +2005,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2048,7 +2046,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2315,7 +2312,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2366,7 +2362,6 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
-                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -4843,5 +4838,82 @@ mod tests {
 
         // Should have 2 results: keys 2 and 3 match
         assert_eq!(results.len(), 2, "Expected 2 join results");
+    }
+
+    #[test]
+    fn test_execution_config_defaults() {
+        let config = ExecutionConfig::default();
+        assert_eq!(config.num_workers, 1);
+
+        let config = ExecutionConfig::with_workers(4);
+        assert_eq!(config.num_workers, 4);
+
+        let config = ExecutionConfig::single_worker();
+        assert_eq!(config.num_workers, 1);
+
+        let config = ExecutionConfig::all_cores();
+        assert!(config.num_workers >= 1);
+    }
+
+    // Vector Search Integration Tests
+    #[test]
+    fn test_compute_euclidean_distance() {
+        let mut codegen = CodeGenerator::new();
+
+        // Add vectors as input data
+        codegen.add_input_tuples(
+            "vectors".to_string(),
+            vec![
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::vector(vec![0.0, 0.0]),
+                    Value::vector(vec![3.0, 4.0]),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::vector(vec![1.0, 1.0]),
+                    Value::vector(vec![2.0, 2.0]),
+                ]),
+            ],
+        );
+
+        // IR: Scan vectors, compute euclidean distance between columns 1 and 2
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "vectors".to_string(),
+                schema: vec!["id".to_string(), "v1".to_string(), "v2".to_string()],
+            }),
+            expressions: vec![(
+                "dist".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Euclidean,
+                    vec![IRExpression::Column(1), IRExpression::Column(2)],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // First tuple: distance between (0,0) and (3,4) = 5.0
+        let first = &results[0];
+        assert_eq!(first.get(0), Some(&Value::Int32(1)));
+        let dist1 = first.get(3).unwrap().to_f64();
+        assert!(
+            (dist1 - 5.0).abs() < 0.001,
+            "Expected dist 5.0, got {}",
+            dist1
+        );
+
+        // Second tuple: distance between (1,1) and (2,2) = sqrt(2)
+        let second = &results[1];
+        let dist2 = second.get(3).unwrap().to_f64();
+        let expected = (2.0_f64).sqrt();
+        assert!(
+            (dist2 - expected).abs() < 0.001,
+            "Expected dist {}, got {}",
+            expected,
+            dist2
+        );
     }
 

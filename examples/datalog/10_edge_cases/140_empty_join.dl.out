@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_join_n10t140
+Knowledge graph 'test_empty_join_n10t140' created.
+Switched to knowledge graph: test_empty_join_n10t140
+> .kg use test_empty_join_n10t140
+Switched to knowledge graph: test_empty_join_n10t140
+> +left[(1, "a"), (2, "b")].
+Inserted 2 fact(s) into 'left'.
+> +right[(10, 100), (20, 200)].
+Inserted 2 fact(s) into 'right'.
+> joined(L, R) :- left(K, L), right(K, R).
+No results.
+(session: 1 rule(s))
+> ?- joined(L, R).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_join_n10t140
+Knowledge graph 'test_empty_join_n10t140' dropped.
