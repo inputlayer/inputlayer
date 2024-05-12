@@ -1,0 +1,14 @@
+% Test: Division avoiding zero
+
+.kg create test_safe_div_n10t139
+.kg use test_safe_div_n10t139
+
++data[(10, 2), (20, 5), (30, 0), (40, 4)].
+
+% Only divide where divisor != 0
+safe_div(A, B, R) :- data(A, B), B != 0, R = A / B.
+
+?- safe_div(A, B, R).
+
+.kg use default
+.kg drop test_safe_div_n10t139
