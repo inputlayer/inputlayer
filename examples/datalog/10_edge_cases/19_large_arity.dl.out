@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_arity_n10t19
+Knowledge graph 'test_large_arity_n10t19' created.
+Switched to knowledge graph: test_large_arity_n10t19
+> .kg use test_large_arity_n10t19
+Switched to knowledge graph: test_large_arity_n10t19
+> +wide10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).
+Inserted 1 fact(s) into 'wide10'.
+> +wide10(11, 12, 13, 14, 15, 16, 17, 18, 19, 20).
+Inserted 1 fact(s) into 'wide10'.
+> ?- wide10(A, B, C, D, E, F, G, H, I, J).
+2 rows:
+  (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+  (11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+> +wide10_copy(A, B, C, D, E, F, G, H, I, J) :- wide10(A, B, C, D, E, F, G, H, I, J).
+Rule 'wide10_copy' registered.
+> ?- wide10_copy(A, B, C, D, E, F, G, H, I, J).
+2 rows:
+  (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+  (11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_large_arity_n10t19
+Knowledge graph 'test_large_arity_n10t19' dropped.
