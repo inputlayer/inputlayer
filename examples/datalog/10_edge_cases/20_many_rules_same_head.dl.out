@@ -1,0 +1,47 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_many_rules_n10t20
+Knowledge graph 'test_many_rules_n10t20' created.
+Switched to knowledge graph: test_many_rules_n10t20
+> .kg use test_many_rules_n10t20
+Switched to knowledge graph: test_many_rules_n10t20
+> +a[(1,), (2,)].
+Inserted 2 fact(s) into 'a'.
+> +b[(3,), (4,)].
+Inserted 2 fact(s) into 'b'.
+> +c[(5,), (6,)].
+Inserted 2 fact(s) into 'c'.
+> +d[(7,), (8,)].
+Inserted 2 fact(s) into 'd'.
+> +e[(9,), (10,)].
+Inserted 2 fact(s) into 'e'.
+> +combined(X) :- a(X).
+Rule 'combined' registered.
+> +combined(X) :- b(X).
+Rule 'combined' registered.
+> +combined(X) :- c(X).
+Rule 'combined' registered.
+> +combined(X) :- d(X).
+Rule 'combined' registered.
+> +combined(X) :- e(X).
+Rule 'combined' registered.
+> ?- combined(X).
+10 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (5)
+  (6)
+  (7)
+  (8)
+  (9)
+  (10)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_many_rules_n10t20
+Knowledge graph 'test_many_rules_n10t20' dropped.

@@ -1,0 +1,17 @@
+% Test: Relations with large arity (10+ columns)
+
+.kg create test_large_arity_n10t19
+.kg use test_large_arity_n10t19
+
+% 10-column relation
++wide10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).
++wide10(11, 12, 13, 14, 15, 16, 17, 18, 19, 20).
+
+?- wide10(A, B, C, D, E, F, G, H, I, J).
+
+% Join on 10-column relations
++wide10_copy(A, B, C, D, E, F, G, H, I, J) :- wide10(A, B, C, D, E, F, G, H, I, J).
+?- wide10_copy(A, B, C, D, E, F, G, H, I, J).
+
+.kg use default
+.kg drop test_large_arity_n10t19
