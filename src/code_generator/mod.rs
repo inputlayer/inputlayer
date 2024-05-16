@@ -5109,3 +5109,113 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_within_radius_aggregate() {
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Float64(0.1)]), // Within
+                Tuple::new(vec![Value::Int32(2), Value::Float64(0.5)]), // Within
+                Tuple::new(vec![Value::Int32(3), Value::Float64(1.5)]), // Outside
+                Tuple::new(vec![Value::Int32(4), Value::Float64(0.3)]), // Within
+            ],
+        );
+
+        // All items within distance 0.5
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["id".to_string(), "dist".to_string()],
+            }),
+            group_by: vec![],
+            aggregations: vec![(
+                AggregateFunction::WithinRadius {
+                    distance_col: 1,
+                    max_distance: 0.5,
+                },
+                0,
+            )],
+            output_schema: vec!["id".to_string(), "dist".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 3, "Expected 3 items within radius");
+
+        // All should have distance <= 0.5
+        for result in &results {
+            let dist = result.get(1).unwrap().to_f64();
+            assert!(dist <= 0.5, "Distance {} is outside radius 0.5", dist);
+        }
+    }
+
+    #[test]
+    fn test_vector_search_pipeline() {
+        // Full vector search pipeline:
+        // 1. Compute distances
+        // 2. Filter by threshold
+        // 3. Return top-k
+
+        let mut codegen = CodeGenerator::new();
+
+        // Database vectors
+        codegen.add_input_tuples(
+            "db_vectors".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 0.0])]),
+                Tuple::new(vec![Value::Int32(2), Value::vector(vec![0.9, 0.1])]), // Close to query
+                Tuple::new(vec![Value::Int32(3), Value::vector(vec![0.0, 1.0])]), // Far from query
+                Tuple::new(vec![Value::Int32(4), Value::vector(vec![0.8, 0.2])]), // Close
+                Tuple::new(vec![Value::Int32(5), Value::vector(vec![-1.0, 0.0])]), // Very far
+            ],
+        );
+
+        // Query vector (will be a constant in the expression)
+        let query_vec = vec![1.0, 0.0];
+
+        // Compute distances to query vector
+        let with_distances = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "db_vectors".to_string(),
+                schema: vec!["id".to_string(), "vec".to_string()],
+            }),
+            expressions: vec![(
+                "dist".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Euclidean,
+                    vec![
+                        IRExpression::Column(1),
+                        IRExpression::VectorLiteral(query_vec),
+                    ],
+                ),
+            )],
+        };
+
+        // Get top 2 closest (ascending by distance)
+        let ir = IRNode::Aggregate {
+            input: Box::new(with_distances),
+            group_by: vec![],
+            aggregations: vec![(
+                AggregateFunction::TopK {
+                    k: 2,
+                    order_col: 2,
+                    descending: false,
+                },
+                0,
+            )],
+            output_schema: vec!["id".to_string(), "vec".to_string(), "dist".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected top 2 closest vectors");
+
+        // The closest should be id=1 (distance 0) and id=2 (very close)
+        let ids: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+        assert!(ids.contains(&1), "ID 1 should be in top 2 (exact match)");
+        // ID 2 or 4 should be second (both are close)
+    }
+
