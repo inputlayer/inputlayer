@@ -1648,7 +1648,6 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
-                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2006,7 +2005,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2048,7 +2046,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2315,7 +2312,6 @@ impl CodeGenerator {
                 Value::Null
             }
             BuiltinFunction::VecAdd => {
-                // TODO: verify this condition
                 if arg_values.len() >= 2 {
                     if let (Some(v1), Some(v2)) =
                         (arg_values[0].as_vector(), arg_values[1].as_vector())
@@ -2366,7 +2362,6 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
-                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -3615,7 +3610,7 @@ mod tests {
             .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(10))));
         assert!(results
             .iter()
-            .any(|t| t.get(0) != Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
+            .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
     }
 
     #[test]
@@ -5025,5 +5020,92 @@ mod tests {
 
         // Similar vectors (1 and 2) might have same bucket (not guaranteed but likely)
         // This is probabilistic, so we don't assert equality
+    }
+
+    #[test]
+    fn test_top_k_aggregate() {
+        let mut codegen = CodeGenerator::new();
+
+        // Input: items with scores
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Float64(5.0)]),
+                Tuple::new(vec![Value::Int32(2), Value::Float64(3.0)]),
+                Tuple::new(vec![Value::Int32(3), Value::Float64(8.0)]),
+                Tuple::new(vec![Value::Int32(4), Value::Float64(1.0)]),
+                Tuple::new(vec![Value::Int32(5), Value::Float64(7.0)]),
+            ],
+        );
+
+        // Top 3 by score (descending)
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["id".to_string(), "score".to_string()],
+            }),
+            group_by: vec![], // No grouping - global top-k
+            aggregations: vec![(
+                AggregateFunction::TopK {
+                    k: 3,
+                    order_col: 1,
+                    descending: true,
+                },
+                0,
+            )],
+            output_schema: vec!["id".to_string(), "score".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 3, "Expected top 3 results");
+
+        // Verify we got the top 3 scores (8.0, 7.0, 5.0)
+        let scores: Vec<f64> = results.iter().map(|t| t.get(1).unwrap().to_f64()).collect();
+        assert!(scores.contains(&8.0), "Missing score 8.0");
+        assert!(scores.contains(&7.0), "Missing score 7.0");
+        assert!(scores.contains(&5.0), "Missing score 5.0");
+    }
+
+    #[test]
+    fn test_top_k_threshold_aggregate() {
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Float64(2.0)]), // Below threshold
+                Tuple::new(vec![Value::Int32(2), Value::Float64(5.0)]), // Above
+                Tuple::new(vec![Value::Int32(3), Value::Float64(8.0)]), // Above
+                Tuple::new(vec![Value::Int32(4), Value::Float64(1.0)]), // Below threshold
+            ],
+        );
+
+        // Top 3 with threshold 4.0 (only scores >= 4.0)
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["id".to_string(), "score".to_string()],
+            }),
+            group_by: vec![],
+            aggregations: vec![(
+                AggregateFunction::TopKThreshold {
+                    k: 3,
+                    order_col: 1,
+                    threshold: 4.0,
+                    descending: true,
+                },
+                0,
+            )],
+            output_schema: vec!["id".to_string(), "score".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 results above threshold");
+
+        // Both should be above threshold (5.0 and 8.0)
+        for result in &results {
+            let score = result.get(1).unwrap().to_f64();
+            assert!(score >= 4.0, "Score {} is below threshold 4.0", score);
+        }
     }
 
