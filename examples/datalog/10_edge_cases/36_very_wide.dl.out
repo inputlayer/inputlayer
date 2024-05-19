@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_very_wide_n10t36
+Knowledge graph 'test_very_wide_n10t36' created.
+Switched to knowledge graph: test_very_wide_n10t36
+> .kg use test_very_wide_n10t36
+Switched to knowledge graph: test_very_wide_n10t36
+> +wide12[(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)].
+Inserted 1 fact(s) into 'wide12'.
+> ?- wide12(A, B, C, D, E, F, G, H, I, J, K, L).
+1 rows:
+  (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+> subset(A, F, L) :- wide12(A, _, _, _, _, F, _, _, _, _, _, L).
+1 rows:
+  (1, 6, 12)
+(session: 1 rule(s))
+> ?- subset(A, F, L).
+1 rows:
+  (1, 6, 12)
+> sum_cols(S) :- wide12(A, B, C, _, _, _, _, _, _, _, _, _), S = A + B + C.
+1 rows:
+  (6)
+(session: 2 rule(s))
+> ?- sum_cols(S).
+1 rows:
+  (6)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_very_wide_n10t36
+Knowledge graph 'test_very_wide_n10t36' dropped.

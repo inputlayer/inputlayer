@@ -1,0 +1,51 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_col_n10t40
+Knowledge graph 'test_single_col_n10t40' created.
+Switched to knowledge graph: test_single_col_n10t40
+> .kg use test_single_col_n10t40
+Switched to knowledge graph: test_single_col_n10t40
+> +flags[(true,), (false,)].
+Inserted 2 fact(s) into 'flags'.
+> +ids[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'ids'.
+> ?- flags(F).
+2 rows:
+  ("false")
+  ("true")
+> ?- ids(I).
+3 rows:
+  (1)
+  (2)
+  (3)
+> both(I, F) :- ids(I), flags(F).
+6 rows:
+  (1, "false")
+  (1, "true")
+  (2, "false")
+  (2, "true")
+  (3, "false")
+  (3, "true")
+(session: 1 rule(s))
+> ?- both(I, F).
+6 rows:
+  (1, "false")
+  (1, "true")
+  (2, "false")
+  (2, "true")
+  (3, "false")
+  (3, "true")
+> +count_ids(count<I>) :- ids(I).
+Rule 'count_ids' registered.
+> ?- count_ids(C).
+1 rows:
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_single_col_n10t40
+Knowledge graph 'test_single_col_n10t40' dropped.
