@@ -1,0 +1,21 @@
+% Test: Symmetric relation patterns
+
+.kg create test_symmetric_n10t28
+.kg use test_symmetric_n10t28
+
+% Friend relation (symmetric)
++friends[(1, 2), (2, 3), (1, 4)].
+
+% Make it symmetric
++symmetric_friends(X, Y) :- friends(X, Y).
++symmetric_friends(Y, X) :- friends(X, Y).
+
+?- symmetric_friends(X, Y).
+
+% Count unique friendships (avoid double counting)
+unique_friends(X, Y) :- symmetric_friends(X, Y), X < Y.
+
+?- unique_friends(X, Y).
+
+.kg use default
+.kg drop test_symmetric_n10t28

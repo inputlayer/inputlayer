@@ -5219,3 +5219,101 @@ mod tests {
         // ID 2 or 4 should be second (both are close)
     }
 
+    #[test]
+    fn test_arithmetic_expression() {
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(10), Value::Int64(3)]),
+                Tuple::new(vec![Value::Int64(20), Value::Int64(5)]),
+            ],
+        );
+
+        // Compute: a + b, a - b, a * b, a / b
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            expressions: vec![
+                (
+                    "sum".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Add,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
+                (
+                    "diff".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Sub,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
+                (
+                    "prod".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Mul,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
+            ],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+
+        // First row: 10 + 3 = 13, 10 - 3 = 7, 10 * 3 = 30
+        let first = &results[0];
+        assert_eq!(first.get(2).unwrap().to_i64(), 13); // sum
+        assert_eq!(first.get(3).unwrap().to_i64(), 7); // diff
+        assert_eq!(first.get(4).unwrap().to_i64(), 30); // prod
+
+        // Second row: 20 + 5 = 25, 20 - 5 = 15, 20 * 5 = 100
+        let second = &results[1];
+        assert_eq!(second.get(2).unwrap().to_i64(), 25);
+        assert_eq!(second.get(3).unwrap().to_i64(), 15);
+        assert_eq!(second.get(4).unwrap().to_i64(), 100);
+    }
+
+    // String and Float Predicate Tests
+    #[test]
+    fn test_string_equality_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "person".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::string("alice")]),
+                Tuple::new(vec![Value::Int32(2), Value::string("bob")]),
+                Tuple::new(vec![Value::Int32(3), Value::string("alice")]),
+                Tuple::new(vec![Value::Int32(4), Value::string("charlie")]),
+            ],
+        );
+
+        // Filter: name = "alice"
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "person".to_string(),
+                schema: vec!["id".to_string(), "name".to_string()],
+            }),
+            predicate: Predicate::ColumnEqStr(1, "alice".to_string()),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows with name='alice'");
+
+        // All results should have name = "alice"
+        for tuple in &results {
+            assert_eq!(
+                tuple.get(1).and_then(|v| v.as_str()),
+                Some("alice"),
+                "All results should have name='alice'"
+            );
+        }
+    }
+

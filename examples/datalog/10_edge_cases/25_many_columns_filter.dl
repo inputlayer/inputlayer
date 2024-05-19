@@ -1,0 +1,27 @@
+% Test: Filter on wide tuple
+
+.kg create test_wide_filter_n10t25
+.kg use test_wide_filter_n10t25
+
+% 6-column data
++data[(1, 10, 100, 1000, 10000, 100000),
+      (2, 20, 200, 2000, 20000, 200000),
+      (3, 30, 300, 3000, 30000, 300000)].
+
+% Filter on first column
+first_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), A > 1.
+
+?- first_filter(A, B, C, D, E, F).
+
+% Filter on middle column
+middle_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), C > 150.
+
+?- middle_filter(A, B, C, D, E, F).
+
+% Filter on last column
+last_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), F >= 200000.
+
+?- last_filter(A, B, C, D, E, F).
+
+.kg use default
+.kg drop test_wide_filter_n10t25
