@@ -5317,3 +5317,100 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_string_inequality_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "person".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::string("alice")]),
+                Tuple::new(vec![Value::Int32(2), Value::string("bob")]),
+                Tuple::new(vec![Value::Int32(3), Value::string("alice")]),
+                Tuple::new(vec![Value::Int32(4), Value::string("charlie")]),
+            ],
+        );
+
+        // Filter: name != "alice"
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "person".to_string(),
+                schema: vec!["id".to_string(), "name".to_string()],
+            }),
+            predicate: Predicate::ColumnNeStr(1, "alice".to_string()),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows with name!='alice'");
+
+        // No results should have name = "alice"
+        for tuple in &results {
+            assert_ne!(
+                tuple.get(1).and_then(|v| v.as_str()),
+                Some("alice"),
+                "No results should have name='alice'"
+            );
+        }
+    }
+
+    fn run_float_filter_test(
+        data: Vec<(i32, f64)>,
+        predicate: Predicate,
+        expected_count: usize,
+        label: &str,
+    ) {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "measurement".to_string(),
+            data.iter()
+                .map(|(id, val)| Tuple::new(vec![Value::Int32(*id), Value::Float64(*val)]))
+                .collect(),
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "measurement".to_string(),
+                schema: vec!["id".to_string(), "value".to_string()],
+            }),
+            predicate,
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), expected_count, "{label}");
+    }
+
+    #[test]
+    fn test_float_comparison_filters() {
+        let ordered = vec![(1, 1.0), (2, 2.5), (3, 3.0), (4, 4.5)];
+        let with_dups = vec![(1, 3.14), (2, 2.71), (3, 3.14), (4, 1.41)];
+
+        run_float_filter_test(
+            with_dups.clone(),
+            Predicate::ColumnEqFloat(1, 3.14),
+            2,
+            "eq 3.14",
+        );
+        run_float_filter_test(
+            ordered.clone(),
+            Predicate::ColumnGtFloat(1, 2.0),
+            3,
+            "gt 2.0",
+        );
+        run_float_filter_test(
+            ordered.clone(),
+            Predicate::ColumnLtFloat(1, 3.0),
+            2,
+            "lt 3.0",
+        );
+        run_float_filter_test(
+            ordered.clone(),
+            Predicate::ColumnGeFloat(1, 2.5),
+            3,
+            "ge 2.5",
+        );
+        run_float_filter_test(ordered, Predicate::ColumnLeFloat(1, 2.5), 2, "le 2.5");
+        run_float_filter_test(
+            vec![(1, 3.14), (2, 2.71), (3, 3.14)],
+            Predicate::ColumnNeFloat(1, 3.14),
+            1,
+            "ne 3.14",
+        );
+    }
+
