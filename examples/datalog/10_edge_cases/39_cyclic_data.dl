@@ -1,0 +1,21 @@
+% Test: Cyclic data handling
+
+.kg create test_cyclic_n10t39
+.kg use test_cyclic_n10t39
+
+% Circular references: 1->2->3->1
++refs[(1, 2), (2, 3), (3, 1)].
+
+% Find all reachable from 1
++reachable(X, Y) :- refs(X, Y).
++reachable(X, Z) :- reachable(X, Y), refs(Y, Z).
+
+?- reachable(1, Y).
+
+% All nodes form a cycle with themselves
+in_cycle(X) :- reachable(X, X).
+
+?- in_cycle(X).
+
+.kg use default
+.kg drop test_cyclic_n10t39
