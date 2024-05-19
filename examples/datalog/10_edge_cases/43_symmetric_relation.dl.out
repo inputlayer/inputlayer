@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_symmetric_n10t43
+Knowledge graph 'test_symmetric_n10t43' created.
+Switched to knowledge graph: test_symmetric_n10t43
+> .kg use test_symmetric_n10t43
+Switched to knowledge graph: test_symmetric_n10t43
+> +friend[(1, 2), (2, 3), (1, 4)].
+Inserted 3 fact(s) into 'friend'.
+> +symmetric(A, B) :- friend(A, B).
+Rule 'symmetric' registered.
+> +symmetric(A, B) :- friend(B, A).
+Rule 'symmetric' registered.
+> ?- symmetric(A, B).
+6 rows:
+  (1, 2)
+  (1, 4)
+  (2, 1)
+  (2, 3)
+  (3, 2)
+  (4, 1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_symmetric_n10t43
+Knowledge graph 'test_symmetric_n10t43' dropped.
