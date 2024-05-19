@@ -5414,3 +5414,114 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_combined_string_and_int_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "employee".to_string(),
+            vec![
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("engineering"),
+                    Value::Int32(50000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("sales"),
+                    Value::Int32(60000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(3),
+                    Value::string("engineering"),
+                    Value::Int32(70000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(4),
+                    Value::string("hr"),
+                    Value::Int32(55000),
+                ]),
+            ],
+        );
+
+        // Filter: dept = "engineering" AND salary > 60000
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "employee".to_string(),
+                schema: vec!["id".to_string(), "dept".to_string(), "salary".to_string()],
+            }),
+            predicate: Predicate::And(
+                Box::new(Predicate::ColumnEqStr(1, "engineering".to_string())),
+                Box::new(Predicate::ColumnGtConst(2, 60000)),
+            ),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected 1 engineering employee with salary > 60000"
+        );
+        assert_eq!(results[0].get(0).and_then(|v| v.as_i32()), Some(3));
+    }
+
+    #[test]
+    fn test_combined_float_and_string_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "product".to_string(),
+            vec![
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("electronics"),
+                    Value::Float64(99.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("electronics"),
+                    Value::Float64(199.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(3),
+                    Value::string("clothing"),
+                    Value::Float64(49.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(4),
+                    Value::string("electronics"),
+                    Value::Float64(149.99),
+                ]),
+            ],
+        );
+
+        // Filter: category = "electronics" AND price < 150.0
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "product".to_string(),
+                schema: vec![
+                    "id".to_string(),
+                    "category".to_string(),
+                    "price".to_string(),
+                ],
+            }),
+            predicate: Predicate::And(
+                Box::new(Predicate::ColumnEqStr(1, "electronics".to_string())),
+                Box::new(Predicate::ColumnLtFloat(2, 150.0)),
+            ),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(
+            results.len(),
+            2,
+            "Expected 2 electronics products with price < 150.0"
+        );
+
+        // Should be products 1 (99.99) and 4 (149.99)
+        let ids: Vec<i32> = results
+            .iter()
+            .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+            .collect();
+        assert!(ids.contains(&1), "Product 1 should be in results");
+        assert!(ids.contains(&4), "Product 4 should be in results");
+    }
+

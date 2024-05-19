@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_same_val_n10t32
+Knowledge graph 'test_same_val_n10t32' created.
+Switched to knowledge graph: test_same_val_n10t32
+> .kg use test_same_val_n10t32
+Switched to knowledge graph: test_same_val_n10t32
+> +uniform[(1, 100), (2, 100), (3, 100), (4, 100)].
+Inserted 4 fact(s) into 'uniform'.
+> +uniform_sum(sum<V>) :- uniform(_, V).
+Rule 'uniform_sum' registered.
+> +uniform_min(min<V>) :- uniform(_, V).
+Rule 'uniform_min' registered.
+> +uniform_max(max<V>) :- uniform(_, V).
+Rule 'uniform_max' registered.
+> +uniform_count(count<V>) :- uniform(_, V).
+Rule 'uniform_count' registered.
+> ?- uniform_sum(S).
+1 rows:
+  (400)
+> ?- uniform_min(M).
+1 rows:
+  (100)
+> ?- uniform_max(M).
+1 rows:
+  (100)
+> ?- uniform_count(C).
+1 rows:
+  (4)
+> distinct_vals(V) :- uniform(_, V).
+1 rows:
+  (100)
+(session: 1 rule(s))
+> ?- distinct_vals(V).
+1 rows:
+  (100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_same_val_n10t32
+Knowledge graph 'test_same_val_n10t32' dropped.
