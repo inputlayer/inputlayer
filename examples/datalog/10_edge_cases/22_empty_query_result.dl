@@ -1,0 +1,21 @@
+% Test: Queries that return empty results
+
+.kg create test_empty_result_n10t22
+.kg use test_empty_result_n10t22
+
+% Some data
++items[(1, "a"), (2, "b"), (3, "c")].
+
+% Query with impossible filter (empty result)
+?- items(Id, Name), Id > 100.
+
+% Query non-matching constant
+?- items(99, Name).
+
+% Join with empty relation
++empty_rel(999, "z").
+-empty_rel(999, "z").
+?- items(Id, N), empty_rel(Id, _).
+
+.kg use default
+.kg drop test_empty_result_n10t22

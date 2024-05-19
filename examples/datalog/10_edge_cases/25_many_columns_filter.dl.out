@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wide_filter_n10t25
+Knowledge graph 'test_wide_filter_n10t25' created.
+Switched to knowledge graph: test_wide_filter_n10t25
+> .kg use test_wide_filter_n10t25
+Switched to knowledge graph: test_wide_filter_n10t25
+> +data[(1, 10, 100, 1000, 10000, 100000), (2, 20, 200, 2000, 20000, 200000), (3, 30, 300, 3000, 30000, 300000)].
+Inserted 3 fact(s) into 'data'.
+> first_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), A > 1.
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+(session: 1 rule(s))
+> ?- first_filter(A, B, C, D, E, F).
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+> middle_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), C > 150.
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+(session: 2 rule(s))
+> ?- middle_filter(A, B, C, D, E, F).
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+> last_filter(A, B, C, D, E, F) :- data(A, B, C, D, E, F), F >= 200000.
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+(session: 3 rule(s))
+> ?- last_filter(A, B, C, D, E, F).
+2 rows:
+  (2, 20, 200, 2000, 20000, 200000)
+  (3, 30, 300, 3000, 30000, 300000)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_wide_filter_n10t25
+Knowledge graph 'test_wide_filter_n10t25' dropped.
