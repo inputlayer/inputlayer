@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_zero_n10t33
+Knowledge graph 'test_zero_n10t33' created.
+Switched to knowledge graph: test_zero_n10t33
+> .kg use test_zero_n10t33
+Switched to knowledge graph: test_zero_n10t33
+> +data[(0, 0), (1, 0), (0, 1), (1, 1)].
+Inserted 4 fact(s) into 'data'.
+> mult_zero(X, Y, R) :- data(X, Y), R = X * Y.
+4 rows:
+  (0, 0, 0)
+  (0, 1, 0)
+  (1, 0, 0)
+  (1, 1, 1)
+(session: 1 rule(s))
+> ?- mult_zero(X, Y, R).
+4 rows:
+  (0, 0, 0)
+  (0, 1, 0)
+  (1, 0, 0)
+  (1, 1, 1)
+> add_zero(X, Y, R) :- data(X, Y), R = X + Y.
+4 rows:
+  (0, 0, 0)
+  (0, 1, 1)
+  (1, 0, 1)
+  (1, 1, 2)
+(session: 2 rule(s))
+> ?- add_zero(X, Y, R).
+4 rows:
+  (0, 0, 0)
+  (0, 1, 1)
+  (1, 0, 1)
+  (1, 1, 2)
+> is_zero(X, Y) :- data(X, Y), X = 0.
+2 rows:
+  (0, 0)
+  (0, 1)
+(session: 3 rule(s))
+> ?- is_zero(X, Y).
+2 rows:
+  (0, 0)
+  (0, 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_zero_n10t33
+Knowledge graph 'test_zero_n10t33' dropped.
