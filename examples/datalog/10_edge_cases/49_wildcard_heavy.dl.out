@@ -1,0 +1,51 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcards_n10t49
+Knowledge graph 'test_wildcards_n10t49' created.
+Switched to knowledge graph: test_wildcards_n10t49
+> .kg use test_wildcards_n10t49
+Switched to knowledge graph: test_wildcards_n10t49
+> +data[(1, "a", 10, true), (2, "b", 20, false), (3, "c", 30, true)].
+Inserted 3 fact(s) into 'data'.
+> first_only(X) :- data(X, _, _, _).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 1 rule(s))
+> ?- first_only(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> first_third(X, Z) :- data(X, _, Z, _).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+(session: 2 rule(s))
+> ?- first_third(X, Z).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> +other[(1, 100), (2, 200)].
+Inserted 2 fact(s) into 'other'.
+> joined(A, C) :- data(A, _, _, _), other(A, C).
+2 rows:
+  (1, 100)
+  (2, 200)
+(session: 3 rule(s))
+> ?- joined(A, C).
+2 rows:
+  (1, 100)
+  (2, 200)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_wildcards_n10t49
+Knowledge graph 'test_wildcards_n10t49' dropped.

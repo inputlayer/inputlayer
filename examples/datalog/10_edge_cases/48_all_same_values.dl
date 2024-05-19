@@ -1,0 +1,23 @@
+% Test: All same values edge case
+
+.kg create test_all_same_n10t48
+.kg use test_all_same_n10t48
+
++same[(5,), (5,), (5,)].
+
+?- same(X).
+
+% Distinct should be 1
++distinct_count(<COUNT_DISTINCT:X>) :- same(X).
+
+?- distinct_count(N).
+
+% Self-join on same values
+pairs(A, B) :- same(A), same(B).
+
++pair_count(count<A>) :- pairs(A, _).
+
+?- pair_count(N).
+
+.kg use default
+.kg drop test_all_same_n10t48

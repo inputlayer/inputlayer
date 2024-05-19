@@ -1,0 +1,27 @@
+% Test: Zero values in various contexts
+
+.kg create test_zeros_n10t46
+.kg use test_zeros_n10t46
+
++nums[(0,), (1,), (-1,)].
+
+% Arithmetic with zero
+plus_zero(X, Y) :- nums(X), Y = X + 0.
+
+?- plus_zero(X, Y).
+
+mult_zero(X, Y) :- nums(X), Y = X * 0.
+
+?- mult_zero(X, Y).
+
+% Comparison with zero
+is_zero(X) :- nums(X), X = 0.
+
+?- is_zero(X).
+
+is_positive(X) :- nums(X), X > 0.
+
+?- is_positive(X).
+
+.kg use default
+.kg drop test_zeros_n10t46

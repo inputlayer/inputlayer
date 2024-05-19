@@ -1,0 +1,20 @@
+% Test: EXISTS pattern
+
+.kg create test_exists_n10t45
+.kg use test_exists_n10t45
+
++departments[(1, "Engineering"), (2, "Sales"), (3, "HR")].
++employees[(1, 1), (2, 1), (3, 2)].
+
+% Departments that have employees (EXISTS)
+has_employees(DeptId, Name) :- departments(DeptId, Name), employees(_, DeptId).
+
+?- has_employees(DeptId, Name).
+
+% Departments without employees (NOT EXISTS)
+no_employees(DeptId, Name) :- departments(DeptId, Name), !employees(_, DeptId).
+
+?- no_employees(DeptId, Name).
+
+.kg use default
+.kg drop test_exists_n10t45

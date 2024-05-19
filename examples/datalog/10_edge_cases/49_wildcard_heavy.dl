@@ -1,0 +1,26 @@
+% Test: Heavy wildcard usage
+
+.kg create test_wildcards_n10t49
+.kg use test_wildcards_n10t49
+
++data[(1, "a", 10, true), (2, "b", 20, false), (3, "c", 30, true)].
+
+% Extract only first column with wildcards
+first_only(X) :- data(X, _, _, _).
+
+?- first_only(X).
+
+% Extract first and third
+first_third(X, Z) :- data(X, _, Z, _).
+
+?- first_third(X, Z).
+
+% Multiple wildcards in join
++other[(1, 100), (2, 200)].
+
+joined(A, C) :- data(A, _, _, _), other(A, C).
+
+?- joined(A, C).
+
+.kg use default
+.kg drop test_wildcards_n10t49
