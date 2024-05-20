@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_ref_n10t50
+Knowledge graph 'test_self_ref_n10t50' created.
+Switched to knowledge graph: test_self_ref_n10t50
+> .kg use test_self_ref_n10t50
+Switched to knowledge graph: test_self_ref_n10t50
+> +person[(1, "Alice", 0), (2, "Bob", 1), (3, "Carol", 1), (4, "Dave", 2)].
+Inserted 4 fact(s) into 'person'.
+> reports(EmpId, EmpName, MgrId) :- person(EmpId, EmpName, MgrId), MgrId > 0.
+3 rows:
+  (2, "Bob", 1)
+  (3, "Carol", 1)
+  (4, "Dave", 2)
+(session: 1 rule(s))
+> ?- reports(EmpId, EmpName, MgrId).
+3 rows:
+  (2, "Bob", 1)
+  (3, "Carol", 1)
+  (4, "Dave", 2)
+> with_manager(EmpName, MgrName) :- person(EmpId, EmpName, MgrId), person(MgrId, MgrName, _), MgrId > 0.
+3 rows:
+  ("Bob", "Alice")
+  ("Carol", "Alice")
+  ("Dave", "Bob")
+(session: 2 rule(s))
+> ?- with_manager(EmpName, MgrName).
+3 rows:
+  ("Bob", "Alice")
+  ("Carol", "Alice")
+  ("Dave", "Bob")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_ref_n10t50
+Knowledge graph 'test_self_ref_n10t50' dropped.

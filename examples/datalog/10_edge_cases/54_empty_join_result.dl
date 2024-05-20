@@ -1,0 +1,15 @@
+% Test: Join producing empty result
+
+.kg create test_empty_join_n10t54
+.kg use test_empty_join_n10t54
+
++left[(1,), (2,), (3,)].
++right[(10,), (20,), (30,)].
+
+% No matching keys - empty result
+empty_join(A) :- left(A), right(A).
+
+?- empty_join(A).
+
+.kg use default
+.kg drop test_empty_join_n10t54

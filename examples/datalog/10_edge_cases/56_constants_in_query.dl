@@ -1,0 +1,19 @@
+% Test: Constants in query patterns
+
+.kg create test_const_query_n10t56
+.kg use test_const_query_n10t56
+
++data[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
+
+% Query with constant in position
+match_a(Id, Val) :- data(Id, "a", Val).
+
+?- match_a(Id, Val).
+
+% Query with multiple constants
+exact(Val) :- data(1, "a", Val).
+
+?- exact(Val).
+
+.kg use default
+.kg drop test_const_query_n10t56
