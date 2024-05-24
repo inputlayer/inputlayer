@@ -1,0 +1,17 @@
+% Test: Duplicate insert handling
+
+.kg create test_dup_ins_n10t59
+.kg use test_dup_ins_n10t59
+
++data[(1, "a")].
++data[(1, "a")].
++data[(1, "a")].
+
+?- data(Id, Val).
+
++count_data(count<Id>) :- data(Id, _).
+
+?- count_data(N).
+
+.kg use default
+.kg drop test_dup_ins_n10t59

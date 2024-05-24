@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_key_n10t63
+Knowledge graph 'test_neg_key_n10t63' created.
+Switched to knowledge graph: test_neg_key_n10t63
+> .kg use test_neg_key_n10t63
+Switched to knowledge graph: test_neg_key_n10t63
+> +data[(-1, "neg_one"), (0, "zero"), (1, "one")].
+Inserted 3 fact(s) into 'data'.
+> ?- data(Key, Val).
+3 rows:
+  (-1, "neg_one")
+  (0, "zero")
+  (1, "one")
+> negative(Key, Val) :- data(Key, Val), Key < 0.
+1 rows:
+  (-1, "neg_one")
+(session: 1 rule(s))
+> ?- negative(Key, Val).
+1 rows:
+  (-1, "neg_one")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_key_n10t63
+Knowledge graph 'test_neg_key_n10t63' dropped.
