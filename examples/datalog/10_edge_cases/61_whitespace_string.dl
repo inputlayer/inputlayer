@@ -1,0 +1,16 @@
+% Test: Whitespace in strings
+
+.kg create test_whitespace_n10t61
+.kg use test_whitespace_n10t61
+
++names[(1, "John Doe"), (2, "Jane Smith"), (3, "Bob")].
+
+?- names(Id, Name).
+
+% Filter for name with space
+has_space(Id, Name) :- names(Id, Name), Name = "John Doe".
+
+?- has_space(Id, Name).
+
+.kg use default
+.kg drop test_whitespace_n10t61

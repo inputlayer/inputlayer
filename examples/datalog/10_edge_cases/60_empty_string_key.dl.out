@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_key_n10t60
+Knowledge graph 'test_empty_key_n10t60' created.
+Switched to knowledge graph: test_empty_key_n10t60
+> .kg use test_empty_key_n10t60
+Switched to knowledge graph: test_empty_key_n10t60
+> +data[("", 100), ("a", 200), ("b", 300)].
+Inserted 3 fact(s) into 'data'.
+> ?- data(Key, Val).
+3 rows:
+  ("", 100)
+  ("a", 200)
+  ("b", 300)
+> empty_key(Val) :- data("", Val).
+1 rows:
+  (100)
+(session: 1 rule(s))
+> ?- empty_key(Val).
+1 rows:
+  (100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_key_n10t60
+Knowledge graph 'test_empty_key_n10t60' dropped.
