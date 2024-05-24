@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_int_n10t88
+Knowledge graph 'test_empty_int_n10t88' created.
+Switched to knowledge graph: test_empty_int_n10t88
+> .kg use test_empty_int_n10t88
+Switched to knowledge graph: test_empty_int_n10t88
+> +set_a[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(4,), (5,), (6,)].
+Inserted 3 fact(s) into 'set_b'.
+> common(X) :- set_a(X), set_b(X).
+No results.
+(session: 1 rule(s))
+> ?- common(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_int_n10t88
+Knowledge graph 'test_empty_int_n10t88' dropped.

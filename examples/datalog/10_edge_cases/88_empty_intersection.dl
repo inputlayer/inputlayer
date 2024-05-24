@@ -1,0 +1,15 @@
+% Test: Intersection that yields empty
+
+.kg create test_empty_int_n10t88
+.kg use test_empty_int_n10t88
+
++set_a[(1,), (2,), (3,)].
++set_b[(4,), (5,), (6,)].
+
+% Intersection of disjoint sets
+common(X) :- set_a(X), set_b(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_empty_int_n10t88
