@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_insert_n10t95
+Knowledge graph 'test_dup_insert_n10t95' created.
+Switched to knowledge graph: test_dup_insert_n10t95
+> .kg use test_dup_insert_n10t95
+Switched to knowledge graph: test_dup_insert_n10t95
+> +data[(1, "a")].
+Inserted 1 fact(s) into 'data'.
+> +data[(1, "a")].
+No facts inserted (1 duplicate skipped).
+> +data[(1, "a")].
+No facts inserted (1 duplicate skipped).
+> +data[(2, "b")].
+Inserted 1 fact(s) into 'data'.
+> count_rows(count<X>) :- data(X, _).
+1 rows:
+  (2)
+(session: 1 rule(s))
+> ?- count_rows(N).
+1 rows:
+  (2)
+> ?- data(X, Y).
+2 rows:
+  (1, "a")
+  (2, "b")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_dup_insert_n10t95
+Knowledge graph 'test_dup_insert_n10t95' dropped.

@@ -1,0 +1,19 @@
+% Test: Aggregation of single value
+
+.kg create test_single_agg_n10t90
+.kg use test_single_agg_n10t90
+
++single[(42,)].
+
+sum_single(sum<X>) :- single(X).
+count_single(count<X>) :- single(X).
+min_single(min<X>) :- single(X).
+max_single(max<X>) :- single(X).
+
+?- sum_single(S).
+?- count_single(C).
+?- min_single(M).
+?- max_single(M).
+
+.kg use default
+.kg drop test_single_agg_n10t90
