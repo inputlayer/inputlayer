@@ -1,0 +1,18 @@
+% Test: Self-referencing in rule body
+
+.kg create test_self_ref_n10t70
+.kg use test_self_ref_n10t70
+
++graph[("a", "a"), ("a", "b"), ("b", "c"), ("c", "c")].
+
+% Find nodes with self-loops
+has_self_loop(X) :- graph(X, X).
+
+% Find nodes without self-loops
+no_self_loop(X) :- graph(X, _), !has_self_loop(X).
+
+?- has_self_loop(X).
+?- no_self_loop(X).
+
+.kg use default
+.kg drop test_self_ref_n10t70

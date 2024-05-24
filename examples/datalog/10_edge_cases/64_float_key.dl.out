@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_key_n10t64
+Knowledge graph 'test_float_key_n10t64' created.
+Switched to knowledge graph: test_float_key_n10t64
+> .kg use test_float_key_n10t64
+Switched to knowledge graph: test_float_key_n10t64
+> +data[(1.5, "one_half"), (2.5, "two_half"), (3.0, "three")].
+Inserted 3 fact(s) into 'data'.
+> ?- data(Key, Val).
+3 rows:
+  (1.5, "one_half")
+  (2.5, "two_half")
+  (3.0, "three")
+> big_floats(Key, Val) :- data(Key, Val), Key > 2.0.
+2 rows:
+  (2.5, "two_half")
+  (3.0, "three")
+(session: 1 rule(s))
+> ?- big_floats(Key, Val).
+2 rows:
+  (2.5, "two_half")
+  (3.0, "three")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_float_key_n10t64
+Knowledge graph 'test_float_key_n10t64' dropped.
