@@ -1,0 +1,17 @@
+% Test: Many rules with same head
+
+.kg create test_many_rules_n10t85
+.kg use test_many_rules_n10t85
+
++nums[(1,), (2,), (3,), (4,), (5,), (6,)].
+
+% Multiple clauses for same head
++classified(X, "tiny") :- nums(X), X <= 1.
++classified(X, "small") :- nums(X), X > 1, X <= 3.
++classified(X, "medium") :- nums(X), X > 3, X <= 5.
++classified(X, "large") :- nums(X), X > 5.
+
+?- classified(X, Cat).
+
+.kg use default
+.kg drop test_many_rules_n10t85
