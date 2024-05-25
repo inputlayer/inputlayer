@@ -731,3 +731,137 @@ impl DDComputation {
     /// Register a new index (metadata only, does not build).
     ///
     /// Returns an error if an index with the same name already exists.
+    pub fn register_index(&self, index: RegisteredIndex) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::RegisterIndex {
+                index,
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while registering index".to_string())?
+    }
+
+    /// Remove an index.
+    pub fn remove_index(&self, name: &str) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::RemoveIndex {
+                name: name.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while removing index".to_string())?
+    }
+
+    /// Store a built index.
+    ///
+    /// Called after building an index to make it available for queries.
+    pub fn set_index_materialized(
+        &self,
+        name: &str,
+        index: Box<dyn Index + Send + Sync>,
+        tuple_count: usize,
+    ) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::SetIndexMaterialized {
+                name: name.to_string(),
+                index,
+                tuple_count,
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while setting index".to_string())
+    }
+
+    /// Get index statistics.
+    ///
+    /// If `name` is Some, returns stats for that specific index.
+    /// If `name` is None, returns stats for all indexes.
+    pub fn get_index_stats(&self, name: Option<&str>) -> Result<Vec<IndexStats>, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::GetIndexStats {
+                name: name.map(String::from),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while getting index stats".to_string())
+    }
+
+    /// Apply incremental updates to an index.
+    ///
+    /// Used to keep indexes in sync with base relation updates.
+    /// `inserts` is a list of (tuple_id, vector) pairs to insert.
+    /// `deletes` is a list of tuple_ids to mark as deleted.
+    pub fn update_index(
+        &self,
+        name: &str,
+        inserts: Vec<(TupleId, Vec<f32>)>,
+        deletes: Vec<TupleId>,
+    ) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::UpdateIndex {
+                name: name.to_string(),
+                inserts,
+                deletes,
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while updating index".to_string())?
+    }
+
+    /// Notify indexes that a base relation has been updated.
+    ///
+    /// This invalidates all indexes that depend on the relation.
+    /// Returns the names of indexes that were invalidated.
+    pub fn notify_indexes_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::NotifyIndexesBaseUpdate {
+                relation: relation.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while notifying indexes".to_string())
+    }
+
+    /// Check if an index exists.
+    pub fn has_index(&self, name: &str) -> bool {
+        self.index_manager.lock().has_index(name)
+    }
+
+    /// Get direct access to the index manager (for advanced use).
+    ///
+    /// This returns an Arc to the manager, allowing direct access without
+    /// going through the command channel. Use with care - the manager
+    /// is also accessed by the worker thread.
+    pub fn index_manager(&self) -> Arc<Mutex<IndexManager>> {
+        Arc::clone(&self.index_manager)
+    }
+
+    /// Shut down the computation cleanly.
+    ///
+    /// Blocks until the worker thread has finished.
+    pub fn shutdown(mut self) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        let _ = self.command_tx.send(DDCommand::Shutdown { response: tx });
+        let _ = rx.recv();
+
+        if let Some(handle) = self.worker_handle.take() {
+            handle
+                .join()
+                .map_err(|_| "DD worker thread panicked".to_string())?;
+        }
+        Ok(())
+    }
+}
+

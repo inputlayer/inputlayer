@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_double_neg_n08t05
+Knowledge graph 'test_double_neg_n08t05' created.
+Switched to knowledge graph: test_double_neg_n08t05
+> .kg use test_double_neg_n08t05
+Switched to knowledge graph: test_double_neg_n08t05
+> +candidate[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
+Inserted 5 fact(s) into 'candidate'.
+> +blacklist[(2, 0), (4, 0)].
+Inserted 2 fact(s) into 'blacklist'.
+> +already_hired[(3, 0)].
+Inserted 1 fact(s) into 'already_hired'.
+> +eligible(X, Y) :- candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
+Rule 'eligible' registered.
+> ?- eligible(X, Y).
+2 rows:
+  (1, 0)
+  (5, 0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_double_neg_n08t05
+Knowledge graph 'test_double_neg_n08t05' dropped.
