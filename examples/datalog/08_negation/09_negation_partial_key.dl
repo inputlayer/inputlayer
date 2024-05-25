@@ -1,0 +1,23 @@
+% Test: Negation with Partial Key Match
+% Description: Tests negation where only part of the tuple is matched
+
+.kg create test_neg_partial_n08t09
+.kg use test_neg_partial_n08t09
+
+% Employee assignments: (employee_id, project_id)
++assignment[(1, 100), (1, 200), (2, 100), (2, 300), (3, 200), (3, 300), (4, 100)].
+
+% Restricted projects
++restricted[(100, 0), (300, 0)].
+
+% Find employees who have at least one non-restricted project
+% Using partial key match on project_id
++has_open_project(Emp, Proj) :- assignment(Emp, Proj), !restricted(Proj, _).
+?- has_open_project(X, Y).
+
+% Find all assignments to non-restricted projects
+?- has_open_project(E, P).
+
+% Cleanup
+.kg use default
+.kg drop test_neg_partial_n08t09

@@ -1,0 +1,23 @@
+% Test: Triple Negation
+% Description: Tests using negation on three different relations
+
+.kg create test_triple_neg_n08t08
+.kg use test_triple_neg_n08t08
+
+% All items
++item[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0)].
+
+% Various exclusion criteria
++sold[(1, 0), (3, 0)].
++reserved[(2, 0), (5, 0)].
++damaged[(4, 0), (7, 0)].
+
+% Available items: not sold, not reserved, not damaged
++available(X, Y) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
+?- available(X, Y).
+
+% Should return: (6, 0), (8, 0)
+
+% Cleanup
+.kg use default
+.kg drop test_triple_neg_n08t08
