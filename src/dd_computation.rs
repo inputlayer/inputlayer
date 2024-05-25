@@ -479,7 +479,6 @@ impl DDComputation {
                                 }
                                 let mut insert_result = Ok(());
                                 for (id, vector) in inserts {
-                                    // TODO: verify this condition
                                     if let Err(e) = mat.index.insert(id, &vector) {
                                         insert_result = Err(e);
                                         break;
@@ -508,3 +507,227 @@ impl DDComputation {
     ///
     /// Each tuple is inserted at the given logical time with diff=+1.
     /// Tracks `max_write_time` for lazy time advancement on reads.
+    pub fn insert(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<(), String> {
+        self.ensure_relation(relation)?;
+        self.max_write_time.fetch_max(time, Ordering::SeqCst);
+
+        let updates: Vec<(Tuple, u64, isize)> = tuples.into_iter().map(|t| (t, time, 1)).collect();
+
+        self.command_tx
+            .send(DDCommand::InsertDelta {
+                relation: relation.to_string(),
+                updates,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())
+    }
+
+    /// Delete a batch of tuples from a relation.
+    ///
+    /// Each tuple is retracted at the given logical time with diff=-1.
+    /// Tracks `max_write_time` for lazy time advancement on reads.
+    pub fn delete(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<(), String> {
+        self.ensure_relation(relation)?;
+        self.max_write_time.fetch_max(time, Ordering::SeqCst);
+
+        let updates: Vec<(Tuple, u64, isize)> = tuples.into_iter().map(|t| (t, time, -1)).collect();
+
+        self.command_tx
+            .send(DDCommand::InsertDelta {
+                relation: relation.to_string(),
+                updates,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())
+    }
+
+    /// Advance the logical time and flush all InputSessions.
+    pub fn advance_time(&self, time: u64) -> Result<(), String> {
+        self.current_time.store(time, Ordering::SeqCst);
+        self.command_tx
+            .send(DDCommand::AdvanceTime(time))
+            .map_err(|_| "DD worker disconnected".to_string())
+    }
+
+    /// Block until the computation has processed all updates through the given time.
+    ///
+    /// This provides strong read consistency: after this returns, any query
+    /// will see all inserts that happened before `time`.
+    pub fn wait_until_caught_up(&self, time: u64) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::WaitUntilCaughtUp { time, response: tx })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while waiting".to_string())
+    }
+
+    /// Read all current tuples from a relation's arrangement.
+    ///
+    /// Returns tuples that have a positive net diff (i.e., currently present).
+    pub fn read_relation(&self, relation: &str) -> Result<Vec<Tuple>, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::ReadRelation {
+                relation: relation.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while reading".to_string())
+    }
+
+    /// Read all current tuples from a relation's arrangement with consistency.
+    ///
+    /// This is the preferred read method. It lazily advances time to cover
+    /// all pending writes, waits for the computation to catch up, then reads.
+    /// After this returns, the result reflects all inserts/deletes that preceded it.
+    pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>, String> {
+        let max_time = self.max_write_time.load(Ordering::SeqCst);
+        let target = max_time + 1;
+        self.advance_time(target)?;
+        self.wait_until_caught_up(target)?;
+        self.read_relation(relation)
+    }
+
+    /// Get the current logical time.
+    pub fn current_time(&self) -> u64 {
+        self.current_time.load(Ordering::SeqCst)
+    }
+
+    /// Get the maximum write time seen so far.
+    pub fn max_write_time(&self) -> u64 {
+        self.max_write_time.load(Ordering::SeqCst)
+    }
+
+    /// Ensure a relation exists in the DD computation.
+    ///
+    /// If the relation doesn't exist yet, creates a new InputSession and
+    /// arrangement for it in a new dataflow on the worker thread.
+    /// Idempotent  -  calling for an existing relation is a fast no-op.
+    pub fn ensure_relation(&self, name: &str) -> Result<(), String> {
+        {
+            let known = self.known_relations.lock();
+            if known.contains(name) {
+                return Ok(());
+            }
+        }
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::AddRelation {
+                name: name.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while adding relation".to_string())?;
+        self.known_relations.lock().insert(name.to_string());
+        Ok(())
+    }
+
+    // === Derived Relations API ===
+
+    /// Register a compiled rule for materialization.
+    ///
+    /// The rule is stored in the DerivedRelationsManager but not immediately
+    /// materialized. Materialization happens on first read or explicit request.
+    pub fn register_rule(&self, rule: CompiledRule) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::RegisterRule { rule, response: tx })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while registering rule".to_string())?
+    }
+
+    /// Remove a rule and its materialization.
+    pub fn remove_rule(&self, name: &str) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::RemoveRule {
+                name: name.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while removing rule".to_string())
+    }
+
+    /// Read materialized data for a derived relation.
+    ///
+    /// Returns None if the relation is not materialized or the materialization
+    /// is invalid (base data has changed since materialization).
+    pub fn read_derived_relation(&self, relation: &str) -> Result<Option<Vec<Tuple>>, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::ReadDerivedRelation {
+                relation: relation.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while reading derived relation".to_string())
+    }
+
+    /// Set materialized data for a derived relation.
+    ///
+    /// Called after executing a rule to cache its results. The manager tracks
+    /// which base relation versions this materialization is based on.
+    pub fn set_materialized(&self, relation: &str, tuples: Vec<Tuple>) -> Result<(), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::SetMaterialized {
+                relation: relation.to_string(),
+                tuples,
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while setting materialized".to_string())
+    }
+
+    /// Notify that a base relation has been updated.
+    ///
+    /// This invalidates all derived relations that depend on the base relation.
+    /// Returns the names of relations that were invalidated.
+    pub fn notify_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::NotifyBaseUpdate {
+                relation: relation.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while notifying base update".to_string())
+    }
+
+    /// Get statistics about derived relations.
+    ///
+    /// Returns (total_rules, materialized_count, invalid_count).
+    pub fn get_derived_stats(&self) -> Result<(usize, usize, usize), String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(DDCommand::GetDerivedStats { response: tx })
+            .map_err(|_| "DD worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "DD worker disconnected while getting stats".to_string())
+    }
+
+    /// Check if a relation is a derived relation (has a registered rule).
+    pub fn is_derived_relation(&self, name: &str) -> bool {
+        self.derived_relations.lock().is_derived(name)
+    }
+
+    /// Get direct access to the derived relations manager (for advanced use).
+    ///
+    /// This returns an Arc to the manager, allowing direct access without
+    /// going through the command channel. Use with care - the manager
+    /// is also accessed by the worker thread.
+    pub fn derived_relations(&self) -> Arc<Mutex<DerivedRelationsManager>> {
+        Arc::clone(&self.derived_relations)
+    }
+
+    // === Index Management API ===
+
+    /// Register a new index (metadata only, does not build).
+    ///
+    /// Returns an error if an index with the same name already exists.
