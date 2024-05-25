@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_triple_neg_n08t08
+Knowledge graph 'test_triple_neg_n08t08' created.
+Switched to knowledge graph: test_triple_neg_n08t08
+> .kg use test_triple_neg_n08t08
+Switched to knowledge graph: test_triple_neg_n08t08
+> +item[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0)].
+Inserted 8 fact(s) into 'item'.
+> +sold[(1, 0), (3, 0)].
+Inserted 2 fact(s) into 'sold'.
+> +reserved[(2, 0), (5, 0)].
+Inserted 2 fact(s) into 'reserved'.
+> +damaged[(4, 0), (7, 0)].
+Inserted 2 fact(s) into 'damaged'.
+> +available(X, Y) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
+Rule 'available' registered.
+> ?- available(X, Y).
+2 rows:
+  (6, 0)
+  (8, 0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triple_neg_n08t08
+Knowledge graph 'test_triple_neg_n08t08' dropped.
