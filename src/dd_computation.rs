@@ -688,7 +688,7 @@ impl DDComputation {
     ///
     /// This invalidates all derived relations that depend on the base relation.
     /// Returns the names of relations that were invalidated.
-    pub fn notify_base_update(self, relation: &str) -> Result<Vec<String>, String> {
+    pub fn notify_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::NotifyBaseUpdate {
@@ -1045,6 +1045,59 @@ mod tests {
         // because we read with "total_diff > 0" check (not exact count)
         let tuples = dd.read_relation("data").unwrap();
         assert_eq!(tuples.len(), 1);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_string_data() {
+        let dd = DDComputation::new(vec!["names".to_string()]).unwrap();
+
+        dd.insert(
+            "names",
+            vec![
+                Tuple::new(vec![Value::string("alice"), Value::Int32(30)]),
+                Tuple::new(vec![Value::string("bob"), Value::Int32(25)]),
+            ],
+            1,
+        )
+        .unwrap();
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+
+        let mut tuples = dd.read_relation("names").unwrap();
+        tuples.sort();
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].get(0), Some(&Value::string("alice")));
+        assert_eq!(tuples[1].get(0), Some(&Value::string("bob")));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_vector_data() {
+        let dd = DDComputation::new(vec!["embeddings".to_string()]).unwrap();
+
+        dd.insert(
+            "embeddings",
+            vec![
+                Tuple::new(vec![
+                    Value::string("doc1"),
+                    Value::vector(vec![1.0, 2.0, 3.0]),
+                ]),
+                Tuple::new(vec![
+                    Value::string("doc2"),
+                    Value::vector(vec![4.0, 5.0, 6.0]),
+                ]),
+            ],
+            1,
+        )
+        .unwrap();
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+
+        let tuples = dd.read_relation("embeddings").unwrap();
+        assert_eq!(tuples.len(), 2);
 
         dd.shutdown().unwrap();
     }
