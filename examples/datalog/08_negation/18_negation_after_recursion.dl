@@ -1,0 +1,32 @@
+% Test: Negation in Recursive Rules (Stratified)
+% Description: Tests negation as part of a recursive computation (stratified negation)
+% NOTE: Using negation on computed views has limitations
+
+.kg create test_neg_rec_n08t18
+.kg use test_neg_rec_n08t18
+
+% Graph edges
++edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+
+% Forbidden edges (not destinations - we filter edges directly)
++forbidden_edge[(2, 3), (4, 5)].
+
+% Transitive closure excluding forbidden edges
+% Base case: direct edges that aren't forbidden
++path(X, Y) :- edge(X, Y), !forbidden_edge(X, Y).
+
+% Recursive case: extend paths through non-forbidden edges
++path(X, Z) :- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
+
+% Query reachability from node 1
+% With edges (2,3) and (4,5) forbidden:
+% Valid edges: (1,2), (3,4)
+% Path from 1: 1->2 (direct), 1->2->? but (2,3) forbidden, so only 1->2
+?- path(1, X).
+
+% All paths
+?- path(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_neg_rec_n08t18
