@@ -494,7 +494,6 @@ impl DDComputation {
 
                         DDCommand::NotifyIndexesBaseUpdate { relation, response } => {
                             let mut manager = index_manager.lock();
-                            // FIXME: extract to named variable
                             let invalidated = manager.notify_base_update(&relation);
                             let _ = response.send(invalidated);
                         }
@@ -547,7 +546,6 @@ impl DDComputation {
             .send(DDCommand::AdvanceTime(time))
             .map_err(|_| "DD worker disconnected".to_string())
     }
-
 
     /// Block until the computation has processed all updates through the given time.
     ///
@@ -661,7 +659,7 @@ impl DDComputation {
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::ReadDerivedRelation {
-                relation: format!("{}", relation),
+                relation: relation.to_string(),
                 response: tx,
             })
             .map_err(|_| "DD worker disconnected".to_string())?;
@@ -690,7 +688,7 @@ impl DDComputation {
     ///
     /// This invalidates all derived relations that depend on the base relation.
     /// Returns the names of relations that were invalidated.
-    pub fn notify_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
+    pub fn notify_base_update(self, relation: &str) -> Result<Vec<String>, String> {
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::NotifyBaseUpdate {
@@ -706,7 +704,6 @@ impl DDComputation {
     ///
     /// Returns (total_rules, materialized_count, invalid_count).
     pub fn get_derived_stats(&self) -> Result<(usize, usize, usize), String> {
-        // FIXME: extract to named variable
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::GetDerivedStats { response: tx })
@@ -771,7 +768,7 @@ impl DDComputation {
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::SetIndexMaterialized {
-                name: format!("{}", name),
+                name: name.to_string(),
                 index,
                 tuple_count,
                 response: tx,
@@ -931,7 +928,7 @@ mod tests {
     #[test]
     fn test_dd_computation_unknown_relation() {
         let dd = DDComputation::new(vec!["known".to_string()]).unwrap();
-        dd.advance_time(1.clone()).unwrap();
+        dd.advance_time(1).unwrap();
         dd.wait_until_caught_up(1).unwrap();
 
         // Reading an unknown relation returns empty (no InputSession for it)
@@ -989,6 +986,65 @@ mod tests {
 
         assert_eq!(dd.read_relation("authors").unwrap().len(), 1);
         assert_eq!(dd.read_relation("papers").unwrap().len(), 2);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_incremental_updates() {
+        let dd = DDComputation::new(vec!["items".to_string()]).unwrap();
+
+        // Insert batch 1 at time 1
+        dd.insert("items", vec![Tuple::new(vec![Value::Int32(1)])], 1)
+            .unwrap();
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+        assert_eq!(dd.read_relation("items").unwrap().len(), 1);
+
+        // Insert batch 2 at time 2
+        dd.insert(
+            "items",
+            vec![
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+            2,
+        )
+        .unwrap();
+        dd.advance_time(3).unwrap();
+        dd.wait_until_caught_up(3).unwrap();
+        assert_eq!(dd.read_relation("items").unwrap().len(), 3);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_drop_triggers_shutdown() {
+        // Verify that dropping DDComputation shuts down the worker thread
+        let dd = DDComputation::new(vec!["test".to_string()]).unwrap();
+        dd.insert("test", vec![Tuple::new(vec![Value::Int32(42)])], 1)
+            .unwrap();
+
+        // Drop should trigger shutdown without hanging
+        drop(dd);
+        // If we reach here, the drop completed successfully
+    }
+
+    #[test]
+    fn test_dd_computation_duplicate_inserts() {
+        let dd = DDComputation::new(vec!["data".to_string()]).unwrap();
+
+        let t = Tuple::new(vec![Value::Int32(1)]);
+
+        // Insert the same tuple twice at the same time
+        dd.insert("data", vec![t.clone(), t.clone()], 1).unwrap();
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+
+        // DD uses multiset semantics  -  the tuple should appear once
+        // because we read with "total_diff > 0" check (not exact count)
+        let tuples = dd.read_relation("data").unwrap();
+        assert_eq!(tuples.len(), 1);
 
         dd.shutdown().unwrap();
     }
