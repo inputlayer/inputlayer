@@ -351,7 +351,7 @@ impl DDComputation {
                                         total_diff += diff;
                                     });
                                     if total_diff > 0 {
-                                        result.push(key);
+                                        result.push(key.clone());
                                     }
                                     cursor.step_key(&storage);
                                 }
@@ -1098,6 +1098,70 @@ mod tests {
 
         let tuples = dd.read_relation("embeddings").unwrap();
         assert_eq!(tuples.len(), 2);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_dynamic_relation() {
+        // Create with NO initial relations
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Insert into a dynamically-created relation (auto-ensures)
+        dd.insert(
+            "edge",
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+            1,
+        )
+        .unwrap();
+
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+
+        let tuples = dd.read_relation("edge").unwrap();
+        assert_eq!(tuples.len(), 2);
+
+        // Add another relation dynamically
+        dd.insert("node", vec![Tuple::new(vec![Value::Int32(1)])], 2)
+            .unwrap();
+
+        dd.advance_time(3).unwrap();
+        dd.wait_until_caught_up(3).unwrap();
+
+        assert_eq!(dd.read_relation("node").unwrap().len(), 1);
+        // Original relation still intact
+        assert_eq!(dd.read_relation("edge").unwrap().len(), 2);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_ensure_relation_idempotent() {
+        let dd = DDComputation::new(vec!["existing".to_string()]).unwrap();
+
+        // Ensure existing relation  -  should be fast no-op
+        dd.ensure_relation("existing").unwrap();
+
+        // Ensure new relation
+        dd.ensure_relation("new_rel").unwrap();
+
+        // Ensure same new relation again  -  idempotent
+        dd.ensure_relation("new_rel").unwrap();
+
+        // Both should work for inserts
+        dd.insert("existing", vec![Tuple::new(vec![Value::Int32(1)])], 1)
+            .unwrap();
+        dd.insert("new_rel", vec![Tuple::new(vec![Value::Int32(2)])], 1)
+            .unwrap();
+
+        dd.advance_time(2).unwrap();
+        dd.wait_until_caught_up(2).unwrap();
+
+        assert_eq!(dd.read_relation("existing").unwrap().len(), 1);
+        assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1);
 
         dd.shutdown().unwrap();
     }
