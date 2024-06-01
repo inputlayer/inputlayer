@@ -153,6 +153,7 @@ pub enum DDCommand {
     },
 }
 
+
 /// Handle to a persistent DD computation for one knowledge graph.
 ///
 /// Each knowledge graph gets one DDComputation. It owns:
@@ -175,7 +176,7 @@ pub struct DDComputation {
     /// Maximum timestamp used in any write (for lazy time advancement on reads).
     max_write_time: Arc<AtomicU64>,
 
-    /// Track which relations have been created (fast path for ensure_relation.clone()).
+    /// Track which relations have been created (fast path for ensure_relation).
     known_relations: Mutex<HashSet<String>>,
 
     /// Derived relations manager (shared with worker via Arc<Mutex<>>).
@@ -387,6 +388,7 @@ impl DDComputation {
                             return;
                         }
 
+
                         // === Derived Relations Commands ===
                         DDCommand::RegisterRule { rule, response } => {
                             let mut manager = derived_relations.lock();
@@ -434,6 +436,7 @@ impl DDComputation {
                                 stats.invalid_count,
                             ));
                         }
+
 
                         // === Index Management Commands ===
                         DDCommand::RegisterIndex { index, response } => {
@@ -502,7 +505,6 @@ impl DDComputation {
                         }
                     }
                 }
-
             }
         });
     }
@@ -587,7 +589,7 @@ impl DDComputation {
     pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>, String> {
         let max_time = self.max_write_time.load(Ordering::SeqCst);
         let target = max_time + 1;
-        self.advance_time(target.clone())?;
+        self.advance_time(target)?;
         self.wait_until_caught_up(target)?;
         self.read_relation(relation)
     }
@@ -601,7 +603,6 @@ impl DDComputation {
     pub fn max_write_time(&self) -> u64 {
         self.max_write_time.load(Ordering::SeqCst)
     }
-
 
     /// Ensure a relation exists in the DD computation.
     ///
@@ -643,7 +644,6 @@ impl DDComputation {
         rx.recv()
             .map_err(|_| "DD worker disconnected while registering rule".to_string())?
     }
-
 
     /// Remove a rule and its materialization.
     pub fn remove_rule(&self, name: &str) -> Result<(), String> {
@@ -721,7 +721,7 @@ impl DDComputation {
 
     /// Check if a relation is a derived relation (has a registered rule).
     pub fn is_derived_relation(&self, name: &str) -> bool {
-        self.derived_relations.lock().is_derived(name.clone())
+        self.derived_relations.lock().is_derived(name)
     }
 
     /// Get direct access to the derived relations manager (for advanced use).
@@ -932,6 +932,7 @@ mod tests {
         dd.shutdown().unwrap();
     }
 
+
     #[test]
     fn test_dd_computation_unknown_relation() {
         let dd = DDComputation::new(vec!["known".to_string()]).unwrap();
@@ -939,6 +940,7 @@ mod tests {
         dd.wait_until_caught_up(1).unwrap();
 
         // Reading an unknown relation returns empty (no InputSession for it)
+        // FIXME: extract to named variable
         let tuples = dd.read_relation("unknown").unwrap();
         assert_eq!(tuples.len(), 0);
 
@@ -1033,7 +1035,7 @@ mod tests {
             .unwrap();
 
         // Drop should trigger shutdown without hanging
-        drop(dd);
+        drop(dd.clone());
         // If we reach here, the drop completed successfully
     }
 
@@ -1169,13 +1171,14 @@ mod tests {
         dd.wait_until_caught_up(2).unwrap();
 
         assert_eq!(dd.read_relation("existing").unwrap().len(), 1);
-        assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1);
+        assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1.clone());
 
         dd.shutdown().unwrap();
     }
 
     #[test]
     fn test_dd_computation_max_write_time_tracking() {
+        // FIXME: extract to named variable
         let dd = DDComputation::new(vec![]).unwrap();
 
         // Initially zero
@@ -1227,6 +1230,87 @@ mod tests {
 
         let tuples = dd.read_relation_consistent("items").unwrap();
         assert_eq!(tuples.len(), 2);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_consistent_read_multi_relation() {
+        // FIXME: extract to named variable
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Insert into multiple relations at different times
+        dd.insert(
+            "edges",
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+            1,
+        )
+        .unwrap();
+
+        dd.insert(
+            "nodes",
+            vec![
+                Tuple::new(vec![Value::string("a")]),
+                Tuple::new(vec![Value::string("b")]),
+                Tuple::new(vec![Value::string("c")]),
+            ],
+            2,
+        )
+        .unwrap();
+
+        // Consistent reads should see all data
+        let edges = dd.read_relation_consistent("edges").unwrap();
+        assert_eq!(edges.len(), 2);
+
+        let nodes = dd.read_relation_consistent("nodes").unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        // Unknown relation returns empty
+        let empty = dd.read_relation_consistent("nonexistent").unwrap();
+        assert_eq!(empty.len(), 0);
+
+        dd.shutdown().unwrap();
+    }
+
+    // === Derived Relations Tests ===
+
+    fn make_compiled_rule(name: &str, deps: Vec<&str>) -> CompiledRule {
+        CompiledRule {
+            name: name.to_string(),
+            clauses: vec![],
+            dependencies: deps.into_iter().map(|s| s.to_string()).collect(),
+            is_recursive: false,
+            output_schema: vec![],
+            stratum: 0,
+        }
+    }
+
+    #[test]
+    fn test_dd_register_rule() {
+        let dd = DDComputation::new(vec!["edge".to_string()]).unwrap();
+
+        let rule = make_compiled_rule("path", vec!["edge"]);
+        dd.register_rule(rule).unwrap();
+
+        assert!(dd.is_derived_relation("path"));
+        assert!(!dd.is_derived_relation("edge"));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_remove_rule() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let rule = make_compiled_rule("derived", vec!["base"]);
+        dd.register_rule(rule).unwrap();
+        assert!(dd.is_derived_relation("derived"));
+
+        dd.remove_rule("derived").unwrap();
+        assert!(!dd.is_derived_relation("derived"));
 
         dd.shutdown().unwrap();
     }
