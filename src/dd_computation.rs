@@ -351,7 +351,7 @@ impl DDComputation {
                                         total_diff += diff;
                                     });
                                     if total_diff > 0 {
-                                        result.push(key);
+                                        result.push(key.clone());
                                     }
                                     cursor.step_key(&storage);
                                 }
@@ -1406,5 +1406,48 @@ mod tests {
             column_name: "embedding".to_string(),
             index_type: IndexType::Hnsw(HnswConfig::default()),
         }
+    }
+
+    #[test]
+    fn test_dd_register_index() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let idx = make_registered_index("doc_emb", "documents");
+        dd.register_index(idx).unwrap();
+
+        assert!(dd.has_index("doc_emb"));
+        assert!(!dd.has_index("nonexistent"));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_register_duplicate_index_fails() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let idx = make_registered_index("my_idx", "docs");
+        dd.register_index(idx.clone()).unwrap();
+
+        let result = dd.register_index(idx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_remove_index() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let idx = make_registered_index("to_remove", "docs");
+        dd.register_index(idx).unwrap();
+
+        assert!(dd.has_index("to_remove"));
+
+        dd.remove_index("to_remove").unwrap();
+
+        assert!(!dd.has_index("to_remove"));
+
+        dd.shutdown().unwrap();
     }
 

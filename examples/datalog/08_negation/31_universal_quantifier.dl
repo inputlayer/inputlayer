@@ -1,0 +1,27 @@
+% Test: Universal quantifier simulation
+
+.kg create test_universal_n08t31
+.kg use test_universal_n08t31
+
++students[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++courses[("Math",), ("Physics",), ("Chemistry",)].
++enrolled[(1, "Math"), (1, "Physics"), (1, "Chemistry"), (2, "Math"), (2, "Physics"), (3, "Math")].
+
+% Students enrolled in at least one course
+has_enrollment(S) :- enrolled(S, _).
+
+?- has_enrollment(S).
+
+% Courses a student is NOT enrolled in
+not_enrolled(S, C) :- students(S, _), courses(C), !enrolled(S, C).
+
+?- not_enrolled(S, C).
+
+% Students enrolled in ALL courses (no course they're not enrolled in)
+% This is "FOR ALL courses C, student S is enrolled in C"
+all_courses(S, Name) :- students(S, Name), !not_enrolled(S, _).
+
+?- all_courses(S, Name).
+
+.kg use default
+.kg drop test_universal_n08t31

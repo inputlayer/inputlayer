@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_agg_n08t29
+Knowledge graph 'test_neg_agg_n08t29' created.
+Switched to knowledge graph: test_neg_agg_n08t29
+> .kg use test_neg_agg_n08t29
+Switched to knowledge graph: test_neg_agg_n08t29
+> +sales[(1, "electronics", 1000), (2, "electronics", 2000), (3, "clothing", 500), (4, "clothing", 750)].
+Inserted 4 fact(s) into 'sales'.
+> +excluded[("food")].
+Inserted 1 fact(s) into 'excluded'.
+> cat_sales(Cat, sum<Amt>) :- sales(_, Cat, Amt), !excluded(Cat).
+2 rows:
+  ("clothing", 1250)
+  ("electronics", 3000)
+(session: 1 rule(s))
+> ?- cat_sales(Cat, Total).
+2 rows:
+  ("clothing", 1250)
+  ("electronics", 3000)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_agg_n08t29
+Knowledge graph 'test_neg_agg_n08t29' dropped.
