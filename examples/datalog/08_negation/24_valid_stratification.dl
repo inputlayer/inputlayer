@@ -1,0 +1,29 @@
+% Test: Valid Stratification Cases
+% Description: Tests that valid stratified negation works correctly
+% NOTE: Bug cases (should error but don't) are in tests 25-27
+
+.kg create test_circular_neg_n08t24
+.kg use test_circular_neg_n08t24
+
+% Base facts
++base[(1), (2), (3)].
++excluded[(2)].
+
+% Test 1: Simple valid stratification (negation on different relation)
++valid_neg(X) :- base(X), !excluded(X).
+?- valid_neg(X).
+
+% Test 2: Two-layer stratification (should work)
++layer1(X) :- base(X).
++layer2(X) :- layer1(X), !excluded(X).
+?- layer2(X).
+
+% Test 3: Negation on derived, non-recursive relation (should work)
++derived(X) :- base(X), X > 1.
++not_derived(X) :- base(X), !derived(X).
+?- not_derived(X).
+
+
+% Cleanup
+.kg use default
+.kg drop test_circular_neg_n08t24
