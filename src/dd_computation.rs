@@ -1351,3 +1351,60 @@ mod tests {
         dd.shutdown().unwrap();
     }
 
+    #[test]
+    fn test_dd_derived_stats() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Initially empty
+        let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
+        assert_eq!(total, 0);
+        assert_eq!(materialized, 0);
+        assert_eq!(invalid, 0);
+
+        // Register a rule
+        let rule = make_compiled_rule("path", vec!["edge"]);
+        dd.register_rule(rule).unwrap();
+
+        let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(materialized, 0);
+        assert_eq!(invalid, 1); // Not materialized = invalid
+
+        // Materialize
+        dd.set_materialized("path", vec![]).unwrap();
+
+        let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(materialized, 1);
+        assert_eq!(invalid, 0);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_derived_relations_accessor() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let rule = make_compiled_rule("path", vec!["edge"]);
+        dd.register_rule(rule).unwrap();
+
+        // Direct access to manager
+        let manager = dd.derived_relations();
+        assert!(manager.lock().is_derived("path"));
+
+        dd.shutdown().unwrap();
+    }
+
+    // === Index Management Tests ===
+
+    fn make_registered_index(name: &str, relation: &str) -> RegisteredIndex {
+        use crate::index_manager::{HnswConfig, IndexType};
+        RegisteredIndex {
+            name: name.to_string(),
+            relation: relation.to_string(),
+            column_idx: 1,
+            column_name: "embedding".to_string(),
+            index_type: IndexType::Hnsw(HnswConfig::default()),
+        }
+    }
+
