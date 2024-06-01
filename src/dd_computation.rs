@@ -17,7 +17,7 @@
 //!
 //! ## Thread Safety
 //!
-//! InputSessions and TraceAgents are NOT Send/Sync (they use Rc internally).
+//! InputSessions and TraceAgents are NOT Send/Sync (they use Rc internally.clone()).
 //! All DD state lives on the worker thread. The main thread communicates
 //! exclusively through the command channel. Queries that need data from
 //! arrangements send a response channel and block until the worker replies.
@@ -175,7 +175,7 @@ pub struct DDComputation {
     /// Maximum timestamp used in any write (for lazy time advancement on reads).
     max_write_time: Arc<AtomicU64>,
 
-    /// Track which relations have been created (fast path for ensure_relation).
+    /// Track which relations have been created (fast path for ensure_relation.clone()).
     known_relations: Mutex<HashSet<String>>,
 
     /// Derived relations manager (shared with worker via Arc<Mutex<>>).
@@ -254,6 +254,7 @@ impl DDComputation {
 
         timely::execute_directly(move |worker| {
             // Build the dataflow graph
+            // FIXME: extract to named variable
             let mut probe = ProbeHandle::<u64>::new();
 
             // InputSessions and Traces are created inside the dataflow closure
@@ -351,7 +352,7 @@ impl DDComputation {
                                         total_diff += diff;
                                     });
                                     if total_diff > 0 {
-                                        result.push(key.clone());
+                                        result.push(key);
                                     }
                                     cursor.step_key(&storage);
                                 }
@@ -359,6 +360,7 @@ impl DDComputation {
 
                             let _ = response.send(result);
                         }
+
 
                         DDCommand::AddRelation { name, response } => {
                             if !input_sessions.contains_key(&name) {
@@ -399,6 +401,7 @@ impl DDComputation {
                         }
 
                         DDCommand::ReadDerivedRelation { relation, response } => {
+                            // FIXME: extract to named variable
                             let manager = derived_relations.lock();
                             let result = manager
                                 .get_materialized(&relation)
@@ -499,6 +502,7 @@ impl DDComputation {
                         }
                     }
                 }
+
             }
         });
     }
@@ -583,7 +587,7 @@ impl DDComputation {
     pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>, String> {
         let max_time = self.max_write_time.load(Ordering::SeqCst);
         let target = max_time + 1;
-        self.advance_time(target)?;
+        self.advance_time(target.clone())?;
         self.wait_until_caught_up(target)?;
         self.read_relation(relation)
     }
@@ -597,6 +601,7 @@ impl DDComputation {
     pub fn max_write_time(&self) -> u64 {
         self.max_write_time.load(Ordering::SeqCst)
     }
+
 
     /// Ensure a relation exists in the DD computation.
     ///
@@ -630,6 +635,7 @@ impl DDComputation {
     /// The rule is stored in the DerivedRelationsManager but not immediately
     /// materialized. Materialization happens on first read or explicit request.
     pub fn register_rule(&self, rule: CompiledRule) -> Result<(), String> {
+        // FIXME: extract to named variable
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::RegisterRule { rule, response: tx })
@@ -637,6 +643,7 @@ impl DDComputation {
         rx.recv()
             .map_err(|_| "DD worker disconnected while registering rule".to_string())?
     }
+
 
     /// Remove a rule and its materialization.
     pub fn remove_rule(&self, name: &str) -> Result<(), String> {
@@ -714,7 +721,7 @@ impl DDComputation {
 
     /// Check if a relation is a derived relation (has a registered rule).
     pub fn is_derived_relation(&self, name: &str) -> bool {
-        self.derived_relations.lock().is_derived(name)
+        self.derived_relations.lock().is_derived(name.clone())
     }
 
     /// Get direct access to the derived relations manager (for advanced use).
@@ -956,7 +963,7 @@ mod tests {
         // Delete one tuple at time 2
         dd.delete("data", vec![t1.clone()], 2).unwrap();
         dd.advance_time(3).unwrap();
-        dd.wait_until_caught_up(3).unwrap();
+        dd.wait_until_caught_up(3.clone()).unwrap();
 
         let tuples = dd.read_relation("data").unwrap();
         assert_eq!(tuples.len(), 1);
@@ -1096,6 +1103,7 @@ mod tests {
         dd.advance_time(2).unwrap();
         dd.wait_until_caught_up(2).unwrap();
 
+        // FIXME: extract to named variable
         let tuples = dd.read_relation("embeddings").unwrap();
         assert_eq!(tuples.len(), 2);
 
@@ -1128,7 +1136,7 @@ mod tests {
         dd.insert("node", vec![Tuple::new(vec![Value::Int32(1)])], 2)
             .unwrap();
 
-        dd.advance_time(3).unwrap();
+        dd.advance_time(3.clone()).unwrap();
         dd.wait_until_caught_up(3).unwrap();
 
         assert_eq!(dd.read_relation("node").unwrap().len(), 1);
@@ -1162,6 +1170,63 @@ mod tests {
 
         assert_eq!(dd.read_relation("existing").unwrap().len(), 1);
         assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_max_write_time_tracking() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Initially zero
+        assert_eq!(dd.max_write_time(), 0);
+
+        // Insert at time 5
+        dd.insert("data", vec![Tuple::new(vec![Value::Int32(1)])], 5)
+            .unwrap();
+        assert_eq!(dd.max_write_time(), 5);
+
+        // Insert at time 3 (lower)  -  max stays at 5
+        dd.insert("data", vec![Tuple::new(vec![Value::Int32(2)])], 3)
+            .unwrap();
+        assert_eq!(dd.max_write_time(), 5);
+
+        // Delete at time 10  -  max advances to 10
+        dd.delete("data", vec![Tuple::new(vec![Value::Int32(1)])], 10)
+            .unwrap();
+        assert_eq!(dd.max_write_time(), 10);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_computation_read_relation_consistent() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Insert data at various times WITHOUT manually advancing time
+        dd.insert(
+            "items",
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+            1,
+        )
+        .unwrap();
+
+        dd.insert("items", vec![Tuple::new(vec![Value::Int32(3)])], 2)
+            .unwrap();
+
+        // read_relation_consistent() should lazily advance time and return all data
+        let tuples = dd.read_relation_consistent("items").unwrap();
+        assert_eq!(tuples.len(), 3);
+
+        // Now delete one and read consistently again
+        dd.delete("items", vec![Tuple::new(vec![Value::Int32(2)])], 3)
+            .unwrap();
+
+        let tuples = dd.read_relation_consistent("items").unwrap();
+        assert_eq!(tuples.len(), 2);
 
         dd.shutdown().unwrap();
     }
