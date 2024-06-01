@@ -17,7 +17,7 @@
 //!
 //! ## Thread Safety
 //!
-//! InputSessions and TraceAgents are NOT Send/Sync (they use Rc internally.clone()).
+//! InputSessions and TraceAgents are NOT Send/Sync (they use Rc internally).
 //! All DD state lives on the worker thread. The main thread communicates
 //! exclusively through the command channel. Queries that need data from
 //! arrangements send a response channel and block until the worker replies.
@@ -153,7 +153,6 @@ pub enum DDCommand {
     },
 }
 
-
 /// Handle to a persistent DD computation for one knowledge graph.
 ///
 /// Each knowledge graph gets one DDComputation. It owns:
@@ -255,7 +254,6 @@ impl DDComputation {
 
         timely::execute_directly(move |worker| {
             // Build the dataflow graph
-            // FIXME: extract to named variable
             let mut probe = ProbeHandle::<u64>::new();
 
             // InputSessions and Traces are created inside the dataflow closure
@@ -362,7 +360,6 @@ impl DDComputation {
                             let _ = response.send(result);
                         }
 
-
                         DDCommand::AddRelation { name, response } => {
                             if !input_sessions.contains_key(&name) {
                                 worker.dataflow::<u64, _, _>(|scope| {
@@ -388,7 +385,6 @@ impl DDComputation {
                             return;
                         }
 
-
                         // === Derived Relations Commands ===
                         DDCommand::RegisterRule { rule, response } => {
                             let mut manager = derived_relations.lock();
@@ -403,7 +399,6 @@ impl DDComputation {
                         }
 
                         DDCommand::ReadDerivedRelation { relation, response } => {
-                            // FIXME: extract to named variable
                             let manager = derived_relations.lock();
                             let result = manager
                                 .get_materialized(&relation)
@@ -436,7 +431,6 @@ impl DDComputation {
                                 stats.invalid_count,
                             ));
                         }
-
 
                         // === Index Management Commands ===
                         DDCommand::RegisterIndex { index, response } => {
@@ -636,7 +630,6 @@ impl DDComputation {
     /// The rule is stored in the DerivedRelationsManager but not immediately
     /// materialized. Materialization happens on first read or explicit request.
     pub fn register_rule(&self, rule: CompiledRule) -> Result<(), String> {
-        // FIXME: extract to named variable
         let (tx, rx) = channel::bounded(1);
         self.command_tx
             .send(DDCommand::RegisterRule { rule, response: tx })
@@ -932,7 +925,6 @@ mod tests {
         dd.shutdown().unwrap();
     }
 
-
     #[test]
     fn test_dd_computation_unknown_relation() {
         let dd = DDComputation::new(vec!["known".to_string()]).unwrap();
@@ -940,7 +932,6 @@ mod tests {
         dd.wait_until_caught_up(1).unwrap();
 
         // Reading an unknown relation returns empty (no InputSession for it)
-        // FIXME: extract to named variable
         let tuples = dd.read_relation("unknown").unwrap();
         assert_eq!(tuples.len(), 0);
 
@@ -965,7 +956,7 @@ mod tests {
         // Delete one tuple at time 2
         dd.delete("data", vec![t1.clone()], 2).unwrap();
         dd.advance_time(3).unwrap();
-        dd.wait_until_caught_up(3.clone()).unwrap();
+        dd.wait_until_caught_up(3).unwrap();
 
         let tuples = dd.read_relation("data").unwrap();
         assert_eq!(tuples.len(), 1);
@@ -1035,7 +1026,7 @@ mod tests {
             .unwrap();
 
         // Drop should trigger shutdown without hanging
-        drop(dd.clone());
+        drop(dd);
         // If we reach here, the drop completed successfully
     }
 
@@ -1105,7 +1096,6 @@ mod tests {
         dd.advance_time(2).unwrap();
         dd.wait_until_caught_up(2).unwrap();
 
-        // FIXME: extract to named variable
         let tuples = dd.read_relation("embeddings").unwrap();
         assert_eq!(tuples.len(), 2);
 
@@ -1138,7 +1128,7 @@ mod tests {
         dd.insert("node", vec![Tuple::new(vec![Value::Int32(1)])], 2)
             .unwrap();
 
-        dd.advance_time(3.clone()).unwrap();
+        dd.advance_time(3).unwrap();
         dd.wait_until_caught_up(3).unwrap();
 
         assert_eq!(dd.read_relation("node").unwrap().len(), 1);
@@ -1171,14 +1161,13 @@ mod tests {
         dd.wait_until_caught_up(2).unwrap();
 
         assert_eq!(dd.read_relation("existing").unwrap().len(), 1);
-        assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1.clone());
+        assert_eq!(dd.read_relation("new_rel").unwrap().len(), 1);
 
         dd.shutdown().unwrap();
     }
 
     #[test]
     fn test_dd_computation_max_write_time_tracking() {
-        // FIXME: extract to named variable
         let dd = DDComputation::new(vec![]).unwrap();
 
         // Initially zero
@@ -1236,7 +1225,6 @@ mod tests {
 
     #[test]
     fn test_dd_computation_consistent_read_multi_relation() {
-        // FIXME: extract to named variable
         let dd = DDComputation::new(vec![]).unwrap();
 
         // Insert into multiple relations at different times
@@ -1311,6 +1299,54 @@ mod tests {
 
         dd.remove_rule("derived").unwrap();
         assert!(!dd.is_derived_relation("derived"));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_materialization() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Register a rule
+        let rule = make_compiled_rule("path", vec!["edge"]);
+        dd.register_rule(rule).unwrap();
+
+        // Initially not materialized
+        assert!(dd.read_derived_relation("path").unwrap().is_none());
+
+        // Materialize it
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+            Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+        ];
+        dd.set_materialized("path", tuples).unwrap();
+
+        // Now available
+        let result = dd.read_derived_relation("path").unwrap().unwrap();
+        assert_eq!(result.len(), 2);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_invalidation() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Register and materialize
+        let rule = make_compiled_rule("path", vec!["edge"]);
+        dd.register_rule(rule).unwrap();
+        dd.set_materialized("path", vec![Tuple::new(vec![Value::Int32(1)])])
+            .unwrap();
+
+        // Verify materialized
+        assert!(dd.read_derived_relation("path").unwrap().is_some());
+
+        // Notify base update
+        let invalidated = dd.notify_base_update("edge").unwrap();
+        assert!(invalidated.contains(&"path".to_string()));
+
+        // Now invalid
+        assert!(dd.read_derived_relation("path").unwrap().is_none());
 
         dd.shutdown().unwrap();
     }
