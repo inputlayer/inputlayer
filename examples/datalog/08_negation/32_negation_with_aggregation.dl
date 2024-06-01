@@ -1,0 +1,20 @@
+% Test: Negation combined with aggregation
+
+.kg create test_neg_agg_n08t32
+.kg use test_neg_agg_n08t32
+
++scores[(1, 80), (2, 90), (3, 70), (4, 85)].
++excluded[(2,)].
+
+% Average of non-excluded scores
++avg_allowed(avg<Score>) :- scores(Id, Score), !excluded(Id).
+
+?- avg_allowed(A).
+
+% Count of non-excluded
++count_allowed(count<Id>) :- scores(Id, _), !excluded(Id).
+
+?- count_allowed(C).
+
+.kg use default
+.kg drop test_neg_agg_n08t32
