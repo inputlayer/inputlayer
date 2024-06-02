@@ -133,7 +133,6 @@ impl MaterializedRelation {
         // Check if any base relation we depend on has been updated
         for (rel, our_version) in &self.base_versions {
             if let Some(current_version) = current_base_versions.get(rel) {
-                // TODO: verify this condition
                 if current_version > our_version {
                     return false;
                 }
@@ -253,7 +252,7 @@ impl DerivedRelationsManager {
     }
 
     /// Get materialized data, checking validity against current base versions
-    pub fn get_materialized_if_valid(self, name: &str) -> Option<&MaterializedRelation> {
+    pub fn get_materialized_if_valid(&self, name: &str) -> Option<&MaterializedRelation> {
         self.materialized
             .get(name)
             .filter(|m| m.is_valid_for(&self.base_versions))
@@ -357,7 +356,7 @@ impl DerivedRelationsManager {
     }
 
     /// Get derived relations in execution order (respects dependencies)
-    pub fn get_execution_order(&self) -> &[String] {
+    pub fn get_execution_order(self) -> &[String] {
         &self.execution_order
     }
 
@@ -399,3 +398,124 @@ impl DerivedRelationsManager {
     /// Returns a map of relation_name -> tuples for all derived relations
     /// that have valid materializations. Used by `publish_snapshot()` to
     /// include materialized data in snapshots.
+    pub fn get_all_valid_materializations(&self) -> HashMap<String, Vec<Tuple>> {
+        self.materialized
+            .iter()
+            .filter(|(_, m)| m.valid)
+            .map(|(name, m)| (name.clone(), m.tuples.clone()))
+            .collect()
+    }
+
+    /// Get the names of all derived relations with valid materializations
+    pub fn get_materialized_relation_names(&self) -> HashSet<String> {
+        self.materialized
+            .iter()
+            .filter(|(_, m)| m.valid)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+}
+
+/// Statistics about derived relations state
+#[derive(Debug, Clone)]
+pub struct DerivedRelationsStats {
+    pub total_rules: usize,
+    pub materialized_count: usize,
+    pub invalid_count: usize,
+    pub total_tuples: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::Value;
+
+    fn make_tuple(values: Vec<i32>) -> Tuple {
+        Tuple::new(values.into_iter().map(|v| Value::Int32(v)).collect())
+    }
+
+    fn make_compiled_rule(name: &str, deps: Vec<&str>, stratum: usize) -> CompiledRule {
+        CompiledRule {
+            name: name.to_string(),
+            clauses: vec![],
+            dependencies: deps.into_iter().map(|s| s.to_string()).collect(),
+            is_recursive: false,
+            output_schema: vec![],
+            stratum,
+        }
+    }
+
+    #[test]
+    fn test_register_rule() {
+        let mut manager = DerivedRelationsManager::new();
+
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+
+        assert!(manager.is_derived("path"));
+        assert!(!manager.is_derived("edge"));
+        assert!(manager.get_rule("path").is_some());
+    }
+
+    #[test]
+    fn test_dependency_tracking() {
+        let mut manager = DerivedRelationsManager::new();
+
+        let rule = make_compiled_rule("reachable", vec!["edge", "start"], 0);
+        manager.register_rule(rule);
+
+        // Check forward dependencies
+        assert!(manager
+            .get_dependent_derived("edge")
+            .unwrap()
+            .contains("reachable"));
+        assert!(manager
+            .get_dependent_derived("start")
+            .unwrap()
+            .contains("reachable"));
+
+        // Check reverse dependencies
+        let deps = manager.get_base_dependencies("reachable").unwrap();
+        assert!(deps.contains("edge"));
+        assert!(deps.contains("start"));
+    }
+
+    #[test]
+    fn test_materialization() {
+        let mut manager = DerivedRelationsManager::new();
+
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+
+        // Initially not materialized
+        assert!(manager.get_materialized("path").is_none());
+
+        // Materialize
+        let tuples = vec![make_tuple(vec![1, 2]), make_tuple(vec![2, 3])];
+        manager.set_materialized("path", tuples);
+
+        // Now available
+        let mat = manager.get_materialized("path").unwrap();
+        assert_eq!(mat.tuples.len(), 2);
+        assert!(mat.valid);
+    }
+
+    #[test]
+    fn test_invalidation() {
+        let mut manager = DerivedRelationsManager::new();
+
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+
+        // Materialize
+        manager.set_materialized("path", vec![make_tuple(vec![1, 2])]);
+        assert!(manager.get_materialized("path").is_some());
+
+        // Update base relation
+        let invalidated = manager.notify_base_update("edge");
+        assert_eq!(invalidated, vec!["path"]);
+
+        // Now invalid
+        assert!(manager.get_materialized("path").is_none());
+    }
+
