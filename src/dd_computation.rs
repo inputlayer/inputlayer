@@ -351,7 +351,7 @@ impl DDComputation {
                                         total_diff += diff;
                                     });
                                     if total_diff > 0 {
-                                        result.push(key.clone());
+                                        result.push(key);
                                     }
                                     cursor.step_key(&storage);
                                 }
@@ -1451,3 +1451,57 @@ mod tests {
         dd.shutdown().unwrap();
     }
 
+    #[test]
+    fn test_dd_index_stats() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Initially no indexes
+        let stats = dd.get_index_stats(None).unwrap();
+        assert!(stats.is_empty());
+
+        // Register an index
+        let idx = make_registered_index("test_idx", "docs");
+        dd.register_index(idx).unwrap();
+
+        // Now we have one index (not yet materialized)
+        let stats = dd.get_index_stats(None).unwrap();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].name, "test_idx");
+        assert!(!stats[0].valid); // Not materialized yet
+
+        // Get specific index stats
+        let stats = dd.get_index_stats(Some("test_idx")).unwrap();
+        assert_eq!(stats.len(), 1);
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_index_manager_accessor() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        let idx = make_registered_index("direct_access", "docs");
+        dd.register_index(idx).unwrap();
+
+        // Direct access to manager
+        let manager = dd.index_manager();
+        assert!(manager.lock().has_index("direct_access"));
+
+        dd.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_dd_notify_indexes_base_update() {
+        let dd = DDComputation::new(vec![]).unwrap();
+
+        // Register an index on "documents"
+        let idx = make_registered_index("doc_idx", "documents");
+        dd.register_index(idx).unwrap();
+
+        // Notify base update - but nothing to invalidate yet (not materialized)
+        let invalidated = dd.notify_indexes_base_update("documents").unwrap();
+        assert!(invalidated.is_empty());
+
+        dd.shutdown().unwrap();
+    }
+}
