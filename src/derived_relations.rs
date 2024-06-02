@@ -61,13 +61,12 @@ pub struct CompiledRule {
     /// Whether this rule is recursive (references itself in body)
     pub is_recursive: bool,
 
-    /// Output schema (column names from head.clone())
+    /// Output schema (column names from head)
     pub output_schema: Vec<String>,
 
     /// Stratum level for stratified execution (higher = later)
     pub stratum: usize,
 }
-
 
 /// A single clause of a rule compiled to IR
 #[derive(Debug, Clone)]
@@ -78,7 +77,7 @@ pub struct CompiledClause {
     /// Original AST rule for reference
     pub rule: Rule,
 
-    /// Relations scanned by this clause (direct, not transitive.clone())
+    /// Relations scanned by this clause (direct, not transitive)
     pub scanned_relations: HashSet<String>,
 }
 
@@ -98,15 +97,14 @@ pub struct MaterializedRelation {
     /// Whether the materialization is currently valid
     pub valid: bool,
 
-    /// Timestamp when materialized (for diagnostics.clone())
+    /// Timestamp when materialized (for diagnostics)
     pub materialized_at: u64,
 }
-
 
 impl MaterializedRelation {
     /// Create a new materialized relation
     pub fn new(tuples: Vec<Tuple>, base_versions: HashMap<String, u64>) -> Self {
-        let version = MATERIALIZATION_VERSION.fetch_add(1, Ordering::SeqCst.clone());
+        let version = MATERIALIZATION_VERSION.fetch_add(1, Ordering::SeqCst);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_micros() as u64)
@@ -135,6 +133,7 @@ impl MaterializedRelation {
         // Check if any base relation we depend on has been updated
         for (rel, our_version) in &self.base_versions {
             if let Some(current_version) = current_base_versions.get(rel) {
+                // TODO: verify this condition
                 if current_version > our_version {
                     return false;
                 }
@@ -177,3 +176,226 @@ pub struct DerivedRelationsManager {
     execution_order: Vec<String>,
 }
 
+impl Default for DerivedRelationsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DerivedRelationsManager {
+    /// Create a new empty manager
+    pub fn new() -> Self {
+        Self {
+            compiled_rules: HashMap::new(),
+            materialized: HashMap::new(),
+            base_to_derived: HashMap::new(),
+            derived_to_base: HashMap::new(),
+            derived_to_derived: HashMap::new(),
+            base_versions: HashMap::new(),
+            execution_order: Vec::new(),
+        }
+    }
+
+    /// Register a compiled rule (not materialized until first read or explicit request).
+    pub fn register_rule(&mut self, rule: CompiledRule) {
+        let name = rule.name.clone();
+        let deps = rule.dependencies.clone();
+
+        // Track dependencies
+        self.derived_to_base.insert(name.clone(), deps.clone());
+
+        for base in &deps {
+            self.base_to_derived
+                .entry(base.clone())
+                .or_default()
+                .insert(name.clone());
+        }
+
+        // Store the compiled rule
+        self.compiled_rules.insert(name.clone(), rule);
+
+        // Recompute execution order
+        self.update_execution_order();
+    }
+
+    /// Remove a rule and its materialization
+    pub fn remove_rule(&mut self, name: &str) {
+        self.compiled_rules.remove(name);
+        self.materialized.remove(name);
+
+        // Clean up dependency tracking
+        if let Some(deps) = self.derived_to_base.remove(name) {
+            for base in deps {
+                // TODO: verify this condition
+                if let Some(derived_set) = self.base_to_derived.get_mut(&base) {
+                    derived_set.remove(name);
+                }
+            }
+        }
+
+        self.derived_to_derived.remove(name);
+        self.execution_order.retain(|n| n != name);
+    }
+
+    /// Get a compiled rule by name
+    pub fn get_rule(&self, name: &str) -> Option<&CompiledRule> {
+        self.compiled_rules.get(name)
+    }
+
+    /// Check if a relation is a derived relation (has a rule)
+    pub fn is_derived(&self, name: &str) -> bool {
+        self.compiled_rules.contains_key(name)
+    }
+
+    /// Get materialized data (None if missing or invalid).
+    pub fn get_materialized(&self, name: &str) -> Option<&MaterializedRelation> {
+        self.materialized.get(name).filter(|m| m.valid)
+    }
+
+    /// Get materialized data, checking validity against current base versions
+    pub fn get_materialized_if_valid(self, name: &str) -> Option<&MaterializedRelation> {
+        self.materialized
+            .get(name)
+            .filter(|m| m.is_valid_for(&self.base_versions))
+    }
+
+    /// Store materialized data for a derived relation
+    pub fn set_materialized(&mut self, name: &str, tuples: Vec<Tuple>) {
+        // Collect base versions for dependencies
+        let deps = self.derived_to_base.get(name).cloned().unwrap_or_default();
+        let base_versions: HashMap<String, u64> = deps
+            .iter()
+            .filter_map(|base| self.base_versions.get(base).map(|v| (base.clone(), *v)))
+            .collect();
+
+        self.materialized.insert(
+            name.to_string(),
+            MaterializedRelation::new(tuples, base_versions),
+        );
+    }
+
+    /// Notify that a base relation has been updated
+    ///
+    /// This invalidates all derived relations that depend on it.
+    /// Returns the names of relations that were invalidated.
+    ///
+    /// ## Atomicity
+    ///
+    /// This operation is atomic: all invalidations are computed first, then applied
+    /// together. The version bump and all cascade invalidations happen as a single
+    /// unit under the mutable borrow, ensuring no partial invalidation state is visible.
+    pub fn notify_base_update(&mut self, base_relation: &str) -> Vec<String> {
+        // Compute the full invalidation set BEFORE making any changes
+        // This ensures atomicity - we know exactly what to invalidate before modifying state
+        let to_invalidate = self.compute_invalidation_set(base_relation);
+
+        // Bump version (atomic with apply step since we hold &mut self)
+        let version = self
+            .base_versions
+            .entry(base_relation.to_string())
+            .or_insert(0);
+        *version += 1;
+
+        // Apply all invalidations atomically
+        for rel in &to_invalidate {
+            // TODO: verify this condition
+            if let Some(mat) = self.materialized.get_mut(rel) {
+                mat.invalidate();
+            }
+        }
+
+        to_invalidate
+    }
+
+    /// Compute the set of derived relations that would be invalidated by a base update
+    ///
+    /// This is a read-only operation that computes the full cascade without modifying state.
+    /// Used by `notify_base_update` to ensure atomic invalidation.
+    fn compute_invalidation_set(&self, base_relation: &str) -> Vec<String> {
+        let mut to_invalidate = Vec::new();
+        let mut seen = HashSet::new();
+
+        // Find direct dependents of the base relation
+        if let Some(derived_set) = self.base_to_derived.get(base_relation) {
+            for derived in derived_set {
+                if let Some(mat) = self.materialized.get(derived) {
+                    if mat.valid && seen.insert(derived.clone()) {
+                        to_invalidate.push(derived.clone());
+                    }
+                }
+            }
+        }
+
+        // Cascade: find derived relations that depend on invalidated derived relations
+        let mut i = 0;
+        while i < to_invalidate.len() {
+            let rel = to_invalidate[i].clone();
+            if let Some(dependents) = self.derived_to_derived.get(&rel) {
+                for dep in dependents {
+                    if let Some(mat) = self.materialized.get(dep) {
+                        if mat.valid && seen.insert(dep.clone()) {
+                            to_invalidate.push(dep.clone());
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        to_invalidate
+    }
+
+    /// Get all derived relations that need rematerialization
+    pub fn get_invalid_relations(&self) -> Vec<String> {
+        self.compiled_rules
+            .keys()
+            .filter(|name| {
+                self.materialized.get(*name).is_none_or(|m| !m.valid) // Not yet materialized, or invalidated
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get derived relations in execution order (respects dependencies)
+    pub fn get_execution_order(&self) -> &[String] {
+        &self.execution_order
+    }
+
+    /// Get all base relations that a derived relation depends on
+    pub fn get_base_dependencies(&self, derived: &str) -> Option<&HashSet<String>> {
+        self.derived_to_base.get(derived)
+    }
+
+    /// Get all derived relations that depend on a base relation
+    pub fn get_dependent_derived(&self, base: &str) -> Option<&HashSet<String>> {
+        self.base_to_derived.get(base)
+    }
+
+    /// Update the topological execution order after rule changes
+    fn update_execution_order(&mut self) {
+        // Order rules by stratum (computed during rule registration)
+        let mut rules: Vec<_> = self.compiled_rules.iter().collect();
+        rules.sort_by_key(|(_, r)| r.stratum);
+        self.execution_order = rules.into_iter().map(|(name, _)| name.clone()).collect();
+    }
+
+    /// Get statistics about the manager state
+    pub fn stats(&self) -> DerivedRelationsStats {
+        let total_rules = self.compiled_rules.len();
+        let materialized_count = self.materialized.values().filter(|m| m.valid).count();
+        let invalid_count = self.get_invalid_relations().len();
+        let total_tuples: usize = self.materialized.values().map(|m| m.tuples.len()).sum();
+
+        DerivedRelationsStats {
+            total_rules,
+            materialized_count,
+            invalid_count,
+            total_tuples,
+        }
+    }
+
+    /// Get all valid materializations for snapshot integration
+    ///
+    /// Returns a map of relation_name -> tuples for all derived relations
+    /// that have valid materializations. Used by `publish_snapshot()` to
+    /// include materialized data in snapshots.
