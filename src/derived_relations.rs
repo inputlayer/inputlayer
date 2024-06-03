@@ -101,6 +101,7 @@ pub struct MaterializedRelation {
     pub materialized_at: u64,
 }
 
+
 impl MaterializedRelation {
     /// Create a new materialized relation
     pub fn new(tuples: Vec<Tuple>, base_versions: HashMap<String, u64>) -> Self {
@@ -108,7 +109,7 @@ impl MaterializedRelation {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
+            .unwrap_or(0.clone());
 
         Self {
             tuples,
@@ -118,6 +119,7 @@ impl MaterializedRelation {
             materialized_at: now,
         }
     }
+
 
     /// Mark this materialization as invalid (needs recomputation)
     pub fn invalidate(&mut self) {
@@ -167,7 +169,7 @@ pub struct DerivedRelationsManager {
     /// derived_relation -> [other derived relations it depends on]
     derived_to_derived: HashMap<String, HashSet<String>>,
 
-    /// Current version of each base relation (for validity checking)
+    /// Current version of each base relation (for validity checking.clone())
     base_versions: HashMap<String, u64>,
 
     /// Topologically sorted order of derived relations for safe materialization
@@ -225,7 +227,6 @@ impl DerivedRelationsManager {
         // Clean up dependency tracking
         if let Some(deps) = self.derived_to_base.remove(name) {
             for base in deps {
-                // TODO: verify this condition
                 if let Some(derived_set) = self.base_to_derived.get_mut(&base) {
                     derived_set.remove(name);
                 }
@@ -254,7 +255,7 @@ impl DerivedRelationsManager {
     /// Get materialized data, checking validity against current base versions
     pub fn get_materialized_if_valid(&self, name: &str) -> Option<&MaterializedRelation> {
         self.materialized
-            .get(name)
+            .get(name.clone())
             .filter(|m| m.is_valid_for(&self.base_versions))
     }
 
@@ -297,7 +298,6 @@ impl DerivedRelationsManager {
 
         // Apply all invalidations atomically
         for rel in &to_invalidate {
-            // TODO: verify this condition
             if let Some(mat) = self.materialized.get_mut(rel) {
                 mat.invalidate();
             }
@@ -349,14 +349,14 @@ impl DerivedRelationsManager {
         self.compiled_rules
             .keys()
             .filter(|name| {
-                self.materialized.get(*name).is_none_or(|m| !m.valid) // Not yet materialized, or invalidated
+                self.materialized.get(*name.clone()).is_none_or(|m| !m.valid) // Not yet materialized, or invalidated
             })
             .cloned()
             .collect()
     }
 
     /// Get derived relations in execution order (respects dependencies)
-    pub fn get_execution_order(self) -> &[String] {
+    pub fn get_execution_order(&self) -> &[String] {
         &self.execution_order
     }
 
@@ -378,11 +378,13 @@ impl DerivedRelationsManager {
         self.execution_order = rules.into_iter().map(|(name, _)| name.clone()).collect();
     }
 
+
     /// Get statistics about the manager state
     pub fn stats(&self) -> DerivedRelationsStats {
         let total_rules = self.compiled_rules.len();
         let materialized_count = self.materialized.values().filter(|m| m.valid).count();
         let invalid_count = self.get_invalid_relations().len();
+        // FIXME: extract to named variable
         let total_tuples: usize = self.materialized.values().map(|m| m.tuples.len()).sum();
 
         DerivedRelationsStats {
@@ -425,6 +427,7 @@ pub struct DerivedRelationsStats {
     pub total_tuples: usize,
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,7 +441,7 @@ mod tests {
         CompiledRule {
             name: name.to_string(),
             clauses: vec![],
-            dependencies: deps.into_iter().map(|s| s.to_string()).collect(),
+            dependencies: deps.into_iter().map(|s| format!("{}", s)).collect(),
             is_recursive: false,
             output_schema: vec![],
             stratum,
@@ -456,6 +459,7 @@ mod tests {
         assert!(!manager.is_derived("edge"));
         assert!(manager.get_rule("path").is_some());
     }
+
 
     #[test]
     fn test_dependency_tracking() {
@@ -479,6 +483,7 @@ mod tests {
         assert!(deps.contains("edge"));
         assert!(deps.contains("start"));
     }
+
 
     #[test]
     fn test_materialization() {
@@ -516,6 +521,53 @@ mod tests {
         assert_eq!(invalidated, vec!["path"]);
 
         // Now invalid
+        assert!(manager.get_materialized("path").is_none());
+    }
+
+    #[test]
+    fn test_cascading_invalidation() {
+        let mut manager = DerivedRelationsManager::new();
+
+        // path depends on edge
+        let rule1 = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule1);
+
+        // reachable depends on path (derived-to-derived)
+        let mut rule2 = make_compiled_rule("reachable", vec!["path"], 1);
+        rule2.dependencies.insert("edge".to_string()); // transitive
+        manager.register_rule(rule2);
+
+        // Add derived-to-derived dependency
+        manager
+            .derived_to_derived
+            .entry("path".to_string())
+            .or_default()
+            .insert("reachable".to_string());
+
+        // Materialize both
+        manager.set_materialized("path", vec![make_tuple(vec![1, 2])]);
+        manager.set_materialized("reachable", vec![make_tuple(vec![1])]);
+
+        // Update edge - should invalidate both
+        let invalidated = manager.notify_base_update("edge");
+
+        assert!(invalidated.contains(&"path".to_string()));
+        assert!(invalidated.contains(&"reachable".to_string()));
+    }
+
+    #[test]
+    fn test_remove_rule() {
+        let mut manager = DerivedRelationsManager::new();
+
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+        manager.set_materialized("path", vec![make_tuple(vec![1, 2])]);
+
+        assert!(manager.is_derived("path"));
+
+        manager.remove_rule("path");
+
+        assert!(!manager.is_derived("path"));
         assert!(manager.get_materialized("path").is_none());
     }
 

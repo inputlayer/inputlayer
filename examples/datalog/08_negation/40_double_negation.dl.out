@@ -1,0 +1,42 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_double_neg_n08t40
+Knowledge graph 'test_double_neg_n08t40' created.
+Switched to knowledge graph: test_double_neg_n08t40
+> .kg use test_double_neg_n08t40
+Switched to knowledge graph: test_double_neg_n08t40
+> +all_items[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'all_items'.
+> +set_a[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(2,), (3,), (4,)].
+Inserted 3 fact(s) into 'set_b'.
+> not_in_a(X) :- all_items(X), !set_a(X).
+2 rows:
+  (4)
+  (5)
+(session: 1 rule(s))
+> in_a(X) :- all_items(X), set_a(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 2 rule(s))
+> ?- not_in_a(X).
+2 rows:
+  (4)
+  (5)
+> ?- in_a(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_double_neg_n08t40
+Knowledge graph 'test_double_neg_n08t40' dropped.
