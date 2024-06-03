@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_partial_n08t36
+Knowledge graph 'test_neg_partial_n08t36' created.
+Switched to knowledge graph: test_neg_partial_n08t36
+> .kg use test_neg_partial_n08t36
+Switched to knowledge graph: test_neg_partial_n08t36
+> +items[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
+Inserted 3 fact(s) into 'items'.
+> +blocked[("a",)].
+Inserted 1 fact(s) into 'blocked'.
+> not_blocked(Id, Cat, Val) :- items(Id, Cat, Val), !blocked(Cat).
+1 rows:
+  (2, "b", 200)
+(session: 1 rule(s))
+> ?- not_blocked(Id, Cat, Val).
+1 rows:
+  (2, "b", 200)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_partial_n08t36
+Knowledge graph 'test_neg_partial_n08t36' dropped.

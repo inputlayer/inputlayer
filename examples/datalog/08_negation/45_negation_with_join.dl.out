@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_join_n08t45
+Knowledge graph 'test_neg_join_n08t45' created.
+Switched to knowledge graph: test_neg_join_n08t45
+> .kg use test_neg_join_n08t45
+Switched to knowledge graph: test_neg_join_n08t45
+> +employees[(1, "Alice", "Eng"), (2, "Bob", "Sales"), (3, "Carol", "Eng")].
+Inserted 3 fact(s) into 'employees'.
+> +managers[(1, "Eng")].
+Inserted 1 fact(s) into 'managers'.
+> non_managers(Id, Name, Dept) :- employees(Id, Name, Dept), !managers(Id, Dept).
+2 rows:
+  (2, "Bob", "Sales")
+  (3, "Carol", "Eng")
+(session: 1 rule(s))
+> ?- non_managers(Id, Name, Dept).
+2 rows:
+  (2, "Bob", "Sales")
+  (3, "Carol", "Eng")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_join_n08t45
+Knowledge graph 'test_neg_join_n08t45' dropped.

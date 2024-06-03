@@ -1,0 +1,12 @@
+% Test: Rule with only negation in body
+
+.kg create test_neg_only_n08t46
+.kg use test_neg_only_n08t46
+
++exclude[(1,), (2,)].
+
+% This should error - X not bound positively
+bad(X) :- !exclude(X).
+
+.kg use default
+.kg drop test_neg_only_n08t46
