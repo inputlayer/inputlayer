@@ -1,0 +1,19 @@
+% Test: Negation in rule chain
+
+.kg create test_neg_chain_n08t62
+.kg use test_neg_chain_n08t62
+
++base[(1,), (2,), (3,), (4,), (5,)].
++excluded[(2,), (4,)].
+
+% First level: not excluded
++level1(X) :- base(X), !excluded(X).
+
+% Second level derived rule using level1
++level2(X) :- level1(X), X > 2.
+
+?- level1(X).
+?- level2(X).
+
+.kg use default
+.kg drop test_neg_chain_n08t62

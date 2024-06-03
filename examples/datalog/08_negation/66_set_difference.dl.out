@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_set_diff_n08t66
+Knowledge graph 'test_set_diff_n08t66' created.
+Switched to knowledge graph: test_set_diff_n08t66
+> .kg use test_set_diff_n08t66
+Switched to knowledge graph: test_set_diff_n08t66
+> +set_a[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'set_a'.
+> +set_b[(2,), (4,)].
+Inserted 2 fact(s) into 'set_b'.
+> +difference(X) :- set_a(X), !set_b(X).
+Rule 'difference' registered.
+> ?- difference(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_set_diff_n08t66
+Knowledge graph 'test_set_diff_n08t66' dropped.
