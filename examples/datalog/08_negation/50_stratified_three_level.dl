@@ -1,0 +1,19 @@
+% Test: Three-level stratified negation
+
+.kg create test_strat_three_n08t50
+.kg use test_strat_three_n08t50
+
++base[(1,), (2,), (3,), (4,), (5,)].
++exclude_l1[(1,), (2,)].
+
+% Level 1: items not in exclude_l1
+level1(X) :- base(X), !exclude_l1(X).
+
+% Level 2: items not in level1
+level2(X) :- base(X), !level1(X).
+
+?- level1(X).
+?- level2(X).
+
+.kg use default
+.kg drop test_strat_three_n08t50

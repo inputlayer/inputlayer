@@ -1,0 +1,19 @@
+% Test: Negation order independence
+
+.kg create test_neg_order_n08t55
+.kg use test_neg_order_n08t55
+
++all[(1,), (2,), (3,), (4,)].
++exclude[(2,), (4,)].
+
+% Negation before positive
+result1(X) :- !exclude(X), all(X).
+
+% Negation after positive
+result2(X) :- all(X), !exclude(X).
+
+?- result1(X).
+?- result2(X).
+
+.kg use default
+.kg drop test_neg_order_n08t55

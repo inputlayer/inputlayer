@@ -1,0 +1,15 @@
+% Test: Negation with computed values
+
+.kg create test_neg_comp_n08t56
+.kg use test_neg_comp_n08t56
+
++nums[(1,), (2,), (3,), (4,), (5,)].
++thresholds[(3,)].
+
+% Numbers not exceeding threshold
+below_threshold(X) :- nums(X), thresholds(T), X <= T.
+
+?- below_threshold(X).
+
+.kg use default
+.kg drop test_neg_comp_n08t56
