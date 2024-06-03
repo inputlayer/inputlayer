@@ -1,0 +1,15 @@
+% Test: Set complement via negation
+
+.kg create test_complement_n08t68
+.kg use test_complement_n08t68
+
++universe[(1,), (2,), (3,), (4,), (5,)].
++subset[(1,), (3,), (5,)].
+
+% Complement: universe - subset
++complement(X) :- universe(X), !subset(X).
+
+?- complement(X).
+
+.kg use default
+.kg drop test_complement_n08t68

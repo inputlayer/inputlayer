@@ -1,0 +1,19 @@
+% Test: Negation combined with join
+
+.kg create test_neg_join_n08t65
+.kg use test_neg_join_n08t65
+
++orders[(1, 100, 50.0), (2, 101, 75.0), (3, 100, 25.0)].
++customers[(100, "Alice"), (101, "Bob"), (102, "Carol")].
++vip[(100,)].
+
+% Non-VIP customers with orders
++non_vip_orders(OrderId, CustName, Amount) :-
+    orders(OrderId, CustId, Amount),
+    customers(CustId, CustName),
+    !vip(CustId).
+
+?- non_vip_orders(O, C, A).
+
+.kg use default
+.kg drop test_neg_join_n08t65
