@@ -1,0 +1,19 @@
+% Test: Double negation pattern
+
+.kg create test_double_neg_n08t60
+.kg use test_double_neg_n08t60
+
++all_items[(1,), (2,), (3,), (4,), (5,)].
++excluded[(2,), (4,)].
+
+% Items not in excluded
++not_excluded(X) :- all_items(X), !excluded(X).
+
+% Items not in "not excluded" (should be same as excluded)
++double_neg(X) :- all_items(X), !not_excluded(X).
+
+?- not_excluded(X).
+?- double_neg(X).
+
+.kg use default
+.kg drop test_double_neg_n08t60

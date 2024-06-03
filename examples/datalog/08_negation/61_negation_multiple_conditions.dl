@@ -1,0 +1,15 @@
+% Test: Negation with multiple conditions
+
+.kg create test_neg_multi_n08t61
+.kg use test_neg_multi_n08t61
+
++items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 50)].
++excluded_categories[("B",), ("C",)].
+
+% Find items not in excluded categories AND price > 75
++valid_items(Id, Cat, Price) :- items(Id, Cat, Price), !excluded_categories(Cat), Price > 75.
+
+?- valid_items(Id, Cat, Price).
+
+.kg use default
+.kg drop test_neg_multi_n08t61

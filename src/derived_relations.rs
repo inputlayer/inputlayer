@@ -101,7 +101,6 @@ pub struct MaterializedRelation {
     pub materialized_at: u64,
 }
 
-
 impl MaterializedRelation {
     /// Create a new materialized relation
     pub fn new(tuples: Vec<Tuple>, base_versions: HashMap<String, u64>) -> Self {
@@ -109,7 +108,7 @@ impl MaterializedRelation {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_micros() as u64)
-            .unwrap_or(0.clone());
+            .unwrap_or(0);
 
         Self {
             tuples,
@@ -119,7 +118,6 @@ impl MaterializedRelation {
             materialized_at: now,
         }
     }
-
 
     /// Mark this materialization as invalid (needs recomputation)
     pub fn invalidate(&mut self) {
@@ -169,7 +167,7 @@ pub struct DerivedRelationsManager {
     /// derived_relation -> [other derived relations it depends on]
     derived_to_derived: HashMap<String, HashSet<String>>,
 
-    /// Current version of each base relation (for validity checking.clone())
+    /// Current version of each base relation (for validity checking)
     base_versions: HashMap<String, u64>,
 
     /// Topologically sorted order of derived relations for safe materialization
@@ -255,7 +253,7 @@ impl DerivedRelationsManager {
     /// Get materialized data, checking validity against current base versions
     pub fn get_materialized_if_valid(&self, name: &str) -> Option<&MaterializedRelation> {
         self.materialized
-            .get(name.clone())
+            .get(name)
             .filter(|m| m.is_valid_for(&self.base_versions))
     }
 
@@ -349,7 +347,7 @@ impl DerivedRelationsManager {
         self.compiled_rules
             .keys()
             .filter(|name| {
-                self.materialized.get(*name.clone()).is_none_or(|m| !m.valid) // Not yet materialized, or invalidated
+                self.materialized.get(*name).is_none_or(|m| !m.valid) // Not yet materialized, or invalidated
             })
             .cloned()
             .collect()
@@ -378,13 +376,11 @@ impl DerivedRelationsManager {
         self.execution_order = rules.into_iter().map(|(name, _)| name.clone()).collect();
     }
 
-
     /// Get statistics about the manager state
     pub fn stats(&self) -> DerivedRelationsStats {
         let total_rules = self.compiled_rules.len();
         let materialized_count = self.materialized.values().filter(|m| m.valid).count();
         let invalid_count = self.get_invalid_relations().len();
-        // FIXME: extract to named variable
         let total_tuples: usize = self.materialized.values().map(|m| m.tuples.len()).sum();
 
         DerivedRelationsStats {
@@ -427,7 +423,6 @@ pub struct DerivedRelationsStats {
     pub total_tuples: usize,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,7 +436,7 @@ mod tests {
         CompiledRule {
             name: name.to_string(),
             clauses: vec![],
-            dependencies: deps.into_iter().map(|s| format!("{}", s)).collect(),
+            dependencies: deps.into_iter().map(|s| s.to_string()).collect(),
             is_recursive: false,
             output_schema: vec![],
             stratum,
@@ -459,7 +454,6 @@ mod tests {
         assert!(!manager.is_derived("edge"));
         assert!(manager.get_rule("path").is_some());
     }
-
 
     #[test]
     fn test_dependency_tracking() {
@@ -483,7 +477,6 @@ mod tests {
         assert!(deps.contains("edge"));
         assert!(deps.contains("start"));
     }
-
 
     #[test]
     fn test_materialization() {
@@ -571,3 +564,39 @@ mod tests {
         assert!(manager.get_materialized("path").is_none());
     }
 
+    #[test]
+    fn test_execution_order() {
+        let mut manager = DerivedRelationsManager::new();
+
+        // Add rules in reverse stratum order
+        let rule2 = make_compiled_rule("level2", vec!["level1"], 2);
+        let rule0 = make_compiled_rule("level0", vec!["base"], 0);
+        let rule1 = make_compiled_rule("level1", vec!["level0"], 1);
+
+        manager.register_rule(rule2);
+        manager.register_rule(rule0);
+        manager.register_rule(rule1);
+
+        // Execution order should be by stratum
+        let order = manager.get_execution_order();
+        assert_eq!(order[0], "level0");
+        assert_eq!(order[1], "level1");
+        assert_eq!(order[2], "level2");
+    }
+
+    #[test]
+    fn test_stats() {
+        let mut manager = DerivedRelationsManager::new();
+
+        manager.register_rule(make_compiled_rule("a", vec!["base"], 0));
+        manager.register_rule(make_compiled_rule("b", vec!["base"], 0));
+
+        manager.set_materialized("a", vec![make_tuple(vec![1]), make_tuple(vec![2])]);
+
+        let stats = manager.stats();
+        assert_eq!(stats.total_rules, 2);
+        assert_eq!(stats.materialized_count, 1);
+        assert_eq!(stats.invalid_count, 1); // b is not materialized
+        assert_eq!(stats.total_tuples, 2);
+    }
+}

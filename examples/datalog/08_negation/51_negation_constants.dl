@@ -1,0 +1,14 @@
+% Test: Negation with constant binding
+
+.kg create test_neg_const_n08t51
+.kg use test_neg_const_n08t51
+
++status[(1, "active"), (2, "inactive"), (3, "active"), (4, "pending")].
+
+% Non-active items (negation with constant)
+non_active(Id, S) :- status(Id, S), S != "active".
+
+?- non_active(Id, S).
+
+.kg use default
+.kg drop test_neg_const_n08t51
