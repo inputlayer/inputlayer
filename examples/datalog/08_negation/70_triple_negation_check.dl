@@ -1,0 +1,16 @@
+% Test: Triple set difference
+
+.kg create test_triple_n08t70
+.kg use test_triple_n08t70
+
++set_a[(1,), (2,), (3,), (4,)].
++set_b[(2,), (3,), (5,)].
++set_c[(3,), (4,), (6,)].
+
+% Elements in A but not in B or C
++only_in_a(X) :- set_a(X), !set_b(X), !set_c(X).
+
+?- only_in_a(X).
+
+.kg use default
+.kg drop test_triple_n08t70

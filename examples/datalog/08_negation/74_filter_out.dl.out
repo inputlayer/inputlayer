@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_filter_out_n08t74
+Knowledge graph 'test_filter_out_n08t74' created.
+Switched to knowledge graph: test_filter_out_n08t74
+> .kg use test_filter_out_n08t74
+Switched to knowledge graph: test_filter_out_n08t74
+> +items[(1, "good"), (2, "bad"), (3, "good"), (4, "bad"), (5, "ok")].
+Inserted 5 fact(s) into 'items'.
+> +exclude[("bad",)].
+Inserted 1 fact(s) into 'exclude'.
+> +kept(Id, Status) :- items(Id, Status), !exclude(Status).
+Rule 'kept' registered.
+> ?- kept(Id, S).
+3 rows:
+  (1, "good")
+  (3, "good")
+  (5, "ok")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_filter_out_n08t74
+Knowledge graph 'test_filter_out_n08t74' dropped.
