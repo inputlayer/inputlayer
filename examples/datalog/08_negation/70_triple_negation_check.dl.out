@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_triple_n08t70
+Knowledge graph 'test_triple_n08t70' created.
+Switched to knowledge graph: test_triple_n08t70
+> .kg use test_triple_n08t70
+Switched to knowledge graph: test_triple_n08t70
+> +set_a[(1,), (2,), (3,), (4,)].
+Inserted 4 fact(s) into 'set_a'.
+> +set_b[(2,), (3,), (5,)].
+Inserted 3 fact(s) into 'set_b'.
+> +set_c[(3,), (4,), (6,)].
+Inserted 3 fact(s) into 'set_c'.
+> +only_in_a(X) :- set_a(X), !set_b(X), !set_c(X).
+Rule 'only_in_a' registered.
+> ?- only_in_a(X).
+1 rows:
+  (1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triple_n08t70
+Knowledge graph 'test_triple_n08t70' dropped.

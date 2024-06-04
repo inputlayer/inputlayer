@@ -1,0 +1,15 @@
+% Test: Set intersection via double containment
+
+.kg create test_intersect_n08t71
+.kg use test_intersect_n08t71
+
++set_a[(1,), (2,), (3,), (4,)].
++set_b[(3,), (4,), (5,), (6,)].
+
+% Intersection: elements in both
++intersection(X) :- set_a(X), set_b(X).
+
+?- intersection(X).
+
+.kg use default
+.kg drop test_intersect_n08t71

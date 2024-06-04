@@ -1,0 +1,15 @@
+% Test: Not member of set
+
+.kg create test_not_member_n08t73
+.kg use test_not_member_n08t73
+
++candidates[(1,), (2,), (3,), (4,), (5,)].
++selected[(2,), (4,)].
+
+% Not selected
++not_selected(X) :- candidates(X), !selected(X).
+
+?- not_selected(X).
+
+.kg use default
+.kg drop test_not_member_n08t73
