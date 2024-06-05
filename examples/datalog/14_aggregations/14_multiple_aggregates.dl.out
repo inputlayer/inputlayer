@@ -1,0 +1,77 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n14t14
+Knowledge graph 'test_multi_agg_n14t14' created.
+Switched to knowledge graph: test_multi_agg_n14t14
+> .kg use test_multi_agg_n14t14
+Switched to knowledge graph: test_multi_agg_n14t14
+> +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000), (2, 201, 70000), (2, 202, 80000), (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)].
+Inserted 9 fact(s) into 'employees'.
+> +dept_count(Dept, count<Emp>) :- employees(Dept, Emp, _).
+Rule 'dept_count' registered.
+> +dept_sum(Dept, sum<Sal>) :- employees(Dept, _, Sal).
+Rule 'dept_sum' registered.
+> +dept_avg(Dept, avg<Sal>) :- employees(Dept, _, Sal).
+Rule 'dept_avg' registered.
+> +dept_min(Dept, min<Sal>) :- employees(Dept, _, Sal).
+Rule 'dept_min' registered.
+> +dept_max(Dept, max<Sal>) :- employees(Dept, _, Sal).
+Rule 'dept_max' registered.
+> ?- dept_count(D, C).
+3 rows:
+  (1, 3)
+  (2, 2)
+  (3, 4)
+> ?- dept_sum(D, S).
+3 rows:
+  (1, 165000)
+  (2, 150000)
+  (3, 192000)
+> ?- dept_avg(D, A).
+3 rows:
+  (1, 55000.0)
+  (2, 75000.0)
+  (3, 48000.0)
+> ?- dept_min(D, M).
+3 rows:
+  (1, 50000)
+  (2, 70000)
+  (3, 45000)
+> ?- dept_max(D, M).
+3 rows:
+  (1, 60000)
+  (2, 80000)
+  (3, 52000)
+> +total_employees(count<E>) :- employees(_, E, _).
+Rule 'total_employees' registered.
+> +total_payroll(sum<S>) :- employees(_, _, S).
+Rule 'total_payroll' registered.
+> +avg_salary(avg<S>) :- employees(_, _, S).
+Rule 'avg_salary' registered.
+> +min_salary(min<S>) :- employees(_, _, S).
+Rule 'min_salary' registered.
+> +max_salary(max<S>) :- employees(_, _, S).
+Rule 'max_salary' registered.
+> ?- total_employees(N).
+1 rows:
+  (9)
+> ?- total_payroll(T).
+1 rows:
+  (507000)
+> ?- avg_salary(A).
+1 rows:
+  (56333.333333333336)
+> ?- min_salary(M).
+1 rows:
+  (45000)
+> ?- max_salary(M).
+1 rows:
+  (80000)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n14t14
+Knowledge graph 'test_multi_agg_n14t14' dropped.

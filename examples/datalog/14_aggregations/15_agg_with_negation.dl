@@ -1,0 +1,39 @@
+% Test: Aggregation with Negation Filter
+% Verifies: Negation applied BEFORE aggregation (filtering)
+% CRITICAL: Tests interaction between negation and aggregation
+
+.kg create test_agg_negation_n14t15
+.kg use test_agg_negation_n14t15
+
+% Employee data: dept, employee_id, salary
++employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 45000),
+           (2, 201, 70000), (2, 202, 55000), (2, 203, 80000),
+           (3, 301, 40000), (3, 302, 65000)].
+
+% Excluded employees (for various reasons)
++excluded[(102), (203), (301)].
+
+% Count active (non-excluded) employees per department
++active_employee(Dept, Emp, Sal) :- employees(Dept, Emp, Sal), !excluded(Emp).
++active_count(Dept, count<Emp>) :- active_employee(Dept, Emp, _).
+
+?- active_employee(D, E, S).
+?- active_count(D, C).
+
+% Expected active_count: Dept 1: 2 (101,103), Dept 2: 2 (201,202), Dept 3: 1 (302)
+
+% Sum of salaries for non-excluded employees
++active_salary_sum(Dept, sum<Sal>) :- active_employee(Dept, _, Sal).
+?- active_salary_sum(D, S).
+
+% Average salary of non-excluded employees
++active_salary_avg(Dept, avg<Sal>) :- active_employee(Dept, _, Sal).
+?- active_salary_avg(D, A).
+
+% Compare: all employees vs active employees
++all_count(Dept, count<Emp>) :- employees(Dept, Emp, _).
+?- all_count(D, C).
+
+% Cleanup
+.kg use default
+.kg drop test_agg_negation_n14t15
