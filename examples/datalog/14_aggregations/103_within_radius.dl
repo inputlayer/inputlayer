@@ -1,0 +1,17 @@
+% Test: Within Radius (Range Query)
+% Description: Tests within_radius aggregate - returns all items where distance <= max
+
+.kg create test_within_radius_n14t103
+.kg use test_within_radius_n14t103
+
+% Insert distance data: dist(id, distance_value)
++dist[(1, 0.1), (2, 0.5), (3, 1.2), (4, 0.3), (5, 2.0), (6, 0.45)].
+
+% Get all items within radius 0.5
++nearby(Id, within_radius<D, 0.5>) :- dist(Id, D).
+
+?- nearby(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_within_radius_n14t103

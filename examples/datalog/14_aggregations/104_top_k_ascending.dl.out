@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_top_k_asc_n14t104
+Knowledge graph 'test_top_k_asc_n14t104' created.
+Switched to knowledge graph: test_top_k_asc_n14t104
+> .kg use test_top_k_asc_n14t104
+Switched to knowledge graph: test_top_k_asc_n14t104
+> +price[(1, 99), (2, 250), (3, 50), (4, 300), (5, 75), (6, 200)].
+Inserted 6 fact(s) into 'price'.
+> +cheapest(Item, top_k<3, Cost>) :- price(Item, Cost).
+Rule 'cheapest' registered.
+> ?- cheapest(X, Y).
+3 rows:
+  (1, 99)
+  (3, 50)
+  (5, 75)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_top_k_asc_n14t104
+Knowledge graph 'test_top_k_asc_n14t104' dropped.
