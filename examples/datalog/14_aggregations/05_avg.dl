@@ -1,0 +1,18 @@
+% Test: Avg Aggregation
+% Description: Tests average aggregation to compute mean per group
+
+.kg create test_agg_avg_n14t05
+.kg use test_agg_avg_n14t05
+
+% Insert scores: score(student_id, points)
++score[(1, 80), (1, 90), (1, 85), (2, 70), (2, 75), (3, 100)].
+
+% Calculate average score per student
++avg_score(Student, avg<Points>) :- score(Student, Points).
+
+% Query the avg result
+?- avg_score(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_agg_avg_n14t05
