@@ -1,0 +1,17 @@
+% Test: Top-K with Threshold
+% Description: Tests top_k_threshold aggregate - only returns top K if score >= threshold
+
+.kg create test_top_k_threshold_n14t101
+.kg use test_top_k_threshold_n14t101
+
+% Insert scores: score(player_id, points)
++score[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 200)].
+
+% Get top 3 players with score >= 100 (descending)
++top_high(Player, top_k_threshold<3, Points, 100, desc>) :- score(Player, Points).
+
+?- top_high(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_top_k_threshold_n14t101

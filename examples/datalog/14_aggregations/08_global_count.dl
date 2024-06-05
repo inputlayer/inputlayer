@@ -1,0 +1,18 @@
+% Test: Global Count (no grouping)
+% Description: Tests count without group-by columns (total count)
+
+.kg create test_global_count_n14t08
+.kg use test_global_count_n14t08
+
+% Insert events: event(id, type)
++event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
+
+% Count all events
++total_events(count<Id>) :- event(Id, _).
+
+% Query the result
+?- total_events(X).
+
+% Cleanup
+.kg use default
+.kg drop test_global_count_n14t08
