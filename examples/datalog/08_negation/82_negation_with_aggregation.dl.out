@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_agg_29_n08t82
+Knowledge graph 'test_neg_agg_29_n08t82' created.
+Switched to knowledge graph: test_neg_agg_29_n08t82
+> .kg use test_neg_agg_29_n08t82
+Switched to knowledge graph: test_neg_agg_29_n08t82
+> +sales[(1, 100), (2, 200), (3, 150)].
+Inserted 3 fact(s) into 'sales'.
+> +products[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'products'.
+> +has_sales(P) :- sales(P, _).
+Rule 'has_sales' registered.
+> +no_sales(P) :- products(P), !has_sales(P).
+Rule 'no_sales' registered.
+> ?- no_sales(P).
+2 rows:
+  (4)
+  (5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_29_n08t82
+Knowledge graph 'test_neg_agg_29_n08t82' dropped.

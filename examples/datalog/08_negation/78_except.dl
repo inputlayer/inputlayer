@@ -1,0 +1,15 @@
+% Test: EXCEPT operation
+
+.kg create test_except_n08t78
+.kg use test_except_n08t78
+
++query1[(1, "a"), (2, "b"), (3, "c")].
++query2[(2, "b"), (3, "c")].
+
+% query1 EXCEPT query2
++except_result(X, Y) :- query1(X, Y), !query2(X, Y).
+
+?- except_result(X, Y).
+
+.kg use default
+.kg drop test_except_n08t78

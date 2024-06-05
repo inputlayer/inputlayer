@@ -1,0 +1,15 @@
+% Test: Disjoint sets check
+
+.kg create test_disjoint_n08t77
+.kg use test_disjoint_n08t77
+
++set_a[(1,), (2,), (3,)].
++set_b[(4,), (5,), (6,)].
+
+% Intersection (should be empty for disjoint)
++common(X) :- set_a(X), set_b(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_disjoint_n08t77
