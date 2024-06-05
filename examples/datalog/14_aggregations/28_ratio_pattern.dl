@@ -1,0 +1,24 @@
+% Test: Ratio calculation pattern
+
+.kg create test_ratio_n14t28
+.kg use test_ratio_n14t28
+
++sales[("North", 100), ("North", 150), ("South", 200), ("South", 250), ("East", 50)].
+
+% Total per region
++region_total(Region, sum<Amt>) :- sales(Region, Amt).
+
+?- region_total(Region, Total).
+
+% Grand total
++grand_total(sum<Amt>) :- sales(_, Amt).
+
+?- grand_total(Total).
+
+% Count per region
++region_count(Region, count<Amt>) :- sales(Region, Amt).
+
+?- region_count(Region, Count).
+
+.kg use default
+.kg drop test_ratio_n14t28

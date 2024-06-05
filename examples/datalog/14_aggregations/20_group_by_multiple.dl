@@ -1,0 +1,18 @@
+% Test: Aggregation with multiple group-by columns
+
+.kg create test_multi_group_n14t20
+.kg use test_multi_group_n14t20
+
+% Sales data: (region, product, amount)
++sales[(1, "A", 100), (1, "A", 150), (1, "B", 200), (2, "A", 300), (2, "B", 250), (2, "B", 100)].
+
+% Count per region and product
++sales_count(Region, Product, count<Amount>) :- sales(Region, Product, Amount).
+?- sales_count(R, P, C).
+
+% Sum per region and product
++sales_sum(Region, Product, sum<Amount>) :- sales(Region, Product, Amount).
+?- sales_sum(R, P, S).
+
+.kg use default
+.kg drop test_multi_group_n14t20
