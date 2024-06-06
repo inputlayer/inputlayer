@@ -1,0 +1,16 @@
+% Test: Weighted average pattern
+
+.kg create test_weighted_avg_n14t65
+.kg use test_weighted_avg_n14t65
+
++scores[(1, 90, 3), (2, 80, 2), (3, 70, 1)].
+
+% Sum of (score * weight) and sum of weights
+weighted_sum(sum<WS>) :- scores(_, S, W), WS = S * W.
+total_weight(sum<W>) :- scores(_, _, W).
+
+?- weighted_sum(WS).
+?- total_weight(TW).
+
+.kg use default
+.kg drop test_weighted_avg_n14t65

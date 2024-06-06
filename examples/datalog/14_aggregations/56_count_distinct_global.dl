@@ -1,0 +1,13 @@
+% Test: Global count distinct
+
+.kg create test_cd_global_n14t56
+.kg use test_cd_global_n14t56
+
++events[("click",), ("view",), ("click",), ("purchase",), ("view",), ("click",)].
+
+unique_events(<COUNT_DISTINCT:E>) :- events(E).
+
+?- unique_events(N).
+
+.kg use default
+.kg drop test_cd_global_n14t56
