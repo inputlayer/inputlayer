@@ -1,0 +1,21 @@
+% Test: Median approximation pattern
+
+.kg create test_median_n14t43
+.kg use test_median_n14t43
+
++vals[(10,), (20,), (30,), (40,), (50,)].
+
+% For odd count, can find middle using count
++val_count(count<V>) :- vals(V).
+
++val_min(min<V>) :- vals(V).
++val_max(max<V>) :- vals(V).
++val_avg(avg<V>) :- vals(V).
+
+?- val_count(C).
+?- val_min(M).
+?- val_max(M).
+?- val_avg(A).
+
+.kg use default
+.kg drop test_median_n14t43

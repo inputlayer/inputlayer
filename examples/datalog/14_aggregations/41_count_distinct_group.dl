@@ -1,0 +1,14 @@
+% Test: COUNT DISTINCT with grouping
+
+.kg create test_cd_group_n14t41
+.kg use test_cd_group_n14t41
+
++sales[(1, "North", "Widget"), (2, "North", "Gadget"), (3, "North", "Widget"), (4, "South", "Widget")].
+
+% Count distinct products per region
++distinct_by_region(Region, <COUNT_DISTINCT:Product>) :- sales(_, Region, Product).
+
+?- distinct_by_region(Region, N).
+
+.kg use default
+.kg drop test_cd_group_n14t41
