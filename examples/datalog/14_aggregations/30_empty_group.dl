@@ -1,0 +1,24 @@
+% Test: Empty group in aggregation
+
+.kg create test_empty_group_n14t30
+.kg use test_empty_group_n14t30
+
++sales[("North", 100), ("North", 150), ("South", 200)].
+
+% Aggregation by region
++region_sum(Region, sum<Amt>) :- sales(Region, Amt).
+
+?- region_sum(Region, Sum).
+
+% Only North sales
+north_only(Amt) :- sales("North", Amt).
+
+?- north_only(Amt).
+
+% Only East sales (empty)
+east_only(Amt) :- sales("East", Amt).
+
+?- east_only(Amt).
+
+.kg use default
+.kg drop test_empty_group_n14t30

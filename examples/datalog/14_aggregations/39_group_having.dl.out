@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_having_n14t39
+Knowledge graph 'test_having_n14t39' created.
+Switched to knowledge graph: test_having_n14t39
+> .kg use test_having_n14t39
+Switched to knowledge graph: test_having_n14t39
+> +orders[(1, "Alice", 100), (2, "Bob", 50), (3, "Alice", 150), (4, "Bob", 30), (5, "Carol", 200)].
+Inserted 5 fact(s) into 'orders'.
+> +customer_total(Customer, sum<Amount>) :- orders(_, Customer, Amount).
+Rule 'customer_total' registered.
+> high_value(Customer, Total) :- customer_total(Customer, Total), Total > 100.
+2 rows:
+  ("Alice", 250)
+  ("Carol", 200)
+(session: 1 rule(s))
+> ?- customer_total(Customer, Total).
+3 rows:
+  ("Alice", 250)
+  ("Bob", 80)
+  ("Carol", 200)
+> ?- high_value(Customer, Total).
+2 rows:
+  ("Alice", 250)
+  ("Carol", 200)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_having_n14t39
+Knowledge graph 'test_having_n14t39' dropped.

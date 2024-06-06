@@ -1,0 +1,15 @@
+% Test: Count after join
+
+.kg create test_count_join_n14t37
+.kg use test_count_join_n14t37
+
++orders[(1, "Alice"), (2, "Bob"), (3, "Alice"), (4, "Carol")].
++vip[("Alice",), ("Bob",)].
+
+% Count VIP orders
+vip_order_count(count<OId>) :- orders(OId, Name), vip(Name).
+
+?- vip_order_count(N).
+
+.kg use default
+.kg drop test_count_join_n14t37
