@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cd_group_n14t41
+Knowledge graph 'test_cd_group_n14t41' created.
+Switched to knowledge graph: test_cd_group_n14t41
+> .kg use test_cd_group_n14t41
+Switched to knowledge graph: test_cd_group_n14t41
+> +sales[(1, "North", "Widget"), (2, "North", "Gadget"), (3, "North", "Widget"), (4, "South", "Widget")].
+Inserted 4 fact(s) into 'sales'.
+> +distinct_by_region(Region, <COUNT_DISTINCT:Product>) :- sales(_, Region, Product).
+Rule 'distinct_by_region' registered.
+> ?- distinct_by_region(Region, N).
+2 rows:
+  ("North", 2)
+  ("South", 1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cd_group_n14t41
+Knowledge graph 'test_cd_group_n14t41' dropped.
