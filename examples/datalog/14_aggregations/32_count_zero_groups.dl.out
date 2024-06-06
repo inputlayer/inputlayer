@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_zero_n14t32
+Knowledge graph 'test_count_zero_n14t32' created.
+Switched to knowledge graph: test_count_zero_n14t32
+> .kg use test_count_zero_n14t32
+Switched to knowledge graph: test_count_zero_n14t32
+> +categories[("A",), ("B",), ("C",)].
+Inserted 3 fact(s) into 'categories'.
+> +items[("A", 1), ("A", 2), ("C", 3)].
+Inserted 3 fact(s) into 'items'.
+> items_per_cat(Cat, count<Id>) :- items(Cat, Id).
+2 rows:
+  ("A", 2)
+  ("C", 1)
+(session: 1 rule(s))
+> ?- items_per_cat(Cat, N).
+2 rows:
+  ("A", 2)
+  ("C", 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_count_zero_n14t32
+Knowledge graph 'test_count_zero_n14t32' dropped.

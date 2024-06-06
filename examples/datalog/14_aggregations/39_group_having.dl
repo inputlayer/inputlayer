@@ -1,0 +1,18 @@
+% Test: Group by with having filter
+
+.kg create test_having_n14t39
+.kg use test_having_n14t39
+
++orders[(1, "Alice", 100), (2, "Bob", 50), (3, "Alice", 150), (4, "Bob", 30), (5, "Carol", 200)].
+
+% Sum by customer
++customer_total(Customer, sum<Amount>) :- orders(_, Customer, Amount).
+
+% Filter customers with total > 100
+high_value(Customer, Total) :- customer_total(Customer, Total), Total > 100.
+
+?- customer_total(Customer, Total).
+?- high_value(Customer, Total).
+
+.kg use default
+.kg drop test_having_n14t39
