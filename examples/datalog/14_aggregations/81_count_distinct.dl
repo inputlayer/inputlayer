@@ -1,0 +1,14 @@
+% Test: COUNT_DISTINCT basic
+
+.kg create test_count_dist_n14t81
+.kg use test_count_dist_n14t81
+
++visits[(1, "page1"), (2, "page2"), (3, "page1"), (4, "page3"), (5, "page1")].
+
+% Count distinct pages
++distinct_pages(<COUNT_DISTINCT:Page>) :- visits(_, Page).
+
+?- distinct_pages(C).
+
+.kg use default
+.kg drop test_count_dist_n14t81

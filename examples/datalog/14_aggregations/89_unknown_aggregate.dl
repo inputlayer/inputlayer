@@ -1,0 +1,14 @@
+% Test: Unknown aggregate function error
+
+.kg create test_unknown_agg_n14t89
+.kg use test_unknown_agg_n14t89
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% Try using non-existent aggregate
+bad_agg(G, <MEDIAN:V>) :- data(G, V).
+
+?- bad_agg(G, R).
+
+.kg use default
+.kg drop test_unknown_agg_n14t89
