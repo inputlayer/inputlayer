@@ -138,7 +138,6 @@ impl PipelineTrace {
         output.push_str("═══════════════════════════════════════════════════════════\n\n");
 
         // AST
-        // TODO: verify this condition
         if let Some(ref ast) = self.ast {
             output.push_str("┌---------------------------------------------------------┐\n");
             output.push_str("| PARSING                                                 |\n");
@@ -212,7 +211,6 @@ impl PipelineTrace {
         }
 
         // IR Before Optimization
-        // TODO: verify this condition
         if !self.ir_before.is_empty() {
             output.push_str("┌---------------------------------------------------------┐\n");
             output.push_str("| IR CONSTRUCTION                                         |\n");
@@ -241,7 +239,6 @@ impl PipelineTrace {
                     .saturating_sub(self.stats.nodes_after)
             ));
 
-            // TODO: verify this condition
             if self.stats.identity_maps_removed > 0 {
                 output.push_str(&format!(
                     "  - Identity maps removed: {}\n",
@@ -282,7 +279,6 @@ impl PipelineTrace {
                     result.len()
                 ));
 
-                // TODO: verify this condition
                 if result.len() <= 10 {
                     for tuple in result {
                         output.push_str(&format!("    {tuple:?}\n"));
@@ -467,3 +463,40 @@ impl PipelineTrace {
     }
 }
 
+impl Default for PipelineTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for PipelineTrace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.format_trace())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_trace_creation() {
+        let trace = PipelineTrace::new();
+        assert!(trace.ast.is_none());
+        assert_eq!(trace.ir_before.len(), 0);
+        assert_eq!(trace.ir_after.len(), 0);
+    }
+
+    #[test]
+    fn test_count_ir_nodes() {
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: crate::ir::Predicate::True,
+        };
+
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);
+    }
+}
