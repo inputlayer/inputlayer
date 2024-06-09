@@ -146,3 +146,63 @@ pub use value::{DataType, SchemaValidationError, Tuple, TupleSchema, Value};
 pub mod schema;
 
 // Re-export schema types for convenience
+pub use schema::{
+    catalog::SchemaError, ColumnSchema, RelationSchema, SchemaCatalog, SchemaType,
+    ValidationEngine, ValidationError, Violation,
+};
+
+// Vector operations (distance functions, LSH, top-k)
+pub mod vector_ops;
+
+// Re-export vector operation types
+pub use vector_ops::{
+    abs_f64,
+    abs_i64,
+    clear_lsh_cache,
+    cosine_distance_dequantized,
+    cosine_distance_int8,
+    dequantize_vector,
+    dequantize_vector_with_scale,
+    dot_product_int8,
+    euclidean_distance_dequantized,
+    // Int8 distance functions
+    euclidean_distance_int8,
+    get_lsh_cache_stats,
+    // Utility functions
+    hamming_distance,
+    lsh_bucket_int8,
+    lsh_bucket_with_distances,
+    lsh_bucket_with_distances_int8,
+    lsh_multi_probe,
+    lsh_multi_probe_int8,
+    // Multi-probe LSH
+    lsh_probes,
+    lsh_probes_ranked,
+    manhattan_distance_int8,
+    quantize_vector,
+    quantize_vector_linear,
+    quantize_vector_minmax,
+    quantize_vector_symmetric,
+    // Cache management
+    LshCacheStats,
+    // Quantization
+    QuantizationMethod,
+    VectorError,
+};
+
+// Temporal operations (time decay, temporal predicates, interval operations)
+pub mod temporal_ops;
+
+// Optimization infrastructure (reserved for future cost-based planning)
+pub mod bloom_filter; // Bloom filters for predicate transfer optimization
+pub mod hash_index; // Hash indexes for future cost-based join planning
+pub mod statistics; // Statistics collection for future selectivity estimation
+
+// Utilities
+mod catalog;
+mod pipeline_trace;
+mod recursion;
+#[cfg(test)]
+mod test_arithmetic;
+
+// Re-export public types
