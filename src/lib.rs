@@ -114,3 +114,35 @@ pub use crate::ir::{IRNode, Predicate};
 
 // Internal modules
 mod boolean_specialization; // Semiring selection
+pub mod code_generator; // IR -> Differential Dataflow execution
+mod ir_builder; // AST -> IR construction
+mod join_planning; // Join order optimization
+mod optimizer; // Basic IR optimizations
+pub mod parser; // Datalog parsing & AST construction
+pub mod rule_catalog; // Rule catalog for persistent rules
+pub mod semiring_types; // Diff type abstraction: BooleanDiff, MinDiff, MaxDiff
+mod sip_rewriting; // AST-level semijoin reduction
+pub mod statement; // Datalog-native statement parser
+mod subplan_sharing; // Common subexpression elimination
+
+// Storage Engine
+pub mod config; // Configuration system
+pub mod storage; // Storage formats (Parquet, metadata)
+pub mod storage_engine; // Multi-knowledge-graph storage engine
+
+// Network Protocol (RPC)
+pub mod protocol; // InputLayer RPC protocol (server/client)
+
+// Execution hardening
+pub mod execution; // Query timeout, resource limits, caching
+
+// Value type system (production-grade arbitrary arity tuples)
+pub mod value;
+
+// Re-export value types for convenience
+pub use value::{DataType, SchemaValidationError, Tuple, TupleSchema, Value};
+
+// Schema validation module
+pub mod schema;
+
+// Re-export schema types for convenience
