@@ -138,6 +138,7 @@ impl PipelineTrace {
         output.push_str("═══════════════════════════════════════════════════════════\n\n");
 
         // AST
+        // TODO: verify this condition
         if let Some(ref ast) = self.ast {
             output.push_str("┌---------------------------------------------------------┐\n");
             output.push_str("| PARSING                                                 |\n");
@@ -211,6 +212,7 @@ impl PipelineTrace {
         }
 
         // IR Before Optimization
+        // TODO: verify this condition
         if !self.ir_before.is_empty() {
             output.push_str("┌---------------------------------------------------------┐\n");
             output.push_str("| IR CONSTRUCTION                                         |\n");
@@ -239,6 +241,7 @@ impl PipelineTrace {
                     .saturating_sub(self.stats.nodes_after)
             ));
 
+            // TODO: verify this condition
             if self.stats.identity_maps_removed > 0 {
                 output.push_str(&format!(
                     "  - Identity maps removed: {}\n",
@@ -279,6 +282,7 @@ impl PipelineTrace {
                     result.len()
                 ));
 
+                // TODO: verify this condition
                 if result.len() <= 10 {
                     for tuple in result {
                         output.push_str(&format!("    {tuple:?}\n"));
@@ -299,3 +303,167 @@ impl PipelineTrace {
     }
 
     /// Format an IR tree with indentation
+    fn format_ir_tree(ir: &IRNode, indent: usize) -> String {
+        let prefix = " ".repeat(indent);
+        let mut output = String::new();
+
+        match ir {
+            IRNode::Scan { relation, schema } => {
+                output.push_str(&format!(
+                    "{}Scan({})[{}]\n",
+                    prefix,
+                    relation,
+                    schema.join(", ")
+                ));
+            }
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Map[{:?}] -> [{}]\n",
+                    prefix,
+                    projection,
+                    output_schema.join(", ")
+                ));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::Filter { input, predicate } => {
+                output.push_str(&format!("{prefix}Filter({predicate:?})\n"));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Join[L:{:?}, R:{:?}] -> [{}]\n",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema.join(", ")
+                ));
+                output.push_str(&format!("{prefix}|- Left:\n"));
+                output.push_str(&Self::format_ir_tree(left, indent + 4));
+                output.push_str(&format!("{prefix}`- Right:\n"));
+                output.push_str(&Self::format_ir_tree(right, indent + 4));
+            }
+            IRNode::Distinct { input } => {
+                output.push_str(&format!("{prefix}Distinct\n"));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::Union { inputs } => {
+                output.push_str(&format!("{}Union ({} inputs)\n", prefix, inputs.len()));
+                for (i, input) in inputs.iter().enumerate() {
+                    output.push_str(&format!("{}|- Input {}:\n", prefix, i + 1));
+                    output.push_str(&Self::format_ir_tree(input, indent + 4));
+                }
+            }
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let agg_strs: Vec<String> = aggregations
+                    .iter()
+                    .map(|(f, c)| format!("{f:?}({c})"))
+                    .collect();
+                output.push_str(&format!(
+                    "{}Aggregate[group_by={:?}, aggs=[{}]] -> [{}]\n",
+                    prefix,
+                    group_by,
+                    agg_strs.join(", "),
+                    output_schema.join(", ")
+                ));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Antijoin[L:{:?}, R:{:?}] -> [{}]\n",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema.join(", ")
+                ));
+                output.push_str(&format!("{prefix}|- Left:\n"));
+                output.push_str(&Self::format_ir_tree(left, indent + 4));
+                output.push_str(&format!("{prefix}`- Right:\n"));
+                output.push_str(&Self::format_ir_tree(right, indent + 4));
+            }
+            IRNode::Compute { input, expressions } => {
+                let expr_strs: Vec<String> =
+                    expressions.iter().map(|(name, _)| name.clone()).collect();
+                output.push_str(&format!("{}Compute[{}]\n", prefix, expr_strs.join(", ")));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::HnswScan {
+                index_name,
+                k,
+                ef_search,
+                output_schema,
+                ..
+            } => {
+                output.push_str(&format!(
+                    "{}HnswScan({})[k={}, ef_search={:?}] -> [{}]\n",
+                    prefix,
+                    index_name,
+                    k,
+                    ef_search,
+                    output_schema.join(", ")
+                ));
+            }
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}FlatMap[{:?}, filter={:?}] -> [{}]\n",
+                    prefix,
+                    projection,
+                    filter_predicate,
+                    output_schema.join(", ")
+                ));
+                output.push_str(&Self::format_ir_tree(input, indent + 2));
+            }
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}JoinFlatMap[L:{:?}, R:{:?}, proj={:?}, filter={:?}] -> [{}]\n",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    projection,
+                    filter_predicate,
+                    output_schema.join(", ")
+                ));
+                output.push_str(&format!("{prefix}|- Left:\n"));
+                output.push_str(&Self::format_ir_tree(left, indent + 4));
+                output.push_str(&format!("{prefix}`- Right:\n"));
+                output.push_str(&Self::format_ir_tree(right, indent + 4));
+            }
+        }
+
+        output
+    }
+}
+
