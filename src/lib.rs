@@ -206,3 +206,39 @@ mod recursion;
 mod test_arithmetic;
 
 // Re-export public types
+pub use catalog::Catalog;
+pub use code_generator::CodeGenerator;
+pub use config::{Config, DurabilityMode};
+pub use ir_builder::IRBuilder;
+pub use optimizer::Optimizer;
+pub use pipeline_trace::{OptimizationStats, PipelineTrace};
+pub use storage_engine::StorageEngine;
+
+// Re-export storage utilities (Parquet and CSV)
+pub use storage::{
+    load_from_csv, load_from_csv_with_options, load_from_parquet, save_to_csv,
+    save_to_csv_with_options, save_to_parquet, CsvOptions, StorageError, StorageResult,
+};
+
+// Re-export execution utilities (timeout, limits, caching)
+pub use execution::{
+    CacheEntry, CacheStats, CancelHandle, ExecutionConfig, ExecutionError, ExecutionResult,
+    MemoryTracker, QueryCache, QueryTimeout, ResourceError, ResourceLimits, TimeoutError,
+};
+
+// Re-export optimization modules for extensibility
+pub use boolean_specialization::{BooleanSpecializer, SemiringAnnotation, SemiringType};
+pub use join_planning::JoinPlanner;
+pub use sip_rewriting::SipRewriter;
+pub use subplan_sharing::SubplanSharer;
+
+// Re-export statement parser types
+pub use statement::{
+    parse_rule_definition, parse_statement, BaseType, ColumnDef, DeleteOp, DeletePattern,
+    DeleteTarget, InsertOp, InsertTarget, LoadMode, MetaCommand, QueryGoal, RecordField,
+    Refinement, RefinementArg, RuleDef, SchemaDecl, SerializableArithExpr, SerializableArithOp,
+    SerializableBodyPred, SerializableRule, SerializableTerm, Statement, TypeDecl, TypeExpr,
+    UpdateOp,
+};
+
+// Re-export parser functions
