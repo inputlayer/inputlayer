@@ -242,3 +242,48 @@ pub use statement::{
 };
 
 // Re-export parser functions
+pub use parser::{parse_program, parse_rule};
+
+// Re-export rule catalog
+pub use rule_catalog::{validate_rule, validate_rules_stratification, RuleCatalog, RuleDefinition};
+
+// Re-export index types
+pub use hnsw_index::HnswIndex;
+pub use index_manager::{
+    DistanceMetric, HnswConfig, Index, IndexManager, IndexStats, IndexType, MaterializedIndex,
+    RegisteredIndex, TupleId,
+};
+
+// Re-export recursion utilities
+pub use recursion::{
+    build_dependency_graph,
+    build_extended_dependency_graph,
+    find_sccs,
+    has_recursion,
+    is_recursive_rule,
+    stratify,
+    stratify_with_negation,
+    DependencyGraph,
+    // New exports for negation-aware stratification
+    DependencyType,
+    StratificationResult,
+};
+
+use std::collections::HashMap;
+
+/// Configuration for advanced optimizations
+#[derive(Debug, Clone)]
+pub struct OptimizationConfig {
+    /// Enable join spanning tree planning
+    pub enable_join_planning: bool,
+
+    /// Enable SIP rewriting (semijoin reduction)
+    pub enable_sip_rewriting: bool,
+
+    /// Enable subplan sharing (common subexpression elimination)
+    pub enable_subplan_sharing: bool,
+
+    /// Enable boolean specialization (semiring selection)
+    pub enable_boolean_specialization: bool,
+}
+
