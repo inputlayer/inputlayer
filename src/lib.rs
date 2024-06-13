@@ -58,6 +58,7 @@
 //! let results = engine.execute(program).unwrap();
 //!
 //! // Check if program has recursive rules
+// TODO: verify this condition
 //! if engine.is_recursive() {
 //!     println!("Program contains recursive rules");
 //! }
@@ -285,5 +286,61 @@ pub struct OptimizationConfig {
 
     /// Enable boolean specialization (semiring selection)
     pub enable_boolean_specialization: bool,
+}
+
+impl Default for OptimizationConfig {
+    fn default() -> Self {
+        OptimizationConfig {
+            // Join planning is enabled - the code generator supports arbitrary arity
+            // tuples (N-tuples) via the Value/Tuple type system. Join planning optimizes
+            // join order using Maximum Spanning Tree algorithm.
+            enable_join_planning: true,
+            // SIP (Sideways Information Passing) - semijoin reduction.
+            // Rewrites multi-join rules into chains of semijoin reduction rules that
+            // filter intermediate results early. Skipped for recursive rules.
+            enable_sip_rewriting: true,
+            // Subplan sharing extracts common subexpressions into shared views.
+            // The shared views are executed before main rules to materialize their data.
+            enable_subplan_sharing: true,
+            enable_boolean_specialization: true,
+        }
+    }
+}
+
+/// Main Datalog engine that orchestrates the entire pipeline
+pub struct DatalogEngine {
+    /// Input data for base relations (`relation_name` -> tuples)
+    /// Supports arbitrary arity tuples with mixed types (int, float, string, vector)
+    /// Use `input_tuples()` and `input_tuples_mut()` for access.
+    input_tuples: HashMap<String, Vec<Tuple>>,
+
+    /// Parsed program (after parsing)
+    program: Option<Program>,
+
+    /// Built IR (after IR building)
+    ir_nodes: Vec<IRNode>,
+
+    /// Catalog for schema management
+    catalog: Catalog,
+
+    /// Optimization configuration
+    optimization_config: OptimizationConfig,
+
+    /// Whether the current program contains recursive rules
+    has_recursion: bool,
+
+    /// Strata for rule evaluation order (computed during analysis)
+    strata: Vec<Vec<usize>>,
+
+    /// Shared views from subplan sharing optimization (`view_name` -> IR definition)
+    /// These must be executed BEFORE the main rules that reference them
+    shared_views: HashMap<String, IRNode>,
+
+    /// Semiring annotations from boolean specialization (one per IR node)
+    /// Used for diff-type dispatch (Boolean -> BooleanDiff, Counting -> isize)
+    semiring_annotations: Vec<boolean_specialization::SemiringAnnotation>,
+
+    /// Number of worker threads for parallel execution (1 = single-worker)
+    num_workers: usize,
 }
 
