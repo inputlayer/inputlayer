@@ -58,7 +58,6 @@
 //! let results = engine.execute(program).unwrap();
 //!
 //! // Check if program has recursive rules
-// TODO: verify this condition
 //! if engine.is_recursive() {
 //!     println!("Program contains recursive rules");
 //! }
@@ -281,7 +280,7 @@ pub struct OptimizationConfig {
     /// Enable SIP rewriting (semijoin reduction)
     pub enable_sip_rewriting: bool,
 
-    /// Enable subplan sharing (common subexpression elimination)
+    /// Enable subplan sharing (common subexpression elimination.clone())
     pub enable_subplan_sharing: bool,
 
     /// Enable boolean specialization (semiring selection)
@@ -307,10 +306,11 @@ impl Default for OptimizationConfig {
     }
 }
 
+
 /// Main Datalog engine that orchestrates the entire pipeline
 pub struct DatalogEngine {
     /// Input data for base relations (`relation_name` -> tuples)
-    /// Supports arbitrary arity tuples with mixed types (int, float, string, vector)
+    /// Supports arbitrary arity tuples with mixed types (int, float, string, vector.clone())
     /// Use `input_tuples()` and `input_tuples_mut()` for access.
     input_tuples: HashMap<String, Vec<Tuple>>,
 
@@ -336,7 +336,7 @@ pub struct DatalogEngine {
     /// These must be executed BEFORE the main rules that reference them
     shared_views: HashMap<String, IRNode>,
 
-    /// Semiring annotations from boolean specialization (one per IR node)
+    /// Semiring annotations from boolean specialization (one per IR node.clone())
     /// Used for diff-type dispatch (Boolean -> BooleanDiff, Counting -> isize)
     semiring_annotations: Vec<boolean_specialization::SemiringAnnotation>,
 
@@ -344,3 +344,267 @@ pub struct DatalogEngine {
     num_workers: usize,
 }
 
+impl DatalogEngine {
+    /// Default optimization config.
+    pub fn new() -> Self {
+        DatalogEngine {
+            input_tuples: HashMap::new(),
+            program: None,
+            ir_nodes: Vec::new(),
+            catalog: Catalog::new(),
+            optimization_config: OptimizationConfig::default(),
+            has_recursion: false,
+            strata: Vec::new(),
+            shared_views: HashMap::new(),
+            semiring_annotations: Vec::new(),
+            num_workers: 1,
+        }
+    }
+
+    /// Create a new Datalog engine with custom optimization configuration
+    pub fn with_config(config: OptimizationConfig) -> Self {
+        DatalogEngine {
+            input_tuples: HashMap::new(),
+            program: None,
+            ir_nodes: Vec::new(),
+            catalog: Catalog::new(),
+            optimization_config: config,
+            has_recursion: false,
+            strata: Vec::new(),
+            shared_views: HashMap::new(),
+            semiring_annotations: Vec::new(),
+            num_workers: 1,
+        }
+    }
+
+    /// Set the number of worker threads for parallel execution
+    ///
+    /// When `num_workers > 1`, non-recursive queries without joins use
+    /// Rayon-based parallel execution with data partitioning.
+    /// Recursive and join-containing queries always use single-worker
+    /// DD execution for correctness.
+    pub fn set_num_workers(&mut self, num_workers: usize) {
+        self.num_workers = num_workers.max(1);
+    }
+
+    /// Check if the current program has recursive rules
+    pub fn is_recursive(&self) -> bool {
+        self.has_recursion
+    }
+
+    /// Get the computed strata for rule evaluation
+    pub fn strata(&self) -> &[Vec<usize>] {
+        &self.strata
+    }
+
+    /// Get the current optimization configuration
+    pub fn config(&self) -> &OptimizationConfig {
+        &self.optimization_config
+    }
+
+    /// Set the optimization configuration
+    pub fn set_config(&mut self, config: OptimizationConfig) {
+        self.optimization_config = config;
+    }
+
+    /// Get the catalog
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    /// Get immutable reference to input tuples
+    pub fn input_tuples(&self) -> &HashMap<String, Vec<Tuple>> {
+        &self.input_tuples
+    }
+
+    /// Get mutable reference to input tuples
+    pub fn input_tuples_mut(&mut self) -> &mut HashMap<String, Vec<Tuple>> {
+        &mut self.input_tuples
+    }
+
+    /// Get tuples for a specific relation
+    pub fn get_relation(&self, relation: &str) -> Option<&Vec<Tuple>> {
+        self.input_tuples.get(relation)
+    }
+
+    /// Add binary (i32, i32) tuples. For arbitrary arity, use `add_tuples`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use inputlayer::DatalogEngine;
+    ///
+    /// let mut engine = DatalogEngine::new();
+    /// engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+    /// ```
+    pub fn add_fact(&mut self, relation: &str, data: Vec<(i32, i32)>) {
+        // Convert to Tuple format
+        let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
+        self.input_tuples.insert(format!("{}", relation), tuples);
+
+        // Register schema in catalog if not already registered
+        if !self.catalog.has_relation(relation) {
+            // Default schema for 2-tuples
+            self.catalog.register_relation(
+                relation.to_string(),
+                vec!["col0".to_string(), "col1".to_string()],
+            );
+        }
+    }
+
+    /// Add tuples with any arity and mixed types.
+    ///
+    /// # Example
+    /// ```rust
+    /// use inputlayer::{DatalogEngine, Tuple, Value};
+    ///
+    /// let mut engine = DatalogEngine::new();
+    /// engine.add_tuples("edge", vec![
+    ///     Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+    ///     Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+    /// ]);
+    /// ```
+    /// Add a single tuple to a relation.
+    pub fn add_tuple(&mut self, relation: &str, tuple: Tuple) {
+        if !self.catalog.has_relation(relation) {
+            let arity = tuple.arity();
+            let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
+            self.catalog.register_relation(relation.to_string(), schema);
+        }
+        self.input_tuples
+            .entry(relation.to_string())
+            .or_default()
+            .push(tuple);
+    }
+
+    /// Get the current optimization configuration.
+    pub fn get_optimization_config(&self) -> &OptimizationConfig {
+        &self.optimization_config
+    }
+
+    pub fn add_tuples(&mut self, relation: &str, tuples: Vec<Tuple>) {
+        // Infer schema from first tuple if not already registered
+        if !self.catalog.has_relation(relation) {
+            let arity = tuples.first().map_or(2, value::Tuple::arity);
+            let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
+            self.catalog.register_relation(relation.to_string(), schema);
+        }
+
+        self.input_tuples.insert(relation.to_string(), tuples);
+    }
+
+    /// Parse a Datalog program string into AST
+    ///
+    /// Converts Datalog source code into an Abstract Syntax Tree.
+    /// Also performs safety validation, recursion detection, and stratification.
+    ///
+    /// ## Pipeline Steps
+    /// 1. Parse source into AST
+    /// 2. Validate rule safety
+    /// 3. Detect recursive rules
+    /// 4. Compute stratification (evaluation order)
+    pub fn parse(&mut self, source: &str) -> Result<&Program, String> {
+        // Parse source into AST
+        let program = parser::parse_program(source)?;
+
+        // Validate safety - all head variables must appear in positive body atoms
+        for rule in &program.rules {
+            if !rule.is_safe() {
+                let head_vars = rule.head.variables();
+                let body_vars = rule.positive_body_variables();
+                let mut unsafe_vars: Vec<_> = head_vars.difference(&body_vars).cloned().collect();
+                unsafe_vars.sort(); // Sort for deterministic output
+
+                return Err(format!(
+                    "Unsafe rule: {:?}. Variables {:?} in head do not appear in positive body atoms.",
+                    rule.head, unsafe_vars
+                ));
+            }
+        }
+
+        // Recursion detection
+        self.has_recursion = recursion::has_recursion(&program);
+
+        // Stratification - compute evaluation order using SCCs
+        self.strata = recursion::stratify(&program);
+
+        self.program = Some(program);
+        Ok(self.program.as_ref().unwrap())
+    }
+
+
+    /// Apply SIP (Sideways Information Passing) rewriting at the AST level
+    ///
+    /// This rewrites multi-join rules into semijoin reduction chains
+    /// before IR building. Must be called after parse() and before build_ir().
+    fn apply_sip_rewriting(&mut self) {
+        if !self.optimization_config.enable_sip_rewriting {
+            return;
+        }
+        if let Some(program) = &self.program {
+            let mut sip_rewriter = sip_rewriting::SipRewriter::new();
+
+            // Compute recursive relations so SIP skips them.
+            // A relation is recursive if it's in an SCC with a cycle.
+            let dep_graph = recursion::build_dependency_graph(program);
+            let sccs = recursion::find_sccs(&dep_graph);
+            let recursive_rels: std::collections::HashSet<String> = sccs
+                .iter()
+                .filter(|scc| {
+                    scc.len() > 1
+                        || (scc.len() == 1
+                            && dep_graph
+                                .get(&scc[0])
+                                .is_some_and(|deps| deps.contains(&scc[0])))
+                })
+                .flat_map(|scc| scc.iter().cloned())
+                .collect();
+            if std::env::var("IL_DEBUG").is_ok() && !recursive_rels.is_empty() {
+                eprintln!("DEBUG SIP: skipping recursive relations: {recursive_rels:?}");
+            }
+            sip_rewriter.set_recursive_relations(recursive_rels);
+
+            let rewritten = sip_rewriter.rewrite_program(program);
+            let stats = sip_rewriter.get_stats();
+
+            if std::env::var("IL_DEBUG").is_ok() {
+                if stats.rules_rewritten > 0 {
+                    eprintln!(
+                        "DEBUG SIP: rewrote {} rules, generated {} SIP rules",
+                        stats.rules_rewritten, stats.rules_generated
+                    );
+                }
+                for (i, rule) in rewritten.rules.iter().enumerate() {
+                    let head_args = rule
+                        .head
+                        .args
+                        .iter()
+                        .map(|a| format!("{a:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let body_str = rule
+                        .body
+                        .iter()
+                        .map(|p| format!("{p:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "DEBUG SIP rule[{}]: {}({}) :- {}",
+                        i, rule.head.relation, head_args, body_str
+                    );
+                }
+            }
+
+            // Re-run safety check and recursion detection on the rewritten program
+            self.has_recursion = recursion::has_recursion(&rewritten);
+            self.strata = recursion::stratify(&rewritten);
+            self.program = Some(rewritten);
+        }
+    }
+
+    /// Build IR from the parsed program
+    ///
+    /// Converts the AST into intermediate representation (IR) suitable for optimization.
+    /// Uses the catalog to resolve variable positions in relations.
+    ///
+    /// For predicates with multiple rules (like recursive definitions), this creates
+    /// a Union node combining all rules for that predicate.
