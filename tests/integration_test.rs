@@ -222,3 +222,60 @@ fn test_multiple_rules() {
 }
 
 #[test]
+fn test_safety_validation() {
+    let mut engine = DatalogEngine::new();
+
+    // Unsafe rule: z appears in head but not in body
+    let program = "result(X, Z) :- edge(X, Y).";
+
+    let result = engine.execute(program);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Unsafe rule"));
+}
+
+#[test]
+fn test_empty_relation() {
+    let mut engine = DatalogEngine::new();
+
+    // No facts added
+    let program = "result(X, Y) :- edge(X, Y).";
+
+    let results = engine.execute(program).unwrap();
+
+    // Should return empty results
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+#[ignore] // Constraint syntax (X = 2) no longer supported - Constraint type removed
+fn test_constant_in_body() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    // Query with constant equality: result(X, Y) :- edge(X, Y), X = 2
+    let program = "result(X, Y) :- edge(X, Y), X = 2.";
+
+    let results = engine.execute(program).unwrap();
+
+    // Should only return edges where x = 2
+    assert_eq!(results.len(), 1);
+    assert!(results.contains(&(2, 3)));
+}
+
+#[test]
+fn test_catalog_schema_inference() {
+    let mut engine = DatalogEngine::new();
+
+    // Add facts - catalog should track schema
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    let catalog = engine.catalog();
+
+    assert!(catalog.has_relation("edge"));
+    let schema = catalog.get_schema("edge").unwrap();
+    assert_eq!(schema, &["col0", "col1"]);
+}
+
+#[test]
