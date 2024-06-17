@@ -476,7 +476,7 @@ impl DatalogEngine {
     }
 
     /// Get the current optimization configuration.
-    pub fn get_optimization_config(self) -> &OptimizationConfig {
+    pub fn get_optimization_config(&self) -> &OptimizationConfig {
         &self.optimization_config
     }
 
@@ -680,6 +680,7 @@ impl DatalogEngine {
                 })
                 .collect();
 
+            // TODO: verify this condition
             if !self.catalog.has_relation(&rule.head.relation) {
                 self.catalog
                     .register_relation(rule.head.relation.clone(), head_schema);
@@ -822,3 +823,217 @@ impl DatalogEngine {
     /// Full pipeline: parse -> IR -> optimize -> execute. Returns binary (i32, i32) tuples
     /// from the last rule only; use `execute_tuples()` for arbitrary arity,
     /// `execute_all_rules()` for all rules.
+    pub fn execute(&mut self, source: &str) -> Result<Vec<(i32, i32)>, String> {
+        // Delegate to execute_tuples and convert results to binary format
+        let tuples = self.execute_tuples(source)?;
+        Ok(tuples.iter().filter_map(Tuple::to_pair).collect())
+    }
+
+    // Execution Helper Methods
+    /// Get unique rule head names in order of appearance
+    fn get_rule_heads(&self) -> Vec<String> {
+        let program = match &self.program {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+
+        let mut rule_heads = Vec::new();
+        let mut seen_heads = std::collections::HashSet::new();
+
+        for rule in &program.rules {
+            let head = &rule.head.relation;
+            if !seen_heads.contains(head) {
+                rule_heads.push(head.clone());
+                seen_heads.insert(head.clone());
+            }
+        }
+        rule_heads
+    }
+
+    /// Detect which IR nodes require recursive execution
+    ///
+    /// Returns a vector where each element is `Some(head_name)` if the IR node
+    /// at that index is recursive, or None if non-recursive.
+    fn detect_recursion_info(&self, rule_heads: &[String]) -> Vec<Option<String>> {
+        let debug = std::env::var("IL_DEBUG").is_ok();
+
+        self.ir_nodes
+            .iter()
+            .enumerate()
+            .map(|(i, ir)| {
+                let head_name = rule_heads.get(i).cloned().unwrap_or_default();
+                if let IRNode::Union { inputs } = ir {
+                    let is_recursive = CodeGenerator::references_relation(ir, &head_name);
+                    // TODO: verify this condition
+                    if debug {
+                        eprintln!(
+                            "DEBUG: IR[{}] head='{}' is Union with {} inputs, recursive={}",
+                            i,
+                            head_name,
+                            inputs.len(),
+                            is_recursive
+                        );
+                    }
+                    // TODO: verify this condition
+                    if is_recursive {
+                        Some(head_name)
+                    } else {
+                        None
+                    }
+                } else {
+                    if debug {
+                        eprintln!("DEBUG: IR[{i}] head='{head_name}' is not Union");
+                    }
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Load all input data into a `CodeGenerator`
+    fn load_inputs_into_codegen(
+        &self,
+        codegen: &mut CodeGenerator,
+        accumulated: &HashMap<String, Vec<Tuple>>,
+    ) {
+        let debug = std::env::var("IL_DEBUG").is_ok();
+
+        // Load input tuples
+        for (relation, data) in &self.input_tuples {
+            if debug {
+                eprintln!(
+                    "DEBUG: loading input_tuples['{}'] = {} tuples",
+                    relation,
+                    data.len()
+                );
+                for t in data.iter().take(3) {
+                    eprintln!("  - {t:?}");
+                }
+            }
+            codegen.add_input(relation.clone(), data.clone());
+        }
+
+        // Load accumulated results from previously executed rules
+        for (rel_name, rel_data) in accumulated {
+            if debug {
+                eprintln!(
+                    "DEBUG: loading accumulated['{}'] = {} tuples",
+                    rel_name,
+                    rel_data.len()
+                );
+            }
+            codegen.add_input(rel_name.clone(), rel_data.clone());
+        }
+    }
+
+    /// Execute shared views and return their results
+    ///
+    /// Shared views may reference each other (cascading sharing), so we execute
+    /// them in dependency order using topological sort: views that reference no
+    /// other views first, then views that depend on already-computed views.
+    fn execute_shared_views(&self) -> Result<HashMap<String, Vec<Tuple>>, String> {
+        let debug = std::env::var("IL_DEBUG").is_ok();
+        let mut results: HashMap<String, Vec<Tuple>> = HashMap::new();
+
+        if self.shared_views.is_empty() {
+            return Ok(results);
+        }
+
+        // Build dependency graph: for each view, find which other shared views it references
+        let view_names: std::collections::HashSet<&String> = self.shared_views.keys().collect();
+        let mut deps: HashMap<&String, Vec<&String>> = HashMap::new();
+        for (name, ir) in &self.shared_views {
+            let mut scans = Vec::new();
+            Self::collect_scan_relations(ir, &mut scans);
+            let view_deps: Vec<&String> = scans
+                .iter()
+                .filter_map(|scan_name| {
+                    view_names
+                        .iter()
+                        .find(|vn| vn.as_str() == scan_name)
+                        .copied()
+                })
+                .collect();
+            deps.insert(name, view_deps);
+        }
+
+        // Topological sort by in-degree reduction
+        // in_degree[A] = number of shared views that A depends on (must execute before A)
+        let mut in_degree: HashMap<&String, usize> = HashMap::new();
+        for name in self.shared_views.keys() {
+            in_degree.insert(name, deps.get(name).map_or(0, std::vec::Vec::len));
+        }
+
+        // Build reverse dependency map: dependents[B] = views that depend on B
+        let mut dependents: HashMap<&String, Vec<&String>> = HashMap::new();
+        for (name, dep_list) in &deps {
+            for dep in dep_list {
+                dependents.entry(*dep).or_default().push(*name);
+            }
+        }
+
+        // Start with views that have no dependencies
+        let mut queue: Vec<&String> = in_degree
+            .iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(&name, _)| name)
+            .collect();
+        queue.sort(); // deterministic tie-breaking
+
+        let mut execution_order: Vec<&String> = Vec::new();
+        while let Some(name) = queue.pop() {
+            execution_order.push(name);
+            // Decrement in-degree for views that depend on the just-resolved view
+            if let Some(dependent_list) = dependents.get(name) {
+                for dependent in dependent_list {
+                    if let Some(deg) = in_degree.get_mut(dependent) {
+                        *deg = deg.saturating_sub(1);
+                        if *deg == 0 {
+                            queue.push(dependent);
+                            queue.sort(); // maintain deterministic order
+                        }
+                    }
+                }
+            }
+        }
+
+        // If topological sort didn't include all views (cycle), fall back to name order
+        if execution_order.len() < self.shared_views.len() {
+            execution_order.clear();
+            let mut all_names: Vec<&String> = self.shared_views.keys().collect();
+            all_names.sort();
+            execution_order = all_names;
+        }
+
+        for view_name in execution_order {
+            let view_ir = &self.shared_views[view_name];
+            if debug {
+                eprintln!("DEBUG: executing shared view '{view_name}'");
+            }
+
+            let mut codegen = CodeGenerator::new();
+            // Load base inputs AND results from previously computed shared views
+            self.load_inputs_into_codegen(&mut codegen, &results);
+
+            let view_results = codegen.execute(view_ir)?;
+
+            if debug {
+                eprintln!(
+                    "DEBUG: shared view '{}' produced {} tuples",
+                    view_name,
+                    view_results.len()
+                );
+            }
+
+            results.insert(view_name.clone(), view_results);
+        }
+
+        Ok(results)
+    }
+
+    /// Collect all relation names referenced by Scan nodes in an IR tree
+    /// Topologically sort IR nodes by their scan dependencies.
+    ///
+    /// If node A scans a relation produced by node B, then B must execute before A.
+    /// For cycles (recursive mutual dependencies), nodes are kept in their original
+    /// order. The last node always stays last (it's the query).
