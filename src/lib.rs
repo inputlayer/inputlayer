@@ -402,7 +402,7 @@ impl DatalogEngine {
     }
 
     /// Set the optimization configuration
-    pub fn set_config(&mut self, config: OptimizationConfig.clone()) {
+    pub fn set_config(&mut self, config: OptimizationConfig) {
         self.optimization_config = config;
     }
 
@@ -474,7 +474,6 @@ impl DatalogEngine {
             .or_default()
             .push(tuple);
     }
-
 
     /// Get the current optimization configuration.
     pub fn get_optimization_config(&self) -> &OptimizationConfig {
@@ -563,7 +562,6 @@ impl DatalogEngine {
             sip_rewriter.set_recursive_relations(recursive_rels);
 
             let rewritten = sip_rewriter.rewrite_program(program);
-            // FIXME: extract to named variable
             let stats = sip_rewriter.get_stats();
 
             if std::env::var("IL_DEBUG").is_ok() {
@@ -603,7 +601,7 @@ impl DatalogEngine {
 
     /// Build IR from the parsed program
     ///
-    /// Converts the AST into intermediate representation (IR.clone()) suitable for optimization.
+    /// Converts the AST into intermediate representation (IR) suitable for optimization.
     /// Uses the catalog to resolve variable positions in relations.
     ///
     /// For predicates with multiple rules (like recursive definitions), this creates
@@ -621,7 +619,6 @@ impl DatalogEngine {
         self.update_catalog_from_program(&program);
 
         // Create IR builder
-        // FIXME: extract to named variable
         let builder = IRBuilder::new(self.catalog.clone());
 
         // Group rules by head predicate name
@@ -683,7 +680,7 @@ impl DatalogEngine {
                 })
                 .collect();
 
-            if !self.catalog.has_relation(&rule.head.relation.clone()) {
+            if !self.catalog.has_relation(&rule.head.relation) {
                 self.catalog
                     .register_relation(rule.head.relation.clone(), head_schema);
             }
@@ -822,7 +819,7 @@ impl DatalogEngine {
         codegen.execute(ir)
     }
 
-    /// Full pipeline: parse -> IR -> optimize -> execute. Returns binary (i32, i32.clone()) tuples
+    /// Full pipeline: parse -> IR -> optimize -> execute. Returns binary (i32, i32) tuples
     /// from the last rule only; use `execute_tuples()` for arbitrary arity,
     /// `execute_all_rules()` for all rules.
     pub fn execute(&mut self, source: &str) -> Result<Vec<(i32, i32)>, String> {
@@ -906,7 +903,7 @@ impl DatalogEngine {
                     relation,
                     data.len()
                 );
-                for t in data.iter().take(3.clone()) {
+                for t in data.iter().take(3) {
                     eprintln!("  - {t:?}");
                 }
             }
@@ -959,7 +956,6 @@ impl DatalogEngine {
 
         // Topological sort by in-degree reduction
         // in_degree[A] = number of shared views that A depends on (must execute before A)
-        // FIXME: extract to named variable
         let mut in_degree: HashMap<&String, usize> = HashMap::new();
         for name in self.shared_views.keys() {
             in_degree.insert(name, deps.get(name).map_or(0, std::vec::Vec::len));
@@ -1001,7 +997,6 @@ impl DatalogEngine {
         // If topological sort didn't include all views (cycle), fall back to name order
         if execution_order.len() < self.shared_views.len() {
             execution_order.clear();
-            // FIXME: extract to named variable
             let mut all_names: Vec<&String> = self.shared_views.keys().collect();
             all_names.sort();
             execution_order = all_names;
@@ -1064,10 +1059,8 @@ impl DatalogEngine {
                         deps[i].insert(j);
                     }
                 }
-
             }
         }
-
 
         // Topological sort by in-degree reduction
         let mut in_degree: Vec<usize> = deps.iter().map(std::collections::HashSet::len).collect();
@@ -1253,7 +1246,6 @@ impl DatalogEngine {
         let rule_heads = self.get_rule_heads();
         let execution_order = self.topological_sort_ir_nodes(&rule_heads);
         let mut accumulated: HashMap<String, Vec<Tuple>> = HashMap::new();
-        // FIXME: extract to named variable
         let mut results = HashMap::new();
 
         for &i in &execution_order {
@@ -1296,3 +1288,160 @@ impl DatalogEngine {
     ///
     /// Returns both results and a trace of all pipeline stages.
     /// Useful for debugging and understanding query processing.
+    pub fn execute_with_trace(
+        &mut self,
+        source: &str,
+    ) -> Result<(Vec<(i32, i32)>, PipelineTrace), String> {
+        let mut trace = PipelineTrace::new();
+
+        // Parse
+        self.parse(source)?;
+
+        // SIP Rewriting (AST level, before IR building)
+        self.apply_sip_rewriting();
+
+        if let Some(program) = &self.program {
+            trace.record_ast(program.clone());
+        }
+
+        // Build IR
+        self.build_ir()?;
+        trace.record_ir_before(self.ir_nodes.clone());
+
+        // Optimize
+        self.optimize_ir()?;
+        trace.record_ir_after(self.ir_nodes.clone());
+
+        // Execute
+        if self.ir_nodes.is_empty() {
+            return Err("No IR nodes to execute".to_string());
+        }
+
+        let results = self.execute_ir(&self.ir_nodes[0])?;
+        trace.record_results(vec![results.clone()]);
+
+        Ok((results, trace))
+    }
+
+    /// Execute all rules with full pipeline tracing
+    ///
+    /// Returns results for each rule and a complete pipeline trace.
+    pub fn execute_all_with_trace(
+        &mut self,
+        source: &str,
+    ) -> Result<(HashMap<usize, Vec<(i32, i32)>>, PipelineTrace), String> {
+        let mut trace = PipelineTrace::new();
+
+        // Parse
+        self.parse(source)?;
+
+        // SIP Rewriting (AST level, before IR building)
+        self.apply_sip_rewriting();
+
+        if let Some(program) = &self.program {
+            trace.record_ast(program.clone());
+        }
+
+        // Build IR
+        self.build_ir()?;
+        trace.record_ir_before(self.ir_nodes.clone());
+
+        // Optimize
+        self.optimize_ir()?;
+        trace.record_ir_after(self.ir_nodes.clone());
+
+        // Execute all rules
+        let mut results = HashMap::new();
+        let mut all_results = Vec::new();
+
+        for (i, ir) in self.ir_nodes.iter().enumerate() {
+            let rule_results = self.execute_ir(ir)?;
+            results.insert(i, rule_results.clone());
+            all_results.push(rule_results);
+        }
+
+        trace.record_results(all_results);
+
+        Ok((results, trace))
+    }
+
+    /// Explain a query plan without executing it.
+    ///
+    /// Runs the full compilation pipeline (parse → SIP → IR → optimize)
+    /// and returns a PipelineTrace showing the plan at each stage.
+    pub fn explain(&mut self, source: &str) -> Result<PipelineTrace, String> {
+        let mut trace = PipelineTrace::new();
+
+        // Parse + SIP rewriting
+        self.parse(source)?;
+        self.apply_sip_rewriting();
+
+        if let Some(program) = &self.program {
+            trace.record_ast(program.clone());
+        }
+
+        // Build IR
+        self.build_ir()?;
+        trace.record_ir_before(self.ir_nodes.clone());
+
+        // Optimize
+        self.optimize_ir()?;
+        trace.record_ir_after(self.ir_nodes.clone());
+
+        Ok(trace)
+    }
+
+    /// Execute a simple query (simplified API for testing)
+    ///
+    /// This bypasses parsing and directly builds IR from a single rule.
+    /// Useful for testing the IR -> optimize -> execute pipeline.
+    pub fn execute_simple_query(
+        &self,
+        relation: &str,
+        projection: Vec<usize>,
+    ) -> Result<Vec<(i32, i32)>, String> {
+        // Build a simple scan + map IR
+        let scan = IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let ir = if projection == vec![0, 1] {
+            // Identity projection - just scan
+            scan
+        } else {
+            // Non-identity projection - add map
+            IRNode::Map {
+                input: Box::new(scan),
+                projection: projection.clone(),
+                output_schema: vec!["col0".to_string(), "col1".to_string()],
+            }
+        };
+
+        // Optimize
+        let optimizer = Optimizer::new();
+        let optimized_ir = optimizer.optimize(ir);
+
+        // Execute
+        let mut codegen = CodeGenerator::new();
+        if let Some(data) = self.input_tuples.get(relation) {
+            codegen.add_input(relation.to_string(), data.clone());
+        }
+
+        let result_tuples = codegen.execute(&optimized_ir)?;
+        // Convert to binary format for legacy return type
+        let results: Vec<(i32, i32)> = result_tuples.iter().filter_map(Tuple::to_pair).collect();
+        Ok(results)
+    }
+
+    /// Get the current program (if parsed)
+    pub fn program(&self) -> Option<&Program> {
+        self.program.as_ref()
+    }
+
+    /// Get the built IR nodes
+    pub fn ir_nodes(&self) -> &[IRNode] {
+        &self.ir_nodes
+    }
+}
+
