@@ -280,7 +280,7 @@ pub struct OptimizationConfig {
     /// Enable SIP rewriting (semijoin reduction)
     pub enable_sip_rewriting: bool,
 
-    /// Enable subplan sharing (common subexpression elimination.clone())
+    /// Enable subplan sharing (common subexpression elimination)
     pub enable_subplan_sharing: bool,
 
     /// Enable boolean specialization (semiring selection)
@@ -306,11 +306,10 @@ impl Default for OptimizationConfig {
     }
 }
 
-
 /// Main Datalog engine that orchestrates the entire pipeline
 pub struct DatalogEngine {
     /// Input data for base relations (`relation_name` -> tuples)
-    /// Supports arbitrary arity tuples with mixed types (int, float, string, vector.clone())
+    /// Supports arbitrary arity tuples with mixed types (int, float, string, vector)
     /// Use `input_tuples()` and `input_tuples_mut()` for access.
     input_tuples: HashMap<String, Vec<Tuple>>,
 
@@ -336,7 +335,7 @@ pub struct DatalogEngine {
     /// These must be executed BEFORE the main rules that reference them
     shared_views: HashMap<String, IRNode>,
 
-    /// Semiring annotations from boolean specialization (one per IR node.clone())
+    /// Semiring annotations from boolean specialization (one per IR node)
     /// Used for diff-type dispatch (Boolean -> BooleanDiff, Counting -> isize)
     semiring_annotations: Vec<boolean_specialization::SemiringAnnotation>,
 
@@ -439,7 +438,7 @@ impl DatalogEngine {
     pub fn add_fact(&mut self, relation: &str, data: Vec<(i32, i32)>) {
         // Convert to Tuple format
         let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
-        self.input_tuples.insert(format!("{}", relation), tuples);
+        self.input_tuples.insert(relation.to_string(), tuples);
 
         // Register schema in catalog if not already registered
         if !self.catalog.has_relation(relation) {
@@ -477,7 +476,7 @@ impl DatalogEngine {
     }
 
     /// Get the current optimization configuration.
-    pub fn get_optimization_config(&self) -> &OptimizationConfig {
+    pub fn get_optimization_config(self) -> &OptimizationConfig {
         &self.optimization_config
     }
 
@@ -530,7 +529,6 @@ impl DatalogEngine {
         self.program = Some(program);
         Ok(self.program.as_ref().unwrap())
     }
-
 
     /// Apply SIP (Sideways Information Passing) rewriting at the AST level
     ///
@@ -608,3 +606,219 @@ impl DatalogEngine {
     ///
     /// For predicates with multiple rules (like recursive definitions), this creates
     /// a Union node combining all rules for that predicate.
+    pub fn build_ir(&mut self) -> Result<(), String> {
+        use std::collections::HashMap;
+
+        let program = self
+            .program
+            .as_ref()
+            .ok_or("No program parsed yet. Call parse() first.")?
+            .clone();
+
+        // Update catalog with schemas from program
+        self.update_catalog_from_program(&program);
+
+        // Create IR builder
+        let builder = IRBuilder::new(self.catalog.clone());
+
+        // Group rules by head predicate name
+        let mut rules_by_head: HashMap<String, Vec<&Rule>> = HashMap::new();
+        for rule in &program.rules {
+            rules_by_head
+                .entry(rule.head.relation.clone())
+                .or_default()
+                .push(rule);
+        }
+
+        // Build IR nodes, combining multiple rules for the same predicate with Union
+        let mut ir_nodes = Vec::new();
+        let mut processed_predicates = std::collections::HashSet::new();
+
+        for rule in &program.rules {
+            let predicate = &rule.head.relation;
+
+            // Skip if we've already processed this predicate
+            if processed_predicates.contains(predicate) {
+                continue;
+            }
+            processed_predicates.insert(predicate.clone());
+
+            let rules_for_predicate = rules_by_head.get(predicate).unwrap();
+
+            if rules_for_predicate.len() == 1 {
+                // Single rule - build IR directly
+                let ir = builder.build_ir(rule)?;
+                ir_nodes.push(ir);
+            } else {
+                // Multiple rules - build IR for each and combine with Union
+                let mut sub_irs = Vec::new();
+                for r in rules_for_predicate {
+                    let ir = builder.build_ir(r)?;
+                    sub_irs.push(ir);
+                }
+                let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
+                ir_nodes.push(union_ir);
+            }
+        }
+
+        self.ir_nodes = ir_nodes;
+        Ok(())
+    }
+
+    /// Update catalog with schemas inferred from program
+    fn update_catalog_from_program(&mut self, program: &Program) {
+        for rule in &program.rules {
+            // Register head relation
+            let head_schema: Vec<_> = rule
+                .head
+                .args
+                .iter()
+                .enumerate()
+                .map(|(i, term)| match term {
+                    Term::Variable(v) => v.clone(),
+                    _ => format!("col{i}"),
+                })
+                .collect();
+
+            if !self.catalog.has_relation(&rule.head.relation) {
+                self.catalog
+                    .register_relation(rule.head.relation.clone(), head_schema);
+            }
+
+            // Register body relations
+            for pred in &rule.body {
+                if let Some(atom) = pred.atom() {
+                    let body_schema: Vec<_> = atom
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, term)| match term {
+                            Term::Variable(v) => v.clone(),
+                            _ => format!("col{i}"),
+                        })
+                        .collect();
+
+                    if !self.catalog.has_relation(&atom.relation) {
+                        self.catalog
+                            .register_relation(atom.relation.clone(), body_schema);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Optimize the IR through the complete optimization pipeline
+    ///
+    /// ## Optimization Pipeline (controlled by `OptimizationConfig`)
+    ///
+    /// 1. Join Planning: Optimize join order based on cost model
+    /// 2. SIP Rewriting: Apply Sideways Information Passing for recursion
+    /// 3. Subplan Sharing: Detect and share common subexpressions
+    /// 4. Boolean Specialization: Select appropriate semiring
+    /// 5. Basic Optimizations: Identity elimination, filter simplification
+    ///
+    /// Each optimization can be enabled/disabled via `OptimizationConfig`.
+    pub fn optimize_ir(&mut self) -> Result<(), String> {
+        // Join Planning
+        if self.optimization_config.enable_join_planning {
+            let join_planner = join_planning::JoinPlanner::new();
+            self.ir_nodes = self
+                .ir_nodes
+                .iter()
+                .map(|ir| join_planner.plan_joins(ir.clone()))
+                .collect();
+        }
+
+        // SIP Rewriting is applied at the AST level (before IR building)
+        // See apply_sip_rewriting() called in execute_tuples() and execute()
+
+        // Subplan Sharing (common subexpression elimination)
+        if self.optimization_config.enable_subplan_sharing {
+            let subplan_sharer = subplan_sharing::SubplanSharer::new();
+            // Collect derived relation names (relations produced by rules).
+            // Shared views execute before rules, so subtrees scanning derived
+            // relations must not be extracted into shared views.
+            let derived_relations: std::collections::HashSet<String> =
+                self.get_rule_heads().into_iter().collect();
+            let (optimized_irs, shared_views) =
+                subplan_sharer.share_subplans(self.ir_nodes.clone(), &derived_relations);
+            self.ir_nodes = optimized_irs;
+            // Store shared views - they will be executed BEFORE main rules
+            self.shared_views = shared_views;
+            if std::env::var("IL_DEBUG").is_ok() && !self.shared_views.is_empty() {
+                eprintln!(
+                    "DEBUG optimize_ir: created {} shared views",
+                    self.shared_views.len()
+                );
+                for name in self.shared_views.keys() {
+                    eprintln!("  - {name}");
+                }
+            }
+        }
+
+        // Boolean Specialization (semiring selection)
+        if self.optimization_config.enable_boolean_specialization {
+            let mut bool_specializer = boolean_specialization::BooleanSpecializer::new();
+            let mut annotations = Vec::new();
+            self.ir_nodes = self
+                .ir_nodes
+                .iter()
+                .map(|ir| {
+                    let (optimized_ir, annotation) = bool_specializer.specialize(ir.clone());
+                    annotations.push(annotation);
+                    optimized_ir
+                })
+                .collect();
+            self.semiring_annotations = annotations;
+        }
+
+        // Basic Optimizations (always applied)
+        let optimizer = Optimizer::new();
+        self.ir_nodes = self
+            .ir_nodes
+            .iter()
+            .map(|ir| optimizer.optimize(ir.clone()))
+            .collect();
+
+        Ok(())
+    }
+
+    /// Generate and execute Differential Dataflow code
+    ///
+    /// Takes an IR node and executes it using Differential Dataflow,
+    /// returning the computed results as binary tuples.
+    pub fn execute_ir(&self, ir: &IRNode) -> Result<Vec<(i32, i32)>, String> {
+        // Execute as Tuples and convert to binary format
+        let tuples = self.execute_ir_tuples(ir)?;
+        Ok(tuples.iter().filter_map(Tuple::to_pair).collect())
+    }
+
+    /// Generate and execute Differential Dataflow code (arbitrary arity)
+    ///
+    /// Takes an IR node and executes it using Differential Dataflow,
+    /// returning the computed results as Tuples of any arity.
+    pub fn execute_ir_tuples(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
+        // Create code generator
+        let mut codegen = CodeGenerator::new();
+
+        // Set semiring type from boolean specialization analysis
+        let semiring = boolean_specialization::compute_global_semiring(&self.semiring_annotations);
+        codegen.set_semiring_type(semiring);
+
+        // Pass semiring annotations for debug tracing
+        if !self.semiring_annotations.is_empty() {
+            codegen.set_semiring_annotations(self.semiring_annotations.clone());
+        }
+
+        // Load input tuples
+        for (relation, data) in &self.input_tuples {
+            codegen.add_input(relation.clone(), data.clone());
+        }
+
+        // Execute and return Tuples
+        codegen.execute(ir)
+    }
+
+    /// Full pipeline: parse -> IR -> optimize -> execute. Returns binary (i32, i32) tuples
+    /// from the last rule only; use `execute_tuples()` for arbitrary arity,
+    /// `execute_all_rules()` for all rules.

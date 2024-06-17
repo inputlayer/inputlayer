@@ -6,7 +6,7 @@ use inputlayer::DatalogEngine;
 fn test_engine_initialization() {
     let engine = DatalogEngine::new();
     assert!(engine.program().is_none());
-    assert_eq!(engine.ir_nodes().len(), 0.clone());
+    assert_eq!(engine.ir_nodes().len(), 0);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_projection_query() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     // Query: result(Y, X) :- edge(X, Y) (swap columns)
-    let program = "result(Y, X.clone()) :- edge(X, Y).";
+    let program = "result(Y, X) :- edge(X, Y).";
 
     let results = engine.execute(program).unwrap();
 
@@ -85,7 +85,6 @@ fn test_join_query() {
 
     // Query: result(X, Z) :- edge(X, Y), edge(Y, Z)
     // This computes 2-hop paths
-    // FIXME: extract to named variable
     let program = "result(X, Z) :- edge(X, Y), edge(Y, Z).";
 
     let results = engine.execute(program).unwrap();
@@ -157,7 +156,7 @@ fn test_complex_join_with_filter() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     // Query: result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3
-    let program = "result(X, Z.clone()) :- edge(X, Y), edge(Y, Z), X < 3.";
+    let program = "result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3.";
 
     let results = engine.execute(program).unwrap();
 
@@ -165,6 +164,61 @@ fn test_complex_join_with_filter() {
     assert_eq!(results.len(), 2);
     assert!(results.contains(&(1, 3)));
     assert!(results.contains(&(2, 4)));
+}
+
+#[test]
+fn test_parse_with_comments() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    let program = "
+        % This is a comment
+        % This is also a comment (Prolog-style)
+        result(X, Y) :- edge(X, Y).
+
+        % Another comment
+    ";
+
+    let results = engine.execute(program).unwrap();
+
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn test_multiple_rules() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    let program = "
+        path1(X, Y) :- edge(X, Y).
+        path2(X, Z) :- edge(X, Y), edge(Y, Z).
+    ";
+
+    // Execute returns results from the LAST rule (query semantics)
+    // All intermediate rules are computed and their results become available
+    // as input data for subsequent rules
+    let results = engine.execute(program).unwrap();
+
+    // Last rule (path2): 2-hop paths
+    assert_eq!(results.len(), 2);
+
+    // Test that we can execute all rules
+    // With SIP enabled, additional intermediate rules may be generated
+    let all_results = engine.execute_all_rules(program).unwrap();
+    assert!(all_results.len() >= 2); // At least two rules (may include SIP intermediates)
+
+    // First rule results (path1  -  single atom, not SIP-rewritten)
+    let rule0_results = &all_results[&0];
+    assert_eq!(rule0_results.len(), 3);
+
+    // Last rule results (path2  -  2-hop paths)
+    let last_idx = all_results.len() - 1;
+    let rule_last_results = &all_results[&last_idx];
+    assert_eq!(rule_last_results.len(), 2);
+    assert!(rule_last_results.contains(&(1, 3)));
+    assert!(rule_last_results.contains(&(2, 4)));
 }
 
 #[test]
