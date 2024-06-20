@@ -336,3 +336,65 @@ fn test_triangles_query() {
 
 #[test]
 #[ignore] // Constraint syntax (X != Z) no longer supported - Constraint type removed
+fn test_three_rule_same_component() {
+    let mut engine = DatalogEngine::new();
+
+    // Simple graph: 1->2->3->4
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    // Three rules for same_component (like session rules would create)
+    let program = r#"
+same_component(X, Y) :- edge(X, Y).
+same_component(X, Y) :- edge(Y, X).
+same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
+__result__(X, Y) :- same_component(X, Y).
+"#;
+
+    let results = engine.execute(program).unwrap();
+
+    println!("Results: {:?}", results);
+
+    // Base cases: direct edges and reverse edges
+    assert!(results.contains(&(1, 2)), "Should contain (1, 2)");
+    assert!(results.contains(&(2, 1)), "Should contain (2, 1) - reverse");
+    assert!(results.contains(&(2, 3)), "Should contain (2, 3)");
+    assert!(results.contains(&(3, 2)), "Should contain (3, 2) - reverse");
+
+    // Transitive: 1 connected to 3 via 2
+    assert!(
+        results.contains(&(1, 3)),
+        "Should contain (1, 3) - transitive"
+    );
+    assert!(
+        results.contains(&(3, 1)),
+        "Should contain (3, 1) - transitive reverse"
+    );
+
+    // Should have many more due to transitivity
+    assert!(
+        results.len() >= 6,
+        "Should have at least 6 results, got {}",
+        results.len()
+    );
+}
+
+#[test]
+#[ignore] // Constraint syntax (X >= 2, Y <= 30, X != 3) no longer supported - Constraint type removed
+fn test_parse_multiple_constraints() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40)]);
+
+    // Multiple constraint types
+    let program = "
+        result(X, Y) :- data(X, Y), X >= 2, Y <= 30, X != 3.
+    ";
+
+    let results = engine.execute(program).unwrap();
+
+    // Only (2, 20) satisfies: x >= 2 AND y <= 30 AND x != 3
+    assert_eq!(results.len(), 1);
+    assert!(results.contains(&(2, 20)));
+}
+
+#[test]
