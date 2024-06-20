@@ -279,3 +279,60 @@ fn test_catalog_schema_inference() {
 }
 
 #[test]
+fn test_optimization_removes_identity_projection() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    // This query has identity projection (x, y) :- edge(X, Y)
+    let program = "result(X, Y) :- edge(X, Y).";
+
+    engine.parse(program).unwrap();
+    engine.build_ir().unwrap();
+
+    // After optimization, identity maps should be removed
+    engine.optimize_ir().unwrap();
+
+    let ir_after = &engine.ir_nodes()[0];
+
+    // Should be a Scan node (Map removed by optimization)
+    assert!(ir_after.is_scan());
+}
+
+#[test]
+fn test_large_dataset() {
+    let mut engine = DatalogEngine::new();
+
+    // Create a larger dataset
+    let mut edges = Vec::new();
+    for i in 1..100 {
+        edges.push((i, i + 1));
+    }
+    engine.add_fact("edge", edges);
+
+    // Count edges
+    let program = "result(X, Y) :- edge(X, Y).";
+
+    let results = engine.execute(program).unwrap();
+
+    assert_eq!(results.len(), 99);
+}
+
+#[test]
+fn test_triangles_query() {
+    let mut engine = DatalogEngine::new();
+
+    // Create a triangle: 1->2, 2->3, 3->1
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 1)]);
+
+    // Find triangles: result(X, Z) :- edge(X, Y), edge(Y, Z), edge(Z, X)
+    let program = "result(X, Z) :- edge(X, Y), edge(Y, Z), edge(Z, X).";
+
+    let results = engine.execute(program).unwrap();
+
+    // Should find the triangle edges
+    assert!(results.len() > 0);
+}
+
+#[test]
+#[ignore] // Constraint syntax (X != Z) no longer supported - Constraint type removed
