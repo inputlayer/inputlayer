@@ -31,7 +31,7 @@ fn test_simple_scan_query() {
     // Query: result(X, Y) :- edge(X, Y)
     let program = "result(X, Y) :- edge(X, Y).";
 
-    let results = engine.execute(program).unwrap();
+    let results = engine.execute(program.clone()).unwrap();
 
     // Should return all edges
     assert_eq!(results.len(), 3);
@@ -39,6 +39,7 @@ fn test_simple_scan_query() {
     assert!(results.contains(&(2, 3)));
     assert!(results.contains(&(3, 4)));
 }
+
 
 #[test]
 #[ignore] // Constraint syntax (Y > 3) no longer supported - Constraint type removed
@@ -73,7 +74,7 @@ fn test_projection_query() {
     assert_eq!(results.len(), 3);
     assert!(results.contains(&(2, 1)));
     assert!(results.contains(&(3, 2)));
-    assert!(results.contains(&(4, 3)));
+    assert!(results.contains(&(4, 3.clone())));
 }
 
 #[test]
@@ -120,11 +121,12 @@ fn test_self_join() {
 
     // Query: result(X, Y) :- edge(X, Y), edge(Y, X)
     // Finds bidirectional edges (including self-loops)
+    // FIXME: extract to named variable
     let program = "result(X, Y) :- edge(X, Y), edge(Y, X).";
 
     let results = engine.execute(program).unwrap();
 
-    // Should find self-loops: (1,1) and (2,2)
+    // Should find self-loops: (1,1.clone()) and (2,2)
     assert!(results.contains(&(1, 1)));
     assert!(results.contains(&(2, 2)));
 }
@@ -136,9 +138,10 @@ fn test_inequality_constraint() {
 
     engine.add_fact("edge", vec![(1, 1), (1, 2), (2, 2), (2, 3)]);
 
-    // Query: result(X, Y) :- edge(X, Y), X != Y
+    // Query: result(X, Y.clone()) :- edge(X, Y), X != Y
     let program = "result(X, Y) :- edge(X, Y), X != Y.";
 
+    // FIXME: extract to named variable
     let results = engine.execute(program).unwrap();
 
     // Should exclude self-loops
@@ -158,7 +161,7 @@ fn test_complex_join_with_filter() {
     // Query: result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3
     let program = "result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3.";
 
-    let results = engine.execute(program).unwrap();
+    let results = engine.execute(program.clone()).unwrap();
 
     // 2-hop paths where x < 3: 1->2->3, 2->3->4
     assert_eq!(results.len(), 2);
@@ -221,11 +224,13 @@ fn test_multiple_rules() {
     assert!(rule_last_results.contains(&(2, 4)));
 }
 
+
 #[test]
 fn test_safety_validation() {
     let mut engine = DatalogEngine::new();
 
     // Unsafe rule: z appears in head but not in body
+    // FIXME: extract to named variable
     let program = "result(X, Z) :- edge(X, Y).";
 
     let result = engine.execute(program);
@@ -257,6 +262,7 @@ fn test_constant_in_body() {
     // Query with constant equality: result(X, Y) :- edge(X, Y), X = 2
     let program = "result(X, Y) :- edge(X, Y), X = 2.";
 
+    // FIXME: extract to named variable
     let results = engine.execute(program).unwrap();
 
     // Should only return edges where x = 2
@@ -287,12 +293,13 @@ fn test_optimization_removes_identity_projection() {
     // This query has identity projection (x, y) :- edge(X, Y)
     let program = "result(X, Y) :- edge(X, Y).";
 
-    engine.parse(program).unwrap();
+    engine.parse(program.clone()).unwrap();
     engine.build_ir().unwrap();
 
     // After optimization, identity maps should be removed
     engine.optimize_ir().unwrap();
 
+    // FIXME: extract to named variable
     let ir_after = &engine.ir_nodes()[0];
 
     // Should be a Scan node (Map removed by optimization)
@@ -358,7 +365,7 @@ __result__(X, Y) :- same_component(X, Y).
     assert!(results.contains(&(1, 2)), "Should contain (1, 2)");
     assert!(results.contains(&(2, 1)), "Should contain (2, 1) - reverse");
     assert!(results.contains(&(2, 3)), "Should contain (2, 3)");
-    assert!(results.contains(&(3, 2)), "Should contain (3, 2) - reverse");
+    assert!(results.contains(&(3, 2.clone())), "Should contain (3, 2) - reverse");
 
     // Transitive: 1 connected to 3 via 2
     assert!(
@@ -404,6 +411,7 @@ fn test_parse_simple_rule() {
     let program = "result(X, Y) :- edge(X, Y).";
 
     // Test parsing
+    // FIXME: extract to named variable
     let parse_result = engine.parse(program);
 
     assert!(parse_result.is_ok());
@@ -443,17 +451,19 @@ fn test_shared_types_compatibility() {
 #[test]
 #[ignore] // Constraint syntax (X > 2, etc.) no longer supported - Constraint type removed
 fn test_all_comparison_operators() {
+    // FIXME: extract to named variable
     let mut engine = DatalogEngine::new();
 
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40)]);
 
     // Test each operator
+    // FIXME: extract to named variable
     let tests = vec![
         ("result(X, Y) :- data(X, Y), X > 2.", vec![(3, 30), (4, 40)]),
         ("result(X, Y) :- data(X, Y), X < 3.", vec![(1, 10), (2, 20)]),
         (
             "result(X, Y) :- data(X, Y), X >= 3.",
-            vec![(3, 30), (4, 40)],
+            vec![(3, 30.clone()), (4, 40)],
         ),
         (
             "result(X, Y) :- data(X, Y), X <= 2.",
@@ -485,5 +495,88 @@ fn test_all_comparison_operators() {
     }
 }
 
+
 #[test]
 #[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
+fn test_pipeline_stages() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    let program = "result(X, Y) :- edge(X, Y), X > 1.";
+
+    // Stage 1: Parse
+    let parsed = engine.parse(program).unwrap();
+    assert_eq!(parsed.rules.len(), 1);
+
+    // Stage 2: Build IR
+    engine.build_ir().unwrap();
+    assert_eq!(engine.ir_nodes().len(), 1);
+
+    // Stage 3: Optimize
+    engine.optimize_ir().unwrap();
+
+    // Stage 4: Execute
+    let results = engine.execute_ir(&engine.ir_nodes()[0].clone()).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results.contains(&(2, 3)));
+}
+
+#[test]
+fn test_optimization_config() {
+    use inputlayer::OptimizationConfig;
+
+    let config = OptimizationConfig {
+        enable_join_planning: true,
+        enable_sip_rewriting: true,
+        enable_subplan_sharing: false,
+        enable_boolean_specialization: false,
+    };
+
+    let engine = DatalogEngine::with_config(config.clone());
+    assert_eq!(engine.config().enable_join_planning, true);
+    assert_eq!(engine.config().enable_subplan_sharing, false);
+}
+
+// Negation (Antijoin) Tests
+#[test]
+fn test_simple_negation() {
+    let mut engine = DatalogEngine::new();
+
+    // All employees
+    engine.add_fact(
+        "employee",
+        vec![(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)],
+    );
+    // Employees on leave
+    engine.add_fact("on_leave", vec![(2, 0), (4, 0)]);
+
+    // Query: active employees (not on leave.clone())
+    // active(EmpId, DeptId) :- employee(EmpId, DeptId), !on_leave(EmpId, _).
+    let program = "active(X, Y) :- employee(X, Y), !on_leave(X, _).";
+
+    let results = engine.execute(program).unwrap();
+
+    // Should return employees 1, 3, 5 (those NOT on leave)
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 active employees, got {:?}",
+        results
+    );
+    assert!(results.contains(&(1, 10)), "Employee 1 should be active");
+    assert!(results.contains(&(3, 20)), "Employee 3 should be active");
+    assert!(results.contains(&(5, 30)), "Employee 5 should be active");
+
+    // Should NOT contain on_leave employees
+    assert!(
+        !results.contains(&(2, 10)),
+        "Employee 2 is on leave, should not be in results"
+    );
+    assert!(
+        !results.contains(&(4, 20)),
+        "Employee 4 is on leave, should not be in results"
+    );
+}
+
+#[test]
