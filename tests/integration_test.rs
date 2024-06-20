@@ -398,3 +398,92 @@ fn test_parse_multiple_constraints() {
 }
 
 #[test]
+fn test_parse_simple_rule() {
+    let mut engine = DatalogEngine::new();
+
+    let program = "result(X, Y) :- edge(X, Y).";
+
+    // Test parsing
+    let parse_result = engine.parse(program);
+
+    assert!(parse_result.is_ok());
+    let program = parse_result.unwrap();
+    assert_eq!(program.rules.len(), 1);
+    assert_eq!(program.rules[0].head.relation, "result");
+}
+
+#[test]
+fn test_shared_types_compatibility() {
+    use inputlayer::{Atom, IRNode, Predicate, Rule, Term};
+
+    // Create an AST rule
+    let rule = Rule {
+        head: Atom {
+            relation: "test".to_string(),
+            args: vec![Term::Variable("x".to_string())],
+        },
+        body: vec![],
+    };
+
+    // Create an IR node
+    let ir = IRNode::Scan {
+        relation: "test".to_string(),
+        schema: vec!["x".to_string()],
+    };
+
+    // Create a predicate
+    let pred = Predicate::ColumnGtConst(0, 5);
+
+    // If these compile, types are compatible!
+    assert_eq!(rule.head.relation, "test");
+    assert_eq!(ir.output_schema(), vec!["x"]);
+    assert!(!matches!(pred, Predicate::True));
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 2, etc.) no longer supported - Constraint type removed
+fn test_all_comparison_operators() {
+    let mut engine = DatalogEngine::new();
+
+    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40)]);
+
+    // Test each operator
+    let tests = vec![
+        ("result(X, Y) :- data(X, Y), X > 2.", vec![(3, 30), (4, 40)]),
+        ("result(X, Y) :- data(X, Y), X < 3.", vec![(1, 10), (2, 20)]),
+        (
+            "result(X, Y) :- data(X, Y), X >= 3.",
+            vec![(3, 30), (4, 40)],
+        ),
+        (
+            "result(X, Y) :- data(X, Y), X <= 2.",
+            vec![(1, 10), (2, 20)],
+        ),
+        ("result(X, Y) :- data(X, Y), X = 2.", vec![(2, 20)]),
+        (
+            "result(X, Y) :- data(X, Y), X != 2.",
+            vec![(1, 10), (3, 30), (4, 40)],
+        ),
+    ];
+
+    for (program, expected) in tests {
+        let results = engine.execute(program).unwrap();
+        assert_eq!(
+            results.len(),
+            expected.len(),
+            "Failed for program: {}",
+            program
+        );
+        for tuple in expected {
+            assert!(
+                results.contains(&tuple),
+                "Missing tuple {:?} for program: {}",
+                tuple,
+                program
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
