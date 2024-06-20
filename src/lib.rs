@@ -654,7 +654,7 @@ impl DatalogEngine {
                 let mut sub_irs = Vec::new();
                 for r in rules_for_predicate {
                     let ir = builder.build_ir(r)?;
-                    sub_irs.push(ir.clone());
+                    sub_irs.push(ir);
                 }
                 let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
                 ir_nodes.push(union_ir);
@@ -690,7 +690,7 @@ impl DatalogEngine {
                 if let Some(atom) = pred.atom() {
                     let body_schema: Vec<_> = atom
                         .args
-                        .iter().cloned()
+                        .iter()
                         .enumerate()
                         .map(|(i, term)| match term {
                             Term::Variable(v) => v.clone(),
@@ -1067,7 +1067,7 @@ impl DatalogEngine {
         let mut reverse_deps: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (i, dep_set) in deps.iter().enumerate() {
             for &j in dep_set {
-                reverse_deps[j].push(i.clone());
+                reverse_deps[j].push(i);
             }
         }
 
@@ -1097,7 +1097,7 @@ impl DatalogEngine {
             let in_order: std::collections::HashSet<usize> = order.iter().copied().collect();
             for i in 0..n {
                 if !in_order.contains(&i) {
-                    order.push(i.clone());
+                    order.push(i);
                 }
             }
         }
@@ -1108,7 +1108,7 @@ impl DatalogEngine {
         if let Some(pos) = order.iter().position(|&i| i == last_idx) {
             if pos != order.len() - 1 {
                 order.remove(pos);
-                order.push(last_idx.clone());
+                order.push(last_idx);
             }
         }
 
@@ -1570,3 +1570,107 @@ mod tests {
         assert_eq!(results[0].get(0), Some(&Value::Int64(1)));
     }
 
+    #[test]
+    fn test_recursive_descendant_with_constant_in_head() {
+        // Regression test: recursive rules with integer constants in the head
+        // must produce correct results through the combined program execution path.
+        // This mirrors the snapshot test pattern:
+        //   descendant(2, X) :- parent(X, 2).
+        //   descendant(2, X) :- parent(X, Y), descendant(2, Y).
+        //   __query__(_c0, X) :- descendant(_c0, X), _c0 = 2.
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "parent",
+            vec![
+                // Tree:  1 -> {2, 3}, 2 -> {4, 5}, 4 -> {8, 9}, 5 -> {10, 11}
+                Tuple::new(vec![Value::Int64(2), Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(3), Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(4), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(5), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(8), Value::Int64(4)]),
+                Tuple::new(vec![Value::Int64(9), Value::Int64(4)]),
+                Tuple::new(vec![Value::Int64(10), Value::Int64(5)]),
+                Tuple::new(vec![Value::Int64(11), Value::Int64(5)]),
+            ],
+        );
+
+        // Combined program as the server would construct it:
+        let program = concat!(
+            "descendant(2, X) :- parent(X, 2).\n",
+            "descendant(2, X) :- parent(X, Y), descendant(2, Y).\n",
+            "__query__(_c0, X) :- descendant(_c0, X), _c0 = 2.\n",
+        );
+        let results = engine.execute_tuples(program).unwrap();
+        eprintln!("Recursive descendant results: {:?}", results);
+        // Descendants of node 2: {4, 5, 8, 9, 10, 11}
+        assert!(
+            results.len() >= 2,
+            "Expected at least 2 descendants of node 2, got {}: {:?}",
+            results.len(),
+            results
+        );
+    }
+
+    #[test]
+    fn test_sip_equijoin_multikey_column_order() {
+        // Regression test: SIP rewrites the rule body, join planner may reorder
+        // sides, but the output column order must match the head declaration.
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "orders",
+            vec![
+                Tuple::new(vec![
+                    Value::Int64(1),
+                    Value::string("2024"),
+                    Value::string("Q1"),
+                    Value::Int64(100),
+                ]),
+                Tuple::new(vec![
+                    Value::Int64(2),
+                    Value::string("2024"),
+                    Value::string("Q2"),
+                    Value::Int64(200),
+                ]),
+                Tuple::new(vec![
+                    Value::Int64(3),
+                    Value::string("2023"),
+                    Value::string("Q1"),
+                    Value::Int64(50),
+                ]),
+            ],
+        );
+        engine.add_tuples(
+            "targets",
+            vec![
+                Tuple::new(vec![
+                    Value::Int64(1),
+                    Value::string("2024"),
+                    Value::string("Q1"),
+                    Value::Int64(90),
+                ]),
+                Tuple::new(vec![
+                    Value::Int64(2),
+                    Value::string("2024"),
+                    Value::string("Q2"),
+                    Value::Int64(150),
+                ]),
+            ],
+        );
+
+        let program = concat!(
+            "matched(OrdId, Year, Qtr, Actual, Target) :- orders(OrdId, Year, Qtr, Actual), targets(_, Year, Qtr, Target).\n",
+            "__query__(OrdId, Year, Qtr, Actual, Target) :- matched(OrdId, Year, Qtr, Actual, Target).\n",
+        );
+        let results = engine.execute_tuples(program).unwrap();
+
+        // Verify column order matches the head: (OrdId, Year, Qtr, Actual, Target)
+        assert_eq!(results.len(), 2);
+        let first = &results[0];
+        assert_eq!(
+            first.values()[0],
+            Value::Int64(1),
+            "First column should be OrdId=1, got {:?}",
+            first
+        );
+    }
+}
