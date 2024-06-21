@@ -683,3 +683,54 @@ fn test_negation_on_view() {
 }
 
 #[test]
+fn test_sip_four_way_join() {
+    use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
+
+    let config = OptimizationConfig {
+        enable_sip_rewriting: true,
+        ..OptimizationConfig::default()
+    };
+    let mut engine = DatalogEngine::with_config(config);
+
+    engine.add_tuples(
+        "users",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::from("alice")]),
+            Tuple::new(vec![Value::Int64(2), Value::from("bob")]),
+        ],
+    );
+    engine.add_tuples(
+        "emails",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::from("alice@mail.com")]),
+            Tuple::new(vec![Value::Int64(2), Value::from("bob@mail.com")]),
+        ],
+    );
+    engine.add_tuples(
+        "roles",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::from("admin")]),
+            Tuple::new(vec![Value::Int64(2), Value::from("user")]),
+        ],
+    );
+    engine.add_tuples(
+        "departments",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::from("engineering")]),
+            Tuple::new(vec![Value::Int64(2), Value::from("sales")]),
+        ],
+    );
+
+    let program = "full_user_info(Name, Email, Role, Dept) :- users(Id, Name), emails(Id, Email), roles(Id, Role), departments(Id, Dept).";
+
+    let results = engine.execute_tuples(program).unwrap();
+    eprintln!("SIP four-way join results: {:?}", results);
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 results from four-way join, got {}",
+        results.len()
+    );
+}
+
+#[test]
