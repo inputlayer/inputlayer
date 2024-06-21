@@ -620,3 +620,66 @@ fn test_negation_with_join() {
 }
 
 #[test]
+fn test_negation_on_view() {
+    // Test case: negation where the negated relation is another rule's result (a view)
+    // This mimics the failing snapshot test 06_negation_self_relation.dl
+    let mut engine = DatalogEngine::new();
+
+    // Base relation: edges in a graph
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)]);
+
+    // Program with multiple rules (views):
+    // source_node(X, Y) :- edge(X, Y).           -- wraps edge
+    // target_node(Y, X) :- edge(X, Y).           -- swaps X and Y from edge
+    // pure_source(X, Y) :- source_node(X, Y), !target_node(X, _).  -- negation on a view
+    let program = r#"
+        source_node(X, Y) :- edge(X, Y).
+        target_node(Y, X) :- edge(X, Y).
+        pure_source(X, Y) :- source_node(X, Y), !target_node(X, _).
+    "#;
+
+    let results = engine.execute(program).unwrap();
+
+    // Analysis:
+    // edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
+    // source_node = edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
+    // target_node(Y, X) :- edge(X, Y) gives: [(2,1), (3,2), (4,3), (3,1), (4,2)]
+    // target_node's first column values: {2, 3, 4}
+    //
+    // pure_source = source_node where X NOT in target_node's first column
+    // Source node X values: 1, 2, 3, 1, 2
+    // Filter: keep where X NOT in {2, 3, 4}
+    // Only X=1 passes: (1,2) and (1,3)
+    //
+    // Expected: [(1, 2), (1, 3)]
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 pure source nodes, got {:?}",
+        results
+    );
+    assert!(
+        results.contains(&(1, 2)),
+        "Node (1,2) should be a pure source"
+    );
+    assert!(
+        results.contains(&(1, 3)),
+        "Node (1,3) should be a pure source"
+    );
+
+    // These should NOT be in results (their X value is in target_node's first column)
+    assert!(
+        !results.contains(&(2, 3)),
+        "Node (2,3) has X=2 which is in target_node"
+    );
+    assert!(
+        !results.contains(&(3, 4)),
+        "Node (3,4) has X=3 which is in target_node"
+    );
+    assert!(
+        !results.contains(&(2, 4)),
+        "Node (2,4) has X=2 which is in target_node"
+    );
+}
+
+#[test]
