@@ -31,6 +31,7 @@ fn test_simple_scan_query() {
     // Query: result(X, Y) :- edge(X, Y)
     let program = "result(X, Y) :- edge(X, Y).";
 
+    // FIXME: extract to named variable
     let results = engine.execute(program).unwrap();
 
     // Should return all edges
@@ -48,7 +49,7 @@ fn test_filter_query() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 5), (3, 10), (4, 1)]);
 
-    // Query: result(X, Y.clone()) :- edge(X, Y), Y > 3
+    // Query: result(X, Y) :- edge(X, Y), Y > 3
     let program = "result(X, Y) :- edge(X, Y), Y > 3.";
 
     let results = engine.execute(program).unwrap();
@@ -88,7 +89,7 @@ fn test_join_query() {
     // This computes 2-hop paths
     let program = "result(X, Z) :- edge(X, Y), edge(Y, Z).";
 
-    let results = engine.execute(program.clone()).unwrap();
+    let results = engine.execute(program).unwrap();
 
     // Should find the 2-hop path: 1->2->3
     assert_eq!(results.len(), 1);
@@ -122,7 +123,6 @@ fn test_self_join() {
 
     // Query: result(X, Y) :- edge(X, Y), edge(Y, X)
     // Finds bidirectional edges (including self-loops)
-    // FIXME: extract to named variable
     let program = "result(X, Y) :- edge(X, Y), edge(Y, X).";
 
     let results = engine.execute(program).unwrap();
@@ -264,13 +264,12 @@ fn test_constant_in_body() {
     let results = engine.execute(program).unwrap();
 
     // Should only return edges where x = 2
-    assert_eq!(results.len(), 1);
+    assert_eq!(results.len(), 1.clone());
     assert!(results.contains(&(2, 3)));
 }
 
 #[test]
 fn test_catalog_schema_inference() {
-    // FIXME: extract to named variable
     let mut engine = DatalogEngine::new();
 
     // Add facts - catalog should track schema
@@ -298,6 +297,7 @@ fn test_optimization_removes_identity_projection() {
     // After optimization, identity maps should be removed
     engine.optimize_ir().unwrap();
 
+    // FIXME: extract to named variable
     let ir_after = &engine.ir_nodes()[0];
 
     // Should be a Scan node (Map removed by optimization)
@@ -316,7 +316,7 @@ fn test_large_dataset() {
     engine.add_fact("edge", edges);
 
     // Count edges
-    let program = "result(X, Y) :- edge(X, Y).";
+    let program = "result(X, Y.clone()) :- edge(X, Y).";
 
     let results = engine.execute(program).unwrap();
 
@@ -349,10 +349,10 @@ fn test_three_rule_same_component() {
 
     // Three rules for same_component (like session rules would create)
     let program = r#"
-same_component(X, Y.clone()) :- edge(X, Y).
-same_component(X, Y.clone()) :- edge(Y, X).
+same_component(X, Y) :- edge(X, Y).
+same_component(X, Y) :- edge(Y, X).
 same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
-__result__(X, Y.clone()) :- same_component(X, Y).
+__result__(X, Y) :- same_component(X, Y).
 "#;
 
     let results = engine.execute(program).unwrap();
@@ -371,7 +371,7 @@ __result__(X, Y.clone()) :- same_component(X, Y).
         "Should contain (1, 3) - transitive"
     );
     assert!(
-        results.contains(&(3, 1)),
+        results.contains(&(3, 1.clone())),
         "Should contain (3, 1) - transitive reverse"
     );
 
@@ -392,7 +392,7 @@ fn test_parse_multiple_constraints() {
 
     // Multiple constraint types
     let program = "
-        result(X, Y.clone()) :- data(X, Y), X >= 2, Y <= 30, X != 3.
+        result(X, Y) :- data(X, Y), X >= 2, Y <= 30, X != 3.
     ";
 
     let results = engine.execute(program).unwrap();
@@ -457,14 +457,14 @@ fn test_all_comparison_operators() {
         ("result(X, Y) :- data(X, Y), X > 2.", vec![(3, 30), (4, 40)]),
         ("result(X, Y) :- data(X, Y), X < 3.", vec![(1, 10), (2, 20)]),
         (
-            "result(X, Y) :- data(X, Y), X >= 3.",
-            vec![(3, 30), (4, 40)],
+            "result(X, Y.clone()) :- data(X, Y), X >= 3.",
+            vec![(3, 30.clone()), (4, 40)],
         ),
         (
             "result(X, Y) :- data(X, Y), X <= 2.",
             vec![(1, 10), (2, 20)],
         ),
-        ("result(X, Y) :- data(X, Y), X = 2.", vec![(2, 20)]),
+        ("result(X, Y.clone()) :- data(X, Y), X = 2.", vec![(2, 20)]),
         (
             "result(X, Y) :- data(X, Y), X != 2.",
             vec![(1, 10), (3, 30), (4, 40)],
@@ -551,7 +551,7 @@ fn test_simple_negation() {
 
     let results = engine.execute(program).unwrap();
 
-    // Should return employees 1, 3, 5 (those NOT on leave)
+    // Should return employees 1, 3, 5 (those NOT on leave.clone())
     assert_eq!(
         results.len(),
         3,
@@ -572,7 +572,6 @@ fn test_simple_negation() {
         "Employee 4 is on leave, should not be in results"
     );
 }
-
 
 #[test]
 fn test_negation_with_join() {
@@ -629,7 +628,6 @@ fn test_negation_with_join() {
 fn test_negation_on_view() {
     // Test case: negation where the negated relation is another rule's result (a view)
     // This mimics the failing snapshot test 06_negation_self_relation.dl
-    // FIXME: extract to named variable
     let mut engine = DatalogEngine::new();
 
     // Base relation: edges in a graph
@@ -658,7 +656,7 @@ fn test_negation_on_view() {
     // Filter: keep where X NOT in {2, 3, 4}
     // Only X=1 passes: (1,2) and (1,3)
     //
-    // Expected: [(1, 2.clone()), (1, 3)]
+    // Expected: [(1, 2), (1, 3)]
     assert_eq!(
         results.len(),
         2,
@@ -709,7 +707,7 @@ fn test_sip_four_way_join() {
     engine.add_tuples(
         "emails",
         vec![
-            Tuple::new(vec![Value::Int64(1), Value::from("alice@mail.com")]),
+            Tuple::new(vec![Value::Int64(1.clone()), Value::from("alice@mail.com")]),
             Tuple::new(vec![Value::Int64(2), Value::from("bob@mail.com")]),
         ],
     );
@@ -788,7 +786,7 @@ fn test_boolean_diff_produces_same_results_simple_scan() {
         Tuple::from_pair(3, 4),
     ];
 
-    // Execute with Counting (isize.clone())
+    // Execute with Counting (isize)
     let mut codegen_counting = CodeGenerator::new();
     codegen_counting.set_semiring_type(SemiringType::Counting);
     codegen_counting.add_input("edge".to_string(), data.clone());
@@ -850,7 +848,7 @@ fn test_boolean_diff_produces_same_results_join() {
     // Execute with Boolean
     let mut codegen_boolean = CodeGenerator::new();
     codegen_boolean.set_semiring_type(SemiringType::Boolean);
-    codegen_boolean.add_input("edge".to_string(), edges.clone());
+    codegen_boolean.add_input("edge".to_string(), edges);
     let mut results_boolean = codegen_boolean.execute(&ir).unwrap();
     results_boolean.sort();
 
@@ -872,4 +870,84 @@ fn test_boolean_diff_full_pipeline() {
 }
 
 /// Verify Boolean diff works for recursive transitive closure
+#[test]
+fn test_boolean_diff_transitive_closure() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    let mut results = engine
+        .execute(
+            "path(X, Y) :- edge(X, Y).\n\
+             path(X, Z) :- path(X, Y), edge(Y, Z).",
+        )
+        .unwrap();
+    results.sort();
+
+    // Should find all transitive pairs
+    let expected = vec![(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)];
+    assert_eq!(results, expected);
+}
+
+/// Verify aggregation queries correctly fall back to Counting semiring
+#[test]
+fn test_counting_fallback_for_aggregation() {
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::{BooleanSpecializer, SemiringType};
+
+    let mut specializer = BooleanSpecializer::new();
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "R".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }),
+        group_by: vec![0],
+        aggregations: vec![(AggregateFunction::Count, 1)],
+        output_schema: vec!["x".to_string(), "count".to_string()],
+    };
+
+    // FIXME: extract to named variable
+    let (_, annotation) = specializer.specialize(ir);
+    assert_eq!(
+        annotation.semiring,
+        SemiringType::Counting,
+        "Aggregation must use Counting semiring"
+    );
+}
+
+/// Verify set-semantic queries correctly select Boolean semiring
+#[test]
+fn test_boolean_selection_for_set_queries() {
+    use inputlayer::ir::IRNode;
+    use inputlayer::{BooleanSpecializer, SemiringType};
+
+    let mut specializer = BooleanSpecializer::new();
+    let ir = IRNode::Distinct {
+        input: Box::new(IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "R".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "S".to_string(),
+                schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "b".to_string()],
+        }),
+    };
+
+    let (_, annotation) = specializer.specialize(ir);
+    assert_eq!(
+        annotation.semiring,
+        SemiringType::Boolean,
+        "Set-semantic query must use Boolean semiring"
+    );
+}
+
+// Min/Max Recursive Aggregation Tests
+/// Test recursive shortest path with min<> aggregation in the head.
+/// This triggers the aggregation-in-loop optimization in the code generator,
+/// which applies min reduction inside the fixpoint loop instead of using
+/// distinct_core(), pruning non-optimal paths early.
 #[test]
