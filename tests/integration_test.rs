@@ -734,3 +734,74 @@ fn test_sip_four_way_join() {
 }
 
 #[test]
+fn test_sip_self_join() {
+    use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
+
+    let config = OptimizationConfig {
+        enable_sip_rewriting: true,
+        ..OptimizationConfig::default()
+    };
+    let mut engine = DatalogEngine::with_config(config);
+
+    engine.add_tuples(
+        "edge",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            Tuple::new(vec![Value::Int64(3), Value::Int64(4)]),
+        ],
+    );
+
+    // Self-join: edge(X, Y), edge(Y, Z) -> 2-hop paths
+    let program = "connected(X, Z) :- edge(X, Y), edge(Y, Z).";
+
+    let results = engine.execute_tuples(program).unwrap();
+    eprintln!("SIP self-join results: {:?}", results);
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 two-hop paths, got {}",
+        results.len()
+    );
+}
+
+// Boolean Diff Type Integration Tests
+/// Verify that BooleanDiff produces the same results as isize for set-semantic queries
+#[test]
+fn test_boolean_diff_produces_same_results_simple_scan() {
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::ir::IRNode;
+    use inputlayer::SemiringType;
+    use inputlayer::Tuple;
+
+    let data = vec![
+        Tuple::from_pair(1, 2),
+        Tuple::from_pair(2, 3),
+        Tuple::from_pair(3, 4),
+    ];
+
+    // Execute with Counting (isize)
+    let mut codegen_counting = CodeGenerator::new();
+    codegen_counting.set_semiring_type(SemiringType::Counting);
+    codegen_counting.add_input("edge".to_string(), data.clone());
+
+    let ir = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+    let mut results_counting = codegen_counting.execute(&ir).unwrap();
+    results_counting.sort();
+
+    // Execute with Boolean (BooleanDiff)
+    let mut codegen_boolean = CodeGenerator::new();
+    codegen_boolean.set_semiring_type(SemiringType::Boolean);
+    codegen_boolean.add_input("edge".to_string(), data);
+
+    let mut results_boolean = codegen_boolean.execute(&ir).unwrap();
+    results_boolean.sort();
+
+    assert_eq!(results_counting, results_boolean, "Scan results must match");
+}
+
+/// Verify Boolean and Counting produce same results for join queries
+#[test]
