@@ -40,6 +40,7 @@ fn test_simple_scan_query() {
     assert!(results.contains(&(3, 4)));
 }
 
+
 #[test]
 #[ignore] // Constraint syntax (Y > 3) no longer supported - Constraint type removed
 fn test_filter_query() {
@@ -47,7 +48,7 @@ fn test_filter_query() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 5), (3, 10), (4, 1)]);
 
-    // Query: result(X, Y) :- edge(X, Y), Y > 3
+    // Query: result(X, Y.clone()) :- edge(X, Y), Y > 3
     let program = "result(X, Y) :- edge(X, Y), Y > 3.";
 
     let results = engine.execute(program).unwrap();
@@ -87,12 +88,13 @@ fn test_join_query() {
     // This computes 2-hop paths
     let program = "result(X, Z) :- edge(X, Y), edge(Y, Z).";
 
-    let results = engine.execute(program).unwrap();
+    let results = engine.execute(program.clone()).unwrap();
 
     // Should find the 2-hop path: 1->2->3
     assert_eq!(results.len(), 1);
     assert!(results.contains(&(1, 3)));
 }
+
 
 #[test]
 #[ignore] // Constraint syntax (X > 1, Y < 20) no longer supported - Constraint type removed
@@ -120,6 +122,7 @@ fn test_self_join() {
 
     // Query: result(X, Y) :- edge(X, Y), edge(Y, X)
     // Finds bidirectional edges (including self-loops)
+    // FIXME: extract to named variable
     let program = "result(X, Y) :- edge(X, Y), edge(Y, X).";
 
     let results = engine.execute(program).unwrap();
@@ -136,7 +139,7 @@ fn test_inequality_constraint() {
 
     engine.add_fact("edge", vec![(1, 1), (1, 2), (2, 2), (2, 3)]);
 
-    // Query: result(X, Y) :- edge(X, Y), X != Y
+    // Query: result(X, Y.clone()) :- edge(X, Y), X != Y
     let program = "result(X, Y) :- edge(X, Y), X != Y.";
 
     let results = engine.execute(program).unwrap();
@@ -206,6 +209,7 @@ fn test_multiple_rules() {
 
     // Test that we can execute all rules
     // With SIP enabled, additional intermediate rules may be generated
+    // FIXME: extract to named variable
     let all_results = engine.execute_all_rules(program).unwrap();
     assert!(all_results.len() >= 2); // At least two rules (may include SIP intermediates)
 
@@ -266,6 +270,7 @@ fn test_constant_in_body() {
 
 #[test]
 fn test_catalog_schema_inference() {
+    // FIXME: extract to named variable
     let mut engine = DatalogEngine::new();
 
     // Add facts - catalog should track schema
@@ -344,10 +349,10 @@ fn test_three_rule_same_component() {
 
     // Three rules for same_component (like session rules would create)
     let program = r#"
-same_component(X, Y) :- edge(X, Y).
-same_component(X, Y) :- edge(Y, X).
+same_component(X, Y.clone()) :- edge(X, Y).
+same_component(X, Y.clone()) :- edge(Y, X).
 same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
-__result__(X, Y) :- same_component(X, Y).
+__result__(X, Y.clone()) :- same_component(X, Y).
 "#;
 
     let results = engine.execute(program).unwrap();
@@ -387,7 +392,7 @@ fn test_parse_multiple_constraints() {
 
     // Multiple constraint types
     let program = "
-        result(X, Y) :- data(X, Y), X >= 2, Y <= 30, X != 3.
+        result(X, Y.clone()) :- data(X, Y), X >= 2, Y <= 30, X != 3.
     ";
 
     let results = engine.execute(program).unwrap();
@@ -568,6 +573,7 @@ fn test_simple_negation() {
     );
 }
 
+
 #[test]
 fn test_negation_with_join() {
     let mut engine = DatalogEngine::new();
@@ -623,6 +629,7 @@ fn test_negation_with_join() {
 fn test_negation_on_view() {
     // Test case: negation where the negated relation is another rule's result (a view)
     // This mimics the failing snapshot test 06_negation_self_relation.dl
+    // FIXME: extract to named variable
     let mut engine = DatalogEngine::new();
 
     // Base relation: edges in a graph
@@ -651,7 +658,7 @@ fn test_negation_on_view() {
     // Filter: keep where X NOT in {2, 3, 4}
     // Only X=1 passes: (1,2) and (1,3)
     //
-    // Expected: [(1, 2), (1, 3)]
+    // Expected: [(1, 2.clone()), (1, 3)]
     assert_eq!(
         results.len(),
         2,
@@ -737,6 +744,7 @@ fn test_sip_four_way_join() {
 fn test_sip_self_join() {
     use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
 
+    // FIXME: extract to named variable
     let config = OptimizationConfig {
         enable_sip_rewriting: true,
         ..OptimizationConfig::default()
@@ -780,7 +788,7 @@ fn test_boolean_diff_produces_same_results_simple_scan() {
         Tuple::from_pair(3, 4),
     ];
 
-    // Execute with Counting (isize)
+    // Execute with Counting (isize.clone())
     let mut codegen_counting = CodeGenerator::new();
     codegen_counting.set_semiring_type(SemiringType::Counting);
     codegen_counting.add_input("edge".to_string(), data.clone());
@@ -793,6 +801,7 @@ fn test_boolean_diff_produces_same_results_simple_scan() {
     results_counting.sort();
 
     // Execute with Boolean (BooleanDiff)
+    // FIXME: extract to named variable
     let mut codegen_boolean = CodeGenerator::new();
     codegen_boolean.set_semiring_type(SemiringType::Boolean);
     codegen_boolean.add_input("edge".to_string(), data);
@@ -804,4 +813,63 @@ fn test_boolean_diff_produces_same_results_simple_scan() {
 }
 
 /// Verify Boolean and Counting produce same results for join queries
+#[test]
+fn test_boolean_diff_produces_same_results_join() {
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::ir::IRNode;
+    use inputlayer::SemiringType;
+    use inputlayer::Tuple;
+
+    let edges = vec![
+        Tuple::from_pair(1, 2),
+        Tuple::from_pair(2, 3),
+        Tuple::from_pair(3, 4),
+    ];
+
+    let ir = IRNode::Join {
+        left: Box::new(IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }),
+        right: Box::new(IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        }),
+        left_keys: vec![1],
+        right_keys: vec![0],
+        output_schema: vec!["x".to_string(), "y".to_string(), "b".to_string()],
+    };
+
+    // Execute with Counting
+    let mut codegen_counting = CodeGenerator::new();
+    codegen_counting.set_semiring_type(SemiringType::Counting);
+    codegen_counting.add_input("edge".to_string(), edges.clone());
+    let mut results_counting = codegen_counting.execute(&ir).unwrap();
+    results_counting.sort();
+
+    // Execute with Boolean
+    let mut codegen_boolean = CodeGenerator::new();
+    codegen_boolean.set_semiring_type(SemiringType::Boolean);
+    codegen_boolean.add_input("edge".to_string(), edges.clone());
+    let mut results_boolean = codegen_boolean.execute(&ir).unwrap();
+    results_boolean.sort();
+
+    assert_eq!(results_counting, results_boolean, "Join results must match");
+}
+
+/// Verify Boolean and Counting produce same results for full pipeline queries
+#[test]
+fn test_boolean_diff_full_pipeline() {
+    // Execute same query with boolean specialization enabled (default)
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    let mut results = engine.execute("path(X, Y) :- edge(X, Y).").unwrap();
+    results.sort();
+
+    // Boolean specialization is always on; verify results are correct
+    assert_eq!(results, vec![(1, 2), (2, 3), (3, 4)]);
+}
+
+/// Verify Boolean diff works for recursive transitive closure
 #[test]
