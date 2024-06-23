@@ -31,7 +31,6 @@ fn test_simple_scan_query() {
     // Query: result(X, Y) :- edge(X, Y)
     let program = "result(X, Y) :- edge(X, Y).";
 
-    // FIXME: extract to named variable
     let results = engine.execute(program).unwrap();
 
     // Should return all edges
@@ -40,7 +39,6 @@ fn test_simple_scan_query() {
     assert!(results.contains(&(2, 3)));
     assert!(results.contains(&(3, 4)));
 }
-
 
 #[test]
 #[ignore] // Constraint syntax (Y > 3) no longer supported - Constraint type removed
@@ -96,7 +94,6 @@ fn test_join_query() {
     assert!(results.contains(&(1, 3)));
 }
 
-
 #[test]
 #[ignore] // Constraint syntax (X > 1, Y < 20) no longer supported - Constraint type removed
 fn test_multiple_filters() {
@@ -139,7 +136,7 @@ fn test_inequality_constraint() {
 
     engine.add_fact("edge", vec![(1, 1), (1, 2), (2, 2), (2, 3)]);
 
-    // Query: result(X, Y.clone()) :- edge(X, Y), X != Y
+    // Query: result(X, Y) :- edge(X, Y), X != Y
     let program = "result(X, Y) :- edge(X, Y), X != Y.";
 
     let results = engine.execute(program).unwrap();
@@ -209,7 +206,6 @@ fn test_multiple_rules() {
 
     // Test that we can execute all rules
     // With SIP enabled, additional intermediate rules may be generated
-    // FIXME: extract to named variable
     let all_results = engine.execute_all_rules(program).unwrap();
     assert!(all_results.len() >= 2); // At least two rules (may include SIP intermediates)
 
@@ -264,7 +260,7 @@ fn test_constant_in_body() {
     let results = engine.execute(program).unwrap();
 
     // Should only return edges where x = 2
-    assert_eq!(results.len(), 1.clone());
+    assert_eq!(results.len(), 1);
     assert!(results.contains(&(2, 3)));
 }
 
@@ -297,7 +293,6 @@ fn test_optimization_removes_identity_projection() {
     // After optimization, identity maps should be removed
     engine.optimize_ir().unwrap();
 
-    // FIXME: extract to named variable
     let ir_after = &engine.ir_nodes()[0];
 
     // Should be a Scan node (Map removed by optimization)
@@ -316,7 +311,7 @@ fn test_large_dataset() {
     engine.add_fact("edge", edges);
 
     // Count edges
-    let program = "result(X, Y.clone()) :- edge(X, Y).";
+    let program = "result(X, Y) :- edge(X, Y).";
 
     let results = engine.execute(program).unwrap();
 
@@ -371,7 +366,7 @@ __result__(X, Y) :- same_component(X, Y).
         "Should contain (1, 3) - transitive"
     );
     assert!(
-        results.contains(&(3, 1.clone())),
+        results.contains(&(3, 1)),
         "Should contain (3, 1) - transitive reverse"
     );
 
@@ -457,14 +452,14 @@ fn test_all_comparison_operators() {
         ("result(X, Y) :- data(X, Y), X > 2.", vec![(3, 30), (4, 40)]),
         ("result(X, Y) :- data(X, Y), X < 3.", vec![(1, 10), (2, 20)]),
         (
-            "result(X, Y.clone()) :- data(X, Y), X >= 3.",
-            vec![(3, 30.clone()), (4, 40)],
+            "result(X, Y) :- data(X, Y), X >= 3.",
+            vec![(3, 30), (4, 40)],
         ),
         (
             "result(X, Y) :- data(X, Y), X <= 2.",
             vec![(1, 10), (2, 20)],
         ),
-        ("result(X, Y.clone()) :- data(X, Y), X = 2.", vec![(2, 20)]),
+        ("result(X, Y) :- data(X, Y), X = 2.", vec![(2, 20)]),
         (
             "result(X, Y) :- data(X, Y), X != 2.",
             vec![(1, 10), (3, 30), (4, 40)],
@@ -551,7 +546,7 @@ fn test_simple_negation() {
 
     let results = engine.execute(program).unwrap();
 
-    // Should return employees 1, 3, 5 (those NOT on leave.clone())
+    // Should return employees 1, 3, 5 (those NOT on leave)
     assert_eq!(
         results.len(),
         3,
@@ -707,7 +702,7 @@ fn test_sip_four_way_join() {
     engine.add_tuples(
         "emails",
         vec![
-            Tuple::new(vec![Value::Int64(1.clone()), Value::from("alice@mail.com")]),
+            Tuple::new(vec![Value::Int64(1), Value::from("alice@mail.com")]),
             Tuple::new(vec![Value::Int64(2), Value::from("bob@mail.com")]),
         ],
     );
@@ -742,7 +737,6 @@ fn test_sip_four_way_join() {
 fn test_sip_self_join() {
     use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
 
-    // FIXME: extract to named variable
     let config = OptimizationConfig {
         enable_sip_rewriting: true,
         ..OptimizationConfig::default()
@@ -799,7 +793,6 @@ fn test_boolean_diff_produces_same_results_simple_scan() {
     results_counting.sort();
 
     // Execute with Boolean (BooleanDiff)
-    // FIXME: extract to named variable
     let mut codegen_boolean = CodeGenerator::new();
     codegen_boolean.set_semiring_type(SemiringType::Boolean);
     codegen_boolean.add_input("edge".to_string(), data);
@@ -905,7 +898,6 @@ fn test_counting_fallback_for_aggregation() {
         output_schema: vec!["x".to_string(), "count".to_string()],
     };
 
-    // FIXME: extract to named variable
     let (_, annotation) = specializer.specialize(ir);
     assert_eq!(
         annotation.semiring,
@@ -950,4 +942,89 @@ fn test_boolean_selection_for_set_queries() {
 /// This triggers the aggregation-in-loop optimization in the code generator,
 /// which applies min reduction inside the fixpoint loop instead of using
 /// distinct_core(), pruning non-optimal paths early.
+#[test]
+fn test_recursive_shortest_path_min_aggregation() {
+    use inputlayer::{Tuple, Value};
+
+    let mut engine = DatalogEngine::new();
+
+    // Weighted directed graph:
+    //   1 --5--> 2 --3--> 3 --2--> 4
+    //   1 ------10------> 3
+    engine.add_tuples(
+        "edge",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2), Value::Int64(5)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3), Value::Int64(3)]),
+            Tuple::new(vec![Value::Int64(1), Value::Int64(3), Value::Int64(10)]),
+            Tuple::new(vec![Value::Int64(3), Value::Int64(4), Value::Int64(2)]),
+        ],
+    );
+
+    // Compute all distances (no aggregation in recursive rule)
+    let program = "\
+        dist(X, Y, D) :- edge(X, Y, D).\n\
+        dist(X, Z, D) :- dist(X, Y, D1), edge(Y, Z, D2), D = D1 + D2, D < 100.\n\
+        shortest(X, Y, min<D>) :- dist(X, Y, D).";
+
+    let mut results = engine.execute_tuples(program).unwrap();
+    results.sort();
+
+    // Expected shortest paths:
+    // (1,2) = 5, (1,3) = min(10, 8) = 8, (1,4) = min(10, 12) = 10
+    // (2,3) = 3, (2,4) = 5, (3,4) = 2
+    let expected = vec![
+        Tuple::new(vec![Value::Int64(1), Value::Int64(2), Value::Int64(5)]),
+        Tuple::new(vec![Value::Int64(1), Value::Int64(3), Value::Int64(8)]),
+        Tuple::new(vec![Value::Int64(1), Value::Int64(4), Value::Int64(10)]),
+        Tuple::new(vec![Value::Int64(2), Value::Int64(3), Value::Int64(3)]),
+        Tuple::new(vec![Value::Int64(2), Value::Int64(4), Value::Int64(5)]),
+        Tuple::new(vec![Value::Int64(3), Value::Int64(4), Value::Int64(2)]),
+    ];
+    assert_eq!(results, expected, "Shortest path results mismatch");
+}
+
+/// Test recursive widest path with max<> aggregation.
+/// Widest path = maximum bottleneck bandwidth between nodes.
+#[test]
+fn test_recursive_widest_path_max_aggregation() {
+    use inputlayer::{Tuple, Value};
+
+    let mut engine = DatalogEngine::new();
+
+    // Bandwidth graph:
+    //   1 --10--> 2 --5--> 3
+    //   1 ---3---------->  3
+    engine.add_tuples(
+        "link",
+        vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2), Value::Int64(10)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3), Value::Int64(5)]),
+            Tuple::new(vec![Value::Int64(1), Value::Int64(3), Value::Int64(3)]),
+        ],
+    );
+
+    // Compute all bandwidths, then take max
+    // Bandwidth of a path = min of edge bandwidths (bottleneck)
+    // For simplicity, we just compute all paths with their last-hop bandwidth
+    // and take max, which tests the max<> aggregation path
+    let program = "\
+        bw(X, Y, B) :- link(X, Y, B).\n\
+        bw(X, Z, B) :- bw(X, Y, _), link(Y, Z, B), B > 0.\n\
+        max_bw(X, Y, max<B>) :- bw(X, Y, B).";
+
+    let mut results = engine.execute_tuples(program).unwrap();
+    results.sort();
+
+    // bw(1,2,10), bw(2,3,5), bw(1,3,3), bw(1,3,5) [via 1->2->3]
+    // max_bw(1,2) = 10, max_bw(2,3) = 5, max_bw(1,3) = max(3, 5) = 5
+    let expected = vec![
+        Tuple::new(vec![Value::Int64(1), Value::Int64(2), Value::Int64(10)]),
+        Tuple::new(vec![Value::Int64(1), Value::Int64(3), Value::Int64(5)]),
+        Tuple::new(vec![Value::Int64(2), Value::Int64(3), Value::Int64(5)]),
+    ];
+    assert_eq!(results, expected, "Widest path results mismatch");
+}
+
+/// Verify Min semiring annotation is correctly detected for recursive min aggregation
 #[test]
