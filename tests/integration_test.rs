@@ -1028,3 +1028,50 @@ fn test_recursive_widest_path_max_aggregation() {
 
 /// Verify Min semiring annotation is correctly detected for recursive min aggregation
 #[test]
+fn test_min_semiring_annotation() {
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::{BooleanSpecializer, SemiringType};
+
+    let mut specializer = BooleanSpecializer::new();
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "R".to_string(),
+            schema: vec!["x".to_string(), "y".to_string(), "d".to_string()],
+        }),
+        group_by: vec![0, 1],
+        aggregations: vec![(AggregateFunction::Min, 2)],
+        output_schema: vec!["x".to_string(), "y".to_string(), "min_d".to_string()],
+    };
+
+    let (_, annotation) = specializer.specialize(ir);
+    assert_eq!(
+        annotation.semiring,
+        SemiringType::Min,
+        "Min aggregation must produce Min semiring"
+    );
+}
+
+/// Verify Max semiring annotation is correctly detected for recursive max aggregation
+#[test]
+fn test_max_semiring_annotation() {
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::{BooleanSpecializer, SemiringType};
+
+    let mut specializer = BooleanSpecializer::new();
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "R".to_string(),
+            schema: vec!["x".to_string(), "y".to_string(), "d".to_string()],
+        }),
+        group_by: vec![0, 1],
+        aggregations: vec![(AggregateFunction::Max, 2)],
+        output_schema: vec!["x".to_string(), "y".to_string(), "max_d".to_string()],
+    };
+
+    let (_, annotation) = specializer.specialize(ir);
+    assert_eq!(
+        annotation.semiring,
+        SemiringType::Max,
+        "Max aggregation must produce Max semiring"
+    );
+}
