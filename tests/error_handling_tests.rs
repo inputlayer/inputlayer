@@ -106,3 +106,57 @@ fn test_malformed_aggregation_returns_error() {
 }
 
 #[test]
+fn test_unbound_head_variable_returns_error() {
+    let mut engine = create_engine();
+    engine.execute("edge(1, 2).").ok();
+
+    // Z is not bound in the body
+    let result = engine.execute("path(X, Z) :- edge(X, Y).");
+    assert!(result.is_err(), "Unbound head variable should return error");
+}
+
+// Storage Error Handling (no panics)
+#[test]
+fn test_query_nonexistent_kg_returns_error() {
+    let (storage, _temp) = create_test_storage();
+
+    let result = storage.execute_query_on("nonexistent_kg", "result(X) :- data(X).");
+    assert!(
+        result.is_err(),
+        "Query on non-existent KG should return error"
+    );
+}
+
+#[test]
+fn test_insert_into_nonexistent_kg_returns_error() {
+    let (storage, _temp) = create_test_storage();
+    let storage = storage; // Make mutable for insert operation
+
+    let result = storage.insert_into("nonexistent_kg", "data", vec![(1, 2)]);
+    assert!(
+        result.is_err(),
+        "Insert into non-existent KG should return error"
+    );
+}
+
+#[test]
+fn test_delete_from_nonexistent_kg_returns_error() {
+    let (storage, _temp) = create_test_storage();
+    let storage = storage; // Make mutable for delete operation
+
+    let result = storage.delete_from("nonexistent_kg", "data", vec![(1, 2)]);
+    assert!(
+        result.is_err(),
+        "Delete from non-existent KG should return error"
+    );
+}
+
+#[test]
+fn test_drop_nonexistent_kg_returns_error() {
+    let (mut storage, _temp) = create_test_storage();
+
+    let result = storage.drop_knowledge_graph("nonexistent_kg");
+    assert!(result.is_err(), "Drop non-existent KG should return error");
+}
+
+#[test]
