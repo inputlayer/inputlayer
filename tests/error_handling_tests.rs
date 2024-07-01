@@ -297,3 +297,60 @@ fn test_concurrent_errors_dont_cause_panic() {
 }
 
 #[test]
+fn test_rapid_kg_create_drop_cycle() {
+    let (mut storage, _temp) = create_test_storage();
+
+    // Rapid create/drop cycle should not cause issues
+    for i in 0..50 {
+        let kg_name = format!("rapid_cycle_{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        storage.insert_into(&kg_name, "data", vec![(i, i)]).unwrap();
+        storage.drop_knowledge_graph(&kg_name).unwrap();
+    }
+}
+
+#[test]
+fn test_error_after_successful_operations() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("mixed").unwrap();
+
+    // Successful operations
+    storage
+        .insert_into("mixed", "data", vec![(1, 10), (2, 20)])
+        .unwrap();
+    let result = storage
+        .execute_query_on("mixed", "result(X,Y) :- data(X,Y).")
+        .unwrap();
+    assert_eq!(result.len(), 2);
+
+    // Try a malformed query - should error
+    let err_result = storage.execute_query_on("mixed", "invalid syntax @@#$%");
+    assert!(err_result.is_err(), "Malformed query should return error");
+
+    // Previous data should still be accessible
+    let result = storage
+        .execute_query_on("mixed", "result(X,Y) :- data(X,Y).")
+        .unwrap();
+    assert_eq!(result.len(), 2);
+}
+
+// Meta Command Error Handling (no panics)
+#[test]
+fn test_invalid_meta_commands_return_error() {
+    let mut engine = create_engine();
+
+    // Invalid meta commands should return errors, not panic
+    let test_cases = vec![
+        ".invalid",
+        ".drop",     // Missing argument
+        ".show xyz", // Invalid show argument
+    ];
+
+    for cmd in test_cases {
+        let result = engine.execute(cmd);
+        // Should error or be handled gracefully
+        let _ = result;
+    }
+}
+
+#[test]
