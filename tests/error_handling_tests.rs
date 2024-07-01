@@ -354,3 +354,58 @@ fn test_invalid_meta_commands_return_error() {
 }
 
 #[test]
+fn test_load_nonexistent_file_returns_error() {
+    let mut engine = create_engine();
+
+    let result = engine.execute(".load /nonexistent/path/file.dl");
+    assert!(
+        result.is_err(),
+        "Loading non-existent file should return error"
+    );
+}
+
+// Edge Case Error Handling (no panics)
+#[test]
+fn test_very_long_relation_name_handled() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("test").unwrap();
+
+    let long_name = "a".repeat(1000);
+    let result = storage.insert_into("test", &long_name, vec![(1, 2)]);
+    // Should succeed or return error, but not panic
+    let _ = result;
+}
+
+#[test]
+fn test_very_long_query_handled() {
+    let mut engine = create_engine();
+
+    // Generate a very long query
+    let long_query = format!(
+        "result(X) :- {}.",
+        (0..100)
+            .map(|i| format!("rel{}(X)", i))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let result = engine.execute(&long_query);
+    // Should return error (undefined relations), but not panic
+    let _ = result;
+}
+
+#[test]
+fn test_deeply_nested_arithmetic_handled() {
+    let mut engine = create_engine();
+    engine.execute("data(1).").ok();
+
+    // Deeply nested arithmetic
+    let nested = "(((((X+1)+1)+1)+1)+1)";
+    let query = format!("result(Y) :- data(X), Y = {}.", nested);
+
+    let result = engine.execute(&query);
+    // Should succeed or error, but not panic
+    let _ = result;
+}
+
+#[test]
