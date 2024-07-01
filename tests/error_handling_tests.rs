@@ -215,3 +215,85 @@ fn test_recursive_query_on_empty_relation() {
 }
 
 #[test]
+fn test_negation_only_rule_returns_error() {
+    let mut engine = create_engine();
+    engine.execute("node(1).").ok();
+
+    // Rule with only negation is unsafe
+    let result = engine.execute("isolated(X) :- !edge(X, _).");
+    assert!(result.is_err(), "Negation-only rule should return error");
+}
+
+// Value Boundary Error Handling (no panics)
+#[test]
+fn test_tuple_out_of_bounds_access() {
+    let tuple = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+
+    // Out of bounds access should return None, not panic
+    assert_eq!(tuple.get(0), Some(&Value::Int32(1)));
+    assert_eq!(tuple.get(1), Some(&Value::Int32(2)));
+    assert_eq!(tuple.get(2), None); // Out of bounds
+    assert_eq!(tuple.get(100), None); // Way out of bounds
+    assert_eq!(tuple.get(usize::MAX), None); // Maximum index
+}
+
+#[test]
+fn test_empty_tuple_access() {
+    let tuple = Tuple::new(vec![]);
+
+    assert_eq!(tuple.arity(), 0);
+    assert_eq!(tuple.get(0), None);
+}
+
+#[test]
+fn test_value_type_mismatches_dont_panic() {
+    let int_val = Value::Int32(42);
+    let string_val = Value::string("hello");
+    let float_val = Value::Float64(3.14);
+
+    // These should return None, not panic
+    assert_eq!(int_val.as_str(), None);
+    assert_eq!(string_val.as_i64(), None);
+    assert_eq!(float_val.as_str(), None);
+}
+
+// Concurrent Error Handling (no panics under contention)
+#[test]
+fn test_concurrent_errors_dont_cause_panic() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("concurrent_errors").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 20;
+    let mut handles = vec![];
+
+    for i in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            let storage_guard = storage_clone.write().expect("Lock failed");
+
+            // Half threads do invalid operations
+            if i % 2 == 0 {
+                let _ = storage_guard.insert_into("nonexistent_kg", "data", vec![(i, i)]);
+                let _ = storage_guard.execute_query_on("nonexistent_kg", "result(X) :- data(X).");
+            } else {
+                // Half do valid operations
+                let _ = storage_guard.insert_into(
+                    "concurrent_errors",
+                    "data",
+                    vec![(i as i32, i as i32)],
+                );
+                let _ = storage_guard
+                    .execute_query_on("concurrent_errors", "result(X,Y) :- data(X,Y).");
+            }
+        });
+        handles.push(handle);
+    }
+
+    // All threads should complete without panic
+    for handle in handles {
+        handle.join().expect("Thread panicked on error");
+    }
+}
+
+#[test]
