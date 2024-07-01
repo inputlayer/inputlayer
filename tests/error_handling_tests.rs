@@ -160,3 +160,58 @@ fn test_drop_nonexistent_kg_returns_error() {
 }
 
 #[test]
+fn test_drop_nonexistent_rule_handles_gracefully() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("test").unwrap();
+
+    // Dropping non-existent rule should not panic
+    let result = storage.drop_rule_in("test", "nonexistent_rule");
+    // Either succeeds (no-op) or returns error - but doesn't panic
+    let _ = result;
+}
+
+#[test]
+fn test_create_duplicate_kg_returns_error() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("duplicate").unwrap();
+
+    let result = storage.create_knowledge_graph("duplicate");
+    assert!(result.is_err(), "Creating duplicate KG should return error");
+}
+
+// Query Execution Error Handling (no panics)
+#[test]
+fn test_query_undefined_relation_returns_error() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("test").unwrap();
+
+    // Querying an undefined relation with a free variable is unsafe in Datalog
+    // The variable X in ?undefined_relation(X) doesn't appear in any positive body atom
+    let result = storage.execute_query_on("test", "?undefined_relation(X).");
+    // Should return error because the query is unsafe (unbound variable in head)
+    assert!(
+        result.is_err(),
+        "Query with unbound variable should return error"
+    );
+}
+
+#[test]
+fn test_recursive_query_on_empty_relation() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("test").unwrap();
+
+    // First create the base relation (empty)
+    storage
+        .insert_into("test", "edge", vec![(0i32, 0i32); 0])
+        .ok();
+
+    // Then query with recursion - should return empty, not panic
+    let result = storage.execute_query_on(
+        "test",
+        "path(X, Y) :- edge(X, Y). path(X, Z) :- path(X, Y), edge(Y, Z). ?path(A, B).",
+    );
+    // Should succeed with empty result or return error - but not panic
+    let _ = result;
+}
+
+#[test]
