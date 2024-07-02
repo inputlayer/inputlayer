@@ -470,3 +470,53 @@ fn test_underflow_arithmetic_handled() {
 
 // Vector Error Handling (no panics)
 #[test]
+fn test_vector_dimension_mismatch_handled() {
+    let mut engine = create_engine();
+
+    // Insert vectors of different dimensions
+    engine.execute("vec1([1.0, 2.0, 3.0]).").ok();
+    engine.execute("vec2([1.0, 2.0]).").ok(); // Different dimension
+
+    // Distance calculation with mismatched dimensions
+    let result = engine.execute("result(D) :- vec1(V1), vec2(V2), D = euclidean(V1, V2).");
+    // Should return error, but not panic
+    assert!(
+        result.is_err() || result.unwrap().is_empty(),
+        "Vector dimension mismatch should return error or empty result"
+    );
+}
+
+#[test]
+fn test_empty_vector_operations_handled() {
+    let mut engine = create_engine();
+
+    engine.execute("vec([]).").ok(); // Empty vector
+
+    // Operations on empty vector
+    let result = engine.execute("result(D) :- vec(V), D = normalize(V).");
+    // Should handle gracefully
+    let _ = result;
+}
+
+// State Consistency After Errors
+#[test]
+fn test_state_consistent_after_parse_error() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("state_test").unwrap();
+
+    // Add valid data
+    storage
+        .insert_into("state_test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+
+    // Parse error should not affect state
+    let _ = storage.execute_query_on("state_test", "invalid syntax here @@#$%");
+
+    // State should still be consistent
+    let result = storage
+        .execute_query_on("state_test", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
+    assert_eq!(result.len(), 2);
+}
+
+#[test]
