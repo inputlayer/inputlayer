@@ -409,3 +409,64 @@ fn test_deeply_nested_arithmetic_handled() {
 }
 
 #[test]
+fn test_unicode_in_queries_handled() {
+    let mut engine = create_engine();
+
+    // Unicode in string literals
+    engine.execute(r#"data("日本語")."#).ok();
+    engine.execute(r#"data("Привет")."#).ok();
+    engine.execute(r#"data("مرحبا")."#).ok();
+
+    let result = engine.execute("result(X) :- data(X).");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_special_characters_in_strings_handled() {
+    let mut engine = create_engine();
+
+    // Various special characters
+    engine.execute(r#"data("hello\nworld")."#).ok();
+    engine.execute(r#"data("tab\there")."#).ok();
+    engine.execute(r#"data("quote\"inside")."#).ok();
+
+    let result = engine.execute("result(X) :- data(X).");
+    assert!(result.is_ok());
+}
+
+// Numeric Edge Case Error Handling (no panics)
+#[test]
+fn test_division_by_zero_handled() {
+    let mut engine = create_engine();
+    engine.execute("data(0).").ok();
+
+    // Division by zero should be handled
+    let result = engine.execute("result(Y) :- data(X), Y = 10 / X.");
+    // Should return error or special value, but not panic
+    let _ = result;
+}
+
+#[test]
+fn test_overflow_arithmetic_handled() {
+    let mut engine = create_engine();
+    engine.execute(&format!("data({}).", i64::MAX)).ok();
+
+    // Overflow should be handled
+    let result = engine.execute("result(Y) :- data(X), Y = X + 1.");
+    // Should return error or wrap, but not panic
+    let _ = result;
+}
+
+#[test]
+fn test_underflow_arithmetic_handled() {
+    let mut engine = create_engine();
+    engine.execute(&format!("data({}).", i64::MIN)).ok();
+
+    // Underflow should be handled
+    let result = engine.execute("result(Y) :- data(X), Y = X - 1.");
+    // Should return error or wrap, but not panic
+    let _ = result;
+}
+
+// Vector Error Handling (no panics)
+#[test]
