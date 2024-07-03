@@ -520,3 +520,41 @@ fn test_state_consistent_after_parse_error() {
 }
 
 #[test]
+fn test_state_consistent_after_execution_error() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("exec_test").unwrap();
+
+    // Add valid data
+    storage
+        .insert_into("exec_test", "data", vec![(1, 10)])
+        .unwrap();
+
+    // Execution error (parse error)
+    let _ = storage.execute_query_on("exec_test", "invalid @@@");
+
+    // State should still be consistent
+    let result = storage
+        .execute_query_on("exec_test", "result(X,Y) :- data(X,Y).")
+        .unwrap();
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_partial_batch_error_handling() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("batch_test").unwrap();
+
+    // Insert valid data
+    storage
+        .insert_into("batch_test", "data", vec![(1, 10), (2, 20)])
+        .unwrap();
+
+    // Try to query with error
+    let _ = storage.execute_query_on("batch_test", "result(X) :- undefined(X).");
+
+    // Original data should be intact
+    let result = storage
+        .execute_query_on("batch_test", "result(X, Y) :- data(X, Y).")
+        .unwrap();
+    assert_eq!(result.len(), 2);
+}
