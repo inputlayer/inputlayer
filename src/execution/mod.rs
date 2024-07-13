@@ -134,3 +134,35 @@ pub enum ExecutionError {
 /// Result type for execution operations
 pub type ExecutionResult<T> = Result<T, ExecutionError>;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = ExecutionConfig::default();
+        assert!(config.timeout.is_some());
+        assert!(config.enable_query_cache);
+        assert!(config.enable_result_cache);
+    }
+
+    #[test]
+    fn test_unlimited_config() {
+        let config = ExecutionConfig::unlimited();
+        assert!(config.timeout.is_none());
+        assert!(!config.enable_query_cache);
+        assert!(!config.enable_result_cache);
+    }
+
+    #[test]
+    fn test_config_builder() {
+        let config = ExecutionConfig::default()
+            .with_timeout(Duration::from_secs(30))
+            .with_max_results(50_000)
+            .with_memory_limit(1024 * 1024 * 100); // 100MB
+
+        assert_eq!(config.timeout, Some(Duration::from_secs(30)));
+        assert_eq!(config.limits.max_result_size, Some(50_000));
+        assert_eq!(config.limits.max_memory_bytes, Some(100 * 1024 * 1024));
+    }
+}
