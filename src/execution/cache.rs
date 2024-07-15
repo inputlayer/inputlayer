@@ -78,3 +78,43 @@ impl<T> CacheEntry<T> {
 
 /// Cache statistics
 #[derive(Debug, Clone, Default)]
+pub struct CacheStats {
+    /// Number of cache hits
+    pub hits: usize,
+
+    /// Number of cache misses
+    pub misses: usize,
+
+    /// Number of entries currently in cache
+    pub size: usize,
+
+    /// Number of entries evicted
+    pub evictions: usize,
+
+    /// Number of entries expired
+    pub expirations: usize,
+}
+
+impl CacheStats {
+    /// Calculate hit rate (0.0 to 1.0)
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
+    }
+
+    /// Reset statistics
+    pub fn reset(&mut self) {
+        self.hits = 0;
+        self.misses = 0;
+        self.evictions = 0;
+        self.expirations = 0;
+    }
+}
+
+/// Query cache for storing compiled IR and results
+///
+/// Thread-safe LRU cache with TTL support.
