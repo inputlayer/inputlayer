@@ -333,3 +333,83 @@ impl QueryCache {
     }
 }
 
+impl Default for QueryCache {
+    fn default() -> Self {
+        Self::with_defaults()
+    }
+}
+
+impl Clone for QueryCache {
+    fn clone(&self) -> Self {
+        QueryCache {
+            compiled: Arc::clone(&self.compiled),
+            results: Arc::clone(&self.results),
+            max_compiled_entries: self.max_compiled_entries,
+            max_result_entries: self.max_result_entries,
+            result_ttl: self.result_ttl,
+            stats: Arc::clone(&self.stats),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_entry_expiration() {
+        let entry: CacheEntry<i32> = CacheEntry::new(42, Some(Duration::from_millis(10)));
+
+        assert!(!entry.is_expired());
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert!(entry.is_expired());
+    }
+
+    #[test]
+    fn test_cache_entry_no_expiration() {
+        let entry: CacheEntry<i32> = CacheEntry::new(42, None);
+
+        assert!(!entry.is_expired());
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        assert!(!entry.is_expired());
+    }
+
+    #[test]
+    fn test_cache_hit_miss() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+
+        // Miss
+        assert!(cache.get_compiled("test query").is_none());
+        assert_eq!(cache.stats().misses, 1);
+
+        // Insert
+        cache.put_compiled("test query", vec![]);
+
+        // Hit
+        assert!(cache.get_compiled("test query").is_some());
+        assert_eq!(cache.stats().hits, 1);
+    }
+
+    #[test]
+    fn test_cache_eviction() {
+        let cache = QueryCache::new(2, 2, Duration::from_secs(60));
+
+        // Fill cache
+        cache.put_compiled("query1", vec![]);
+        cache.put_compiled("query2", vec![]);
+
+        // Access query1 to make it more recent
+        cache.get_compiled("query1");
+
+        // Add third entry - should evict query2 (LRU)
+        cache.put_compiled("query3", vec![]);
+
+        assert_eq!(cache.compiled_size(), 2);
+        assert!(cache.get_compiled("query1").is_some()); // Still there
+        assert!(cache.get_compiled("query3").is_some()); // Still there
+    }
+
