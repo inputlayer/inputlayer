@@ -169,3 +169,85 @@ fn test_triangle_detection() {
 // pipeline_demo.rs tests
 #[test]
 #[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
+fn test_pipeline_stages() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    // Parse
+    let program = engine
+        .parse("result(X, Z) :- edge(X, Y), edge(Y, Z), X > 1.")
+        .unwrap();
+    assert!(!program.rules.is_empty());
+
+    // Build IR
+    engine.build_ir().unwrap();
+    let ir_nodes = engine.ir_nodes();
+    assert!(!ir_nodes.is_empty());
+
+    // Optimize
+    engine.optimize_ir().unwrap();
+
+    // Execute
+    let results = engine.execute_ir(&engine.ir_nodes()[0]).unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(to_set(results).contains(&(2, 4)));
+}
+
+#[test]
+fn test_pipeline_with_trace() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    let (results, trace) = engine
+        .execute_with_trace("result(X, Y) :- edge(X, Y).")
+        .unwrap();
+
+    // Verify trace contains information
+    let trace_str = trace.to_string();
+    assert!(!trace_str.is_empty());
+
+    // Verify results
+    assert_eq!(results.len(), 3);
+}
+
+// Comparison operators tests
+#[test]
+#[ignore] // Constraint syntax (X > 2, etc.) no longer supported - Constraint type removed
+fn test_all_comparison_operators() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
+
+    // Greater than
+    let results = engine
+        .execute("result(X, Y) :- data(X, Y), X > 2.")
+        .unwrap();
+    assert_eq!(results.len(), 3);
+
+    // Less than
+    let results = engine
+        .execute("result(X, Y) :- data(X, Y), X < 3.")
+        .unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Greater or equal
+    let results = engine
+        .execute("result(X, Y) :- data(X, Y), X >= 3.")
+        .unwrap();
+    assert_eq!(results.len(), 3);
+
+    // Less or equal
+    let results = engine
+        .execute("result(X, Y) :- data(X, Y), X <= 3.")
+        .unwrap();
+    assert_eq!(results.len(), 3);
+
+    // Not equal
+    let results = engine
+        .execute("result(X, Y) :- data(X, Y), X != 3.")
+        .unwrap();
+    assert_eq!(results.len(), 4);
+}
+
+// Edge cases
+#[test]
+#[ignore] // Constraint syntax (X > 100) no longer supported - Constraint type removed
