@@ -254,7 +254,7 @@ impl QueryCache {
 
     /// Evict the LRU entry (oldest last_accessed).
     fn evict_lru<T: Clone>(&self, cache: &mut HashMap<u64, CacheEntry<T>>) {
-        if let Some((&key_to_remove, _)) = cache.iter().cloned().min_by_key(|(_, entry)| entry.last_accessed)
+        if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
             let mut stats = self.stats.write();
@@ -281,7 +281,7 @@ impl QueryCache {
         }
 
         // Otherwise evict LRU
-        if let Some((&key_to_remove, _)) = cache.iter().cloned().min_by_key(|(_, entry)| entry.last_accessed)
+        if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
             let mut stats = self.stats.write();
@@ -413,3 +413,46 @@ mod tests {
         assert!(cache.get_compiled("query3").is_some()); // Still there
     }
 
+    #[test]
+    fn test_result_cache_with_fingerprint() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+
+        let query = "test query";
+        let results = vec![(1, 2), (3, 4)];
+
+        // Different fingerprints should be different cache entries
+        cache.put_results(query, 123, results.clone());
+        cache.put_results(query, 456, vec![(5, 6)]);
+
+        assert_eq!(cache.get_results(query, 123), Some(results));
+        assert_eq!(cache.get_results(query, 456), Some(vec![(5, 6)]));
+        assert!(cache.get_results(query, 789).is_none());
+    }
+
+    #[test]
+    fn test_hit_rate() {
+        let stats = CacheStats {
+            hits: 75,
+            misses: 25,
+            ..Default::default()
+        };
+
+        assert!((stats.hit_rate() - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_clear_caches() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+
+        cache.put_compiled("query", vec![]);
+        cache.put_results("query", 123, vec![(1, 2)]);
+
+        assert_eq!(cache.compiled_size(), 1);
+        assert_eq!(cache.results_size(), 1);
+
+        cache.clear();
+
+        assert_eq!(cache.compiled_size(), 0);
+        assert_eq!(cache.results_size(), 0);
+    }
+}
