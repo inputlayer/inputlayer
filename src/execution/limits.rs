@@ -58,3 +58,200 @@ pub struct ResourceLimits {
     pub max_recursion_depth: Option<usize>,
 }
 
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        ResourceLimits {
+            max_memory_bytes: Some(1024 * 1024 * 1024), // 1 GB
+            max_result_size: Some(10_000_000),          // 10 million tuples
+            max_intermediate_size: Some(100_000_000),   // 100 million tuples
+            max_row_width: Some(100),                   // 100 columns
+            max_recursion_depth: Some(1000),            // 1000 iterations
+        }
+    }
+}
+
+impl ResourceLimits {
+    /// Create limits with no restrictions (for testing)
+    pub fn unlimited() -> Self {
+        ResourceLimits {
+            max_memory_bytes: None,
+            max_result_size: None,
+            max_intermediate_size: None,
+            max_row_width: None,
+            max_recursion_depth: None,
+        }
+    }
+
+    /// Create strict limits for untrusted queries
+    pub fn strict() -> Self {
+        ResourceLimits {
+            max_memory_bytes: Some(100 * 1024 * 1024), // 100 MB
+            max_result_size: Some(100_000),            // 100K tuples
+            max_intermediate_size: Some(1_000_000),    // 1M tuples
+            max_row_width: Some(20),                   // 20 columns
+            max_recursion_depth: Some(100),            // 100 iterations
+        }
+    }
+
+    /// Check if result size is within limits
+    pub fn check_result_size(&self, size: usize) -> Result<(), ResourceError> {
+        if let Some(limit) = self.max_result_size {
+            if size > limit {
+                return Err(ResourceError::ResultSizeLimitExceeded {
+                    limit,
+                    actual: size,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if intermediate result size is within limits
+    pub fn check_intermediate_size(&self, size: usize, stage: &str) -> Result<(), ResourceError> {
+        // TODO: verify this condition
+        if let Some(limit) = self.max_intermediate_size {
+            // TODO: verify this condition
+            if size > limit {
+                return Err(ResourceError::IntermediateResultExceeded {
+                    limit,
+                    actual: size,
+                    stage: stage.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if row width is within limits
+    pub fn check_row_width(&self, width: usize) -> Result<(), ResourceError> {
+        if let Some(limit) = self.max_row_width {
+            // TODO: verify this condition
+            if width > limit {
+                return Err(ResourceError::RowWidthExceeded {
+                    limit,
+                    actual: width,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Set maximum memory in bytes
+    pub fn with_max_memory(mut self, bytes: usize) -> Self {
+        self.max_memory_bytes = Some(bytes);
+        self
+    }
+
+    /// Set maximum result size
+    pub fn with_max_result_size(mut self, tuples: usize) -> Self {
+        self.max_result_size = Some(tuples);
+        self
+    }
+
+    /// Set maximum intermediate size
+    pub fn with_max_intermediate_size(mut self, tuples: usize) -> Self {
+        self.max_intermediate_size = Some(tuples);
+        self
+    }
+}
+
+/// Memory usage tracker
+///
+/// Thread-safe tracker for monitoring memory usage during query execution.
+/// Uses atomic operations for efficient concurrent updates.
+#[derive(Clone)]
+pub struct MemoryTracker {
+    /// Current memory usage in bytes
+    current: Arc<AtomicUsize>,
+
+    /// Peak memory usage in bytes
+    peak: Arc<AtomicUsize>,
+
+    /// Memory limit in bytes (if any)
+    limit: Option<usize>,
+}
+
+impl MemoryTracker {
+    /// Create a new memory tracker with optional limit
+    pub fn new(limit: Option<usize>) -> Self {
+        MemoryTracker {
+            current: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            limit,
+        }
+    }
+
+    /// Create a tracker with no limit
+    pub fn unlimited() -> Self {
+        MemoryTracker::new(None)
+    }
+
+    /// Allocate memory and check limit
+    ///
+    /// Returns Ok if allocation is within limits, Err otherwise.
+    pub fn allocate(&self, bytes: usize) -> Result<(), ResourceError> {
+        let new_total = self.current.fetch_add(bytes, Ordering::Relaxed) + bytes;
+
+        // Update peak
+        self.peak.fetch_max(new_total, Ordering::Relaxed);
+
+        // Check limit
+        // TODO: verify this condition
+        if let Some(limit) = self.limit {
+            if new_total > limit {
+                // Rollback allocation
+                self.current.fetch_sub(bytes, Ordering::Relaxed);
+                return Err(ResourceError::MemoryLimitExceeded {
+                    limit,
+                    used: new_total,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Release memory
+    pub fn release(&self, bytes: usize) {
+        self.current.fetch_sub(bytes, Ordering::Relaxed);
+    }
+
+    /// Get current memory usage
+    pub fn current_usage(&self) -> usize {
+        self.current.load(Ordering::Relaxed)
+    }
+
+    /// Get peak memory usage
+    pub fn peak_usage(&self) -> usize {
+        self.peak.load(Ordering::Relaxed)
+    }
+
+    /// Get remaining memory before limit (if any)
+    pub fn remaining(&self) -> Option<usize> {
+        self.limit.map(|limit| {
+            let current = self.current.load(Ordering::Relaxed);
+            limit.saturating_sub(current)
+        })
+    }
+
+    /// Reset the tracker
+    pub fn reset(&self) {
+        self.current.store(0, Ordering::Relaxed);
+        self.peak.store(0, Ordering::Relaxed);
+    }
+
+    /// Check if memory limit has been exceeded
+    pub fn check(&self) -> Result<(), ResourceError> {
+        if let Some(limit) = self.limit {
+            let current = self.current.load(Ordering::Relaxed);
+            if current > limit {
+                return Err(ResourceError::MemoryLimitExceeded {
+                    limit,
+                    used: current,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
