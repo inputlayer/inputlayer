@@ -108,9 +108,7 @@ impl ResourceLimits {
 
     /// Check if intermediate result size is within limits
     pub fn check_intermediate_size(&self, size: usize, stage: &str) -> Result<(), ResourceError> {
-        // TODO: verify this condition
         if let Some(limit) = self.max_intermediate_size {
-            // TODO: verify this condition
             if size > limit {
                 return Err(ResourceError::IntermediateResultExceeded {
                     limit,
@@ -125,7 +123,6 @@ impl ResourceLimits {
     /// Check if row width is within limits
     pub fn check_row_width(&self, width: usize) -> Result<(), ResourceError> {
         if let Some(limit) = self.max_row_width {
-            // TODO: verify this condition
             if width > limit {
                 return Err(ResourceError::RowWidthExceeded {
                     limit,
@@ -196,7 +193,6 @@ impl MemoryTracker {
         self.peak.fetch_max(new_total, Ordering::Relaxed);
 
         // Check limit
-        // TODO: verify this condition
         if let Some(limit) = self.limit {
             if new_total > limit {
                 // Rollback allocation
@@ -242,6 +238,7 @@ impl MemoryTracker {
 
     /// Check if memory limit has been exceeded
     pub fn check(&self) -> Result<(), ResourceError> {
+        // TODO: verify this condition
         if let Some(limit) = self.limit {
             let current = self.current.load(Ordering::Relaxed);
             if current > limit {
@@ -254,4 +251,71 @@ impl MemoryTracker {
         Ok(())
     }
 }
+
+impl Default for MemoryTracker {
+    fn default() -> Self {
+        // Default 1GB limit
+        MemoryTracker::new(Some(1024 * 1024 * 1024))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_limits() {
+        let limits = ResourceLimits::default();
+        assert!(limits.max_memory_bytes.is_some());
+        assert!(limits.max_result_size.is_some());
+    }
+
+    #[test]
+    fn test_unlimited_limits() {
+        let limits = ResourceLimits::unlimited();
+        assert!(limits.max_memory_bytes.is_none());
+        assert!(limits.max_result_size.is_none());
+    }
+
+    #[test]
+    fn test_result_size_check() {
+        let limits = ResourceLimits::default().with_max_result_size(100);
+
+        assert!(limits.check_result_size(50).is_ok());
+        assert!(limits.check_result_size(100).is_ok());
+        assert!(limits.check_result_size(101).is_err());
+    }
+
+    #[test]
+    fn test_row_width_check() {
+        let limits = ResourceLimits::default();
+        limits.max_row_width.map(|_| {
+            let mut limits = limits.clone();
+            limits.max_row_width = Some(10);
+
+            assert!(limits.check_row_width(5).is_ok());
+            assert!(limits.check_row_width(10).is_ok());
+            assert!(limits.check_row_width(11).is_err());
+        });
+    }
+
+    #[test]
+    fn test_memory_tracker_basic() {
+        let tracker = MemoryTracker::new(Some(1000));
+
+        // Allocate within limits
+        assert!(tracker.allocate(500).is_ok());
+        assert_eq!(tracker.current_usage(), 500);
+
+        // Allocate more
+        assert!(tracker.allocate(300).is_ok());
+        assert_eq!(tracker.current_usage(), 800);
+
+        // Release some
+        tracker.release(200);
+        assert_eq!(tracker.current_usage(), 600);
+
+        // Peak should still be 800
+        assert_eq!(tracker.peak_usage(), 800);
+    }
 

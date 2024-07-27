@@ -251,3 +251,44 @@ fn test_all_comparison_operators() {
 // Edge cases
 #[test]
 #[ignore] // Constraint syntax (X > 100) no longer supported - Constraint type removed
+fn test_empty_result() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    let results = engine
+        .execute("result(X, Y) :- edge(X, Y), X > 100.")
+        .unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_empty_relation() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![]);
+
+    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    assert!(results.is_empty());
+}
+
+#[test]
+fn test_single_tuple() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], (1, 2));
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 50) no longer supported - Constraint type removed
+fn test_large_dataset() {
+    let mut engine = DatalogEngine::new();
+    let data: Vec<(i32, i32)> = (1..=100).map(|i| (i, i + 1)).collect();
+    engine.add_fact("edge", data);
+
+    let results = engine
+        .execute("result(X, Y) :- edge(X, Y), X > 50.")
+        .unwrap();
+    assert_eq!(results.len(), 50);
+}
