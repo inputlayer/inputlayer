@@ -238,7 +238,6 @@ impl MemoryTracker {
 
     /// Check if memory limit has been exceeded
     pub fn check(&self) -> Result<(), ResourceError> {
-        // TODO: verify this condition
         if let Some(limit) = self.limit {
             let current = self.current.load(Ordering::Relaxed);
             if current > limit {
@@ -319,3 +318,46 @@ mod tests {
         assert_eq!(tracker.peak_usage(), 800);
     }
 
+    #[test]
+    fn test_memory_tracker_limit() {
+        let tracker = MemoryTracker::new(Some(1000));
+
+        // Allocate up to limit
+        assert!(tracker.allocate(900).is_ok());
+
+        // Exceed limit - should fail and rollback
+        assert!(tracker.allocate(200).is_err());
+        assert_eq!(tracker.current_usage(), 900); // Rolled back
+
+        // Can still allocate within remaining space
+        assert!(tracker.allocate(100).is_ok());
+        assert_eq!(tracker.current_usage(), 1000);
+    }
+
+    #[test]
+    fn test_memory_tracker_unlimited() {
+        let tracker = MemoryTracker::unlimited();
+
+        // Can allocate any amount
+        assert!(tracker.allocate(1_000_000_000).is_ok());
+        assert_eq!(tracker.remaining(), None);
+    }
+
+    #[test]
+    fn test_remaining_memory() {
+        let tracker = MemoryTracker::new(Some(1000));
+        assert_eq!(tracker.remaining(), Some(1000));
+
+        tracker.allocate(300).unwrap();
+        assert_eq!(tracker.remaining(), Some(700));
+    }
+
+    #[test]
+    fn test_strict_limits() {
+        let limits = ResourceLimits::strict();
+
+        // Strict limits are more restrictive
+        assert!(limits.max_result_size.unwrap() < 1_000_000);
+        assert!(limits.max_row_width.unwrap() <= 20);
+    }
+}
