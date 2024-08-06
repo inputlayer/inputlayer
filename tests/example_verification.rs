@@ -77,3 +77,58 @@ fn test_all_datalog_examples_present() {
 }
 
 #[test]
+fn test_all_test_files_have_output_snapshots() {
+    let examples_dir = Path::new("examples/datalog");
+    let dl_files = find_dl_files(examples_dir);
+
+    let mut missing_outputs = Vec::new();
+
+    for dl_file in &dl_files {
+        let out_file = dl_file.with_extension("dl.out");
+        if !out_file.exists() {
+            missing_outputs.push(dl_file.display().to_string());
+        }
+    }
+
+    assert!(
+        missing_outputs.is_empty(),
+        "The following test files are missing .dl.out snapshot files:\n  {}",
+        missing_outputs.join("\n  ")
+    );
+}
+
+#[test]
+fn test_all_rust_examples_present() {
+    let examples_dir = Path::new("examples/rust");
+
+    if !examples_dir.exists() {
+        panic!("examples/rust directory does not exist!");
+    }
+
+    let entries = fs::read_dir(examples_dir).expect("Failed to read examples/rust directory");
+
+    let mut rs_files: Vec<String> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()? == "rs" {
+                Some(path.file_name()?.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    rs_files.sort();
+
+    // Should have at least 4 Rust examples
+    assert!(
+        rs_files.len() >= 4,
+        "Expected at least 4 Rust examples, found {}. Files: {:?}",
+        rs_files.len(),
+        rs_files
+    );
+}
+
+// Example Content Validation
+#[test]
