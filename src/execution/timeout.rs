@@ -148,3 +148,58 @@ impl CancelHandle {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn test_no_timeout() {
+        let timeout = QueryTimeout::new(None);
+        assert!(timeout.check().is_ok());
+        assert!(!timeout.is_cancelled());
+    }
+
+    #[test]
+    fn test_timeout_not_exceeded() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        assert!(timeout.check().is_ok());
+        assert!(!timeout.is_cancelled());
+    }
+
+    #[test]
+    fn test_explicit_cancellation() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        timeout.cancel();
+        assert!(timeout.is_cancelled());
+        assert!(timeout.check().is_err());
+    }
+
+    #[test]
+    fn test_cancel_handle() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let handle = timeout.cancel_handle();
+
+        // Cancel from handle
+        handle.cancel();
+
+        // Original controller should reflect cancellation
+        assert!(timeout.is_cancelled());
+        assert!(handle.is_cancelled());
+    }
+
+    #[test]
+    fn test_timeout_exceeded() {
+        let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
+
+        // Sleep to exceed timeout
+        thread::sleep(Duration::from_millis(50));
+
+        let result = timeout.check();
+        assert!(result.is_err());
+
+        if let Err(e) = result {
+            assert!(e.elapsed >= Duration::from_millis(10));
+        }
+    }
+
