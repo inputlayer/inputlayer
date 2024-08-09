@@ -203,3 +203,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_remaining_time() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let remaining = timeout.remaining().unwrap();
+        assert!(remaining <= Duration::from_secs(10));
+        assert!(remaining > Duration::from_secs(9));
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        timeout.cancel();
+        assert!(timeout.is_cancelled());
+
+        timeout.reset();
+        assert!(!timeout.is_cancelled());
+        assert!(timeout.check().is_ok());
+    }
+}

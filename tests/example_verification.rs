@@ -132,3 +132,57 @@ fn test_all_rust_examples_present() {
 
 // Example Content Validation
 #[test]
+fn test_examples_not_empty() {
+    let examples_dir = Path::new("examples/datalog");
+    let dl_files = find_dl_files(examples_dir);
+
+    for path in dl_files {
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {:?}", path));
+
+        assert!(
+            !content.trim().is_empty(),
+            "Example file {:?} is empty",
+            path.file_name().unwrap()
+        );
+
+        assert!(
+            content.len() > 10,
+            "Example file {:?} is suspiciously small (< 10 bytes)",
+            path.file_name().unwrap()
+        );
+    }
+}
+
+#[test]
+fn test_output_files_not_empty() {
+    let examples_dir = Path::new("examples/datalog");
+    let dl_files = find_dl_files(examples_dir);
+
+    for dl_file in dl_files {
+        let out_file = dl_file.with_extension("dl.out");
+        if out_file.exists() {
+            let content = fs::read_to_string(&out_file)
+                .unwrap_or_else(|_| panic!("Failed to read {:?}", out_file));
+
+            assert!(
+                !content.trim().is_empty(),
+                "Output file {:?} is empty",
+                out_file.file_name().unwrap()
+            );
+        }
+    }
+}
+
+// Test Category Validation
+#[test]
+fn test_knowledge_graph_tests() {
+    let dir = Path::new("examples/datalog/01_knowledge_graph");
+    let files = find_dl_files(dir);
+    assert!(
+        !files.is_empty(),
+        "01_knowledge_graph should have at least one test"
+    );
+}
+
+#[test]
