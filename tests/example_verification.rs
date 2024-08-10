@@ -186,3 +186,57 @@ fn test_knowledge_graph_tests() {
 }
 
 #[test]
+fn test_relations_tests() {
+    let dir = Path::new("examples/datalog/02_relations");
+    let files = find_dl_files(dir);
+    assert!(
+        files.len() >= 3,
+        "02_relations should have at least 3 tests (insert, bulk, delete)"
+    );
+}
+
+#[test]
+fn test_joins_tests() {
+    let dir = Path::new("examples/datalog/06_joins");
+    let files = find_dl_files(dir);
+    assert!(files.len() >= 3, "06_joins should have at least 3 tests");
+}
+
+#[test]
+fn test_negation_tests() {
+    let dir = Path::new("examples/datalog/08_negation");
+    let files = find_dl_files(dir);
+    assert!(
+        !files.is_empty(),
+        "08_negation should have at least one test"
+    );
+}
+
+#[test]
+fn test_recursion_tests() {
+    let dir = Path::new("examples/datalog/09_recursion");
+    let files = find_dl_files(dir);
+    assert!(
+        files.len() >= 2,
+        "09_recursion should have at least 2 tests"
+    );
+}
+
+// Syntax Validation Tests
+/// Extract persistent rule statements from our test format (new syntax uses "+name(...) :- ...")
+fn extract_rules_from_test(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            // Keep lines that look like persistent rule declarations (start with "+" and contain ":-")
+            if trimmed.starts_with("+") && trimmed.contains(":-") {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[test]
