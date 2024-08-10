@@ -62,3 +62,63 @@ fn test_query_timeout_exceeded() {
 }
 
 #[test]
+fn test_query_timeout_explicit_cancel() {
+    let timeout = QueryTimeout::new(Some(Duration::from_secs(60)));
+
+    assert!(!timeout.is_cancelled());
+    timeout.cancel();
+    assert!(timeout.is_cancelled());
+
+    // Check should now return error
+    assert!(timeout.check().is_err());
+}
+
+#[test]
+fn test_cancel_handle_cross_thread() {
+    let timeout = QueryTimeout::new(Some(Duration::from_secs(60)));
+    let handle = timeout.cancel_handle();
+
+    // Spawn thread to cancel
+    let cancel_thread = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(10));
+        handle.cancel();
+    });
+
+    // Wait for cancellation
+    cancel_thread.join().unwrap();
+
+    // Original timeout should be cancelled
+    assert!(timeout.is_cancelled());
+    assert!(timeout.check().is_err());
+}
+
+#[test]
+fn test_query_timeout_remaining_time() {
+    let timeout = QueryTimeout::new(Some(Duration::from_millis(100)));
+
+    let remaining1 = timeout.remaining().unwrap();
+    assert!(remaining1 > Duration::from_millis(90));
+
+    thread::sleep(Duration::from_millis(30));
+
+    let remaining2 = timeout.remaining().unwrap();
+    assert!(remaining2 < remaining1);
+    assert!(remaining2 < Duration::from_millis(80));
+}
+
+#[test]
+fn test_query_timeout_reset() {
+    let mut timeout = QueryTimeout::new(Some(Duration::from_millis(100)));
+
+    // Cancel it
+    timeout.cancel();
+    assert!(timeout.is_cancelled());
+
+    // Reset should clear cancellation
+    timeout.reset();
+    assert!(!timeout.is_cancelled());
+    assert!(timeout.check().is_ok());
+}
+
+// MemoryTracker Tests
+#[test]
