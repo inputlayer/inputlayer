@@ -240,3 +240,77 @@ fn extract_rules_from_test(content: &str) -> Vec<String> {
 }
 
 #[test]
+fn test_negation_syntax_valid() {
+    let path = Path::new("examples/datalog/08_negation/01_simple_negation.dl");
+    let content = fs::read_to_string(path).expect("Failed to read negation test");
+    let rules = extract_rules_from_test(&content);
+
+    // Verify the rule syntax contains negation
+    let has_negation = rules.iter().any(|r| r.contains("!skip"));
+    assert!(has_negation, "Test should contain negation syntax (!skip)");
+
+    // Verify the rule format is correct (new + prefix syntax)
+    let negation_rule = rules.iter().find(|r| r.contains("!skip")).unwrap();
+    assert!(
+        negation_rule.contains("+filtered") && negation_rule.contains("!skip(X, Y)"),
+        "Negation rule should have correct format"
+    );
+}
+
+#[test]
+fn test_recursion_syntax_valid() {
+    let path = Path::new("examples/datalog/09_recursion/01_transitive_closure.dl");
+    let content = fs::read_to_string(path).expect("Failed to read recursion test");
+    let rules = extract_rules_from_test(&content);
+
+    // Should have at least 2 rules (base case and recursive case)
+    assert!(
+        rules.len() >= 2,
+        "Transitive closure should have at least 2 rules, found {}",
+        rules.len()
+    );
+
+    // Verify recursive structure (relation used in both head and body)
+    let has_recursive = rules.iter().any(|r| {
+        // Extract name after "+" and before "("
+        let after_plus = r.strip_prefix("+").unwrap_or("");
+        let head_name = after_plus.split('(').next().unwrap_or("").trim();
+        let body = r.split(":-").nth(1).unwrap_or("");
+        // Check if the relation in head appears in body
+        !head_name.is_empty() && body.contains(head_name)
+    });
+    assert!(has_recursive, "Should have recursive rule structure");
+}
+
+// Test Summary and Statistics
+#[test]
+fn test_example_statistics() {
+    let rust_dir = Path::new("examples/rust");
+    let datalog_dir = Path::new("examples/datalog");
+
+    let rust_count = fs::read_dir(rust_dir)
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .and_then(|s| s.to_str())
+                == Some("rs")
+        })
+        .count();
+
+    let datalog_count = find_dl_files(datalog_dir).len();
+
+    println!("\n=== Example Statistics ===");
+    println!("Rust examples: {}", rust_count);
+    println!("Datalog test files: {}", datalog_count);
+    println!("Total examples: {}", rust_count + datalog_count);
+
+    // Verify minimum counts
+    assert!(rust_count >= 4, "Should have at least 4 Rust examples");
+    assert!(
+        datalog_count >= 20,
+        "Should have at least 20 Datalog test files"
+    );
+}
