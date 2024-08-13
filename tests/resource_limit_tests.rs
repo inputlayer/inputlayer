@@ -122,3 +122,65 @@ fn test_query_timeout_reset() {
 
 // MemoryTracker Tests
 #[test]
+fn test_memory_tracker_allocate_within_limit() {
+    let tracker = MemoryTracker::new(Some(1000));
+
+    // Allocate within limits
+    assert!(tracker.allocate(500).is_ok());
+    assert_eq!(tracker.current_usage(), 500);
+
+    assert!(tracker.allocate(300).is_ok());
+    assert_eq!(tracker.current_usage(), 800);
+}
+
+#[test]
+fn test_memory_tracker_exceed_limit() {
+    let tracker = MemoryTracker::new(Some(1000));
+
+    // Allocate up to limit
+    assert!(tracker.allocate(900).is_ok());
+
+    // Exceed limit - should fail and rollback
+    let result = tracker.allocate(200);
+    assert!(result.is_err());
+
+    if let Err(ResourceError::MemoryLimitExceeded { limit, used }) = result {
+        assert_eq!(limit, 1000);
+        assert_eq!(used, 1100); // 900 + 200
+    }
+
+    // Should have rolled back
+    assert_eq!(tracker.current_usage(), 900);
+}
+
+#[test]
+fn test_memory_tracker_release() {
+    let tracker = MemoryTracker::new(Some(1000));
+
+    tracker.allocate(500).unwrap();
+    assert_eq!(tracker.current_usage(), 500);
+
+    tracker.release(200);
+    assert_eq!(tracker.current_usage(), 300);
+
+    // Can now allocate more
+    assert!(tracker.allocate(600).is_ok());
+    assert_eq!(tracker.current_usage(), 900);
+}
+
+#[test]
+fn test_memory_tracker_peak_tracking() {
+    let tracker = MemoryTracker::new(Some(1000));
+
+    tracker.allocate(500).unwrap();
+    assert_eq!(tracker.peak_usage(), 500);
+
+    tracker.allocate(300).unwrap();
+    assert_eq!(tracker.peak_usage(), 800);
+
+    tracker.release(500);
+    assert_eq!(tracker.current_usage(), 300);
+    assert_eq!(tracker.peak_usage(), 800); // Peak remains
+}
+
+#[test]
