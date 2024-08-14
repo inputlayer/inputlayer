@@ -184,3 +184,58 @@ fn test_memory_tracker_peak_tracking() {
 }
 
 #[test]
+fn test_memory_tracker_unlimited() {
+    let tracker = MemoryTracker::unlimited();
+
+    // Should accept any amount
+    assert!(tracker.allocate(1_000_000_000).is_ok());
+    assert!(tracker.remaining().is_none());
+}
+
+#[test]
+fn test_memory_tracker_concurrent_access() {
+    let tracker = Arc::new(MemoryTracker::new(Some(10000)));
+
+    let handles: Vec<_> = (0..10)
+        .map(|_| {
+            let tracker = Arc::clone(&tracker);
+            thread::spawn(move || {
+                for _ in 0..100 {
+                    let _ = tracker.allocate(10);
+                    tracker.release(10);
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Should be back to 0 (all allocations released)
+    assert_eq!(tracker.current_usage(), 0);
+}
+
+// ResourceLimits Tests
+#[test]
+fn test_resource_limits_default() {
+    let limits = ResourceLimits::default();
+
+    // Should have reasonable defaults
+    assert!(limits.max_memory_bytes.is_some());
+    assert!(limits.max_result_size.is_some());
+    assert!(limits.max_intermediate_size.is_some());
+    assert!(limits.max_row_width.is_some());
+}
+
+#[test]
+fn test_resource_limits_unlimited() {
+    let limits = ResourceLimits::unlimited();
+
+    assert!(limits.max_memory_bytes.is_none());
+    assert!(limits.max_result_size.is_none());
+    assert!(limits.max_intermediate_size.is_none());
+    assert!(limits.max_row_width.is_none());
+}
+
+#[test]
