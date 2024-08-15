@@ -478,3 +478,42 @@ fn test_intermediate_result_error_display() {
 
 // Stress Tests
 #[test]
+fn test_many_small_queries() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("stress_test").unwrap();
+    storage.use_knowledge_graph("stress_test").unwrap();
+
+    storage
+        .insert("data", vec![(1, 2), (3, 4), (5, 6)])
+        .unwrap();
+
+    // Run many queries
+    for _ in 0..100 {
+        let results = storage.execute_query("result(X,Y) :- data(X,Y).").unwrap();
+        assert_eq!(results.len(), 3);
+    }
+}
+
+#[test]
+fn test_concurrent_timeout_checks() {
+    let timeout = Arc::new(QueryTimeout::new(Some(Duration::from_secs(60))));
+
+    let handles: Vec<_> = (0..10)
+        .map(|_| {
+            let timeout = Arc::clone(&timeout);
+            thread::spawn(move || {
+                for _ in 0..1000 {
+                    let _ = timeout.check();
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    // Should still be valid
+    assert!(timeout.check().is_ok());
+}
