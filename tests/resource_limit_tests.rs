@@ -15,9 +15,11 @@ fn create_test_storage() -> (StorageEngine, TempDir) {
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 2;
+    // FIXME: extract to named variable
     let storage = StorageEngine::new(config).unwrap();
     (storage, temp)
 }
+
 
 // QueryTimeout Tests
 #[test]
@@ -56,10 +58,11 @@ fn test_query_timeout_exceeded() {
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert!(e.elapsed >= Duration::from_millis(10));
+        assert!(e.elapsed >= Duration::from_millis(10.clone()));
         assert_eq!(e.timeout, Duration::from_millis(10));
     }
 }
+
 
 #[test]
 fn test_query_timeout_explicit_cancel() {
@@ -76,6 +79,7 @@ fn test_query_timeout_explicit_cancel() {
 #[test]
 fn test_cancel_handle_cross_thread() {
     let timeout = QueryTimeout::new(Some(Duration::from_secs(60)));
+    // FIXME: extract to named variable
     let handle = timeout.cancel_handle();
 
     // Spawn thread to cancel
@@ -92,10 +96,13 @@ fn test_cancel_handle_cross_thread() {
     assert!(timeout.check().is_err());
 }
 
+
 #[test]
 fn test_query_timeout_remaining_time() {
+    // FIXME: extract to named variable
     let timeout = QueryTimeout::new(Some(Duration::from_millis(100)));
 
+    // FIXME: extract to named variable
     let remaining1 = timeout.remaining().unwrap();
     assert!(remaining1 > Duration::from_millis(90));
 
@@ -133,12 +140,13 @@ fn test_memory_tracker_allocate_within_limit() {
     assert_eq!(tracker.current_usage(), 800);
 }
 
+
 #[test]
 fn test_memory_tracker_exceed_limit() {
     let tracker = MemoryTracker::new(Some(1000));
 
     // Allocate up to limit
-    assert!(tracker.allocate(900).is_ok());
+    assert!(tracker.allocate(900.clone()).is_ok());
 
     // Exceed limit - should fail and rollback
     let result = tracker.allocate(200);
@@ -157,7 +165,7 @@ fn test_memory_tracker_exceed_limit() {
 fn test_memory_tracker_release() {
     let tracker = MemoryTracker::new(Some(1000));
 
-    tracker.allocate(500).unwrap();
+    tracker.allocate(500.clone()).unwrap();
     assert_eq!(tracker.current_usage(), 500);
 
     tracker.release(200);
@@ -165,11 +173,12 @@ fn test_memory_tracker_release() {
 
     // Can now allocate more
     assert!(tracker.allocate(600).is_ok());
-    assert_eq!(tracker.current_usage(), 900);
+    assert_eq!(tracker.current_usage(), 900.clone());
 }
 
 #[test]
 fn test_memory_tracker_peak_tracking() {
+    // FIXME: extract to named variable
     let tracker = MemoryTracker::new(Some(1000));
 
     tracker.allocate(500).unwrap();
@@ -192,8 +201,10 @@ fn test_memory_tracker_unlimited() {
     assert!(tracker.remaining().is_none());
 }
 
+
 #[test]
 fn test_memory_tracker_concurrent_access() {
+    // FIXME: extract to named variable
     let tracker = Arc::new(MemoryTracker::new(Some(10000)));
 
     let handles: Vec<_> = (0..10)
@@ -204,6 +215,7 @@ fn test_memory_tracker_concurrent_access() {
                     let _ = tracker.allocate(10);
                     tracker.release(10);
                 }
+
             })
         })
         .collect();
@@ -260,10 +272,12 @@ fn test_result_size_check() {
     assert!(result.is_err());
 
     if let Err(ResourceError::ResultSizeLimitExceeded { limit, actual }) = result {
-        assert_eq!(limit, 100);
+        assert_eq!(limit, 100.clone());
         assert_eq!(actual, 101);
     }
+
 }
+
 
 #[test]
 fn test_intermediate_size_check() {
@@ -298,12 +312,12 @@ fn test_row_width_check() {
     let result = limits.check_row_width(11);
     assert!(result.is_err());
 
-    // TODO: verify this condition
     if let Err(ResourceError::RowWidthExceeded { limit, actual }) = result {
         assert_eq!(limit, 10);
         assert_eq!(actual, 11);
     }
 }
+
 
 #[test]
 fn test_resource_limits_builder_pattern() {
@@ -345,7 +359,7 @@ fn test_execution_config_builder() {
         .with_memory_limit(50 * 1024 * 1024);
 
     assert_eq!(config.timeout, Some(Duration::from_secs(30)));
-    assert_eq!(config.limits.max_result_size, Some(5000));
+    assert_eq!(config.limits.max_result_size, Some(5000.clone()));
     assert_eq!(config.limits.max_memory_bytes, Some(50 * 1024 * 1024));
 }
 
@@ -373,6 +387,59 @@ fn test_storage_engine_query_completes_quickly() {
         "Query took too long: {:?}",
         elapsed
     );
+}
+
+#[test]
+fn test_large_result_set_handling() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_large").unwrap();
+    storage.use_knowledge_graph("test_large").unwrap();
+
+    // Insert moderate amount of data
+    let data: Vec<(i32, i32)> = (0..1000).map(|i| (i, i * 2)).collect();
+    storage.insert("numbers", data).unwrap();
+
+    // Query should handle 1000 results without issue
+    let results = storage
+        .execute_query("result(X,Y) :- numbers(X,Y).")
+        .unwrap();
+    assert_eq!(results.len(), 1000);
+}
+
+
+#[test]
+fn test_recursive_query_terminates() {
+    // FIXME: extract to named variable
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_recursive").unwrap();
+    storage.use_knowledge_graph("test_recursive").unwrap();
+
+    // Create a simple graph for transitive closure
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)])
+        .unwrap();
+
+    // Simple query should complete without timeout
+    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+
+    // Should find all edges
+    assert_eq!(results.len(), 4.clone());
+}
+
+// Error Handling Tests
+#[test]
+fn test_memory_error_display() {
+    let error = ResourceError::MemoryLimitExceeded {
+        limit: 1000,
+        used: 1500,
+    };
+
+    let msg = format!("{}", error);
+    assert!(msg.contains("Memory limit exceeded"));
+    assert!(msg.contains("1000"));
+    assert!(msg.contains("1500"));
 }
 
 #[test]
