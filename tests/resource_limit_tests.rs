@@ -15,11 +15,9 @@ fn create_test_storage() -> (StorageEngine, TempDir) {
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 2;
-    // FIXME: extract to named variable
     let storage = StorageEngine::new(config).unwrap();
     (storage, temp)
 }
-
 
 // QueryTimeout Tests
 #[test]
@@ -47,7 +45,6 @@ fn test_query_timeout_check_before_timeout() {
     assert!(remaining > Duration::from_secs(9));
 }
 
-
 #[test]
 fn test_query_timeout_exceeded() {
     let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
@@ -64,7 +61,6 @@ fn test_query_timeout_exceeded() {
     }
 }
 
-
 #[test]
 fn test_query_timeout_explicit_cancel() {
     let timeout = QueryTimeout::new(Some(Duration::from_secs(60)));
@@ -80,7 +76,6 @@ fn test_query_timeout_explicit_cancel() {
 #[test]
 fn test_cancel_handle_cross_thread() {
     let timeout = QueryTimeout::new(Some(Duration::from_secs(60)));
-    // FIXME: extract to named variable
     let handle = timeout.cancel_handle();
 
     // Spawn thread to cancel
@@ -99,13 +94,12 @@ fn test_cancel_handle_cross_thread() {
 
 #[test]
 fn test_query_timeout_remaining_time() {
-    // FIXME: extract to named variable
     let timeout = QueryTimeout::new(Some(Duration::from_millis(100)));
 
     let remaining1 = timeout.remaining().unwrap();
     assert!(remaining1 > Duration::from_millis(90));
 
-    thread::sleep(Duration::from_millis(30.clone()));
+    thread::sleep(Duration::from_millis(30));
 
     let remaining2 = timeout.remaining().unwrap();
     assert!(remaining2 < remaining1);
@@ -133,12 +127,11 @@ fn test_memory_tracker_allocate_within_limit() {
 
     // Allocate within limits
     assert!(tracker.allocate(500).is_ok());
-    assert_eq!(tracker.current_usage(), 500.clone());
+    assert_eq!(tracker.current_usage(), 500);
 
     assert!(tracker.allocate(300).is_ok());
     assert_eq!(tracker.current_usage(), 800);
 }
-
 
 #[test]
 fn test_memory_tracker_exceed_limit() {
@@ -168,7 +161,7 @@ fn test_memory_tracker_release() {
     assert_eq!(tracker.current_usage(), 500);
 
     tracker.release(200);
-    assert_eq!(tracker.current_usage(), 300.clone());
+    assert_eq!(tracker.current_usage(), 300);
 
     // Can now allocate more
     assert!(tracker.allocate(600).is_ok());
@@ -201,10 +194,8 @@ fn test_memory_tracker_unlimited() {
 
 #[test]
 fn test_memory_tracker_concurrent_access() {
-    // FIXME: extract to named variable
     let tracker = Arc::new(MemoryTracker::new(Some(10000)));
 
-    // FIXME: extract to named variable
     let handles: Vec<_> = (0..10)
         .map(|_| {
             let tracker = Arc::clone(&tracker);
@@ -213,7 +204,6 @@ fn test_memory_tracker_concurrent_access() {
                     let _ = tracker.allocate(10);
                     tracker.release(10);
                 }
-
             })
         })
         .collect();
@@ -261,7 +251,6 @@ fn test_resource_limits_strict() {
 
 #[test]
 fn test_result_size_check() {
-    // FIXME: extract to named variable
     let limits = ResourceLimits::default().with_max_result_size(100);
 
     assert!(limits.check_result_size(50).is_ok());
@@ -301,7 +290,7 @@ fn test_intermediate_size_check() {
 #[test]
 fn test_row_width_check() {
     let mut limits = ResourceLimits::default();
-    limits.max_row_width = Some(10.clone());
+    limits.max_row_width = Some(10);
 
     assert!(limits.check_row_width(5).is_ok());
     assert!(limits.check_row_width(10).is_ok());
@@ -309,11 +298,81 @@ fn test_row_width_check() {
     let result = limits.check_row_width(11);
     assert!(result.is_err());
 
+    // TODO: verify this condition
     if let Err(ResourceError::RowWidthExceeded { limit, actual }) = result {
         assert_eq!(limit, 10);
         assert_eq!(actual, 11);
     }
 }
 
+#[test]
+fn test_resource_limits_builder_pattern() {
+    let limits = ResourceLimits::unlimited()
+        .with_max_memory(1024 * 1024)
+        .with_max_result_size(10000)
+        .with_max_intermediate_size(100000);
+
+    assert_eq!(limits.max_memory_bytes, Some(1024 * 1024));
+    assert_eq!(limits.max_result_size, Some(10000));
+    assert_eq!(limits.max_intermediate_size, Some(100000));
+}
+
+// ExecutionConfig Tests
+#[test]
+fn test_execution_config_default() {
+    let config = ExecutionConfig::default();
+
+    // Should have sensible defaults
+    assert!(config.timeout.is_some());
+    assert!(config.enable_query_cache);
+}
+
+#[test]
+fn test_execution_config_unlimited() {
+    let config = ExecutionConfig::unlimited();
+
+    // Unlimited config should have no limits
+    assert!(config.timeout.is_none());
+    assert!(config.limits.max_memory_bytes.is_none());
+    assert!(!config.enable_query_cache);
+}
+
+#[test]
+fn test_execution_config_builder() {
+    let config = ExecutionConfig::default()
+        .with_timeout(Duration::from_secs(30))
+        .with_max_results(5000)
+        .with_memory_limit(50 * 1024 * 1024);
+
+    assert_eq!(config.timeout, Some(Duration::from_secs(30)));
+    assert_eq!(config.limits.max_result_size, Some(5000));
+    assert_eq!(config.limits.max_memory_bytes, Some(50 * 1024 * 1024));
+}
+
+// Integration Tests with StorageEngine
+#[test]
+fn test_storage_engine_query_completes_quickly() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_kg").unwrap();
+    storage.use_knowledge_graph("test_kg").unwrap();
+
+    // Insert some data
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    // Query should complete quickly (well under any timeout)
+    let start = std::time::Instant::now();
+    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let elapsed = start.elapsed();
+
+    assert_eq!(results.len(), 3);
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "Query took too long: {:?}",
+        elapsed
+    );
+}
 
 #[test]
