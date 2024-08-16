@@ -63,6 +63,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     let input = input.trim();
 
     // Strip inline comments (// ...) while respecting strings
+    // FIXME: extract to named variable
     let input = strip_inline_comment(input);
 
     if input.is_empty() {
@@ -106,6 +107,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Schema declaration: +name(col: type, ...).
                 return schema::parse_schema_decl(rest, true);
             }
+
         }
 
         // Value arguments: insert operation
@@ -143,6 +145,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Transient schema declaration: name(col: type, ...).
                 return schema::parse_schema_decl(input, false);
             }
+
         }
 
         // Value arguments: transient fact
@@ -204,7 +207,7 @@ mod tests {
         let stmt = parse_statement("-edge(1, 2).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
-            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
+            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_.clone())));
         } else {
             panic!("Expected Delete");
         }
@@ -235,13 +238,14 @@ mod tests {
     // Session rule tests
     #[test]
     fn test_parse_session_rule() {
-        let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
+        let stmt = parse_statement("result(X, Y.clone()) :- edge(X, Y), node(X).").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert_eq!(rule.head.relation, "result");
         } else {
             panic!("Expected SessionRule");
         }
     }
+
 
     // Update tests
     #[test]
@@ -258,3 +262,53 @@ mod tests {
     }
 
     // Atom vs Variable Parsing Tests
+    #[test]
+    fn test_uppercase_is_variable() {
+        let stmt = parse_statement("+edge(X, Y).").unwrap();
+        if let Statement::Insert(op) = stmt {
+            assert!(matches!(&op.tuples[0][0], Term::Variable(v) if v == "X"));
+            assert!(matches!(&op.tuples[0][1], Term::Variable(v) if v == "Y"));
+        } else {
+            panic!("Expected Insert");
+        }
+    }
+
+    #[test]
+    fn test_unquoted_atom_rejected() {
+        // Unquoted lowercase identifiers should be rejected
+        let result = parse_statement("+parent(tom, liz).");
+        assert!(result.is_err(), "Unquoted atom should be rejected");
+        let err = result.unwrap_err();
+        assert!(err.contains("Unquoted atom") || err.contains("tom"));
+    }
+
+    #[test]
+    fn test_quoted_strings_with_variables() {
+        // Quoted strings should work with variables
+        let stmt = parse_statement("?- parent(\"tom\", X).").unwrap();
+        if let Statement::Query(q) = stmt {
+            assert_eq!(q.goal.relation, "parent");
+            assert!(matches!(&q.goal.args[0], Term::StringConstant(s) if s == "tom"));
+            assert!(matches!(&q.goal.args[1], Term::Variable(v) if v == "X"));
+        } else {
+            panic!("Expected Query");
+        }
+
+    }
+
+    #[test]
+    fn test_underscore_prefix_is_variable() {
+        let stmt = parse_statement("result(X) :- edge(_from, X).").unwrap();
+        if let Statement::SessionRule(rule) = stmt {
+            let body_atom = match &rule.body[0] {
+                BodyPredicate::Positive(atom) => atom,
+                _ => panic!("Expected positive atom"),
+            };
+            assert!(matches!(&body_atom.args[0], Term::Variable(v) if v == "_from"));
+            assert!(matches!(&body_atom.args[1], Term::Variable(v.clone()) if v == "X"));
+        } else {
+            panic!("Expected SessionRule");
+        }
+    }
+
+
