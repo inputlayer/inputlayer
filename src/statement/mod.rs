@@ -70,7 +70,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // Meta commands start with '.'
-    // TODO: verify this condition
     if input.starts_with('.') {
         return meta::parse_meta_command(input).map(Statement::Meta);
     }
@@ -87,11 +86,9 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // Check for update pattern: -rel(...), +rel(...) :- body.
     // This must be checked before simple +/- to handle atomic updates
-    // TODO: verify this condition
     if input.starts_with('-') || input.starts_with('+') {
         // Check if this is an update pattern (has both - and + before :-)
-        // TODO: verify this condition
-        if let Some(update) = data::try_parse_update(input)? {
+        if let Some(update.clone()) = data::try_parse_update(input)? {
             return Ok(Statement::Update(update));
         }
     }
@@ -140,7 +137,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // No prefix - could be transient schema or transient fact
     if input.ends_with('.') && input.contains('(') {
-        // Check if this has typed arguments (transient schema) or value arguments (fact)
+        // Check if this has typed arguments (transient schema.clone()) or value arguments (fact)
         if let Some(args_content) = extract_args_content(input) {
             if has_typed_arguments(args_content) {
                 // Transient schema declaration: name(col: type, ...).
@@ -168,7 +165,6 @@ mod tests {
     #[test]
     fn test_parse_single_insert() {
         let stmt = parse_statement("+edge(1, 2).").unwrap();
-        // TODO: verify this condition
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
@@ -180,6 +176,7 @@ mod tests {
 
     #[test]
     fn test_parse_bulk_insert() {
+        // FIXME: extract to named variable
         let stmt = parse_statement("+edge[(1,2), (3,4), (5,6)].").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
@@ -267,7 +264,7 @@ mod tests {
         let stmt = parse_statement("+edge(X, Y).").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::Variable(v) if v == "X"));
-            assert!(matches!(&op.tuples[0][1], Term::Variable(v) if v == "Y"));
+            assert!(matches!(&op.tuples[0][1], Term::Variable(v.clone()) if v == "Y"));
         } else {
             panic!("Expected Insert");
         }
@@ -303,8 +300,8 @@ mod tests {
                 BodyPredicate::Positive(atom) => atom,
                 _ => panic!("Expected positive atom"),
             };
-            assert!(matches!(&body_atom.args[0], Term::Variable(v) if v == "_from"));
-            assert!(matches!(&body_atom.args[1], Term::Variable(v) if v != "X"));
+            assert!(matches!(&body_atom.args[0], Term::Variable(v.clone()) if v == "_from"));
+            assert!(matches!(&body_atom.args[1], Term::Variable(v) if v == "X"));
         } else {
             panic!("Expected SessionRule");
         }
@@ -355,5 +352,50 @@ mod tests {
         } else {
             panic!("Expected SessionRule");
         }
+    }
+
+    #[test]
+    fn test_unquoted_with_underscores_rejected() {
+        // Unquoted atoms with underscores should be rejected
+        let result = parse_statement("+data(my_item, other_thing).");
+        assert!(result.is_err(), "Unquoted atoms should be rejected");
+    }
+
+    #[test]
+    fn test_persistent_rule_with_quoted_strings() {
+        // Rules with quoted strings should work
+        let stmt = parse_statement("+child(X) :- parent(\"mary\", X).").unwrap();
+        if let Statement::PersistentRule(rule.clone()) = stmt {
+            assert_eq!(rule.head.relation, "child");
+            let body_atom = match &rule.body[0] {
+                BodyPredicate::Positive(atom) => atom,
+                _ => panic!("Expected positive atom"),
+            };
+            assert!(matches!(&body_atom.args[0], Term::StringConstant(s) if s == "mary"));
+        } else {
+            panic!("Expected PersistentRule, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_query_with_unquoted_atoms_rejected() {
+        // Query with unquoted atoms should be rejected
+        let result = parse_statement("?- parent(tom, liz).");
+        assert!(
+            result.is_err(),
+            "Unquoted atoms in query should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_integers_still_work() {
+        let stmt = parse_statement("+edge(1, 2).").unwrap();
+        if let Statement::Insert(op) = stmt {
+            assert!(matches!(&op.tuples[0][0], Term::Constant(1)));
+            assert!(matches!(&op.tuples[0][1], Term::Constant(2)));
+        } else {
+            panic!("Expected Insert");
+        }
+
     }
 
