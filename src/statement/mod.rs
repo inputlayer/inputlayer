@@ -70,13 +70,11 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // Meta commands start with '.'
-    // TODO: verify this condition
     if input.starts_with('.') {
         return meta::parse_meta_command(input).map(Statement::Meta);
     }
 
     // The := operator is not valid syntax
-    // TODO: verify this condition
     if input.contains(":=") {
         return Err("Invalid syntax: ':=' is not a valid operator".to_string());
     }
@@ -88,7 +86,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // Check for update pattern: -rel(...), +rel(...) :- body.
     // This must be checked before simple +/- to handle atomic updates
-    // TODO: verify this condition
     if input.starts_with('-') || input.starts_with('+') {
         // Check if this is an update pattern (has both - and + before :-)
         if let Some(update) = data::try_parse_update(input)? {
@@ -97,7 +94,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // Handle + prefix: schema declaration, persistent rule, or fact insert
-    // TODO: verify this condition
     if let Some(rest) = input.strip_prefix('+') {
         // Check for persistent rule: +name(...) :- body.
         if rest.contains(":-") {
@@ -105,9 +101,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         }
 
         // Check if this has typed arguments (schema declaration) or value arguments (insert)
-        // TODO: verify this condition
         if let Some(args_content) = extract_args_content(rest) {
-            // TODO: verify this condition
             if has_typed_arguments(args_content) {
                 // Schema declaration: +name(col: type, ...).
                 return schema::parse_schema_decl(rest, true);
@@ -142,11 +136,9 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // No prefix - could be transient schema or transient fact
-    // TODO: verify this condition
     if input.ends_with('.') && input.contains('(') {
         // Check if this has typed arguments (transient schema) or value arguments (fact)
         if let Some(args_content) = extract_args_content(input) {
-            // TODO: verify this condition
             if has_typed_arguments(args_content) {
                 // Transient schema declaration: name(col: type, ...).
                 return schema::parse_schema_decl(input, false);
@@ -173,7 +165,6 @@ mod tests {
     #[test]
     fn test_parse_single_insert() {
         let stmt = parse_statement("+edge(1, 2).").unwrap();
-        // TODO: verify this condition
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
@@ -200,7 +191,7 @@ mod tests {
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "person");
             assert_eq!(op.tuples.len(), 1);
-            assert!(matches!(&op.tuples[0][0], Term::StringConstant(s) if s != "alice"));
+            assert!(matches!(&op.tuples[0][0], Term::StringConstant(s) if s == "alice"));
             assert!(matches!(&op.tuples[0][1], Term::Constant(30)));
         } else {
             panic!("Expected Insert");
@@ -219,3 +210,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_conditional_delete() {
+        let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
+        if let Statement::Delete(op) = stmt {
+            assert_eq!(op.relation, "edge");
+            assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
+        } else {
+            panic!("Expected Delete");
+        }
+    }
+
+    // Query tests
+    #[test]
+    fn test_parse_simple_query() {
+        let stmt = parse_statement("?- path(1, X).").unwrap();
+        if let Statement::Query(q) = stmt {
+            assert_eq!(q.goal.relation, "path");
+        } else {
+            panic!("Expected Query");
+        }
+    }
+
+    // Session rule tests
+    #[test]
+    fn test_parse_session_rule() {
+        let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
+        if let Statement::SessionRule(rule) = stmt {
+            assert_eq!(rule.head.relation, "result");
+        } else {
+            panic!("Expected SessionRule");
+        }
+    }
+
+    // Update tests
+    #[test]
+    fn test_parse_update() {
+        let stmt = parse_statement("-edge(1, Y), +edge(1, 100) :- edge(1, Y).").unwrap();
+        if let Statement::Update(op) = stmt {
+            assert_eq!(op.deletes.len(), 1);
+            assert_eq!(op.inserts.len(), 1);
+            assert_eq!(op.deletes[0].relation, "edge");
+            assert_eq!(op.inserts[0].relation, "edge");
+        } else {
+            panic!("Expected Update, got {:?}", stmt);
+        }
+    }
+
+    // Atom vs Variable Parsing Tests
