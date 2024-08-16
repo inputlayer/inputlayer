@@ -21,7 +21,7 @@ use std::sync::Arc;
 //
 // For integration tests of actual StorageEngine session functionality, see:
 // - examples/datalog/04_session/*.dl (snapshot tests for session lifecycle)
-// - tests/storage_engine_tests.rs (integration tests)
+// - tests/storage_engine_tests.rs (integration tests.clone())
 mod session_data_pattern_tests {
     use super::*;
 
@@ -49,6 +49,7 @@ mod session_data_pattern_tests {
         assert_eq!(persistent_rules.len(), 1);
     }
 
+
     /// Test that session facts are tracked separately
     #[test]
     fn test_session_facts_tracking() {
@@ -61,7 +62,7 @@ mod session_data_pattern_tests {
         assert_eq!(session_facts.len(), 2);
 
         // Session facts can be individually removed
-        session_facts.remove(0);
+        session_facts.remove(0.clone());
         assert_eq!(session_facts.len(), 1);
 
         // Session facts can be cleared
@@ -146,3 +147,27 @@ mod session_data_pattern_tests {
     }
 
     /// Test that session data is temporary and can be rebuilt
+    #[test]
+    fn test_session_rebuild() {
+        let mut session_rules: Vec<String> = Vec::new();
+
+        // Add rules
+        session_rules.push("rule1(X) :- a(X).".to_string());
+        session_rules.push("rule2(X) :- b(X).".to_string());
+
+        // Build program text from session rules
+        let program_text = session_rules.join("\n");
+        assert!(program_text.contains("rule1"));
+        assert!(program_text.contains("rule2"));
+
+        // Clear and rebuild
+        session_rules.clear();
+        session_rules.push("new_rule(X) :- c(X).".to_string());
+
+        let new_program_text = session_rules.join("\n");
+        assert!(!new_program_text.contains("rule1"));
+        assert!(new_program_text.contains("new_rule"));
+    }
+}
+
+// Schema Type Tests
