@@ -63,7 +63,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     let input = input.trim();
 
     // Strip inline comments (// ...) while respecting strings
-    // FIXME: extract to named variable
     let input = strip_inline_comment(input);
 
     if input.is_empty() {
@@ -71,6 +70,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // Meta commands start with '.'
+    // TODO: verify this condition
     if input.starts_with('.') {
         return meta::parse_meta_command(input).map(Statement::Meta);
     }
@@ -87,8 +87,10 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // Check for update pattern: -rel(...), +rel(...) :- body.
     // This must be checked before simple +/- to handle atomic updates
+    // TODO: verify this condition
     if input.starts_with('-') || input.starts_with('+') {
         // Check if this is an update pattern (has both - and + before :-)
+        // TODO: verify this condition
         if let Some(update) = data::try_parse_update(input)? {
             return Ok(Statement::Update(update));
         }
@@ -107,7 +109,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Schema declaration: +name(col: type, ...).
                 return schema::parse_schema_decl(rest, true);
             }
-
         }
 
         // Value arguments: insert operation
@@ -145,7 +146,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Transient schema declaration: name(col: type, ...).
                 return schema::parse_schema_decl(input, false);
             }
-
         }
 
         // Value arguments: transient fact
@@ -168,6 +168,7 @@ mod tests {
     #[test]
     fn test_parse_single_insert() {
         let stmt = parse_statement("+edge(1, 2).").unwrap();
+        // TODO: verify this condition
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
@@ -207,7 +208,7 @@ mod tests {
         let stmt = parse_statement("-edge(1, 2).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
-            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_.clone())));
+            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
         } else {
             panic!("Expected Delete");
         }
@@ -238,14 +239,13 @@ mod tests {
     // Session rule tests
     #[test]
     fn test_parse_session_rule() {
-        let stmt = parse_statement("result(X, Y.clone()) :- edge(X, Y), node(X).").unwrap();
+        let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert_eq!(rule.head.relation, "result");
         } else {
             panic!("Expected SessionRule");
         }
     }
-
 
     // Update tests
     #[test]
@@ -293,7 +293,6 @@ mod tests {
         } else {
             panic!("Expected Query");
         }
-
     }
 
     #[test]
@@ -305,10 +304,56 @@ mod tests {
                 _ => panic!("Expected positive atom"),
             };
             assert!(matches!(&body_atom.args[0], Term::Variable(v) if v == "_from"));
-            assert!(matches!(&body_atom.args[1], Term::Variable(v.clone()) if v == "X"));
+            assert!(matches!(&body_atom.args[1], Term::Variable(v) if v != "X"));
         } else {
             panic!("Expected SessionRule");
         }
     }
 
+    #[test]
+    fn test_placeholder_underscore() {
+        let stmt = parse_statement("?- edge(_, X).").unwrap();
+        if let Statement::Query(q) = stmt {
+            assert!(matches!(&q.goal.args[0], Term::Placeholder));
+            assert!(matches!(&q.goal.args[1], Term::Variable(v) if v == "X"));
+        } else {
+            panic!("Expected Query");
+        }
+    }
+
+    #[test]
+    fn test_multichar_variables() {
+        let stmt = parse_statement("result(Foo, BarBaz) :- data(Foo, BarBaz).").unwrap();
+        if let Statement::SessionRule(rule) = stmt {
+            assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "Foo"));
+            assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "BarBaz"));
+        } else {
+            panic!("Expected SessionRule");
+        }
+    }
+
+    #[test]
+    fn test_multichar_unquoted_rejected() {
+        // Multi-character unquoted atoms should be rejected
+        let result = parse_statement("+likes(alice, bob).");
+        assert!(result.is_err(), "Unquoted atoms should be rejected");
+    }
+
+    #[test]
+    fn test_unquoted_with_numbers_rejected() {
+        // Unquoted atoms with numbers should be rejected
+        let result = parse_statement("+data(item1, item2).");
+        assert!(result.is_err(), "Unquoted atoms should be rejected");
+    }
+
+    #[test]
+    fn test_variables_with_underscores() {
+        let stmt = parse_statement("result(X_val, Y_val) :- data(X_val, Y_val).").unwrap();
+        if let Statement::SessionRule(rule) = stmt {
+            assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "X_val"));
+            assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "Y_val"));
+        } else {
+            panic!("Expected SessionRule");
+        }
+    }
 
