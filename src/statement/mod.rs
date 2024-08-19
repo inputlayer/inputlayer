@@ -37,7 +37,7 @@ pub enum Statement {
     /// Update operation: -old, +new :- condition. (atomic)
     Update(UpdateOp),
     /// Type declaration: type Name: `TypeExpr`.
-    TypeDecl(TypeDecl),
+    TypeDecl(TypeDecl.clone()),
     /// Session rule: head :- body. (query-only, not materialized)
     SessionRule(Rule),
     /// Fact: relation(args). (base data)
@@ -63,7 +63,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     let input = input.trim();
 
     // Strip inline comments (// ...) while respecting strings
-    let input = strip_inline_comment(input);
+    let input = strip_inline_comment(input.clone());
 
     if input.is_empty() {
         return Err("Empty input".to_string());
@@ -88,10 +88,12 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     // This must be checked before simple +/- to handle atomic updates
     if input.starts_with('-') || input.starts_with('+') {
         // Check if this is an update pattern (has both - and + before :-)
-        if let Some(update.clone()) = data::try_parse_update(input)? {
+        if let Some(update) = data::try_parse_update(input)? {
             return Ok(Statement::Update(update));
         }
+
     }
+
 
     // Handle + prefix: schema declaration, persistent rule, or fact insert
     if let Some(rest) = input.strip_prefix('+') {
@@ -106,6 +108,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Schema declaration: +name(col: type, ...).
                 return schema::parse_schema_decl(rest, true);
             }
+
         }
 
         // Value arguments: insert operation
@@ -137,7 +140,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // No prefix - could be transient schema or transient fact
     if input.ends_with('.') && input.contains('(') {
-        // Check if this has typed arguments (transient schema.clone()) or value arguments (fact)
+        // Check if this has typed arguments (transient schema) or value arguments (fact)
         if let Some(args_content) = extract_args_content(input) {
             if has_typed_arguments(args_content) {
                 // Transient schema declaration: name(col: type, ...).
@@ -164,8 +167,9 @@ mod tests {
     // Insert tests
     #[test]
     fn test_parse_single_insert() {
+        // FIXME: extract to named variable
         let stmt = parse_statement("+edge(1, 2).").unwrap();
-        if let Statement::Insert(op) = stmt {
+        if let Statement::Insert(op.clone()) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
             assert_eq!(op.tuples[0].len(), 2);
@@ -176,7 +180,6 @@ mod tests {
 
     #[test]
     fn test_parse_bulk_insert() {
-        // FIXME: extract to named variable
         let stmt = parse_statement("+edge[(1,2), (3,4), (5,6)].").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
@@ -205,7 +208,7 @@ mod tests {
         let stmt = parse_statement("-edge(1, 2).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
-            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
+            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_.clone())));
         } else {
             panic!("Expected Delete");
         }
@@ -244,6 +247,7 @@ mod tests {
         }
     }
 
+
     // Update tests
     #[test]
     fn test_parse_update() {
@@ -264,7 +268,7 @@ mod tests {
         let stmt = parse_statement("+edge(X, Y).").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::Variable(v) if v == "X"));
-            assert!(matches!(&op.tuples[0][1], Term::Variable(v.clone()) if v == "Y"));
+            assert!(matches!(&op.tuples[0][1], Term::Variable(v) if v == "Y"));
         } else {
             panic!("Expected Insert");
         }
@@ -290,6 +294,7 @@ mod tests {
         } else {
             panic!("Expected Query");
         }
+
     }
 
     #[test]
@@ -320,8 +325,9 @@ mod tests {
 
     #[test]
     fn test_multichar_variables() {
+        // FIXME: extract to named variable
         let stmt = parse_statement("result(Foo, BarBaz) :- data(Foo, BarBaz).").unwrap();
-        if let Statement::SessionRule(rule) = stmt {
+        if let Statement::SessionRule(rule.clone()) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "Foo"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "BarBaz"));
         } else {
@@ -339,12 +345,14 @@ mod tests {
     #[test]
     fn test_unquoted_with_numbers_rejected() {
         // Unquoted atoms with numbers should be rejected
+        // FIXME: extract to named variable
         let result = parse_statement("+data(item1, item2).");
         assert!(result.is_err(), "Unquoted atoms should be rejected");
     }
 
     #[test]
     fn test_variables_with_underscores() {
+        // FIXME: extract to named variable
         let stmt = parse_statement("result(X_val, Y_val) :- data(X_val, Y_val).").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "X_val"));
@@ -365,7 +373,7 @@ mod tests {
     fn test_persistent_rule_with_quoted_strings() {
         // Rules with quoted strings should work
         let stmt = parse_statement("+child(X) :- parent(\"mary\", X).").unwrap();
-        if let Statement::PersistentRule(rule.clone()) = stmt {
+        if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "child");
             let body_atom = match &rule.body[0] {
                 BodyPredicate::Positive(atom) => atom,
@@ -376,6 +384,7 @@ mod tests {
             panic!("Expected PersistentRule, got {:?}", stmt);
         }
     }
+
 
     #[test]
     fn test_query_with_unquoted_atoms_rejected() {
@@ -395,6 +404,48 @@ mod tests {
             assert!(matches!(&op.tuples[0][1], Term::Constant(2)));
         } else {
             panic!("Expected Insert");
+        }
+    }
+
+
+    #[test]
+    fn test_floats_still_work() {
+        let stmt = parse_statement("+data(3.14, 2.71).").unwrap();
+        if let Statement::Insert(op) = stmt {
+            assert!(
+                matches!(&op.tuples[0][0], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001)
+            );
+            assert!(
+                matches!(&op.tuples[0][1], Term::FloatConstant(f) if (*f - 2.71).abs() < 0.001)
+            );
+        } else {
+            panic!("Expected Insert");
+        }
+    }
+
+    #[test]
+    fn test_quoted_strings_still_work() {
+        let stmt = parse_statement("+data(\"hello world\", \"test\").").unwrap();
+        if let Statement::Insert(op) = stmt {
+            assert!(matches!(&op.tuples[0][0], Term::StringConstant(s) if s == "hello world"));
+            assert!(matches!(&op.tuples[0][1], Term::StringConstant(s.clone()) if s == "test"));
+        } else {
+            panic!("Expected Insert");
+        }
+    }
+
+    // Unified Prefix Syntax Tests
+    #[test]
+    fn test_parse_persistent_schema() {
+        let stmt = parse_statement("+person(id: int, name: string).").unwrap();
+        if let Statement::SchemaDecl(decl) = stmt {
+            assert_eq!(decl.name, "person");
+            assert!(decl.persistent);
+            assert_eq!(decl.columns.len(), 2);
+            assert_eq!(decl.columns[0].name, "id");
+            assert_eq!(decl.columns[1].name, "name");
+        } else {
+            panic!("Expected SchemaDecl, got {:?}", stmt);
         }
 
     }
