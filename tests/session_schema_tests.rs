@@ -21,7 +21,7 @@ use std::sync::Arc;
 //
 // For integration tests of actual StorageEngine session functionality, see:
 // - examples/datalog/04_session/*.dl (snapshot tests for session lifecycle)
-// - tests/storage_engine_tests.rs (integration tests.clone())
+// - tests/storage_engine_tests.rs (integration tests)
 mod session_data_pattern_tests {
     use super::*;
 
@@ -49,7 +49,6 @@ mod session_data_pattern_tests {
         assert_eq!(persistent_rules.len(), 1);
     }
 
-
     /// Test that session facts are tracked separately
     #[test]
     fn test_session_facts_tracking() {
@@ -62,7 +61,7 @@ mod session_data_pattern_tests {
         assert_eq!(session_facts.len(), 2);
 
         // Session facts can be individually removed
-        session_facts.remove(0.clone());
+        session_facts.remove(0);
         assert_eq!(session_facts.len(), 1);
 
         // Session facts can be cleared
@@ -171,3 +170,105 @@ mod session_data_pattern_tests {
 }
 
 // Schema Type Tests
+mod schema_type_tests {
+    use super::*;
+
+    #[test]
+    fn test_int_type_matching() {
+        // Int matches both Int32 and Int64
+        assert!(SchemaType::Int.matches(&Value::Int32(0)));
+        assert!(SchemaType::Int.matches(&Value::Int32(i32::MAX)));
+        assert!(SchemaType::Int.matches(&Value::Int32(i32::MIN)));
+        assert!(SchemaType::Int.matches(&Value::Int64(0)));
+        assert!(SchemaType::Int.matches(&Value::Int64(i64::MAX)));
+        assert!(SchemaType::Int.matches(&Value::Int64(i64::MIN)));
+
+        // Int does not match other types
+        assert!(!SchemaType::Int.matches(&Value::Float64(1.0)));
+        assert!(!SchemaType::Int.matches(&Value::string("1")));
+        assert!(!SchemaType::Int.matches(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_float_type_with_coercion() {
+        // Float matches Float64
+        assert!(SchemaType::Float.matches(&Value::Float64(0.0)));
+        assert!(SchemaType::Float.matches(&Value::Float64(f64::MAX)));
+        assert!(SchemaType::Float.matches(&Value::Float64(f64::MIN)));
+        assert!(SchemaType::Float.matches(&Value::Float64(f64::NAN)));
+        assert!(SchemaType::Float.matches(&Value::Float64(f64::INFINITY)));
+
+        // Float also matches Int (coercion)
+        assert!(SchemaType::Float.matches(&Value::Int32(42)));
+        assert!(SchemaType::Float.matches(&Value::Int64(42)));
+
+        // Float does not match string or bool
+        assert!(!SchemaType::Float.matches(&Value::string("1.0")));
+        assert!(!SchemaType::Float.matches(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_string_type_matching() {
+        assert!(SchemaType::String.matches(&Value::string("")));
+        assert!(SchemaType::String.matches(&Value::string("hello")));
+        assert!(SchemaType::String.matches(&Value::string("hello world with spaces")));
+
+        // String does not match other types
+        assert!(!SchemaType::String.matches(&Value::Int64(42)));
+        assert!(!SchemaType::String.matches(&Value::Float64(3.14)));
+        assert!(!SchemaType::String.matches(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_symbol_type_matching() {
+        // Symbol is currently an alias for String in type matching
+        assert!(SchemaType::Symbol.matches(&Value::string("alice")));
+        assert!(SchemaType::Symbol.matches(&Value::string("bob")));
+
+        assert!(!SchemaType::Symbol.matches(&Value::Int64(42)));
+    }
+
+    #[test]
+    fn test_bool_type_matching() {
+        assert!(SchemaType::Bool.matches(&Value::Bool(true)));
+        assert!(SchemaType::Bool.matches(&Value::Bool(false)));
+
+        assert!(!SchemaType::Bool.matches(&Value::Int64(0)));
+        assert!(!SchemaType::Bool.matches(&Value::Int64(1)));
+        assert!(!SchemaType::Bool.matches(&Value::string("true")));
+    }
+
+    #[test]
+    fn test_timestamp_type_matching() {
+        assert!(SchemaType::Timestamp.matches(&Value::Timestamp(0)));
+        assert!(SchemaType::Timestamp.matches(&Value::Timestamp(1705349600000)));
+
+        // Timestamp also accepts Int64 (for convenience)
+        assert!(SchemaType::Timestamp.matches(&Value::Int64(1705349600000)));
+
+        assert!(!SchemaType::Timestamp.matches(&Value::string("2024-01-15")));
+        assert!(!SchemaType::Timestamp.matches(&Value::Float64(1705349600000.0)));
+    }
+
+    #[test]
+    fn test_vector_type_matching() {
+        assert!(SchemaType::Vector.matches(&Value::Vector(Arc::new(vec![1.0, 2.0, 3.0]))));
+        assert!(SchemaType::Vector.matches(&Value::Vector(Arc::new(vec![]))));
+        assert!(SchemaType::Vector.matches(&Value::VectorInt8(Arc::new(vec![1, 2, 3]))));
+
+        assert!(!SchemaType::Vector.matches(&Value::string("[1,2,3]")));
+        assert!(!SchemaType::Vector.matches(&Value::Int64(123)));
+    }
+
+    #[test]
+    fn test_any_type_matches_all() {
+        assert!(SchemaType::Any.matches(&Value::Int32(42)));
+        assert!(SchemaType::Any.matches(&Value::Int64(42)));
+        assert!(SchemaType::Any.matches(&Value::Float64(3.14)));
+        assert!(SchemaType::Any.matches(&Value::string("anything")));
+        assert!(SchemaType::Any.matches(&Value::Bool(true)));
+        assert!(SchemaType::Any.matches(&Value::Null));
+        assert!(SchemaType::Any.matches(&Value::Vector(Arc::new(vec![1.0]))));
+        assert!(SchemaType::Any.matches(&Value::Timestamp(0)));
+    }
+
