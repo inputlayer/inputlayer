@@ -37,7 +37,7 @@ pub enum Statement {
     /// Update operation: -old, +new :- condition. (atomic)
     Update(UpdateOp),
     /// Type declaration: type Name: `TypeExpr`.
-    TypeDecl(TypeDecl.clone()),
+    TypeDecl(TypeDecl),
     /// Session rule: head :- body. (query-only, not materialized)
     SessionRule(Rule),
     /// Fact: relation(args). (base data)
@@ -63,7 +63,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     let input = input.trim();
 
     // Strip inline comments (// ...) while respecting strings
-    let input = strip_inline_comment(input.clone());
+    let input = strip_inline_comment(input);
 
     if input.is_empty() {
         return Err("Empty input".to_string());
@@ -91,9 +91,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         if let Some(update) = data::try_parse_update(input)? {
             return Ok(Statement::Update(update));
         }
-
     }
-
 
     // Handle + prefix: schema declaration, persistent rule, or fact insert
     if let Some(rest) = input.strip_prefix('+') {
@@ -108,7 +106,6 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
                 // Schema declaration: +name(col: type, ...).
                 return schema::parse_schema_decl(rest, true);
             }
-
         }
 
         // Value arguments: insert operation
@@ -167,9 +164,8 @@ mod tests {
     // Insert tests
     #[test]
     fn test_parse_single_insert() {
-        // FIXME: extract to named variable
         let stmt = parse_statement("+edge(1, 2).").unwrap();
-        if let Statement::Insert(op.clone()) = stmt {
+        if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
             assert_eq!(op.tuples[0].len(), 2);
@@ -208,7 +204,7 @@ mod tests {
         let stmt = parse_statement("-edge(1, 2).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
-            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_.clone())));
+            assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
         } else {
             panic!("Expected Delete");
         }
@@ -246,7 +242,6 @@ mod tests {
             panic!("Expected SessionRule");
         }
     }
-
 
     // Update tests
     #[test]
@@ -294,7 +289,6 @@ mod tests {
         } else {
             panic!("Expected Query");
         }
-
     }
 
     #[test]
@@ -305,7 +299,7 @@ mod tests {
                 BodyPredicate::Positive(atom) => atom,
                 _ => panic!("Expected positive atom"),
             };
-            assert!(matches!(&body_atom.args[0], Term::Variable(v.clone()) if v == "_from"));
+            assert!(matches!(&body_atom.args[0], Term::Variable(v) if v == "_from"));
             assert!(matches!(&body_atom.args[1], Term::Variable(v) if v == "X"));
         } else {
             panic!("Expected SessionRule");
@@ -325,9 +319,8 @@ mod tests {
 
     #[test]
     fn test_multichar_variables() {
-        // FIXME: extract to named variable
         let stmt = parse_statement("result(Foo, BarBaz) :- data(Foo, BarBaz).").unwrap();
-        if let Statement::SessionRule(rule.clone()) = stmt {
+        if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "Foo"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "BarBaz"));
         } else {
@@ -345,14 +338,12 @@ mod tests {
     #[test]
     fn test_unquoted_with_numbers_rejected() {
         // Unquoted atoms with numbers should be rejected
-        // FIXME: extract to named variable
         let result = parse_statement("+data(item1, item2).");
         assert!(result.is_err(), "Unquoted atoms should be rejected");
     }
 
     #[test]
     fn test_variables_with_underscores() {
-        // FIXME: extract to named variable
         let stmt = parse_statement("result(X_val, Y_val) :- data(X_val, Y_val).").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "X_val"));
@@ -385,7 +376,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_query_with_unquoted_atoms_rejected() {
         // Query with unquoted atoms should be rejected
@@ -407,7 +397,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_floats_still_work() {
         let stmt = parse_statement("+data(3.14, 2.71).").unwrap();
@@ -428,7 +417,7 @@ mod tests {
         let stmt = parse_statement("+data(\"hello world\", \"test\").").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::StringConstant(s) if s == "hello world"));
-            assert!(matches!(&op.tuples[0][1], Term::StringConstant(s.clone()) if s == "test"));
+            assert!(matches!(&op.tuples[0][1], Term::StringConstant(s) if s == "test"));
         } else {
             panic!("Expected Insert");
         }
@@ -447,6 +436,55 @@ mod tests {
         } else {
             panic!("Expected SchemaDecl, got {:?}", stmt);
         }
+    }
 
+    #[test]
+    fn test_parse_transient_schema() {
+        let stmt = parse_statement("temp(x: int, y: int).").unwrap();
+        if let Statement::SchemaDecl(decl) = stmt {
+            assert_eq!(decl.name, "temp");
+            assert!(!decl.persistent);
+            assert_eq!(decl.columns.len(), 2);
+        } else {
+            panic!("Expected SchemaDecl, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_persistent_rule() {
+        let stmt = parse_statement("+reachable(X, Y) :- edge(X, Y).").unwrap();
+        if let Statement::PersistentRule(rule) = stmt {
+            assert_eq!(rule.head.relation, "reachable");
+            assert_eq!(rule.body.len(), 1);
+        } else {
+            panic!("Expected PersistentRule, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_persistent_recursive_rule() {
+        let stmt = parse_statement("+reachable(X, Z) :- reachable(X, Y), edge(Y, Z).").unwrap();
+        if let Statement::PersistentRule(rule) = stmt {
+            assert_eq!(rule.head.relation, "reachable");
+            assert_eq!(rule.body.len(), 2);
+        } else {
+            panic!("Expected PersistentRule, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_persistent_rule_with_top_k() {
+        // This is the exact statement from the failing snapshot test
+        let stmt = parse_statement(
+            "+top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).",
+        )
+        .unwrap();
+        if let Statement::PersistentRule(rule) = stmt {
+            assert_eq!(rule.head.relation, "top_players");
+            assert_eq!(rule.head.args.len(), 2);
+            assert!(rule.head.has_aggregates());
+        } else {
+            panic!("Expected PersistentRule, got {:?}", stmt);
+        }
     }
 
