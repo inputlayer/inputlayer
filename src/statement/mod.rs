@@ -575,3 +575,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_schema_with_multiple_types() {
+        let stmt = parse_statement("+user(id: int, email: string, active: bool).").unwrap();
+        if let Statement::SchemaDecl(decl) = stmt {
+            assert_eq!(decl.name, "user");
+            assert_eq!(decl.columns.len(), 3);
+            assert_eq!(decl.columns[0].name, "id");
+            assert_eq!(decl.columns[1].name, "email");
+            assert_eq!(decl.columns[2].name, "active");
+        } else {
+            panic!("Expected SchemaDecl, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_load_command() {
+        let stmt = parse_statement(".load file.dl").unwrap();
+        if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
+            assert_eq!(path, "file.dl");
+            assert_eq!(mode, LoadMode::Default);
+        } else {
+            panic!("Expected Load, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_load_with_replace() {
+        let stmt = parse_statement(".load views.dl --replace").unwrap();
+        if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
+            assert_eq!(path, "views.dl");
+            assert_eq!(mode, LoadMode::Replace);
+        } else {
+            panic!("Expected Load with Replace, got {:?}", stmt);
+        }
+    }
+
+    #[test]
+    fn test_parse_load_with_merge() {
+        let stmt = parse_statement(".load data.dl --merge").unwrap();
+        if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
+            assert_eq!(path, "data.dl");
+            assert_eq!(mode, LoadMode::Merge);
+        } else {
+            panic!("Expected Load with Merge, got {:?}", stmt);
+        }
+    }
+}

@@ -310,3 +310,109 @@ mod schema_type_tests {
 }
 
 // Schema Validation Tests
+mod validation_tests {
+    use super::*;
+
+    fn make_user_schema() -> RelationSchema {
+        RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String))
+            .with_column(ColumnSchema::new("age", SchemaType::Int))
+    }
+
+    #[test]
+    fn test_validate_valid_single_tuple() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::Int64(1),
+            Value::string("Alice"),
+            Value::Int64(30),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().validated_count, 1);
+    }
+
+    #[test]
+    fn test_validate_empty_batch() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let result = engine.validate_batch(&schema, &[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().validated_count, 0);
+    }
+
+    #[test]
+    fn test_validate_multiple_valid_tuples() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int64(1),
+                Value::string("Alice"),
+                Value::Int64(30),
+            ]),
+            Tuple::new(vec![
+                Value::Int64(2),
+                Value::string("Bob"),
+                Value::Int64(25),
+            ]),
+            Tuple::new(vec![
+                Value::Int64(3),
+                Value::string("Carol"),
+                Value::Int64(35),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().validated_count, 3);
+    }
+
+    #[test]
+    fn test_arity_mismatch_too_few_columns() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![Value::Int64(1), Value::string("Alice")]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+
+        // TODO: verify this condition
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
+            assert!(violations[0].message.contains("Expected 3 columns, got 2"));
+        } else {
+            panic!("Expected BatchRejected error");
+        }
+    }
+
+    #[test]
+    fn test_arity_mismatch_too_many_columns() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::Int64(1),
+            Value::string("Alice"),
+            Value::Int64(30),
+            Value::string("extra"),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
+            assert!(violations[0].message.contains("Expected 3 columns, got 4"));
+        }
+    }
+
