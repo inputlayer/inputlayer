@@ -272,3 +272,41 @@ mod schema_type_tests {
         assert!(SchemaType::Any.matches(&Value::Timestamp(0)));
     }
 
+    #[test]
+    fn test_named_type_parsing() {
+        // Named types start with uppercase
+        assert_eq!(
+            SchemaType::from_str("Email"),
+            Some(SchemaType::Named("Email".to_string()))
+        );
+        assert_eq!(
+            SchemaType::from_str("UserId"),
+            Some(SchemaType::Named("UserId".to_string()))
+        );
+        assert_eq!(
+            SchemaType::from_str("Age"),
+            Some(SchemaType::Named("Age".to_string()))
+        );
+
+        // Lowercase is not a named type (it's parsed as base type or None)
+        assert_eq!(SchemaType::from_str("email"), None);
+    }
+
+    #[test]
+    fn test_schema_type_display() {
+        assert_eq!(format!("{}", SchemaType::Int), "int");
+        assert_eq!(format!("{}", SchemaType::Float), "float");
+        assert_eq!(format!("{}", SchemaType::String), "string");
+        assert_eq!(format!("{}", SchemaType::Symbol), "symbol");
+        assert_eq!(format!("{}", SchemaType::Bool), "bool");
+        assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
+        assert_eq!(format!("{}", SchemaType::Vector), "vector");
+        assert_eq!(format!("{}", SchemaType::Any), "any");
+        assert_eq!(
+            format!("{}", SchemaType::Named("Email".to_string())),
+            "Email"
+        );
+    }
+}
+
+// Schema Validation Tests
