@@ -384,7 +384,6 @@ mod validation_tests {
         let result = engine.validate_batch(&schema, &[tuple]);
         assert!(result.is_err());
 
-        // TODO: verify this condition
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
             assert_eq!(violations.len(), 1);
             assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
@@ -413,6 +412,109 @@ mod validation_tests {
             assert_eq!(violations.len(), 1);
             assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
             assert!(violations[0].message.contains("Expected 3 columns, got 4"));
+        }
+    }
+
+    #[test]
+    fn test_type_mismatch_single_column() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::Int64(1),
+            Value::string("Alice"),
+            Value::string("thirty"), // Should be Int
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].violation_type, ViolationType::TypeMismatch);
+            assert_eq!(violations[0].column, Some("age".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_type_mismatch_multiple_columns() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::string("not_an_id"), // Should be Int
+            Value::Int64(123),          // Should be String
+            Value::string("thirty"),    // Should be Int
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            // Should have violations for all 3 columns
+            assert_eq!(violations.len(), 3);
+            assert!(violations
+                .iter()
+                .all(|v| v.violation_type == ViolationType::TypeMismatch));
+        }
+    }
+
+    #[test]
+    fn test_batch_rejected_all_or_nothing() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int64(1),
+                Value::string("Alice"),
+                Value::Int64(30),
+            ]),
+            Tuple::new(vec![
+                Value::Int64(2),
+                Value::string("Bob"),
+                Value::string("invalid"), // Type error
+            ]),
+            Tuple::new(vec![
+                Value::Int64(3),
+                Value::string("Carol"),
+                Value::Int64(35),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_err());
+
+        // All-or-nothing: the entire batch is rejected
+        if let Err(ValidationError::BatchRejected {
+            total_tuples,
+            violations,
+            ..
+        }) = result
+        {
+            assert_eq!(total_tuples, 3);
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].tuple_index, 1); // Second tuple (index 1)
+        }
+    }
+
+    #[test]
+    fn test_violation_contains_tuple_data() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::Int64(999),
+            Value::string("Test"),
+            Value::string("not_int"),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple.clone()]);
+
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            // Violation should contain the original tuple
+            assert_eq!(violations[0].tuple.arity(), 3);
+            assert_eq!(violations[0].tuple.get(0), Some(&Value::Int64(999)));
         }
     }
 
