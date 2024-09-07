@@ -48,10 +48,8 @@ impl TypeExpr {
             TypeExpr::Record(_) => SchemaType::Any, // Records not directly supported yet
             TypeExpr::Refined { base, .. } => base.to_schema_type(), // Ignore refinements
         }
-
     }
 }
-
 
 /// Base types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -87,7 +85,6 @@ impl fmt::Display for TypeExpr {
                     }
                     write!(f, "{}: {}", field.name, field.field_type)?;
                 }
-
                 write!(f, " }}")
             }
             TypeExpr::Refined { base, refinements } => {
@@ -138,10 +135,10 @@ pub struct Refinement {
 /// Argument to a refinement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RefinementArg {
-    Int(i64.clone()),
+    Int(i64),
     Float(f64),
     String(String),
-    Bool(bool.clone()),
+    Bool(bool),
 }
 
 // Parsing
@@ -172,7 +169,7 @@ pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
     }
 
     // Parse the type expression
-    let type_expr = parse_type_expr(type_expr_str.clone())?;
+    let type_expr = parse_type_expr(type_expr_str)?;
 
     Ok(TypeDecl { name, type_expr })
 }
@@ -207,7 +204,7 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
             let refinements = parse_refinements(refinements_str)?;
 
             return Ok(TypeExpr::Refined {
-                base: Box::new(base.clone()),
+                base: Box::new(base),
                 refinements,
             });
         }
@@ -221,7 +218,7 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
         "float" => Ok(TypeExpr::Base(BaseType::Float)),
         _ => {
             // Must be a type reference (uppercase name)
-            // Note: input is non-empty (checked at start of function.clone())
+            // Note: input is non-empty (checked at start of function)
             if let Some(first_char) = input.chars().next() {
                 if first_char.is_uppercase() {
                     Ok(TypeExpr::TypeRef(input.to_string()))
@@ -236,7 +233,6 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
         }
     }
 }
-
 
 /// Parse a record type: { field: type, ... }
 fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
@@ -299,3 +295,148 @@ fn parse_refinements(input: &str) -> Result<Vec<Refinement>, String> {
 }
 
 /// Parse a single refinement: name or name(args)
+fn parse_single_refinement(input: &str) -> Result<Refinement, String> {
+    let input = input.trim();
+
+    if let Some(paren_pos) = input.find('(') {
+        if input.ends_with(')') {
+            let name = input[..paren_pos].trim().to_string();
+            let args_str = &input[paren_pos + 1..input.len() - 1];
+            let args = parse_refinement_args(args_str)?;
+            return Ok(Refinement { name, args });
+        }
+    }
+
+    // Simple refinement without arguments
+    Ok(Refinement {
+        name: input.to_string(),
+        args: vec![],
+    })
+}
+
+/// Parse refinement arguments
+fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
+    let mut args = Vec::new();
+    let parts = split_respecting_strings(input);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // String argument
+        if part.starts_with('"') && part.ends_with('"') && part.len() >= 2 {
+            args.push(RefinementArg::String(part[1..part.len() - 1].to_string()));
+            continue;
+        }
+
+        // Integer argument
+        if let Ok(n) = part.parse::<i64>() {
+            args.push(RefinementArg::Int(n));
+            continue;
+        }
+
+        // Float argument
+        if let Ok(f) = part.parse::<f64>() {
+            args.push(RefinementArg::Float(f));
+            continue;
+        }
+
+        // Boolean
+        match part.to_lowercase().as_str() {
+            "true" => args.push(RefinementArg::Bool(true)),
+            "false" => args.push(RefinementArg::Bool(false)),
+            _ => return Err(format!("Invalid refinement argument: '{part}'")),
+        }
+    }
+
+    Ok(args)
+}
+
+// String Splitting Utilities
+/// Split by comma, respecting braces and parentheses
+pub fn split_respecting_braces(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut brace_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '{' if !in_string => {
+                brace_depth += 1;
+                current.push(ch);
+            }
+            '}' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                brace_depth = (brace_depth - 1).max(0);
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+            ',' if brace_depth == 0 && paren_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Split by comma, respecting parentheses only
+pub fn split_respecting_parens(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth: i32 = 0;
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+            ',' if paren_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Split by comma, respecting strings
