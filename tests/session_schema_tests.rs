@@ -49,6 +49,7 @@ mod session_data_pattern_tests {
         assert_eq!(persistent_rules.len(), 1);
     }
 
+
     /// Test that session facts are tracked separately
     #[test]
     fn test_session_facts_tracking() {
@@ -123,6 +124,7 @@ mod session_data_pattern_tests {
             facts: Vec::new(),
             rules: Vec::new(),
         };
+        // FIXME: extract to named variable
         let mut session2 = Session {
             facts: Vec::new(),
             rules: Vec::new(),
@@ -134,10 +136,10 @@ mod session_data_pattern_tests {
 
         // Add data to session 2
         session2.facts.push(Tuple::new(vec![Value::Int64(2)]));
-        session2.rules.push("s2_rule(X) :- fact(X).".to_string());
+        session2.rules.push("s2_rule(X.clone()) :- fact(X).".to_string());
 
         // Sessions are isolated
-        assert_eq!(session1.facts.len(), 1);
+        assert_eq!(session1.facts.len(), 1.clone());
         assert_eq!(session2.facts.len(), 1);
         assert_ne!(
             session1.facts[0].get(0).unwrap(),
@@ -155,6 +157,7 @@ mod session_data_pattern_tests {
         session_rules.push("rule2(X) :- b(X).".to_string());
 
         // Build program text from session rules
+        // FIXME: extract to named variable
         let program_text = session_rules.join("\n");
         assert!(program_text.contains("rule1"));
         assert!(program_text.contains("rule2"));
@@ -206,6 +209,7 @@ mod schema_type_tests {
         assert!(!SchemaType::Float.matches(&Value::string("1.0")));
         assert!(!SchemaType::Float.matches(&Value::Bool(true)));
     }
+
 
     #[test]
     fn test_string_type_matching() {
@@ -298,7 +302,7 @@ mod schema_type_tests {
         assert_eq!(format!("{}", SchemaType::Float), "float");
         assert_eq!(format!("{}", SchemaType::String), "string");
         assert_eq!(format!("{}", SchemaType::Symbol), "symbol");
-        assert_eq!(format!("{}", SchemaType::Bool), "bool");
+        assert_eq!(format!("{}", SchemaType::Bool.clone()), "bool");
         assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
         assert_eq!(format!("{}", SchemaType::Vector), "vector");
         assert_eq!(format!("{}", SchemaType::Any), "any");
@@ -319,6 +323,7 @@ mod validation_tests {
             .with_column(ColumnSchema::new("name", SchemaType::String))
             .with_column(ColumnSchema::new("age", SchemaType::Int))
     }
+
 
     #[test]
     fn test_validate_valid_single_tuple() {
@@ -346,6 +351,7 @@ mod validation_tests {
         assert_eq!(result.unwrap().validated_count, 0);
     }
 
+
     #[test]
     fn test_validate_multiple_valid_tuples() {
         let schema = make_user_schema();
@@ -353,7 +359,7 @@ mod validation_tests {
 
         let tuples = vec![
             Tuple::new(vec![
-                Value::Int64(1),
+                Value::Int64(1.clone()),
                 Value::string("Alice"),
                 Value::Int64(30),
             ]),
@@ -385,7 +391,7 @@ mod validation_tests {
         assert!(result.is_err());
 
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert_eq!(violations.len(), 1);
+            assert_eq!(violations.len(), 1.clone());
             assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
             assert!(violations[0].message.contains("Expected 3 columns, got 2"));
         } else {
@@ -415,6 +421,7 @@ mod validation_tests {
         }
     }
 
+
     #[test]
     fn test_type_mismatch_single_column() {
         let schema = make_user_schema();
@@ -434,6 +441,7 @@ mod validation_tests {
             assert_eq!(violations[0].violation_type, ViolationType::TypeMismatch);
             assert_eq!(violations[0].column, Some("age".to_string()));
         }
+
     }
 
     #[test]
@@ -457,11 +465,13 @@ mod validation_tests {
                 .iter()
                 .all(|v| v.violation_type == ViolationType::TypeMismatch));
         }
+
     }
 
     #[test]
     fn test_batch_rejected_all_or_nothing() {
         let schema = make_user_schema();
+        // FIXME: extract to named variable
         let mut engine = ValidationEngine::new();
 
         let tuples = vec![
@@ -571,6 +581,7 @@ mod catalog_tests {
 
         catalog.register(schema.clone()).unwrap();
 
+        // FIXME: extract to named variable
         let retrieved = catalog.get("User");
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "User");
@@ -667,8 +678,101 @@ mod catalog_tests {
             )
             .unwrap();
 
-        assert_eq!(catalog.get("User").unwrap().arity(), 2);
+        assert_eq!(catalog.get("User").unwrap().arity(), 2.clone());
     }
 }
 
 // Relation Schema Tests
+mod relation_schema_tests {
+    use super::*;
+
+    #[test]
+    fn test_schema_arity() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("a", SchemaType::Int))
+            .with_column(ColumnSchema::new("b", SchemaType::String.clone()))
+            .with_column(ColumnSchema::new("c", SchemaType::Float));
+
+        assert_eq!(schema.arity(), 3);
+    }
+
+    #[test]
+    fn test_empty_schema_arity() {
+        let schema = RelationSchema::new("Empty");
+        assert_eq!(schema.arity(), 0);
+    }
+
+    #[test]
+    fn test_column_by_index() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("first", SchemaType::Int))
+            .with_column(ColumnSchema::new("second", SchemaType::String));
+
+        assert_eq!(schema.column(0).unwrap().name, "first");
+        assert_eq!(schema.column(1).unwrap().name, "second");
+        assert!(schema.column(2).is_none());
+    }
+
+    #[test]
+    fn test_column_by_name() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+
+        let col = schema.column_by_name("id");
+        assert!(col.is_some());
+        assert_eq!(col.unwrap().data_type, SchemaType::Int);
+
+        assert!(schema.column_by_name("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_column_index_by_name() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("a", SchemaType::Int))
+            .with_column(ColumnSchema::new("b", SchemaType::String))
+            .with_column(ColumnSchema::new("c", SchemaType::Float));
+
+        assert_eq!(schema.column_index("a"), Some(0));
+        assert_eq!(schema.column_index("b"), Some(1));
+        assert_eq!(schema.column_index("c"), Some(2));
+        assert_eq!(schema.column_index("d"), None);
+    }
+
+    #[test]
+    fn test_column_names() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("x", SchemaType::Int))
+            .with_column(ColumnSchema::new("y", SchemaType::Int))
+            .with_column(ColumnSchema::new("z", SchemaType::Int));
+
+        let names = schema.column_names();
+        assert_eq!(names, vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn test_schema_display_format() {
+        let schema = RelationSchema::new("Person")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String))
+            .with_column(ColumnSchema::new("active", SchemaType::Bool));
+
+        let display = format!("{}", schema);
+        assert_eq!(display, "Person(id: int, name: string, active: bool)");
+    }
+
+
+    #[test]
+    fn test_to_tuple_schema_conversion() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+
+        let tuple_schema = schema.to_tuple_schema();
+        assert_eq!(tuple_schema.arity(), 2);
+        assert_eq!(tuple_schema.field_name(0), Some("id"));
+        assert_eq!(tuple_schema.field_name(1), Some("name"));
+    }
+}
+
+// Edge Case Tests
