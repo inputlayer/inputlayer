@@ -558,3 +558,117 @@ mod validation_tests {
 }
 
 // Schema Catalog Tests
+mod catalog_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_and_get_schema() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+
+        catalog.register(schema.clone()).unwrap();
+
+        let retrieved = catalog.get("User");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().name, "User");
+        assert_eq!(retrieved.unwrap().arity(), 2);
+    }
+
+    #[test]
+    fn test_get_nonexistent_schema() {
+        let catalog = SchemaCatalog::new();
+        assert!(catalog.get("NonExistent").is_none());
+    }
+
+    #[test]
+    fn test_remove_schema() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema =
+            RelationSchema::new("ToRemove").with_column(ColumnSchema::new("id", SchemaType::Int));
+
+        catalog.register(schema).unwrap();
+        assert!(catalog.get("ToRemove").is_some());
+
+        catalog.remove("ToRemove");
+        assert!(catalog.get("ToRemove").is_none());
+    }
+
+    #[test]
+    fn test_list_schemas() {
+        let mut catalog = SchemaCatalog::new();
+
+        catalog
+            .register(
+                RelationSchema::new("Alpha").with_column(ColumnSchema::new("a", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register(
+                RelationSchema::new("Beta").with_column(ColumnSchema::new("b", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register(
+                RelationSchema::new("Gamma").with_column(ColumnSchema::new("c", SchemaType::Int)),
+            )
+            .unwrap();
+
+        let names = catalog.relations();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"Alpha"));
+        assert!(names.contains(&"Beta"));
+        assert!(names.contains(&"Gamma"));
+    }
+
+    #[test]
+    fn test_clear_catalog() {
+        let mut catalog = SchemaCatalog::new();
+
+        catalog
+            .register(
+                RelationSchema::new("One").with_column(ColumnSchema::new("a", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register(
+                RelationSchema::new("Two").with_column(ColumnSchema::new("b", SchemaType::Int)),
+            )
+            .unwrap();
+
+        assert_eq!(catalog.relations().len(), 2);
+
+        catalog.clear();
+        assert_eq!(catalog.relations().len(), 0);
+    }
+
+    #[test]
+    fn test_schema_overwrite() {
+        let mut catalog = SchemaCatalog::new();
+
+        // Register initial schema
+        catalog
+            .register(
+                RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Int)),
+            )
+            .unwrap();
+
+        assert_eq!(catalog.get("User").unwrap().arity(), 1);
+
+        // Register new schema with same name (use register_or_update)
+        catalog
+            .register_or_update(
+                RelationSchema::new("User")
+                    .with_column(ColumnSchema::new("id", SchemaType::Int))
+                    .with_column(ColumnSchema::new("name", SchemaType::String)),
+            )
+            .unwrap();
+
+        assert_eq!(catalog.get("User").unwrap().arity(), 2);
+    }
+}
+
+// Relation Schema Tests

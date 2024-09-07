@@ -440,3 +440,28 @@ pub fn split_respecting_parens(input: &str) -> Vec<String> {
 }
 
 /// Split by comma, respecting strings
+pub fn split_respecting_strings(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            ',' if !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
