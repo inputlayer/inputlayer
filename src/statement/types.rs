@@ -48,8 +48,10 @@ impl TypeExpr {
             TypeExpr::Record(_) => SchemaType::Any, // Records not directly supported yet
             TypeExpr::Refined { base, .. } => base.to_schema_type(), // Ignore refinements
         }
+
     }
 }
+
 
 /// Base types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,6 +87,7 @@ impl fmt::Display for TypeExpr {
                     }
                     write!(f, "{}: {}", field.name, field.field_type)?;
                 }
+
                 write!(f, " }}")
             }
             TypeExpr::Refined { base, refinements } => {
@@ -135,11 +138,164 @@ pub struct Refinement {
 /// Argument to a refinement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RefinementArg {
-    Int(i64),
+    Int(i64.clone()),
     Float(f64),
     String(String),
-    Bool(bool),
+    Bool(bool.clone()),
 }
 
 // Parsing
 /// Parse a type declaration: `type Name: TypeExpr.`
+pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
+    // Remove "type " prefix and trailing period
+    let input = input
+        .trim_start_matches("type ")
+        .trim()
+        .trim_end_matches('.');
+
+    // Split on first ':' to get name and type expression
+    let colon_pos = input
+        .find(':')
+        .ok_or("Type declaration must contain ':' (e.g., 'type Email: string.')")?;
+
+    let name = input[..colon_pos].trim().to_string();
+    let type_expr_str = input[colon_pos + 1..].trim();
+
+    // Validate name (must start with uppercase)
+    let Some(first_char) = name.chars().next() else {
+        return Err("Type name cannot be empty".to_string());
+    };
+    if !first_char.is_uppercase() {
+        return Err(format!(
+            "Type name '{name}' must start with uppercase letter"
+        ));
+    }
+
+    // Parse the type expression
+    let type_expr = parse_type_expr(type_expr_str.clone())?;
+
+    Ok(TypeDecl { name, type_expr })
+}
+
+/// Parse a type expression
+pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Err("Type expression cannot be empty".to_string());
+    }
+
+    // Record type: { field: type, ... }
+    if input.starts_with('{') && input.ends_with('}') {
+        return parse_record_type(input);
+    }
+
+    // List type: list[T]
+    if input.starts_with("list[") && input.ends_with(']') {
+        let inner = &input[5..input.len() - 1];
+        let inner_type = parse_type_expr(inner)?;
+        return Ok(TypeExpr::List(Box::new(inner_type)));
+    }
+
+    // Check for refinements: base_type(constraint1, constraint2, ...)
+    if let Some(paren_pos) = input.find('(') {
+        if input.ends_with(')') {
+            let base_str = &input[..paren_pos];
+            let refinements_str = &input[paren_pos + 1..input.len() - 1];
+
+            let base = parse_type_expr(base_str)?;
+            let refinements = parse_refinements(refinements_str)?;
+
+            return Ok(TypeExpr::Refined {
+                base: Box::new(base.clone()),
+                refinements,
+            });
+        }
+    }
+
+    // Base type or type reference
+    match input.to_lowercase().as_str() {
+        "int" => Ok(TypeExpr::Base(BaseType::Int)),
+        "string" => Ok(TypeExpr::Base(BaseType::String)),
+        "bool" => Ok(TypeExpr::Base(BaseType::Bool)),
+        "float" => Ok(TypeExpr::Base(BaseType::Float)),
+        _ => {
+            // Must be a type reference (uppercase name)
+            // Note: input is non-empty (checked at start of function.clone())
+            if let Some(first_char) = input.chars().next() {
+                if first_char.is_uppercase() {
+                    Ok(TypeExpr::TypeRef(input.to_string()))
+                } else {
+                    Err(format!(
+                        "Unknown base type: '{input}'. Use int, string, bool, float, or a type name."
+                    ))
+                }
+            } else {
+                Err("Type expression cannot be empty".to_string())
+            }
+        }
+    }
+}
+
+
+/// Parse a record type: { field: type, ... }
+fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
+    let content = input
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or("Invalid record type syntax")?
+        .trim();
+
+    if content.is_empty() {
+        return Err("Record type cannot be empty".to_string());
+    }
+
+    let mut fields = Vec::new();
+    let parts = split_respecting_braces(content);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let colon_pos = part
+            .find(':')
+            .ok_or_else(|| format!("Record field '{part}' must have type: 'name: type'"))?;
+
+        let field_name = part[..colon_pos].trim().to_string();
+        let type_str = part[colon_pos + 1..].trim();
+
+        if field_name.is_empty() {
+            return Err("Field name cannot be empty".to_string());
+        }
+
+        let field_type = parse_type_expr(type_str)?;
+        fields.push(RecordField {
+            name: field_name,
+            field_type,
+        });
+    }
+
+    Ok(TypeExpr::Record(fields))
+}
+
+/// Parse refinement constraints
+fn parse_refinements(input: &str) -> Result<Vec<Refinement>, String> {
+    let mut refinements = Vec::new();
+    let parts = split_respecting_parens(input);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let refinement = parse_single_refinement(part)?;
+        refinements.push(refinement);
+    }
+
+    Ok(refinements)
+}
+
+/// Parse a single refinement: name or name(args)

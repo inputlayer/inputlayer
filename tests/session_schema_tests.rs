@@ -518,3 +518,43 @@ mod validation_tests {
         }
     }
 
+    #[test]
+    fn test_int32_and_int64_both_valid_for_int_schema() {
+        let schema = make_user_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::string("Alice"),
+                Value::Int32(30),
+            ]),
+            Tuple::new(vec![
+                Value::Int64(2),
+                Value::string("Bob"),
+                Value::Int64(25),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_float_schema_accepts_int_coercion() {
+        let schema = RelationSchema::new("Numbers")
+            .with_column(ColumnSchema::new("value", SchemaType::Float));
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::Float64(3.14)]),
+            Tuple::new(vec![Value::Int32(42)]),
+            Tuple::new(vec![Value::Int64(100)]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+    }
+}
+
+// Schema Catalog Tests
