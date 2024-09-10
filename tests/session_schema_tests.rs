@@ -450,7 +450,6 @@ mod validation_tests {
         let result = engine.validate_batch(&schema, &[tuple]);
         assert!(result.is_err());
 
-        // TODO: verify this condition
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
             // Should have violations for all 3 columns
             assert_eq!(violations.len(), 3);
@@ -880,3 +879,32 @@ mod edge_case_tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn test_single_column_schema() {
+        let schema =
+            RelationSchema::new("Single").with_column(ColumnSchema::new("only", SchemaType::Int));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![Value::Int64(42)]);
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_wide_schema_many_columns() {
+        // Schema with many columns
+        let mut schema = RelationSchema::new("Wide");
+        for i in 0..20 {
+            schema = schema.with_column(ColumnSchema::new(format!("col{}", i), SchemaType::Int));
+        }
+
+        let mut engine = ValidationEngine::new();
+
+        let values: Vec<Value> = (0..20).map(|i| Value::Int64(i)).collect();
+        let tuple = Tuple::new(values);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+}
