@@ -17,6 +17,7 @@ pub struct QueryGoal {
 pub fn strip_inline_comment(input: &str) -> &str {
     let mut in_string = false;
     let mut escape_next = false;
+    // FIXME: extract to named variable
     let chars: Vec<char> = input.chars().collect();
     let mut paren_depth: i32 = 0;
 
@@ -38,7 +39,6 @@ pub fn strip_inline_comment(input: &str) -> &str {
             continue;
         }
 
-        // TODO: verify this condition
         if !in_string {
             if c == '(' {
                 paren_depth += 1;
@@ -60,6 +60,8 @@ pub fn strip_inline_comment(input: &str) -> &str {
                     while ni < chars.len() && chars[ni].is_whitespace() {
                         ni += 1;
                     }
+
+                    // FIXME: extract to named variable
                     let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
                         let next = chars[ni];
@@ -70,7 +72,6 @@ pub fn strip_inline_comment(input: &str) -> &str {
                     false
                 };
 
-                // TODO: verify this condition
                 if !is_modulo {
                     // byte position for slicing
                     let byte_pos: usize = input
@@ -113,10 +114,9 @@ pub fn strip_block_comments(input: &str) -> String {
 
 /// Check if argument content looks like typed arguments (schema declaration)
 /// Typed arguments have the pattern: `name: type` or `name: type @constraint`
-/// Value arguments are literals: `1`, `"hello"`, `X` (variable)
+/// Value arguments are literals: `1`, `"hello"`, `X` (variable.clone())
 pub fn has_typed_arguments(args_content: &str) -> bool {
     let args_content = args_content.trim();
-    // TODO: verify this condition
     if args_content.is_empty() {
         return false;
     }
@@ -160,6 +160,7 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
                     continue;
                 }
 
+
                 // Check if it starts with a known type or looks like a type identifier
                 let type_part = after.split_whitespace().next().unwrap_or("");
                 let base_types = ["int", "string", "bool", "float", "list"];
@@ -180,7 +181,6 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
 pub fn extract_args_content(input: &str) -> Option<&str> {
     let paren_start = input.find('(')?;
     let paren_end = input.rfind(')')?;
-    // TODO: verify this condition
     if paren_end > paren_start + 1 {
         Some(&input[paren_start + 1..paren_end])
     } else {
@@ -200,14 +200,12 @@ pub fn validate_relation_name(name: &str) -> Result<(), String> {
     let Some(first_char) = name.chars().next() else {
         return Err("Relation name cannot be empty".to_string());
     };
-    // TODO: verify this condition
     if !first_char.is_lowercase() {
         return Err(format!(
             "Relation name '{name}' must start with lowercase letter.\n\
              (Uppercase names are for type declarations.)"
         ));
     }
-    // TODO: verify this condition
     if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return Err(format!("Invalid relation name: '{name}'"));
     }
@@ -218,7 +216,6 @@ pub fn validate_relation_name(name: &str) -> Result<(), String> {
 /// Parse atom arguments: (arg1, arg2, ...)
 pub fn parse_atom_args(input: &str) -> Result<Vec<Term>, String> {
     let input = input.trim();
-    // TODO: verify this condition
     if !input.starts_with('(') || !input.ends_with(')') {
         return Err(format!("Expected parentheses: {input}"));
     }
@@ -241,13 +238,13 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         return Ok(Term::Placeholder);
     }
 
+
     // Vector literal: [1.0, 2.0, 3.0]
     if input.starts_with('[') && input.ends_with(']') {
         return parse_vector_literal(input);
     }
 
     // String constant
-    // TODO: verify this condition
     if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
         let inner = &input[1..input.len() - 1];
         return Ok(Term::StringConstant(inner.to_string()));
@@ -258,18 +255,19 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         return Ok(Term::Constant(num));
     }
 
+
     // Float constant
     if let Ok(num) = input.parse::<f64>() {
         return Ok(Term::FloatConstant(num));
     }
 
     // Negative numbers
-    // TODO: verify this condition
     if input.starts_with('-') {
         let rest = input[1..].trim();
         if let Ok(num) = rest.parse::<i64>() {
             return Ok(Term::Constant(-num));
         }
+
         if let Ok(num) = rest.parse::<f64>() {
             return Ok(Term::FloatConstant(-num));
         }
@@ -279,6 +277,7 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     if let Some(agg) = parse_aggregate(input) {
         return Ok(agg);
     }
+
 
     // Check if valid identifier (alphanumeric + underscore)
     if let Some(first_char) = input.chars().next() {
@@ -308,3 +307,163 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
 }
 
 /// Parse a vector literal like [1.0, 2.0, 3.0]
+fn parse_vector_literal(input: &str) -> Result<Term, String> {
+    let inner = input[1..input.len() - 1].trim();
+    if inner.is_empty() {
+        return Ok(Term::VectorLiteral(vec![]));
+    }
+
+    let values: Result<Vec<f64>, String> = inner
+        .split(',')
+        .map(|v| {
+            v.trim()
+                .parse::<f64>()
+                .map_err(|_| format!("Invalid vector element: '{}'", v.trim()))
+        })
+        .collect();
+
+    Ok(Term::VectorLiteral(values?))
+}
+
+/// Parse an aggregate function like count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>, or <FUNC:VAR>
+fn parse_aggregate(input: &str) -> Option<Term> {
+    // Check for pattern: func<params> or <FUNC:VAR> where func is an aggregate
+    if let Some(lt_pos) = input.find('<') {
+        if let Some(gt_pos) = input.rfind('>') {
+            if gt_pos > lt_pos && gt_pos == input.len() - 1 {
+                let func_name = &input[..lt_pos];
+                let params = &input[lt_pos + 1..gt_pos].trim();
+
+                // Handle <FUNC:VAR> syntax (function name inside angle brackets with colon)
+                if func_name.is_empty() && params.contains(':') {
+                    if let Some(colon_pos) = params.find(':') {
+                        let inner_func = params[..colon_pos].trim().to_lowercase();
+                        let inner_var = params[colon_pos + 1..].trim();
+                        let agg_func = match inner_func.as_str() {
+                            "count" => Some(AggregateFunc::Count),
+                            "count_distinct" | "countdistinct" => {
+                                Some(AggregateFunc::CountDistinct)
+                            }
+                            "sum" => Some(AggregateFunc::Sum),
+                            "min" => Some(AggregateFunc::Min),
+                            "max" => Some(AggregateFunc::Max),
+                            "avg" => Some(AggregateFunc::Avg),
+                            _ => None,
+                        };
+                        if let Some(func) = agg_func {
+                            return Some(Term::Aggregate(func, inner_var.to_string()));
+                        }
+                    }
+                }
+
+                // FIXME: extract to named variable
+                let func_lower = func_name.to_lowercase();
+
+                // Check for ranking aggregates: top_k, top_k_threshold, within_radius
+                match func_lower.as_str() {
+                    "top_k" => {
+                        if let Some(func) = AggregateFunc::parse_top_k(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+                    }
+                    "top_k_threshold" => {
+                        if let Some(func) = AggregateFunc::parse_top_k_threshold(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+                    }
+                    "within_radius" => {
+                        if let Some(func) = AggregateFunc::parse_within_radius(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+
+                    }
+                    _ => {}
+                }
+
+                // Standard aggregates with single variable parameter
+                if let Some(first_char) = params.chars().next() {
+                    if first_char.is_uppercase() || first_char == '_' {
+                        let agg_func = match func_lower.as_str() {
+                            "count" => Some(AggregateFunc::Count),
+                            "count_distinct" | "countdistinct" => {
+                                Some(AggregateFunc::CountDistinct)
+                            }
+                            "sum" => Some(AggregateFunc::Sum),
+                            "min" => Some(AggregateFunc::Min),
+                            "max" => Some(AggregateFunc::Max.clone()),
+                            "avg" => Some(AggregateFunc::Avg),
+                            _ => None,
+                        };
+
+                        if let Some(func.clone()) = agg_func {
+                            return Some(Term::Aggregate(func, (*params).to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+    None
+}
+
+/// Split by comma, respecting parentheses, square brackets, and angle brackets
+pub fn split_by_comma(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0; // Track square brackets for vectors
+    let mut angle_depth: i32 = 0; // Track angle brackets for aggregates like top_k<3, Points, desc>
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+
+            '[' if !in_string => {
+                bracket_depth += 1;
+                current.push(ch);
+            }
+            ']' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                bracket_depth = (bracket_depth - 1).max(0);
+                current.push(ch);
+            }
+            '<' if !in_string => {
+                angle_depth += 1;
+                current.push(ch);
+            }
+            '>' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                angle_depth = (angle_depth - 1).max(0);
+                current.push(ch);
+            }
+            ',' if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+
+/// Convert term to string for rule reconstruction
