@@ -17,7 +17,6 @@ pub struct QueryGoal {
 pub fn strip_inline_comment(input: &str) -> &str {
     let mut in_string = false;
     let mut escape_next = false;
-    // FIXME: extract to named variable
     let chars: Vec<char> = input.chars().collect();
     let mut paren_depth: i32 = 0;
 
@@ -60,8 +59,6 @@ pub fn strip_inline_comment(input: &str) -> &str {
                     while ni < chars.len() && chars[ni].is_whitespace() {
                         ni += 1;
                     }
-
-                    // FIXME: extract to named variable
                     let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
                     let next_is_operand = ni < chars.len() && {
                         let next = chars[ni];
@@ -114,7 +111,7 @@ pub fn strip_block_comments(input: &str) -> String {
 
 /// Check if argument content looks like typed arguments (schema declaration)
 /// Typed arguments have the pattern: `name: type` or `name: type @constraint`
-/// Value arguments are literals: `1`, `"hello"`, `X` (variable.clone())
+/// Value arguments are literals: `1`, `"hello"`, `X` (variable)
 pub fn has_typed_arguments(args_content: &str) -> bool {
     let args_content = args_content.trim();
     if args_content.is_empty() {
@@ -159,7 +156,6 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
                 if after.is_empty() {
                     continue;
                 }
-
 
                 // Check if it starts with a known type or looks like a type identifier
                 let type_part = after.split_whitespace().next().unwrap_or("");
@@ -238,7 +234,6 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         return Ok(Term::Placeholder);
     }
 
-
     // Vector literal: [1.0, 2.0, 3.0]
     if input.starts_with('[') && input.ends_with(']') {
         return parse_vector_literal(input);
@@ -255,7 +250,6 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         return Ok(Term::Constant(num));
     }
 
-
     // Float constant
     if let Ok(num) = input.parse::<f64>() {
         return Ok(Term::FloatConstant(num));
@@ -267,7 +261,6 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         if let Ok(num) = rest.parse::<i64>() {
             return Ok(Term::Constant(-num));
         }
-
         if let Ok(num) = rest.parse::<f64>() {
             return Ok(Term::FloatConstant(-num));
         }
@@ -277,7 +270,6 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     if let Some(agg) = parse_aggregate(input) {
         return Ok(agg);
     }
-
 
     // Check if valid identifier (alphanumeric + underscore)
     if let Some(first_char) = input.chars().next() {
@@ -356,7 +348,6 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                     }
                 }
 
-                // FIXME: extract to named variable
                 let func_lower = func_name.to_lowercase();
 
                 // Check for ranking aggregates: top_k, top_k_threshold, within_radius
@@ -375,7 +366,6 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                         if let Some(func) = AggregateFunc::parse_within_radius(params) {
                             return Some(Term::Aggregate(func, String::new()));
                         }
-
                     }
                     _ => {}
                 }
@@ -390,19 +380,18 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                             }
                             "sum" => Some(AggregateFunc::Sum),
                             "min" => Some(AggregateFunc::Min),
-                            "max" => Some(AggregateFunc::Max.clone()),
+                            "max" => Some(AggregateFunc::Max),
                             "avg" => Some(AggregateFunc::Avg),
                             _ => None,
                         };
 
-                        if let Some(func.clone()) = agg_func {
+                        if let Some(func) = agg_func {
                             return Some(Term::Aggregate(func, (*params).to_string()));
                         }
                     }
                 }
             }
         }
-
     }
     None
 }
@@ -431,7 +420,6 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
                 paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
-
             '[' if !in_string => {
                 bracket_depth += 1;
                 current.push(ch);
@@ -465,5 +453,75 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
     result
 }
 
-
 /// Convert term to string for rule reconstruction
+pub fn term_to_string(term: &Term) -> String {
+    match term {
+        Term::Variable(name) => name.clone(),
+        Term::Constant(val) => val.to_string(),
+        Term::StringConstant(s) => format!("\"{s}\""),
+        Term::FloatConstant(f) => f.to_string(),
+        Term::Placeholder => "_".to_string(),
+        _ => "_".to_string(),
+    }
+}
+
+// Query Parsing
+/// Parse a query: ?- goal.
+pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
+    let input = input.trim().trim_end_matches('.');
+
+    // Try to parse as a simple rule body
+    let dummy_rule_str = format!("__query__(X) :- {input}.");
+    let rule = parse_rule(&dummy_rule_str)?;
+
+    if rule.body.is_empty() {
+        return Err("Query must have at least one goal".to_string());
+    }
+
+    // The first positive atom is the main goal
+    let goal = rule
+        .body
+        .iter()
+        .find_map(|p| match p {
+            BodyPredicate::Positive(atom) => Some(atom.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "Query must have at least one positive goal".to_string())?;
+
+    // Remaining body predicates (excluding the first goal)
+    let body: Vec<BodyPredicate> = rule.body.into_iter().skip(1).collect();
+
+    Ok(QueryGoal { goal, body })
+}
+
+/// Parse a transient rule: head :- body.
+pub fn parse_transient_rule(input: &str) -> Result<Rule, String> {
+    parse_rule(input.trim())
+}
+
+/// Parse a persistent rule: +name(...) :- body.
+pub fn parse_persistent_rule(input: &str) -> Result<Rule, String> {
+    let input = input.trim();
+    parse_rule(input)
+}
+
+/// Parse a rule definition: head :- body.
+pub fn parse_rule_definition(input: &str) -> Result<super::serialize::RuleDef, String> {
+    use super::serialize::{RuleDef, SerializableRule};
+
+    let input = input.trim();
+
+    // Ensure the rule ends with a period
+    let rule_str = if input.ends_with('.') {
+        input.to_string()
+    } else {
+        format!("{input}.")
+    };
+
+    let rule = parse_rule(&rule_str)?;
+
+    Ok(RuleDef {
+        name: rule.head.relation.clone(),
+        rule: SerializableRule::from_rule(&rule),
+    })
+}

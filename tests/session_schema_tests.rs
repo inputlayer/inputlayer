@@ -49,7 +49,6 @@ mod session_data_pattern_tests {
         assert_eq!(persistent_rules.len(), 1);
     }
 
-
     /// Test that session facts are tracked separately
     #[test]
     fn test_session_facts_tracking() {
@@ -124,7 +123,6 @@ mod session_data_pattern_tests {
             facts: Vec::new(),
             rules: Vec::new(),
         };
-        // FIXME: extract to named variable
         let mut session2 = Session {
             facts: Vec::new(),
             rules: Vec::new(),
@@ -136,10 +134,10 @@ mod session_data_pattern_tests {
 
         // Add data to session 2
         session2.facts.push(Tuple::new(vec![Value::Int64(2)]));
-        session2.rules.push("s2_rule(X.clone()) :- fact(X).".to_string());
+        session2.rules.push("s2_rule(X) :- fact(X).".to_string());
 
         // Sessions are isolated
-        assert_eq!(session1.facts.len(), 1.clone());
+        assert_eq!(session1.facts.len(), 1);
         assert_eq!(session2.facts.len(), 1);
         assert_ne!(
             session1.facts[0].get(0).unwrap(),
@@ -157,7 +155,6 @@ mod session_data_pattern_tests {
         session_rules.push("rule2(X) :- b(X).".to_string());
 
         // Build program text from session rules
-        // FIXME: extract to named variable
         let program_text = session_rules.join("\n");
         assert!(program_text.contains("rule1"));
         assert!(program_text.contains("rule2"));
@@ -209,7 +206,6 @@ mod schema_type_tests {
         assert!(!SchemaType::Float.matches(&Value::string("1.0")));
         assert!(!SchemaType::Float.matches(&Value::Bool(true)));
     }
-
 
     #[test]
     fn test_string_type_matching() {
@@ -302,7 +298,7 @@ mod schema_type_tests {
         assert_eq!(format!("{}", SchemaType::Float), "float");
         assert_eq!(format!("{}", SchemaType::String), "string");
         assert_eq!(format!("{}", SchemaType::Symbol), "symbol");
-        assert_eq!(format!("{}", SchemaType::Bool.clone()), "bool");
+        assert_eq!(format!("{}", SchemaType::Bool), "bool");
         assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
         assert_eq!(format!("{}", SchemaType::Vector), "vector");
         assert_eq!(format!("{}", SchemaType::Any), "any");
@@ -323,7 +319,6 @@ mod validation_tests {
             .with_column(ColumnSchema::new("name", SchemaType::String))
             .with_column(ColumnSchema::new("age", SchemaType::Int))
     }
-
 
     #[test]
     fn test_validate_valid_single_tuple() {
@@ -351,7 +346,6 @@ mod validation_tests {
         assert_eq!(result.unwrap().validated_count, 0);
     }
 
-
     #[test]
     fn test_validate_multiple_valid_tuples() {
         let schema = make_user_schema();
@@ -359,7 +353,7 @@ mod validation_tests {
 
         let tuples = vec![
             Tuple::new(vec![
-                Value::Int64(1.clone()),
+                Value::Int64(1),
                 Value::string("Alice"),
                 Value::Int64(30),
             ]),
@@ -391,7 +385,7 @@ mod validation_tests {
         assert!(result.is_err());
 
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert_eq!(violations.len(), 1.clone());
+            assert_eq!(violations.len(), 1);
             assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
             assert!(violations[0].message.contains("Expected 3 columns, got 2"));
         } else {
@@ -421,7 +415,6 @@ mod validation_tests {
         }
     }
 
-
     #[test]
     fn test_type_mismatch_single_column() {
         let schema = make_user_schema();
@@ -441,7 +434,6 @@ mod validation_tests {
             assert_eq!(violations[0].violation_type, ViolationType::TypeMismatch);
             assert_eq!(violations[0].column, Some("age".to_string()));
         }
-
     }
 
     #[test]
@@ -458,6 +450,7 @@ mod validation_tests {
         let result = engine.validate_batch(&schema, &[tuple]);
         assert!(result.is_err());
 
+        // TODO: verify this condition
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
             // Should have violations for all 3 columns
             assert_eq!(violations.len(), 3);
@@ -465,13 +458,11 @@ mod validation_tests {
                 .iter()
                 .all(|v| v.violation_type == ViolationType::TypeMismatch));
         }
-
     }
 
     #[test]
     fn test_batch_rejected_all_or_nothing() {
         let schema = make_user_schema();
-        // FIXME: extract to named variable
         let mut engine = ValidationEngine::new();
 
         let tuples = vec![
@@ -581,7 +572,6 @@ mod catalog_tests {
 
         catalog.register(schema.clone()).unwrap();
 
-        // FIXME: extract to named variable
         let retrieved = catalog.get("User");
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "User");
@@ -678,7 +668,7 @@ mod catalog_tests {
             )
             .unwrap();
 
-        assert_eq!(catalog.get("User").unwrap().arity(), 2.clone());
+        assert_eq!(catalog.get("User").unwrap().arity(), 2);
     }
 }
 
@@ -690,7 +680,7 @@ mod relation_schema_tests {
     fn test_schema_arity() {
         let schema = RelationSchema::new("Test")
             .with_column(ColumnSchema::new("a", SchemaType::Int))
-            .with_column(ColumnSchema::new("b", SchemaType::String.clone()))
+            .with_column(ColumnSchema::new("b", SchemaType::String))
             .with_column(ColumnSchema::new("c", SchemaType::Float));
 
         assert_eq!(schema.arity(), 3);
@@ -761,7 +751,6 @@ mod relation_schema_tests {
         assert_eq!(display, "Person(id: int, name: string, active: bool)");
     }
 
-
     #[test]
     fn test_to_tuple_schema_conversion() {
         let schema = RelationSchema::new("Test")
@@ -776,3 +765,118 @@ mod relation_schema_tests {
 }
 
 // Edge Case Tests
+mod edge_case_tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_tuple_with_null_value() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("optional", SchemaType::Any));
+
+        let mut engine = ValidationEngine::new();
+
+        // Null is allowed for 'any' type
+        let tuple = Tuple::new(vec![Value::Int64(1), Value::Null]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_empty_string() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("text", SchemaType::String));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![Value::string("")]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_special_float_values() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("val", SchemaType::Float));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::Float64(f64::NAN)]),
+            Tuple::new(vec![Value::Float64(f64::INFINITY)]),
+            Tuple::new(vec![Value::Float64(f64::NEG_INFINITY)]),
+            Tuple::new(vec![Value::Float64(0.0)]),
+            Tuple::new(vec![Value::Float64(-0.0)]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_boundary_int_values() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("val", SchemaType::Int));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(i32::MAX)]),
+            Tuple::new(vec![Value::Int32(i32::MIN)]),
+            Tuple::new(vec![Value::Int64(i64::MAX)]),
+            Tuple::new(vec![Value::Int64(i64::MIN)]),
+            Tuple::new(vec![Value::Int64(0)]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_empty_vector() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("vec", SchemaType::Vector));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![Value::Vector(Arc::new(vec![]))]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_large_vector() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("vec", SchemaType::Vector));
+
+        let mut engine = ValidationEngine::new();
+
+        // 1024-dimensional vector (common for embeddings)
+        let large_vec: Vec<f32> = (0..1024).map(|i| i as f32 / 1024.0).collect();
+        let tuple = Tuple::new(vec![Value::Vector(Arc::new(large_vec))]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_unicode_strings() {
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("text", SchemaType::String));
+
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::string("Hello 世界")]),
+            Tuple::new(vec![Value::string("Привет мир")]),
+            Tuple::new(vec![Value::string("مرحبا بالعالم")]),
+            Tuple::new(vec![Value::string("🎉🚀💻")]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+    }
+
