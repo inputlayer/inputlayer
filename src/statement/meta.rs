@@ -230,3 +230,216 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
     }
 }
 
+fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    if parts.len() == 1 {
+        Ok(MetaCommand::SessionList)
+    } else {
+        match parts[1].to_lowercase().as_str() {
+            "clear" => Ok(MetaCommand::SessionClear),
+            "drop" => {
+                if parts.len() < 3 {
+                    Err("Usage: .session drop <n>".to_string())
+                } else {
+                    let index: usize = parts[2].parse().map_err(|_| {
+                        format!("Invalid index '{}': must be a number (1-based)", parts[2])
+                    })?;
+                    if index == 0 {
+                        return Err("Index must be 1 or greater (1-based indexing)".to_string());
+                    }
+                    Ok(MetaCommand::SessionDrop(index - 1)) // Convert to 0-based
+                }
+            }
+            _ => Err(format!(
+                "Unknown session subcommand: {}. Use: clear, drop <n>",
+                parts[1]
+            )),
+        }
+    }
+}
+
+fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    // .load <file> [--replace|--merge]
+    if parts.len() < 2 {
+        Err("Usage: .load <file> [--replace|--merge]".to_string())
+    } else {
+        let path = parts[1].to_string();
+        let mode = if parts.len() > 2 {
+            match parts[2].to_lowercase().as_str() {
+                "--replace" | "-r" | "replace" => LoadMode::Replace,
+                "--merge" | "-m" | "merge" => LoadMode::Merge,
+                _ => {
+                    return Err(format!(
+                        "Unknown load mode: {}. Use --replace or --merge",
+                        parts[2]
+                    ))
+                }
+            }
+        } else {
+            LoadMode::Default
+        };
+        Ok(MetaCommand::Load { path, mode })
+    }
+}
+
+fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
+    if parts.len() == 1 {
+        // Default to listing indexes
+        return Ok(MetaCommand::IndexList);
+    }
+
+    match parts[1].to_lowercase().as_str() {
+        "list" => Ok(MetaCommand::IndexList),
+        "drop" => {
+            if parts.len() < 3 {
+                Err("Usage: .index drop <name>".to_string())
+            } else {
+                Ok(MetaCommand::IndexDrop(parts[2].to_string()))
+            }
+        }
+        "stats" => {
+            if parts.len() < 3 {
+                Err("Usage: .index stats <name>".to_string())
+            } else {
+                Ok(MetaCommand::IndexStats(parts[2].to_string()))
+            }
+        }
+        "rebuild" => {
+            if parts.len() < 3 {
+                Err("Usage: .index rebuild <name>".to_string())
+            } else {
+                Ok(MetaCommand::IndexRebuild(parts[2].to_string()))
+            }
+        }
+        "create" => parse_index_create_command(input),
+        _ => Err(format!(
+            "Unknown index subcommand: {}. Use: list, create, drop, stats, rebuild",
+            parts[1]
+        )),
+    }
+}
+
+/// Parse `.index create <name> on <relation>(<column>) [type hnsw] [metric cosine] [m 16] [ef_construction 200] [ef_search 50]`
+fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
+    // Extract the part after "index create"
+    let input = input.trim_start_matches('.').trim();
+    let after_index = input
+        .strip_prefix("index")
+        .or_else(|| input.strip_prefix("idx"))
+        .ok_or("Expected .index command")?
+        .trim();
+    let after_create = after_index
+        .strip_prefix("create")
+        .ok_or("Expected 'create' subcommand")?
+        .trim();
+
+    if after_create.is_empty() {
+        return Err(
+            "Usage: .index create <name> on <relation>(<column>) [type hnsw] [metric cosine] [m 16]"
+                .to_string(),
+        );
+    }
+
+    // Parse: <name> on <relation>(<column>) [options...]
+    let tokens: Vec<&str> = after_create.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Err("Missing index name".to_string());
+    }
+
+    let name = tokens[0].to_string();
+
+    // Find "on" keyword
+    let on_pos = tokens
+        .iter()
+        .position(|t| t.to_lowercase() == "on")
+        .ok_or("Missing 'on' keyword. Usage: .index create <name> on <relation>(<column>)")?;
+
+    if on_pos + 1 >= tokens.len() {
+        return Err("Missing relation specification after 'on'".to_string());
+    }
+
+    // Parse relation(column)
+    let relation_spec = tokens[on_pos + 1];
+    let (relation, column) = parse_relation_column(relation_spec)?;
+
+    // Parse optional parameters
+    let mut index_type = "hnsw".to_string();
+    let mut metric = None;
+    let mut m = None;
+    let mut ef_construction = None;
+    let mut ef_search = None;
+
+    let mut i = on_pos + 2;
+    while i < tokens.len() {
+        let key = tokens[i].to_lowercase();
+        match key.as_str() {
+            "type" => {
+                if i + 1 >= tokens.len() {
+                    return Err("Missing value for 'type'".to_string());
+                }
+                index_type = tokens[i + 1].to_lowercase();
+                i += 2;
+            }
+            "metric" => {
+                if i + 1 >= tokens.len() {
+                    return Err("Missing value for 'metric'".to_string());
+                }
+                metric = Some(tokens[i + 1].to_lowercase());
+                i += 2;
+            }
+            "m" => {
+                if i + 1 >= tokens.len() {
+                    return Err("Missing value for 'm'".to_string());
+                }
+                m = Some(tokens[i + 1].parse().map_err(|_| {
+                    format!(
+                        "Invalid value for 'm': expected integer, got '{}'",
+                        tokens[i + 1]
+                    )
+                })?);
+                i += 2;
+            }
+            "ef_construction" | "efc" => {
+                if i + 1 >= tokens.len() {
+                    return Err("Missing value for 'ef_construction'".to_string());
+                }
+                ef_construction = Some(tokens[i + 1].parse().map_err(|_| {
+                    format!(
+                        "Invalid value for 'ef_construction': expected integer, got '{}'",
+                        tokens[i + 1]
+                    )
+                })?);
+                i += 2;
+            }
+            "ef_search" | "efs" => {
+                if i + 1 >= tokens.len() {
+                    return Err("Missing value for 'ef_search'".to_string());
+                }
+                ef_search = Some(tokens[i + 1].parse().map_err(|_| {
+                    format!(
+                        "Invalid value for 'ef_search': expected integer, got '{}'",
+                        tokens[i + 1]
+                    )
+                })?);
+                i += 2;
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown option: '{key}'. Valid options: type, metric, m, ef_construction, ef_search"
+                ));
+            }
+        }
+    }
+
+    Ok(MetaCommand::IndexCreate(IndexCreateOptions {
+        name,
+        relation,
+        column,
+        index_type,
+        metric,
+        m,
+        ef_construction,
+        ef_search,
+    }))
+}
+
+/// Parse `relation(column)` specification
