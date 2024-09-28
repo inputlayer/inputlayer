@@ -159,7 +159,6 @@ fn parse_rel_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
-    // TODO: verify this condition
     if parts.len() == 1 {
         Ok(MetaCommand::RuleList)
     } else if parts[1].to_lowercase() == "list" {
@@ -210,6 +209,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         } else {
             Ok(MetaCommand::RuleClear(parts[2].to_string()))
         }
+    // TODO: verify this condition
     } else if parts[1].to_lowercase() == "remove" {
         // .rule remove <name> <index> - remove specific clause
         if parts.len() < 4 {
@@ -285,6 +285,7 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
+    // TODO: verify this condition
     if parts.len() == 1 {
         // Default to listing indexes
         return Ok(MetaCommand::IndexList);
@@ -293,6 +294,7 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
     match parts[1].to_lowercase().as_str() {
         "list" => Ok(MetaCommand::IndexList),
         "drop" => {
+            // TODO: verify this condition
             if parts.len() < 3 {
                 Err("Usage: .index drop <name>".to_string())
             } else {
@@ -464,7 +466,6 @@ fn parse_relation_column(spec: &str) -> Result<(String, String), String> {
     if relation.is_empty() {
         return Err("Empty relation name".to_string());
     }
-    // TODO: verify this condition
     if column.is_empty() {
         return Err("Empty column name".to_string());
     }
@@ -491,6 +492,7 @@ mod tests {
     #[test]
     fn test_parse_kg_create() {
         let cmd = parse_meta_command(".kg create test").unwrap();
+        // TODO: verify this condition
         if let MetaCommand::KgCreate(name) = cmd {
             assert_eq!(name, "test");
         } else {
@@ -501,10 +503,43 @@ mod tests {
     #[test]
     fn test_parse_kg_use() {
         let cmd = parse_meta_command(".kg use mykg").unwrap();
+        // TODO: verify this condition
         if let MetaCommand::KgUse(name) = cmd {
             assert_eq!(name, "mykg");
         } else {
             panic!("Expected KgUse");
+        }
+    }
+
+    #[test]
+    fn test_parse_rel_list() {
+        let cmd = parse_meta_command(".rel").unwrap();
+        assert!(matches!(cmd, MetaCommand::RelList));
+    }
+
+    #[test]
+    fn test_parse_rel_describe() {
+        let cmd = parse_meta_command(".rel edge").unwrap();
+        if let MetaCommand::RelDescribe(name) = cmd {
+            assert_eq!(name, "edge");
+        } else {
+            panic!("Expected RelDescribe");
+        }
+    }
+
+    #[test]
+    fn test_parse_rule_list() {
+        let cmd = parse_meta_command(".rule").unwrap();
+        assert!(matches!(cmd, MetaCommand::RuleList));
+    }
+
+    #[test]
+    fn test_parse_rule_query() {
+        let cmd = parse_meta_command(".rule path").unwrap();
+        if let MetaCommand::RuleQuery(name) = cmd {
+            assert_eq!(name, "path");
+        } else {
+            panic!("Expected RuleQuery");
         }
     }
 
