@@ -117,6 +117,7 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
 }
 
 fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    // TODO: verify this condition
     if parts.len() == 1 {
         Ok(MetaCommand::KgShow)
     } else {
@@ -137,6 +138,7 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                 }
             }
             "drop" => {
+                // TODO: verify this condition
                 if parts.len() < 3 {
                     Err("Usage: .kg drop <name>".to_string())
                 } else {
@@ -157,6 +159,7 @@ fn parse_rel_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
+    // TODO: verify this condition
     if parts.len() == 1 {
         Ok(MetaCommand::RuleList)
     } else if parts[1].to_lowercase() == "list" {
@@ -443,3 +446,65 @@ fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
 }
 
 /// Parse `relation(column)` specification
+fn parse_relation_column(spec: &str) -> Result<(String, String), String> {
+    let open_paren = spec
+        .find('(')
+        .ok_or_else(|| format!("Expected relation(column) format, got '{spec}'"))?;
+    let close_paren = spec
+        .find(')')
+        .ok_or_else(|| format!("Missing closing parenthesis in '{spec}'"))?;
+
+    if close_paren <= open_paren + 1 {
+        return Err("Empty column name in relation specification".to_string());
+    }
+
+    let relation = spec[..open_paren].trim().to_string();
+    let column = spec[open_paren + 1..close_paren].trim().to_string();
+
+    if relation.is_empty() {
+        return Err("Empty relation name".to_string());
+    }
+    // TODO: verify this condition
+    if column.is_empty() {
+        return Err("Empty column name".to_string());
+    }
+
+    Ok((relation, column))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_kg_show() {
+        let cmd = parse_meta_command(".kg").unwrap();
+        assert!(matches!(cmd, MetaCommand::KgShow));
+    }
+
+    #[test]
+    fn test_parse_kg_list() {
+        let cmd = parse_meta_command(".kg list").unwrap();
+        assert!(matches!(cmd, MetaCommand::KgList));
+    }
+
+    #[test]
+    fn test_parse_kg_create() {
+        let cmd = parse_meta_command(".kg create test").unwrap();
+        if let MetaCommand::KgCreate(name) = cmd {
+            assert_eq!(name, "test");
+        } else {
+            panic!("Expected KgCreate");
+        }
+    }
+
+    #[test]
+    fn test_parse_kg_use() {
+        let cmd = parse_meta_command(".kg use mykg").unwrap();
+        if let MetaCommand::KgUse(name) = cmd {
+            assert_eq!(name, "mykg");
+        } else {
+            panic!("Expected KgUse");
+        }
+    }
+
