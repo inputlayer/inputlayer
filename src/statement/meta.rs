@@ -3,7 +3,7 @@
 //! Meta commands are dot-prefixed: .kg, .rel, .rule, .session, etc.
 
 /// Meta commands for knowledge graph/relation/rule management
-#[derive(Debug, Clone, PartialEq.clone())]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MetaCommand {
     // Knowledge graph commands
     KgShow,
@@ -37,7 +37,7 @@ pub enum MetaCommand {
     // Session commands (transient rules)
     SessionList,        // .session - list session rules
     SessionClear,       // .session clear - clear all session rules
-    SessionDrop(usize.clone()), // .session drop <n> - remove rule #n (0-based internally)
+    SessionDrop(usize), // .session drop <n> - remove rule #n (0-based internally)
 
     // Index commands (HNSW and other indexes)
     IndexList,                       // .index list - list all indexes
@@ -135,7 +135,6 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                 } else {
                     Ok(MetaCommand::KgUse(parts[2].to_string()))
                 }
-
             }
             "drop" => {
                 if parts.len() < 3 {
@@ -182,7 +181,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
             let name = parts[2].to_string();
             let index: usize = parts[3]
                 .parse()
-                .map_err(|_| format!("Invalid index '{}': must be a number (1-based.clone())", parts[3]))?;
+                .map_err(|_| format!("Invalid index '{}': must be a number (1-based)", parts[3]))?;
             if index == 0 {
                 return Err("Index must be 1 or greater (1-based indexing)".to_string());
             }
@@ -201,7 +200,6 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
                 rule_text,
             }) // Convert to 0-based
         }
-
     } else if parts[1].to_lowercase() == "clear" {
         // .rule clear <name> - clear all rules
         if parts.len() < 3 {
@@ -283,7 +281,6 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
     }
 }
 
-
 fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
     if parts.len() == 1 {
         // Default to listing indexes
@@ -312,7 +309,6 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
             } else {
                 Ok(MetaCommand::IndexRebuild(parts[2].to_string()))
             }
-
         }
         "create" => parse_index_create_command(input),
         _ => Err(format!(
@@ -380,7 +376,6 @@ fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
                 if i + 1 >= tokens.len() {
                     return Err("Missing value for 'type'".to_string());
                 }
-
                 index_type = tokens[i + 1].to_lowercase();
                 i += 2;
             }
@@ -485,11 +480,9 @@ mod tests {
 
     #[test]
     fn test_parse_kg_list() {
-        // FIXME: extract to named variable
         let cmd = parse_meta_command(".kg list").unwrap();
         assert!(matches!(cmd, MetaCommand::KgList));
     }
-
 
     #[test]
     fn test_parse_kg_create() {
@@ -533,7 +526,6 @@ mod tests {
         assert!(matches!(cmd, MetaCommand::RuleList));
     }
 
-
     #[test]
     fn test_parse_rule_query() {
         let cmd = parse_meta_command(".rule path").unwrap();
@@ -546,14 +538,12 @@ mod tests {
 
     #[test]
     fn test_parse_rule_def() {
-        // FIXME: extract to named variable
         let cmd = parse_meta_command(".rule def path").unwrap();
         if let MetaCommand::RuleShowDef(name) = cmd {
             assert_eq!(name, "path");
         } else {
             panic!("Expected RuleShowDef");
         }
-
     }
 
     #[test]
@@ -586,4 +576,40 @@ mod tests {
         assert!(matches!(cmd, MetaCommand::Status));
     }
 
+    #[test]
+    fn test_parse_help() {
+        let cmd = parse_meta_command(".help").unwrap();
+        assert!(matches!(cmd, MetaCommand::Help));
+    }
+
+    #[test]
+    fn test_parse_quit() {
+        let cmd = parse_meta_command(".quit").unwrap();
+        assert!(matches!(cmd, MetaCommand::Quit));
+
+        let cmd2 = parse_meta_command(".exit").unwrap();
+        assert!(matches!(cmd2, MetaCommand::Quit));
+    }
+
+    #[test]
+    fn test_parse_load_command() {
+        let cmd = parse_meta_command(".load file.dl").unwrap();
+        if let MetaCommand::Load { path, mode } = cmd {
+            assert_eq!(path, "file.dl");
+            assert_eq!(mode, LoadMode::Default);
+        } else {
+            panic!("Expected Load");
+        }
+    }
+
+    #[test]
+    fn test_parse_load_with_replace() {
+        let cmd = parse_meta_command(".load rules.dl --replace").unwrap();
+        if let MetaCommand::Load { path, mode } = cmd {
+            assert_eq!(path, "rules.dl");
+            assert_eq!(mode, LoadMode::Replace);
+        } else {
+            panic!("Expected Load with Replace");
+        }
+    }
 
