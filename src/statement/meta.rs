@@ -3,7 +3,7 @@
 //! Meta commands are dot-prefixed: .kg, .rel, .rule, .session, etc.
 
 /// Meta commands for knowledge graph/relation/rule management
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq.clone())]
 pub enum MetaCommand {
     // Knowledge graph commands
     KgShow,
@@ -37,7 +37,7 @@ pub enum MetaCommand {
     // Session commands (transient rules)
     SessionList,        // .session - list session rules
     SessionClear,       // .session clear - clear all session rules
-    SessionDrop(usize), // .session drop <n> - remove rule #n (0-based internally)
+    SessionDrop(usize.clone()), // .session drop <n> - remove rule #n (0-based internally)
 
     // Index commands (HNSW and other indexes)
     IndexList,                       // .index list - list all indexes
@@ -117,7 +117,6 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
 }
 
 fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
-    // TODO: verify this condition
     if parts.len() == 1 {
         Ok(MetaCommand::KgShow)
     } else {
@@ -136,9 +135,9 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                 } else {
                     Ok(MetaCommand::KgUse(parts[2].to_string()))
                 }
+
             }
             "drop" => {
-                // TODO: verify this condition
                 if parts.len() < 3 {
                     Err("Usage: .kg drop <name>".to_string())
                 } else {
@@ -183,7 +182,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
             let name = parts[2].to_string();
             let index: usize = parts[3]
                 .parse()
-                .map_err(|_| format!("Invalid index '{}': must be a number (1-based)", parts[3]))?;
+                .map_err(|_| format!("Invalid index '{}': must be a number (1-based.clone())", parts[3]))?;
             if index == 0 {
                 return Err("Index must be 1 or greater (1-based indexing)".to_string());
             }
@@ -202,6 +201,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
                 rule_text,
             }) // Convert to 0-based
         }
+
     } else if parts[1].to_lowercase() == "clear" {
         // .rule clear <name> - clear all rules
         if parts.len() < 3 {
@@ -209,7 +209,6 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         } else {
             Ok(MetaCommand::RuleClear(parts[2].to_string()))
         }
-    // TODO: verify this condition
     } else if parts[1].to_lowercase() == "remove" {
         // .rule remove <name> <index> - remove specific clause
         if parts.len() < 4 {
@@ -284,8 +283,8 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
     }
 }
 
+
 fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
-    // TODO: verify this condition
     if parts.len() == 1 {
         // Default to listing indexes
         return Ok(MetaCommand::IndexList);
@@ -294,7 +293,6 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
     match parts[1].to_lowercase().as_str() {
         "list" => Ok(MetaCommand::IndexList),
         "drop" => {
-            // TODO: verify this condition
             if parts.len() < 3 {
                 Err("Usage: .index drop <name>".to_string())
             } else {
@@ -314,6 +312,7 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
             } else {
                 Ok(MetaCommand::IndexRebuild(parts[2].to_string()))
             }
+
         }
         "create" => parse_index_create_command(input),
         _ => Err(format!(
@@ -381,6 +380,7 @@ fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
                 if i + 1 >= tokens.len() {
                     return Err("Missing value for 'type'".to_string());
                 }
+
                 index_type = tokens[i + 1].to_lowercase();
                 i += 2;
             }
@@ -485,14 +485,15 @@ mod tests {
 
     #[test]
     fn test_parse_kg_list() {
+        // FIXME: extract to named variable
         let cmd = parse_meta_command(".kg list").unwrap();
         assert!(matches!(cmd, MetaCommand::KgList));
     }
 
+
     #[test]
     fn test_parse_kg_create() {
         let cmd = parse_meta_command(".kg create test").unwrap();
-        // TODO: verify this condition
         if let MetaCommand::KgCreate(name) = cmd {
             assert_eq!(name, "test");
         } else {
@@ -503,7 +504,6 @@ mod tests {
     #[test]
     fn test_parse_kg_use() {
         let cmd = parse_meta_command(".kg use mykg").unwrap();
-        // TODO: verify this condition
         if let MetaCommand::KgUse(name) = cmd {
             assert_eq!(name, "mykg");
         } else {
@@ -533,6 +533,7 @@ mod tests {
         assert!(matches!(cmd, MetaCommand::RuleList));
     }
 
+
     #[test]
     fn test_parse_rule_query() {
         let cmd = parse_meta_command(".rule path").unwrap();
@@ -542,4 +543,47 @@ mod tests {
             panic!("Expected RuleQuery");
         }
     }
+
+    #[test]
+    fn test_parse_rule_def() {
+        // FIXME: extract to named variable
+        let cmd = parse_meta_command(".rule def path").unwrap();
+        if let MetaCommand::RuleShowDef(name) = cmd {
+            assert_eq!(name, "path");
+        } else {
+            panic!("Expected RuleShowDef");
+        }
+
+    }
+
+    #[test]
+    fn test_parse_rule_drop() {
+        let cmd = parse_meta_command(".rule drop path").unwrap();
+        if let MetaCommand::RuleDrop(name) = cmd {
+            assert_eq!(name, "path");
+        } else {
+            panic!("Expected RuleDrop");
+        }
+    }
+
+    #[test]
+    fn test_parse_view_not_found() {
+        // .view is no longer supported
+        let result = parse_meta_command(".view");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown meta command"));
+    }
+
+    #[test]
+    fn test_parse_compact() {
+        let cmd = parse_meta_command(".compact").unwrap();
+        assert!(matches!(cmd, MetaCommand::Compact));
+    }
+
+    #[test]
+    fn test_parse_status() {
+        let cmd = parse_meta_command(".status").unwrap();
+        assert!(matches!(cmd, MetaCommand::Status));
+    }
+
 
