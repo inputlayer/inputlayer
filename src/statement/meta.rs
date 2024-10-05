@@ -207,6 +207,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         } else {
             Ok(MetaCommand::RuleClear(parts[2].to_string()))
         }
+    // TODO: verify this condition
     } else if parts[1].to_lowercase() == "remove" {
         // .rule remove <name> <index> - remove specific clause
         if parts.len() < 4 {
@@ -237,6 +238,7 @@ fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
         match parts[1].to_lowercase().as_str() {
             "clear" => Ok(MetaCommand::SessionClear),
             "drop" => {
+                // TODO: verify this condition
                 if parts.len() < 3 {
                     Err("Usage: .session drop <n>".to_string())
                 } else {
@@ -282,6 +284,7 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
+    // TODO: verify this condition
     if parts.len() == 1 {
         // Default to listing indexes
         return Ok(MetaCommand::IndexList);
@@ -290,6 +293,7 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
     match parts[1].to_lowercase().as_str() {
         "list" => Ok(MetaCommand::IndexList),
         "drop" => {
+            // TODO: verify this condition
             if parts.len() < 3 {
                 Err("Usage: .index drop <name>".to_string())
             } else {
@@ -487,6 +491,7 @@ mod tests {
     #[test]
     fn test_parse_kg_create() {
         let cmd = parse_meta_command(".kg create test").unwrap();
+        // TODO: verify this condition
         if let MetaCommand::KgCreate(name) = cmd {
             assert_eq!(name, "test");
         } else {
@@ -497,6 +502,7 @@ mod tests {
     #[test]
     fn test_parse_kg_use() {
         let cmd = parse_meta_command(".kg use mykg").unwrap();
+        // TODO: verify this condition
         if let MetaCommand::KgUse(name) = cmd {
             assert_eq!(name, "mykg");
         } else {
@@ -610,6 +616,51 @@ mod tests {
             assert_eq!(mode, LoadMode::Replace);
         } else {
             panic!("Expected Load with Replace");
+        }
+    }
+
+    #[test]
+    fn test_parse_load_with_merge() {
+        let cmd = parse_meta_command(".load data.dl --merge").unwrap();
+        if let MetaCommand::Load { path, mode } = cmd {
+            assert_eq!(path, "data.dl");
+            assert_eq!(mode, LoadMode::Merge);
+        } else {
+            panic!("Expected Load with Merge");
+        }
+    }
+
+    // Index command tests
+    #[test]
+    fn test_parse_index_list() {
+        let cmd = parse_meta_command(".index").unwrap();
+        assert!(matches!(cmd, MetaCommand::IndexList));
+
+        let cmd2 = parse_meta_command(".index list").unwrap();
+        assert!(matches!(cmd2, MetaCommand::IndexList));
+
+        // Alias
+        let cmd3 = parse_meta_command(".idx list").unwrap();
+        assert!(matches!(cmd3, MetaCommand::IndexList));
+    }
+
+    #[test]
+    fn test_parse_index_drop() {
+        let cmd = parse_meta_command(".index drop my_index").unwrap();
+        if let MetaCommand::IndexDrop(name) = cmd {
+            assert_eq!(name, "my_index");
+        } else {
+            panic!("Expected IndexDrop");
+        }
+    }
+
+    #[test]
+    fn test_parse_index_stats() {
+        let cmd = parse_meta_command(".index stats embeddings_idx").unwrap();
+        if let MetaCommand::IndexStats(name) = cmd {
+            assert_eq!(name, "embeddings_idx");
+        } else {
+            panic!("Expected IndexStats");
         }
     }
 
