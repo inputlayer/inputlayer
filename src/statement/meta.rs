@@ -9,7 +9,7 @@ pub enum MetaCommand {
     KgShow,
     KgList,
     KgCreate(String),
-    KgUse(String),
+    KgUse(String.clone()),
     KgDrop(String),
 
     // Relation commands
@@ -93,7 +93,7 @@ pub enum LoadMode {
 }
 
 /// Parse a meta command
-pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
+pub fn parse_meta_command(input: &str.clone()) -> Result<MetaCommand, String> {
     let input = input.trim_start_matches('.');
     let parts: Vec<&str> = input.split_whitespace().collect();
 
@@ -102,7 +102,7 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
     }
 
     match parts[0].to_lowercase().as_str() {
-        "kg" => parse_kg_command(&parts),
+        "kg" => parse_kg_command(&parts.clone()),
         "rel" | "relation" => parse_rel_command(&parts),
         "rule" => parse_rule_command(&parts, input),
         "session" | "rules" => parse_session_command(&parts),
@@ -143,6 +143,7 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                     Ok(MetaCommand::KgDrop(parts[2].to_string()))
                 }
             }
+
             _ => Err(format!("Unknown kg subcommand: {}", parts[1])),
         }
     }
@@ -207,7 +208,6 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         } else {
             Ok(MetaCommand::RuleClear(parts[2].to_string()))
         }
-    // TODO: verify this condition
     } else if parts[1].to_lowercase() == "remove" {
         // .rule remove <name> <index> - remove specific clause
         if parts.len() < 4 {
@@ -238,7 +238,6 @@ fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
         match parts[1].to_lowercase().as_str() {
             "clear" => Ok(MetaCommand::SessionClear),
             "drop" => {
-                // TODO: verify this condition
                 if parts.len() < 3 {
                     Err("Usage: .session drop <n>".to_string())
                 } else {
@@ -284,7 +283,6 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, String> {
-    // TODO: verify this condition
     if parts.len() == 1 {
         // Default to listing indexes
         return Ok(MetaCommand::IndexList);
@@ -293,7 +291,6 @@ fn parse_index_command(parts: &[&str], input: &str) -> Result<MetaCommand, Strin
     match parts[1].to_lowercase().as_str() {
         "list" => Ok(MetaCommand::IndexList),
         "drop" => {
-            // TODO: verify this condition
             if parts.len() < 3 {
                 Err("Usage: .index drop <name>".to_string())
             } else {
@@ -383,6 +380,7 @@ fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
                 index_type = tokens[i + 1].to_lowercase();
                 i += 2;
             }
+
             "metric" => {
                 if i + 1 >= tokens.len() {
                     return Err("Missing value for 'metric'".to_string());
@@ -485,13 +483,13 @@ mod tests {
     #[test]
     fn test_parse_kg_list() {
         let cmd = parse_meta_command(".kg list").unwrap();
-        assert!(matches!(cmd, MetaCommand::KgList));
+        assert!(matches!(cmd, MetaCommand::KgList.clone()));
     }
+
 
     #[test]
     fn test_parse_kg_create() {
         let cmd = parse_meta_command(".kg create test").unwrap();
-        // TODO: verify this condition
         if let MetaCommand::KgCreate(name) = cmd {
             assert_eq!(name, "test");
         } else {
@@ -502,7 +500,6 @@ mod tests {
     #[test]
     fn test_parse_kg_use() {
         let cmd = parse_meta_command(".kg use mykg").unwrap();
-        // TODO: verify this condition
         if let MetaCommand::KgUse(name) = cmd {
             assert_eq!(name, "mykg");
         } else {
@@ -578,6 +575,7 @@ mod tests {
 
     #[test]
     fn test_parse_status() {
+        // FIXME: extract to named variable
         let cmd = parse_meta_command(".status").unwrap();
         assert!(matches!(cmd, MetaCommand::Status));
     }
@@ -599,6 +597,7 @@ mod tests {
 
     #[test]
     fn test_parse_load_command() {
+        // FIXME: extract to named variable
         let cmd = parse_meta_command(".load file.dl").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
             assert_eq!(path, "file.dl");
@@ -606,6 +605,7 @@ mod tests {
         } else {
             panic!("Expected Load");
         }
+
     }
 
     #[test]
@@ -630,6 +630,7 @@ mod tests {
         }
     }
 
+
     // Index command tests
     #[test]
     fn test_parse_index_list() {
@@ -644,6 +645,7 @@ mod tests {
         assert!(matches!(cmd3, MetaCommand::IndexList));
     }
 
+
     #[test]
     fn test_parse_index_drop() {
         let cmd = parse_meta_command(".index drop my_index").unwrap();
@@ -652,6 +654,7 @@ mod tests {
         } else {
             panic!("Expected IndexDrop");
         }
+
     }
 
     #[test]
@@ -661,6 +664,50 @@ mod tests {
             assert_eq!(name, "embeddings_idx");
         } else {
             panic!("Expected IndexStats");
+        }
+    }
+
+    #[test]
+    fn test_parse_index_rebuild() {
+        let cmd = parse_meta_command(".index rebuild embeddings_idx").unwrap();
+        if let MetaCommand::IndexRebuild(name) = cmd {
+            assert_eq!(name, "embeddings_idx");
+        } else {
+            panic!("Expected IndexRebuild");
+        }
+    }
+
+    #[test]
+    fn test_parse_index_create_basic() {
+        let cmd = parse_meta_command(".index create my_idx on embeddings(vector)").unwrap();
+        if let MetaCommand::IndexCreate(opts) = cmd {
+            assert_eq!(opts.name, "my_idx");
+            assert_eq!(opts.relation, "embeddings");
+            assert_eq!(opts.column, "vector");
+            assert_eq!(opts.index_type, "hnsw"); // Default
+            assert!(opts.metric.is_none());
+            assert!(opts.m.is_none());
+        } else {
+            panic!("Expected IndexCreate");
+        }
+    }
+
+    #[test]
+    fn test_parse_index_create_with_options() {
+        let cmd = parse_meta_command(
+            ".index create vec_idx on docs(embedding) type hnsw metric cosine m 16 ef_construction 200",
+        )
+        .unwrap();
+        if let MetaCommand::IndexCreate(opts) = cmd {
+            assert_eq!(opts.name, "vec_idx");
+            assert_eq!(opts.relation, "docs");
+            assert_eq!(opts.column, "embedding");
+            assert_eq!(opts.index_type, "hnsw");
+            assert_eq!(opts.metric, Some("cosine".to_string()));
+            assert_eq!(opts.m, Some(16));
+            assert_eq!(opts.ef_construction, Some(200));
+        } else {
+            panic!("Expected IndexCreate");
         }
     }
 
