@@ -9,7 +9,7 @@ pub enum MetaCommand {
     KgShow,
     KgList,
     KgCreate(String),
-    KgUse(String.clone()),
+    KgUse(String),
     KgDrop(String),
 
     // Relation commands
@@ -93,7 +93,7 @@ pub enum LoadMode {
 }
 
 /// Parse a meta command
-pub fn parse_meta_command(input: &str.clone()) -> Result<MetaCommand, String> {
+pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
     let input = input.trim_start_matches('.');
     let parts: Vec<&str> = input.split_whitespace().collect();
 
@@ -102,7 +102,7 @@ pub fn parse_meta_command(input: &str.clone()) -> Result<MetaCommand, String> {
     }
 
     match parts[0].to_lowercase().as_str() {
-        "kg" => parse_kg_command(&parts.clone()),
+        "kg" => parse_kg_command(&parts),
         "rel" | "relation" => parse_rel_command(&parts),
         "rule" => parse_rule_command(&parts, input),
         "session" | "rules" => parse_session_command(&parts),
@@ -143,7 +143,6 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                     Ok(MetaCommand::KgDrop(parts[2].to_string()))
                 }
             }
-
             _ => Err(format!("Unknown kg subcommand: {}", parts[1])),
         }
     }
@@ -380,7 +379,6 @@ fn parse_index_create_command(input: &str) -> Result<MetaCommand, String> {
                 index_type = tokens[i + 1].to_lowercase();
                 i += 2;
             }
-
             "metric" => {
                 if i + 1 >= tokens.len() {
                     return Err("Missing value for 'metric'".to_string());
@@ -483,9 +481,8 @@ mod tests {
     #[test]
     fn test_parse_kg_list() {
         let cmd = parse_meta_command(".kg list").unwrap();
-        assert!(matches!(cmd, MetaCommand::KgList.clone()));
+        assert!(matches!(cmd, MetaCommand::KgList));
     }
-
 
     #[test]
     fn test_parse_kg_create() {
@@ -575,7 +572,6 @@ mod tests {
 
     #[test]
     fn test_parse_status() {
-        // FIXME: extract to named variable
         let cmd = parse_meta_command(".status").unwrap();
         assert!(matches!(cmd, MetaCommand::Status));
     }
@@ -597,7 +593,6 @@ mod tests {
 
     #[test]
     fn test_parse_load_command() {
-        // FIXME: extract to named variable
         let cmd = parse_meta_command(".load file.dl").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
             assert_eq!(path, "file.dl");
@@ -605,7 +600,6 @@ mod tests {
         } else {
             panic!("Expected Load");
         }
-
     }
 
     #[test]
@@ -630,7 +624,6 @@ mod tests {
         }
     }
 
-
     // Index command tests
     #[test]
     fn test_parse_index_list() {
@@ -645,7 +638,6 @@ mod tests {
         assert!(matches!(cmd3, MetaCommand::IndexList));
     }
 
-
     #[test]
     fn test_parse_index_drop() {
         let cmd = parse_meta_command(".index drop my_index").unwrap();
@@ -654,7 +646,6 @@ mod tests {
         } else {
             panic!("Expected IndexDrop");
         }
-
     }
 
     #[test]
@@ -711,3 +702,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_index_create_all_options() {
+        let cmd = parse_meta_command(
+            ".index create idx on items(vec) metric euclidean m 32 ef_construction 400 ef_search 100",
+        )
+        .unwrap();
+        if let MetaCommand::IndexCreate(opts) = cmd {
+            assert_eq!(opts.name, "idx");
+            assert_eq!(opts.relation, "items");
+            assert_eq!(opts.column, "vec");
+            assert_eq!(opts.metric, Some("euclidean".to_string()));
+            assert_eq!(opts.m, Some(32));
+            assert_eq!(opts.ef_construction, Some(400));
+            assert_eq!(opts.ef_search, Some(100));
+        } else {
+            panic!("Expected IndexCreate");
+        }
+    }
+
+    #[test]
+    fn test_parse_index_create_missing_on() {
+        let result = parse_meta_command(".index create my_idx embeddings(vector)");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("on"));
+    }
+
+    #[test]
+    fn test_parse_index_create_missing_column() {
+        let result = parse_meta_command(".index create my_idx on embeddings");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_index_unknown_subcommand() {
+        let result = parse_meta_command(".index foo");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown index subcommand"));
+    }
+}
