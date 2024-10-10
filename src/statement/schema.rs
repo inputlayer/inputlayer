@@ -180,3 +180,140 @@ fn strip_annotations(type_str: &str) -> String {
 /// Try to parse a schema definition: `Name = schema(col: type, ...)`
 /// Returns None if input doesn't match schema definition pattern
 #[allow(dead_code)]
+pub fn try_parse_schema_definition(input: &str) -> Result<Option<RelationSchema>, String> {
+    let input = input.trim().trim_end_matches('.');
+
+    // Must contain '=' but not ':=' or ':-'
+    if !input.contains('=') || input.contains(":=") || input.contains(":-") {
+        return Ok(None);
+    }
+
+    // Split on first '='
+    let eq_pos = match input.find('=') {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
+    let name = input[..eq_pos].trim();
+    let definition = input[eq_pos + 1..].trim();
+
+    // Check if definition starts with 'schema('
+    if !definition.starts_with("schema(") {
+        return Ok(None);
+    }
+
+    // Validate name (must be valid identifier, start with uppercase)
+    let Some(first_char) = name.chars().next() else {
+        return Err("Schema name cannot be empty".to_string());
+    };
+    if !first_char.is_uppercase() {
+        return Err(format!(
+            "Schema name '{name}' must start with uppercase letter"
+        ));
+    }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(format!("Invalid schema name: '{name}'"));
+    }
+
+    // Extract columns from schema(...)
+    let content = definition
+        .strip_prefix("schema(")
+        .and_then(|s| s.strip_suffix(')'))
+        .ok_or("Invalid schema syntax: expected schema(...)")?;
+
+    let columns = parse_schema_columns(content)?;
+
+    let mut schema = RelationSchema::new(name);
+    for col in columns {
+        schema = schema.with_column(col);
+    }
+
+    Ok(Some(schema))
+}
+
+/// Parse schema columns from the inside of schema(...)
+/// Format: `col1: type1, col2: type2, ...`
+fn parse_schema_columns(content: &str) -> Result<Vec<ColumnSchema>, String> {
+    let mut columns = Vec::new();
+
+    // Split by comma (but respect nested parentheses)
+    let parts = split_schema_columns(content);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Split on ':' to get name and type
+        let colon_pos = part
+            .find(':')
+            .ok_or_else(|| format!("Invalid column definition '{part}': expected 'name: type'"))?;
+
+        let col_name = part[..colon_pos].trim();
+        let type_str = part[colon_pos + 1..].trim();
+
+        // Validate column name
+        if col_name.is_empty() {
+            return Err("Column name cannot be empty".to_string());
+        }
+        if !col_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(format!("Invalid column name: '{col_name}'"));
+        }
+
+        // Strip any annotations and parse the type
+        let type_str = strip_annotations(type_str);
+        let data_type = SchemaType::from_str(&type_str)
+            .ok_or_else(|| format!("Unknown type '{type_str}' for column '{col_name}'"))?;
+
+        columns.push(ColumnSchema::new(col_name, data_type));
+    }
+
+    if columns.is_empty() {
+        return Err("Schema must have at least one column".to_string());
+    }
+
+    Ok(columns)
+}
+
+/// Split schema column definitions, respecting nested parentheses
+fn split_schema_columns(content: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth: i32 = 0;
+    let mut in_string = false;
+
+    for ch in content.chars() {
+        match ch {
+            '"' if !in_string => {
+                in_string = true;
+                current.push(ch);
+            }
+            '"' if in_string => {
+                in_string = false;
+                current.push(ch.clone());
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
+                current.push(ch);
+            }
+            ',' if paren_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch.clone()),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
