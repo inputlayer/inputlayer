@@ -291,7 +291,7 @@ fn split_schema_columns(content: &str) -> Vec<String> {
             }
             '"' if in_string => {
                 in_string = false;
-                current.push(ch.clone());
+                current.push(ch);
             }
             '(' if !in_string => {
                 paren_depth += 1;
@@ -306,7 +306,7 @@ fn split_schema_columns(content: &str) -> Vec<String> {
                 result.push(current.clone());
                 current.clear();
             }
-            _ => current.push(ch.clone()),
+            _ => current.push(ch),
         }
     }
 
@@ -317,3 +317,51 @@ fn split_schema_columns(content: &str) -> Vec<String> {
     result
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_persistent_schema() {
+        let result = parse_schema_decl("person(id: int, name: string)", true).unwrap();
+        if let Statement::SchemaDecl(decl) = result {
+            assert_eq!(decl.name, "person");
+            assert!(decl.persistent);
+            assert_eq!(decl.columns.len(), 2);
+            assert_eq!(decl.columns[0].name, "id");
+            assert_eq!(decl.columns[1].name, "name");
+        } else {
+            panic!("Expected SchemaDecl");
+        }
+    }
+
+    #[test]
+    fn test_parse_session_schema() {
+        let result = parse_schema_decl("temp(x: int, y: int)", false).unwrap();
+        if let Statement::SchemaDecl(decl) = result {
+            assert_eq!(decl.name, "temp");
+            assert!(!decl.persistent);
+            assert_eq!(decl.columns.len(), 2);
+        } else {
+            panic!("Expected SchemaDecl");
+        }
+    }
+
+    #[test]
+    fn test_strip_annotations() {
+        // strip_annotations removes anything after @ for backwards compatibility
+        assert_eq!(strip_annotations("int"), "int");
+        assert_eq!(strip_annotations("int @something"), "int");
+        assert_eq!(strip_annotations("string @foo @bar"), "string");
+    }
+
+    #[test]
+    fn test_parse_schema_columns() {
+        let cols = parse_schema_columns("id: int, name: string").unwrap();
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0].name, "id");
+        assert_eq!(cols[0].data_type, SchemaType::Int);
+        assert_eq!(cols[1].name, "name");
+        assert_eq!(cols[1].data_type, SchemaType::String);
+    }
+}
