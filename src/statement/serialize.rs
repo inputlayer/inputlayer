@@ -266,3 +266,43 @@ impl SerializableBodyPred {
     }
 }
 
+impl SerializableComparisonOp {
+    pub fn from_op(op: &ComparisonOp) -> Self {
+        match op {
+            ComparisonOp::Equal => SerializableComparisonOp::Equal,
+            ComparisonOp::NotEqual => SerializableComparisonOp::NotEqual,
+            ComparisonOp::LessThan => SerializableComparisonOp::LessThan,
+            ComparisonOp::LessOrEqual => SerializableComparisonOp::LessOrEqual,
+            ComparisonOp::GreaterThan => SerializableComparisonOp::GreaterThan,
+            ComparisonOp::GreaterOrEqual => SerializableComparisonOp::GreaterOrEqual,
+        }
+    }
+
+    pub fn to_op(&self) -> ComparisonOp {
+        match self {
+            SerializableComparisonOp::Equal => ComparisonOp::Equal,
+            SerializableComparisonOp::NotEqual => ComparisonOp::NotEqual,
+            SerializableComparisonOp::LessThan => ComparisonOp::LessThan,
+            SerializableComparisonOp::LessOrEqual => ComparisonOp::LessOrEqual,
+            SerializableComparisonOp::GreaterThan => ComparisonOp::GreaterThan,
+            SerializableComparisonOp::GreaterOrEqual => ComparisonOp::GreaterOrEqual,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse_rule;
+
+    #[test]
+    fn test_serializable_rule_roundtrip() {
+        let rule_str = "path(X, Y) :- edge(X, Y).";
+        let rule = parse_rule(rule_str).unwrap();
+        let serializable = SerializableRule::from_rule(&rule);
+        let json = serde_json::to_string(&serializable).unwrap();
+        let deserialized: SerializableRule = serde_json::from_str(&json).unwrap();
+        let restored = deserialized.to_rule();
+        assert_eq!(restored.head.relation, "path");
+    }
+}
