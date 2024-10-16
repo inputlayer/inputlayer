@@ -90,7 +90,6 @@ pub enum SerializableComparisonOp {
     GreaterOrEqual,
 }
 
-
 // Conversion Helpers
 impl SerializableRule {
     /// Convert from `crate::ast::Rule`
@@ -157,7 +156,113 @@ impl SerializableTerm {
             SerializableTerm::Aggregate(func, var) => Term::Aggregate(func.clone(), var.clone()),
             SerializableTerm::Arithmetic(expr) => Term::Arithmetic(expr.to_arith_expr()),
         }
+    }
+}
 
+impl SerializableArithExpr {
+    /// Convert from `crate::ast::ArithExpr`
+    pub fn from_arith_expr(expr: &ArithExpr) -> Self {
+        match expr {
+            ArithExpr::Variable(name) => SerializableArithExpr::Variable(name.clone()),
+            ArithExpr::Constant(val) => SerializableArithExpr::Constant(*val),
+            ArithExpr::FloatConstant(bits) => {
+                SerializableArithExpr::FloatConstant(f64::from_bits(*bits))
+            }
+            ArithExpr::Binary { op, left, right } => SerializableArithExpr::Binary {
+                op: SerializableArithOp::from_arith_op(op),
+                left: Box::new(Self::from_arith_expr(left)),
+                right: Box::new(Self::from_arith_expr(right)),
+            },
+        }
+    }
+
+    /// Convert to `crate::ast::ArithExpr`
+    pub fn to_arith_expr(&self) -> ArithExpr {
+        match self {
+            SerializableArithExpr::Variable(name) => ArithExpr::Variable(name.clone()),
+            SerializableArithExpr::Constant(val) => ArithExpr::Constant(*val),
+            SerializableArithExpr::FloatConstant(val) => ArithExpr::FloatConstant(val.to_bits()),
+            SerializableArithExpr::Binary { op, left, right } => ArithExpr::Binary {
+                op: op.to_arith_op(),
+                left: Box::new(left.to_arith_expr()),
+                right: Box::new(right.to_arith_expr()),
+            },
+        }
+    }
+}
+
+impl SerializableArithOp {
+    /// Convert from `crate::ast::ArithOp`
+    pub fn from_arith_op(op: &ArithOp) -> Self {
+        match op {
+            ArithOp::Add => SerializableArithOp::Add,
+            ArithOp::Sub => SerializableArithOp::Sub,
+            ArithOp::Mul => SerializableArithOp::Mul,
+            ArithOp::Div => SerializableArithOp::Div,
+            ArithOp::Mod => SerializableArithOp::Mod,
+        }
+    }
+
+    /// Convert to `crate::ast::ArithOp`
+    pub fn to_arith_op(&self) -> ArithOp {
+        match self {
+            SerializableArithOp::Add => ArithOp::Add,
+            SerializableArithOp::Sub => ArithOp::Sub,
+            SerializableArithOp::Mul => ArithOp::Mul,
+            SerializableArithOp::Div => ArithOp::Div,
+            SerializableArithOp::Mod => ArithOp::Mod,
+        }
+    }
+}
+
+impl SerializableBodyPred {
+    pub fn from_body_pred(pred: &BodyPredicate) -> Self {
+        match pred {
+            BodyPredicate::Positive(atom) => SerializableBodyPred::Atom {
+                relation: atom.relation.clone(),
+                args: atom.args.iter().map(SerializableTerm::from_term).collect(),
+                negated: false,
+            },
+            BodyPredicate::Negated(atom) => SerializableBodyPred::Atom {
+                relation: atom.relation.clone(),
+                args: atom.args.iter().map(SerializableTerm::from_term).collect(),
+                negated: true,
+            },
+            BodyPredicate::Comparison(left, op, right) => SerializableBodyPred::Comparison {
+                left: SerializableTerm::from_term(left),
+                op: SerializableComparisonOp::from_op(op),
+                right: SerializableTerm::from_term(right),
+            },
+            // HnswNearest is a runtime-only predicate, not serialized in rules
+            BodyPredicate::HnswNearest { .. } => SerializableBodyPred::Atom {
+                relation: "__hnsw_nearest__".to_string(),
+                args: vec![],
+                negated: false,
+            },
+        }
+    }
+
+    pub fn to_body_pred(&self) -> BodyPredicate {
+        match self {
+            SerializableBodyPred::Atom {
+                relation,
+                args,
+                negated,
+            } => {
+                let atom = Atom::new(
+                    relation.clone(),
+                    args.iter().map(SerializableTerm::to_term).collect(),
+                );
+                if *negated {
+                    BodyPredicate::Negated(atom)
+                } else {
+                    BodyPredicate::Positive(atom)
+                }
+            }
+            SerializableBodyPred::Comparison { left, op, right } => {
+                BodyPredicate::Comparison(left.to_term(), op.to_op(), right.to_term())
+            }
+        }
     }
 }
 
