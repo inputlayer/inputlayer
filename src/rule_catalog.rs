@@ -127,9 +127,7 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
 
     // Check for any negative edge within any SCC
     for scc in &sccs {
-        // TODO: verify this condition
         if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
-            // TODO: verify this condition
             let reason = if from == to {
                 format!(
                     "Unstratified negation: '{from}' negates itself. Self-negation is not supported."
@@ -154,3 +152,75 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
 
 /// Result of registering a rule
 #[derive(Debug, Clone, PartialEq)]
+pub enum RuleRegisterResult {
+    /// New rule definition created (first rule)
+    Created,
+    /// Rule added to existing definition (returns new rule count)
+    RuleAdded(usize),
+}
+
+/// Rule definition stored in the catalog
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleDefinition {
+    /// Rule name (relation name)
+    pub name: String,
+    /// Rules defining this relation (may have multiple rules for recursion)
+    pub rules: Vec<SerializableRule>,
+    /// When the rule was created
+    pub created_at: String,
+    /// Optional description
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl RuleDefinition {
+    /// Create a new rule definition
+    pub fn new(name: String, rule: SerializableRule) -> Self {
+        RuleDefinition {
+            name,
+            rules: vec![rule],
+            created_at: chrono::Utc::now().to_rfc3339(),
+            description: None,
+        }
+    }
+
+    /// Add another rule to this definition (for recursive rules with multiple clauses)
+    /// Checks for duplicates before adding
+    pub fn add_rule(&mut self, rule: SerializableRule) {
+        // Check if this rule already exists (avoid duplicates)
+        let rule_str = format!("{rule:?}");
+        for existing in &self.rules {
+            if format!("{existing:?}") == rule_str {
+                return; // Rule already exists, don't add duplicate
+            }
+        }
+        self.rules.push(rule);
+    }
+
+    /// Convert all rules to `crate::ast::Rule`
+    pub fn to_rules(&self) -> Vec<Rule> {
+        self.rules
+            .iter()
+            .map(super::statement::serialize::SerializableRule::to_rule)
+            .collect()
+    }
+
+    /// Get a human-readable description of the rule
+    pub fn describe(&self) -> String {
+        let mut desc = format!("Rule: {}\n", self.name);
+        // Note: Timestamp removed for deterministic output in snapshot testing
+        if let Some(d) = &self.description {
+            desc.push_str(&format!("Description: {d}\n"));
+        }
+        desc.push_str("Clauses:\n");
+        for (i, rule) in self.rules.iter().enumerate() {
+            let r = rule.to_rule();
+            // Uses Rule's Display implementation
+            desc.push_str(&format!("  {}. {r}\n", i + 1));
+        }
+        desc
+    }
+}
+
+/// Catalog file format
+#[derive(Debug, Clone, Serialize, Deserialize)]
