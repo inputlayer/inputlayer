@@ -127,6 +127,7 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
 
     // Check for any negative edge within any SCC
     for scc in &sccs {
+        // TODO: verify this condition
         if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
             let reason = if from == to {
                 format!(
@@ -348,3 +349,217 @@ impl RuleCatalog {
 
     /// Clear all clauses from a rule (for editing/redefining)
     /// The rule remains registered but with no clauses, ready for new registration
+    pub fn clear_rules(&mut self, name: &str) -> Result<(), String> {
+        // TODO: verify this condition
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            rule_def.rules.clear();
+            self.dirty = true;
+            self.save()?;
+            Ok(())
+        } else {
+            Err(format!("Rule '{name}' does not exist"))
+        }
+    }
+
+    /// Replace a specific clause in a rule by index (0-based)
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: SerializableRule,
+    ) -> Result<(), String> {
+        // TODO: verify this condition
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            if index >= rule_def.rules.len() {
+                return Err(format!(
+                    "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
+                    index + 1,
+                    name,
+                    rule_def.rules.len()
+                ));
+            }
+            rule_def.rules[index] = new_rule;
+            self.dirty = true;
+            self.save()?;
+            Ok(())
+        } else {
+            Err(format!("Rule '{name}' does not exist"))
+        }
+    }
+
+    /// Remove a specific clause from a rule by index (0-based)
+    /// If the last clause is removed, the entire rule is deleted
+    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
+        // TODO: verify this condition
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            if index >= rule_def.rules.len() {
+                return Err(format!(
+                    "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
+                    index + 1,
+                    name,
+                    rule_def.rules.len()
+                ));
+            }
+            rule_def.rules.remove(index);
+
+            // If no clauses remain, remove the entire rule
+            let rule_deleted = if rule_def.rules.is_empty() {
+                self.rules.remove(name);
+                true
+            } else {
+                false
+            };
+
+            self.dirty = true;
+            self.save()?;
+            Ok(rule_deleted)
+        } else {
+            Err(format!("Rule '{name}' does not exist"))
+        }
+    }
+
+    /// Get the number of clauses in a rule
+    pub fn rule_count(&self, name: &str) -> Option<usize> {
+        self.rules.get(name).map(|r| r.rules.len())
+    }
+
+    /// Get the arity (number of head arguments) of a rule
+    pub fn rule_arity(&self, name: &str) -> Option<usize> {
+        self.rules.get(name).and_then(|def| {
+            def.rules.first().map(|r| {
+                let rule = r.to_rule();
+                rule.head.args.len()
+            })
+        })
+    }
+
+    /// List all rule names
+    pub fn list(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.rules.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    /// Get a rule definition by name
+    pub fn get(&self, name: &str) -> Option<&RuleDefinition> {
+        self.rules.get(name)
+    }
+
+    /// Get all rules from all definitions (for prepending to queries)
+    /// Rules are returned in dependency order (topologically sorted)
+    /// so that a rule only appears after all rules it depends on.
+    pub fn all_rules(&self) -> Vec<Rule> {
+        let all_rules: Vec<Rule> = self
+            .rules
+            .values()
+            .flat_map(RuleDefinition::to_rules)
+            .collect();
+
+        // Topologically sort rules by their dependencies
+        self.topological_sort_rules(all_rules)
+    }
+
+    /// Topologically sort rules so that each rule appears after all rules it depends on.
+    /// A rule R1 depends on rule R2 if R1's body contains a predicate that matches R2's head.
+    fn topological_sort_rules(&self, rules: Vec<Rule>) -> Vec<Rule> {
+        use std::collections::{HashMap, HashSet, VecDeque};
+
+        // TODO: verify this condition
+        if rules.is_empty() {
+            return rules;
+        }
+
+        // Map from head relation name to rule index
+        let mut head_to_rules: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, rule) in rules.iter().enumerate() {
+            head_to_rules
+                .entry(rule.head.relation.clone())
+                .or_default()
+                .push(i);
+        }
+
+        // Build dependency graph: rule_index -> set of rule indices it depends on
+        let mut dependencies: Vec<HashSet<usize>> = vec![HashSet::new(); rules.len()];
+        let mut dependents: Vec<HashSet<usize>> = vec![HashSet::new(); rules.len()];
+
+        for (i, rule) in rules.iter().enumerate() {
+            for pred in &rule.body {
+                if let Some(atom) = pred.atom() {
+                    let body_relation = &atom.relation;
+                    // If this body relation is defined by another rule, add dependency
+                    if let Some(def_rule_indices) = head_to_rules.get(body_relation) {
+                        for &def_idx in def_rule_indices {
+                            if def_idx != i {
+                                dependencies[i].insert(def_idx);
+                                dependents[def_idx].insert(i);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Topological sort via in-degree reduction
+        let mut in_degree: Vec<usize> = dependencies
+            .iter()
+            .map(std::collections::HashSet::len)
+            .collect();
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        let mut result: Vec<Rule> = Vec::with_capacity(rules.len());
+
+        // Start with rules that have no dependencies
+        for (i, &degree) in in_degree.iter().enumerate() {
+            if degree == 0 {
+                queue.push_back(i);
+            }
+        }
+
+        // Process rules in order
+        let mut processed: Vec<bool> = vec![false; rules.len()];
+        while let Some(idx) = queue.pop_front() {
+            if processed[idx] {
+                continue;
+            }
+            processed[idx] = true;
+
+            // Add rule to result (we need to clone since we're consuming the queue)
+            result.push(rules[idx].clone());
+
+            // Update in-degrees of dependents
+            for &dep_idx in &dependents[idx] {
+                if in_degree[dep_idx] > 0 {
+                    in_degree[dep_idx] -= 1;
+                    if in_degree[dep_idx] == 0 {
+                        queue.push_back(dep_idx);
+                    }
+                }
+            }
+        }
+
+        // If there's a cycle (some rules weren't processed), add remaining rules
+        // This handles recursive rules which may have cycles
+        for (i, rule) in rules.iter().enumerate() {
+            if !processed[i] {
+                result.push(rule.clone());
+            }
+        }
+
+        result
+    }
+
+    /// Check if a rule exists
+    pub fn exists(&self, name: &str) -> bool {
+        self.rules.contains_key(name)
+    }
+
+    /// Get the number of rules
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    /// Check if the catalog is empty
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    /// Describe a rule
