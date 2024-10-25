@@ -224,3 +224,127 @@ impl RuleDefinition {
 
 /// Catalog file format
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct CatalogFile {
+    version: u32,
+    rules: HashMap<String, RuleDefinition>,
+}
+
+impl Default for CatalogFile {
+    fn default() -> Self {
+        CatalogFile {
+            version: 1,
+            rules: HashMap::new(),
+        }
+    }
+}
+
+/// Rule catalog - manages persistent rules per database
+#[derive(Debug)]
+pub struct RuleCatalog {
+    /// Rules indexed by name
+    rules: HashMap<String, RuleDefinition>,
+    /// Path to the catalog file
+    catalog_path: PathBuf,
+    /// Whether the catalog has been modified since last save
+    dirty: bool,
+}
+
+impl RuleCatalog {
+    /// Create an empty rule catalog (for error recovery when loading fails)
+    pub fn empty() -> Self {
+        RuleCatalog {
+            rules: HashMap::new(),
+            catalog_path: PathBuf::new(),
+            dirty: false,
+        }
+    }
+
+    /// Create a new rule catalog for a database directory
+    pub fn new(db_dir: PathBuf) -> Result<Self, String> {
+        let rules_dir = db_dir.join("rules");
+        let catalog_path = rules_dir.join("catalog.json");
+
+        let mut catalog = RuleCatalog {
+            rules: HashMap::new(),
+            catalog_path,
+            dirty: false,
+        };
+
+        // Load existing catalog if present
+        if catalog.catalog_path.exists() {
+            catalog.load()?;
+        }
+
+        Ok(catalog)
+    }
+
+    /// Register a rule from a `RuleDef`
+    /// Returns information about whether rule was created or updated
+    ///
+    /// This function performs stratification checking to reject:
+    /// - Self-negation: a(X) :- !a(X)
+    /// - Mutual negation cycles: a(X) :- !b(X), b(X) :- !a(X)
+    /// - Any recursion through negation
+    pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<RuleRegisterResult, String> {
+        let name = &rule_def.name;
+        let rule = rule_def.rule.clone();
+        let ast_rule = rule.to_rule();
+
+        // Validate single-rule safety constraints (self-negation, head safety, range restriction)
+        validate_rule(&ast_rule, name)?;
+
+        // Full stratification check against all existing rules plus the new one
+        let mut all_rules: Vec<Rule> = Vec::new();
+        for rule_def in self.rules.values() {
+            all_rules.extend(rule_def.to_rules());
+        }
+        all_rules.push(ast_rule.clone());
+
+        validate_rules_stratification(&all_rules)?;
+
+        // Stratification passed, proceed with registration
+        let result = if let Some(existing) = self.rules.get_mut(name) {
+            // Check if this is a new clause for an existing rule (recursive case)
+            existing.add_rule(rule);
+            RuleRegisterResult::RuleAdded(existing.rules.len())
+        } else {
+            // Create new rule definition
+            let definition = RuleDefinition::new(name.clone(), rule);
+            self.rules.insert(name.clone(), definition);
+            RuleRegisterResult::Created
+        };
+
+        self.dirty = true;
+        self.save()?;
+        Ok(result)
+    }
+
+    /// Register a rule from a Rule directly
+    pub fn register(&mut self, name: &str, rule: &Rule) -> Result<(), String> {
+        let serializable = SerializableRule::from_rule(rule);
+
+        if let Some(existing) = self.rules.get_mut(name) {
+            existing.add_rule(serializable);
+        } else {
+            let definition = RuleDefinition::new(name.to_string(), serializable);
+            self.rules.insert(name.to_string(), definition);
+        }
+
+        self.dirty = true;
+        self.save()?;
+        Ok(())
+    }
+
+    /// Drop a rule
+    pub fn drop(&mut self, name: &str) -> Result<(), String> {
+        if self.rules.remove(name).is_none() {
+            return Err(format!("Rule '{name}' does not exist"));
+        }
+
+        self.dirty = true;
+        self.save()?;
+        Ok(())
+    }
+
+    /// Clear all clauses from a rule (for editing/redefining)
+    /// The rule remains registered but with no clauses, ready for new registration

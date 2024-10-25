@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_multi_n17t06
+Knowledge graph 'test_drop_multi_n17t06' created.
+Switched to knowledge graph: test_drop_multi_n17t06
+> .kg use test_drop_multi_n17t06
+Switched to knowledge graph: test_drop_multi_n17t06
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 fact(s) into 'edge'.
+> +simple(X, Y) :- edge(Y, X).
+Rule 'simple' registered.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule 'reachable' registered.
+> .rule list
+Rules:
+  reachable (2 clause(s))
+  simple (1 clause(s))
+> ?- reachable(1, Y).
+3 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+> .rule drop reachable
+Rule 'reachable' dropped.
+> .rule list
+Rules:
+  simple (1 clause(s))
+> ?- reachable(1, Y).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_multi_n17t06
+Knowledge graph 'test_drop_multi_n17t06' dropped.
