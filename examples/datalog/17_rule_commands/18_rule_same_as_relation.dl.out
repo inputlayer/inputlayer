@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_name_conflict_n17t18
+Knowledge graph 'test_name_conflict_n17t18' created.
+Switched to knowledge graph: test_name_conflict_n17t18
+> .kg use test_name_conflict_n17t18
+Switched to knowledge graph: test_name_conflict_n17t18
+> +items[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'items'.
+> ?- items(Id, Val).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> +items(Id, Val) :- items(Id, Val), Val > 15.
+Rule 'items' registered.
+> ?- items(Id, Val).
+2 rows:
+  (2, 20)
+  (3, 30)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_name_conflict_n17t18
+Knowledge graph 'test_name_conflict_n17t18' dropped.
