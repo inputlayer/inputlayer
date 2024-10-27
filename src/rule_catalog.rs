@@ -754,3 +754,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_rule_catalog_get() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        let view = catalog.get("path").unwrap();
+        assert_eq!(view.name, "path");
+        assert_eq!(view.rules.len(), 1);
+
+        assert!(catalog.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_rule_catalog_describe() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        let desc = catalog.describe("path").unwrap();
+        assert!(desc.contains("Rule: path"));
+        assert!(desc.contains("Clauses:"));
+    }
+
+    #[test]
+    fn test_rule_catalog_all_rules() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        catalog
+            .register("path", &make_test_rule("path", "edge"))
+            .unwrap();
+        catalog
+            .register("reach", &make_test_rule("reach", "source"))
+            .unwrap();
+
+        let rules = catalog.all_rules();
+        assert_eq!(rules.len(), 2);
+
+        let relations: Vec<_> = rules.iter().map(|r| r.head.relation.as_str()).collect();
+        assert!(relations.contains(&"path"));
+        assert!(relations.contains(&"reach"));
+    }
+
