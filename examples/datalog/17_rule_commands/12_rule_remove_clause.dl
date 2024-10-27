@@ -1,0 +1,22 @@
+% Test: Rule Remove Clause
+% Description: Tests removing specific clauses from rules by index
+.kg create test_rule_remove_12_n17t12
+.kg use test_rule_remove_12_n17t12
+% Insert base data
++edge[(1,2), (2,3), (3,4)].
+% Define a multi-clause rule
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+% Verify rule has 2 clauses
+.rule list
+% Query before removal - should show transitive closure
+?- reachable(X, Y).
+% Remove clause 1 (base case)
+.rule remove reachable 1
+% Verify rule now has 1 clause
+.rule list
+% Query after removal - no results (recursive case without base case)
+?- reachable(X, Y).
+% Cleanup
+.kg use default
+.kg drop test_rule_remove_12_n17t12

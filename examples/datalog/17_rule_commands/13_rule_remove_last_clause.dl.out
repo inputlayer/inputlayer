@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_remove_last_n17t13
+Knowledge graph 'test_rule_remove_last_n17t13' created.
+Switched to knowledge graph: test_rule_remove_last_n17t13
+> .kg use test_rule_remove_last_n17t13
+Switched to knowledge graph: test_rule_remove_last_n17t13
+> +edge[(1,2)].
+Inserted 1 fact(s) into 'edge'.
+> +simple(X, Y) :- edge(X, Y).
+Rule 'simple' registered.
+> .rule list
+Rules:
+  simple (1 clause(s))
+> ?- simple(X, Y).
+1 rows:
+  (1, 2)
+> .rule remove simple 1
+Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining).
+> .rule list
+No rules defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_remove_last_n17t13
+Knowledge graph 'test_rule_remove_last_n17t13' dropped.

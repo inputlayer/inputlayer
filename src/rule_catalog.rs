@@ -689,3 +689,68 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_rule_catalog_multiple_rules() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First rule: path(X, Y) :- edge(X, Y).
+        let rule1 = make_test_rule("path", "edge");
+        catalog.register("path", &rule1).unwrap();
+
+        // Second rule: path(X, Z) :- edge(X, Y), path(Y, Z).
+        let head = Atom::new(
+            "path".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            )),
+        ];
+        let rule2 = Rule::new(head, body);
+        catalog.register("path", &rule2).unwrap();
+
+        // Should still be one view with two rules
+        assert_eq!(catalog.len(), 1);
+        let rules = catalog.all_rules();
+        assert_eq!(rules.len(), 2);
+    }
+
+    #[test]
+    fn test_rule_catalog_persistence() {
+        let tmp_dir = TempDir::new().unwrap();
+        let db_path = tmp_dir.path().to_path_buf();
+
+        // Create and populate catalog
+        {
+            let mut catalog = RuleCatalog::new(db_path.clone()).unwrap();
+            let rule = make_test_rule("path", "edge");
+            catalog.register("path", &rule).unwrap();
+        }
+
+        // Reload and verify
+        {
+            let catalog = RuleCatalog::new(db_path).unwrap();
+            assert!(catalog.exists("path"));
+            assert_eq!(catalog.len(), 1);
+            let rules = catalog.all_rules();
+            assert_eq!(rules.len(), 1);
+            assert_eq!(rules[0].head.relation, "path");
+        }
+    }
+
