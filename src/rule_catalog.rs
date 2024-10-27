@@ -349,7 +349,6 @@ impl RuleCatalog {
     /// Clear all clauses from a rule (for editing/redefining)
     /// The rule remains registered but with no clauses, ready for new registration
     pub fn clear_rules(&mut self, name: &str) -> Result<(), String> {
-        // TODO: verify this condition
         if let Some(rule_def) = self.rules.get_mut(name) {
             rule_def.rules.clear();
             self.dirty = true;
@@ -388,7 +387,6 @@ impl RuleCatalog {
     /// Remove a specific clause from a rule by index (0-based)
     /// If the last clause is removed, the entire rule is deleted
     pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
-        // TODO: verify this condition
         if let Some(rule_def) = self.rules.get_mut(name) {
             if index >= rule_def.rules.len() {
                 return Err(format!(
@@ -579,13 +577,11 @@ impl RuleCatalog {
 
     /// Save the catalog to disk
     pub fn save(&mut self) -> Result<(), String> {
-        // TODO: verify this condition
         if !self.dirty {
             return Ok(());
         }
 
         // Ensure the rules directory exists
-        // TODO: verify this condition
         if let Some(parent) = self.catalog_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create rules directory: {e}"))?;
@@ -882,5 +878,78 @@ mod tests {
         } else {
             panic!("Expected positive body predicate");
         }
+    }
+
+    #[test]
+    fn test_replace_rule() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Register view with 2 rules
+        let rule1 = make_test_rule("path", "edge");
+        catalog.register("path", &rule1).unwrap();
+
+        let head = Atom::new(
+            "path".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            )),
+        ];
+        let rule2 = Rule::new(head, body);
+        catalog.register("path", &rule2).unwrap();
+
+        assert_eq!(catalog.all_rules().len(), 2);
+
+        // Replace second rule (index 1) with a new rule
+        let new_rule = make_test_rule("path", "new_connection");
+        let new_serializable = SerializableRule::from_rule(&new_rule);
+        catalog.replace_rule("path", 1, new_serializable).unwrap();
+
+        // Verify the rule was replaced
+        let rules = catalog.all_rules();
+        assert_eq!(rules.len(), 2);
+
+        // First rule should be unchanged
+        if let BodyPredicate::Positive(atom) = &rules[0].body[0] {
+            assert_eq!(atom.relation, "edge");
+        }
+
+        // Second rule should be the new one
+        if let BodyPredicate::Positive(atom) = &rules[1].body[0] {
+            assert_eq!(atom.relation, "new_connection");
+        }
+    }
+
+    #[test]
+    fn test_replace_rule_out_of_bounds() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        // Try to replace rule at index 5 when there's only 1 rule
+        let new_rule = make_test_rule("path", "new_edge");
+        let result = catalog.replace_rule("path", 5, SerializableRule::from_rule(&new_rule));
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("out of bounds"));
     }
 
