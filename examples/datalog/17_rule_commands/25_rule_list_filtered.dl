@@ -1,0 +1,15 @@
+% Test: List rules for specific head
+
+.kg create test_rule_list_n17t25
+.kg use test_rule_list_n17t25
+
++base[(1,), (2,), (3,)].
+
++rule_a(X, Y) :- base(X), Y = X + 1.
++rule_a(X, Y) :- base(X), Y = X * 2.
++rule_b(X) :- base(X), X > 1.
+
+.rule def rule_a
+
+.kg use default
+.kg drop test_rule_list_n17t25

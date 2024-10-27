@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_list_n17t25
+Knowledge graph 'test_rule_list_n17t25' created.
+Switched to knowledge graph: test_rule_list_n17t25
+> .kg use test_rule_list_n17t25
+Switched to knowledge graph: test_rule_list_n17t25
+> +base[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'base'.
+> +rule_a(X, Y) :- base(X), Y = X + 1.
+Rule 'rule_a' registered.
+> +rule_a(X, Y) :- base(X), Y = X * 2.
+Rule 'rule_a' registered.
+> +rule_b(X) :- base(X), X > 1.
+Rule 'rule_b' registered.
+> .rule def rule_a
+This command is available in embedded mode. HTTP support is planned for a future release.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_list_n17t25
+Knowledge graph 'test_rule_list_n17t25' dropped.
