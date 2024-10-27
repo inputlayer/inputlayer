@@ -127,7 +127,6 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
 
     // Check for any negative edge within any SCC
     for scc in &sccs {
-        // TODO: verify this condition
         if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
             let reason = if from == to {
                 format!(
@@ -350,7 +349,6 @@ impl RuleCatalog {
     /// Clear all clauses from a rule (for editing/redefining)
     /// The rule remains registered but with no clauses, ready for new registration
     pub fn clear_rules(&mut self, name: &str) -> Result<(), String> {
-        // TODO: verify this condition
         if let Some(rule_def) = self.rules.get_mut(name) {
             rule_def.rules.clear();
             self.dirty = true;
@@ -368,7 +366,6 @@ impl RuleCatalog {
         index: usize,
         new_rule: SerializableRule,
     ) -> Result<(), String> {
-        // TODO: verify this condition
         if let Some(rule_def) = self.rules.get_mut(name) {
             if index >= rule_def.rules.len() {
                 return Err(format!(
@@ -390,7 +387,6 @@ impl RuleCatalog {
     /// Remove a specific clause from a rule by index (0-based)
     /// If the last clause is removed, the entire rule is deleted
     pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
-        // TODO: verify this condition
         if let Some(rule_def) = self.rules.get_mut(name) {
             if index >= rule_def.rules.len() {
                 return Err(format!(
@@ -464,7 +460,6 @@ impl RuleCatalog {
     fn topological_sort_rules(&self, rules: Vec<Rule>) -> Vec<Rule> {
         use std::collections::{HashMap, HashSet, VecDeque};
 
-        // TODO: verify this condition
         if rules.is_empty() {
             return rules;
         }
@@ -563,3 +558,134 @@ impl RuleCatalog {
     }
 
     /// Describe a rule
+    pub fn describe(&self, name: &str) -> Option<String> {
+        self.rules.get(name).map(RuleDefinition::describe)
+    }
+
+    /// Load the catalog from disk
+    fn load(&mut self) -> Result<(), String> {
+        let content = fs::read_to_string(&self.catalog_path)
+            .map_err(|e| format!("Failed to read catalog: {e}"))?;
+
+        let catalog_file: CatalogFile =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse catalog: {e}"))?;
+
+        self.rules = catalog_file.rules;
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// Save the catalog to disk
+    pub fn save(&mut self) -> Result<(), String> {
+        if !self.dirty {
+            return Ok(());
+        }
+
+        // Ensure the rules directory exists
+        if let Some(parent) = self.catalog_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create rules directory: {e}"))?;
+        }
+
+        let catalog_file = CatalogFile {
+            version: 1,
+            rules: self.rules.clone(),
+        };
+
+        let content = serde_json::to_string_pretty(&catalog_file)
+            .map_err(|e| format!("Failed to serialize catalog: {e}"))?;
+
+        fs::write(&self.catalog_path, content)
+            .map_err(|e| format!("Failed to write catalog: {e}"))?;
+
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// Force a reload from disk
+    pub fn reload(&mut self) -> Result<(), String> {
+        if self.catalog_path.exists() {
+            self.load()
+        } else {
+            self.rules.clear();
+            self.dirty = false;
+            Ok(())
+        }
+    }
+
+    /// Clear all rules (does not save automatically)
+    pub fn clear(&mut self) {
+        self.rules.clear();
+        self.dirty = true;
+    }
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Atom, BodyPredicate, Term};
+    use tempfile::TempDir;
+
+    fn make_test_rule(head_rel: &str, body_rel: &str) -> Rule {
+        let head = Atom::new(
+            head_rel.to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
+        );
+        let body = vec![BodyPredicate::Positive(Atom::new(
+            body_rel.to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
+        ))];
+        Rule::new(head, body)
+    }
+
+    #[test]
+    fn test_rule_catalog_new() {
+        let tmp_dir = TempDir::new().unwrap();
+        let catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        assert!(catalog.is_empty());
+        assert_eq!(catalog.len(), 0);
+    }
+
+    #[test]
+    fn test_rule_catalog_register() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        assert!(catalog.exists("path"));
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog.list(), vec!["path"]);
+    }
+
+    #[test]
+    fn test_rule_catalog_drop() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        assert!(catalog.exists("path"));
+        catalog.drop("path").unwrap();
+        assert!(!catalog.exists("path"));
+        assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn test_rule_catalog_drop_nonexistent() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let result = catalog.drop("nonexistent");
+        assert!(result.is_err());
+    }
+
