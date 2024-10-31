@@ -194,7 +194,7 @@ impl RuleDefinition {
                 return; // Rule already exists, don't add duplicate
             }
         }
-        self.rules.push(rule);
+        self.rules.push(rule.clone());
     }
 
     /// Convert all rules to `crate::ast::Rule`
@@ -951,5 +951,96 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("out of bounds"));
+    }
+
+    #[test]
+    fn test_clear_rules_nonexistent_view() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let result = catalog.clear_rules("nonexistent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_rule_definition_new() {
+        let rule = make_test_rule("path", "edge");
+        let serializable = SerializableRule::from_rule(&rule);
+        let def = RuleDefinition::new("path".to_string(), serializable);
+
+        assert_eq!(def.name, "path");
+        assert_eq!(def.rules.len(), 1);
+        assert!(def.description.is_none());
+    }
+
+    #[test]
+    fn test_register_rule_multiple_rules() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First rule: connected(X, Y) :- edge(X, Y).
+        let rule1 = make_test_rule("connected", "edge");
+        let rule_def1 = RuleDef {
+            name: "connected".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&rule_def1).unwrap();
+
+        println!("After first register_rule:");
+        println!("  Number of rules: {}", catalog.len());
+        if let Some(view) = catalog.get("connected") {
+            println!("  Rules in 'connected': {}", view.rules.len());
+        }
+
+        // Second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
+        let head = Atom::new(
+            "connected".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "connected".to_string(),
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            )),
+        ];
+        let rule2 = Rule::new(head, body);
+        let rule_def2 = RuleDef {
+            name: "connected".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+        catalog.register_rule(&rule_def2).unwrap();
+
+        println!("After second register_rule:");
+        println!("  Number of views: {}", catalog.len());
+        if let Some(view) = catalog.get("connected") {
+            println!("  Rules in 'connected': {}", view.rules.len());
+        }
+
+        // Verify: should have 1 view with 2 rules
+        assert_eq!(catalog.len(), 1, "Should have exactly 1 view");
+        let rules = catalog.all_rules();
+        assert_eq!(rules.len(), 2, "Should have exactly 2 rules total");
+
+        // Check the view has both rules
+        let view = catalog
+            .get("connected")
+            .expect("View 'connected' should exist");
+        assert_eq!(view.rules.len(), 2, "View 'connected' should have 2 rules");
     }
 
