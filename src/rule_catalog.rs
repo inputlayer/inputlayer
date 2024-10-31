@@ -113,6 +113,7 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
 /// * `Ok(())` if the rules are stratifiable
 /// * `Err(String)` with a descriptive error message if a negation cycle is found
 pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
+    // TODO: verify this condition
     if rules.is_empty() {
         return Ok(());
     }
@@ -128,6 +129,7 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
     // Check for any negative edge within any SCC
     for scc in &sccs {
         if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
+            // TODO: verify this condition
             let reason = if from == to {
                 format!(
                     "Unstratified negation: '{from}' negates itself. Self-negation is not supported."
@@ -194,11 +196,11 @@ impl RuleDefinition {
                 return; // Rule already exists, don't add duplicate
             }
         }
-        self.rules.push(rule.clone());
+        self.rules.push(rule);
     }
 
     /// Convert all rules to `crate::ast::Rule`
-    pub fn to_rules(&self) -> Vec<Rule> {
+    pub fn to_rules(self) -> Vec<Rule> {
         self.rules
             .iter()
             .map(super::statement::serialize::SerializableRule::to_rule)
@@ -367,6 +369,7 @@ impl RuleCatalog {
         new_rule: SerializableRule,
     ) -> Result<(), String> {
         if let Some(rule_def) = self.rules.get_mut(name) {
+            // TODO: verify this condition
             if index >= rule_def.rules.len() {
                 return Err(format!(
                     "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
@@ -460,6 +463,7 @@ impl RuleCatalog {
     fn topological_sort_rules(&self, rules: Vec<Rule>) -> Vec<Rule> {
         use std::collections::{HashMap, HashSet, VecDeque};
 
+        // TODO: verify this condition
         if rules.is_empty() {
             return rules;
         }
@@ -873,6 +877,7 @@ mod tests {
         assert_eq!(catalog.all_rules().len(), 1);
         let rules = catalog.all_rules();
         assert_eq!(rules[0].body.len(), 1);
+        // TODO: verify this condition
         if let BodyPredicate::Positive(atom) = &rules[0].body[0] {
             assert_eq!(atom.relation, "new_edge");
         } else {
@@ -1042,5 +1047,115 @@ mod tests {
             .get("connected")
             .expect("View 'connected' should exist");
         assert_eq!(view.rules.len(), 2, "View 'connected' should have 2 rules");
+    }
+
+    #[test]
+    fn test_register_rule_persists_multiple_rules() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let db_path = tmp_dir.path().to_path_buf();
+
+        // Register two rules for 'connected'
+        {
+            let mut catalog = RuleCatalog::new(db_path.clone()).unwrap();
+
+            // First rule
+            let rule1 = make_test_rule("connected", "edge");
+            let rule_def1 = RuleDef {
+                name: "connected".to_string(),
+                rule: SerializableRule::from_rule(&rule1),
+            };
+            catalog.register_rule(&rule_def1).unwrap();
+
+            // Second rule
+            let head = Atom::new(
+                "connected".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            );
+            let body = vec![
+                BodyPredicate::Positive(Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Positive(Atom::new(
+                    "connected".to_string(),
+                    vec![
+                        Term::Variable("Y".to_string()),
+                        Term::Variable("Z".to_string()),
+                    ],
+                )),
+            ];
+            let rule2 = Rule::new(head, body);
+            let rule_def2 = RuleDef {
+                name: "connected".to_string(),
+                rule: SerializableRule::from_rule(&rule2),
+            };
+            catalog.register_rule(&rule_def2).unwrap();
+
+            println!("Before dropping catalog:");
+            println!("  Rules count: {}", catalog.all_rules().len());
+        }
+        // Catalog is dropped here, file should be persisted
+
+        // Reload and verify
+        {
+            let catalog = RuleCatalog::new(db_path).unwrap();
+            println!("After reloading catalog:");
+            println!("  Views count: {}", catalog.len());
+            println!("  Rules count: {}", catalog.all_rules().len());
+
+            assert_eq!(catalog.len(), 1, "Should have 1 view after reload");
+            assert_eq!(
+                catalog.all_rules().len(),
+                2,
+                "Should have 2 rules after reload"
+            );
+
+            let view = catalog.get("connected").expect("View should exist");
+            assert_eq!(view.rules.len(), 2, "View should have 2 rules after reload");
+        }
+    }
+
+    #[test]
+    fn test_self_negation_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Self-negation: a(X) :- base(X), !a(X).
+        // This should be rejected as unstratified
+        let head = Atom::new("a".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Negated(Atom::new(
+                "a".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+        ];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "a".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(result.is_err(), "Self-negation should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unstratified") || err.contains("negates itself"),
+            "Error message should mention unstratified negation: {}",
+            err
+        );
     }
 
