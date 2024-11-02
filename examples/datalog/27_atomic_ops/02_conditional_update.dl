@@ -1,0 +1,27 @@
+% Test: Conditional Delete Operation
+% Description: Tests conditional delete with filter conditions
+
+.kg create conditional_update_test_n27t02
+.kg use conditional_update_test_n27t02
+
+% Initial data: counters with values
++counter[(1, 100), (2, 200), (3, 50), (4, 150)].
+
+% Query initial state
+?- counter(Id, Value).
+
+% Delete counters where value > 100 (counters 2 and 4)
+-counter(Id, Value) :- counter(Id, Value), Value > 100.
+
+% Query after conditional delete
+?- counter(Id, Value).
+
+% Re-add the counters with new values
++counter[(2, 210), (4, 160)].
+
+% Query final state
+?- counter(Id, Value).
+
+% Cleanup
+.kg use default
+.kg drop conditional_update_test_n27t02

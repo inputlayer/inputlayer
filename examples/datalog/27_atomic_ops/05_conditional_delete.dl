@@ -1,0 +1,16 @@
+% Test: Conditional Fact Deletion
+% Description: Tests deleting facts based on a condition from another relation
+.kg create test_cond_del_05_n27t05
+.kg use test_cond_del_05_n27t05
+% Insert base data
++edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
++source[(1), (2), (5)].
+% Query initial state
+?- edge(X, Y).
+% Delete edges where X is in source - should delete (1,2), (2,3), (5,6)
+-edge(X, Y) :- source(X).
+% Query after conditional delete
+?- edge(X, Y).
+% Cleanup
+.kg use default
+.kg drop test_cond_del_05_n27t05

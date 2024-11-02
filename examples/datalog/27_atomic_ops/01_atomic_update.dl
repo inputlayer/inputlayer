@@ -1,0 +1,31 @@
+% Test: Update Pattern with Delete and Insert
+% Description: Tests the delete-then-insert update pattern
+
+.kg create atomic_update_test_n27t01
+.kg use atomic_update_test_n27t01
+
+% Initial data
++counter[(1, 0), (2, 10), (3, 20)].
+
+% Query initial state
+?- counter(Id, Value).
+
+% Update counter 1: delete old, insert new
+% First, delete the old value
+-counter(1, 0).
+% Then insert the new value
++counter(1, 5).
+
+% Query after update
+?- counter(Id, Value).
+
+% Update counter 2: delete and insert
+-counter(2, 10).
++counter(2, 20).
+
+% Query final state
+?- counter(Id, Value).
+
+% Cleanup
+.kg use default
+.kg drop atomic_update_test_n27t01

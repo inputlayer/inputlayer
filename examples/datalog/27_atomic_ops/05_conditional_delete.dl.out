@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_del_05_n27t05
+Knowledge graph 'test_cond_del_05_n27t05' created.
+Switched to knowledge graph: test_cond_del_05_n27t05
+> .kg use test_cond_del_05_n27t05
+Switched to knowledge graph: test_cond_del_05_n27t05
+> +edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+Inserted 5 fact(s) into 'edge'.
+> +source[(1), (2), (5)].
+Inserted 3 fact(s) into 'source'.
+> ?- edge(X, Y).
+5 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
+  (5, 6)
+> -edge(X, Y) :- source(X).
+Conditional delete: 3 fact(s) deleted from 'edge'.
+> ?- edge(X, Y).
+2 rows:
+  (3, 4)
+  (4, 5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_05_n27t05
+Knowledge graph 'test_cond_del_05_n27t05' dropped.
