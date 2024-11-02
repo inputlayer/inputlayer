@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create conditional_update_test_n27t02
+Knowledge graph 'conditional_update_test_n27t02' created.
+Switched to knowledge graph: conditional_update_test_n27t02
+> .kg use conditional_update_test_n27t02
+Switched to knowledge graph: conditional_update_test_n27t02
+> +counter[(1, 100), (2, 200), (3, 50), (4, 150)].
+Inserted 4 fact(s) into 'counter'.
+> ?- counter(Id, Value).
+4 rows:
+  (1, 100)
+  (2, 200)
+  (3, 50)
+  (4, 150)
+> -counter(Id, Value) :- counter(Id, Value), Value > 100.
+Conditional delete: 2 fact(s) deleted from 'counter'.
+> ?- counter(Id, Value).
+2 rows:
+  (1, 100)
+  (3, 50)
+> +counter[(2, 210), (4, 160)].
+Inserted 2 fact(s) into 'counter'.
+> ?- counter(Id, Value).
+4 rows:
+  (1, 100)
+  (2, 210)
+  (3, 50)
+  (4, 160)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop conditional_update_test_n27t02
+Knowledge graph 'conditional_update_test_n27t02' dropped.

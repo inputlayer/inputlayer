@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_del_join_n27t06
+Knowledge graph 'test_cond_del_join_n27t06' created.
+Switched to knowledge graph: test_cond_del_join_n27t06
+> .kg use test_cond_del_join_n27t06
+Switched to knowledge graph: test_cond_del_join_n27t06
+> +orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 300)].
+Inserted 3 fact(s) into 'orders'.
+> +banned[("Alice",)].
+Inserted 1 fact(s) into 'banned'.
+> ?- orders(Id, Name, Amount).
+3 rows:
+  (1, "Alice", 100)
+  (2, "Bob", 200)
+  (3, "Alice", 300)
+> -orders(Id, Name, Amount) :- banned(Name).
+Conditional delete: 2 fact(s) deleted from 'orders'.
+> ?- orders(Id, Name, Amount).
+1 rows:
+  (2, "Bob", 200)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_join_n27t06
+Knowledge graph 'test_cond_del_join_n27t06' dropped.

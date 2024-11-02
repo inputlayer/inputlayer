@@ -113,7 +113,6 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
 /// * `Ok(())` if the rules are stratifiable
 /// * `Err(String)` with a descriptive error message if a negation cycle is found
 pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
-    // TODO: verify this condition
     if rules.is_empty() {
         return Ok(());
     }
@@ -129,7 +128,6 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
     // Check for any negative edge within any SCC
     for scc in &sccs {
         if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
-            // TODO: verify this condition
             let reason = if from == to {
                 format!(
                     "Unstratified negation: '{from}' negates itself. Self-negation is not supported."
@@ -200,7 +198,7 @@ impl RuleDefinition {
     }
 
     /// Convert all rules to `crate::ast::Rule`
-    pub fn to_rules(self) -> Vec<Rule> {
+    pub fn to_rules(&self) -> Vec<Rule> {
         self.rules
             .iter()
             .map(super::statement::serialize::SerializableRule::to_rule)
@@ -369,7 +367,6 @@ impl RuleCatalog {
         new_rule: SerializableRule,
     ) -> Result<(), String> {
         if let Some(rule_def) = self.rules.get_mut(name) {
-            // TODO: verify this condition
             if index >= rule_def.rules.len() {
                 return Err(format!(
                     "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
@@ -463,7 +460,6 @@ impl RuleCatalog {
     fn topological_sort_rules(&self, rules: Vec<Rule>) -> Vec<Rule> {
         use std::collections::{HashMap, HashSet, VecDeque};
 
-        // TODO: verify this condition
         if rules.is_empty() {
             return rules;
         }
@@ -877,7 +873,6 @@ mod tests {
         assert_eq!(catalog.all_rules().len(), 1);
         let rules = catalog.all_rules();
         assert_eq!(rules[0].body.len(), 1);
-        // TODO: verify this condition
         if let BodyPredicate::Positive(atom) = &rules[0].body[0] {
             assert_eq!(atom.relation, "new_edge");
         } else {
@@ -1229,3 +1224,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_safe_negation_with_bound_variables() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Safe negation: not_banned(X) :- person(X), !banned(X).
+        // X is bound by positive atom person(X), so !banned(X) is safe
+        let head = Atom::new(
+            "not_banned".to_string(),
+            vec![Term::Variable("X".to_string())],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "person".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Negated(Atom::new(
+                "banned".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+        ];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "not_banned".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(
+            result.is_ok(),
+            "Safe negation with bound variables should be accepted: {:?}",
+            result
+        );
+    }
+}

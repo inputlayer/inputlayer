@@ -1,0 +1,33 @@
+% Test: Bulk Conditional Delete
+% Description: Tests conditional delete with filter condition
+
+.kg create bulk_delete_test_n27t03
+.kg use bulk_delete_test_n27t03
+
+% Initial data: entries with (id, value) pairs
+% Values: 1=info, 2=error, 3=warn
++entry(1, 1).
++entry(2, 2).
++entry(3, 1).
++entry(4, 2).
++entry(5, 1).
++entry(6, 3).
+
+% Query initial state
+?- entry(Id, Type).
+
+% Conditional delete: remove all error entries (type=2)
+-entry(Id, Type) :- entry(Id, Type), Type = 2.
+
+% Query after deleting errors
+?- entry(Id, Type).
+
+% Conditional delete: remove entries with id > 4
+-entry(Id, Type) :- entry(Id, Type), Id > 4.
+
+% Query final state
+?- entry(Id, Type).
+
+% Cleanup
+.kg use default
+.kg drop bulk_delete_test_n27t03

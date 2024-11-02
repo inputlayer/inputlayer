@@ -1,0 +1,17 @@
+% Test: Conditional delete with join
+
+.kg create test_cond_del_join_n27t06
+.kg use test_cond_del_join_n27t06
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 300)].
++banned[("Alice",)].
+
+?- orders(Id, Name, Amount).
+
+% Delete orders from banned customers
+-orders(Id, Name, Amount) :- banned(Name).
+
+?- orders(Id, Name, Amount).
+
+.kg use default
+.kg drop test_cond_del_join_n27t06
