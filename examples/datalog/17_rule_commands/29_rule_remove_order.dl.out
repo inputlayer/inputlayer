@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_remove_order_n17t29
+Knowledge graph 'test_remove_order_n17t29' created.
+Switched to knowledge graph: test_remove_order_n17t29
+> .kg use test_remove_order_n17t29
+Switched to knowledge graph: test_remove_order_n17t29
+> +nums[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'nums'.
+> +output(X, 10) :- nums(X), X = 1.
+Rule 'output' registered.
+> +output(X, 20) :- nums(X), X = 2.
+Rule 'output' registered.
+> +output(X, 30) :- nums(X), X = 3.
+Rule 'output' registered.
+> ?- output(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> .rule def output
+This command is available in embedded mode. HTTP support is planned for a future release.
+> .rule remove output 2
+Clause 2 removed from rule 'output'.
+> .rule def output
+This command is available in embedded mode. HTTP support is planned for a future release.
+> ?- output(X, Y).
+2 rows:
+  (1, 10)
+  (3, 30)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_remove_order_n17t29
+Knowledge graph 'test_remove_order_n17t29' dropped.

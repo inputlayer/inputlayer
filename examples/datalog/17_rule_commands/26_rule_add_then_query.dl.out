@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_add_query_n17t26
+Knowledge graph 'test_add_query_n17t26' created.
+Switched to knowledge graph: test_add_query_n17t26
+> .kg use test_add_query_n17t26
+Switched to knowledge graph: test_add_query_n17t26
+> +facts[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'facts'.
+> +derived(X, Y) :- facts(X), Y = X * 10.
+Rule 'derived' registered.
+> ?- derived(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_add_query_n17t26
+Knowledge graph 'test_add_query_n17t26' dropped.
