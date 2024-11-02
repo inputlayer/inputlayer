@@ -1,0 +1,19 @@
+% Test: Conditional delete with no matches
+
+.kg create test_cond_del_empty_n27t09
+.kg use test_cond_del_empty_n27t09
+
++data[(1, "a"), (2, "b"), (3, "c")].
+
+% Empty condition - nothing to delete
++to_delete[(99)].
+
+?- data(Id, Val).
+
+% Try to delete based on empty match
+-data(Id, Val) :- to_delete(Id), data(Id, Val).
+
+?- data(Id, Val).
+
+.kg use default
+.kg drop test_cond_del_empty_n27t09
