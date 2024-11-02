@@ -1159,3 +1159,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_unsafe_negation_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Unsafe negation: unsafe_rule(X) :- !banned(X).
+        // X only appears in the negated atom, not in any positive atom
+        // This should be rejected as unsafe (range restriction violation)
+        let head = Atom::new(
+            "unsafe_rule".to_string(),
+            vec![Term::Variable("X".to_string())],
+        );
+        let body = vec![BodyPredicate::Negated(Atom::new(
+            "banned".to_string(),
+            vec![Term::Variable("X".to_string())],
+        ))];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "unsafe_rule".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(result.is_err(), "Unsafe negation should be rejected");
+        let err = result.unwrap_err();
+        // Either "Unsafe negation" (range restriction) or "Unsafe rule" (unbound head var) is correct
+        // since X only appears in negation and not in any positive body atom
+        assert!(
+            err.contains("Unsafe negation")
+                || err.contains("Unsafe rule")
+                || err.contains("range")
+                || err.contains("Range")
+                || err.contains("not bound"),
+            "Error message should mention unsafe rule or unsafe negation: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_empty_body_unbound_head_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Empty body rule: foo(X) :- .
+        // X is in head but not bound by any positive body atom (no body atoms at all!)
+        let head = Atom::new("foo".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![]; // Empty body
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "foo".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(
+            result.is_err(),
+            "Rule with empty body and unbound head variable should be rejected"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unsafe rule") || err.contains("not bound"),
+            "Error message should mention unsafe rule: {}",
+            err
+        );
+    }
+

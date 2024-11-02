@@ -1,0 +1,18 @@
+% Test: Rule with same name as existing relation
+
+.kg create test_rule_rel_name_n17t30
+.kg use test_rule_rel_name_n17t30
+
+% Create a relation
++data[(1, 10), (2, 20)].
+
+% Create a rule with different name
++computed(X, Y) :- data(X, Z), Y = Z * 2.
+
+?- computed(X, Y).
+
+% Query the original relation
+?- data(X, Y).
+
+.kg use default
+.kg drop test_rule_rel_name_n17t30
