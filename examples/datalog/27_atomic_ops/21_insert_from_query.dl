@@ -1,0 +1,14 @@
+% Test: Insert derived from query
+
+.kg create test_insert_query_n27t21
+.kg use test_insert_query_n27t21
+
++source[(1, 10), (2, 20), (3, 30)].
+
+% Derive and persist doubled values
++doubled(Id, Val) :- source(Id, V), Val = V * 2.
+
+?- doubled(Id, Val).
+
+.kg use default
+.kg drop test_insert_query_n27t21
