@@ -1,0 +1,22 @@
+% Test: Session rules with same name as persistent
+
+.kg create test_sess_override_n04t06
+.kg use test_sess_override_n04t06
+
+% Persistent rule
++persistent_view(X, Y) :- edge(X, Y).
+
+% Base data
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Query persistent view
+?- persistent_view(X, Y).
+
+% Session-only rule (no +)
+session_only(X) :- edge(X, _).
+
+% Query session rule
+?- session_only(X).
+
+.kg use default
+.kg drop test_sess_override_n04t06
