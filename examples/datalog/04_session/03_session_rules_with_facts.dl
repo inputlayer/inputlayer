@@ -1,0 +1,40 @@
+% Test: Session Rules with Session Facts
+% Description: Tests session rules that derive from session facts (classic Socrates example)
+
+.kg create test_sess_rules_facts_n04t03
+.kg use test_sess_rules_facts_n04t03
+
+% Add a session fact (no + prefix - not persisted)
+human("socrates").
+
+% Add a session rule (no + prefix - not persisted)
+mortal(X) :- human(X).
+
+% Query using the session rule applied to session fact
+% Should derive mortal("socrates") from human("socrates")
+?- mortal(X).
+
+% Show current session state
+.session
+
+% Test with multiple session facts
+human("plato").
+human("aristotle").
+
+% Query again - should show all three mortals
+?- mortal(X).
+
+% Test with chained session rules
+wise(X) :- mortal(X).
+?- wise(X).
+
+% Clear session
+.session clear
+
+% Verify session is empty
+.session
+
+% Cleanup
+.kg use default
+.kg drop test_sess_rules_facts_n04t03
+.kg list

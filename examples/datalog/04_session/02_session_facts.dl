@@ -1,0 +1,30 @@
+% Test: Session Facts (Transient Facts)
+% Description: Tests transient session facts that exist only during current CLI session
+
+.kg create test_sess_facts_n04t02
+.kg use test_sess_facts_n04t02
+
+% Insert persistent facts using + prefix
++edge(1, 2).
++edge(2, 3).
+
+% Query should show 2 persistent facts
+?- edge(X, Y).
+
+% Add session fact (no + prefix) - stays in session until db switch or clear
+edge(100, 200).
+
+% Query shows all 3 (2 persistent + 1 session)
+?- edge(X, Y).
+
+% Session facts cleared when switching databases
+.kg use default
+
+% Switch back to verify session fact is gone
+.kg use test_sess_facts_n04t02
+?- edge(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_sess_facts_n04t02
+.kg list
