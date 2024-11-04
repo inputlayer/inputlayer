@@ -1,0 +1,31 @@
+% Test: Session Rule Overwrite
+% Description: Tests that session rules can have multiple clauses
+
+.kg create test_session_overwrite_n04t11
+.kg use test_session_overwrite_n04t11
+
+% Insert test data
++edge[(1, 2), (2, 3), (3, 4)].
++special[(2,)].
+
+% First rule clause
+connected(X, Y) :- edge(X, Y).
+
+% Show session
+.session
+
+% Query - should show direct connections
+?- connected(X, Y).
+
+% Add second clause (extending the rule)
+connected(X, Z) :- edge(X, Y), edge(Y, Z).
+
+% Show session - should now have 2 rules
+.session
+
+% Query - should now show 2-hop connections too
+?- connected(1, X).
+
+% Cleanup
+.kg use default
+.kg drop test_session_overwrite_n04t11
