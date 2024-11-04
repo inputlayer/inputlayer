@@ -1,0 +1,15 @@
+.kg create test_session_mat_n04t20
+.kg use test_session_mat_n04t20
+
++edge(1, 2).
++edge(2, 3).
++edge(3, 4).
+
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
+
+reachable_from_one(Y) :- path(1, Y).
+?- reachable_from_one(X).
+
+.kg use default
+.kg drop test_session_mat_n04t20

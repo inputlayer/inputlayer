@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_join_mat_n04t22
+Knowledge graph 'test_join_mat_n04t22' created.
+Switched to knowledge graph: test_join_mat_n04t22
+> .kg use test_join_mat_n04t22
+Switched to knowledge graph: test_join_mat_n04t22
+> +edge(1, 2).
+Inserted 1 fact(s) into 'edge'.
+> +edge(2, 3).
+Inserted 1 fact(s) into 'edge'.
+> +edge(3, 4).
+Inserted 1 fact(s) into 'edge'.
+> +label(1, "start").
+Inserted 1 fact(s) into 'label'.
+> +label(4, "end").
+Inserted 1 fact(s) into 'label'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule 'reachable' registered.
+> path_between_labels(From, To) :- label(From, "start"), label(To, "end"), reachable(From, To).
+1 rows:
+  (1, 4)
+(session: 1 rule(s))
+> ?- path_between_labels(X, Y).
+1 rows:
+  (1, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_join_mat_n04t22
+Knowledge graph 'test_join_mat_n04t22' dropped.

@@ -1,0 +1,33 @@
+% Test: Session Facts Not Persisted
+% Description: Verifies that session facts are NOT saved when switching KGs
+
+.kg create test_session_persist_n04t09
+.kg use test_session_persist_n04t09
+
+% Insert persistent facts
++base_data[(1,), (2,), (3,)].
+
+% Add session fact (not persisted)
+session_fact(100).
+
+% Query should show all 4 values
+?- base_data(X).
+
+% Query session fact
+?- session_fact(X).
+
+% Switch to default (session facts cleared)
+.kg use default
+
+% Switch back
+.kg use test_session_persist_n04t09
+
+% Query base data - still there
+?- base_data(X).
+
+% Query session fact - should show no results (not persisted)
+?- session_fact(X).
+
+% Cleanup
+.kg use default
+.kg drop test_session_persist_n04t09
