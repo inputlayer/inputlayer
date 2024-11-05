@@ -1,0 +1,7 @@
+% Test: Use Non-existent Database
+% Description: Tests error handling when switching to a database that doesn't exist
+
+% Attempt to use a database that doesn't exist
+.kg use nonexistent_database_xyz_n12t06
+
+% This should produce an error message

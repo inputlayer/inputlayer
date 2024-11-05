@@ -1,0 +1,19 @@
+% Test: Arity Mismatch
+% Description: Tests error when inserting tuples with different arities into same relation
+
+.kg create test_arity_err_n12t04
+.kg use test_arity_err_n12t04
+
+% First insert binary tuples
++mixed[(1, 2), (3, 4)].
+?- mixed(X, Y).
+
+% Now try to insert ternary tuple into same relation - should error
++mixed[(5, 6, 7)].
+
+% Query to see what happened
+?- mixed(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_arity_err_n12t04

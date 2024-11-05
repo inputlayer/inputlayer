@@ -1,0 +1,8 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg use nonexistent_database_xyz_n12t06
+Script error: Knowledge graph 'nonexistent_database_xyz_n12t06' not found
