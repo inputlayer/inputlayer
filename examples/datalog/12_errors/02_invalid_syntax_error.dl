@@ -1,0 +1,15 @@
+% Test: Invalid Syntax Errors
+% Description: Tests error handling for various syntax errors
+
+.kg create test_syntax_err_n12t02
+.kg use test_syntax_err_n12t02
+
+% Insert some valid data first
++edge[(1, 2), (2, 3)].
+
+% Missing closing bracket - should error
++broken[(1, 2.
+
+% Cleanup (may not execute if above fails)
+.kg use default
+.kg drop test_syntax_err_n12t02

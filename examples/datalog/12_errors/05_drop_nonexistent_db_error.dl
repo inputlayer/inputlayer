@@ -1,0 +1,7 @@
+% Test: Drop Non-existent Database
+% Description: Tests error handling when dropping a database that doesn't exist
+
+% Attempt to drop a database that doesn't exist
+.kg drop nonexistent_database_xyz_n12t05
+
+% This should produce an error message
