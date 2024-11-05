@@ -1,0 +1,21 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_n12t16
+Knowledge graph 'test_arity_n12t16' created.
+Switched to knowledge graph: test_arity_n12t16
+> .kg use test_arity_n12t16
+Switched to knowledge graph: test_arity_n12t16
+> +edge(1, 2).
+Inserted 1 fact(s) into 'edge'.
+> +edge(3, 4).
+Inserted 1 fact(s) into 'edge'.
+> ?- edge(X, Y).
+2 rows:
+  (1, 2)
+  (3, 4)
+> +edge(5, 6, 7).
+Script error: Insert failed: Arity mismatch for relation 'edge': existing arity is 2, but trying to insert tuples with arity 3

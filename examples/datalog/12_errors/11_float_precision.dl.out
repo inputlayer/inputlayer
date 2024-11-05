@@ -1,0 +1,48 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_precision_n12t11
+Knowledge graph 'test_float_precision_n12t11' created.
+Switched to knowledge graph: test_float_precision_n12t11
+> .kg use test_float_precision_n12t11
+Switched to knowledge graph: test_float_precision_n12t11
+> +scaled_floats[(1, 2, 3), (10, 20, 30), (100, 200, 300)].
+Inserted 3 fact(s) into 'scaled_floats'.
+> +add_test(A, B, C, A+B) :- scaled_floats(A, B, C).
+Rule 'add_test' registered.
+> ?- add_test(A, B, C, Sum).
+3 rows:
+  (1, 2, 3, 3)
+  (10, 20, 30, 30)
+  (100, 200, 300, 300)
+> +div_cases[(10, 3), (7, 2), (1, 3), (22, 7)].
+Inserted 4 fact(s) into 'div_cases'.
+> +div_result(X, Y, X/Y) :- div_cases(X, Y).
+Rule 'div_result' registered.
+> ?- div_result(A, B, C).
+4 rows:
+  (1, 3, 0.3333333333333333)
+  (7, 2, 3.5)
+  (10, 3, 3.3333333333333335)
+  (22, 7, 3.142857142857143)
+> +compare_base[(100, 50)].
+Inserted 1 fact(s) into 'compare_base'.
+> +equal_after_div(X, Y) :- compare_base(X, Y), X/2 = Y.
+Rule 'equal_after_div' registered.
+> ?- equal_after_div(X, Y).
+1 rows:
+  (100, 50)
+> +chain_base[(12)].
+Inserted 1 fact(s) into 'chain_base'.
+> +chain_result(X, X*2/2) :- chain_base(X).
+Rule 'chain_result' registered.
+> ?- chain_result(A, B).
+1 rows:
+  (12, 12.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_float_precision_n12t11
+Knowledge graph 'test_float_precision_n12t11' dropped.
