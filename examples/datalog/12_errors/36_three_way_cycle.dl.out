@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_3way_cycle_n12t36
+Knowledge graph 'test_3way_cycle_n12t36' created.
+Switched to knowledge graph: test_3way_cycle_n12t36
+> .kg use test_3way_cycle_n12t36
+Switched to knowledge graph: test_3way_cycle_n12t36
+> +base(1).
+Inserted 1 fact(s) into 'base'.
+> cycle_a(X) :- base(X), !cycle_b(X).
+1 rows:
+  (1)
+(session: 1 rule(s))
+> cycle_b(X) :- base(X), !cycle_c(X).
+1 rows:
+  (1)
+(session: 2 rule(s))
+> cycle_c(X) :- base(X), !cycle_a(X).
+No results.
+(session: 3 rule(s))
+> ?- cycle_a(X).
+1 rows:
+  (1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_3way_cycle_n12t36
+Knowledge graph 'test_3way_cycle_n12t36' dropped.
