@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_3way_neg_n12t31
+Knowledge graph 'test_3way_neg_n12t31' created.
+Switched to knowledge graph: test_3way_neg_n12t31
+> .kg use test_3way_neg_n12t31
+Switched to knowledge graph: test_3way_neg_n12t31
+> +base[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'base'.
+> +a(X) :- base(X), !b(X).
+Rule 'a' registered.
+> +b(X) :- base(X), !c(X).
+Rule 'b' registered.
+> +c(X) :- base(X), !a(X).
+Script error: Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b, c]

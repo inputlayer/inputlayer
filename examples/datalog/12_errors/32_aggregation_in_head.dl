@@ -1,0 +1,14 @@
+% Test: Invalid aggregation syntax
+
+.kg create test_agg_err_n12t32
+.kg use test_agg_err_n12t32
+
++nums[(1,), (2,), (3,)].
+
+% This should work
+total(sum<X>) :- nums(X).
+
+?- total(T).
+
+.kg use default
+.kg drop test_agg_err_n12t32
