@@ -1,0 +1,12 @@
+% Test: Query with wrong arity
+
+.kg create test_arity_err_n12t40
+.kg use test_arity_err_n12t40
+
++data[(1, "a", 100)].
+
+% Wrong arity in query
+?- data(X, Y).
+
+.kg use default
+.kg drop test_arity_err_n12t40
