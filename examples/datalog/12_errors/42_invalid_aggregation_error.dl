@@ -1,0 +1,12 @@
+% Test: Invalid aggregation syntax
+
+.kg create test_inv_agg_n12t42
+.kg use test_inv_agg_n12t42
+
++data[(1,), (2,), (3,)].
+
+% Invalid aggregation name
+bad(X, <INVALID:Y>) :- data(Y).
+
+.kg use default
+.kg drop test_inv_agg_n12t42

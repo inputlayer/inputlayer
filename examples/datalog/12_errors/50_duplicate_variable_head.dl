@@ -1,0 +1,14 @@
+% Test: Duplicate variable in rule head
+
+.kg create test_dup_head_n12t50
+.kg use test_dup_head_n12t50
+
++data[(1, 1), (2, 3), (3, 3)].
+
+% Same variable in head multiple times
+duplicate_head(X, X) :- data(X, X).
+
+?- duplicate_head(A, B).
+
+.kg use default
+.kg drop test_dup_head_n12t50

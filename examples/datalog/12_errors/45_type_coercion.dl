@@ -1,0 +1,14 @@
+% Test: Type mismatch with constant
+
+.kg create test_inv_const_n12t45
+.kg use test_inv_const_n12t45
+
++nums[(1,), (2,), (3,)].
+
+% Compare int to string
+bad(X) :- nums(X), X = "one".
+
+?- bad(X).
+
+.kg use default
+.kg drop test_inv_const_n12t45

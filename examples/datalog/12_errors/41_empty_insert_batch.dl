@@ -1,0 +1,12 @@
+% Test: Empty insert batch error
+
+.kg create test_empty_batch_n12t41
+.kg use test_empty_batch_n12t41
+
+% Empty batch insert should error
++data[].
+
+?- data(X).
+
+.kg use default
+.kg drop test_empty_batch_n12t41
