@@ -1,0 +1,12 @@
+% Test: Unbound variable in comparison
+
+.kg create test_unbound_cmp_n12t61
+.kg use test_unbound_cmp_n12t61
+
++data[(1,), (2,)].
+
+% Y is not bound before comparison
+bad(X) :- data(X), Y > 5.
+
+.kg use default
+.kg drop test_unbound_cmp_n12t61
