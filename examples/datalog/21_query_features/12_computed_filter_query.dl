@@ -1,0 +1,14 @@
+% Test: Computed filter in query
+
+.kg create test_computed_filter_n21t12
+.kg use test_computed_filter_n21t12
+
++items[(1, 10), (2, 20), (3, 30), (4, 40)].
+
+% Filter based on computed value
+over_threshold(Id, Val, Doubled) :- items(Id, Val), Doubled = Val * 2, Doubled > 50.
+
+?- over_threshold(Id, Val, Doubled).
+
+.kg use default
+.kg drop test_computed_filter_n21t12

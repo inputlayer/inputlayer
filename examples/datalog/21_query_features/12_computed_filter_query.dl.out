@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_computed_filter_n21t12
+Knowledge graph 'test_computed_filter_n21t12' created.
+Switched to knowledge graph: test_computed_filter_n21t12
+> .kg use test_computed_filter_n21t12
+Switched to knowledge graph: test_computed_filter_n21t12
+> +items[(1, 10), (2, 20), (3, 30), (4, 40)].
+Inserted 4 fact(s) into 'items'.
+> over_threshold(Id, Val, Doubled) :- items(Id, Val), Doubled = Val * 2, Doubled > 50.
+2 rows:
+  (3, 30, 60)
+  (4, 40, 80)
+(session: 1 rule(s))
+> ?- over_threshold(Id, Val, Doubled).
+2 rows:
+  (3, 30, 60)
+  (4, 40, 80)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_computed_filter_n21t12
+Knowledge graph 'test_computed_filter_n21t12' dropped.

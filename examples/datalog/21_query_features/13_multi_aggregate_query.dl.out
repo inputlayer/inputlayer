@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n21t13
+Knowledge graph 'test_multi_agg_n21t13' created.
+Switched to knowledge graph: test_multi_agg_n21t13
+> .kg use test_multi_agg_n21t13
+Switched to knowledge graph: test_multi_agg_n21t13
+> +vals[(10,), (20,), (30,), (40,), (50,)].
+Inserted 5 fact(s) into 'vals'.
+> +stats(sum<X>, count<X>, min<X>, max<X>, avg<X>) :- vals(X).
+Rule 'stats' registered.
+> ?- stats(Sum, Count, Min, Max, Avg).
+1 rows:
+  (150, 5, 10, 50, 30.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n21t13
+Knowledge graph 'test_multi_agg_n21t13' dropped.

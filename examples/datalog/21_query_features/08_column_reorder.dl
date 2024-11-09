@@ -1,0 +1,18 @@
+% Test: Column reordering in projection
+
+.kg create test_col_reorder_n21t08
+.kg use test_col_reorder_n21t08
+
+% Sample data: (id, name, value)
++data[(1, "alice", 100), (2, "bob", 200), (3, "carol", 300)].
+
+% Reorder columns: (value, name, id)
++reordered(V, N, I) :- data(I, N, V).
+?- reordered(V, N, I).
+
+% Partial projection with reorder: (name, value) only
++partial(N, V) :- data(_, N, V).
+?- partial(N, V).
+
+.kg use default
+.kg drop test_col_reorder_n21t08

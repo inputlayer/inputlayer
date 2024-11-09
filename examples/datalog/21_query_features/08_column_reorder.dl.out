@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_col_reorder_n21t08
+Knowledge graph 'test_col_reorder_n21t08' created.
+Switched to knowledge graph: test_col_reorder_n21t08
+> .kg use test_col_reorder_n21t08
+Switched to knowledge graph: test_col_reorder_n21t08
+> +data[(1, "alice", 100), (2, "bob", 200), (3, "carol", 300)].
+Inserted 3 fact(s) into 'data'.
+> +reordered(V, N, I) :- data(I, N, V).
+Rule 'reordered' registered.
+> ?- reordered(V, N, I).
+3 rows:
+  (100, "alice", 1)
+  (200, "bob", 2)
+  (300, "carol", 3)
+> +partial(N, V) :- data(_, N, V).
+Rule 'partial' registered.
+> ?- partial(N, V).
+3 rows:
+  ("alice", 100)
+  ("bob", 200)
+  ("carol", 300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_col_reorder_n21t08
+Knowledge graph 'test_col_reorder_n21t08' dropped.
