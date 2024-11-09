@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_col_reorder_n21t07
+Knowledge graph 'test_col_reorder_n21t07' created.
+Switched to knowledge graph: test_col_reorder_n21t07
+> .kg use test_col_reorder_n21t07
+Switched to knowledge graph: test_col_reorder_n21t07
+> +employees[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Carol", 55000)].
+Inserted 3 fact(s) into 'employees'.
+> reordered(Name, Id, Salary) :- employees(Id, Name, Salary).
+3 rows:
+  ("Alice", 1, 50000)
+  ("Bob", 2, 60000)
+  ("Carol", 3, 55000)
+(session: 1 rule(s))
+> ?- reordered(Name, Id, Salary).
+3 rows:
+  ("Alice", 1, 50000)
+  ("Bob", 2, 60000)
+  ("Carol", 3, 55000)
+> reversed(Salary, Name, Id) :- employees(Id, Name, Salary).
+3 rows:
+  (50000, "Alice", 1)
+  (55000, "Carol", 3)
+  (60000, "Bob", 2)
+(session: 2 rule(s))
+> ?- reversed(Salary, Name, Id).
+3 rows:
+  (50000, "Alice", 1)
+  (55000, "Carol", 3)
+  (60000, "Bob", 2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_col_reorder_n21t07
+Knowledge graph 'test_col_reorder_n21t07' dropped.

@@ -1,0 +1,17 @@
+% Test: Column reorder in query
+
+.kg create test_reorder_n21t10
+.kg use test_reorder_n21t10
+
++records[(1, "Alice", 100), (2, "Bob", 200)].
+
+% Original order
+?- records(Id, Name, Val).
+
+% Reordered via rule
+reordered(Name, Val, Id) :- records(Id, Name, Val).
+
+?- reordered(Name, Val, Id).
+
+.kg use default
+.kg drop test_reorder_n21t10
