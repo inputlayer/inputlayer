@@ -1,0 +1,15 @@
+% Test: Negation cycle detection
+
+.kg create test_neg_cycle_n12t66
+.kg use test_neg_cycle_n12t66
+
++base(1).
+
+% Mutual negation cycle: a depends on !b, b depends on !a
+a(X) :- base(X), !b(X).
+b(X) :- base(X), !a(X).
+
+?- a(X).
+
+.kg use default
+.kg drop test_neg_cycle_n12t66
