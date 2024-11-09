@@ -1,0 +1,14 @@
+% Test: Filter applied after head computation
+
+.kg create test_filter_head_n21t17
+.kg use test_filter_head_n21t17
+
++vals[(1,), (2,), (3,), (4,), (5,)].
+
+% Compute in head, filter by computed value
+doubled_big(X, Y) :- vals(X), Y = X * 2, Y > 5.
+
+?- doubled_big(X, Y).
+
+.kg use default
+.kg drop test_filter_head_n21t17

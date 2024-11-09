@@ -1,0 +1,19 @@
+% Test: Nested query pattern
+
+.kg create test_nested_n21t14
+.kg use test_nested_n21t14
+
++sales[(1, "North", 100), (2, "South", 200), (3, "North", 150), (4, "South", 50)].
+
+% Subquery: regional totals
++regional_total(Region, sum<Amount>) :- sales(_, Region, Amount).
+
+% Main query: regions above average
++global_avg(avg<Total>) :- regional_total(_, Total).
+
+?- regional_total(Region, Total).
+
+?- global_avg(Avg).
+
+.kg use default
+.kg drop test_nested_n21t14
