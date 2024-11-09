@@ -1,0 +1,10 @@
+% Test: Empty rule body
+
+.kg create test_empty_body_n12t64
+.kg use test_empty_body_n12t64
+
+% This should fail - rule with empty body
+bad_rule(X) :- .
+
+.kg use default
+.kg drop test_empty_body_n12t64

@@ -1,0 +1,12 @@
+% Test: Unbound variable in rule head
+
+.kg create test_unbound_head_n12t65
+.kg use test_unbound_head_n12t65
+
++data[(1, 2), (3, 4)].
+
+% Y is not bound in body - should fail safety check
+unsafe_rule(X, Y) :- data(X, _).
+
+.kg use default
+.kg drop test_unbound_head_n12t65
