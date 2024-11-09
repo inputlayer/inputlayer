@@ -1,0 +1,13 @@
+% Test: Arity mismatch in query
+
+.kg create test_arity_query_n12t63
+.kg use test_arity_query_n12t63
+
+% Define a 3-arity relation
++triple(1, 2, 3).
+
+% Query with wrong arity (should fail)
+?- triple(X, Y).
+
+.kg use default
+.kg drop test_arity_query_n12t63
