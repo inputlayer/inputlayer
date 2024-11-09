@@ -1,0 +1,15 @@
+% Test: Multiple rules feeding same query
+
+.kg create test_multi_rule_n21t18
+.kg use test_multi_rule_n21t18
+
++numbers[(1,), (2,), (3,), (4,), (5,)].
+
+% Two clauses contribute to same head
++categorized(X, "small") :- numbers(X), X <= 2.
++categorized(X, "large") :- numbers(X), X > 2.
+
+?- categorized(X, Cat).
+
+.kg use default
+.kg drop test_multi_rule_n21t18
