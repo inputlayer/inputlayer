@@ -1,0 +1,14 @@
+% Test: Subquery-like pattern
+
+.kg create test_subquery_n21t30
+.kg use test_subquery_n21t30
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)].
+
+% Find max order amount
+max_order(max<Val>) :- orders(_, _, Val).
+
+?- max_order(M).
+
+.kg use default
+.kg drop test_subquery_n21t30
