@@ -1,0 +1,14 @@
+% Test: Variable renaming in projection
+
+.kg create test_var_rename_n21t40
+.kg use test_var_rename_n21t40
+
++src[(1, "a", 100)].
+
+% Rename variables in head
+renamed(Id, Name, Value) :- src(Id, Name, Value).
+
+?- renamed(X, Y, Z).
+
+.kg use default
+.kg drop test_var_rename_n21t40
