@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bound_n21t48
+Knowledge graph 'test_bound_n21t48' created.
+Switched to knowledge graph: test_bound_n21t48
+> .kg use test_bound_n21t48
+Switched to knowledge graph: test_bound_n21t48
+> +data[(1, "a", 100), (2, "b", 200), (3, "a", 300), (4, "c", 100)].
+Inserted 4 fact(s) into 'data'.
+> ?- data(1, Y, Z).
+1 rows:
+  (1, "a", 100)
+> ?- data(X, "a", Z).
+2 rows:
+  (1, "a", 100)
+  (3, "a", 300)
+> ?- data(X, Y, 100).
+2 rows:
+  (1, "a", 100)
+  (4, "c", 100)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bound_n21t48
+Knowledge graph 'test_bound_n21t48' dropped.

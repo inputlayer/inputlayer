@@ -1,0 +1,14 @@
+% Test: Underscore for unused columns
+
+.kg create test_underscore_n21t46
+.kg use test_underscore_n21t46
+
++records[(1, "Alice", 100, "active"), (2, "Bob", 200, "inactive"), (3, "Carol", 150, "active")].
+
+% Project only id and status, ignore middle columns
+id_status(Id, Status) :- records(Id, _, _, Status).
+
+?- id_status(Id, Status).
+
+.kg use default
+.kg drop test_underscore_n21t46
