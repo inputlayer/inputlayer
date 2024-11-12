@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested_n21t56
+Knowledge graph 'test_nested_n21t56' created.
+Switched to knowledge graph: test_nested_n21t56
+> .kg use test_nested_n21t56
+Switched to knowledge graph: test_nested_n21t56
+> +base[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'base'.
+> +doubled(Id, D) :- base(Id, V), D = V * 2.
+Rule 'doubled' registered.
+> +quadrupled(Id, Q) :- doubled(Id, D), Q = D * 2.
+Rule 'quadrupled' registered.
+> ?- doubled(Id, D).
+3 rows:
+  (1, 20)
+  (2, 40)
+  (3, 60)
+> ?- quadrupled(Id, Q).
+3 rows:
+  (1, 40)
+  (2, 80)
+  (3, 120)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_n21t56
+Knowledge graph 'test_nested_n21t56' dropped.
