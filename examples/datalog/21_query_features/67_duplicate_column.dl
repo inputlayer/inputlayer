@@ -1,0 +1,18 @@
+% Test: Duplicate column in output
+
+.kg create test_dup_col_n21t67
+.kg use test_dup_col_n21t67
+
+% Sample data
++pairs[(1, 10), (2, 20), (3, 30)].
+
+% Duplicate first column twice
++dup_first(X, Y, X) :- pairs(X, Y).
+?- dup_first(A, B, C).
+
+% Triple the value column
++triple_val(X, Y, Y, Y) :- pairs(X, Y).
+?- triple_val(A, B, C, D).
+
+.kg use default
+.kg drop test_dup_col_n21t67
