@@ -1,0 +1,20 @@
+% Test: Duplicate column in output
+
+.kg create test_dup_col_n21t66
+.kg use test_dup_col_n21t66
+
+% Base data
++data[(1, "a"), (2, "b"), (3, "c")].
+
+% Duplicate column in output
+dup_id(X, X) :- data(X, _).
+
+?- dup_id(A, B).
+
+% Duplicate with other column
+dup_with_val(X, V, X) :- data(X, V).
+
+?- dup_with_val(A, B, C).
+
+.kg use default
+.kg drop test_dup_col_n21t66
