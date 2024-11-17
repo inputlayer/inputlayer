@@ -116,7 +116,7 @@ impl Optimizer {
                     }
                 } else {
                     IRNode::Map {
-                        input: Box::new(optimized_input),
+                        input: Box::new(optimized_input.clone()),
                         projection: outer_projection,
                         output_schema: outer_schema,
                     }
@@ -297,6 +297,7 @@ impl Optimizer {
         }
     }
 
+
     /// Rule: Push filters down through joins
     ///
     /// Filter(Join(A, B), pred) -> Join(Filter(A, pred), B)
@@ -311,7 +312,7 @@ impl Optimizer {
     fn pushdown_filters(&self, ir: IRNode) -> IRNode {
         match ir {
             IRNode::Filter { input, predicate } => {
-                let optimized_input = self.pushdown_filters(*input);
+                let optimized_input = self.pushdown_filters(*input.clone());
 
                 match optimized_input {
                     IRNode::Join {
@@ -542,7 +543,7 @@ impl Optimizer {
                 Box::new(Self::adjust_predicate_columns(left, offset)),
                 Box::new(Self::adjust_predicate_columns(right, offset)),
             ),
-            Predicate::Or(left, right) => Predicate::Or(
+            Predicate::Or(left, right.clone()) => Predicate::Or(
                 Box::new(Self::adjust_predicate_columns(left, offset)),
                 Box::new(Self::adjust_predicate_columns(right, offset)),
             ),
@@ -569,7 +570,6 @@ impl Optimizer {
                     .filter(|i| !matches!(i, IRNode::Union { inputs } if inputs.is_empty()))
                     .collect();
 
-                // TODO: verify this condition
                 if non_empty.is_empty() {
                     IRNode::Union { inputs: vec![] }
                 } else if non_empty.len() == 1 {
@@ -578,6 +578,7 @@ impl Optimizer {
                     IRNode::Union { inputs: non_empty }
                 }
             }
+
 
             IRNode::Map {
                 input,
@@ -616,6 +617,7 @@ impl Optimizer {
                 output_schema,
             } => {
                 let left = self.eliminate_empty_unions(*left);
+                // FIXME: extract to named variable
                 let right = self.eliminate_empty_unions(*right);
 
                 // If either side is empty, the join is empty
@@ -645,7 +647,6 @@ impl Optimizer {
                 let right = self.eliminate_empty_unions(*right);
 
                 // If left is empty, antijoin is empty
-                // TODO: verify this condition
                 if matches!(&left, IRNode::Union { inputs } if inputs.is_empty()) {
                     IRNode::Union { inputs: vec![] }
                 } else {
@@ -786,6 +787,7 @@ impl Optimizer {
             other => other,
         }
     }
+
 
     /// Rule: Remove always-true filters
     ///
@@ -1169,6 +1171,7 @@ impl Optimizer {
                             output_schema,
                         }
                     }
+
                     other => IRNode::Map {
                         input: Box::new(other),
                         projection,
@@ -1236,4 +1239,228 @@ impl Optimizer {
                 right_keys,
                 output_schema,
             },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.fuse_to_join_flatmap(*left)),
+                right: Box::new(self.fuse_to_join_flatmap(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.fuse_to_join_flatmap(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.fuse_to_join_flatmap(ir))
+                    .collect(),
+            },
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
+                input: Box::new(self.fuse_to_join_flatmap(*input)),
+                group_by,
+                aggregations,
+                output_schema,
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.fuse_to_join_flatmap(*input)),
+                expressions,
+            },
+
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => IRNode::JoinFlatMap {
+                left: Box::new(self.fuse_to_join_flatmap(*left)),
+                right: Box::new(self.fuse_to_join_flatmap(*right)),
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Check if two IR trees are structurally equal
+    ///
+    /// Used for fixpoint detection
+    fn ir_equals(a: &IRNode, b: &IRNode) -> bool {
+        match (a, b) {
+            (
+                IRNode::Scan {
+                    relation: r1,
+                    schema: s1,
+                },
+                IRNode::Scan {
+                    relation: r2,
+                    schema: s2,
+                },
+            ) => r1 == r2 && s1 == s2,
+
+            (
+                IRNode::Map {
+                    input: i1,
+                    projection: p1,
+                    output_schema: s1,
+                },
+                IRNode::Map {
+                    input: i2,
+                    projection: p2,
+                    output_schema: s2,
+                },
+            ) => p1 == p2 && s1 == s2 && Self::ir_equals(i1, i2),
+
+            (
+                IRNode::Filter {
+                    input: i1,
+                    predicate: p1,
+                },
+                IRNode::Filter {
+                    input: i2,
+                    predicate: p2,
+                },
+            ) => Self::predicate_equals(p1, p2) && Self::ir_equals(i1, i2),
+
+            (
+                IRNode::Join {
+                    left: l1,
+                    right: r1,
+                    left_keys: lk1,
+                    right_keys: rk1,
+                    output_schema: s1,
+                },
+                IRNode::Join {
+                    left: l2,
+                    right: r2,
+                    left_keys: lk2,
+                    right_keys: rk2,
+                    output_schema: s2,
+                },
+            ) => {
+                lk1 == lk2
+                    && rk1 == rk2
+                    && s1 == s2
+                    && Self::ir_equals(l1, l2)
+                    && Self::ir_equals(r1, r2)
+            }
+
+            (IRNode::Distinct { input: i1 }, IRNode::Distinct { input: i2 }) => {
+                Self::ir_equals(i1, i2)
+            }
+
+            (IRNode::Union { inputs: in1 }, IRNode::Union { inputs: in2 }) => {
+                in1.len() == in2.len()
+                    && in1
+                        .iter()
+                        .zip(in2.iter())
+                        .all(|(a, b)| Self::ir_equals(a, b))
+            }
+
+            (
+                IRNode::Antijoin {
+                    left: l1,
+                    right: r1,
+                    left_keys: lk1,
+                    right_keys: rk1,
+                    output_schema: s1,
+                },
+                IRNode::Antijoin {
+                    left: l2,
+                    right: r2,
+                    left_keys: lk2,
+                    right_keys: rk2,
+                    output_schema: s2,
+                },
+            ) => {
+                lk1 == lk2
+                    && rk1 == rk2
+                    && s1 == s2
+                    && Self::ir_equals(l1, l2)
+                    && Self::ir_equals(r1, r2)
+            }
+
+            (
+                IRNode::FlatMap {
+                    input: i1,
+                    projection: p1,
+                    filter_predicate: f1,
+                    output_schema: s1,
+                },
+                IRNode::FlatMap {
+                    input: i2,
+                    projection: p2,
+                    filter_predicate: f2,
+                    output_schema: s2,
+                },
+            ) => {
+                p1 == p2
+                    && s1 == s2
+                    && format!("{f1:?}") == format!("{f2:?}")
+                    && Self::ir_equals(i1, i2)
+            }
+
+            (
+                IRNode::JoinFlatMap {
+                    left: l1,
+                    right: r1,
+                    left_keys: lk1,
+                    right_keys: rk1,
+                    projection: p1,
+                    filter_predicate: f1,
+                    output_schema: s1,
+                },
+                IRNode::JoinFlatMap {
+                    left: l2,
+                    right: r2,
+                    left_keys: lk2,
+                    right_keys: rk2,
+                    projection: p2,
+                    filter_predicate: f2,
+                    output_schema: s2,
+                },
+            ) => {
+                lk1 == lk2
+                    && rk1 == rk2
+                    && p1 == p2
+                    && s1 == s2
+                    && format!("{f1:?}") == format!("{f2:?}")
+                    && Self::ir_equals(l1, l2)
+                    && Self::ir_equals(r1, r2)
+            }
+
+            _ => false,
+        }
+    }
+
+
+    /// Check if two predicates are equal
+    fn predicate_equals(a: &Predicate, b: &Predicate) -> bool {
+        // Simple structural equality
+        // For more complex predicates, would need deeper comparison
+        format!("{a:?}") == format!("{b:?}")
+    }
+}
 
