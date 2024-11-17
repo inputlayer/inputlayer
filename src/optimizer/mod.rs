@@ -569,6 +569,7 @@ impl Optimizer {
                     .filter(|i| !matches!(i, IRNode::Union { inputs } if inputs.is_empty()))
                     .collect();
 
+                // TODO: verify this condition
                 if non_empty.is_empty() {
                     IRNode::Union { inputs: vec![] }
                 } else if non_empty.len() == 1 {
@@ -644,6 +645,7 @@ impl Optimizer {
                 let right = self.eliminate_empty_unions(*right);
 
                 // If left is empty, antijoin is empty
+                // TODO: verify this condition
                 if matches!(&left, IRNode::Union { inputs } if inputs.is_empty()) {
                     IRNode::Union { inputs: vec![] }
                 } else {
@@ -1027,5 +1029,211 @@ impl Optimizer {
                     .into_iter()
                     .map(|ir| self.fuse_to_flatmap(ir))
                     .collect(),
+            },
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
+                input: Box::new(self.fuse_to_flatmap(*input)),
+                group_by,
+                aggregations,
+                output_schema,
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.fuse_to_flatmap(*input)),
+                expressions,
+            },
+
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => IRNode::FlatMap {
+                input: Box::new(self.fuse_to_flatmap(*input)),
+                projection,
+                filter_predicate,
+                output_schema,
+            },
+
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => IRNode::JoinFlatMap {
+                left: Box::new(self.fuse_to_flatmap(*left)),
+                right: Box::new(self.fuse_to_flatmap(*right)),
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Logic Fusion: Fuse Join+Map into JoinFlatMap
+    ///
+    /// Patterns recognized:
+    /// - `Map(Join(L, R, lk, rk), proj)` -> `JoinFlatMap(L, R, lk, rk, proj, None)`
+    /// - `Filter(Map(Join(L, R, lk, rk), proj), pred)` -> `JoinFlatMap(L, R, lk, rk, proj, Some(pred))`
+    ///   (handled by fuse_to_flatmap first converting to FlatMap, then this converts FlatMap-over-Join)
+    /// Remap projection indices from Join output space to JoinFlatMap concat space.
+    ///
+    /// Join output: `left_cols + right_non_key_cols` (right_keys columns excluded)
+    /// JoinFlatMap concat: `left_cols + ALL_right_cols` (everything included)
+    ///
+    /// For indices in the left portion (< left_width), no change needed.
+    /// For indices in the right portion (>= left_width), we need to map back to
+    /// the original right column index, accounting for the excluded key columns.
+    fn remap_projection_for_join_flatmap(
+        projection: &[usize],
+        left_width: usize,
+        right_keys: &[usize],
+    ) -> Vec<usize> {
+        // Build a mapping from "right non-key position" to "right absolute position"
+        // right_keys are the indices that were excluded from the Join output
+        let mut sorted_keys = right_keys.to_vec();
+        sorted_keys.sort_unstable();
+
+        projection
+            .iter()
+            .map(|&idx| {
+                if idx < left_width {
+                    // Left-side index: unchanged
+                    idx
+                } else {
+                    // Right-side index in Join output: idx - left_width is the
+                    // position in right_non_key_cols. We need to find the actual
+                    // right column index by reinserting the excluded key positions.
+                    let right_non_key_pos = idx - left_width;
+                    let mut actual_right_idx = right_non_key_pos;
+                    for &key_idx in &sorted_keys {
+                        if key_idx <= actual_right_idx {
+                            actual_right_idx += 1;
+                        }
+                    }
+                    left_width + actual_right_idx
+                }
+            })
+            .collect()
+    }
+
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn fuse_to_join_flatmap(&self, ir: IRNode) -> IRNode {
+        match ir {
+            // Map(Join(...), proj) -> JoinFlatMap
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                let optimized_input = self.fuse_to_join_flatmap(*input);
+                match optimized_input {
+                    IRNode::Join {
+                        left,
+                        right,
+                        left_keys,
+                        right_keys,
+                        ..
+                    } => {
+                        // Remap projection indices: Join output schema excludes right_keys
+                        // columns, but JoinFlatMap concat includes ALL columns from both sides.
+                        let left_width = left.output_schema().len();
+                        let remapped = Self::remap_projection_for_join_flatmap(
+                            &projection,
+                            left_width,
+                            &right_keys,
+                        );
+                        IRNode::JoinFlatMap {
+                            left,
+                            right,
+                            left_keys,
+                            right_keys,
+                            projection: remapped,
+                            filter_predicate: None,
+                            output_schema,
+                        }
+                    }
+                    other => IRNode::Map {
+                        input: Box::new(other),
+                        projection,
+                        output_schema,
+                    },
+                }
+            }
+
+            // FlatMap(Join(...), proj, pred) -> JoinFlatMap
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                let optimized_input = self.fuse_to_join_flatmap(*input);
+                match optimized_input {
+                    IRNode::Join {
+                        left,
+                        right,
+                        left_keys,
+                        right_keys,
+                        ..
+                    } => {
+                        let left_width = left.output_schema().len();
+                        let remapped = Self::remap_projection_for_join_flatmap(
+                            &projection,
+                            left_width,
+                            &right_keys,
+                        );
+                        IRNode::JoinFlatMap {
+                            left,
+                            right,
+                            left_keys,
+                            right_keys,
+                            projection: remapped,
+                            filter_predicate,
+                            output_schema,
+                        }
+                    }
+                    other => IRNode::FlatMap {
+                        input: Box::new(other),
+                        projection,
+                        filter_predicate,
+                        output_schema,
+                    },
+                }
+            }
+
+            IRNode::Filter { input, predicate } => IRNode::Filter {
+                input: Box::new(self.fuse_to_join_flatmap(*input)),
+                predicate,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.fuse_to_join_flatmap(*left)),
+                right: Box::new(self.fuse_to_join_flatmap(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
             },
 
