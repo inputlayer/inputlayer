@@ -815,3 +815,217 @@ impl Optimizer {
                 output_schema,
             },
 
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.eliminate_always_true_filters(*left)),
+                right: Box::new(self.eliminate_always_true_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.eliminate_always_true_filters(*left)),
+                right: Box::new(self.eliminate_always_true_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.eliminate_always_true_filters(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.eliminate_always_true_filters(ir))
+                    .collect(),
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.eliminate_always_true_filters(*input)),
+                expressions,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Rule: Remove always-false filters
+    ///
+    /// Filter(input, False) -> Empty
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn eliminate_always_false_filters(&self, ir: IRNode) -> IRNode {
+        match ir {
+            IRNode::Filter { input, predicate } => {
+                if predicate.is_always_false() {
+                    // Return an empty union (represents empty set)
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Filter {
+                        input: Box::new(self.eliminate_always_false_filters(*input)),
+                        predicate,
+                    }
+                }
+            }
+
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => IRNode::Map {
+                input: Box::new(self.eliminate_always_false_filters(*input)),
+                projection,
+                output_schema,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.eliminate_always_false_filters(*left)),
+                right: Box::new(self.eliminate_always_false_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.eliminate_always_false_filters(*left)),
+                right: Box::new(self.eliminate_always_false_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.eliminate_always_false_filters(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.eliminate_always_false_filters(ir))
+                    .collect(),
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.eliminate_always_false_filters(*input)),
+                expressions,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Logic Fusion: Fuse Map+Filter into FlatMap
+    ///
+    /// Patterns recognized:
+    /// - `Filter(Map(input, proj), pred)` -> `FlatMap(input, proj, Some(pred))`
+    /// - `Map(input, proj)` with no filter -> `FlatMap(input, proj, None)` (not fused; only Filter+Map is)
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn fuse_to_flatmap(&self, ir: IRNode) -> IRNode {
+        match ir {
+            IRNode::Filter {
+                input, predicate, ..
+            } => {
+                let optimized_input = self.fuse_to_flatmap(*input);
+                match optimized_input {
+                    IRNode::Map {
+                        input: inner_input,
+                        projection,
+                        output_schema,
+                    } => {
+                        // Filter(Map(input, proj), pred) -> FlatMap(input, proj, Some(pred))
+                        IRNode::FlatMap {
+                            input: inner_input,
+                            projection,
+                            filter_predicate: Some(predicate),
+                            output_schema,
+                        }
+                    }
+                    other => IRNode::Filter {
+                        input: Box::new(other),
+                        predicate,
+                    },
+                }
+            }
+
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => IRNode::Map {
+                input: Box::new(self.fuse_to_flatmap(*input)),
+                projection,
+                output_schema,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.fuse_to_flatmap(*left)),
+                right: Box::new(self.fuse_to_flatmap(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.fuse_to_flatmap(*left)),
+                right: Box::new(self.fuse_to_flatmap(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.fuse_to_flatmap(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.fuse_to_flatmap(ir))
+                    .collect(),
+            },
+
