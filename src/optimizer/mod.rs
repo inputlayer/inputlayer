@@ -377,3 +377,221 @@ impl Optimizer {
                 }
             }
 
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => IRNode::Map {
+                input: Box::new(self.pushdown_filters(*input)),
+                projection,
+                output_schema,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.pushdown_filters(*left)),
+                right: Box::new(self.pushdown_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.pushdown_filters(*left)),
+                right: Box::new(self.pushdown_filters(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.pushdown_filters(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.pushdown_filters(ir))
+                    .collect(),
+            },
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
+                input: Box::new(self.pushdown_filters(*input)),
+                group_by,
+                aggregations,
+                output_schema,
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.pushdown_filters(*input)),
+                expressions,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Extract column indices referenced by a predicate
+    fn get_predicate_columns(predicate: &Predicate) -> Vec<usize> {
+        match predicate {
+            Predicate::ColumnEqConst(col, _)
+            | Predicate::ColumnNeConst(col, _)
+            | Predicate::ColumnLtConst(col, _)
+            | Predicate::ColumnLeConst(col, _)
+            | Predicate::ColumnGtConst(col, _)
+            | Predicate::ColumnGeConst(col, _)
+            | Predicate::ColumnEqStr(col, _)
+            | Predicate::ColumnNeStr(col, _)
+            | Predicate::ColumnLtStr(col, _)
+            | Predicate::ColumnGtStr(col, _)
+            | Predicate::ColumnLeStr(col, _)
+            | Predicate::ColumnGeStr(col, _)
+            | Predicate::ColumnEqFloat(col, _)
+            | Predicate::ColumnNeFloat(col, _)
+            | Predicate::ColumnGtFloat(col, _)
+            | Predicate::ColumnLtFloat(col, _)
+            | Predicate::ColumnGeFloat(col, _)
+            | Predicate::ColumnLeFloat(col, _) => {
+                vec![*col]
+            }
+            Predicate::ColumnsEq(col1, col2)
+            | Predicate::ColumnsNe(col1, col2)
+            | Predicate::ColumnsLt(col1, col2)
+            | Predicate::ColumnsGt(col1, col2)
+            | Predicate::ColumnsLe(col1, col2)
+            | Predicate::ColumnsGe(col1, col2) => {
+                vec![*col1, *col2]
+            }
+            Predicate::ColumnCompareArith(col, _, _, var_map) => {
+                let mut cols = vec![*col];
+                cols.extend(var_map.values().copied());
+                cols
+            }
+            Predicate::ArithCompareConst(_, _, _, var_map) => var_map.values().copied().collect(),
+            Predicate::And(left, right) | Predicate::Or(left, right) => {
+                let mut cols = Self::get_predicate_columns(left);
+                cols.extend(Self::get_predicate_columns(right));
+                cols
+            }
+            Predicate::True | Predicate::False => vec![],
+        }
+    }
+
+    /// Adjust column indices in a predicate by an offset
+    fn adjust_predicate_columns(predicate: &Predicate, offset: i32) -> Predicate {
+        let adjust = |col: usize| -> usize { ((col as i32) + offset) as usize };
+
+        match predicate {
+            Predicate::ColumnEqConst(col, val) => Predicate::ColumnEqConst(adjust(*col), *val),
+            Predicate::ColumnNeConst(col, val) => Predicate::ColumnNeConst(adjust(*col), *val),
+            Predicate::ColumnLtConst(col, val) => Predicate::ColumnLtConst(adjust(*col), *val),
+            Predicate::ColumnLeConst(col, val) => Predicate::ColumnLeConst(adjust(*col), *val),
+            Predicate::ColumnGtConst(col, val) => Predicate::ColumnGtConst(adjust(*col), *val),
+            Predicate::ColumnGeConst(col, val) => Predicate::ColumnGeConst(adjust(*col), *val),
+            // String predicates
+            Predicate::ColumnEqStr(col, val) => Predicate::ColumnEqStr(adjust(*col), val.clone()),
+            Predicate::ColumnNeStr(col, val) => Predicate::ColumnNeStr(adjust(*col), val.clone()),
+            Predicate::ColumnLtStr(col, val) => Predicate::ColumnLtStr(adjust(*col), val.clone()),
+            Predicate::ColumnGtStr(col, val) => Predicate::ColumnGtStr(adjust(*col), val.clone()),
+            Predicate::ColumnLeStr(col, val) => Predicate::ColumnLeStr(adjust(*col), val.clone()),
+            Predicate::ColumnGeStr(col, val) => Predicate::ColumnGeStr(adjust(*col), val.clone()),
+            // Float predicates
+            Predicate::ColumnEqFloat(col, val) => Predicate::ColumnEqFloat(adjust(*col), *val),
+            Predicate::ColumnNeFloat(col, val) => Predicate::ColumnNeFloat(adjust(*col), *val),
+            Predicate::ColumnGtFloat(col, val) => Predicate::ColumnGtFloat(adjust(*col), *val),
+            Predicate::ColumnLtFloat(col, val) => Predicate::ColumnLtFloat(adjust(*col), *val),
+            Predicate::ColumnGeFloat(col, val) => Predicate::ColumnGeFloat(adjust(*col), *val),
+            Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(adjust(*col), *val),
+            Predicate::ColumnsEq(col1, col2) => Predicate::ColumnsEq(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsNe(col1, col2) => Predicate::ColumnsNe(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsLt(col1, col2) => Predicate::ColumnsLt(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsGt(col1, col2) => Predicate::ColumnsGt(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsLe(col1, col2) => Predicate::ColumnsLe(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsGe(col1, col2) => Predicate::ColumnsGe(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnCompareArith(col, op, expr, var_map) => {
+                let new_var_map: std::collections::HashMap<String, usize> = var_map
+                    .iter()
+                    .map(|(name, idx)| (name.clone(), adjust(*idx)))
+                    .collect();
+                Predicate::ColumnCompareArith(adjust(*col), op.clone(), expr.clone(), new_var_map)
+            }
+            Predicate::ArithCompareConst(expr, op, val, var_map) => {
+                let new_var_map: std::collections::HashMap<String, usize> = var_map
+                    .iter()
+                    .map(|(name, idx)| (name.clone(), adjust(*idx)))
+                    .collect();
+                Predicate::ArithCompareConst(expr.clone(), op.clone(), *val, new_var_map)
+            }
+            Predicate::And(left, right) => Predicate::And(
+                Box::new(Self::adjust_predicate_columns(left, offset)),
+                Box::new(Self::adjust_predicate_columns(right, offset)),
+            ),
+            Predicate::Or(left, right) => Predicate::Or(
+                Box::new(Self::adjust_predicate_columns(left, offset)),
+                Box::new(Self::adjust_predicate_columns(right, offset)),
+            ),
+            Predicate::True => Predicate::True,
+            Predicate::False => Predicate::False,
+        }
+    }
+
+    /// Rule: Eliminate empty unions from the tree
+    ///
+    /// Union([]) appearing anywhere should be propagated up
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn eliminate_empty_unions(&self, ir: IRNode) -> IRNode {
+        match ir {
+            IRNode::Union { inputs } => {
+                // Filter out empty unions from inputs
+                let non_empty: Vec<IRNode> = inputs
+                    .into_iter()
+                    .map(|i| self.eliminate_empty_unions(i))
+                    .filter(|i| !matches!(i, IRNode::Union { inputs } if inputs.is_empty()))
+                    .collect();
+
+                if non_empty.is_empty() {
+                    IRNode::Union { inputs: vec![] }
+                } else if non_empty.len() == 1 {
+                    non_empty.into_iter().next().unwrap()
+                } else {
+                    IRNode::Union { inputs: non_empty }
+                }
+            }
+
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                let input = self.eliminate_empty_unions(*input);
+                if matches!(&input, IRNode::Union { inputs } if inputs.is_empty()) {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Map {
+                        input: Box::new(input),
+                        projection,
+                        output_schema,
+                    }
+                }
+            }
+
