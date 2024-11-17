@@ -595,3 +595,223 @@ impl Optimizer {
                 }
             }
 
+            IRNode::Filter { input, predicate } => {
+                let input = self.eliminate_empty_unions(*input);
+                if matches!(&input, IRNode::Union { inputs } if inputs.is_empty()) {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Filter {
+                        input: Box::new(input),
+                        predicate,
+                    }
+                }
+            }
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                let left = self.eliminate_empty_unions(*left);
+                let right = self.eliminate_empty_unions(*right);
+
+                // If either side is empty, the join is empty
+                if matches!(&left, IRNode::Union { inputs } if inputs.is_empty())
+                    || matches!(&right, IRNode::Union { inputs } if inputs.is_empty())
+                {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Join {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        left_keys,
+                        right_keys,
+                        output_schema,
+                    }
+                }
+            }
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                let left = self.eliminate_empty_unions(*left);
+                let right = self.eliminate_empty_unions(*right);
+
+                // If left is empty, antijoin is empty
+                if matches!(&left, IRNode::Union { inputs } if inputs.is_empty()) {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Antijoin {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        left_keys,
+                        right_keys,
+                        output_schema,
+                    }
+                }
+            }
+
+            IRNode::Distinct { input } => {
+                let input = self.eliminate_empty_unions(*input);
+                if matches!(&input, IRNode::Union { inputs } if inputs.is_empty()) {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Distinct {
+                        input: Box::new(input),
+                    }
+                }
+            }
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let input = self.eliminate_empty_unions(*input);
+                IRNode::Aggregate {
+                    input: Box::new(input),
+                    group_by,
+                    aggregations,
+                    output_schema,
+                }
+            }
+
+            IRNode::Compute { input, expressions } => {
+                let input = self.eliminate_empty_unions(*input);
+                if matches!(&input, IRNode::Union { inputs } if inputs.is_empty()) {
+                    IRNode::Union { inputs: vec![] }
+                } else {
+                    IRNode::Compute {
+                        input: Box::new(input),
+                        expressions,
+                    }
+                }
+            }
+
+            other => other,
+        }
+    }
+
+    /// Rule: Remove identity Map nodes
+    ///
+    /// Map(input, [0, 1, ..., n]) where projection is identity -> input
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn eliminate_identity_maps(&self, ir: IRNode) -> IRNode {
+        match ir {
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                let input = Box::new(self.eliminate_identity_maps(*input));
+                let input_schema = input.output_schema();
+
+                // Check if projection is identity
+                let is_identity = projection.iter().enumerate().all(|(i, &p)| i == p)
+                    && projection.len() == input_schema.len();
+
+                if is_identity {
+                    *input
+                } else {
+                    IRNode::Map {
+                        input,
+                        projection,
+                        output_schema,
+                    }
+                }
+            }
+
+            IRNode::Filter { input, predicate } => IRNode::Filter {
+                input: Box::new(self.eliminate_identity_maps(*input)),
+                predicate,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Join {
+                left: Box::new(self.eliminate_identity_maps(*left)),
+                right: Box::new(self.eliminate_identity_maps(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.eliminate_identity_maps(*left)),
+                right: Box::new(self.eliminate_identity_maps(*right)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            IRNode::Distinct { input } => IRNode::Distinct {
+                input: Box::new(self.eliminate_identity_maps(*input)),
+            },
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|ir| self.eliminate_identity_maps(ir))
+                    .collect(),
+            },
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.eliminate_identity_maps(*input)),
+                expressions,
+            },
+
+            other => other,
+        }
+    }
+
+    /// Rule: Remove always-true filters
+    ///
+    /// Filter(input, True) -> input
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn eliminate_always_true_filters(&self, ir: IRNode) -> IRNode {
+        match ir {
+            IRNode::Filter { input, predicate } => {
+                let input = Box::new(self.eliminate_always_true_filters(*input));
+
+                if predicate.is_always_true() {
+                    *input
+                } else {
+                    IRNode::Filter { input, predicate }
+                }
+            }
+
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => IRNode::Map {
+                input: Box::new(self.eliminate_always_true_filters(*input)),
+                projection,
+                output_schema,
+            },
+
