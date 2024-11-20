@@ -1649,3 +1649,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_pushdown_filter_to_right() {
+        let optimizer = Optimizer::new();
+
+        // Filter(Join(A, B), pred_on_B) -> Join(A, Filter(B, adjusted_pred))
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "r".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "s".to_string(),
+                    schema: vec!["y".to_string(), "z".to_string()],
+                }),
+                left_keys: vec![1],
+                right_keys: vec![0],
+                output_schema: vec![
+                    "x".to_string(),
+                    "y".to_string(),
+                    "y".to_string(),
+                    "z".to_string(),
+                ],
+            }),
+            predicate: Predicate::ColumnLtConst(3, 100), // z < 100, only references right side (col 3)
+        };
+
+        let optimized = optimizer.pushdown_filters(ir);
+
+        // Should push filter down to right side of join
+        match optimized {
+            IRNode::Join { right, .. } => {
+                assert!(matches!(*right, IRNode::Filter { .. }));
+            }
+            _ => panic!("Expected Join with Filter on right"),
+        }
+    }
+
+    #[test]
+    fn test_no_pushdown_for_cross_reference() {
+        let optimizer = Optimizer::new();
+
+        // Filter referencing both sides cannot be pushed down
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "r".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "s".to_string(),
+                    schema: vec!["y".to_string(), "z".to_string()],
+                }),
+                left_keys: vec![1],
+                right_keys: vec![0],
+                output_schema: vec![
+                    "x".to_string(),
+                    "y".to_string(),
+                    "y".to_string(),
+                    "z".to_string(),
+                ],
+            }),
+            predicate: Predicate::ColumnsEq(0, 3), // x = z, references both sides
+        };
+
+        let optimized = optimizer.pushdown_filters(ir);
+
+        // Filter should stay on top
+        assert!(matches!(optimized, IRNode::Filter { .. }));
+    }
+
