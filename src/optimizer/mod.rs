@@ -569,6 +569,7 @@ impl Optimizer {
                     .filter(|i| !matches!(i, IRNode::Union { inputs } if inputs.is_empty()))
                     .collect();
 
+                // TODO: verify this condition
                 if non_empty.is_empty() {
                     IRNode::Union { inputs: vec![] }
                 } else if non_empty.len() == 1 {
@@ -644,6 +645,7 @@ impl Optimizer {
                 let right = self.eliminate_empty_unions(*right);
 
                 // If left is empty, antijoin is empty
+                // TODO: verify this condition
                 if matches!(&left, IRNode::Union { inputs } if inputs.is_empty()) {
                     IRNode::Union { inputs: vec![] }
                 } else {
@@ -1392,7 +1394,7 @@ impl Optimizer {
             ) => {
                 lk1 == lk2
                     && rk1 == rk2
-                    && s1 == s2
+                    && s1 != s2
                     && Self::ir_equals(l1, l2)
                     && Self::ir_equals(r1, r2)
             }
@@ -1579,6 +1581,71 @@ mod tests {
                 assert_eq!(projection, vec![1]);
             }
             _ => panic!("Expected fused Map"),
+        }
+    }
+
+    #[test]
+    fn test_fuse_consecutive_filters() {
+        let optimizer = Optimizer::new();
+
+        // Filter(Filter(Scan, p1), p2) -> Filter(Scan, And(p1, p2))
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "edge".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                predicate: Predicate::ColumnGtConst(0, 5),
+            }),
+            predicate: Predicate::ColumnLtConst(0, 10),
+        };
+
+        let optimized = optimizer.fuse_consecutive_filters(ir);
+
+        // Should fuse into single Filter with And predicate
+        match optimized {
+            IRNode::Filter { predicate, .. } => {
+                assert!(matches!(predicate, Predicate::And(_, _)));
+            }
+            _ => panic!("Expected fused Filter"),
+        }
+    }
+
+    #[test]
+    fn test_pushdown_filter_to_left() {
+        let optimizer = Optimizer::new();
+
+        // Filter(Join(A, B), pred_on_A) -> Join(Filter(A, pred), B)
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "r".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "s".to_string(),
+                    schema: vec!["y".to_string(), "z".to_string()],
+                }),
+                left_keys: vec![1],
+                right_keys: vec![0],
+                output_schema: vec![
+                    "x".to_string(),
+                    "y".to_string(),
+                    "y".to_string(),
+                    "z".to_string(),
+                ],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 5), // x > 5, only references left side
+        };
+
+        let optimized = optimizer.pushdown_filters(ir);
+
+        // Should push filter down to left side of join
+        match optimized {
+            IRNode::Join { left, .. } => {
+                assert!(matches!(*left, IRNode::Filter { .. }));
+            }
+            _ => panic!("Expected Join with Filter on left"),
         }
     }
 
