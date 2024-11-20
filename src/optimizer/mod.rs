@@ -116,7 +116,7 @@ impl Optimizer {
                     }
                 } else {
                     IRNode::Map {
-                        input: Box::new(optimized_input.clone()),
+                        input: Box::new(optimized_input),
                         projection: outer_projection,
                         output_schema: outer_schema,
                     }
@@ -297,7 +297,6 @@ impl Optimizer {
         }
     }
 
-
     /// Rule: Push filters down through joins
     ///
     /// Filter(Join(A, B), pred) -> Join(Filter(A, pred), B)
@@ -312,7 +311,7 @@ impl Optimizer {
     fn pushdown_filters(&self, ir: IRNode) -> IRNode {
         match ir {
             IRNode::Filter { input, predicate } => {
-                let optimized_input = self.pushdown_filters(*input.clone());
+                let optimized_input = self.pushdown_filters(*input);
 
                 match optimized_input {
                     IRNode::Join {
@@ -543,7 +542,7 @@ impl Optimizer {
                 Box::new(Self::adjust_predicate_columns(left, offset)),
                 Box::new(Self::adjust_predicate_columns(right, offset)),
             ),
-            Predicate::Or(left, right.clone()) => Predicate::Or(
+            Predicate::Or(left, right) => Predicate::Or(
                 Box::new(Self::adjust_predicate_columns(left, offset)),
                 Box::new(Self::adjust_predicate_columns(right, offset)),
             ),
@@ -578,7 +577,6 @@ impl Optimizer {
                     IRNode::Union { inputs: non_empty }
                 }
             }
-
 
             IRNode::Map {
                 input,
@@ -617,7 +615,6 @@ impl Optimizer {
                 output_schema,
             } => {
                 let left = self.eliminate_empty_unions(*left);
-                // FIXME: extract to named variable
                 let right = self.eliminate_empty_unions(*right);
 
                 // If either side is empty, the join is empty
@@ -787,7 +784,6 @@ impl Optimizer {
             other => other,
         }
     }
-
 
     /// Rule: Remove always-true filters
     ///
@@ -1171,7 +1167,6 @@ impl Optimizer {
                             output_schema,
                         }
                     }
-
                     other => IRNode::Map {
                         input: Box::new(other),
                         projection,
@@ -1455,7 +1450,6 @@ impl Optimizer {
         }
     }
 
-
     /// Check if two predicates are equal
     fn predicate_equals(a: &Predicate, b: &Predicate) -> bool {
         // Simple structural equality
@@ -1463,4 +1457,128 @@ impl Optimizer {
         format!("{a:?}") == format!("{b:?}")
     }
 }
+
+impl Default for Optimizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eliminate_identity_map() {
+        let optimizer = Optimizer::new();
+
+        // Map with identity projection
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 1], // Identity
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let optimized = optimizer.eliminate_identity_maps(ir);
+
+        // Should be reduced to just the scan
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_eliminate_always_true_filter() {
+        let optimizer = Optimizer::new();
+
+        // Filter with always-true predicate
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::True,
+        };
+
+        let optimized = optimizer.eliminate_always_true_filters(ir);
+
+        // Should be reduced to just the scan
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_eliminate_always_false_filter() {
+        let optimizer = Optimizer::new();
+
+        // Filter with always-false predicate
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::False,
+        };
+
+        let optimized = optimizer.eliminate_always_false_filters(ir);
+
+        // Should be reduced to empty union
+        match optimized {
+            IRNode::Union { inputs } => assert_eq!(inputs.len(), 0),
+            _ => panic!("Expected empty union"),
+        }
+    }
+
+    #[test]
+    fn test_fixpoint_optimization() {
+        let optimizer = Optimizer::new();
+
+        // Nested identity maps
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "edge".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                projection: vec![0, 1],
+                output_schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let optimized = optimizer.optimize(ir);
+
+        // Both identity maps should be eliminated
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_fuse_consecutive_maps() {
+        let optimizer = Optimizer::new();
+
+        // Map(Map(Scan, [1, 0]), [0]) -> Map(Scan, [1])
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "edge".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                projection: vec![1, 0], // swap columns
+                output_schema: vec!["y".to_string(), "x".to_string()],
+            }),
+            projection: vec![0], // project first column (which was y)
+            output_schema: vec!["y".to_string()],
+        };
+
+        let optimized = optimizer.fuse_consecutive_maps(ir);
+
+        // Should fuse into single Map with projection [1]
+        match optimized {
+            IRNode::Map { projection, .. } => {
+                assert_eq!(projection, vec![1]);
+            }
+            _ => panic!("Expected fused Map"),
+        }
+    }
 
