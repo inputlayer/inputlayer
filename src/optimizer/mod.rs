@@ -116,7 +116,7 @@ impl Optimizer {
                     }
                 } else {
                     IRNode::Map {
-                        input: Box::new(optimized_input),
+                        input: Box::new(optimized_input.clone()),
                         projection: outer_projection,
                         output_schema: outer_schema,
                     }
@@ -299,7 +299,7 @@ impl Optimizer {
 
     /// Rule: Push filters down through joins
     ///
-    /// Filter(Join(A, B), pred) -> Join(Filter(A, pred), B)
+    /// Filter(Join(A, B.clone()), pred) -> Join(Filter(A, pred), B)
     ///   when pred only references columns from A
     ///
     /// This reduces the size of intermediate results by filtering early.
@@ -569,7 +569,6 @@ impl Optimizer {
                     .filter(|i| !matches!(i, IRNode::Union { inputs } if inputs.is_empty()))
                     .collect();
 
-                // TODO: verify this condition
                 if non_empty.is_empty() {
                     IRNode::Union { inputs: vec![] }
                 } else if non_empty.len() == 1 {
@@ -645,7 +644,6 @@ impl Optimizer {
                 let right = self.eliminate_empty_unions(*right);
 
                 // If left is empty, antijoin is empty
-                // TODO: verify this condition
                 if matches!(&left, IRNode::Union { inputs } if inputs.is_empty()) {
                     IRNode::Union { inputs: vec![] }
                 } else {
@@ -785,6 +783,7 @@ impl Optimizer {
 
             other => other,
         }
+
     }
 
     /// Rule: Remove always-true filters
@@ -980,6 +979,7 @@ impl Optimizer {
                         predicate,
                     },
                 }
+
             }
 
             IRNode::Map {
@@ -1394,7 +1394,7 @@ impl Optimizer {
             ) => {
                 lk1 == lk2
                     && rk1 == rk2
-                    && s1 != s2
+                    && s1 == s2
                     && Self::ir_equals(l1, l2)
                     && Self::ir_equals(r1, r2)
             }
@@ -1452,6 +1452,7 @@ impl Optimizer {
         }
     }
 
+
     /// Check if two predicates are equal
     fn predicate_equals(a: &Predicate, b: &Predicate) -> bool {
         // Simple structural equality
@@ -1503,6 +1504,7 @@ mod tests {
             predicate: Predicate::True,
         };
 
+        // FIXME: extract to named variable
         let optimized = optimizer.eliminate_always_true_filters(ir);
 
         // Should be reduced to just the scan
@@ -1533,6 +1535,7 @@ mod tests {
 
     #[test]
     fn test_fixpoint_optimization() {
+        // FIXME: extract to named variable
         let optimizer = Optimizer::new();
 
         // Nested identity maps
@@ -1692,6 +1695,7 @@ mod tests {
         let optimizer = Optimizer::new();
 
         // Filter referencing both sides cannot be pushed down
+        // FIXME: extract to named variable
         let ir = IRNode::Filter {
             input: Box::new(IRNode::Join {
                 left: Box::new(IRNode::Scan {
@@ -1718,5 +1722,41 @@ mod tests {
 
         // Filter should stay on top
         assert!(matches!(optimized, IRNode::Filter { .. }));
+    }
+
+    #[test]
+    fn test_eliminate_empty_unions() {
+        let optimizer = Optimizer::new();
+
+        // Map over empty union should become empty union
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Union { inputs: vec![] }),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let optimized = optimizer.eliminate_empty_unions(ir);
+
+        match optimized {
+            IRNode::Union { inputs } => assert!(inputs.is_empty()),
+            _ => panic!("Expected empty union"),
+        }
+    }
+
+    #[test]
+    fn test_singleton_union_elimination() {
+        let optimizer = Optimizer::new();
+
+        // Union with single input should be unwrapped
+        let ir = IRNode::Union {
+            inputs: vec![IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }],
+        };
+
+        let optimized = optimizer.eliminate_empty_unions(ir);
+
+        assert!(optimized.is_scan());
     }
 
