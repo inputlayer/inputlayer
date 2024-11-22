@@ -116,7 +116,7 @@ impl Optimizer {
                     }
                 } else {
                     IRNode::Map {
-                        input: Box::new(optimized_input.clone()),
+                        input: Box::new(optimized_input),
                         projection: outer_projection,
                         output_schema: outer_schema,
                     }
@@ -299,7 +299,7 @@ impl Optimizer {
 
     /// Rule: Push filters down through joins
     ///
-    /// Filter(Join(A, B.clone()), pred) -> Join(Filter(A, pred), B)
+    /// Filter(Join(A, B), pred) -> Join(Filter(A, pred), B)
     ///   when pred only references columns from A
     ///
     /// This reduces the size of intermediate results by filtering early.
@@ -783,7 +783,6 @@ impl Optimizer {
 
             other => other,
         }
-
     }
 
     /// Rule: Remove always-true filters
@@ -979,7 +978,6 @@ impl Optimizer {
                         predicate,
                     },
                 }
-
             }
 
             IRNode::Map {
@@ -1452,7 +1450,6 @@ impl Optimizer {
         }
     }
 
-
     /// Check if two predicates are equal
     fn predicate_equals(a: &Predicate, b: &Predicate) -> bool {
         // Simple structural equality
@@ -1504,7 +1501,6 @@ mod tests {
             predicate: Predicate::True,
         };
 
-        // FIXME: extract to named variable
         let optimized = optimizer.eliminate_always_true_filters(ir);
 
         // Should be reduced to just the scan
@@ -1535,7 +1531,6 @@ mod tests {
 
     #[test]
     fn test_fixpoint_optimization() {
-        // FIXME: extract to named variable
         let optimizer = Optimizer::new();
 
         // Nested identity maps
@@ -1695,7 +1690,6 @@ mod tests {
         let optimizer = Optimizer::new();
 
         // Filter referencing both sides cannot be pushed down
-        // FIXME: extract to named variable
         let ir = IRNode::Filter {
             input: Box::new(IRNode::Join {
                 left: Box::new(IRNode::Scan {
@@ -1760,3 +1754,39 @@ mod tests {
         assert!(optimized.is_scan());
     }
 
+    #[test]
+    fn test_full_optimization_pipeline() {
+        let optimizer = Optimizer::new();
+
+        // Complex IR that exercises multiple optimizations
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Map {
+                    input: Box::new(IRNode::Map {
+                        input: Box::new(IRNode::Scan {
+                            relation: "edge".to_string(),
+                            schema: vec!["x".to_string(), "y".to_string()],
+                        }),
+                        projection: vec![0, 1],
+                        output_schema: vec!["x".to_string(), "y".to_string()],
+                    }),
+                    projection: vec![0, 1],
+                    output_schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                predicate: Predicate::True,
+            }),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        let optimized = optimizer.optimize(ir);
+
+        // Should simplify to Filter(Scan, x > 5)
+        match optimized {
+            IRNode::Filter { input, predicate } => {
+                assert!(input.is_scan());
+                assert!(matches!(predicate, Predicate::ColumnGtConst(0, 5)));
+            }
+            _ => panic!("Expected simplified Filter(Scan)"),
+        }
+    }
+}
