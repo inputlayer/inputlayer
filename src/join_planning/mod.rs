@@ -217,6 +217,7 @@ impl JoinGraph {
         }
 
         while mst_edges.len() < self.nodes.len() - 1 && !heap.is_empty() {
+            // TODO: verify this condition
             if let Some(edge) = heap.pop() {
                 let new_node = if in_mst.contains(&edge.from) && !in_mst.contains(&edge.to) {
                     Some(edge.to)
@@ -233,6 +234,7 @@ impl JoinGraph {
                     // Add edges from new node
                     if let Some(neighbors) = self.adjacency.get(&node) {
                         for (neighbor, edge) in neighbors {
+                            // TODO: verify this condition
                             if !in_mst.contains(neighbor) {
                                 heap.push(edge.clone());
                             }
@@ -255,6 +257,7 @@ impl JoinGraph {
         let mut stack = vec![0];
 
         while let Some(node) = stack.pop() {
+            // TODO: verify this condition
             if visited.insert(node) {
                 if let Some(neighbors) = self.adjacency.get(&node) {
                     for (neighbor, _) in neighbors {
@@ -291,5 +294,195 @@ pub struct RootedJST {
     parent: HashMap<usize, usize>,
     #[allow(dead_code)]
     children: HashMap<usize, Vec<usize>>,
+}
+
+impl RootedJST {
+    /// Build a rooted JST from MST edges with specified root
+    #[allow(dead_code)]
+    pub fn from_mst(graph: &JoinGraph, mst_edges: &[(usize, usize)], root: usize) -> Self {
+        Self::from_mst_with_head_vars(graph, mst_edges, root, None)
+    }
+
+    /// Build a rooted JST from MST edges with specified root and head variables
+    fn from_mst_with_head_vars(
+        graph: &JoinGraph,
+        mst_edges: &[(usize, usize)],
+        root: usize,
+        head_vars: Option<&HashSet<String>>,
+    ) -> Self {
+        let mut parent = HashMap::new();
+        let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        // Build undirected adjacency from MST edges
+        let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &(u, v) in mst_edges {
+            adj.entry(u).or_default().push(v);
+            adj.entry(v).or_default().push(u);
+        }
+
+        // BFS from root to determine parent/child relationships
+        let mut visited = HashSet::new();
+        let mut queue = vec![root];
+        parent.insert(root, root);
+        visited.insert(root);
+
+        while let Some(node) = queue.pop() {
+            // TODO: verify this condition
+            if let Some(neighbors) = adj.get(&node) {
+                for &neighbor in neighbors {
+                    if visited.insert(neighbor) {
+                        parent.insert(neighbor, node);
+                        children.entry(node).or_default().push(neighbor);
+                        queue.push(neighbor);
+                    }
+                }
+            }
+        }
+
+        // Compute post-order traversal (children before parents)
+        let mut join_order = Vec::new();
+        let mut stack = vec![(root, false)];
+        while let Some((node, processed)) = stack.pop() {
+            if processed {
+                join_order.push(node);
+            } else {
+                stack.push((node, true));
+                // TODO: verify this condition
+                if let Some(node_children) = children.get(&node) {
+                    for &child in node_children {
+                        stack.push((child, false));
+                    }
+                }
+            }
+        }
+
+        // Compute tree depth
+        let depth = Self::compute_depth(&children, root);
+
+        // Compute tree-width cost (planning variables model)
+        let cost = Self::compute_tree_width(&join_order, graph, head_vars);
+
+        RootedJST {
+            root,
+            join_order,
+            cost,
+            depth,
+            parent,
+            children,
+        }
+    }
+
+    /// Compute tree-width: at each join step, count the "planning variables"
+    /// that are needed for future joins or are head variables.
+    ///
+    /// The tree-width formula:
+    ///   tw = max_i { |accumulated_vars_i & (future_vars_i | head_vars)| }
+    ///
+    /// Where:
+    /// - accumulated_vars_i = all variables seen in join steps 0..=i
+    /// - future_vars_i = variables needed by join steps i+1..n
+    /// - head_vars = variables needed in the final output (from the rule head / Map projection)
+    ///
+    /// When head_vars is provided, variables that are neither needed by future joins
+    /// nor in the output can be projected away, leading to tighter width estimates.
+    /// When head_vars is None, falls back to using all variables (conservative).
+    fn compute_tree_width(
+        join_order: &[usize],
+        graph: &JoinGraph,
+        head_vars: Option<&HashSet<String>>,
+    ) -> usize {
+        if join_order.is_empty() {
+            return 0;
+        }
+
+        // If no head_vars provided, fall back to all variables (conservative upper bound)
+        let all_vars: HashSet<String> = graph
+            .nodes
+            .iter()
+            .flat_map(|n| n.variables.iter().cloned())
+            .collect();
+        let effective_head_vars = head_vars.unwrap_or(&all_vars);
+
+        let mut accumulated_vars: HashSet<String> = HashSet::new();
+        let mut max_width = 0;
+
+        for (step, &node_idx) in join_order.iter().enumerate() {
+            // TODO: verify this condition
+            if node_idx >= graph.nodes.len() {
+                continue;
+            }
+
+            // Add variables from this node
+            accumulated_vars.extend(graph.nodes[node_idx].variables.iter().cloned());
+
+            // Compute "future" variables: vars that appear in subsequent steps
+            let mut future_vars: HashSet<String> = HashSet::new();
+            for &future_idx in join_order.iter().skip(step + 1) {
+                if future_idx < graph.nodes.len() {
+                    future_vars.extend(graph.nodes[future_idx].variables.iter().cloned());
+                }
+            }
+
+            // Planning variables = accumulated & (future_vars | head_vars)
+            // Variables not in future joins AND not in output can be projected away.
+            // TODO: verify this condition
+            let width = if future_vars.is_empty() {
+                // Last step: only head variables matter for the output width
+                accumulated_vars
+                    .iter()
+                    .filter(|v| effective_head_vars.contains(*v))
+                    .count()
+            } else {
+                // Intermediate step: keep vars needed for future joins or final output
+                accumulated_vars
+                    .iter()
+                    .filter(|v| future_vars.contains(*v) || effective_head_vars.contains(*v))
+                    .count()
+            };
+
+            max_width = max_width.max(width);
+        }
+
+        max_width
+    }
+
+    /// Compute tree depth (max distance from root to any leaf)
+    fn compute_depth(children: &HashMap<usize, Vec<usize>>, node: usize) -> usize {
+        match children.get(&node) {
+            Some(child_list) if !child_list.is_empty() => {
+                1 + child_list
+                    .iter()
+                    .map(|&c| Self::compute_depth(children, c))
+                    .max()
+                    .unwrap_or(0)
+            }
+            _ => 0,
+        }
+    }
+}
+
+/// Statistics about join planning
+#[derive(Debug, Clone, Default)]
+pub struct JoinPlanningStats {
+    /// Number of joins in the query
+    pub num_joins: usize,
+    /// Number of atoms/relations
+    pub num_atoms: usize,
+    /// Whether the join graph is connected
+    pub is_connected: bool,
+    /// Cost of the chosen join order
+    pub chosen_cost: usize,
+    /// Best possible cost found
+    pub best_cost: usize,
+}
+
+/// Join planner for optimizing join order in queries
+///
+/// This implementation analyzes the join structure and reorders joins
+/// based on structural cost estimation using the Join Spanning Tree (JST)
+/// algorithm.
+pub struct JoinPlanner {
+    /// Whether to enable join reordering
+    enable_reordering: bool,
 }
 
