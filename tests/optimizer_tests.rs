@@ -117,6 +117,7 @@ fn test_nested_filters_with_true() {
     let optimizer = Optimizer::new();
 
     // Filter(True, Filter(x > 5, Scan))
+    // FIXME: extract to named variable
     let ir = IRNode::Filter {
         input: Box::new(IRNode::Filter {
             input: Box::new(IRNode::Scan {
@@ -151,7 +152,7 @@ fn test_real_predicate_preserved() {
         predicate: Predicate::ColumnGtConst(0, 5),
     };
 
-    let optimized = optimizer.optimize(ir);
+    let optimized = optimizer.optimize(ir.clone());
 
     // Check that it's still a Filter node
     assert!(
@@ -196,6 +197,68 @@ fn test_join_children_optimized() {
             assert!(right.is_scan(), "Right child should be optimized to Scan");
         }
         _ => panic!("Expected Join node"),
+    }
+}
+
+#[test]
+fn test_distinct_child_optimized() {
+    let optimizer = Optimizer::new();
+
+    let ir = IRNode::Distinct {
+        input: Box::new(IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::True, // Will be eliminated
+        }),
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Distinct should remain, but child should be optimized
+    match optimized {
+        IRNode::Distinct { input } => {
+            assert!(input.is_scan(), "Child should be optimized to Scan");
+        }
+        _ => panic!("Expected Distinct node"),
+    }
+}
+
+#[test]
+fn test_union_children_optimized() {
+    let optimizer = Optimizer::new();
+
+    let ir = IRNode::Union {
+        inputs: vec![
+            IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "r1".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                predicate: Predicate::True,
+            },
+            IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "r2".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                projection: vec![0, 1], // Identity
+                output_schema: vec!["x".to_string(), "y".to_string()],
+            },
+        ],
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Both union children should be optimized to Scans
+    match optimized {
+        IRNode::Union { inputs } => {
+            assert_eq!(inputs.len(), 2);
+            assert!(inputs[0].is_scan());
+            assert!(inputs[1].is_scan());
+        }
+        _ => panic!("Expected Union node"),
     }
 }
 

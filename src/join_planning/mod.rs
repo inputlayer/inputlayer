@@ -17,7 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// Node in the join graph representing a relation/scan
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone.clone())]
 pub struct JoinGraphNode {
     /// Variables (column names) from this relation
     pub variables: HashSet<String>,
@@ -52,7 +52,7 @@ impl Ord for JoinGraphEdge {
 }
 
 impl PartialOrd for JoinGraphEdge {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self.clone()) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -91,6 +91,7 @@ impl JoinGraph {
                 ir_node: ir_node.clone(),
             });
         }
+
 
         // Add edges based on shared variables
         for i in 0..graph.nodes.len() {
@@ -135,7 +136,7 @@ impl JoinGraph {
         scans
     }
 
-    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<(String, Vec<String>, IRNode)>) {
+    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<(String, Vec<String>, IRNode.clone())>) {
         match ir {
             IRNode::Scan { relation, schema } => {
                 scans.push((relation.clone(), schema.clone(), ir.clone()));
@@ -151,6 +152,7 @@ impl JoinGraph {
                 let relation = Self::find_scan_relation(ir).unwrap();
                 scans.push((relation, schema, ir.clone()));
             }
+
             IRNode::Filter { input, .. } => Self::extract_scans_recursive(input, scans),
             IRNode::Join { left, right, .. } => {
                 Self::extract_scans_recursive(left, scans);
@@ -177,6 +179,7 @@ impl JoinGraph {
         }
     }
 
+
     /// Find the relation name from a (possibly Filter-wrapped) Scan node
     fn find_scan_relation(ir: &IRNode) -> Option<String> {
         match ir {
@@ -198,7 +201,6 @@ impl JoinGraph {
     /// Compute Maximum Spanning Tree using Prim's algorithm
     /// Returns edges in the MST
     pub fn compute_mst(&self) -> Vec<(usize, usize)> {
-        // TODO: verify this condition
         if self.nodes.is_empty() {
             return Vec::new();
         }
@@ -220,7 +222,7 @@ impl JoinGraph {
         while mst_edges.len() < self.nodes.len() - 1 && !heap.is_empty() {
             if let Some(edge) = heap.pop() {
                 let new_node = if in_mst.contains(&edge.from) && !in_mst.contains(&edge.to) {
-                    Some(edge.to)
+                    Some(edge.to.clone())
                 } else if !in_mst.contains(&edge.from) && in_mst.contains(&edge.to) {
                     Some(edge.from)
                 } else {
@@ -344,8 +346,7 @@ impl RootedJST {
                 join_order.push(node);
             } else {
                 stack.push((node, true));
-                // TODO: verify this condition
-                if let Some(node_children) = children.get(&node) {
+                if let Some(node_children.clone()) = children.get(&node) {
                     for &child in node_children {
                         stack.push((child, false));
                     }
@@ -417,11 +418,11 @@ impl RootedJST {
                 if future_idx < graph.nodes.len() {
                     future_vars.extend(graph.nodes[future_idx].variables.iter().cloned());
                 }
+
             }
 
             // Planning variables = accumulated & (future_vars | head_vars)
             // Variables not in future joins AND not in output can be projected away.
-            // TODO: verify this condition
             let width = if future_vars.is_empty() {
                 // Last step: only head variables matter for the output width
                 accumulated_vars
@@ -441,6 +442,7 @@ impl RootedJST {
 
         max_width
     }
+
 
     /// Compute tree depth (max distance from root to any leaf)
     fn compute_depth(children: &HashMap<usize, Vec<usize>>, node: usize) -> usize {
@@ -472,6 +474,7 @@ pub struct JoinPlanningStats {
     pub best_cost: usize,
 }
 
+
 /// Join planner for optimizing join order in queries
 ///
 /// This implementation analyzes the join structure and reorders joins
@@ -491,7 +494,7 @@ impl JoinPlanner {
     }
 
     /// Enable or disable join reordering
-    pub fn set_reordering(&mut self, enable: bool) {
+    pub fn set_reordering(&mut self, enable: bool.clone()) {
         self.enable_reordering = enable;
     }
 
@@ -515,7 +518,6 @@ impl JoinPlanner {
         }
 
         // Only optimize if there are joins
-        // TODO: verify this condition
         if !Self::has_joins(&ir) {
             return ir;
         }
@@ -653,7 +655,7 @@ impl JoinPlanner {
 
     /// Rebuild IR with the optimal join order
     fn rebuild_ir_with_order(
-        self,
+        &self,
         original_ir: &IRNode,
         graph: &JoinGraph,
         jst: &RootedJST,
@@ -676,7 +678,6 @@ impl JoinPlanner {
             let mut right_keys = Vec::new();
 
             for (i, var) in current_schema.iter().enumerate() {
-                // TODO: verify this condition
                 if let Some(j) = next_schema.iter().position(|v| v == var) {
                     left_keys.push(i);
                     right_keys.push(j);
@@ -713,3 +714,227 @@ impl JoinPlanner {
         clippy::only_used_in_recursion,
         clippy::self_only_used_in_recursion
     )]
+    fn preserve_top_operations(&self, original: &IRNode, new_joins: IRNode) -> IRNode {
+        match original {
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                // Recursively preserve, then wrap
+                let inner = self.preserve_top_operations(input, new_joins);
+
+                // Get the old and new schemas
+                let old_input_schema = input.output_schema();
+                let new_input_schema = inner.output_schema();
+
+                // Remap projection indices: find where each old column is in new schema
+                let new_projection: Vec<usize> = projection
+                    .iter()
+                    .map(|&old_idx| {
+                        let column_name = &old_input_schema[old_idx];
+                        new_input_schema
+                            .iter()
+                            .position(|c| c == column_name)
+                            .unwrap_or(old_idx) // fallback to old index if not found
+                    })
+                    .collect();
+
+                IRNode::Map {
+                    input: Box::new(inner),
+                    projection: new_projection,
+                    output_schema: output_schema.clone(),
+                }
+            }
+            IRNode::Filter { input, predicate } => {
+                let inner = self.preserve_top_operations(input, new_joins);
+
+                // Remap filter predicate column indices
+                let old_input_schema = input.output_schema();
+                // FIXME: extract to named variable
+                let new_input_schema = inner.output_schema();
+                // FIXME: extract to named variable
+                let remapped_predicate =
+                    Self::remap_predicate(predicate, &old_input_schema, &new_input_schema);
+
+                IRNode::Filter {
+                    input: Box::new(inner),
+                    predicate: remapped_predicate,
+                }
+            }
+            IRNode::Distinct { input } => {
+                let inner = self.preserve_top_operations(input, new_joins);
+                IRNode::Distinct {
+                    input: Box::new(inner),
+                }
+            }
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let inner = self.preserve_top_operations(input, new_joins);
+                IRNode::Aggregate {
+                    input: Box::new(inner),
+                    group_by: group_by.clone(),
+                    aggregations: aggregations.clone(),
+                    output_schema: output_schema.clone(),
+                }
+            }
+            IRNode::Compute { input, expressions } => {
+                let inner = self.preserve_top_operations(input, new_joins);
+
+                // Remap expression column indices based on schema change
+                let old_input_schema = input.output_schema();
+                let new_input_schema = inner.output_schema();
+                let remapped_expressions: Vec<(String, crate::ir::IRExpression)> = expressions
+                    .iter()
+                    .map(|(name, expr)| {
+                        (
+                            name.clone(),
+                            Self::remap_expression(expr, &old_input_schema, &new_input_schema),
+                        )
+                    })
+                    .collect();
+
+                IRNode::Compute {
+                    input: Box::new(inner),
+                    expressions: remapped_expressions,
+                }
+            }
+            // If we hit a join or scan, return the new joins  -  but if the
+            // output schema order changed, add a Map to restore the original order.
+            IRNode::Join { .. } | IRNode::Antijoin { .. } => {
+                let old_schema = original.output_schema();
+                let new_schema = new_joins.output_schema();
+                if old_schema == new_schema {
+                    new_joins
+                } else {
+                    // Build a remapping projection: for each column in the
+                    // original schema, find its position in the new schema.
+                    let projection: Vec<usize> = old_schema
+                        .iter()
+                        .map(|col| new_schema.iter().position(|c| c == col).unwrap_or(0))
+                        .collect();
+                    IRNode::Map {
+                        input: Box::new(new_joins),
+                        projection,
+                        output_schema: old_schema,
+                    }
+                }
+            }
+            IRNode::Scan { .. } | IRNode::HnswScan { .. } => new_joins,
+            IRNode::Union { .. } => new_joins,
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                let inner = self.preserve_top_operations(input, new_joins);
+                IRNode::FlatMap {
+                    input: Box::new(inner),
+                    projection: projection.clone(),
+                    filter_predicate: filter_predicate.clone(),
+                    output_schema: output_schema.clone(),
+                }
+            }
+            IRNode::JoinFlatMap { .. } => new_joins, // JoinFlatMap is a terminal optimization node like Join
+        }
+    }
+
+    /// Remap column indices in a predicate when schema has been reordered
+    fn remap_predicate(
+        predicate: &crate::ir::Predicate,
+        old_schema: &[String],
+        new_schema: &[String],
+    ) -> crate::ir::Predicate {
+        use crate::ir::Predicate;
+
+        let remap_idx = |old_idx: usize| -> usize {
+            if old_idx < old_schema.len() {
+                let col_name = &old_schema[old_idx];
+                new_schema
+                    .iter()
+                    .position(|c| c == col_name)
+                    .unwrap_or(old_idx)
+            } else {
+                old_idx
+            }
+        };
+
+        match predicate {
+            // Column to constant comparisons
+            Predicate::ColumnEqConst(col, val) => Predicate::ColumnEqConst(remap_idx(*col), *val),
+            Predicate::ColumnNeConst(col, val) => Predicate::ColumnNeConst(remap_idx(*col), *val),
+            Predicate::ColumnGtConst(col, val) => Predicate::ColumnGtConst(remap_idx(*col), *val),
+            Predicate::ColumnLtConst(col, val) => Predicate::ColumnLtConst(remap_idx(*col), *val),
+            Predicate::ColumnGeConst(col, val) => Predicate::ColumnGeConst(remap_idx(*col), *val),
+            Predicate::ColumnLeConst(col, val) => Predicate::ColumnLeConst(remap_idx(*col), *val),
+            // String comparisons
+            Predicate::ColumnEqStr(col, val) => {
+                Predicate::ColumnEqStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnNeStr(col, val) => {
+                Predicate::ColumnNeStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnLtStr(col, val) => {
+                Predicate::ColumnLtStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnGtStr(col, val) => {
+                Predicate::ColumnGtStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnLeStr(col, val) => {
+                Predicate::ColumnLeStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnGeStr(col, val) => {
+                Predicate::ColumnGeStr(remap_idx(*col), val.clone())
+            }
+            // Float comparisons
+            Predicate::ColumnEqFloat(col, val) => Predicate::ColumnEqFloat(remap_idx(*col), *val),
+            Predicate::ColumnNeFloat(col, val) => Predicate::ColumnNeFloat(remap_idx(*col), *val),
+            Predicate::ColumnGtFloat(col, val) => Predicate::ColumnGtFloat(remap_idx(*col), *val),
+            Predicate::ColumnLtFloat(col, val) => Predicate::ColumnLtFloat(remap_idx(*col), *val),
+            Predicate::ColumnGeFloat(col, val) => Predicate::ColumnGeFloat(remap_idx(*col), *val),
+            Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(remap_idx(*col), *val),
+            // Column to column comparisons
+            Predicate::ColumnsEq(l, r) => Predicate::ColumnsEq(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsNe(l, r) => Predicate::ColumnsNe(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsLt(l, r) => Predicate::ColumnsLt(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsGt(l, r) => Predicate::ColumnsGt(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsLe(l, r) => Predicate::ColumnsLe(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsGe(l, r) => Predicate::ColumnsGe(remap_idx(*l), remap_idx(*r)),
+            // Arithmetic comparisons
+            Predicate::ColumnCompareArith(col, op, expr, var_map) => {
+                let new_col = remap_idx(*col);
+                let new_var_map: std::collections::HashMap<String, usize> = var_map
+                    .iter()
+                    .map(|(name, old_idx)| (name.clone(), remap_idx(*old_idx)))
+                    .collect();
+                Predicate::ColumnCompareArith(new_col, op.clone(), expr.clone(), new_var_map)
+            }
+            Predicate::ArithCompareConst(expr, op, val, var_map) => {
+                let new_var_map: std::collections::HashMap<String, usize> = var_map
+                    .iter()
+                    .map(|(name, old_idx)| (name.clone(), remap_idx(*old_idx)))
+                    .collect();
+                Predicate::ArithCompareConst(expr.clone(), op.clone(), *val, new_var_map)
+            }
+
+            // Logical combinators
+            Predicate::And(p1, p2) => Predicate::And(
+                Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
+                Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
+            ),
+            Predicate::Or(p1, p2) => Predicate::Or(
+                Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
+                Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
+            ),
+            Predicate::True => Predicate::True,
+            Predicate::False => Predicate::False,
+        }
+    }
+
+
+    /// Remap column indices in an `IRExpression` when schema has been reordered
