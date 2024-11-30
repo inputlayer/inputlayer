@@ -198,6 +198,7 @@ impl JoinGraph {
     /// Compute Maximum Spanning Tree using Prim's algorithm
     /// Returns edges in the MST
     pub fn compute_mst(&self) -> Vec<(usize, usize)> {
+        // TODO: verify this condition
         if self.nodes.is_empty() {
             return Vec::new();
         }
@@ -217,7 +218,6 @@ impl JoinGraph {
         }
 
         while mst_edges.len() < self.nodes.len() - 1 && !heap.is_empty() {
-            // TODO: verify this condition
             if let Some(edge) = heap.pop() {
                 let new_node = if in_mst.contains(&edge.from) && !in_mst.contains(&edge.to) {
                     Some(edge.to)
@@ -234,7 +234,6 @@ impl JoinGraph {
                     // Add edges from new node
                     if let Some(neighbors) = self.adjacency.get(&node) {
                         for (neighbor, edge) in neighbors {
-                            // TODO: verify this condition
                             if !in_mst.contains(neighbor) {
                                 heap.push(edge.clone());
                             }
@@ -257,7 +256,6 @@ impl JoinGraph {
         let mut stack = vec![0];
 
         while let Some(node) = stack.pop() {
-            // TODO: verify this condition
             if visited.insert(node) {
                 if let Some(neighbors) = self.adjacency.get(&node) {
                     for (neighbor, _) in neighbors {
@@ -327,7 +325,6 @@ impl RootedJST {
         visited.insert(root);
 
         while let Some(node) = queue.pop() {
-            // TODO: verify this condition
             if let Some(neighbors) = adj.get(&node) {
                 for &neighbor in neighbors {
                     if visited.insert(neighbor) {
@@ -407,7 +404,6 @@ impl RootedJST {
         let mut max_width = 0;
 
         for (step, &node_idx) in join_order.iter().enumerate() {
-            // TODO: verify this condition
             if node_idx >= graph.nodes.len() {
                 continue;
             }
@@ -486,3 +482,234 @@ pub struct JoinPlanner {
     enable_reordering: bool,
 }
 
+impl JoinPlanner {
+    /// Create a new join planner
+    pub fn new() -> Self {
+        JoinPlanner {
+            enable_reordering: true,
+        }
+    }
+
+    /// Enable or disable join reordering
+    pub fn set_reordering(&mut self, enable: bool) {
+        self.enable_reordering = enable;
+    }
+
+    /// Plan join execution order for the given IR tree
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Extract joins from IR tree
+    /// 2. Build join graph
+    /// 3. Compute Maximum Spanning Tree (MST)
+    /// 4. Try each node as root, compute structural cost
+    /// 5. Select order with minimum cost
+    /// 6. Rebuild IR tree with optimal join order
+    ///
+    /// # Returns
+    ///
+    /// Optimized IR with joins reordered for efficiency
+    pub fn plan_joins(&self, ir: IRNode) -> IRNode {
+        if !self.enable_reordering {
+            return ir;
+        }
+
+        // Only optimize if there are joins
+        // TODO: verify this condition
+        if !Self::has_joins(&ir) {
+            return ir;
+        }
+
+        // Skip join planning when Antijoins are present
+        // Antijoin has specific semantics (negation) that must be preserved
+        if Self::has_antijoin(&ir) {
+            return ir;
+        }
+
+        // Build join graph
+        let graph = JoinGraph::from_ir(&ir);
+
+        // If graph has only one node or is not connected, return unchanged
+        if graph.nodes.len() <= 1 || !graph.is_connected() {
+            return ir;
+        }
+
+        // Extract head variables from the top-level operation above the joins.
+        // These are the variables that survive to the final result, allowing
+        // compute_tree_width to account for early projection.
+        let head_vars = Self::extract_head_vars(&ir);
+        let head_vars_ref = head_vars.as_ref();
+
+        // Compute MST
+        let mst_edges = graph.compute_mst();
+
+        // Find optimal root
+        let optimal_jst = self.find_optimal_root(&graph, &mst_edges, head_vars_ref);
+
+        // Rebuild IR with optimal join order
+        self.rebuild_ir_with_order(&ir, &graph, &optimal_jst)
+    }
+
+    /// Extract head variables from the top-level IR operation above the joins.
+    ///
+    /// Walks the IR tree looking for Map/FlatMap nodes whose output_schema
+    /// tells us which variables survive to the final result. Returns None
+    /// if the IR is just a bare join tree (all variables are needed).
+    fn extract_head_vars(ir: &IRNode) -> Option<HashSet<String>> {
+        match ir {
+            // Map projects to a subset - its output_schema is the head variables
+            IRNode::Map { output_schema, .. } | IRNode::FlatMap { output_schema, .. } => {
+                Some(output_schema.iter().cloned().collect())
+            }
+            // Distinct/Filter don't change the schema, recurse into child
+            IRNode::Distinct { input } | IRNode::Filter { input, .. } => {
+                Self::extract_head_vars(input)
+            }
+            // Aggregate output schema defines what survives
+            IRNode::Aggregate { output_schema, .. } => {
+                Some(output_schema.iter().cloned().collect())
+            }
+            // Compute adds columns but doesn't remove - keep looking
+            IRNode::Compute { input, .. } => Self::extract_head_vars(input),
+            // Join/Scan/etc: no projection above, all vars needed
+            _ => None,
+        }
+    }
+
+    /// Check if IR contains joins
+    fn has_joins(ir: &IRNode) -> bool {
+        match ir {
+            IRNode::Join { .. } => true,
+            IRNode::Antijoin { left, right, .. } => Self::has_joins(left) || Self::has_joins(right),
+            IRNode::Scan { .. } => false,
+            IRNode::HnswScan { .. } => false,
+            IRNode::Map { input, .. } => Self::has_joins(input),
+            IRNode::Filter { input, .. } => Self::has_joins(input),
+            IRNode::Distinct { input } => Self::has_joins(input),
+            IRNode::Union { inputs } => inputs.iter().any(Self::has_joins),
+            IRNode::Aggregate { input, .. } => Self::has_joins(input),
+            IRNode::Compute { input, .. } => Self::has_joins(input),
+            IRNode::FlatMap { input, .. } => Self::has_joins(input),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                Self::has_joins(left) || Self::has_joins(right)
+            }
+        }
+    }
+
+    /// Check if IR contains any Antijoin nodes
+    /// Antijoin represents negation and must be preserved exactly
+    fn has_antijoin(ir: &IRNode) -> bool {
+        match ir {
+            IRNode::Antijoin { .. } => true,
+            IRNode::Join { left, right, .. } => {
+                Self::has_antijoin(left) || Self::has_antijoin(right)
+            }
+            IRNode::Scan { .. } => false,
+            IRNode::HnswScan { .. } => false,
+            IRNode::Map { input, .. } => Self::has_antijoin(input),
+            IRNode::Filter { input, .. } => Self::has_antijoin(input),
+            IRNode::Distinct { input } => Self::has_antijoin(input),
+            IRNode::Union { inputs } => inputs.iter().any(Self::has_antijoin),
+            IRNode::Aggregate { input, .. } => Self::has_antijoin(input),
+            IRNode::Compute { input, .. } => Self::has_antijoin(input),
+            IRNode::FlatMap { input, .. } => Self::has_antijoin(input),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                Self::has_antijoin(left) || Self::has_antijoin(right)
+            }
+        }
+    }
+
+    /// Find the optimal root for the rooted JST
+    ///
+    /// Tries every node as root and selects the one with minimum tree-width cost.
+    /// On ties, prefers lower depth (bushier trees minimize intermediate result sizes).
+    fn find_optimal_root(
+        &self,
+        graph: &JoinGraph,
+        mst_edges: &[(usize, usize)],
+        head_vars: Option<&HashSet<String>>,
+    ) -> RootedJST {
+        let mut best_jst: Option<RootedJST> = None;
+
+        for root in 0..graph.nodes.len() {
+            let jst = RootedJST::from_mst_with_head_vars(graph, mst_edges, root, head_vars);
+
+            match &best_jst {
+                None => best_jst = Some(jst),
+                Some(current_best) => {
+                    // Prefer lower cost; on tie, prefer lower depth (bushier tree)
+                    if jst.cost < current_best.cost
+                        || (jst.cost == current_best.cost && jst.depth < current_best.depth)
+                    {
+                        best_jst = Some(jst);
+                    }
+                }
+            }
+        }
+
+        best_jst
+            .unwrap_or_else(|| RootedJST::from_mst_with_head_vars(graph, mst_edges, 0, head_vars))
+    }
+
+    /// Rebuild IR with the optimal join order
+    fn rebuild_ir_with_order(
+        self,
+        original_ir: &IRNode,
+        graph: &JoinGraph,
+        jst: &RootedJST,
+    ) -> IRNode {
+        if jst.join_order.is_empty() {
+            return original_ir.clone();
+        }
+
+        // Build joins in the order specified by JST
+        let mut current = graph.nodes[jst.join_order[0]].ir_node.clone();
+
+        for &node_idx in jst.join_order.iter().skip(1) {
+            let next_node = &graph.nodes[node_idx];
+
+            // Find shared variables for join keys
+            let current_schema = current.output_schema();
+            let next_schema = next_node.ir_node.output_schema();
+
+            let mut left_keys = Vec::new();
+            let mut right_keys = Vec::new();
+
+            for (i, var) in current_schema.iter().enumerate() {
+                // TODO: verify this condition
+                if let Some(j) = next_schema.iter().position(|v| v == var) {
+                    left_keys.push(i);
+                    right_keys.push(j);
+                }
+            }
+
+            // Build output schema (union of variables, shared vars once)
+            let mut output_schema = current_schema.clone();
+            for var in &next_schema {
+                if !output_schema.contains(var) {
+                    output_schema.push(var.clone());
+                }
+            }
+
+            current = IRNode::Join {
+                left: Box::new(current),
+                right: Box::new(next_node.ir_node.clone()),
+                left_keys,
+                right_keys,
+                output_schema,
+            };
+        }
+
+        // Preserve operations above the joins (Map, Filter, Distinct, etc.)
+        self.preserve_top_operations(original_ir, current)
+    }
+
+    /// Preserve operations that were on top of the original joins
+    ///
+    /// IMPORTANT: When the join order is reordered, the output schema changes.
+    /// We need to remap projection indices based on the new schema.
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]

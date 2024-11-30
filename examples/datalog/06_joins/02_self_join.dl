@@ -1,0 +1,18 @@
+% Test: Self Join (Path of Length 2)
+% Description: Tests joining a relation with itself
+
+.kg create test_self_n06t02
+.kg use test_self_n06t02
+
+% Graph: 1->2->3->4
++edge[(1,2), (2,3), (3,4)].
+
+% Find paths of length 2
++path2(X, Z) :- edge(X, Y), edge(Y, Z).
+
+% Query
+?- path2(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_self_n06t02

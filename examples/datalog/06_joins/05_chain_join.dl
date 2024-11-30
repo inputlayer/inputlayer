@@ -1,0 +1,22 @@
+% Test: Chain Join (A->B->C->D)
+% Description: Tests joining through a chain of relations
+
+.kg create test_chain_join_n06t05
+.kg use test_chain_join_n06t05
+
+% Relations forming a chain
++a_to_b[(1, 10), (2, 20), (3, 30)].
++b_to_c[(10, 100), (20, 200), (30, 300)].
++c_to_d[(100, 1000), (200, 2000), (300, 3000)].
+
+% Two-way chain: A -> B -> C
++chain2(A, C) :- a_to_b(A, B), b_to_c(B, C).
+?- chain2(X, Y).
+
+% Three-way chain: A -> B -> C -> D
++chain3(A, D) :- a_to_b(A, B), b_to_c(B, C), c_to_d(C, D).
+?- chain3(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_chain_join_n06t05
