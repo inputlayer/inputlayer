@@ -113,3 +113,90 @@ fn test_always_false_filter() {
 }
 
 #[test]
+fn test_nested_filters_with_true() {
+    let optimizer = Optimizer::new();
+
+    // Filter(True, Filter(x > 5, Scan))
+    let ir = IRNode::Filter {
+        input: Box::new(IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        }),
+        predicate: Predicate::True,
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Should eliminate the True filter, keeping only the real filter
+    match optimized {
+        IRNode::Filter { predicate, .. } => {
+            assert!(matches!(predicate, Predicate::ColumnGtConst(0, 5)));
+        }
+        _ => panic!("Expected single filter after optimization"),
+    }
+}
+
+#[test]
+fn test_real_predicate_preserved() {
+    let optimizer = Optimizer::new();
+
+    let ir = IRNode::Filter {
+        input: Box::new(IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }),
+        predicate: Predicate::ColumnGtConst(0, 5),
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Check that it's still a Filter node
+    assert!(
+        matches!(optimized, IRNode::Filter { .. }),
+        "Real filter should be preserved"
+    );
+}
+
+#[test]
+fn test_join_children_optimized() {
+    let optimizer = Optimizer::new();
+
+    // Join with identity maps on both sides
+    let ir = IRNode::Join {
+        left: Box::new(IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "r".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 1], // Identity
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        }),
+        right: Box::new(IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "s".to_string(),
+                schema: vec!["y".to_string(), "z".to_string()],
+            }),
+            projection: vec![0, 1], // Identity
+            output_schema: vec!["y".to_string(), "z".to_string()],
+        }),
+        left_keys: vec![1],
+        right_keys: vec![0],
+        output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Check that join children are optimized
+    match optimized {
+        IRNode::Join { left, right, .. } => {
+            assert!(left.is_scan(), "Left child should be optimized to Scan");
+            assert!(right.is_scan(), "Right child should be optimized to Scan");
+        }
+        _ => panic!("Expected Join node"),
+    }
+}
+
+#[test]
