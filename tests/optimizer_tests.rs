@@ -117,7 +117,6 @@ fn test_nested_filters_with_true() {
     let optimizer = Optimizer::new();
 
     // Filter(True, Filter(x > 5, Scan))
-    // FIXME: extract to named variable
     let ir = IRNode::Filter {
         input: Box::new(IRNode::Filter {
             input: Box::new(IRNode::Scan {
@@ -152,7 +151,7 @@ fn test_real_predicate_preserved() {
         predicate: Predicate::ColumnGtConst(0, 5),
     };
 
-    let optimized = optimizer.optimize(ir.clone());
+    let optimized = optimizer.optimize(ir);
 
     // Check that it's still a Filter node
     assert!(
@@ -260,6 +259,78 @@ fn test_union_children_optimized() {
         }
         _ => panic!("Expected Union node"),
     }
+}
+
+#[test]
+fn test_complex_nested_optimization() {
+    let optimizer = Optimizer::new();
+
+    // Complex: Filter(True, Map(identity, Join(
+    //   Filter(True, Scan),
+    //   Map(identity, Scan)
+    // )))
+    let ir = IRNode::Filter {
+        input: Box::new(IRNode::Map {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Filter {
+                    input: Box::new(IRNode::Scan {
+                        relation: "r".to_string(),
+                        schema: vec!["x".to_string(), "y".to_string()],
+                    }),
+                    predicate: Predicate::True,
+                }),
+                right: Box::new(IRNode::Map {
+                    input: Box::new(IRNode::Scan {
+                        relation: "s".to_string(),
+                        schema: vec!["y".to_string(), "z".to_string()],
+                    }),
+                    projection: vec![0, 1],
+                    output_schema: vec!["y".to_string(), "z".to_string()],
+                }),
+                left_keys: vec![1],
+                right_keys: vec![0],
+                output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            }),
+            projection: vec![0, 1, 2], // Identity
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        }),
+        predicate: Predicate::True,
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Should be optimized to just a Join with Scan children
+    match optimized {
+        IRNode::Join { left, right, .. } => {
+            assert!(left.is_scan());
+            assert!(right.is_scan());
+        }
+        _ => panic!("Expected optimized Join"),
+    }
+}
+
+#[test]
+fn test_fixpoint_reaches_stable_state() {
+    let optimizer = Optimizer::with_max_iterations(5);
+
+    // Create deeply nested identity maps
+    let mut ir = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+
+    for _ in 0..5 {
+        ir = IRNode::Map {
+            input: Box::new(ir),
+            projection: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+    }
+
+    let optimized = optimizer.optimize(ir);
+
+    // Should eliminate all identity maps
+    assert!(optimized.is_scan());
 }
 
 #[test]
