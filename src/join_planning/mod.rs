@@ -1194,3 +1194,47 @@ mod tests {
         assert!(stats.is_connected);
     }
 
+    #[test]
+    fn test_star_query_planning() {
+        // Star query: R(x,y), S(x,z), T(x,w) - all share x
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["x", "z"]);
+        let scan3 = make_scan("T", &["x", "w"]);
+
+        let join1 = make_join(scan1, scan2, "x");
+        let original_schema = vec![
+            "x".to_string(),
+            "y".to_string(),
+            "z".to_string(),
+            "w".to_string(),
+        ];
+        let ir = make_join(join1, scan3, "x");
+
+        let result = planner.plan_joins(ir);
+
+        // Output schema must match original, even if join order changed
+        let output = result.output_schema();
+        assert_eq!(output, original_schema, "Output schema must match original");
+    }
+
+    #[test]
+    fn test_chain_query_planning() {
+        // Chain query: R(x,y), S(y,z), T(z,w)
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let scan3 = make_scan("T", &["z", "w"]);
+
+        let join1 = make_join(scan1, scan2, "y");
+        let ir = make_join(join1, scan3, "z");
+
+        let stats = planner.analyze(&ir);
+
+        // Chain should be connected
+        assert!(stats.is_connected);
+        assert_eq!(stats.num_atoms, 3);
+    }
+}
