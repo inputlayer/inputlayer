@@ -334,3 +334,67 @@ fn test_fixpoint_reaches_stable_state() {
 }
 
 #[test]
+fn test_empty_union_not_further_optimized() {
+    let optimizer = Optimizer::new();
+
+    let ir = IRNode::Union { inputs: vec![] };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Empty union stays empty union
+    match optimized {
+        IRNode::Union { inputs } => assert_eq!(inputs.len(), 0),
+        _ => panic!("Expected empty union"),
+    }
+}
+
+#[test]
+fn test_scan_not_modified() {
+    let optimizer = Optimizer::new();
+
+    let ir = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+
+    let optimized = optimizer.optimize(ir.clone());
+
+    // Scans should pass through unchanged
+    assert!(optimized.is_scan());
+}
+
+#[test]
+fn test_multiple_real_filters_preserved() {
+    let optimizer = Optimizer::new();
+
+    // Filter(x > 5, Filter(y < 10, Scan))
+    let ir = IRNode::Filter {
+        input: Box::new(IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnLtConst(1, 10),
+        }),
+        predicate: Predicate::ColumnGtConst(0, 5),
+    };
+
+    let optimized = optimizer.optimize(ir);
+
+    // Filters should be fused into a single filter with And predicate
+    match optimized {
+        IRNode::Filter { input, predicate } => {
+            // Input should be the scan
+            assert!(input.is_scan(), "After fusion, input should be scan");
+            // Predicate should be And of both conditions
+            assert!(
+                matches!(predicate, Predicate::And(_, _)),
+                "Filters should be fused with And"
+            );
+        }
+        _ => panic!("Expected fused filter"),
+    }
+}
+
+// Advanced Optimizer Tests (join planning, subplan sharing, etc.)
+#[test]
