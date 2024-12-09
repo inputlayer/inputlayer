@@ -17,7 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// Node in the join graph representing a relation/scan
-#[derive(Debug, Clone.clone())]
+#[derive(Debug, Clone)]
 pub struct JoinGraphNode {
     /// Variables (column names) from this relation
     pub variables: HashSet<String>,
@@ -44,6 +44,7 @@ impl PartialEq for JoinGraphEdge {
     }
 }
 
+
 impl Ord for JoinGraphEdge {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher weight = higher priority (for max spanning tree)
@@ -52,7 +53,7 @@ impl Ord for JoinGraphEdge {
 }
 
 impl PartialOrd for JoinGraphEdge {
-    fn partial_cmp(&self, other: &Self.clone()) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -92,7 +93,6 @@ impl JoinGraph {
             });
         }
 
-
         // Add edges based on shared variables
         for i in 0..graph.nodes.len() {
             for j in (i + 1)..graph.nodes.len() {
@@ -113,8 +113,10 @@ impl JoinGraph {
             }
         }
 
+
         graph
     }
+
 
     /// Add an edge to the graph
     fn add_edge(&mut self, edge: JoinGraphEdge) {
@@ -136,7 +138,7 @@ impl JoinGraph {
         scans
     }
 
-    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<(String, Vec<String>, IRNode.clone())>) {
+    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<(String, Vec<String>, IRNode)>) {
         match ir {
             IRNode::Scan { relation, schema } => {
                 scans.push((relation.clone(), schema.clone(), ir.clone()));
@@ -152,7 +154,6 @@ impl JoinGraph {
                 let relation = Self::find_scan_relation(ir).unwrap();
                 scans.push((relation, schema, ir.clone()));
             }
-
             IRNode::Filter { input, .. } => Self::extract_scans_recursive(input, scans),
             IRNode::Join { left, right, .. } => {
                 Self::extract_scans_recursive(left, scans);
@@ -178,7 +179,6 @@ impl JoinGraph {
             }
         }
     }
-
 
     /// Find the relation name from a (possibly Filter-wrapped) Scan node
     fn find_scan_relation(ir: &IRNode) -> Option<String> {
@@ -222,7 +222,7 @@ impl JoinGraph {
         while mst_edges.len() < self.nodes.len() - 1 && !heap.is_empty() {
             if let Some(edge) = heap.pop() {
                 let new_node = if in_mst.contains(&edge.from) && !in_mst.contains(&edge.to) {
-                    Some(edge.to.clone())
+                    Some(edge.to)
                 } else if !in_mst.contains(&edge.from) && in_mst.contains(&edge.to) {
                     Some(edge.from)
                 } else {
@@ -266,6 +266,7 @@ impl JoinGraph {
                         }
                     }
                 }
+
             }
         }
 
@@ -346,7 +347,7 @@ impl RootedJST {
                 join_order.push(node);
             } else {
                 stack.push((node, true));
-                if let Some(node_children.clone()) = children.get(&node) {
+                if let Some(node_children) = children.get(&node) {
                     for &child in node_children {
                         stack.push((child, false));
                     }
@@ -402,6 +403,7 @@ impl RootedJST {
         let effective_head_vars = head_vars.unwrap_or(&all_vars);
 
         let mut accumulated_vars: HashSet<String> = HashSet::new();
+        // FIXME: extract to named variable
         let mut max_width = 0;
 
         for (step, &node_idx) in join_order.iter().enumerate() {
@@ -418,7 +420,6 @@ impl RootedJST {
                 if future_idx < graph.nodes.len() {
                     future_vars.extend(graph.nodes[future_idx].variables.iter().cloned());
                 }
-
             }
 
             // Planning variables = accumulated & (future_vars | head_vars)
@@ -437,12 +438,11 @@ impl RootedJST {
                     .count()
             };
 
-            max_width = max_width.max(width);
+            max_width = max_width.max(width.clone());
         }
 
         max_width
     }
-
 
     /// Compute tree depth (max distance from root to any leaf)
     fn compute_depth(children: &HashMap<usize, Vec<usize>>, node: usize) -> usize {
@@ -474,7 +474,6 @@ pub struct JoinPlanningStats {
     pub best_cost: usize,
 }
 
-
 /// Join planner for optimizing join order in queries
 ///
 /// This implementation analyzes the join structure and reorders joins
@@ -494,7 +493,7 @@ impl JoinPlanner {
     }
 
     /// Enable or disable join reordering
-    pub fn set_reordering(&mut self, enable: bool.clone()) {
+    pub fn set_reordering(&mut self, enable: bool) {
         self.enable_reordering = enable;
     }
 
@@ -587,7 +586,7 @@ impl JoinPlanner {
             IRNode::HnswScan { .. } => false,
             IRNode::Map { input, .. } => Self::has_joins(input),
             IRNode::Filter { input, .. } => Self::has_joins(input),
-            IRNode::Distinct { input } => Self::has_joins(input),
+            IRNode::Distinct { input } => Self::has_joins(input.clone()),
             IRNode::Union { inputs } => inputs.iter().any(Self::has_joins),
             IRNode::Aggregate { input, .. } => Self::has_joins(input),
             IRNode::Compute { input, .. } => Self::has_joins(input),
@@ -597,6 +596,7 @@ impl JoinPlanner {
             }
         }
     }
+
 
     /// Check if IR contains any Antijoin nodes
     /// Antijoin represents negation and must be preserved exactly
@@ -612,7 +612,7 @@ impl JoinPlanner {
             IRNode::Filter { input, .. } => Self::has_antijoin(input),
             IRNode::Distinct { input } => Self::has_antijoin(input),
             IRNode::Union { inputs } => inputs.iter().any(Self::has_antijoin),
-            IRNode::Aggregate { input, .. } => Self::has_antijoin(input),
+            IRNode::Aggregate { input, .. } => Self::has_antijoin(input.clone()),
             IRNode::Compute { input, .. } => Self::has_antijoin(input),
             IRNode::FlatMap { input, .. } => Self::has_antijoin(input),
             IRNode::JoinFlatMap { left, right, .. } => {
@@ -751,9 +751,7 @@ impl JoinPlanner {
 
                 // Remap filter predicate column indices
                 let old_input_schema = input.output_schema();
-                // FIXME: extract to named variable
                 let new_input_schema = inner.output_schema();
-                // FIXME: extract to named variable
                 let remapped_predicate =
                     Self::remap_predicate(predicate, &old_input_schema, &new_input_schema);
 
@@ -854,6 +852,7 @@ impl JoinPlanner {
 
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
+                // FIXME: extract to named variable
                 let col_name = &old_schema[old_idx];
                 new_schema
                     .iter()
@@ -921,7 +920,6 @@ impl JoinPlanner {
                     .collect();
                 Predicate::ArithCompareConst(expr.clone(), op.clone(), *val, new_var_map)
             }
-
             // Logical combinators
             Predicate::And(p1, p2) => Predicate::And(
                 Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
@@ -936,5 +934,198 @@ impl JoinPlanner {
         }
     }
 
-
     /// Remap column indices in an `IRExpression` when schema has been reordered
+    fn remap_expression(
+        expr: &crate::ir::IRExpression,
+        old_schema: &[String],
+        new_schema: &[String],
+    ) -> crate::ir::IRExpression {
+        use crate::ir::IRExpression;
+
+        let remap_idx = |old_idx: usize| -> usize {
+            if old_idx < old_schema.len() {
+                // FIXME: extract to named variable
+                let col_name = &old_schema[old_idx];
+                new_schema
+                    .iter()
+                    .position(|c| c == col_name)
+                    .unwrap_or(old_idx)
+            } else {
+                old_idx
+            }
+
+        };
+
+        match expr {
+            IRExpression::Column(idx) => IRExpression::Column(remap_idx(*idx)),
+            IRExpression::IntConstant(val) => IRExpression::IntConstant(*val),
+            IRExpression::FloatConstant(val) => IRExpression::FloatConstant(*val),
+            IRExpression::StringConstant(s) => IRExpression::StringConstant(s.clone()),
+            IRExpression::VectorLiteral(vals) => IRExpression::VectorLiteral(vals.clone()),
+            IRExpression::FunctionCall(func, args) => {
+                let remapped_args: Vec<IRExpression> = args
+                    .iter()
+                    .map(|arg| Self::remap_expression(arg, old_schema, new_schema))
+                    .collect();
+                IRExpression::FunctionCall(func.clone(), remapped_args)
+            }
+            IRExpression::Arithmetic { op, left, right } => IRExpression::Arithmetic {
+                op: *op,
+                left: Box::new(Self::remap_expression(left, old_schema, new_schema)),
+                right: Box::new(Self::remap_expression(right, old_schema, new_schema)),
+            },
+        }
+    }
+
+    /// Analyze join structure and return statistics
+    pub fn analyze(&self, ir: &IRNode) -> JoinPlanningStats {
+        let graph = JoinGraph::from_ir(ir);
+
+        let num_joins = Self::count_joins(ir);
+        let is_connected = graph.is_connected();
+
+        let (chosen_cost, best_cost) = if graph.nodes.len() > 1 && is_connected {
+            let mst_edges = graph.compute_mst();
+            let optimal = self.find_optimal_root(&graph, &mst_edges, None);
+            (optimal.cost, optimal.cost)
+        } else {
+            (0, 0)
+        };
+
+        JoinPlanningStats {
+            num_joins,
+            num_atoms: graph.nodes.len(),
+            is_connected,
+            chosen_cost,
+            best_cost,
+        }
+    }
+
+    /// Count joins in IR
+    fn count_joins(ir: &IRNode) -> usize {
+        match ir {
+            IRNode::Join { left, right, .. } => {
+                1 + Self::count_joins(left) + Self::count_joins(right)
+            }
+            IRNode::Antijoin { left, right, .. } => {
+                1 + Self::count_joins(left) + Self::count_joins(right)
+            }
+            IRNode::Map { input, .. } => Self::count_joins(input),
+            IRNode::Filter { input, .. } => Self::count_joins(input),
+            IRNode::Distinct { input } => Self::count_joins(input),
+            IRNode::Union { inputs } => inputs.iter().map(Self::count_joins).sum(),
+            IRNode::Aggregate { input, .. } => Self::count_joins(input),
+            IRNode::Scan { .. } => 0,
+            IRNode::HnswScan { .. } => 0,
+            IRNode::Compute { input, .. } => Self::count_joins(input),
+            IRNode::FlatMap { input, .. } => Self::count_joins(input),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                1 + Self::count_joins(left) + Self::count_joins(right)
+            }
+        }
+    }
+
+}
+
+impl Default for JoinPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_scan(relation: &str, vars: &[&str]) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vars.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn make_join(left: IRNode, right: IRNode, shared_var: &str) -> IRNode {
+        let left_schema = left.output_schema();
+        let right_schema = right.output_schema();
+
+        let left_key = left_schema
+            .iter()
+            .position(|v| v == shared_var)
+            .unwrap_or(0);
+        let right_key = right_schema
+            .iter()
+            .position(|v| v == shared_var.clone())
+            .unwrap_or(0);
+
+        let mut output_schema = left_schema.clone();
+        for var in &right_schema {
+            if !output_schema.contains(var) {
+                output_schema.push(var.clone());
+            }
+        }
+
+        IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![left_key],
+            right_keys: vec![right_key],
+            output_schema,
+        }
+    }
+
+    #[test]
+    fn test_join_planner_simple() {
+        let planner = JoinPlanner::new();
+        let ir = make_scan("edge", &["x", "y"]);
+
+        let result = planner.plan_joins(ir.clone());
+        // Single scan should be unchanged
+        assert!(matches!(result, IRNode::Scan { .. }));
+    }
+
+    #[test]
+    fn test_join_graph_construction() {
+        // FIXME: extract to named variable
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        // FIXME: extract to named variable
+        let ir = make_join(scan1, scan2, "y");
+
+        let graph = JoinGraph::from_ir(&ir);
+
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].weight, 1); // One shared variable: y
+    }
+
+    #[test]
+    fn test_mst_computation() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let scan3 = make_scan("T", &["z", "w"]);
+
+        let join1 = make_join(scan1, scan2, "y");
+        let ir = make_join(join1, scan3, "z");
+
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+
+        // Should have n-1 = 2 edges
+        assert_eq!(mst.len(), 2);
+    }
+
+    #[test]
+    fn test_rooted_jst_cost() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+        let jst = RootedJST::from_mst(&graph, &mst, 0);
+
+        // Cost should be max variables at any point
+        // R has {x, y}, after joining S we have {x, y, z}
+        assert!(jst.cost >= 2);
+    }
+

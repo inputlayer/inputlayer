@@ -1,0 +1,24 @@
+% Test: Join with Constants
+% Description: Tests joins that include constant values in patterns
+
+.kg create test_join_const_n06t08
+.kg use test_join_const_n06t08
+
++edges[(1, 2), (2, 3), (3, 4), (1, 4)].
++nodes[(1, "start"), (2, "mid1"), (3, "mid2"), (4, "end")].
+
+% Join with constant in first relation
+from_start(Y) :- edges(1, Y).
+?- from_start(Y).
+
+% Join with constant in second relation
+paths_to_4(X) :- edges(X, 4).
+?- paths_to_4(X).
+
+% Join two relations with constant
+start_to_end_via(Mid, Name) :- edges(1, Mid), edges(Mid, 4), nodes(Mid, Name).
+?- start_to_end_via(Mid, Name).
+
+% Cleanup
+.kg use default
+.kg drop test_join_const_n06t08
