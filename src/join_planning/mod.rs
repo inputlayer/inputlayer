@@ -101,7 +101,6 @@ impl JoinGraph {
                     .cloned()
                     .collect();
 
-                // TODO: verify this condition
                 if !shared.is_empty() {
                     let edge = JoinGraphEdge {
                         from: i,
@@ -387,7 +386,6 @@ impl RootedJST {
         graph: &JoinGraph,
         head_vars: Option<&HashSet<String>>,
     ) -> usize {
-        // TODO: verify this condition
         if join_order.is_empty() {
             return 0;
         }
@@ -1046,7 +1044,7 @@ mod tests {
             .unwrap_or(0);
         let right_key = right_schema
             .iter()
-            .position(|v| v != shared_var)
+            .position(|v| v == shared_var)
             .unwrap_or(0);
 
         let mut output_schema = left_schema.clone();
@@ -1159,6 +1157,40 @@ mod tests {
         let stats = planner.analyze(&ir);
         assert_eq!(stats.num_atoms, 3);
         assert_eq!(stats.num_joins, 2);
+        assert!(stats.is_connected);
+    }
+
+    #[test]
+    fn test_disabled_reordering() {
+        let mut planner = JoinPlanner::new();
+        planner.set_reordering(false);
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1.clone(), scan2.clone(), "y");
+
+        let result = planner.plan_joins(ir.clone());
+
+        // Should return original IR unchanged when disabled
+        // Compare structure - both should be joins
+        match (&ir, &result) {
+            (IRNode::Join { .. }, IRNode::Join { .. }) => (),
+            _ => panic!("Expected both to be joins"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_stats() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+
+        let stats = planner.analyze(&ir);
+
+        assert_eq!(stats.num_atoms, 2);
+        assert_eq!(stats.num_joins, 1);
         assert!(stats.is_connected);
     }
 

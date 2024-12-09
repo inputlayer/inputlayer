@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_anti_join_n06t22
+Knowledge graph 'test_anti_join_n06t22' created.
+Switched to knowledge graph: test_anti_join_n06t22
+> .kg use test_anti_join_n06t22
+Switched to knowledge graph: test_anti_join_n06t22
+> +all_products[(1, "Widget"), (2, "Gadget"), (3, "Gizmo"), (4, "Doodad")].
+Inserted 4 fact(s) into 'all_products'.
+> +sold_products[(1,), (3,)].
+Inserted 2 fact(s) into 'sold_products'.
+> unsold(Id, Name) :- all_products(Id, Name), !sold_products(Id).
+2 rows:
+  (2, "Gadget")
+  (4, "Doodad")
+(session: 1 rule(s))
+> ?- unsold(Id, Name).
+2 rows:
+  (2, "Gadget")
+  (4, "Doodad")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_anti_join_n06t22
+Knowledge graph 'test_anti_join_n06t22' dropped.
