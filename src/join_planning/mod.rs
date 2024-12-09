@@ -44,7 +44,6 @@ impl PartialEq for JoinGraphEdge {
     }
 }
 
-
 impl Ord for JoinGraphEdge {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher weight = higher priority (for max spanning tree)
@@ -102,6 +101,7 @@ impl JoinGraph {
                     .cloned()
                     .collect();
 
+                // TODO: verify this condition
                 if !shared.is_empty() {
                     let edge = JoinGraphEdge {
                         from: i,
@@ -113,10 +113,8 @@ impl JoinGraph {
             }
         }
 
-
         graph
     }
-
 
     /// Add an edge to the graph
     fn add_edge(&mut self, edge: JoinGraphEdge) {
@@ -266,7 +264,6 @@ impl JoinGraph {
                         }
                     }
                 }
-
             }
         }
 
@@ -390,6 +387,7 @@ impl RootedJST {
         graph: &JoinGraph,
         head_vars: Option<&HashSet<String>>,
     ) -> usize {
+        // TODO: verify this condition
         if join_order.is_empty() {
             return 0;
         }
@@ -403,7 +401,6 @@ impl RootedJST {
         let effective_head_vars = head_vars.unwrap_or(&all_vars);
 
         let mut accumulated_vars: HashSet<String> = HashSet::new();
-        // FIXME: extract to named variable
         let mut max_width = 0;
 
         for (step, &node_idx) in join_order.iter().enumerate() {
@@ -438,7 +435,7 @@ impl RootedJST {
                     .count()
             };
 
-            max_width = max_width.max(width.clone());
+            max_width = max_width.max(width);
         }
 
         max_width
@@ -586,7 +583,7 @@ impl JoinPlanner {
             IRNode::HnswScan { .. } => false,
             IRNode::Map { input, .. } => Self::has_joins(input),
             IRNode::Filter { input, .. } => Self::has_joins(input),
-            IRNode::Distinct { input } => Self::has_joins(input.clone()),
+            IRNode::Distinct { input } => Self::has_joins(input),
             IRNode::Union { inputs } => inputs.iter().any(Self::has_joins),
             IRNode::Aggregate { input, .. } => Self::has_joins(input),
             IRNode::Compute { input, .. } => Self::has_joins(input),
@@ -596,7 +593,6 @@ impl JoinPlanner {
             }
         }
     }
-
 
     /// Check if IR contains any Antijoin nodes
     /// Antijoin represents negation and must be preserved exactly
@@ -612,7 +608,7 @@ impl JoinPlanner {
             IRNode::Filter { input, .. } => Self::has_antijoin(input),
             IRNode::Distinct { input } => Self::has_antijoin(input),
             IRNode::Union { inputs } => inputs.iter().any(Self::has_antijoin),
-            IRNode::Aggregate { input, .. } => Self::has_antijoin(input.clone()),
+            IRNode::Aggregate { input, .. } => Self::has_antijoin(input),
             IRNode::Compute { input, .. } => Self::has_antijoin(input),
             IRNode::FlatMap { input, .. } => Self::has_antijoin(input),
             IRNode::JoinFlatMap { left, right, .. } => {
@@ -852,7 +848,6 @@ impl JoinPlanner {
 
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
-                // FIXME: extract to named variable
                 let col_name = &old_schema[old_idx];
                 new_schema
                     .iter()
@@ -944,7 +939,6 @@ impl JoinPlanner {
 
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
-                // FIXME: extract to named variable
                 let col_name = &old_schema[old_idx];
                 new_schema
                     .iter()
@@ -953,7 +947,6 @@ impl JoinPlanner {
             } else {
                 old_idx
             }
-
         };
 
         match expr {
@@ -1024,7 +1017,6 @@ impl JoinPlanner {
             }
         }
     }
-
 }
 
 impl Default for JoinPlanner {
@@ -1054,7 +1046,7 @@ mod tests {
             .unwrap_or(0);
         let right_key = right_schema
             .iter()
-            .position(|v| v == shared_var.clone())
+            .position(|v| v != shared_var)
             .unwrap_or(0);
 
         let mut output_schema = left_schema.clone();
@@ -1085,10 +1077,8 @@ mod tests {
 
     #[test]
     fn test_join_graph_construction() {
-        // FIXME: extract to named variable
         let scan1 = make_scan("R", &["x", "y"]);
         let scan2 = make_scan("S", &["y", "z"]);
-        // FIXME: extract to named variable
         let ir = make_join(scan1, scan2, "y");
 
         let graph = JoinGraph::from_ir(&ir);
@@ -1127,5 +1117,48 @@ mod tests {
         // Cost should be max variables at any point
         // R has {x, y}, after joining S we have {x, y, z}
         assert!(jst.cost >= 2);
+    }
+
+    #[test]
+    fn test_join_planning_preserves_semantics() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("edge", &["x", "y"]);
+        let scan2 = make_scan("edge", &["y", "z"]);
+        let original_schema = vec!["x".to_string(), "y".to_string(), "z".to_string()];
+        let ir = make_join(scan1, scan2, "y");
+
+        let result = planner.plan_joins(ir);
+
+        // Result should be a join (possibly wrapped in a Map for schema remapping)
+        let output = result.output_schema();
+        assert_eq!(output, original_schema, "Output schema must match original");
+    }
+
+    #[test]
+    fn test_graph_connectivity() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+
+        let graph = JoinGraph::from_ir(&ir);
+        assert!(graph.is_connected());
+    }
+
+    #[test]
+    fn test_three_way_join() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["a", "b"]);
+        let scan2 = make_scan("S", &["b", "c"]);
+        let scan3 = make_scan("T", &["c", "d"]);
+
+        let join1 = make_join(scan1, scan2, "b");
+        let ir = make_join(join1, scan3, "c");
+
+        let stats = planner.analyze(&ir);
+        assert_eq!(stats.num_atoms, 3);
+        assert_eq!(stats.num_joins, 2);
+        assert!(stats.is_connected);
     }
 
