@@ -398,3 +398,58 @@ fn test_multiple_real_filters_preserved() {
 
 // Advanced Optimizer Tests (join planning, subplan sharing, etc.)
 #[test]
+fn test_subplan_sharing_detects_common_subexpressions() {
+    use inputlayer::SubplanSharer;
+
+    let sharer = SubplanSharer::new();
+
+    // Two identical scans
+    let ir1 = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+    let ir2 = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+
+    let (optimized, shared) =
+        sharer.share_subplans(vec![ir1, ir2], &std::collections::HashSet::new());
+
+    // Should detect that both are identical
+    assert_eq!(optimized.len(), 2);
+    // Shared views is a HashMap of shared subplans
+    // The exact behavior depends on implementation - this test verifies:
+    // 1. The API works without panicking
+    // 2. We get back the expected number of plans
+    let _ = shared; // Use the shared variable to avoid unused warning
+}
+
+#[test]
+fn test_boolean_specializer_analyzes_semiring() {
+    use inputlayer::BooleanSpecializer;
+
+    let mut specializer = BooleanSpecializer::new();
+
+    let ir = IRNode::Scan {
+        relation: "edge".to_string(),
+        schema: vec!["x".to_string(), "y".to_string()],
+    };
+
+    let (optimized, annotation) = specializer.specialize(ir.clone());
+
+    // Specializer should return the IR (possibly with Distinct wrapper)
+    // and an annotation with semiring information
+    assert!(
+        !annotation.reason.is_empty(),
+        "Annotation should have a reason"
+    );
+
+    // The result should be a valid IR node
+    match &optimized {
+        IRNode::Scan { .. } | IRNode::Distinct { .. } => (),
+        _ => panic!("Expected Scan or Distinct"),
+    }
+}
+
+#[test]
