@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_overlap_n06t68
+Knowledge graph 'test_overlap_n06t68' created.
+Switched to knowledge graph: test_overlap_n06t68
+> .kg use test_overlap_n06t68
+Switched to knowledge graph: test_overlap_n06t68
+> +ranges[(1, 0, 10), (2, 5, 15), (3, 20, 30)].
+Inserted 3 fact(s) into 'ranges'.
+> +overlaps(Id1, Id2) :- ranges(Id1, S1, E1), ranges(Id2, S2, E2), Id1 < Id2, S1 <= E2, S2 <= E1.
+Rule 'overlaps' registered.
+> ?- overlaps(A, B).
+1 rows:
+  (1, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_overlap_n06t68
+Knowledge graph 'test_overlap_n06t68' dropped.

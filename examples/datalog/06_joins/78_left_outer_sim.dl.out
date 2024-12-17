@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_left_outer_n06t78
+Knowledge graph 'test_left_outer_n06t78' created.
+Switched to knowledge graph: test_left_outer_n06t78
+> .kg use test_left_outer_n06t78
+Switched to knowledge graph: test_left_outer_n06t78
+> +employees[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'employees'.
+> +departments[(1, "Engineering"), (2, "Sales")].
+Inserted 2 fact(s) into 'departments'.
+> inner_joined(EmpId, Name, Dept) :- employees(EmpId, Name), departments(EmpId, Dept).
+2 rows:
+  (1, "Alice", "Engineering")
+  (2, "Bob", "Sales")
+(session: 1 rule(s))
+> ?- inner_joined(EmpId, Name, Dept).
+2 rows:
+  (1, "Alice", "Engineering")
+  (2, "Bob", "Sales")
+> no_dept(EmpId, Name) :- employees(EmpId, Name), !departments(EmpId, _).
+1 rows:
+  (3, "Carol")
+(session: 2 rule(s))
+> ?- no_dept(EmpId, Name).
+1 rows:
+  (3, "Carol")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_left_outer_n06t78
+Knowledge graph 'test_left_outer_n06t78' dropped.
