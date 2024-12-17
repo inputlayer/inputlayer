@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_optional_n06t45
+Knowledge graph 'test_optional_n06t45' created.
+Switched to knowledge graph: test_optional_n06t45
+> .kg use test_optional_n06t45
+Switched to knowledge graph: test_optional_n06t45
+> +employees[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'employees'.
+> +managers[(1, "Dept A"), (2, "Dept B")].
+Inserted 2 fact(s) into 'managers'.
+> with_manager(Id, Name, Dept) :- employees(Id, Name), managers(Id, Dept).
+2 rows:
+  (1, "Alice", "Dept A")
+  (2, "Bob", "Dept B")
+(session: 1 rule(s))
+> without_manager(Id, Name) :- employees(Id, Name), !managers(Id, _).
+1 rows:
+  (3, "Carol")
+(session: 2 rule(s))
+> ?- with_manager(Id, Name, Dept).
+2 rows:
+  (1, "Alice", "Dept A")
+  (2, "Bob", "Dept B")
+> ?- without_manager(Id, Name).
+1 rows:
+  (3, "Carol")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_optional_n06t45
+Knowledge graph 'test_optional_n06t45' dropped.
