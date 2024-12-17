@@ -1,0 +1,23 @@
+% Test: Full outer join simulation
+
+.kg create test_full_outer_n06t62
+.kg use test_full_outer_n06t62
+
++left_t[(1, "A"), (2, "B")].
++right_t[(2, 100), (3, 200)].
+
+% Inner join (matched)
++inner_matched(K, L, R) :- left_t(K, L), right_t(K, R).
+
+% Left only (not in right)
++left_only(K, L) :- left_t(K, L), !right_t(K, _).
+
+% Right only (not in left)
++right_only(K, R) :- right_t(K, R), !left_t(K, _).
+
+?- inner_matched(K, L, R).
+?- left_only(K, L).
+?- right_only(K, R).
+
+.kg use default
+.kg drop test_full_outer_n06t62

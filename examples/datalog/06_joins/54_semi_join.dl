@@ -1,0 +1,15 @@
+% Test: Semi-join pattern
+
+.kg create test_semi_join_n06t54
+.kg use test_semi_join_n06t54
+
++orders[(1, 100, "pending"), (2, 200, "shipped"), (3, 150, "pending"), (4, 300, "delivered")].
++priority_customers[(100,), (300,)].
+
+% Get orders from priority customers (semi-join)
+priority_order(Id, Status) :- orders(Id, CustId, Status), priority_customers(CustId).
+
+?- priority_order(Id, Status).
+
+.kg use default
+.kg drop test_semi_join_n06t54
