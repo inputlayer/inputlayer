@@ -1,0 +1,15 @@
+% Test: Join with empty left relation
+
+.kg create test_empty_left_n06t36
+.kg use test_empty_left_n06t36
+
++left_rel[].
++right_rel[(1, "a"), (2, "b")].
+
+% Join should be empty
+joined(X, Y) :- left_rel(X), right_rel(X, Y).
+
+?- joined(X, Y).
+
+.kg use default
+.kg drop test_empty_left_n06t36

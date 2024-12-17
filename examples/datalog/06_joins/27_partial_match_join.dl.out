@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_partial_n06t27
+Knowledge graph 'test_partial_n06t27' created.
+Switched to knowledge graph: test_partial_n06t27
+> .kg use test_partial_n06t27
+Switched to knowledge graph: test_partial_n06t27
+> +orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)].
+Inserted 3 fact(s) into 'orders'.
+> +customers[("Alice", "VIP"), ("Bob", "Regular"), ("Carol", "New")].
+Inserted 3 fact(s) into 'customers'.
+> enriched(OrdId, Name, Amount, Status) :- orders(OrdId, Name, Amount), customers(Name, Status).
+3 rows:
+  (1, "Alice", 100, "VIP")
+  (2, "Bob", 200, "Regular")
+  (3, "Alice", 150, "VIP")
+(session: 1 rule(s))
+> ?- enriched(OrdId, Name, Amount, Status).
+3 rows:
+  (1, "Alice", 100, "VIP")
+  (2, "Bob", 200, "Regular")
+  (3, "Alice", 150, "VIP")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_partial_n06t27
+Knowledge graph 'test_partial_n06t27' dropped.

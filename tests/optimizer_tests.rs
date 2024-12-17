@@ -453,3 +453,90 @@ fn test_boolean_specializer_analyzes_semiring() {
 }
 
 #[test]
+fn test_join_planner_analyzes_structure() {
+    use inputlayer::JoinPlanner;
+
+    let planner = JoinPlanner::new();
+
+    let ir = IRNode::Join {
+        left: Box::new(IRNode::Scan {
+            relation: "r".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }),
+        right: Box::new(IRNode::Scan {
+            relation: "s".to_string(),
+            schema: vec!["y".to_string(), "z".to_string()],
+        }),
+        left_keys: vec![1],
+        right_keys: vec![0],
+        output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+    };
+
+    let stats = planner.analyze(&ir);
+
+    assert_eq!(stats.num_joins, 1);
+    assert_eq!(stats.num_atoms, 2);
+    assert!(stats.is_connected);
+}
+
+#[test]
+fn test_sip_rewriter_analyzes_joins() {
+    use inputlayer::ast::{Atom, BodyPredicate, Program, Rule, Term};
+    use inputlayer::SipRewriter;
+
+    let mut rewriter = SipRewriter::new();
+
+    // Create a rule: result(X, Z) :- r(X, Y), s(Y, Z).
+    let rule = Rule::new(
+        Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        ),
+        vec![
+            BodyPredicate::Positive(Atom::new(
+                "r".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "s".to_string(),
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            )),
+        ],
+    );
+
+    let program = Program { rules: vec![rule] };
+
+    // SIP rewriting should produce additional rules
+    let result = rewriter.rewrite_program(&program);
+
+    // Result should have more rules than the original (SIP rules + final rule)
+    assert!(
+        result.rules.len() >= 2,
+        "Expected SIP rules, got {} rules",
+        result.rules.len()
+    );
+    // Last rule should still be "result"
+    assert_eq!(result.rules.last().unwrap().head.relation, "result");
+}
+
+#[test]
+fn test_default_config_optimizations() {
+    use inputlayer::OptimizationConfig;
+
+    let config = OptimizationConfig::default();
+
+    // All optimizations enabled by default
+    assert!(config.enable_join_planning);
+    assert!(config.enable_sip_rewriting);
+    assert!(config.enable_subplan_sharing);
+    assert!(config.enable_boolean_specialization);
+}
