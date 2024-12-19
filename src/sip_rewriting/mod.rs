@@ -509,3 +509,122 @@ impl SipRewriter {
     }
 }
 
+impl Default for SipRewriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Atom, BodyPredicate, ComparisonOp, Program, Rule, Term};
+
+    fn var(name: &str) -> Term {
+        Term::Variable(name.to_string())
+    }
+
+    fn atom(rel: &str, args: Vec<Term>) -> Atom {
+        Atom::new(rel.to_string(), args)
+    }
+
+    fn pos(a: Atom) -> BodyPredicate {
+        BodyPredicate::Positive(a)
+    }
+
+    fn neg(a: Atom) -> BodyPredicate {
+        BodyPredicate::Negated(a)
+    }
+
+    fn cmp(left: Term, op: ComparisonOp, right: Term) -> BodyPredicate {
+        BodyPredicate::Comparison(left, op, right)
+    }
+
+    #[test]
+    fn test_single_atom_rule_unchanged() {
+        let mut rewriter = SipRewriter::new();
+        let rule = Rule::new(
+            atom("result", vec![var("X")]),
+            vec![pos(atom("r", vec![var("X")]))],
+        );
+        let program = Program {
+            rules: vec![rule.clone()],
+        };
+        let result = rewriter.rewrite_program(&program);
+
+        assert_eq!(result.rules.len(), 1);
+        assert_eq!(result.rules[0].head.relation, "result");
+    }
+
+    #[test]
+    fn test_two_way_join_produces_sip_rules() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, Z) :- R(X, Y), S(Y, Z).
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should produce forward rules + backward rules + final rule
+        // With 2 core atoms, forward may generate 1 non-trivial rule,
+        // backward may generate 1 non-trivial rule, plus the final rule
+        assert!(
+            result.rules.len() >= 2,
+            "Expected SIP rules, got {} rules",
+            result.rules.len()
+        );
+
+        // The last rule should have head "result"
+        let last = result.rules.last().unwrap();
+        assert_eq!(last.head.relation, "result");
+    }
+
+    #[test]
+    fn test_three_way_join_produces_sip_rules() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, W) :- R(X, Y), S(Y, Z), T(Z, W).
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("W")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+                pos(atom("T", vec![var("Z"), var("W")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // With 3 core atoms, expect more SIP rules
+        assert!(
+            result.rules.len() >= 3,
+            "Expected at least 3 rules, got {}",
+            result.rules.len()
+        );
+
+        // Last rule should still be "result"
+        let last = result.rules.last().unwrap();
+        assert_eq!(last.head.relation, "result");
+    }
+
+    #[test]
+    fn test_no_shared_variables_unchanged() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, Z) :- R(X, Y), S(A, B). (no shared variables)
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("A"), var("B")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        assert_eq!(result.rules.len(), 1);
+    }
+
