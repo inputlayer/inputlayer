@@ -107,7 +107,6 @@ impl SipRewriter {
             }
 
             // Check if this rule has any joins (shared variables between atoms)
-            // TODO: verify this condition
             if !Self::has_shared_variables(&positive_atoms) {
                 new_rules.push(rule.clone());
                 continue;
@@ -138,7 +137,6 @@ impl SipRewriter {
                 }
                 _ => false,
             });
-            // TODO: verify this condition
             if references_derived {
                 new_rules.push(rule.clone());
                 continue;
@@ -222,7 +220,6 @@ impl SipRewriter {
 
         // Add (now SIP-renamed) core atoms
         for (i, atom) in atoms.iter().enumerate() {
-            // TODO: verify this condition
             if is_core[i] {
                 final_body.push(atom.clone());
             }
@@ -352,7 +349,6 @@ impl SipRewriter {
                 let prior_vars_set: HashSet<&String> = prior_vars.iter().collect();
 
                 // Only add if there's shared variables
-                // TODO: verify this condition
                 if base_vars_set.is_disjoint(&prior_vars_set) {
                     continue;
                 }
@@ -363,7 +359,6 @@ impl SipRewriter {
             }
 
             // Skip trivial rules (body has only the base atom, no actual filtering)
-            // TODO: verify this condition
             if sip_body.len() == 1 {
                 continue;
             }
@@ -380,3 +375,137 @@ impl SipRewriter {
     }
 
     /// Categorize body predicates into positive atoms, negated atoms, and comparisons
+    fn categorize_body(
+        rule: &Rule,
+    ) -> (Vec<BodyPredicate>, Vec<BodyPredicate>, Vec<BodyPredicate>) {
+        let mut atoms = Vec::new();
+        let mut negated = Vec::new();
+        let mut comparisons = Vec::new();
+
+        for pred in &rule.body {
+            match pred {
+                BodyPredicate::Positive(_) => atoms.push(pred.clone()),
+                BodyPredicate::Negated(_) => negated.push(pred.clone()),
+                BodyPredicate::Comparison(_, _, _) => comparisons.push(pred.clone()),
+                BodyPredicate::HnswNearest { .. } => comparisons.push(pred.clone()),
+            }
+        }
+
+        (atoms, negated, comparisons)
+    }
+
+    /// Extract positive atoms from a rule
+    fn positive_atoms(rule: &Rule) -> Vec<&Atom> {
+        rule.body
+            .iter()
+            .filter_map(|pred| match pred {
+                BodyPredicate::Positive(atom) => Some(atom),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Check if any two positive atoms share variables (indicating a join)
+    fn has_shared_variables(atoms: &[&Atom]) -> bool {
+        for (i, atom_i) in atoms.iter().enumerate() {
+            let vars_i = atom_i.variables();
+            for atom_j in &atoms[i + 1..] {
+                let vars_j = atom_j.variables();
+                if !vars_i.is_disjoint(&vars_j) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Compute core atom bitmap
+    ///
+    /// An atom is "core" if its variable set is NOT a strict subset of any other atom.
+    /// When two atoms have identical variable sets, the one with the lower index is kept.
+    fn compute_core_atom_bitmap(atoms: &[BodyPredicate]) -> Vec<bool> {
+        let var_sets: Vec<HashSet<String>> =
+            atoms.iter().map(Self::variables_of_predicate).collect();
+
+        let mut is_core = vec![true; atoms.len()];
+
+        for i in 0..atoms.len() {
+            for j in 0..atoms.len() {
+                if i == j {
+                    continue;
+                }
+                if var_sets[i].is_subset(&var_sets[j]) {
+                    if var_sets[i].len() < var_sets[j].len() {
+                        // Strict subset: i is non-core
+                        is_core[i] = false;
+                    } else if i > j {
+                        // Same variables, higher index is non-core
+                        is_core[i] = false;
+                    }
+                }
+            }
+        }
+
+        is_core
+    }
+
+    /// Get variables of a body predicate
+    fn variables_of_predicate(pred: &BodyPredicate) -> HashSet<String> {
+        pred.variables()
+    }
+
+    /// Get unique variables of a predicate (deduplicated, preserving first-occurrence order)
+    fn unique_variables_of_predicate(pred: &BodyPredicate) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+
+        match pred {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => {
+                for term in &atom.args {
+                    if let Term::Variable(v) = term {
+                        if seen.insert(v.clone()) {
+                            result.push(v.clone());
+                        }
+                    }
+                }
+            }
+            _ => {
+                for v in pred.variables() {
+                    if seen.insert(v.clone()) {
+                        result.push(v);
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Get the relation name from a body predicate
+    fn predicate_relation_name(pred: &BodyPredicate) -> String {
+        match pred {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => atom.relation.clone(),
+            _ => "_cmp".to_string(),
+        }
+    }
+
+    /// Create a copy of a predicate with non-shared variables replaced by wildcards
+    fn wildcarded_predicate(pred: &BodyPredicate, shared_vars: &HashSet<&String>) -> BodyPredicate {
+        match pred {
+            BodyPredicate::Positive(atom) => {
+                let new_args: Vec<Term> = atom
+                    .args
+                    .iter()
+                    .map(|term| match term {
+                        Term::Variable(v) if !shared_vars.contains(v) => Term::Placeholder,
+                        other => other.clone(),
+                    })
+                    .collect();
+                BodyPredicate::Positive(Atom::new(atom.relation.clone(), new_args))
+            }
+            // For non-atom predicates, return as-is
+            other => other.clone(),
+        }
+    }
+}
+
