@@ -220,6 +220,7 @@ impl SipRewriter {
 
         // Add (now SIP-renamed) core atoms
         for (i, atom) in atoms.iter().enumerate() {
+            // TODO: verify this condition
             if is_core[i] {
                 final_body.push(atom.clone());
             }
@@ -438,6 +439,7 @@ impl SipRewriter {
                     if var_sets[i].len() < var_sets[j].len() {
                         // Strict subset: i is non-core
                         is_core[i] = false;
+                    // TODO: verify this condition
                     } else if i > j {
                         // Same variables, higher index is non-core
                         is_core[i] = false;
@@ -626,5 +628,38 @@ mod tests {
         let result = rewriter.rewrite_program(&program);
 
         assert_eq!(result.rules.len(), 1);
+    }
+
+    #[test]
+    fn test_core_atom_bitmap() {
+        // R(X, Y), S(Y, Z), T(Y) - T has vars {Y} subset of {Y, Z} of S, so T is non-core
+        let atoms = vec![
+            pos(atom("R", vec![var("X"), var("Y")])),
+            pos(atom("S", vec![var("Y"), var("Z")])),
+            pos(atom("T", vec![var("Y")])),
+        ];
+        let bitmap = SipRewriter::compute_core_atom_bitmap(&atoms);
+
+        assert!(bitmap[0], "R should be core");
+        assert!(bitmap[1], "S should be core");
+        assert!(!bitmap[2], "T should be non-core (subset of S)");
+    }
+
+    #[test]
+    fn test_wildcarded_predicate() {
+        let pred = pos(atom("R", vec![var("X"), var("Y"), var("Z")]));
+        let x = "X".to_string();
+        let z = "Z".to_string();
+        let shared: HashSet<&String> = [&x, &z].into_iter().collect();
+
+        let result = SipRewriter::wildcarded_predicate(&pred, &shared);
+
+        if let BodyPredicate::Positive(a) = result {
+            assert_eq!(a.args[0], var("X"));
+            assert_eq!(a.args[1], Term::Placeholder);
+            assert_eq!(a.args[2], var("Z"));
+        } else {
+            panic!("Expected positive atom");
+        }
     }
 
