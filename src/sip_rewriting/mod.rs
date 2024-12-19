@@ -663,3 +663,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_sip_with_negation() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, Z) :- R(X, Y), S(Y, Z), not T(X).
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+                neg(atom("T", vec![var("X")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should still produce SIP rules (negation is handled)
+        assert!(result.rules.len() >= 2);
+    }
+
+    #[test]
+    fn test_sip_with_comparisons() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, Z) :- R(X, Y), S(Y, Z), X > 1.
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+                cmp(var("X"), ComparisonOp::GreaterThan, Term::Constant(1)),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        assert!(result.rules.len() >= 2);
+    }
+
