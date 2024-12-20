@@ -220,7 +220,6 @@ impl SipRewriter {
 
         // Add (now SIP-renamed) core atoms
         for (i, atom) in atoms.iter().enumerate() {
-            // TODO: verify this condition
             if is_core[i] {
                 final_body.push(atom.clone());
             }
@@ -439,7 +438,6 @@ impl SipRewriter {
                     if var_sets[i].len() < var_sets[j].len() {
                         // Strict subset: i is non-core
                         is_core[i] = false;
-                    // TODO: verify this condition
                     } else if i > j {
                         // Same variables, higher index is non-core
                         is_core[i] = false;
@@ -700,3 +698,47 @@ mod tests {
         assert!(result.rules.len() >= 2);
     }
 
+    #[test]
+    fn test_sip_preserves_non_join_rules() {
+        let mut rewriter = SipRewriter::new();
+
+        let rule1 = Rule::new(
+            atom("base", vec![var("X")]),
+            vec![pos(atom("input", vec![var("X")]))],
+        );
+        let rule2 = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program {
+            rules: vec![rule1, rule2],
+        };
+        let result = rewriter.rewrite_program(&program);
+
+        // First rule should be unchanged
+        assert_eq!(result.rules[0].head.relation, "base");
+        // Last rule should be the rewritten "result"
+        assert_eq!(result.rules.last().unwrap().head.relation, "result");
+    }
+
+    #[test]
+    fn test_stats_tracking() {
+        let mut rewriter = SipRewriter::new();
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let _ = rewriter.rewrite_program(&program);
+
+        let stats = rewriter.get_stats();
+        assert_eq!(stats.rules_rewritten, 1);
+        assert!(stats.rules_generated > 0);
+    }
+}

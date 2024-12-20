@@ -1,0 +1,43 @@
+% Test: Aggregation Stress Test
+% Verifies: Multiple aggregations on larger datasets
+
+.kg create test_agg_stress_n13t10
+.kg use test_agg_stress_n13t10
+
+% Generate data with multiple groups
++sales[(1, 100, 10), (1, 101, 20), (1, 102, 15), (1, 103, 25), (1, 104, 30),
+       (2, 100, 12), (2, 101, 22), (2, 102, 18), (2, 103, 28), (2, 104, 35),
+       (3, 100, 8), (3, 101, 18), (3, 102, 12), (3, 103, 22), (3, 104, 28),
+       (4, 100, 15), (4, 101, 25), (4, 102, 20), (4, 103, 30), (4, 104, 40),
+       (5, 100, 11), (5, 101, 21), (5, 102, 16), (5, 103, 26), (5, 104, 32)].
+
+% Multiple aggregations per group
++store_count(Store, count<Product>) :- sales(Store, Product, _).
++store_sum(Store, sum<Amount>) :- sales(Store, _, Amount).
++store_avg(Store, avg<Amount>) :- sales(Store, _, Amount).
++store_min(Store, min<Amount>) :- sales(Store, _, Amount).
++store_max(Store, max<Amount>) :- sales(Store, _, Amount).
+
+?- store_count(S, C).
+?- store_sum(S, T).
+?- store_avg(S, A).
+?- store_min(S, M).
+?- store_max(S, M).
+
+% Product aggregations
++product_total(Product, sum<Amount>) :- sales(_, Product, Amount).
+?- product_total(P, T).
+
+% Global aggregations
++total_sales(sum<A>) :- sales(_, _, A).
++avg_sale(avg<A>) :- sales(_, _, A).
+?- total_sales(T).
+?- avg_sale(A).
+
+% Nested aggregation: max of sums
++max_store_total(max<T>) :- store_sum(_, T).
+?- max_store_total(M).
+
+% Cleanup
+.kg use default
+.kg drop test_agg_stress_n13t10

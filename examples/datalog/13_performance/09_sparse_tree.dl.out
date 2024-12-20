@@ -1,0 +1,105 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sparse_tree_n13t09
+Knowledge graph 'test_sparse_tree_n13t09' created.
+Switched to knowledge graph: test_sparse_tree_n13t09
+> .kg use test_sparse_tree_n13t09
+Switched to knowledge graph: test_sparse_tree_n13t09
+> +parent[(2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (7, 3), (8, 4), (9, 4), (10, 5), (11, 5), (12, 6), (13, 6), (14, 7), (15, 7)].
+Inserted 14 fact(s) into 'parent'.
+> +ancestor(X, A) :- parent(X, A).
+Rule 'ancestor' registered.
+> +ancestor(X, A) :- parent(X, P), ancestor(P, A).
+Rule 'ancestor' registered.
+> ?- ancestor(X, A).
+34 rows:
+  (2, 1)
+  (3, 1)
+  (4, 1)
+  (4, 2)
+  (5, 1)
+  (5, 2)
+  (6, 1)
+  (6, 3)
+  (7, 1)
+  (7, 3)
+  (8, 1)
+  (8, 2)
+  (8, 4)
+  (9, 1)
+  (9, 2)
+  (9, 4)
+  (10, 1)
+  (10, 2)
+  (10, 5)
+  (11, 1)
+  (11, 2)
+  (11, 5)
+  (12, 1)
+  (12, 3)
+  (12, 6)
+  (13, 1)
+  (13, 3)
+  (13, 6)
+  (14, 1)
+  (14, 3)
+  (14, 7)
+  (15, 1)
+  (15, 3)
+  (15, 7)
+> +depth(1, 0).
+Inserted 1 fact(s) into 'depth'.
+> +depth(X, D+1) :- parent(X, P), depth(P, D).
+Rule 'depth' registered.
+> +ancestor_count(X, count<A>) :- ancestor(X, A).
+Rule 'ancestor_count' registered.
+> ?- ancestor_count(X, C).
+14 rows:
+  (2, 1)
+  (3, 1)
+  (4, 2)
+  (5, 2)
+  (6, 2)
+  (7, 2)
+  (8, 3)
+  (9, 3)
+  (10, 3)
+  (11, 3)
+  (12, 3)
+  (13, 3)
+  (14, 3)
+  (15, 3)
+> +descendant(2, X) :- parent(X, 2).
+Rule 'descendant' registered.
+> +descendant(2, X) :- parent(X, Y), descendant(2, Y).
+Rule 'descendant' registered.
+> ?- descendant(2, X).
+6 rows:
+  (2, 4)
+  (2, 5)
+  (2, 8)
+  (2, 9)
+  (2, 10)
+  (2, 11)
+> +has_child(P) :- parent(_, P).
+Rule 'has_child' registered.
+> +leaf(X) :- parent(X, _), !has_child(X).
+Rule 'leaf' registered.
+> ?- leaf(X).
+8 rows:
+  (8)
+  (9)
+  (10)
+  (11)
+  (12)
+  (13)
+  (14)
+  (15)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sparse_tree_n13t09
+Knowledge graph 'test_sparse_tree_n13t09' dropped.
