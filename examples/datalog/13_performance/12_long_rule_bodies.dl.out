@@ -1,0 +1,52 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_long_rules_n13t12
+Knowledge graph 'test_long_rules_n13t12' created.
+Switched to knowledge graph: test_long_rules_n13t12
+> .kg use test_long_rules_n13t12
+Switched to knowledge graph: test_long_rules_n13t12
+> +r1[(1, 2), (2, 3)].
+Inserted 2 fact(s) into 'r1'.
+> +r2[(2, 20), (3, 30)].
+Inserted 2 fact(s) into 'r2'.
+> +r3[(20, 200), (30, 300)].
+Inserted 2 fact(s) into 'r3'.
+> +r4[(200, 2000), (300, 3000)].
+Inserted 2 fact(s) into 'r4'.
+> +r5[(2000, "a"), (3000, "b")].
+Inserted 2 fact(s) into 'r5'.
+> +join5(A, E) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E).
+Rule 'join5' registered.
+> ?- join5(A, E).
+2 rows:
+  (1, 2000)
+  (2, 3000)
+> +data[(1, 10, 100), (2, 20, 200), (3, 30, 300), (1, 11, 110)].
+Inserted 4 fact(s) into 'data'.
+> +multi_cond(X) :- data(X, Y, Z), Y > 5, Z > 50, Y < 25, Z < 250.
+Rule 'multi_cond' registered.
+> ?- multi_cond(X).
+2 rows:
+  (1)
+  (2)
+> +complex_rule(A, E) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E), A > 0, B > 1, C > 10, D > 100, E > 1000.
+Rule 'complex_rule' registered.
+> ?- complex_rule(A, E).
+2 rows:
+  (1, 2000)
+  (2, 3000)
+> +chain[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)].
+Inserted 7 fact(s) into 'chain'.
+> +path8(A, H) :- chain(A, B), chain(B, C), chain(C, D), chain(D, E), chain(E, F), chain(F, G), chain(G, H).
+Rule 'path8' registered.
+> ?- path8(A, H).
+1 rows:
+  (1, 8)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_long_rules_n13t12
+Knowledge graph 'test_long_rules_n13t12' dropped.

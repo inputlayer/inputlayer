@@ -1,0 +1,86 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_stress_n13t10
+Knowledge graph 'test_agg_stress_n13t10' created.
+Switched to knowledge graph: test_agg_stress_n13t10
+> .kg use test_agg_stress_n13t10
+Switched to knowledge graph: test_agg_stress_n13t10
+> +sales[(1, 100, 10), (1, 101, 20), (1, 102, 15), (1, 103, 25), (1, 104, 30), (2, 100, 12), (2, 101, 22), (2, 102, 18), (2, 103, 28), (2, 104, 35), (3, 100, 8), (3, 101, 18), (3, 102, 12), (3, 103, 22), (3, 104, 28), (4, 100, 15), (4, 101, 25), (4, 102, 20), (4, 103, 30), (4, 104, 40), (5, 100, 11), (5, 101, 21), (5, 102, 16), (5, 103, 26), (5, 104, 32)].
+Inserted 25 fact(s) into 'sales'.
+> +store_count(Store, count<Product>) :- sales(Store, Product, _).
+Rule 'store_count' registered.
+> +store_sum(Store, sum<Amount>) :- sales(Store, _, Amount).
+Rule 'store_sum' registered.
+> +store_avg(Store, avg<Amount>) :- sales(Store, _, Amount).
+Rule 'store_avg' registered.
+> +store_min(Store, min<Amount>) :- sales(Store, _, Amount).
+Rule 'store_min' registered.
+> +store_max(Store, max<Amount>) :- sales(Store, _, Amount).
+Rule 'store_max' registered.
+> ?- store_count(S, C).
+5 rows:
+  (1, 5)
+  (2, 5)
+  (3, 5)
+  (4, 5)
+  (5, 5)
+> ?- store_sum(S, T).
+5 rows:
+  (1, 100)
+  (2, 115)
+  (3, 88)
+  (4, 130)
+  (5, 106)
+> ?- store_avg(S, A).
+5 rows:
+  (1, 20.0)
+  (2, 23.0)
+  (3, 17.6)
+  (4, 26.0)
+  (5, 21.2)
+> ?- store_min(S, M).
+5 rows:
+  (1, 10)
+  (2, 12)
+  (3, 8)
+  (4, 15)
+  (5, 11)
+> ?- store_max(S, M).
+5 rows:
+  (1, 30)
+  (2, 35)
+  (3, 28)
+  (4, 40)
+  (5, 32)
+> +product_total(Product, sum<Amount>) :- sales(_, Product, Amount).
+Rule 'product_total' registered.
+> ?- product_total(P, T).
+5 rows:
+  (100, 56)
+  (101, 106)
+  (102, 81)
+  (103, 131)
+  (104, 165)
+> +total_sales(sum<A>) :- sales(_, _, A).
+Rule 'total_sales' registered.
+> +avg_sale(avg<A>) :- sales(_, _, A).
+Rule 'avg_sale' registered.
+> ?- total_sales(T).
+1 rows:
+  (539)
+> ?- avg_sale(A).
+1 rows:
+  (21.56)
+> +max_store_total(max<T>) :- store_sum(_, T).
+Rule 'max_store_total' registered.
+> ?- max_store_total(M).
+1 rows:
+  (130)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_stress_n13t10
+Knowledge graph 'test_agg_stress_n13t10' dropped.
