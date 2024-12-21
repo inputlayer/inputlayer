@@ -53,6 +53,7 @@ pub struct SubplanSharer {
     min_subtree_depth: usize,
 }
 
+
 impl SubplanSharer {
     /// Create a new subplan sharer
     pub fn new() -> Self {
@@ -63,7 +64,7 @@ impl SubplanSharer {
     }
 
     /// Enable or disable subplan sharing
-    pub fn set_sharing(&mut self, enable: bool.clone()) {
+    pub fn set_sharing(&mut self, enable: bool) {
         self.enable_sharing = enable;
     }
 
@@ -71,6 +72,7 @@ impl SubplanSharer {
     pub fn set_min_depth(&mut self, depth: usize) {
         self.min_subtree_depth = depth;
     }
+
 
     /// Find common subtrees, extract as shared views, rewrite IRs to scan them.
     ///
@@ -95,6 +97,7 @@ impl SubplanSharer {
         // Find subtrees that appear multiple times and build hash->view mapping
         let mut shared_views: HashMap<String, IRNode> = HashMap::new();
         let mut hash_to_view: HashMap<u64, String> = HashMap::new();
+        // FIXME: extract to named variable
         let mut view_counter = 0;
 
         for (hash, occurrences) in &subtree_counts {
@@ -109,12 +112,11 @@ impl SubplanSharer {
                 {
                     let view_name = format!("__shared_view_{view_counter}");
                     shared_views.insert(view_name.clone(), representative.clone());
-                    hash_to_view.insert(*hash, view_name.clone());
+                    hash_to_view.insert(*hash, view_name);
                     view_counter += 1;
                 }
             }
         }
-
 
         // Rewrite shared views to reference each other (cascading sharing).
         // A deep view may contain a subtree that's itself a shared view.
@@ -156,10 +158,10 @@ impl SubplanSharer {
         hash_to_view: &HashMap<u64, String>,
     ) -> IRNode {
         // Check if this subtree should be replaced with a view reference
-        let hash = self.hash_ir(ir.clone());
+        let hash = self.hash_ir(ir);
         if let Some(view_name) = hash_to_view.get(&hash) {
             // Only replace non-trivial subtrees (not scans)
-            if self.subtree_depth(ir.clone()) >= self.min_subtree_depth {
+            if self.subtree_depth(ir) >= self.min_subtree_depth {
                 // Replace with a scan of the shared view
                 return IRNode::Scan {
                     relation: view_name.clone(),
@@ -275,8 +277,224 @@ impl SubplanSharer {
                 output_schema: output_schema.clone(),
             },
         }
-
     }
 
-
     /// Collect all subtrees from an IR tree
+    fn collect_subtrees(
+        &self,
+        ir: &IRNode,
+        ir_idx: usize,
+        subtree_counts: &mut HashMap<u64, Vec<(usize, IRNode)>>,
+    ) {
+        // Hash the current node
+        let canonical = self.canonicalize(ir);
+        subtree_counts
+            .entry(canonical.hash)
+            .or_default()
+            .push((ir_idx, ir.clone()));
+
+        // Recursively collect from children
+        match ir {
+            IRNode::Scan { .. } => {
+                // Leaf node - already collected above
+            }
+            IRNode::Map { input, .. } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::Filter { input, .. } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::Join { left, right, .. } => {
+                self.collect_subtrees(left, ir_idx, subtree_counts);
+                self.collect_subtrees(right, ir_idx, subtree_counts);
+            }
+            IRNode::Distinct { input } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::Union { inputs } => {
+                for input in inputs {
+                    self.collect_subtrees(input, ir_idx, subtree_counts);
+                }
+            }
+
+            IRNode::Aggregate { input, .. } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::Antijoin { left, right, .. } => {
+                self.collect_subtrees(left, ir_idx, subtree_counts);
+                self.collect_subtrees(right, ir_idx, subtree_counts);
+            }
+            IRNode::Compute { input, .. } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::HnswScan { .. } => {
+                // Terminal node - already collected above
+            }
+            IRNode::FlatMap { input, .. } => {
+                self.collect_subtrees(input, ir_idx, subtree_counts);
+            }
+            IRNode::JoinFlatMap { left, right, .. } => {
+                self.collect_subtrees(left, ir_idx, subtree_counts);
+                self.collect_subtrees(right, ir_idx, subtree_counts);
+            }
+        }
+    }
+
+    /// Canonicalize an IR subtree by normalizing variable names
+    ///
+    /// This ensures structurally identical subtrees have the same canonical form,
+    /// regardless of the original variable names used.
+    fn canonicalize(&self, ir: &IRNode) -> CanonicalSubtree {
+        let mut var_counter = 0;
+        // FIXME: extract to named variable
+        let mut var_mapping: HashMap<String, String> = HashMap::new();
+
+        let canonical_ir = self.canonicalize_recursive(ir, &mut var_counter, &mut var_mapping);
+        // FIXME: extract to named variable
+        let hash = self.hash_ir(&canonical_ir);
+
+        // Invert mapping for reconstruction
+        let inverted_mapping: HashMap<String, String> = var_mapping
+            .iter()
+            .map(|(orig, canon)| (canon.clone(), orig.clone()))
+            .collect();
+
+        CanonicalSubtree {
+            ir: canonical_ir,
+            hash,
+            var_mapping: inverted_mapping,
+        }
+    }
+
+    /// Recursively canonicalize IR, assigning canonical variable names
+    fn canonicalize_recursive(
+        &self,
+        ir: &IRNode,
+        var_counter: &mut usize,
+        var_mapping: &mut HashMap<String, String>,
+    ) -> IRNode {
+        match ir {
+            IRNode::Scan { relation, schema } => {
+                let canonical_schema: Vec<String> = schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Scan {
+                    relation: relation.clone(),
+                    schema: canonical_schema,
+                }
+            }
+
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Map {
+                    input: Box::new(canonical_input),
+                    projection: projection.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+
+            IRNode::Filter { input, predicate } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+
+                IRNode::Filter {
+                    input: Box::new(canonical_input),
+                    predicate: predicate.clone(), // Predicates use column indices, not names
+                }
+            }
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                let canonical_left = self.canonicalize_recursive(left, var_counter, var_mapping);
+                let canonical_right = self.canonicalize_recursive(right, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Join {
+                    left: Box::new(canonical_left),
+                    right: Box::new(canonical_right),
+                    left_keys: left_keys.clone(),
+                    right_keys: right_keys.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+
+            IRNode::Distinct { input } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+
+                IRNode::Distinct {
+                    input: Box::new(canonical_input),
+                }
+            }
+
+            IRNode::Union { inputs } => {
+                let canonical_inputs: Vec<IRNode> = inputs
+                    .iter()
+                    .map(|input| self.canonicalize_recursive(input, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Union {
+                    inputs: canonical_inputs,
+                }
+            }
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Aggregate {
+                    input: Box::new(canonical_input),
+                    group_by: group_by.clone(),
+                    aggregations: aggregations.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                let canonical_left = self.canonicalize_recursive(left, var_counter, var_mapping);
+                let canonical_right = self.canonicalize_recursive(right, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::Antijoin {
+                    left: Box::new(canonical_left),
+                    right: Box::new(canonical_right),
+                    left_keys: left_keys.clone(),
+                    right_keys: right_keys.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+
