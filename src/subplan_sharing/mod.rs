@@ -53,7 +53,6 @@ pub struct SubplanSharer {
     min_subtree_depth: usize,
 }
 
-
 impl SubplanSharer {
     /// Create a new subplan sharer
     pub fn new() -> Self {
@@ -72,7 +71,6 @@ impl SubplanSharer {
     pub fn set_min_depth(&mut self, depth: usize) {
         self.min_subtree_depth = depth;
     }
-
 
     /// Find common subtrees, extract as shared views, rewrite IRs to scan them.
     ///
@@ -97,7 +95,6 @@ impl SubplanSharer {
         // Find subtrees that appear multiple times and build hash->view mapping
         let mut shared_views: HashMap<String, IRNode> = HashMap::new();
         let mut hash_to_view: HashMap<u64, String> = HashMap::new();
-        // FIXME: extract to named variable
         let mut view_counter = 0;
 
         for (hash, occurrences) in &subtree_counts {
@@ -316,7 +313,6 @@ impl SubplanSharer {
                     self.collect_subtrees(input, ir_idx, subtree_counts);
                 }
             }
-
             IRNode::Aggregate { input, .. } => {
                 self.collect_subtrees(input, ir_idx, subtree_counts);
             }
@@ -346,11 +342,9 @@ impl SubplanSharer {
     /// regardless of the original variable names used.
     fn canonicalize(&self, ir: &IRNode) -> CanonicalSubtree {
         let mut var_counter = 0;
-        // FIXME: extract to named variable
         let mut var_mapping: HashMap<String, String> = HashMap::new();
 
         let canonical_ir = self.canonicalize_recursive(ir, &mut var_counter, &mut var_mapping);
-        // FIXME: extract to named variable
         let hash = self.hash_ir(&canonical_ir);
 
         // Invert mapping for reconstruction
@@ -496,5 +490,224 @@ impl SubplanSharer {
                     right_keys: right_keys.clone(),
                     output_schema: canonical_output,
                 }
+            }
+
+            IRNode::Compute { input, expressions } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+
+                IRNode::Compute {
+                    input: Box::new(canonical_input),
+                    expressions: expressions.clone(),
+                }
+            }
+
+            IRNode::HnswScan {
+                index_name,
+                query,
+                k,
+                ef_search,
+                output_schema,
+            } => {
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::HnswScan {
+                    index_name: index_name.clone(),
+                    query: query.clone(),
+                    k: *k,
+                    ef_search: *ef_search,
+                    output_schema: canonical_output,
+                }
+            }
+
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::FlatMap {
+                    input: Box::new(canonical_input),
+                    projection: projection.clone(),
+                    filter_predicate: filter_predicate.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => {
+                let canonical_left = self.canonicalize_recursive(left, var_counter, var_mapping);
+                let canonical_right = self.canonicalize_recursive(right, var_counter, var_mapping);
+                let canonical_output: Vec<String> = output_schema
+                    .iter()
+                    .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
+                    .collect();
+
+                IRNode::JoinFlatMap {
+                    left: Box::new(canonical_left),
+                    right: Box::new(canonical_right),
+                    left_keys: left_keys.clone(),
+                    right_keys: right_keys.clone(),
+                    projection: projection.clone(),
+                    filter_predicate: filter_predicate.clone(),
+                    output_schema: canonical_output,
+                }
+            }
+        }
+    }
+
+    /// Get or create canonical variable name
+    fn get_canonical_var(
+        &self,
+        original: &str,
+        counter: &mut usize,
+        mapping: &mut HashMap<String, String>,
+    ) -> String {
+        if let Some(canonical) = mapping.get(original) {
+            canonical.clone()
+        } else {
+            let canonical = format!("v{}", *counter);
+            *counter += 1;
+            mapping.insert(original.to_string(), canonical.clone());
+            canonical
+        }
+    }
+
+    /// Compute structural hash of an IR node
+    fn hash_ir(&self, ir: &IRNode) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash_ir_recursive(ir, &mut hasher);
+        hasher.finish()
+    }
+
+    /// Recursively hash IR structure
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn hash_ir_recursive<H: Hasher>(&self, ir: &IRNode, hasher: &mut H) {
+        // Hash node type discriminant
+        std::mem::discriminant(ir).hash(hasher);
+
+        match ir {
+            IRNode::Scan { relation, schema } => {
+                relation.hash(hasher);
+                schema.len().hash(hasher);
+                // Don't hash variable names - they're canonicalized
+            }
+
+            IRNode::Map {
+                input, projection, ..
+            } => {
+                projection.hash(hasher);
+                self.hash_ir_recursive(input, hasher);
+            }
+
+            IRNode::Filter { input, predicate } => {
+                // Hash predicate structure
+                format!("{predicate:?}").hash(hasher);
+                self.hash_ir_recursive(input, hasher);
+            }
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                ..
+            } => {
+                left_keys.hash(hasher);
+                right_keys.hash(hasher);
+                self.hash_ir_recursive(left, hasher);
+                self.hash_ir_recursive(right, hasher);
+            }
+
+            IRNode::Distinct { input } => {
+                self.hash_ir_recursive(input, hasher);
+            }
+
+            IRNode::Union { inputs } => {
+                inputs.len().hash(hasher);
+                for input in inputs {
+                    self.hash_ir_recursive(input, hasher);
+                }
+            }
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                ..
+            } => {
+                group_by.hash(hasher);
+                for (func, col) in aggregations {
+                    format!("{func:?}").hash(hasher);
+                    col.hash(hasher);
+                }
+                self.hash_ir_recursive(input, hasher);
+            }
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                ..
+            } => {
+                left_keys.hash(hasher);
+                right_keys.hash(hasher);
+                self.hash_ir_recursive(left, hasher);
+                self.hash_ir_recursive(right, hasher);
+            }
+
+            IRNode::Compute { input, expressions } => {
+                // Hash the number of expressions
+                expressions.len().hash(hasher);
+                // Hash each expression's name AND the expression content (not just the name!)
+                // This is critical - expressions like Column(1)+1 vs Column(2)+1 must hash differently
+                for (name, expr) in expressions {
+                    name.hash(hasher);
+                    // Hash the full expression structure including column indices
+                    format!("{expr:?}").hash(hasher);
+                }
+                self.hash_ir_recursive(input, hasher);
+            }
+
+            IRNode::HnswScan {
+                index_name,
+                k,
+                ef_search,
+                ..
+            } => {
+                index_name.hash(hasher);
+                k.hash(hasher);
+                ef_search.hash(hasher);
+            }
+
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                ..
+            } => {
+                projection.hash(hasher);
+                format!("{filter_predicate:?}").hash(hasher);
+                self.hash_ir_recursive(input, hasher);
             }
 
