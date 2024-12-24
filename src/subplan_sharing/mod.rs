@@ -811,10 +811,8 @@ impl SubplanSharer {
         let mut shared_views_created = 0;
 
         for occurrences in subtree_counts.values() {
-            // TODO: verify this condition
             if occurrences.len() > 1 {
                 let (_, representative) = &occurrences[0];
-                // TODO: verify this condition
                 if self.subtree_depth(representative) >= self.min_subtree_depth {
                     duplicates_eliminated += occurrences.len() - 1;
                     shared_views_created += 1;
@@ -1015,5 +1013,48 @@ mod tests {
 
         assert!(stats.total_subtrees > 0);
         assert!(stats.unique_subtrees > 0);
+    }
+
+    #[test]
+    fn test_find_internal_duplicates() {
+        let sharer = SubplanSharer::new();
+
+        // IR with same scan used twice in a union
+        let scan = make_scan("R");
+        let ir = IRNode::Union {
+            inputs: vec![scan.clone(), scan.clone()],
+        };
+
+        let duplicates = sharer.find_internal_duplicates(&ir);
+
+        // Should find the duplicate scan
+        assert!(
+            duplicates.iter().any(|(_, count)| *count > 1),
+            "Should detect internal duplicates"
+        );
+    }
+
+    #[test]
+    fn test_empty_input() {
+        let sharer = SubplanSharer::new();
+        let (result, views) = sharer.share_subplans(vec![], &no_derived());
+
+        assert!(result.is_empty());
+        assert!(views.is_empty());
+    }
+
+    #[test]
+    fn test_disabled_sharing() {
+        let mut sharer = SubplanSharer::new();
+        sharer.set_sharing(false);
+
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+
+        let (result, views) = sharer.share_subplans(vec![ir1.clone(), ir2.clone()], &no_derived());
+
+        // Should return original IRs unchanged
+        assert_eq!(result.len(), 2);
+        assert!(views.is_empty(), "Disabled sharer should not create views");
     }
 
