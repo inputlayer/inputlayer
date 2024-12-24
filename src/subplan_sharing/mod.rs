@@ -811,8 +811,10 @@ impl SubplanSharer {
         let mut shared_views_created = 0;
 
         for occurrences in subtree_counts.values() {
+            // TODO: verify this condition
             if occurrences.len() > 1 {
                 let (_, representative) = &occurrences[0];
+                // TODO: verify this condition
                 if self.subtree_depth(representative) >= self.min_subtree_depth {
                     duplicates_eliminated += occurrences.len() - 1;
                     shared_views_created += 1;
@@ -873,4 +875,145 @@ impl SubplanSharer {
         }
     }
 }
+
+impl Default for SubplanSharer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::Predicate;
+    use std::collections::HashSet;
+
+    /// Empty derived relations set for tests that don't need derived relation filtering
+    fn no_derived() -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn make_scan(relation: &str) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }
+    }
+
+    fn make_join(left: IRNode, right: IRNode) -> IRNode {
+        IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        }
+    }
+
+    fn make_scan_with_schema(relation: &str, schema: Vec<&str>) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: schema.into_iter().map(String::from).collect(),
+        }
+    }
+
+    #[test]
+    fn test_subplan_sharer_detects_duplicates() {
+        let sharer = SubplanSharer::new();
+
+        // Two IRs with identical join subtrees
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Should create exactly one shared view for the common join
+        assert_eq!(
+            shared_views.len(),
+            1,
+            "Expected 1 shared view for identical joins"
+        );
+
+        // Both rewritten IRs should be Scan nodes referencing the shared view
+        for ir in &rewritten {
+            match ir {
+                IRNode::Scan { relation, .. } => {
+                    assert!(
+                        relation.starts_with("__shared_view_"),
+                        "Expected shared view reference, got '{relation}'"
+                    );
+                }
+                _ => panic!("Expected Scan referencing shared view, got {:?}", ir),
+            }
+        }
+    }
+
+    #[test]
+    fn test_canonicalization_normalizes_names() {
+        let sharer = SubplanSharer::new();
+
+        // Same structure, different variable names
+        let ir1 = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let ir2 = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let canonical1 = sharer.canonicalize(&ir1);
+        let canonical2 = sharer.canonicalize(&ir2);
+
+        // Canonical forms should have same hash (same structure)
+        assert_eq!(
+            canonical1.hash, canonical2.hash,
+            "Same structure should have same canonical hash"
+        );
+    }
+
+    #[test]
+    fn test_different_structures_different_hash() {
+        let sharer = SubplanSharer::new();
+
+        let ir1 = make_scan("R");
+        let ir2 = make_scan("S");
+
+        let canonical1 = sharer.canonicalize(&ir1);
+        let canonical2 = sharer.canonicalize(&ir2);
+
+        // Different relations should have different hashes
+        assert_ne!(
+            canonical1.hash, canonical2.hash,
+            "Different relations should have different hash"
+        );
+    }
+
+    #[test]
+    fn test_subtree_depth_calculation() {
+        let sharer = SubplanSharer::new();
+
+        let scan = make_scan("R");
+        assert_eq!(sharer.subtree_depth(&scan), 1);
+
+        let join = make_join(make_scan("R"), make_scan("S"));
+        assert_eq!(sharer.subtree_depth(&join), 2);
+
+        let nested_join = make_join(join.clone(), make_scan("T"));
+        assert_eq!(sharer.subtree_depth(&nested_join), 3);
+    }
+
+    #[test]
+    fn test_compute_stats() {
+        let sharer = SubplanSharer::new();
+
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+        let ir3 = make_scan("T");
+
+        let stats = sharer.compute_stats(&[ir1, ir2, ir3]);
+
+        assert!(stats.total_subtrees > 0);
+        assert!(stats.unique_subtrees > 0);
+    }
 
