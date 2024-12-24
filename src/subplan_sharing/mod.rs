@@ -711,3 +711,166 @@ impl SubplanSharer {
                 self.hash_ir_recursive(input, hasher);
             }
 
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                ..
+            } => {
+                left_keys.hash(hasher);
+                right_keys.hash(hasher);
+                projection.hash(hasher);
+                format!("{filter_predicate:?}").hash(hasher);
+                self.hash_ir_recursive(left, hasher);
+                self.hash_ir_recursive(right, hasher);
+            }
+        }
+    }
+
+    /// Check if an IR subtree references any derived relation.
+    /// Derived relations are populated by rule execution, which happens AFTER
+    /// shared views are executed. Extracting subtrees that scan derived relations
+    /// into shared views would produce empty results.
+    fn references_derived_relation(
+        ir: &IRNode,
+        derived_relations: &std::collections::HashSet<String>,
+    ) -> bool {
+        match ir {
+            IRNode::Scan { relation, .. } => derived_relations.contains(relation),
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::Aggregate { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => {
+                Self::references_derived_relation(input, derived_relations)
+            }
+            IRNode::Join { left, right, .. }
+            | IRNode::Antijoin { left, right, .. }
+            | IRNode::JoinFlatMap { left, right, .. } => {
+                Self::references_derived_relation(left, derived_relations)
+                    || Self::references_derived_relation(right, derived_relations)
+            }
+            IRNode::Union { inputs } => inputs
+                .iter()
+                .any(|i| Self::references_derived_relation(i, derived_relations)),
+            IRNode::HnswScan { .. } => false,
+        }
+    }
+
+    /// Compute depth of a subtree
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn subtree_depth(&self, ir: &IRNode) -> usize {
+        match ir {
+            IRNode::Scan { .. } => 1,
+            IRNode::Map { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::Filter { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::Join { left, right, .. } => {
+                1 + self.subtree_depth(left).max(self.subtree_depth(right))
+            }
+            IRNode::Distinct { input } => 1 + self.subtree_depth(input),
+            IRNode::Union { inputs } => {
+                1 + inputs
+                    .iter()
+                    .map(|i| self.subtree_depth(i))
+                    .max()
+                    .unwrap_or(0)
+            }
+            IRNode::Aggregate { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::Antijoin { left, right, .. } => {
+                1 + self.subtree_depth(left).max(self.subtree_depth(right))
+            }
+            IRNode::Compute { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::HnswScan { .. } => 1, // Terminal node like Scan
+            IRNode::FlatMap { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                1 + self.subtree_depth(left).max(self.subtree_depth(right))
+            }
+        }
+    }
+
+    /// Compute sharing statistics for a set of IR trees
+    pub fn compute_stats(&self, irs: &[IRNode]) -> SharingStats {
+        let mut subtree_counts: HashMap<u64, Vec<(usize, IRNode)>> = HashMap::new();
+
+        for (ir_idx, ir) in irs.iter().enumerate() {
+            self.collect_subtrees(ir, ir_idx, &mut subtree_counts);
+        }
+
+        let total_subtrees: usize = subtree_counts.values().map(std::vec::Vec::len).sum();
+        let unique_subtrees = subtree_counts.len();
+
+        let mut duplicates_eliminated = 0;
+        let mut shared_views_created = 0;
+
+        for occurrences in subtree_counts.values() {
+            if occurrences.len() > 1 {
+                let (_, representative) = &occurrences[0];
+                if self.subtree_depth(representative) >= self.min_subtree_depth {
+                    duplicates_eliminated += occurrences.len() - 1;
+                    shared_views_created += 1;
+                }
+            }
+        }
+
+        SharingStats {
+            total_subtrees,
+            unique_subtrees,
+            duplicates_eliminated,
+            shared_views_created,
+        }
+    }
+
+    /// Find common subtrees within a single IR (internal deduplication)
+    pub fn find_internal_duplicates(&self, ir: &IRNode) -> Vec<(u64, usize)> {
+        let mut subtree_counts: HashMap<u64, usize> = HashMap::new();
+        self.count_subtrees_internal(ir, &mut subtree_counts);
+
+        subtree_counts
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .collect()
+    }
+
+    /// Count subtree occurrences within a single IR
+    fn count_subtrees_internal(&self, ir: &IRNode, counts: &mut HashMap<u64, usize>) {
+        let canonical = self.canonicalize(ir);
+        *counts.entry(canonical.hash).or_insert(0) += 1;
+
+        match ir {
+            IRNode::Scan { .. } => {}
+            IRNode::Map { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::Filter { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::Join { left, right, .. } => {
+                self.count_subtrees_internal(left, counts);
+                self.count_subtrees_internal(right, counts);
+            }
+            IRNode::Distinct { input } => self.count_subtrees_internal(input, counts),
+            IRNode::Union { inputs } => {
+                for input in inputs {
+                    self.count_subtrees_internal(input, counts);
+                }
+            }
+            IRNode::Aggregate { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::Antijoin { left, right, .. } => {
+                self.count_subtrees_internal(left, counts);
+                self.count_subtrees_internal(right, counts);
+            }
+            IRNode::Compute { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::HnswScan { .. } => {} // Terminal node
+            IRNode::FlatMap { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                self.count_subtrees_internal(left, counts);
+                self.count_subtrees_internal(right, counts);
+            }
+        }
+    }
+}
+
