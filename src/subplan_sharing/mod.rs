@@ -1058,3 +1058,68 @@ mod tests {
         assert!(views.is_empty(), "Disabled sharer should not create views");
     }
 
+    #[test]
+    fn test_cross_rule_sharing_different_var_names() {
+        let sharer = SubplanSharer::new();
+
+        // Rule 1: Join(Scan("R", [X, Y]), Scan("S", [Y, Z]))
+        let ir1 = IRNode::Join {
+            left: Box::new(make_scan_with_schema("R", vec!["X", "Y"])),
+            right: Box::new(make_scan_with_schema("S", vec!["Y", "Z"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["X".to_string(), "Y".to_string(), "Z".to_string()],
+        };
+
+        // Rule 2: Join(Scan("R", [A, B]), Scan("S", [B, C]))   -  same structure, different names
+        let ir2 = IRNode::Join {
+            left: Box::new(make_scan_with_schema("R", vec!["A", "B"])),
+            right: Box::new(make_scan_with_schema("S", vec!["B", "C"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        };
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Should detect these as the same subexpression
+        assert_eq!(shared_views.len(), 1, "Expected 1 shared view");
+
+        // Both should be rewritten to Scan nodes
+        assert_eq!(rewritten.len(), 2);
+        for ir in &rewritten {
+            assert!(matches!(ir, IRNode::Scan { .. }), "Expected Scan node");
+        }
+
+        // Verify schema names are preserved for each replacement
+        match &rewritten[0] {
+            IRNode::Scan { schema, .. } => {
+                assert_eq!(schema, &["X", "Y", "Z"]);
+            }
+            _ => unreachable!(),
+        }
+        match &rewritten[1] {
+            IRNode::Scan { schema, .. } => {
+                assert_eq!(schema, &["A", "B", "C"]);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_no_sharing_different_structures() {
+        let sharer = SubplanSharer::new();
+
+        // Join R,S vs Join R,T  -  different right relation
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("T"));
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Should NOT share (different structures)
+        assert!(
+            shared_views.is_empty(),
+            "Different structures should not be shared"
+        );
+    }
+
