@@ -1123,3 +1123,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_no_sharing_different_key_indices() {
+        let sharer = SubplanSharer::new();
+
+        // Join on left[1]=right[0] vs left[0]=right[1]
+        let ir1 = IRNode::Join {
+            left: Box::new(make_scan("R")),
+            right: Box::new(make_scan("S")),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+        let ir2 = IRNode::Join {
+            left: Box::new(make_scan("R")),
+            right: Box::new(make_scan("S")),
+            left_keys: vec![0],
+            right_keys: vec![1],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        assert!(
+            shared_views.is_empty(),
+            "Different key indices should not be shared"
+        );
+    }
+
+    #[test]
+    fn test_trivial_scans_not_shared() {
+        let sharer = SubplanSharer::new();
+
+        // Two identical scans (depth 1, below min_subtree_depth of 2)
+        let ir1 = make_scan("R");
+        let ir2 = make_scan("R");
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        assert!(
+            shared_views.is_empty(),
+            "Trivial scans should not be shared (below depth threshold)"
+        );
+        // Rewritten IRs should be unchanged
+        assert_eq!(rewritten.len(), 2);
+        for ir in &rewritten {
+            assert!(matches!(ir, IRNode::Scan { relation, .. } if relation == "R"));
+        }
+    }
+
