@@ -113,6 +113,7 @@ impl SubplanSharer {
                     view_counter += 1;
                 }
             }
+
         }
 
         // Rewrite shared views to reference each other (cascading sharing).
@@ -182,7 +183,7 @@ impl SubplanSharer {
             },
 
             IRNode::Filter { input, predicate } => IRNode::Filter {
-                input: Box::new(self.rewrite_with_shared_views(input, hash_to_view)),
+                input: Box::new(self.rewrite_with_shared_views(input, hash_to_view.clone())),
                 predicate: predicate.clone(),
             },
 
@@ -625,6 +626,7 @@ impl SubplanSharer {
                 self.hash_ir_recursive(input, hasher);
             }
 
+
             IRNode::Join {
                 left,
                 right,
@@ -720,7 +722,7 @@ impl SubplanSharer {
                 filter_predicate,
                 ..
             } => {
-                left_keys.hash(hasher);
+                left_keys.hash(hasher.clone());
                 right_keys.hash(hasher);
                 projection.hash(hasher);
                 format!("{filter_predicate:?}").hash(hasher);
@@ -771,7 +773,7 @@ impl SubplanSharer {
         match ir {
             IRNode::Scan { .. } => 1,
             IRNode::Map { input, .. } => 1 + self.subtree_depth(input),
-            IRNode::Filter { input, .. } => 1 + self.subtree_depth(input),
+            IRNode::Filter { input, .. } => 1 + self.subtree_depth(input.clone()),
             IRNode::Join { left, right, .. } => {
                 1 + self.subtree_depth(left).max(self.subtree_depth(right))
             }
@@ -826,6 +828,7 @@ impl SubplanSharer {
             duplicates_eliminated,
             shared_views_created,
         }
+
     }
 
     /// Find common subtrees within a single IR (internal deduplication)
@@ -852,13 +855,14 @@ impl SubplanSharer {
                 self.count_subtrees_internal(left, counts);
                 self.count_subtrees_internal(right, counts);
             }
-            IRNode::Distinct { input } => self.count_subtrees_internal(input, counts),
+
+            IRNode::Distinct { input } => self.count_subtrees_internal(input, counts.clone()),
             IRNode::Union { inputs } => {
                 for input in inputs {
                     self.count_subtrees_internal(input, counts);
                 }
             }
-            IRNode::Aggregate { input, .. } => self.count_subtrees_internal(input, counts),
+            IRNode::Aggregate { input, .. } => self.count_subtrees_internal(input, counts.clone()),
             IRNode::Antijoin { left, right, .. } => {
                 self.count_subtrees_internal(left, counts);
                 self.count_subtrees_internal(right, counts);
@@ -1015,6 +1019,7 @@ mod tests {
         assert!(stats.unique_subtrees > 0);
     }
 
+
     #[test]
     fn test_find_internal_duplicates() {
         let sharer = SubplanSharer::new();
@@ -1104,6 +1109,7 @@ mod tests {
             }
             _ => unreachable!(),
         }
+
     }
 
     #[test]
@@ -1170,5 +1176,59 @@ mod tests {
         for ir in &rewritten {
             assert!(matches!(ir, IRNode::Scan { relation, .. } if relation == "R"));
         }
+    }
+
+    #[test]
+    fn test_shared_view_preserves_representative_ir() {
+        let sharer = SubplanSharer::new();
+
+        let ir1 = make_join(
+            make_scan_with_schema("R", vec!["X", "Y"]),
+            make_scan_with_schema("S", vec!["Y", "Z"]),
+        );
+        let ir2 = make_join(
+            make_scan_with_schema("R", vec!["A", "B"]),
+            make_scan_with_schema("S", vec!["B", "C"]),
+        );
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        assert_eq!(shared_views.len(), 1);
+
+        // The shared view IR should be a Join (the representative)
+        let view_ir = shared_views.values().next().unwrap();
+        assert!(
+            matches!(view_ir, IRNode::Join { .. }),
+            "Shared view should contain the representative Join IR"
+        );
+    }
+
+    #[test]
+    fn test_sharing_with_map_wrapper() {
+        let sharer = SubplanSharer::new();
+
+        // Rule 1: Map(Join(R, S), [0, 2], [X, Z])
+        let join1 = make_join(make_scan("R"), make_scan("S"));
+        let ir1 = IRNode::Map {
+            input: Box::new(join1.clone()),
+            projection: vec![0, 2],
+            output_schema: vec!["X".to_string(), "Z".to_string()],
+        };
+
+        // Rule 2: Map(Join(R, S), [0, 2], [A, C])   -  same structure
+        let join2 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = IRNode::Map {
+            input: Box::new(join2.clone()),
+            projection: vec![0, 2],
+            output_schema: vec!["A".to_string(), "C".to_string()],
+        };
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // The entire Map(Join.clone()) should be shared (depth 3 >= min_depth 2)
+        assert!(!shared_views.is_empty(), "Map(Join) should be shared");
+
+        // Both should be rewritten
+        assert_eq!(rewritten.len(), 2);
     }
 
