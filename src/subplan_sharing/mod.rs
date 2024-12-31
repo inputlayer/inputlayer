@@ -1332,3 +1332,39 @@ mod tests {
         assert!(stats.duplicates_eliminated >= 2); // 3 occurrences - 1 representative = 2 eliminated
     }
 
+    #[test]
+    fn test_single_ir_no_sharing() {
+        let sharer = SubplanSharer::new();
+
+        let ir = make_join(make_scan("R"), make_scan("S"));
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir], &no_derived());
+
+        // Single IR with no internal duplicates above threshold should not create views
+        assert!(
+            shared_views.is_empty(),
+            "Single IR should not create shared views (no cross-rule sharing)"
+        );
+        assert_eq!(rewritten.len(), 1);
+    }
+
+    #[test]
+    fn test_canonicalization_var_mapping() {
+        let sharer = SubplanSharer::new();
+
+        let ir = IRNode::Join {
+            left: Box::new(make_scan_with_schema("R", vec!["Foo", "Bar"])),
+            right: Box::new(make_scan_with_schema("S", vec!["Bar", "Baz"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["Foo".to_string(), "Bar".to_string(), "Baz".to_string()],
+        };
+
+        let canonical = sharer.canonicalize(&ir);
+
+        // var_mapping should map canonical -> original
+        assert_eq!(canonical.var_mapping.get("v0"), Some(&"Foo".to_string()));
+        assert_eq!(canonical.var_mapping.get("v1"), Some(&"Bar".to_string()));
+        assert_eq!(canonical.var_mapping.get("v2"), Some(&"Baz".to_string()));
+    }
+}
