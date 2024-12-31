@@ -1288,3 +1288,47 @@ mod tests {
         assert_eq!(rewritten.len(), 3);
     }
 
+    #[test]
+    fn test_sharing_with_filter() {
+        let sharer = SubplanSharer::new();
+
+        // Two identical Filter(Scan) subtrees
+        let ir1 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+        let ir2 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Filter(Scan) has depth 2, should be shared
+        assert_eq!(
+            shared_views.len(),
+            1,
+            "Identical Filter(Scan) should be shared"
+        );
+        for ir in &rewritten {
+            assert!(
+                matches!(ir, IRNode::Scan { relation, .. } if relation.starts_with("__shared_view_"))
+            );
+        }
+    }
+
+    #[test]
+    fn test_sharing_stats_accurate() {
+        let sharer = SubplanSharer::new();
+
+        // 3 identical joins
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+        let ir3 = make_join(make_scan("R"), make_scan("S"));
+
+        let stats = sharer.compute_stats(&[ir1, ir2, ir3]);
+
+        assert!(stats.shared_views_created >= 1);
+        assert!(stats.duplicates_eliminated >= 2); // 3 occurrences - 1 representative = 2 eliminated
+    }
+
