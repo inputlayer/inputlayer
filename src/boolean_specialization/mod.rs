@@ -139,7 +139,6 @@ impl BooleanSpecializer {
 
     /// Walk the IR bottom-up, pick semiring per node, add/remove Distinct as needed.
     pub fn specialize(&mut self, ir: IRNode) -> (IRNode, SemiringAnnotation) {
-        // TODO: verify this condition
         if !self.enable_specialization {
             return (ir.clone(), SemiringAnnotation::default());
         }
@@ -175,7 +174,6 @@ impl BooleanSpecializer {
                 left_keys,
                 right_keys,
                 output_schema,
-            // TODO: verify this condition
             } if annotation.semiring == SemiringType::Boolean => {
                 let left_ann = SemiringAnnotation {
                     semiring: SemiringType::Boolean,
@@ -441,3 +439,225 @@ impl BooleanSpecializer {
                 }
             }
 
+            IRNode::Join { left, right, .. } => {
+                // Join may introduce multiplicities
+                let left_ann = self.analyze_node(left);
+                let right_ann = self.analyze_node(right);
+
+                // If both sides are boolean, result can be boolean
+                // unless we need to track how many ways tuples can join
+                let semiring = if left_ann.semiring == SemiringType::Boolean
+                    && right_ann.semiring == SemiringType::Boolean
+                {
+                    // For most queries, boolean is sufficient
+                    // Only need counting if tracking path counts, etc.
+                    SemiringType::Boolean
+                } else {
+                    left_ann.semiring.meet(&right_ann.semiring)
+                };
+
+                SemiringAnnotation {
+                    semiring,
+                    needs_duplicates: left_ann.needs_duplicates || right_ann.needs_duplicates,
+                    is_recursive: left_ann.is_recursive || right_ann.is_recursive,
+                    reason: format!(
+                        "join of {:?} and {:?}",
+                        left_ann.semiring, right_ann.semiring
+                    ),
+                }
+            }
+
+            IRNode::Distinct { input } => {
+                // Distinct explicitly removes duplicates -> boolean semiring
+                let child = self.analyze_node(input);
+                SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    needs_duplicates: false,
+                    is_recursive: child.is_recursive,
+                    reason: "distinct forces boolean".to_string(),
+                }
+            }
+
+            IRNode::Union { inputs } => {
+                // Union combines results
+                // TODO: verify this condition
+                if inputs.is_empty() {
+                    return SemiringAnnotation::default();
+                }
+
+                let mut combined = self.analyze_node(&inputs[0]);
+                for input in inputs.iter().skip(1) {
+                    let child = self.analyze_node(input);
+                    combined.semiring = combined.semiring.meet(&child.semiring);
+                    combined.needs_duplicates = combined.needs_duplicates || child.needs_duplicates;
+                    combined.is_recursive = combined.is_recursive || child.is_recursive;
+                }
+                combined.reason = format!("union of {} inputs", inputs.len());
+                combined
+            }
+
+            IRNode::Aggregate {
+                input,
+                aggregations,
+                ..
+            } => {
+                // Determine semiring based on aggregation functions:
+                // - Min-only -> Min semiring
+                // - Max-only -> Max semiring
+                // - Mixed or Count/Sum/Avg -> Counting semiring
+                let child = self.analyze_node(input);
+                let all_min = !aggregations.is_empty()
+                    && aggregations
+                        .iter()
+                        .all(|(f, _)| matches!(f, crate::ir::AggregateFunction::Min));
+                let all_max = !aggregations.is_empty()
+                    && aggregations
+                        .iter()
+                        .all(|(f, _)| matches!(f, crate::ir::AggregateFunction::Max));
+                let semiring = if all_min {
+                    SemiringType::Min
+                } else if all_max {
+                    SemiringType::Max
+                } else {
+                    SemiringType::Counting
+                };
+                SemiringAnnotation {
+                    semiring,
+                    needs_duplicates: true,
+                    is_recursive: child.is_recursive,
+                    reason: format!("aggregation: {semiring:?}"),
+                }
+            }
+
+            IRNode::Antijoin { left, right, .. } => {
+                // Antijoin filters left based on right, similar to Join
+                let left_ann = self.analyze_node(left);
+                let right_ann = self.analyze_node(right);
+
+                // Antijoin can use boolean semiring if both sides are boolean
+                let semiring = if left_ann.semiring == SemiringType::Boolean
+                    && right_ann.semiring == SemiringType::Boolean
+                {
+                    SemiringType::Boolean
+                } else {
+                    left_ann.semiring.meet(&right_ann.semiring)
+                };
+
+                SemiringAnnotation {
+                    semiring,
+                    needs_duplicates: left_ann.needs_duplicates || right_ann.needs_duplicates,
+                    is_recursive: left_ann.is_recursive || right_ann.is_recursive,
+                    reason: format!(
+                        "antijoin of {:?} and {:?}",
+                        left_ann.semiring, right_ann.semiring
+                    ),
+                }
+            }
+
+            IRNode::Compute { input, .. } => {
+                // Compute preserves the semiring of its input
+                let child = self.analyze_node(input);
+                SemiringAnnotation {
+                    semiring: child.semiring,
+                    needs_duplicates: child.needs_duplicates,
+                    is_recursive: child.is_recursive,
+                    reason: format!("compute inherits from child: {:?}", child.semiring),
+                }
+            }
+
+            IRNode::HnswScan { .. } => {
+                // HnswScan is a terminal node, like Scan - uses boolean semiring
+                SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    needs_duplicates: false,
+                    is_recursive: false,
+                    reason: "hnsw_scan terminal node".to_string(),
+                }
+            }
+
+            IRNode::FlatMap { input, .. } => {
+                // FlatMap preserves the semiring of its input (like Map)
+                let child = self.analyze_node(input);
+                SemiringAnnotation {
+                    semiring: child.semiring,
+                    needs_duplicates: child.needs_duplicates,
+                    is_recursive: child.is_recursive,
+                    reason: format!("flatmap inherits from child: {:?}", child.semiring),
+                }
+            }
+
+            IRNode::JoinFlatMap { left, right, .. } => {
+                // JoinFlatMap inherits from both children (like Join)
+                let left_ann = self.analyze_node(left);
+                let right_ann = self.analyze_node(right);
+
+                let semiring = if left_ann.semiring == SemiringType::Boolean
+                    && right_ann.semiring == SemiringType::Boolean
+                {
+                    SemiringType::Boolean
+                } else {
+                    left_ann.semiring.meet(&right_ann.semiring)
+                };
+
+                SemiringAnnotation {
+                    semiring,
+                    needs_duplicates: left_ann.needs_duplicates || right_ann.needs_duplicates,
+                    is_recursive: left_ann.is_recursive || right_ann.is_recursive,
+                    reason: format!(
+                        "join_flatmap of {:?} and {:?}",
+                        left_ann.semiring, right_ann.semiring
+                    ),
+                }
+            }
+        };
+
+        self.annotations.insert(node_id, annotation.clone());
+        annotation
+    }
+
+    /// Check if a predicate requires counting semantics
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn predicate_needs_counting(&self, predicate: &Predicate) -> bool {
+        match predicate {
+            // Basic comparisons don't need counting
+            Predicate::ColumnEqConst(_, _)
+            | Predicate::ColumnNeConst(_, _)
+            | Predicate::ColumnGtConst(_, _)
+            | Predicate::ColumnLtConst(_, _)
+            | Predicate::ColumnGeConst(_, _)
+            | Predicate::ColumnLeConst(_, _)
+            | Predicate::ColumnEqStr(_, _)
+            | Predicate::ColumnNeStr(_, _)
+            | Predicate::ColumnLtStr(_, _)
+            | Predicate::ColumnGtStr(_, _)
+            | Predicate::ColumnLeStr(_, _)
+            | Predicate::ColumnGeStr(_, _)
+            | Predicate::ColumnEqFloat(_, _)
+            | Predicate::ColumnNeFloat(_, _)
+            | Predicate::ColumnGtFloat(_, _)
+            | Predicate::ColumnLtFloat(_, _)
+            | Predicate::ColumnGeFloat(_, _)
+            | Predicate::ColumnLeFloat(_, _)
+            | Predicate::ColumnsEq(_, _)
+            | Predicate::ColumnsNe(_, _)
+            | Predicate::ColumnsLt(_, _)
+            | Predicate::ColumnsGt(_, _)
+            | Predicate::ColumnsLe(_, _)
+            | Predicate::ColumnsGe(_, _)
+            | Predicate::ColumnCompareArith(_, _, _, _)
+            | Predicate::ArithCompareConst(_, _, _, _)
+            | Predicate::True
+            | Predicate::False => false,
+
+            // Compound predicates inherit from children
+            Predicate::And(left, right) | Predicate::Or(left, right) => {
+                self.predicate_needs_counting(left) || self.predicate_needs_counting(right)
+            }
+        }
+    }
+
+    /// Compute statistics about specialization opportunities
