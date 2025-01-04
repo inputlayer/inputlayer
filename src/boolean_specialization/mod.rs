@@ -139,6 +139,7 @@ impl BooleanSpecializer {
 
     /// Walk the IR bottom-up, pick semiring per node, add/remove Distinct as needed.
     pub fn specialize(&mut self, ir: IRNode) -> (IRNode, SemiringAnnotation) {
+        // TODO: verify this condition
         if !self.enable_specialization {
             return (ir.clone(), SemiringAnnotation::default());
         }
@@ -174,6 +175,7 @@ impl BooleanSpecializer {
                 left_keys,
                 right_keys,
                 output_schema,
+            // TODO: verify this condition
             } if annotation.semiring == SemiringType::Boolean => {
                 let left_ann = SemiringAnnotation {
                     semiring: SemiringType::Boolean,
@@ -221,4 +223,221 @@ impl BooleanSpecializer {
                 projection,
                 output_schema,
             },
+
+            IRNode::Filter { input, predicate } => IRNode::Filter {
+                input: Box::new(self.transform_for_semiring(*input, annotation)),
+                predicate,
+            },
+
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                // Non-boolean semiring join
+                IRNode::Join {
+                    left: Box::new(self.transform_for_semiring(*left, annotation)),
+                    right: Box::new(self.transform_for_semiring(*right, annotation)),
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                }
+            }
+
+            IRNode::Union { inputs } => IRNode::Union {
+                inputs: inputs
+                    .into_iter()
+                    .map(|i| self.transform_for_semiring(i, annotation))
+                    .collect(),
+            },
+
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
+                input: Box::new(self.transform_for_semiring(*input, annotation)),
+                group_by,
+                aggregations,
+                output_schema,
+            },
+
+            // For boolean semiring, ensure inputs to antijoin are distinct
+            // (antijoin requires proper set semantics for correct negation)
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } if annotation.semiring == SemiringType::Boolean => {
+                let left_ann = SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    ..Default::default()
+                };
+                let right_ann = SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    ..Default::default()
+                };
+                let left_transformed = self.transform_for_semiring(*left, &left_ann);
+                let right_transformed = self.transform_for_semiring(*right, &right_ann);
+
+                // Wrap left in Distinct if it's not already distinct/scan
+                let left_final = match &left_transformed {
+                    IRNode::Distinct { .. } | IRNode::Scan { .. } => left_transformed,
+                    _ => IRNode::Distinct {
+                        input: Box::new(left_transformed),
+                    },
+                };
+
+                IRNode::Antijoin {
+                    left: Box::new(left_final),
+                    right: Box::new(right_transformed),
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                }
+            }
+
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => IRNode::Antijoin {
+                left: Box::new(self.transform_for_semiring(*left, annotation)),
+                right: Box::new(self.transform_for_semiring(*right, annotation)),
+                left_keys,
+                right_keys,
+                output_schema,
+            },
+
+            // Scans don't need transformation
+            IRNode::Scan { .. } => ir,
+
+            // HnswScan doesn't need transformation (terminal node)
+            IRNode::HnswScan { .. } => ir,
+
+            IRNode::Compute { input, expressions } => IRNode::Compute {
+                input: Box::new(self.transform_for_semiring(*input, annotation)),
+                expressions,
+            },
+
+            IRNode::FlatMap {
+                input,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => IRNode::FlatMap {
+                input: Box::new(self.transform_for_semiring(*input, annotation)),
+                projection,
+                filter_predicate,
+                output_schema,
+            },
+
+            // For boolean semiring, wrap JoinFlatMap in Distinct (like Join)
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } if annotation.semiring == SemiringType::Boolean => {
+                let left_ann = SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    ..Default::default()
+                };
+                let right_ann = SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    ..Default::default()
+                };
+                let transformed = IRNode::JoinFlatMap {
+                    left: Box::new(self.transform_for_semiring(*left, &left_ann)),
+                    right: Box::new(self.transform_for_semiring(*right, &right_ann)),
+                    left_keys,
+                    right_keys,
+                    projection,
+                    filter_predicate,
+                    output_schema,
+                };
+                IRNode::Distinct {
+                    input: Box::new(transformed),
+                }
+            }
+
+            IRNode::JoinFlatMap {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            } => IRNode::JoinFlatMap {
+                left: Box::new(self.transform_for_semiring(*left, annotation)),
+                right: Box::new(self.transform_for_semiring(*right, annotation)),
+                left_keys,
+                right_keys,
+                projection,
+                filter_predicate,
+                output_schema,
+            },
+        }
+    }
+
+    /// Analyze semiring requirements for a node
+    fn analyze_node(&mut self, ir: &IRNode) -> SemiringAnnotation {
+        let node_id = self.node_counter;
+        self.node_counter += 1;
+
+        let annotation = match ir {
+            IRNode::Scan { relation, .. } => {
+                // Base case: scans can use boolean semiring
+                // unless the relation is known to need counting
+                let is_recursive = self.recursive_relations.contains(relation);
+                SemiringAnnotation {
+                    semiring: SemiringType::Boolean,
+                    needs_duplicates: false,
+                    is_recursive,
+                    reason: format!("scan of {relation}"),
+                }
+            }
+
+            IRNode::Map { input, .. } => {
+                // Map preserves the semiring of its input
+                let child = self.analyze_node(input);
+                SemiringAnnotation {
+                    semiring: child.semiring,
+                    needs_duplicates: child.needs_duplicates,
+                    is_recursive: child.is_recursive,
+                    reason: format!("map inherits from child: {:?}", child.semiring),
+                }
+            }
+
+            IRNode::Filter { input, predicate } => {
+                // Filter preserves the semiring of its input
+                let child = self.analyze_node(input);
+
+                // Check if predicate uses aggregation functions
+                let needs_counting = self.predicate_needs_counting(predicate);
+
+                let semiring = if needs_counting {
+                    SemiringType::Counting
+                } else {
+                    child.semiring
+                };
+
+                SemiringAnnotation {
+                    semiring,
+                    needs_duplicates: child.needs_duplicates || needs_counting,
+                    is_recursive: child.is_recursive,
+                    reason: format!("filter: {semiring:?}"),
+                }
+            }
 
