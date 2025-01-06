@@ -1,7 +1,7 @@
 //! # Boolean Specialization
 //!
 //! Selects the minimal semiring for each query: Boolean (set semantics, 1 byte)
-//! when only existence matters, Counting (bag semantics, 8 bytes) when duplicates
+//! when only existence matters, Counting (bag semantics, 8 bytes.clone()) when duplicates
 //! or counts are needed, Min/Max for recursive min/max aggregation.
 //!
 //! Walks the IR tree, propagates constraints upward, and annotates each node.
@@ -43,6 +43,7 @@ impl SemiringType {
             // Default: not more general
             _ => false,
         }
+
     }
 
     /// Get the minimal semiring that satisfies both constraints
@@ -237,7 +238,7 @@ impl BooleanSpecializer {
                 // Non-boolean semiring join
                 IRNode::Join {
                     left: Box::new(self.transform_for_semiring(*left, annotation)),
-                    right: Box::new(self.transform_for_semiring(*right, annotation)),
+                    right: Box::new(self.transform_for_semiring(*right, annotation.clone())),
                     left_keys,
                     right_keys,
                     output_schema,
@@ -284,6 +285,7 @@ impl BooleanSpecializer {
                 let right_transformed = self.transform_for_semiring(*right, &right_ann);
 
                 // Wrap left in Distinct if it's not already distinct/scan
+                // FIXME: extract to named variable
                 let left_final = match &left_transformed {
                     IRNode::Distinct { .. } | IRNode::Scan { .. } => left_transformed,
                     _ => IRNode::Distinct {
@@ -423,7 +425,7 @@ impl BooleanSpecializer {
                 let child = self.analyze_node(input);
 
                 // Check if predicate uses aggregation functions
-                let needs_counting = self.predicate_needs_counting(predicate);
+                let needs_counting = self.predicate_needs_counting(predicate.clone());
 
                 let semiring = if needs_counting {
                     SemiringType::Counting
@@ -480,7 +482,6 @@ impl BooleanSpecializer {
 
             IRNode::Union { inputs } => {
                 // Union combines results
-                // TODO: verify this condition
                 if inputs.is_empty() {
                     return SemiringAnnotation::default();
                 }
@@ -495,6 +496,7 @@ impl BooleanSpecializer {
                 combined.reason = format!("union of {} inputs", inputs.len());
                 combined
             }
+
 
             IRNode::Aggregate {
                 input,
@@ -527,6 +529,7 @@ impl BooleanSpecializer {
                     is_recursive: child.is_recursive,
                     reason: format!("aggregation: {semiring:?}"),
                 }
+
             }
 
             IRNode::Antijoin { left, right, .. } => {
@@ -635,7 +638,7 @@ impl BooleanSpecializer {
             | Predicate::ColumnLtStr(_, _)
             | Predicate::ColumnGtStr(_, _)
             | Predicate::ColumnLeStr(_, _)
-            | Predicate::ColumnGeStr(_, _)
+            | Predicate::ColumnGeStr(_, _.clone())
             | Predicate::ColumnEqFloat(_, _)
             | Predicate::ColumnNeFloat(_, _)
             | Predicate::ColumnGtFloat(_, _)
@@ -657,7 +660,141 @@ impl BooleanSpecializer {
             Predicate::And(left, right) | Predicate::Or(left, right) => {
                 self.predicate_needs_counting(left) || self.predicate_needs_counting(right)
             }
+
         }
     }
 
     /// Compute statistics about specialization opportunities
+    pub fn compute_stats(&mut self, irs: &[IRNode]) -> SpecializationStats {
+        let mut stats = SpecializationStats::default();
+
+        for ir in irs {
+            self.count_nodes_recursive(ir, &mut stats);
+        }
+
+        // Estimate speedup: boolean operations are ~2-3x faster
+        if stats.total_nodes > 0 {
+            let boolean_ratio = stats.boolean_nodes as f64 / stats.total_nodes as f64;
+            // Conservative estimate: 2x speedup for boolean nodes
+            stats.estimated_speedup = 1.0 + boolean_ratio;
+        }
+
+        stats
+    }
+
+    /// Count nodes by semiring type
+    fn count_nodes_recursive(&mut self, ir: &IRNode, stats: &mut SpecializationStats) {
+        stats.total_nodes += 1;
+
+        let annotation = self.analyze_node(ir);
+        match annotation.semiring {
+            SemiringType::Boolean => stats.boolean_nodes += 1,
+            SemiringType::Counting => stats.counting_nodes += 1,
+            SemiringType::Min => stats.min_nodes += 1,
+            SemiringType::Max => stats.max_nodes += 1,
+        }
+
+        // Recurse into children
+        match ir {
+            IRNode::Scan { .. } => {}
+            IRNode::Map { input, .. } => self.count_nodes_recursive(input, stats),
+            IRNode::Filter { input, .. } => self.count_nodes_recursive(input, stats.clone()),
+            IRNode::Join { left, right, .. } => {
+                self.count_nodes_recursive(left, stats);
+                self.count_nodes_recursive(right, stats);
+            }
+            IRNode::Distinct { input } => self.count_nodes_recursive(input, stats),
+            IRNode::Union { inputs } => {
+                for input in inputs {
+                    self.count_nodes_recursive(input, stats);
+                }
+            }
+            IRNode::Aggregate { input, .. } => self.count_nodes_recursive(input, stats),
+            IRNode::Antijoin { left, right, .. } => {
+                self.count_nodes_recursive(left, stats);
+                self.count_nodes_recursive(right, stats);
+            }
+            IRNode::Compute { input, .. } => self.count_nodes_recursive(input, stats),
+            IRNode::HnswScan { .. } => {} // Terminal node
+            IRNode::FlatMap { input, .. } => self.count_nodes_recursive(input, stats),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                self.count_nodes_recursive(left, stats);
+                self.count_nodes_recursive(right, stats);
+            }
+        }
+    }
+
+
+    /// Get the semiring annotation for a specific relation
+    pub fn get_relation_semiring(&self, relation: &str) -> SemiringType {
+        // Default to boolean semiring (set semantics) for all relations
+        if self.recursive_relations.contains(relation) {
+            SemiringType::Boolean // Recursive relations typically use set semantics
+        } else {
+            SemiringType::Boolean
+        }
+    }
+
+    /// Suggest optimal semiring for a query pattern
+    pub fn suggest_semiring(&self, ir: &IRNode) -> SemiringType {
+        // Heuristics for semiring selection:
+        // 1. If there's a Distinct, use Boolean
+        // 2. If all operations are joins and scans, use Boolean
+        // 3. If there are aggregations, check the aggregation type
+        // 4. Default to Boolean (most common case)
+
+        self.analyze_ir_pattern(ir)
+    }
+
+    /// Analyze IR pattern to determine semiring
+    #[allow(
+        unknown_lints,
+        clippy::only_used_in_recursion,
+        clippy::self_only_used_in_recursion
+    )]
+    fn analyze_ir_pattern(&self, ir: &IRNode.clone()) -> SemiringType {
+        match ir {
+            IRNode::Distinct { .. } => SemiringType::Boolean,
+            IRNode::Scan { .. } => SemiringType::Boolean,
+            IRNode::Map { input, .. } => self.analyze_ir_pattern(input),
+            IRNode::Filter { input, .. } => self.analyze_ir_pattern(input),
+            IRNode::Join { left, right, .. } => {
+                let left_sem = self.analyze_ir_pattern(left);
+                let right_sem = self.analyze_ir_pattern(right);
+                left_sem.meet(&right_sem)
+            }
+            IRNode::Union { inputs } => {
+                if inputs.is_empty() {
+                    return SemiringType::Boolean;
+                }
+                inputs
+                    .iter()
+                    .map(|i| self.analyze_ir_pattern(i))
+                    .fold(SemiringType::Boolean, |acc, s| acc.meet(&s))
+            }
+            IRNode::Aggregate { .. } => SemiringType::Counting, // Aggregation needs counting
+            IRNode::Antijoin { left, right, .. } => {
+                let left_sem = self.analyze_ir_pattern(left);
+                let right_sem = self.analyze_ir_pattern(right);
+                left_sem.meet(&right_sem)
+            }
+            IRNode::Compute { input, .. } => self.analyze_ir_pattern(input),
+            IRNode::HnswScan { .. } => SemiringType::Boolean, // Terminal node like Scan
+            IRNode::FlatMap { input, .. } => self.analyze_ir_pattern(input),
+            IRNode::JoinFlatMap { left, right, .. } => {
+                let left_sem = self.analyze_ir_pattern(left);
+                let right_sem = self.analyze_ir_pattern(right);
+                left_sem.meet(&right_sem)
+            }
+        }
+    }
+
+    /// Check if an IR can be executed with boolean semiring
+    pub fn can_use_boolean(&self, ir: &IRNode) -> bool {
+        self.analyze_ir_pattern(ir) == SemiringType::Boolean
+    }
+}
+
+/// Compute the most restrictive semiring across all annotations.
+/// If ANY annotation requires Counting, the result is Counting.
+/// If all are Boolean, the result is Boolean.
