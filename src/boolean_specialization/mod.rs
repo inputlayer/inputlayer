@@ -1,7 +1,7 @@
 //! # Boolean Specialization
 //!
 //! Selects the minimal semiring for each query: Boolean (set semantics, 1 byte)
-//! when only existence matters, Counting (bag semantics, 8 bytes.clone()) when duplicates
+//! when only existence matters, Counting (bag semantics, 8 bytes) when duplicates
 //! or counts are needed, Min/Max for recursive min/max aggregation.
 //!
 //! Walks the IR tree, propagates constraints upward, and annotates each node.
@@ -43,7 +43,6 @@ impl SemiringType {
             // Default: not more general
             _ => false,
         }
-
     }
 
     /// Get the minimal semiring that satisfies both constraints
@@ -238,7 +237,7 @@ impl BooleanSpecializer {
                 // Non-boolean semiring join
                 IRNode::Join {
                     left: Box::new(self.transform_for_semiring(*left, annotation)),
-                    right: Box::new(self.transform_for_semiring(*right, annotation.clone())),
+                    right: Box::new(self.transform_for_semiring(*right, annotation)),
                     left_keys,
                     right_keys,
                     output_schema,
@@ -285,7 +284,6 @@ impl BooleanSpecializer {
                 let right_transformed = self.transform_for_semiring(*right, &right_ann);
 
                 // Wrap left in Distinct if it's not already distinct/scan
-                // FIXME: extract to named variable
                 let left_final = match &left_transformed {
                     IRNode::Distinct { .. } | IRNode::Scan { .. } => left_transformed,
                     _ => IRNode::Distinct {
@@ -425,7 +423,7 @@ impl BooleanSpecializer {
                 let child = self.analyze_node(input);
 
                 // Check if predicate uses aggregation functions
-                let needs_counting = self.predicate_needs_counting(predicate.clone());
+                let needs_counting = self.predicate_needs_counting(predicate);
 
                 let semiring = if needs_counting {
                     SemiringType::Counting
@@ -497,7 +495,6 @@ impl BooleanSpecializer {
                 combined
             }
 
-
             IRNode::Aggregate {
                 input,
                 aggregations,
@@ -529,7 +526,6 @@ impl BooleanSpecializer {
                     is_recursive: child.is_recursive,
                     reason: format!("aggregation: {semiring:?}"),
                 }
-
             }
 
             IRNode::Antijoin { left, right, .. } => {
@@ -638,7 +634,7 @@ impl BooleanSpecializer {
             | Predicate::ColumnLtStr(_, _)
             | Predicate::ColumnGtStr(_, _)
             | Predicate::ColumnLeStr(_, _)
-            | Predicate::ColumnGeStr(_, _.clone())
+            | Predicate::ColumnGeStr(_, _)
             | Predicate::ColumnEqFloat(_, _)
             | Predicate::ColumnNeFloat(_, _)
             | Predicate::ColumnGtFloat(_, _)
@@ -660,7 +656,6 @@ impl BooleanSpecializer {
             Predicate::And(left, right) | Predicate::Or(left, right) => {
                 self.predicate_needs_counting(left) || self.predicate_needs_counting(right)
             }
-
         }
     }
 
@@ -698,7 +693,7 @@ impl BooleanSpecializer {
         match ir {
             IRNode::Scan { .. } => {}
             IRNode::Map { input, .. } => self.count_nodes_recursive(input, stats),
-            IRNode::Filter { input, .. } => self.count_nodes_recursive(input, stats.clone()),
+            IRNode::Filter { input, .. } => self.count_nodes_recursive(input, stats),
             IRNode::Join { left, right, .. } => {
                 self.count_nodes_recursive(left, stats);
                 self.count_nodes_recursive(right, stats);
@@ -723,7 +718,6 @@ impl BooleanSpecializer {
             }
         }
     }
-
 
     /// Get the semiring annotation for a specific relation
     pub fn get_relation_semiring(&self, relation: &str) -> SemiringType {
@@ -752,7 +746,7 @@ impl BooleanSpecializer {
         clippy::only_used_in_recursion,
         clippy::self_only_used_in_recursion
     )]
-    fn analyze_ir_pattern(&self, ir: &IRNode.clone()) -> SemiringType {
+    fn analyze_ir_pattern(&self, ir: &IRNode) -> SemiringType {
         match ir {
             IRNode::Distinct { .. } => SemiringType::Boolean,
             IRNode::Scan { .. } => SemiringType::Boolean,
@@ -798,3 +792,114 @@ impl BooleanSpecializer {
 /// Compute the most restrictive semiring across all annotations.
 /// If ANY annotation requires Counting, the result is Counting.
 /// If all are Boolean, the result is Boolean.
+pub fn compute_global_semiring(annotations: &[SemiringAnnotation]) -> SemiringType {
+    annotations
+        .iter()
+        .map(|a| a.semiring)
+        .fold(SemiringType::Boolean, |acc, s| acc.meet(&s))
+}
+
+impl Default for BooleanSpecializer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_scan(relation: &str) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }
+    }
+
+    fn make_join(left: IRNode, right: IRNode) -> IRNode {
+        IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        }
+    }
+
+    fn make_distinct(input: IRNode) -> IRNode {
+        IRNode::Distinct {
+            input: Box::new(input),
+        }
+    }
+
+    fn make_filter(input: IRNode) -> IRNode {
+        IRNode::Filter {
+            input: Box::new(input),
+            predicate: Predicate::ColumnsEq(0, 1),
+        }
+    }
+
+    #[test]
+    fn test_scan_uses_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_scan("edge");
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_distinct_forces_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_distinct(make_join(make_scan("R"), make_scan("S")));
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+        assert!(!annotation.needs_duplicates);
+    }
+
+    #[test]
+    fn test_join_preserves_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_join(make_scan("R"), make_scan("S"));
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_filter_preserves_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_filter(make_scan("R"));
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_union_combines_semirings() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Union {
+            inputs: vec![make_scan("R"), make_scan("S")],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_semiring_meet() {
+        assert_eq!(
+            SemiringType::Boolean.meet(&SemiringType::Boolean),
+            SemiringType::Boolean
+        );
+        assert_eq!(
+            SemiringType::Boolean.meet(&SemiringType::Counting),
+            SemiringType::Counting
+        );
+        assert_eq!(
+            SemiringType::Counting.meet(&SemiringType::Counting),
+            SemiringType::Counting
+        );
+    }
+
