@@ -480,6 +480,7 @@ impl BooleanSpecializer {
 
             IRNode::Union { inputs } => {
                 // Union combines results
+                // TODO: verify this condition
                 if inputs.is_empty() {
                     return SemiringAnnotation::default();
                 }
@@ -901,5 +902,55 @@ mod tests {
             SemiringType::Counting.meet(&SemiringType::Counting),
             SemiringType::Counting
         );
+    }
+
+    #[test]
+    fn test_compute_stats() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_distinct(make_join(make_scan("R"), make_scan("S")));
+
+        let stats = specializer.compute_stats(&[ir]);
+
+        assert!(stats.total_nodes > 0);
+        assert!(stats.boolean_nodes > 0);
+        assert!(stats.estimated_speedup >= 1.0);
+    }
+
+    #[test]
+    fn test_disabled_specialization() {
+        let mut specializer = BooleanSpecializer::new();
+        specializer.set_specialization(false);
+
+        let ir = make_scan("edge");
+        let (_, annotation) = specializer.specialize(ir);
+
+        // Default annotation when disabled
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_recursive_relation_marking() {
+        let mut specializer = BooleanSpecializer::new();
+        specializer.mark_recursive("reachable");
+
+        assert_eq!(
+            specializer.get_relation_semiring("reachable"),
+            SemiringType::Boolean
+        );
+    }
+
+    #[test]
+    fn test_can_use_boolean() {
+        let specializer = BooleanSpecializer::new();
+
+        // Scan can use boolean
+        assert!(specializer.can_use_boolean(&make_scan("R")));
+
+        // Join can use boolean
+        let join = make_join(make_scan("R"), make_scan("S"));
+        assert!(specializer.can_use_boolean(&join));
+
+        // Distinct forces boolean
+        assert!(specializer.can_use_boolean(&make_distinct(join)));
     }
 
