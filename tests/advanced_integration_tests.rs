@@ -57,3 +57,77 @@ fn test_complex_filter_combination() {
 }
 
 #[test]
+fn test_column_swap_projection() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
+
+    // Swap columns: result(Y, X) :- edge(X, Y)
+    let query = "result(Y, X) :- edge(X, Y).";
+    let results = engine.execute(query).unwrap();
+
+    let result_set = to_set(results);
+    assert!(result_set.contains(&(2, 1)));
+    assert!(result_set.contains(&(4, 3)));
+    assert!(result_set.contains(&(6, 5)));
+}
+
+#[test]
+fn test_join_with_column_equality() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("r", vec![(1, 2), (2, 3), (3, 3)]);
+    engine.add_fact("s", vec![(2, 10), (3, 20), (3, 30)]);
+
+    // Join where y from r equals x from s
+    let query = "result(X, Z) :- r(X, Y), s(Y, Z).";
+    let results = engine.execute(query).unwrap();
+
+    assert!(!results.is_empty());
+    let result_set = to_set(results);
+    assert!(result_set.contains(&(1, 10))); // r(1,2), s(2,10)
+    assert!(result_set.contains(&(2, 20)) || result_set.contains(&(2, 30))); // r(2,3), s(3,*)
+}
+
+#[test]
+#[ignore] // Constraint syntax (A < C) no longer supported - Constraint type removed
+fn test_cartesian_product_filtered() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("r", vec![(1, 2), (2, 3)]);
+    engine.add_fact("s", vec![(10, 20), (30, 40)]);
+
+    // Cartesian product filtered by constraint
+    let query = "result(A, C) :- r(A, B), s(C, D), A < C.";
+    let results = engine.execute(query).unwrap();
+
+    // Should have results where a < c
+    for (a, c) in &results {
+        assert!(a < c);
+    }
+}
+
+#[test]
+fn test_variable_reuse_in_body() {
+    let mut engine = DatalogEngine::new();
+    // Add edges including bidirectional ones to form cycles
+    engine.add_fact("edge", vec![(1, 2), (2, 1), (2, 3), (3, 1), (4, 4)]);
+
+    // Find cycles: edge(X, Y), edge(Y, X)
+    let query = "cycle(X, Y) :- edge(X, Y), edge(Y, X).";
+    let results = engine.execute(query).unwrap();
+
+    let result_set = to_set(results);
+    // (1,2) and (2,1) form a cycle (both directions exist)
+    // (4,4) is self-loop
+    assert!(
+        result_set.contains(&(1, 2)) || result_set.contains(&(2, 1)),
+        "Expected (1,2) or (2,1) cycle but got {:?}",
+        result_set
+    );
+    assert!(
+        result_set.contains(&(4, 4)),
+        "Expected self-loop (4,4) but got {:?}",
+        result_set
+    );
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 10) no longer supported - Constraint type removed
