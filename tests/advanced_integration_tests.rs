@@ -131,3 +131,53 @@ fn test_variable_reuse_in_body() {
 
 #[test]
 #[ignore] // Constraint syntax (X > 10) no longer supported - Constraint type removed
+fn test_empty_result_set() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    // Filter that excludes everything
+    let query = "result(X, Y) :- edge(X, Y), X > 10.";
+    let results = engine.execute(query).unwrap();
+
+    assert_eq!(results.len(), 0, "Expected empty result set");
+}
+
+#[test]
+#[ignore] // Constraint syntax (X = Y) no longer supported - Constraint type removed
+fn test_single_variable_constraint() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("data", vec![(1, 1), (2, 2), (3, 4), (5, 5)]);
+
+    // Only pairs where X == Y
+    let query = "result(X, Y) :- data(X, Y), X = Y.";
+    let results = engine.execute(query).unwrap();
+
+    for (x, y) in &results {
+        assert_eq!(x, y, "Expected x == y");
+    }
+
+    let result_set = to_set(results);
+    assert!(result_set.contains(&(1, 1)));
+    assert!(result_set.contains(&(2, 2)));
+    assert!(result_set.contains(&(5, 5)));
+    assert!(!result_set.contains(&(3, 4)));
+}
+
+#[test]
+#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
+fn test_multiple_inequality_constraints() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("data", vec![(1, 1), (2, 3), (4, 5), (6, 6)]);
+
+    // X != Y
+    let query = "result(X, Y) :- data(X, Y), X != Y.";
+    let results = engine.execute(query).unwrap();
+
+    for (x, y) in &results {
+        assert_ne!(x, y, "Expected x != y");
+    }
+
+    assert_eq!(results.len(), 2); // (2,3) and (4,5)
+}
+
+#[test]

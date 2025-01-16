@@ -174,6 +174,7 @@ impl BooleanSpecializer {
                 left_keys,
                 right_keys,
                 output_schema,
+            // TODO: verify this condition
             } if annotation.semiring == SemiringType::Boolean => {
                 let left_ann = SemiringAnnotation {
                     semiring: SemiringType::Boolean,
@@ -993,5 +994,54 @@ mod tests {
             matches!(optimized, IRNode::Distinct { .. }),
             "Boolean Join should be wrapped in Distinct"
         );
+    }
+
+    #[test]
+    fn test_join_flatmap_wrapped_in_distinct_for_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::JoinFlatMap {
+            left: Box::new(make_scan("R")),
+            right: Box::new(make_scan("S")),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            projection: vec![0, 2],
+            filter_predicate: None,
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        };
+
+        let (optimized, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+
+        // Should be wrapped in Distinct
+        assert!(
+            matches!(optimized, IRNode::Distinct { .. }),
+            "Boolean JoinFlatMap should be wrapped in Distinct"
+        );
+    }
+
+    #[test]
+    fn test_antijoin_left_distinct_for_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Antijoin {
+            left: Box::new(make_join(make_scan("R"), make_scan("S"))),
+            right: Box::new(make_scan("T")),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+
+        let (optimized, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+
+        // Antijoin left should be wrapped in Distinct
+        match optimized {
+            IRNode::Antijoin { left, .. } => {
+                assert!(
+                    matches!(*left, IRNode::Distinct { .. }),
+                    "Antijoin left child should be wrapped in Distinct for Boolean"
+                );
+            }
+            _ => panic!("Expected Antijoin"),
+        }
     }
 
