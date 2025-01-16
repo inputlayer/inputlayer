@@ -480,7 +480,6 @@ impl BooleanSpecializer {
 
             IRNode::Union { inputs } => {
                 // Union combines results
-                // TODO: verify this condition
                 if inputs.is_empty() {
                     return SemiringAnnotation::default();
                 }
@@ -952,5 +951,47 @@ mod tests {
 
         // Distinct forces boolean
         assert!(specializer.can_use_boolean(&make_distinct(join)));
+    }
+
+    #[test]
+    fn test_suggest_semiring() {
+        let specializer = BooleanSpecializer::new();
+
+        let ir = make_distinct(make_join(make_scan("R"), make_scan("S")));
+        assert_eq!(specializer.suggest_semiring(&ir), SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_complex_query_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+
+        // Complex query: filter(distinct(join(R, S)))
+        let ir = make_filter(make_distinct(make_join(make_scan("R"), make_scan("S"))));
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+        assert!(!annotation.needs_duplicates);
+    }
+
+    #[test]
+    fn test_is_more_general_than() {
+        assert!(SemiringType::Counting.is_more_general_than(&SemiringType::Boolean));
+        assert!(!SemiringType::Boolean.is_more_general_than(&SemiringType::Counting));
+        assert!(!SemiringType::Boolean.is_more_general_than(&SemiringType::Boolean));
+    }
+
+    #[test]
+    fn test_join_wrapped_in_distinct_for_boolean() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_join(make_scan("R"), make_scan("S"));
+
+        let (optimized, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+
+        // Should be wrapped in Distinct
+        assert!(
+            matches!(optimized, IRNode::Distinct { .. }),
+            "Boolean Join should be wrapped in Distinct"
+        );
     }
 
