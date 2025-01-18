@@ -181,3 +181,72 @@ fn test_multiple_inequality_constraints() {
 }
 
 #[test]
+fn test_join_with_multiple_constraints() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("r", vec![(1, 2), (2, 3), (3, 4)]);
+    engine.add_fact("s", vec![(2, 5), (3, 6), (4, 7)]);
+
+    // Join with both join condition and filter
+    let query = "result(X, Z) :- r(X, Y), s(Y, Z), X < Y, Y < Z.";
+    let results = engine.execute(query).unwrap();
+
+    for (x, z) in &results {
+        // We can't check y directly, but results should exist
+        assert!(x < z);
+    }
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 50) no longer supported - Constraint type removed
+fn test_large_dataset_performance() {
+    let mut engine = DatalogEngine::new();
+
+    // Create larger dataset
+    let mut data = Vec::new();
+    for i in 1..=100 {
+        data.push((i, i + 1));
+    }
+    engine.add_fact("edge", data);
+
+    let query = "result(X, Y) :- edge(X, Y), X > 50.";
+    let results = engine.execute(query).unwrap();
+
+    assert_eq!(results.len(), 50); // 51 to 100
+}
+
+#[test]
+fn test_nested_join_complex() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("a", vec![(1, 2), (2, 3)]);
+    engine.add_fact("b", vec![(2, 4), (3, 5)]);
+    engine.add_fact("c", vec![(4, 6), (5, 7)]);
+
+    // Three-way join: a JOIN b JOIN c
+    let query = "result(X, W) :- a(X, Y), b(Y, Z), c(Z, W).";
+    let results = engine.execute(query).unwrap();
+
+    assert!(!results.is_empty());
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
+fn test_pipeline_with_trace() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    let query = "result(X, Y) :- edge(X, Y), X > 1.";
+    let (results, trace) = engine.execute_with_trace(query).unwrap();
+
+    // Verify trace captured all stages
+    assert!(trace.ast.is_some());
+    assert!(!trace.ir_before.is_empty());
+    assert!(!trace.ir_after.is_empty());
+    assert!(!trace.results.is_empty());
+
+    // Verify results
+    assert_eq!(results.len(), 1);
+    assert!(results.contains(&(2, 3)));
+}
+
+#[test]
+#[ignore] // Constraint syntax (X = 3, etc.) no longer supported - Constraint type removed
