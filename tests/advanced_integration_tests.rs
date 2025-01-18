@@ -250,3 +250,60 @@ fn test_pipeline_with_trace() {
 
 #[test]
 #[ignore] // Constraint syntax (X = 3, etc.) no longer supported - Constraint type removed
+fn test_all_comparison_operators_comprehensive() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
+
+    // Test each operator
+    let tests = vec![
+        ("result(X, Y) :- data(X, Y), X = 3.", 1),  // Equal
+        ("result(X, Y) :- data(X, Y), X != 3.", 4), // Not equal
+        ("result(X, Y) :- data(X, Y), X < 3.", 2),  // Less than
+        ("result(X, Y) :- data(X, Y), X > 3.", 2),  // Greater than
+        ("result(X, Y) :- data(X, Y), X <= 3.", 3), // Less or equal
+        ("result(X, Y) :- data(X, Y), X >= 3.", 3), // Greater or equal
+    ];
+
+    for (query, expected_count) in tests {
+        let results = engine.execute(query).unwrap();
+        assert_eq!(
+            results.len(),
+            expected_count,
+            "Query '{}' expected {} results, got {}",
+            query,
+            expected_count,
+            results.len()
+        );
+    }
+}
+
+#[test]
+fn test_safety_violation_detection() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    // Unsafe: z not in body
+    let query = "result(X, Z) :- edge(X, Y).";
+    let result = engine.execute(query);
+
+    assert!(result.is_err(), "Expected safety violation error");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("Unsafe") || err.contains("not found"),
+        "Error should mention safety: {}",
+        err
+    );
+}
+
+#[test]
+fn test_empty_knowledge_graph_query() {
+    let mut engine = DatalogEngine::new();
+    // No facts added
+
+    let query = "result(X, Y) :- edge(X, Y).";
+    let results = engine.execute(query).unwrap();
+
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
