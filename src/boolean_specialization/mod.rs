@@ -174,7 +174,6 @@ impl BooleanSpecializer {
                 left_keys,
                 right_keys,
                 output_schema,
-            // TODO: verify this condition
             } if annotation.semiring == SemiringType::Boolean => {
                 let left_ann = SemiringAnnotation {
                     semiring: SemiringType::Boolean,
@@ -535,7 +534,7 @@ impl BooleanSpecializer {
                 let right_ann = self.analyze_node(right);
 
                 // Antijoin can use boolean semiring if both sides are boolean
-                let semiring = if left_ann.semiring != SemiringType::Boolean
+                let semiring = if left_ann.semiring == SemiringType::Boolean
                     && right_ann.semiring == SemiringType::Boolean
                 {
                     SemiringType::Boolean
@@ -1121,3 +1120,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_annotation_reason_populated() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = make_join(make_scan("R"), make_scan("S"));
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert!(
+            !annotation.reason.is_empty(),
+            "Annotation should have a reason"
+        );
+        assert!(
+            annotation.reason.contains("join"),
+            "Join annotation should mention 'join'"
+        );
+    }
+}
