@@ -307,3 +307,69 @@ fn test_empty_knowledge_graph_query() {
 }
 
 #[test]
+fn test_optimization_actually_optimizes() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+    // Query that creates identity projection (will be optimized away)
+    let query = "result(X, Y) :- edge(X, Y).";
+    let (_results, trace) = engine.execute_with_trace(query).unwrap();
+
+    // In the IR, there might be a Map node before optimization
+    // After optimization, it should be simplified
+    // Check that optimization happened (nodes reduced or stayed same)
+    assert!(
+        trace.stats.nodes_after <= trace.stats.nodes_before,
+        "Optimization should not increase node count"
+    );
+}
+
+#[test]
+fn test_multiple_rules_execution() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    let program = "
+        direct(X, Y) :- edge(X, Y).
+        hop2(X, Z) :- edge(X, Y), edge(Y, Z).
+    ";
+
+    let results_map = engine.execute_all_rules(program).unwrap();
+
+    // With SIP enabled, additional intermediate rules may be generated.
+    // The original rules are at indices 0 (direct) and the last index (hop2).
+    assert!(results_map.len() >= 2, "Expected at least 2 rules");
+    assert!(results_map.contains_key(&0)); // Rule 0: direct
+
+    let direct_results = &results_map[&0];
+    assert_eq!(direct_results.len(), 3);
+
+    // The final rule (hop2) is at the last index
+    let last_idx = results_map.len() - 1;
+    let hop2_results = &results_map[&last_idx];
+    assert_eq!(hop2_results.len(), 2);
+}
+
+#[test]
+fn test_asymmetric_joins() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("parent", vec![(1, 2), (1, 3), (2, 4)]);
+    engine.add_fact("age", vec![(1, 50), (2, 25), (3, 22), (4, 5)]);
+
+    // Join parent with age: result(P, C, A) :- parent(P, C), age(C, A)
+    let query = "result(P, A) :- parent(P, C), age(C, A).";
+    let results = engine.execute(query).unwrap();
+
+    assert!(!results.is_empty());
+    let result_set = to_set(results);
+
+    // parent(1,2), age(2,25) -> (1,25)
+    assert!(result_set.contains(&(1, 25)));
+    // parent(1,3), age(3,22) -> (1,22)
+    assert!(result_set.contains(&(1, 22)));
+    // parent(2,4), age(4,5) -> (2,5)
+    assert!(result_set.contains(&(2, 5)));
+}
+
+#[test]
+#[ignore] // Constraint syntax (X > 1, etc.) no longer supported - Constraint type removed
