@@ -552,3 +552,96 @@ fn test_multiple_atoms_in_body() {
 /// Test aggregation using direct IR construction
 /// This tests count, sum, min, max aggregations
 #[test]
+fn test_aggregation_count() {
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
+
+    let mut generator = CodeGenerator::new();
+
+    // Data: sales(category, amount)
+    generator.add_input_tuples(
+        "sales".to_string(),
+        vec![
+            Tuple::new(vec![Value::string("electronics"), Value::Int32(100)]),
+            Tuple::new(vec![Value::string("electronics"), Value::Int32(200)]),
+            Tuple::new(vec![Value::string("electronics"), Value::Int32(150)]),
+            Tuple::new(vec![Value::string("clothing"), Value::Int32(50)]),
+            Tuple::new(vec![Value::string("clothing"), Value::Int32(75)]),
+        ],
+    );
+
+    // COUNT aggregation: count items per category
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "sales".to_string(),
+            schema: vec!["category".to_string(), "amount".to_string()],
+        }),
+        group_by: vec![0],                                 // group by category
+        aggregations: vec![(AggregateFunction::Count, 1)], // count items
+        output_schema: vec!["category".to_string(), "count".to_string()],
+    };
+
+    let results = generator.generate_and_execute_tuples(&ir).unwrap();
+
+    // Should have 2 groups: electronics (3 items) and clothing (2 items)
+    assert_eq!(results.len(), 2);
+
+    // Check counts
+    for tuple in &results {
+        let category = tuple.get(0).unwrap().as_str().unwrap();
+        let count = tuple.get(1).unwrap().as_i64().unwrap();
+        match category {
+            "electronics" => assert_eq!(count, 3),
+            "clothing" => assert_eq!(count, 2),
+            _ => panic!("Unexpected category: {}", category),
+        }
+    }
+}
+
+#[test]
+fn test_aggregation_sum() {
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
+
+    let mut generator = CodeGenerator::new();
+
+    // Data: sales(category, amount)
+    generator.add_input_tuples(
+        "sales".to_string(),
+        vec![
+            Tuple::new(vec![Value::string("electronics"), Value::Int32(100)]),
+            Tuple::new(vec![Value::string("electronics"), Value::Int32(200)]),
+            Tuple::new(vec![Value::string("clothing"), Value::Int32(50)]),
+            Tuple::new(vec![Value::string("clothing"), Value::Int32(75)]),
+        ],
+    );
+
+    // SUM aggregation: total amount per category
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "sales".to_string(),
+            schema: vec!["category".to_string(), "amount".to_string()],
+        }),
+        group_by: vec![0],                               // group by category
+        aggregations: vec![(AggregateFunction::Sum, 1)], // sum amount
+        output_schema: vec!["category".to_string(), "total".to_string()],
+    };
+
+    let results = generator.generate_and_execute_tuples(&ir).unwrap();
+
+    assert_eq!(results.len(), 2);
+
+    for tuple in &results {
+        let category = tuple.get(0).unwrap().as_str().unwrap();
+        let total = tuple.get(1).unwrap().as_i64().unwrap();
+        match category {
+            "electronics" => assert_eq!(total, 300), // 100 + 200
+            "clothing" => assert_eq!(total, 125),    // 50 + 75
+            _ => panic!("Unexpected category: {}", category),
+        }
+    }
+}
+
+#[test]
