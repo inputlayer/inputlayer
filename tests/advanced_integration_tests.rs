@@ -373,3 +373,58 @@ fn test_asymmetric_joins() {
 
 #[test]
 #[ignore] // Constraint syntax (X > 1, etc.) no longer supported - Constraint type removed
+fn test_filters_pushed_through_pipeline() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
+
+    // Multiple filters that should all be applied
+    let query = "result(X, Y) :- data(X, Y), X > 1, X < 5, Y >= 20, Y <= 40.";
+    let results = engine.execute(query).unwrap();
+
+    // Should get (2,20), (3,30), (4,40)
+    assert_eq!(results.len(), 3);
+
+    for (x, y) in &results {
+        assert!(*x > 1 && *x < 5, "x should be in (1, 5)");
+        assert!(*y >= 20 && *y <= 40, "y should be in [20, 40]");
+    }
+}
+
+#[test]
+#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
+fn test_column_to_column_comparison() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("pairs", vec![(1, 1), (1, 2), (2, 1), (2, 2), (3, 4)]);
+
+    // X != Y (column-to-column comparison)
+    let query = "result(X, Y) :- pairs(X, Y), X != Y.";
+    let results = engine.execute(query).unwrap();
+
+    let result_set = to_set(results);
+    assert!(!result_set.contains(&(1, 1)));
+    assert!(result_set.contains(&(1, 2)));
+    assert!(result_set.contains(&(2, 1)));
+    assert!(!result_set.contains(&(2, 2)));
+    assert!(result_set.contains(&(3, 4)));
+}
+
+#[test]
+fn test_fact_parsing() {
+    let mut engine = DatalogEngine::new();
+
+    // Test parsing facts (rules with no body)
+    let program = "
+        edge(1, 2).
+        edge(2, 3).
+    ";
+
+    engine.parse(program).unwrap();
+    let prog = engine.program().unwrap();
+
+    assert_eq!(prog.rules.len(), 2);
+    for rule in &prog.rules {
+        assert_eq!(rule.body.len(), 0, "Facts should have empty body");
+    }
+}
+
+#[test]
