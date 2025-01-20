@@ -491,3 +491,64 @@ fn test_distinct_eliminates_duplicates() {
 }
 
 #[test]
+fn test_no_constraints_returns_all() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
+
+    let query = "result(X, Y) :- edge(X, Y).";
+    let results = engine.execute(query).unwrap();
+
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
+fn test_catalog_tracks_schemas() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    let catalog = engine.catalog();
+    assert!(catalog.has_relation("edge"));
+}
+
+#[test]
+fn test_ir_nodes_generated() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    engine.parse("result(X, Y) :- edge(X, Y).").unwrap();
+    engine.build_ir().unwrap();
+
+    let ir_nodes = engine.ir_nodes();
+    assert_eq!(ir_nodes.len(), 1);
+}
+
+#[test]
+fn test_optimization_config_accessible() {
+    let engine = DatalogEngine::new();
+    let config = engine.config();
+
+    // Verify default configuration - all optimizations enabled
+    assert!(config.enable_join_planning);
+    assert!(config.enable_sip_rewriting);
+    assert!(config.enable_subplan_sharing);
+    assert!(config.enable_boolean_specialization);
+}
+
+#[test]
+fn test_multiple_atoms_in_body() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("r", vec![(1, 2)]);
+    engine.add_fact("s", vec![(2, 3)]);
+    engine.add_fact("t", vec![(3, 4)]);
+
+    // Three atoms in body
+    let query = "result(X, W) :- r(X, Y), s(Y, Z), t(Z, W).";
+    let results = engine.execute(query).unwrap();
+
+    assert!(!results.is_empty());
+    assert!(results.contains(&(1, 4)));
+}
+
+/// Test aggregation using direct IR construction
+/// This tests count, sum, min, max aggregations
+#[test]
