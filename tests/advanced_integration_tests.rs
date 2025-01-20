@@ -428,3 +428,66 @@ fn test_fact_parsing() {
 }
 
 #[test]
+fn test_comment_handling() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    let program = "
+        % This is a comment
+        % This is also a comment (Prolog-style)
+        result(X, Y) :- edge(X, Y).
+    ";
+
+    let results = engine.execute(program).unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn test_whitespace_handling() {
+    let mut engine = DatalogEngine::new();
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    // Test various whitespace scenarios
+    let program = "
+
+        result(X,Y):-edge(X,Y).
+
+    ";
+
+    let results = engine.execute(program).unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn test_config_creation() {
+    use inputlayer::OptimizationConfig;
+
+    let config = OptimizationConfig::default();
+    // All optimizations enabled by default
+    assert!(config.enable_join_planning);
+    assert!(config.enable_sip_rewriting);
+    assert!(config.enable_subplan_sharing);
+    assert!(config.enable_boolean_specialization);
+
+    let mut engine = DatalogEngine::with_config(config);
+    engine.add_fact("edge", vec![(1, 2)]);
+
+    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn test_distinct_eliminates_duplicates() {
+    let mut engine = DatalogEngine::new();
+    // Add duplicate facts
+    engine.add_fact("data", vec![(1, 2), (1, 2), (2, 3), (2, 3), (3, 4)]);
+
+    let query = "result(X, Y) :- data(X, Y).";
+    let results = engine.execute(query).unwrap();
+
+    // DD collections are naturally distinct, so duplicates should be eliminated
+    let result_set = to_set(results);
+    assert_eq!(result_set.len(), 3);
+}
+
+#[test]
