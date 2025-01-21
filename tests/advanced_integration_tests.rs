@@ -645,3 +645,64 @@ fn test_aggregation_sum() {
 }
 
 #[test]
+fn test_aggregation_min_max() {
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
+
+    let mut generator = CodeGenerator::new();
+
+    // Data: scores(student, score)
+    generator.add_input_tuples(
+        "scores".to_string(),
+        vec![
+            Tuple::new(vec![Value::string("alice"), Value::Int32(85)]),
+            Tuple::new(vec![Value::string("alice"), Value::Int32(92)]),
+            Tuple::new(vec![Value::string("alice"), Value::Int32(78)]),
+            Tuple::new(vec![Value::string("bob"), Value::Int32(90)]),
+            Tuple::new(vec![Value::string("bob"), Value::Int32(88)]),
+        ],
+    );
+
+    // MIN and MAX aggregation
+    let ir = IRNode::Aggregate {
+        input: Box::new(IRNode::Scan {
+            relation: "scores".to_string(),
+            schema: vec!["student".to_string(), "score".to_string()],
+        }),
+        group_by: vec![0], // group by student
+        aggregations: vec![
+            (AggregateFunction::Min, 1), // min score
+            (AggregateFunction::Max, 1), // max score
+        ],
+        output_schema: vec![
+            "student".to_string(),
+            "min_score".to_string(),
+            "max_score".to_string(),
+        ],
+    };
+
+    let results = generator.generate_and_execute_tuples(&ir).unwrap();
+
+    assert_eq!(results.len(), 2);
+
+    for tuple in &results {
+        let student = tuple.get(0).unwrap().as_str().unwrap();
+        let min_score = tuple.get(1).unwrap().as_i32().unwrap();
+        let max_score = tuple.get(2).unwrap().as_i32().unwrap();
+        match student {
+            "alice" => {
+                assert_eq!(min_score, 78);
+                assert_eq!(max_score, 92);
+            }
+            "bob" => {
+                assert_eq!(min_score, 88);
+                assert_eq!(max_score, 90);
+            }
+            _ => panic!("Unexpected student: {}", student),
+        }
+    }
+}
+
+// SIP Rewriting Tests
+#[test]
