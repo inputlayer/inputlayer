@@ -136,3 +136,111 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - Returns 0.0 if either vector is zero (treats as identical)
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
+pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let mut dot_product: f32 = 0.0;
+    let mut norm_a_sq: f32 = 0.0;
+    let mut norm_b_sq: f32 = 0.0;
+
+    // Single pass through both vectors for cache efficiency
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot_product += x * y;
+        norm_a_sq += x * x;
+        norm_b_sq += y * y;
+    }
+
+    let norm_a = f64::from(norm_a_sq).sqrt();
+    let norm_b = f64::from(norm_b_sq).sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0; // Treat zero vectors as identical
+    }
+
+    let similarity = f64::from(dot_product) / (norm_a * norm_b);
+    // Clamp to handle floating point errors
+    1.0 - similarity.clamp(-1.0, 1.0)
+}
+
+/// Compute dot product of two vectors.
+///
+/// Formula: a · b = sum(a\[i\] * b\[i\])
+///
+/// # Returns
+/// - The scalar dot product
+/// - 0.0 for mismatched dimensions
+#[inline]
+pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| f64::from(*x) * f64::from(*y))
+        .sum()
+}
+
+/// Compute Manhattan (L1) distance between two vectors.
+///
+/// Formula: d(a, b) = sum(|a\[i\] - b\[i\]|)
+///
+/// # Performance
+/// - O(n) where n is vector dimension
+/// - Good for sparse vectors
+#[inline]
+pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| f64::from(*x - *y).abs())
+        .sum()
+}
+
+// Utility Functions (Hamming, Abs)
+/// Compute Hamming distance between two integers.
+///
+/// Counts the number of bit positions where the two integers differ.
+/// Useful for comparing perceptual hashes (pHash, dHash) for image similarity.
+///
+/// # Arguments
+/// * `a` - First integer (e.g., perceptual hash)
+/// * `b` - Second integer (e.g., perceptual hash)
+///
+/// # Returns
+/// Number of differing bits (0 to 64 for i64)
+///
+/// # Example
+/// ```rust
+/// use inputlayer::vector_ops::hamming_distance;
+///
+/// let h1 = 0b1010_1010i64;
+/// let h2 = 0b1010_1000i64;  // Differs in 1 bit
+/// assert_eq!(hamming_distance(h1, h2), 1);
+///
+/// // For perceptual hashes, typically:
+/// // - distance < 5: very similar images
+/// // - distance < 10: similar images
+/// // - distance >= 10: different images
+/// ```
+#[inline]
+pub fn hamming_distance(a: i64, b: i64) -> i64 {
+    i64::from((a ^ b).count_ones())
+}
+
+/// Compute absolute value of an integer.
+///
+/// # Note
+/// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
+#[inline]
+pub fn abs_i64(x: i64) -> i64 {
+    x.saturating_abs()
+}
+
+/// Compute absolute value of a float.
+#[inline]
