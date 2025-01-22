@@ -46,3 +46,93 @@ impl Ord for OrdF64 {
 
 /// Wrapper for (score, item) pairs that implements Ord based only on score.
 /// This allows us to use `BinaryHeap` without requiring T: Ord.
+struct HeapEntry<T> {
+    score: OrdF64,
+    item: T,
+}
+
+impl<T> PartialEq for HeapEntry<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+
+impl<T> Eq for HeapEntry<T> {}
+
+impl<T> PartialOrd for HeapEntry<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for HeapEntry<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.score.cmp(&other.score)
+    }
+}
+
+// Distance Functions
+/// Compute Euclidean (L2) distance between two vectors.
+///
+/// Formula: d(a, b) = sqrt(sum((a\[i\] - b\[i\])^2))
+///
+/// # Performance
+/// - O(n) where n is vector dimension
+/// - Uses iterator fusion for cache efficiency
+/// - Compiler can autovectorize the inner loop
+///
+/// # Panics
+/// Returns `f64::INFINITY` if vectors have different lengths.
+#[inline]
+pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let sum_sq: f32 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| {
+            let diff = x - y;
+            diff * diff
+        })
+        .sum();
+
+    f64::from(sum_sq).sqrt()
+}
+
+/// Compute squared Euclidean distance (avoids sqrt for comparisons).
+///
+/// Use this when you only need to compare distances, not absolute values.
+/// This is faster because it avoids the sqrt operation.
+#[inline]
+pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let sum_sq: f32 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| {
+            let diff = x - y;
+            diff * diff
+        })
+        .sum();
+
+    f64::from(sum_sq)
+}
+
+/// Compute cosine distance between two vectors.
+///
+/// Formula: d(a, b) = 1 - (a · b) / (||a|| * ||b||)
+///
+/// Returns a value in [0, 2] where:
+/// - 0 = identical direction
+/// - 1 = orthogonal
+/// - 2 = opposite direction
+///
+/// # Edge Cases
+/// - Returns 0.0 if either vector is zero (treats as identical)
+/// - Returns `f64::INFINITY` for mismatched dimensions
+#[inline]
