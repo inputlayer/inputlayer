@@ -706,3 +706,58 @@ fn test_aggregation_min_max() {
 
 // SIP Rewriting Tests
 #[test]
+fn test_sip_chain_join_correctness() {
+    use inputlayer::OptimizationConfig;
+
+    // Create engine with all optimizations enabled (SIP + subplan sharing work together)
+    let config = OptimizationConfig {
+        enable_join_planning: true,
+        enable_sip_rewriting: true,
+        enable_subplan_sharing: true,
+        enable_boolean_specialization: true,
+    };
+
+    let mut engine = DatalogEngine::with_config(config);
+
+    // Chain data: a -> b -> c -> d
+    engine.add_fact("r", vec![(1, 2), (3, 4)]);
+    engine.add_fact("s", vec![(2, 5), (4, 6)]);
+    engine.add_fact("t", vec![(5, 7), (6, 8)]);
+
+    // Chain query: result(A, D) :- r(A, B), s(B, C), t(C, D).
+    // Expected: (1, 7) via 1->2->5->7 and (3, 8) via 3->4->6->8
+    let query = "result(A, D) :- r(A, B), s(B, C), t(C, D).";
+    let results = engine.execute(query).unwrap();
+
+    let result_set = to_set(results);
+    assert_eq!(result_set.len(), 2);
+    assert!(result_set.contains(&(1, 7)));
+    assert!(result_set.contains(&(3, 8)));
+}
+
+#[test]
+fn test_sip_two_way_join_correctness() {
+    use inputlayer::OptimizationConfig;
+
+    let config = OptimizationConfig {
+        enable_join_planning: true,
+        enable_sip_rewriting: true,
+        enable_subplan_sharing: true,
+        enable_boolean_specialization: true,
+    };
+
+    let mut engine = DatalogEngine::with_config(config);
+
+    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
+
+    // Two-hop path query
+    let query = "path2(X, Z) :- edge(X, Y), edge(Y, Z).";
+    let results = engine.execute(query).unwrap();
+
+    let result_set = to_set(results);
+    assert_eq!(result_set.len(), 2);
+    assert!(result_set.contains(&(1, 3))); // 1->2->3
+    assert!(result_set.contains(&(2, 4))); // 2->3->4
+}
+
+#[test]
