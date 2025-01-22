@@ -761,3 +761,29 @@ fn test_sip_two_way_join_correctness() {
 }
 
 #[test]
+fn test_sip_with_dangling_tuples() {
+    use inputlayer::OptimizationConfig;
+
+    // This tests the core value of SIP: filtering out tuples that won't
+    // contribute to the final result
+    let config = OptimizationConfig {
+        enable_join_planning: true,
+        enable_sip_rewriting: true,
+        enable_subplan_sharing: true,
+        enable_boolean_specialization: true,
+    };
+
+    let mut engine = DatalogEngine::with_config(config);
+
+    // R has tuples that won't match S, S has tuples that won't match T
+    engine.add_fact("r", vec![(1, 2), (100, 200), (300, 400)]); // 100,300 won't join
+    engine.add_fact("s", vec![(2, 3), (999, 888)]); // 999 won't join
+    engine.add_fact("t", vec![(3, 4)]);
+
+    let query = "result(A, D) :- r(A, B), s(B, C), t(C, D).";
+    let results = engine.execute(query).unwrap();
+
+    // Only 1->2->3->4 should work
+    assert_eq!(results.len(), 1);
+    assert!(to_set(results).contains(&(1, 4)));
+}
