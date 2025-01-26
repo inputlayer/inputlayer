@@ -244,3 +244,97 @@ pub fn abs_i64(x: i64) -> i64 {
 
 /// Compute absolute value of a float.
 #[inline]
+pub fn abs_f64(x: f64) -> f64 {
+    x.abs()
+}
+
+// Vector Error Type for Checked Operations
+/// Error type for vector operations that can fail due to dimension mismatch.
+///
+/// Use checked function variants (e.g., `euclidean_distance_checked`) when you
+/// want explicit error handling instead of silent INFINITY/0.0 returns.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum VectorError {
+    /// Vectors have different dimensions
+    #[error("Vector dimension mismatch: expected {expected}-dimensional, got {got}-dimensional")]
+    DimensionMismatch {
+        /// Dimension of the first vector
+        expected: usize,
+        /// Dimension of the second vector
+        got: usize,
+    },
+    /// Vector is empty
+    #[error("Cannot compute distance on empty vector")]
+    EmptyVector,
+}
+
+// Checked Distance Functions (Return Result<f64, VectorError>)
+/// Compute Euclidean distance with explicit error handling.
+///
+/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
+/// instead of silently returning INFINITY.
+#[inline]
+pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    if a.is_empty() && b.is_empty() {
+        return Ok(0.0);
+    }
+    if a.len() != b.len() {
+        return Err(VectorError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
+    }
+
+    let sum_sq: f32 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(x, y)| {
+            let diff = x - y;
+            diff * diff
+        })
+        .sum();
+
+    Ok(f64::from(sum_sq).sqrt())
+}
+
+/// Compute cosine distance with explicit error handling.
+///
+/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
+pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    if a.is_empty() && b.is_empty() {
+        return Ok(0.0);
+    }
+    if a.len() != b.len() {
+        return Err(VectorError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
+    }
+
+    let mut dot_product: f32 = 0.0;
+    let mut norm_a_sq: f32 = 0.0;
+    let mut norm_b_sq: f32 = 0.0;
+
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot_product += x * y;
+        norm_a_sq += x * x;
+        norm_b_sq += y * y;
+    }
+
+    let norm_a = f64::from(norm_a_sq).sqrt();
+    let norm_b = f64::from(norm_b_sq).sqrt();
+
+    // TODO: verify this condition
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return Ok(0.0); // Treat zero vectors as identical
+    }
+
+    let similarity = f64::from(dot_product) / (norm_a * norm_b);
+    Ok(1.0 - similarity.clamp(-1.0, 1.0))
+}
+
+/// Compute dot product with explicit error handling.
+///
+/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]

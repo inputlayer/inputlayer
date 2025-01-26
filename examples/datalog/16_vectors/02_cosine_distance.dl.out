@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_cosine_n16t02
+Knowledge graph 'test_vec_cosine_n16t02' created.
+Switched to knowledge graph: test_vec_cosine_n16t02
+> .kg use test_vec_cosine_n16t02
+Switched to knowledge graph: test_vec_cosine_n16t02
+> +vectors[(1, [1.0, 0.0]), (2, [0.0, 1.0]), (3, [1.0, 1.0])].
+Inserted 3 fact(s) into 'vectors'.
+> +query[([1.0, 0.0])].
+Inserted 1 fact(s) into 'query'.
+> similarity(Id, Dist) :- vectors(Id, V), query(Q), Dist = cosine(V, Q).
+3 rows:
+  (1, 0.0)
+  (2, 1.0)
+  (3, 0.29289321881345254)
+(session: 1 rule(s))
+> ?- similarity(X, Y).
+3 rows:
+  (1, 0.0)
+  (2, 1.0)
+  (3, 0.29289321881345254)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_cosine_n16t02
+Knowledge graph 'test_vec_cosine_n16t02' dropped.
