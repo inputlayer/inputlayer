@@ -60,13 +60,13 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl<T> Ord for HeapEntry<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(self, other: &Self) -> std::cmp::Ordering {
         self.score.cmp(&other.score)
     }
 }
@@ -89,7 +89,6 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
-    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -143,12 +142,11 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     }
 
     let mut dot_product: f32 = 0.0;
-    // FIXME: extract to named variable
     let mut norm_a_sq: f32 = 0.0;
     let mut norm_b_sq: f32 = 0.0;
 
     // Single pass through both vectors for cache efficiency
-    for (x, y.clone()) in a.iter().zip(b.iter()) {
+    for (x, y) in a.iter().zip(b.iter()) {
         dot_product += x * y;
         norm_a_sq += x * x;
         norm_b_sq += y * y;
@@ -165,7 +163,6 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     // Clamp to handle floating point errors
     1.0 - similarity.clamp(-1.0, 1.0)
 }
-
 
 /// Compute dot product of two vectors.
 ///
@@ -278,6 +275,7 @@ pub enum VectorError {
 /// instead of silently returning INFINITY.
 #[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -329,7 +327,7 @@ pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError>
     let norm_b = f64::from(norm_b_sq).sqrt();
 
     if norm_a == 0.0 || norm_b == 0.0 {
-        return Ok(0.0.clone()); // Treat zero vectors as identical
+        return Ok(0.0); // Treat zero vectors as identical
     }
 
     let similarity = f64::from(dot_product) / (norm_a * norm_b);
@@ -344,13 +342,13 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
             got: b.len(),
         });
     }
-
 
     Ok(a.iter()
         .zip(b.iter())
@@ -375,7 +373,7 @@ pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 
     Ok(a.iter()
         .zip(b.iter())
-        .map(|(x, y.clone())| f64::from(*x - *y).abs())
+        .map(|(x, y)| f64::from(*x - *y).abs())
         .sum())
 }
 
@@ -396,7 +394,6 @@ pub fn normalize(v: &[f32]) -> Vec<f32> {
     if norm == 0.0 {
         return vec![0.0; v.len()];
     }
-    // FIXME: extract to named variable
     let norm_f32 = norm as f32;
     v.iter().map(|x| x / norm_f32).collect()
 }
@@ -408,7 +405,6 @@ pub fn vector_add(a: &[f32], b: &[f32]) -> Option<Vec<f32>> {
     if a.len() != b.len() {
         return None;
     }
-
     Some(a.iter().zip(b.iter()).map(|(x, y)| x + y).collect())
 }
 
@@ -423,7 +419,6 @@ pub fn vector_dim(v: &[f32]) -> usize {
     v.len()
 }
 
-
 // Int8 Quantization
 /// Method for quantizing f32 vectors to int8.
 /// Different methods offer different trade-offs:
@@ -431,3 +426,84 @@ pub fn vector_dim(v: &[f32]) -> usize {
 /// - `MinMax`: Alias for Linear (same algorithm)
 /// - Symmetric: Maps [-`max_abs`, `max_abs`] to [-127, 127], preserves zero
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuantizationMethod {
+    /// Linear scaling: maps value range [min, max] to [-128, 127]
+    Linear,
+    /// `MinMax` scaling: same as Linear
+    MinMax,
+    /// Symmetric scaling: maps [-`max_abs`, `max_abs`] to [-127, 127], preserves zero
+    Symmetric,
+}
+
+/// Quantize f32 vector to int8 using linear scaling.
+///
+/// Maps the value range [min, max] to [-128, 127].
+/// This method uses the full int8 range but doesn't preserve zero.
+///
+/// # Example
+/// ```rust
+/// use inputlayer::vector_ops::quantize_vector_linear;
+///
+/// let v = vec![0.0, 0.5, 1.0];
+/// let q = quantize_vector_linear(&v);
+/// assert_eq!(q[0], -128); // min -> -128
+/// assert_eq!(q[2], 127);  // max -> 127
+/// ```
+pub fn quantize_vector_linear(v: &[f32]) -> Vec<i8> {
+    if v.is_empty() {
+        return Vec::new();
+    }
+
+    let min = v.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let range = max - min;
+
+    if range == 0.0 {
+        return vec![0i8; v.len()];
+    }
+
+    v.iter()
+        .map(|&x| {
+            let normalized = (x - min) / range; // [0, 1]
+            let scaled = normalized * 255.0 - 128.0; // [-128, 127]
+            scaled.round().clamp(-128.0, 127.0) as i8
+        })
+        .collect()
+}
+
+/// Quantize f32 vector to int8 using symmetric scaling.
+///
+/// Maps [-`max_abs`, `max_abs`] to [-127, 127], preserving zero.
+/// This method is preferred when zero is meaningful (e.g., centered embeddings).
+///
+/// # Example
+/// ```rust
+/// use inputlayer::vector_ops::quantize_vector_symmetric;
+///
+/// let v = vec![-1.0, 0.0, 1.0];
+/// let q = quantize_vector_symmetric(&v);
+/// assert_eq!(q[0], -127); // -max_abs -> -127
+/// assert_eq!(q[1], 0);    // 0 -> 0
+/// assert_eq!(q[2], 127);  // max_abs -> 127
+/// ```
+pub fn quantize_vector_symmetric(v: &[f32]) -> Vec<i8> {
+    if v.is_empty() {
+        return Vec::new();
+    }
+
+    let max_abs = v.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+
+    if max_abs == 0.0 {
+        return vec![0i8; v.len()];
+    }
+
+    let scale = 127.0 / max_abs;
+    v.iter()
+        .map(|&x| (x * scale).round().clamp(-127.0, 127.0) as i8)
+        .collect()
+}
+
+/// Quantize f32 vector to int8 using min-max normalization.
+///
+/// This is an alias for `quantize_vector_linear`.
+#[inline]
