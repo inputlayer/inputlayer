@@ -1,0 +1,20 @@
+% Test: LSH Bucket
+% Description: Tests lsh_bucket(v, table_idx, num_hyperplanes) for locality-sensitive hashing
+
+.kg create test_lsh_n16t10
+.kg use test_lsh_n16t10
+
+% Insert vectors for LSH bucketing
++vectors[(1, [1.0, 0.0, 0.0])].
++vectors[(2, [0.9, 0.1, 0.0])].
++vectors[(3, [0.0, 1.0, 0.0])].
++vectors[(4, [0.0, 0.0, 1.0])].
+
+% Compute LSH bucket with 4 hyperplanes
+bucket(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4).
+
+% Query buckets - similar vectors should have same bucket
+?- bucket(Id, Bucket).
+
+.kg use default
+.kg drop test_lsh_n16t10

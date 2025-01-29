@@ -1,0 +1,18 @@
+% Test: Pairwise Vector Similarity (Cartesian Product)
+% Description: Tests pairwise similarity calculations using Cartesian product joins
+
+.kg create test_pairwise_sim_n16t17
+.kg use test_pairwise_sim_n16t17
+
+% Insert embeddings: embedding(id, vector)
++embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [0.7, 0.7, 0.0])].
+
+% Calculate all pairwise cosine distances (Id1 < Id2 to avoid duplicates)
+pairwise(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).
+
+% Query all pairwise similarities
+?- pairwise(X, Y, Z).
+
+% Cleanup
+.kg use default
+.kg drop test_pairwise_sim_n16t17

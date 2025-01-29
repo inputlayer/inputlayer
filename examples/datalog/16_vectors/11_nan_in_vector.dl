@@ -1,0 +1,14 @@
+% Test: NaN in vector (edge case)
+
+.kg create test_vec_nan_n16t11
+.kg use test_vec_nan_n16t11
+
+% Normal vectors
++vecs[(1, [1.0, 2.0, 3.0]), (2, [4.0, 5.0, 6.0])].
+
+dist(Id1, Id2, D) :- vecs(Id1, V1), vecs(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).
+
+?- dist(Id1, Id2, D).
+
+.kg use default
+.kg drop test_vec_nan_n16t11

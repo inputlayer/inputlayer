@@ -1,0 +1,14 @@
+% Test: Vector equality comparison
+
+.kg create test_vec_eq_n16t15
+.kg use test_vec_eq_n16t15
+
++data[(1, [1, 2, 3]), (2, [4, 5, 6]), (3, [1, 2, 3])].
+
+% Find entries with same vector as entry 1
+matching(Id, V) :- data(Id, V), data(1, V).
+
+?- matching(Id, V).
+
+.kg use default
+.kg drop test_vec_eq_n16t15
