@@ -1,0 +1,18 @@
+% Test: Vector Addition
+% Description: Tests vec_add(v1, v2) function to add two vectors
+
+.kg create test_vec_add_n16t08
+.kg use test_vec_add_n16t08
+
+% Insert vector pairs
++vec_pairs[(1, [1.0, 2.0, 3.0], [4.0, 5.0, 6.0])].
++vec_pairs[(2, [0.0, 0.0], [1.0, 1.0])].
+
+% Add vectors element-wise
+added(Id, Sum) :- vec_pairs(Id, V1, V2), Sum = vec_add(V1, V2).
+
+% Query results
+?- added(Id, Sum).
+
+.kg use default
+.kg drop test_vec_add_n16t08

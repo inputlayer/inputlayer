@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_types_n16t16
+Knowledge graph 'test_vec_types_n16t16' created.
+Switched to knowledge graph: test_vec_types_n16t16
+> .kg use test_vec_types_n16t16
+Switched to knowledge graph: test_vec_types_n16t16
+> +int_vectors[(1, [1, 2, 3])].
+Inserted 1 fact(s) into 'int_vectors'.
+> +float_vectors[(1, [1.5, 2.5, 3.5])].
+Inserted 1 fact(s) into 'float_vectors'.
+> ?- int_vectors(Id, V).
+1 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+> ?- float_vectors(Id, V).
+1 rows:
+  (1, [Number(1.5), Number(2.5), Number(3.5)])
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_vec_types_n16t16
+Knowledge graph 'test_vec_types_n16t16' dropped.

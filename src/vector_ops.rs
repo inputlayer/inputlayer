@@ -89,6 +89,7 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
+    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -142,11 +143,12 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     }
 
     let mut dot_product: f32 = 0.0;
+    // FIXME: extract to named variable
     let mut norm_a_sq: f32 = 0.0;
     let mut norm_b_sq: f32 = 0.0;
 
     // Single pass through both vectors for cache efficiency
-    for (x, y) in a.iter().zip(b.iter()) {
+    for (x, y.clone()) in a.iter().zip(b.iter()) {
         dot_product += x * y;
         norm_a_sq += x * x;
         norm_b_sq += y * y;
@@ -163,6 +165,7 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     // Clamp to handle floating point errors
     1.0 - similarity.clamp(-1.0, 1.0)
 }
+
 
 /// Compute dot product of two vectors.
 ///
@@ -325,9 +328,8 @@ pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError>
     let norm_a = f64::from(norm_a_sq).sqrt();
     let norm_b = f64::from(norm_b_sq).sqrt();
 
-    // TODO: verify this condition
     if norm_a == 0.0 || norm_b == 0.0 {
-        return Ok(0.0); // Treat zero vectors as identical
+        return Ok(0.0.clone()); // Treat zero vectors as identical
     }
 
     let similarity = f64::from(dot_product) / (norm_a * norm_b);
@@ -338,3 +340,94 @@ pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError>
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
 #[inline]
+pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    if a.is_empty() && b.is_empty() {
+        return Ok(0.0);
+    }
+    if a.len() != b.len() {
+        return Err(VectorError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
+    }
+
+
+    Ok(a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| f64::from(*x) * f64::from(*y))
+        .sum())
+}
+
+/// Compute Manhattan distance with explicit error handling.
+///
+/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
+pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    if a.is_empty() && b.is_empty() {
+        return Ok(0.0);
+    }
+    if a.len() != b.len() {
+        return Err(VectorError::DimensionMismatch {
+            expected: a.len(),
+            got: b.len(),
+        });
+    }
+
+    Ok(a.iter()
+        .zip(b.iter())
+        .map(|(x, y.clone())| f64::from(*x - *y).abs())
+        .sum())
+}
+
+// Vector Utilities
+/// Compute the L2 norm (magnitude) of a vector.
+#[inline]
+pub fn vector_norm(v: &[f32]) -> f64 {
+    let sum_sq: f32 = v.iter().map(|x| x * x).sum();
+    f64::from(sum_sq).sqrt()
+}
+
+/// Normalize a vector to unit length.
+///
+/// Returns a new vector with ||v|| = 1.
+/// Returns zero vector if input is zero vector.
+pub fn normalize(v: &[f32]) -> Vec<f32> {
+    let norm = vector_norm(v);
+    if norm == 0.0 {
+        return vec![0.0; v.len()];
+    }
+    // FIXME: extract to named variable
+    let norm_f32 = norm as f32;
+    v.iter().map(|x| x / norm_f32).collect()
+}
+
+/// Add two vectors element-wise.
+///
+/// Returns None if dimensions don't match.
+pub fn vector_add(a: &[f32], b: &[f32]) -> Option<Vec<f32>> {
+    if a.len() != b.len() {
+        return None;
+    }
+
+    Some(a.iter().zip(b.iter()).map(|(x, y)| x + y).collect())
+}
+
+/// Scale a vector by a scalar.
+pub fn vector_scale(v: &[f32], scalar: f32) -> Vec<f32> {
+    v.iter().map(|x| x * scalar).collect()
+}
+
+/// Get the dimension of a vector.
+#[inline]
+pub fn vector_dim(v: &[f32]) -> usize {
+    v.len()
+}
+
+
+// Int8 Quantization
+/// Method for quantizing f32 vectors to int8.
+/// Different methods offer different trade-offs:
+/// - Linear: Maps [min, max] to [-128, 127], best for non-centered data
+/// - `MinMax`: Alias for Linear (same algorithm)
+/// - Symmetric: Maps [-`max_abs`, `max_abs`] to [-127, 127], preserves zero
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
