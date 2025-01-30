@@ -1,0 +1,20 @@
+% Test: Single Element Vector
+% Description: Tests operations on 1D vectors [x]
+
+.kg create test_single_elem_n16t24
+.kg use test_single_elem_n16t24
+
+% Insert 1D vectors
++scalar[(1, [5.0]), (2, [3.0]), (3, [-2.0])].
+
+% Euclidean distance on 1D
+dist(Id1, Id2, D) :- scalar(Id1, V1), scalar(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).
+?- dist(Id1, Id2, D).
+
+% Cosine on 1D (essentially sign comparison)
+cos(Id1, Id2, S) :- scalar(Id1, V1), scalar(Id2, V2), Id1 < Id2, S = cosine(V1, V2).
+?- cos(Id1, Id2, S).
+
+% Cleanup
+.kg use default
+.kg drop test_single_elem_n16t24
