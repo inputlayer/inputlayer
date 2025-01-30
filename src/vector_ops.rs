@@ -60,13 +60,13 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl<T> Ord for HeapEntry<T> {
-    fn cmp(self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.score.cmp(&other.score)
     }
 }
@@ -190,7 +190,6 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// # Performance
 /// - O(n) where n is vector dimension
 /// - Good for sparse vectors
-#[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
     if a.len() != b.len() {
         return f64::INFINITY;
@@ -237,7 +236,6 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
-#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -273,9 +271,7 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
-#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
-    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -288,7 +284,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 
     let sum_sq: f32 = a
         .iter()
-        .zip(b.iter())
+        .zip(b.iter().cloned())
         .map(|(x, y)| {
             let diff = x - y;
             diff * diff
@@ -301,7 +297,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 /// Compute cosine distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
-#[inline]
 pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -342,7 +337,6 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -506,4 +500,119 @@ pub fn quantize_vector_symmetric(v: &[f32]) -> Vec<i8> {
 /// Quantize f32 vector to int8 using min-max normalization.
 ///
 /// This is an alias for `quantize_vector_linear`.
+#[inline]
+pub fn quantize_vector_minmax(v: &[f32]) -> Vec<i8> {
+    quantize_vector_linear(v)
+}
+
+/// Quantize f32 vector to int8 using the specified method.
+///
+/// # Arguments
+/// * `v` - The f32 vector to quantize
+/// * `method` - The quantization method to use
+///
+/// # Returns
+/// An int8 vector with 75% memory savings compared to f32.
+pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
+    match method {
+        QuantizationMethod::Linear => quantize_vector_linear(v),
+        QuantizationMethod::MinMax => quantize_vector_minmax(v),
+        QuantizationMethod::Symmetric => quantize_vector_symmetric(v),
+    }
+}
+
+/// Dequantize int8 vector to f32.
+///
+/// Without scale factor, simply converts i8 to f32.
+/// The user can apply their own scaling if needed.
+///
+/// Note: This is lossy - the original values cannot be perfectly recovered.
+#[inline]
+pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
+    v.iter().map(|&x| f32::from(x)).collect()
+}
+
+/// Dequantize int8 vector to f32 with explicit scale factor.
+///
+/// Use this when you track the scale factor externally.
+///
+/// # Arguments
+/// * `v` - The int8 vector to dequantize
+/// * `scale` - The scale factor to multiply by
+#[inline]
+pub fn dequantize_vector_with_scale(v: &[i8], scale: f32) -> Vec<f32> {
+    v.iter().map(|&x| f32::from(x) * scale).collect()
+}
+
+// Int8 Distance Functions
+/// Euclidean distance for int8 vectors.
+///
+/// Uses i32 accumulation to avoid overflow during squared difference computation.
+/// Maximum squared difference per element: (127 - (-128))^2 = 65025
+/// Maximum safe vector length without overflow: `i64::MAX` / 65025 ~= 141 trillion elements
+///
+/// # Returns
+/// - The Euclidean distance as f64
+/// - `f64::INFINITY` if dimensions don't match
+#[inline]
+pub fn euclidean_distance_int8(a: &[i8], b: &[i8]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let sum_sq: i64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| {
+            let diff = i32::from(x) - i32::from(y);
+            i64::from(diff * diff)
+        })
+        .sum();
+
+    (sum_sq as f64).sqrt()
+}
+
+/// Cosine distance for int8 vectors.
+///
+/// Uses i64 accumulation for dot products to avoid overflow.
+/// Maximum dot product per element: 127 * 127 = 16129
+/// Maximum safe vector length: `i64::MAX` / 16129 ~= 571 trillion elements
+///
+/// # Returns
+/// - Cosine distance in [0, 2] where 0=same direction, 1=orthogonal, 2=opposite
+/// - `f64::INFINITY` if dimensions don't match
+/// - 1.0 for zero vectors (maximum distance)
+#[inline]
+pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let mut dot: i64 = 0;
+    let mut norm_a: i64 = 0;
+    let mut norm_b: i64 = 0;
+
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let x = i64::from(x);
+        let y = i64::from(y);
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+
+    if norm_a == 0 || norm_b == 0 {
+        return 1.0; // Maximum distance for zero vectors
+    }
+
+    let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
+    1.0 - similarity.clamp(-1.0, 1.0)
+}
+
+/// Dot product for int8 vectors.
+///
+/// Uses i64 accumulation to avoid overflow.
+///
+/// # Returns
+/// - The dot product as f64
+/// - 0.0 if dimensions don't match
 #[inline]

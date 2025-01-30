@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_ops_n16t18
+Knowledge graph 'test_vec_ops_n16t18' created.
+Switched to knowledge graph: test_vec_ops_n16t18
+> .kg use test_vec_ops_n16t18
+Switched to knowledge graph: test_vec_ops_n16t18
+> +vectors(1, [1.0, 2.0, 3.0]).
+Inserted 1 fact(s) into 'vectors'.
+> +vectors(2, [4.0, 5.0, 6.0]).
+Inserted 1 fact(s) into 'vectors'.
+> +vectors(3, [1.0, 0.0, 0.0]).
+Inserted 1 fact(s) into 'vectors'.
+> ?- vectors(Id, V).
+3 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+  (2, [Number(4.0), Number(5.0), Number(6.0)])
+  (3, [Number(1.0), Number(0.0), Number(0.0)])
+> similar(Id1, Id2, D) :- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).
+3 rows:
+  (1, 2, 5.196152422706632)
+  (1, 3, 3.605551275463989)
+  (2, 3, 8.366600265340756)
+(session: 1 rule(s))
+> ?- similar(A, B, D).
+3 rows:
+  (1, 2, 5.196152422706632)
+  (1, 3, 3.605551275463989)
+  (2, 3, 8.366600265340756)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_ops_n16t18
+Knowledge graph 'test_vec_ops_n16t18' dropped.

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dim_mismatch_n16t23
+Knowledge graph 'test_dim_mismatch_n16t23' created.
+Switched to knowledge graph: test_dim_mismatch_n16t23
+> .kg use test_dim_mismatch_n16t23
+Switched to knowledge graph: test_dim_mismatch_n16t23
+> +vec2d[(1, [1.0, 2.0])].
+Inserted 1 fact(s) into 'vec2d'.
+> +vec3d[(1, [1.0, 2.0, 3.0])].
+Inserted 1 fact(s) into 'vec3d'.
+> bad_dist(Id, D) :- vec2d(Id, V2), vec3d(Id, V3), D = euclidean(V2, V3).
+1 rows:
+  (1, null)
+(session: 1 rule(s))
+> ?- bad_dist(Id, D).
+1 rows:
+  (1, null)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_dim_mismatch_n16t23
+Knowledge graph 'test_dim_mismatch_n16t23' dropped.
