@@ -190,7 +190,6 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// # Performance
 /// - O(n) where n is vector dimension
 /// - Good for sparse vectors
-#[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
     if a.len() != b.len() {
         return f64::INFINITY;
@@ -237,7 +236,6 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
-#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -273,7 +271,6 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
-#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -757,3 +754,44 @@ impl CachedHyperplanes {
 }
 
 /// Global monotonic counter for LRU ordering (avoids syscalls)
+static ACCESS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Get next access timestamp (monotonically increasing, no syscall)
+#[inline]
+fn next_access_time() -> u64 {
+    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Cache entry with atomic access tracking for true LRU eviction.
+/// Uses `AtomicU64` so timestamps can be updated through shared references.
+struct HyperplaneCacheEntry {
+    hyperplanes: CachedHyperplanes,
+    last_accessed: AtomicU64,
+    access_count: AtomicUsize,
+}
+
+impl HyperplaneCacheEntry {
+    fn new(hyperplanes: CachedHyperplanes) -> Self {
+        Self {
+            hyperplanes,
+            last_accessed: AtomicU64::new(next_access_time()),
+            access_count: AtomicUsize::new(1),
+        }
+    }
+
+    /// Update access time (can be called through shared reference on read path)
+    #[inline]
+    fn touch(&self) {
+        self.last_accessed
+            .store(next_access_time(), Ordering::Relaxed);
+        self.access_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get last access time for LRU comparison
+    fn last_access(&self) -> u64 {
+        self.last_accessed.load(Ordering::Relaxed)
+    }
+}
+
+/// LSH hyperplane cache statistics
+#[derive(Debug, Clone, Default)]
