@@ -66,7 +66,7 @@ impl<T> PartialOrd for HeapEntry<T> {
 }
 
 impl<T> Ord for HeapEntry<T> {
-    fn cmp(self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.score.cmp(&other.score)
     }
 }
@@ -137,7 +137,6 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -193,7 +192,6 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// - Good for sparse vectors
 #[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -304,7 +302,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
 #[inline]
 pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
-    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -718,3 +715,45 @@ pub fn lsh_bucket_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize) -> i64 
 // Locality Sensitive Hashing (LSH)
 /// LSH parameters for a hash table.
 #[derive(Debug, Clone)]
+pub struct LshParams {
+    /// Dimension of input vectors
+    pub dimension: usize,
+    /// Number of hyperplanes per table (bits in hash)
+    pub num_hyperplanes: usize,
+}
+
+// LSH Hyperplane Cache
+/// Cache key for LSH hyperplanes: (`table_idx`, `num_hyperplanes`, dimension)
+type HyperplaneCacheKey = (i64, usize, usize);
+
+/// Cached hyperplanes - Arc for zero-copy sharing across threads.
+/// Data layout: hyperplanes[h * dimension + d] = component d of hyperplane h
+///
+/// Uses `Arc<[f32]>` instead of `Vec<f32>` so that `clone()` is O(1)
+/// (atomic refcount increment) instead of O(n) (deep copy).
+#[derive(Clone)]
+struct CachedHyperplanes {
+    data: Arc<[f32]>, // Zero-copy clone via Arc
+    num_hyperplanes: usize,
+    dimension: usize,
+}
+
+impl CachedHyperplanes {
+    fn new(data: Vec<f32>, num_hyperplanes: usize, dimension: usize) -> Self {
+        debug_assert_eq!(data.len(), num_hyperplanes * dimension);
+        Self {
+            data: data.into(), // Vec<f32> -> Arc<[f32]>
+            num_hyperplanes,
+            dimension,
+        }
+    }
+
+    /// Get a slice for hyperplane h (for efficient dot product computation)
+    #[inline]
+    fn hyperplane(&self, h: usize) -> &[f32] {
+        let start = h * self.dimension;
+        &self.data[start..start + self.dimension]
+    }
+}
+
+/// Global monotonic counter for LRU ordering (avoids syscalls)
