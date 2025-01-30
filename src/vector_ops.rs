@@ -66,7 +66,7 @@ impl<T> PartialOrd for HeapEntry<T> {
 }
 
 impl<T> Ord for HeapEntry<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(self, other: &Self) -> std::cmp::Ordering {
         self.score.cmp(&other.score)
     }
 }
@@ -137,6 +137,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -190,7 +191,9 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// # Performance
 /// - O(n) where n is vector dimension
 /// - Good for sparse vectors
+#[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -236,6 +239,7 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
+#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -271,6 +275,7 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
+#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -284,7 +289,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 
     let sum_sq: f32 = a
         .iter()
-        .zip(b.iter().cloned())
+        .zip(b.iter())
         .map(|(x, y)| {
             let diff = x - y;
             diff * diff
@@ -297,7 +302,9 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 /// Compute cosine distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
 pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -616,3 +623,98 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
 /// - The dot product as f64
 /// - 0.0 if dimensions don't match
 #[inline]
+pub fn dot_product_int8(a: &[i8], b: &[i8]) -> f64 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+
+    let sum: i64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| i64::from(x) * i64::from(y))
+        .sum();
+
+    sum as f64
+}
+
+/// Manhattan (L1) distance for int8 vectors.
+///
+/// Uses i64 accumulation to avoid overflow.
+///
+/// # Returns
+/// - The Manhattan distance as f64
+/// - `f64::INFINITY` if dimensions don't match
+#[inline]
+pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
+    if a.len() != b.len() {
+        return f64::INFINITY;
+    }
+
+    let sum: i64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| i64::from((i32::from(x) - i32::from(y)).abs()))
+        .sum();
+
+    sum as f64
+}
+
+/// Euclidean distance by dequantizing int8 to f32 first.
+///
+/// This provides higher accuracy than native int8 distance
+/// at the cost of more computation.
+#[inline]
+pub fn euclidean_distance_dequantized(a: &[i8], b: &[i8]) -> f64 {
+    let a_f32 = dequantize_vector(a);
+    let b_f32 = dequantize_vector(b);
+    euclidean_distance(&a_f32, &b_f32)
+}
+
+/// Cosine distance by dequantizing int8 to f32 first.
+///
+/// This provides higher accuracy than native int8 distance
+/// at the cost of more computation.
+#[inline]
+pub fn cosine_distance_dequantized(a: &[i8], b: &[i8]) -> f64 {
+    let a_f32 = dequantize_vector(a);
+    let b_f32 = dequantize_vector(b);
+    cosine_distance(&a_f32, &b_f32)
+}
+
+/// Compute LSH bucket for int8 vector.
+///
+/// Casts int8 values to f64 for hyperplane dot product computation.
+/// Uses the same hyperplanes as f32 vectors for consistency.
+///
+/// # Arguments
+/// * `v` - The int8 vector to hash
+/// * `table_idx` - Index of the hash table
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash)
+pub fn lsh_bucket_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize) -> i64 {
+    if v.is_empty() || num_hyperplanes == 0 {
+        return 0;
+    }
+
+    let num_bits = num_hyperplanes.min(62);
+    let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
+
+    let mut bucket: i64 = 0;
+
+    for h in 0..hyperplanes.num_hyperplanes {
+        let hp = hyperplanes.hyperplane(h);
+        let dot: f64 = v
+            .iter()
+            .zip(hp.iter())
+            .map(|(&vi, &hi)| f64::from(vi) * f64::from(hi))
+            .sum();
+        if dot > 0.0 {
+            bucket |= 1i64 << h;
+        }
+    }
+
+    bucket
+}
+
+// Locality Sensitive Hashing (LSH)
+/// LSH parameters for a hash table.
+#[derive(Debug, Clone)]
