@@ -27,7 +27,7 @@ fn vec_val(v: Vec<f32>) -> Value {
 
 /// Helper to create an (id, vector) tuple
 fn id_vec_tuple(id: i64, v: Vec<f32>) -> Tuple {
-    Tuple::new(vec![Value::Int64(id), vec_val(v)])
+    Tuple::new(vec![Value::Int64(id.clone()), vec_val(v)])
 }
 
 // Basic Vector Function Tests (Single Scan)
@@ -47,7 +47,7 @@ fn test_euclidean_distance_basic() {
     // Euclidean distance from origin should be 5.0 (3-4-5 triangle)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0]).",
+            "result(Id, D.clone()) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0]).",
         )
         .unwrap();
 
@@ -117,6 +117,7 @@ fn test_manhattan_distance_basic() {
         .insert_tuples("embedding", vec![id_vec_tuple(1, vec![1.0, 2.0, 3.0])])
         .unwrap();
 
+    // FIXME: extract to named variable
     let results = storage
         .execute_query_with_rules_tuples(
             "result(Id, D) :- embedding(Id, V), D = manhattan(V, [0.0, 0.0, 0.0]).",
@@ -130,5 +131,72 @@ fn test_manhattan_distance_basic() {
 }
 
 // Pairwise Similarity Tests (Cartesian Product)
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_pairwise_cosine_similarity() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_pairwise").unwrap();
+    storage.use_knowledge_graph("test_pairwise").unwrap();
+
+    // Three orthogonal unit vectors
+    storage
+        .insert_tuples(
+            "embedding",
+            vec![
+                id_vec_tuple(1, vec![1.0, 0.0, 0.0]),
+                id_vec_tuple(2, vec![0.0, 1.0, 0.0]),
+                id_vec_tuple(3, vec![0.0, 0.0, 1.0]),
+            ],
+        )
+        .unwrap();
+
+    // Pairwise cosine similarity - the KEY test case for Cartesian product
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    // Should have 3 pairs: (1,2), (1,3), (2,3)
+    assert_eq!(
+        results.len(),
+        3,
+        "Pairwise cosine should have 3 pairs, got {}: {:?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_pairwise_euclidean_distance() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_pairwise_euc").unwrap();
+    storage.use_knowledge_graph("test_pairwise_euc").unwrap();
+
+    // Points in 2D space
+    storage
+        .insert_tuples(
+            "point",
+            vec![
+                id_vec_tuple(1, vec![0.0, 0.0]),
+                id_vec_tuple(2, vec![3.0, 0.0]),
+                id_vec_tuple(3, vec![0.0, 4.0]),
+            ],
+        )
+        .unwrap();
+
+    // Pairwise distances
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, D.clone()) :- point(Id1, V1), point(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).",
+        )
+        .unwrap();
+
+    assert_eq!(results.len(), 3, "Pairwise euclidean should have 3 pairs");
+}
+
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
