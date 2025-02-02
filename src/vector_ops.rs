@@ -137,6 +137,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -190,7 +191,9 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// # Performance
 /// - O(n) where n is vector dimension
 /// - Good for sparse vectors
+#[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -236,6 +239,7 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
+#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -271,6 +275,7 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
+#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -299,6 +304,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
 #[inline]
 pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
+    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -788,6 +794,7 @@ impl HyperplaneCacheEntry {
     }
 
     /// Get last access time for LRU comparison
+    #[inline]
     fn last_access(&self) -> u64 {
         self.last_accessed.load(Ordering::Relaxed)
     }
@@ -795,3 +802,55 @@ impl HyperplaneCacheEntry {
 
 /// LSH hyperplane cache statistics
 #[derive(Debug, Clone, Default)]
+pub struct LshCacheStats {
+    pub hits: usize,
+    pub misses: usize,
+    pub evictions: usize,
+    pub entries: usize,
+}
+
+impl LshCacheStats {
+    /// Get the cache hit rate (0.0 to 1.0)
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
+    }
+}
+
+/// Atomic stats for lock-free updates on fast path
+struct AtomicCacheStats {
+    hits: AtomicUsize,
+    misses: AtomicUsize,
+    evictions: AtomicUsize,
+}
+
+impl AtomicCacheStats {
+    fn new() -> Self {
+        Self {
+            hits: AtomicUsize::new(0),
+            misses: AtomicUsize::new(0),
+            evictions: AtomicUsize::new(0),
+        }
+    }
+
+    fn to_stats(&self, entries: usize) -> LshCacheStats {
+        LshCacheStats {
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
+            evictions: self.evictions.load(Ordering::Relaxed),
+            entries,
+        }
+    }
+
+    fn reset(&self) {
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+        self.evictions.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Thread-safe LSH hyperplane cache

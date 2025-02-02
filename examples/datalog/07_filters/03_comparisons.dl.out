@@ -1,0 +1,81 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cmp_n07t03
+Knowledge graph 'test_cmp_n07t03' created.
+Switched to knowledge graph: test_cmp_n07t03
+> .kg use test_cmp_n07t03
+Switched to knowledge graph: test_cmp_n07t03
+> +data[(1, 100), (3, 101), (5, 102), (7, 103), (9, 104)].
+Inserted 5 fact(s) into 'data'.
+> +lt_five(X, Y) :- data(X, Y), X < 5.
+Rule 'lt_five' registered.
+> ?- lt_five(X, Y).
+2 rows:
+  (1, 100)
+  (3, 101)
+> +gt_five(X, Y) :- data(X, Y), X > 5.
+Rule 'gt_five' registered.
+> ?- gt_five(X, Y).
+2 rows:
+  (7, 103)
+  (9, 104)
+> +le_five(X, Y) :- data(X, Y), X <= 5.
+Rule 'le_five' registered.
+> ?- le_five(X, Y).
+3 rows:
+  (1, 100)
+  (3, 101)
+  (5, 102)
+> +ge_five(X, Y) :- data(X, Y), X >= 5.
+Rule 'ge_five' registered.
+> ?- ge_five(X, Y).
+3 rows:
+  (5, 102)
+  (7, 103)
+  (9, 104)
+> +pairs[(1, 5), (3, 3), (7, 2), (9, 10)].
+Inserted 4 fact(s) into 'pairs'.
+> +a_lt_b(A, B) :- pairs(A, B), A < B.
+Rule 'a_lt_b' registered.
+> ?- a_lt_b(X, Y).
+2 rows:
+  (1, 5)
+  (9, 10)
+> +a_gt_b(A, B) :- pairs(A, B), A > B.
+Rule 'a_gt_b' registered.
+> ?- a_gt_b(X, Y).
+1 rows:
+  (7, 2)
+> +a_eq_b(A, B) :- pairs(A, B), A = B.
+Rule 'a_eq_b' registered.
+> ?- a_eq_b(X, Y).
+1 rows:
+  (3, 3)
+> +a_neq_b(A, B) :- pairs(A, B), A != B.
+Rule 'a_neq_b' registered.
+> ?- a_neq_b(X, Y).
+3 rows:
+  (1, 5)
+  (7, 2)
+  (9, 10)
+> +a_le_b(A, B) :- pairs(A, B), A <= B.
+Rule 'a_le_b' registered.
+> ?- a_le_b(X, Y).
+3 rows:
+  (1, 5)
+  (3, 3)
+  (9, 10)
+> +a_ge_b(A, B) :- pairs(A, B), A >= B.
+Rule 'a_ge_b' registered.
+> ?- a_ge_b(X, Y).
+2 rows:
+  (3, 3)
+  (7, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cmp_n07t03
+Knowledge graph 'test_cmp_n07t03' dropped.

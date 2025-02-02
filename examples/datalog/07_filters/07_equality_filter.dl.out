@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_eq_filter_n07t07
+Knowledge graph 'test_eq_filter_n07t07' created.
+Switched to knowledge graph: test_eq_filter_n07t07
+> .kg use test_eq_filter_n07t07
+Switched to knowledge graph: test_eq_filter_n07t07
+> +items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 100)].
+Inserted 4 fact(s) into 'items'.
+> category_a(Id, Price) :- items(Id, "A", Price).
+2 rows:
+  (1, 100)
+  (3, 150)
+(session: 1 rule(s))
+> price_100(Id, Cat) :- items(Id, Cat, 100).
+2 rows:
+  (1, "A")
+  (4, "C")
+(session: 2 rule(s))
+> ?- category_a(Id, Price).
+2 rows:
+  (1, 100)
+  (3, 150)
+> ?- price_100(Id, Cat).
+2 rows:
+  (1, "A")
+  (4, "C")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_eq_filter_n07t07
+Knowledge graph 'test_eq_filter_n07t07' dropped.

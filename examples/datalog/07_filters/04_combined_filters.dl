@@ -1,0 +1,25 @@
+% Test: Combined Filters
+% Description: Tests multiple filter conditions in a single rule
+
+.kg create test_combined_filters_n07t04
+.kg use test_combined_filters_n07t04
+
+% Insert test data
++data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
+      (6, 15), (7, 25), (8, 35), (9, 45), (10, 55)].
+
+% Filter with X > 3 AND Y < 50
++filtered1(X, Y) :- data(X, Y), X > 3, Y < 50.
+?- filtered1(X, Y).
+
+% Filter with range: 20 <= Y <= 40
++filtered2(X, Y) :- data(X, Y), Y >= 20, Y <= 40.
+?- filtered2(X, Y).
+
+% Filter with X != Y relationship
++different(X, Y) :- data(X, Y), X != Y.
+?- different(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_combined_filters_n07t04
