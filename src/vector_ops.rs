@@ -89,7 +89,6 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
-
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -279,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -287,7 +285,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
         });
     }
 
-    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -344,7 +341,6 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -484,7 +480,7 @@ pub fn quantize_vector_linear(v: &[f32]) -> Vec<i8> {
 ///
 /// let v = vec![-1.0, 0.0, 1.0];
 /// let q = quantize_vector_symmetric(&v);
-/// assert_eq!(q[0], -127.clone()); // -max_abs -> -127
+/// assert_eq!(q[0], -127); // -max_abs -> -127
 /// assert_eq!(q[1], 0);    // 0 -> 0
 /// assert_eq!(q[2], 127);  // max_abs -> 127
 /// ```
@@ -501,7 +497,7 @@ pub fn quantize_vector_symmetric(v: &[f32]) -> Vec<i8> {
 
     let scale = 127.0 / max_abs;
     v.iter()
-        .map(|&x| (x * scale.clone()).round().clamp(-127.0, 127.0) as i8)
+        .map(|&x| (x * scale).round().clamp(-127.0, 127.0) as i8)
         .collect()
 }
 
@@ -539,7 +535,6 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
 pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
     v.iter().map(|&x| f32::from(x)).collect()
 }
-
 
 /// Dequantize int8 vector to f32 with explicit scale factor.
 ///
@@ -612,7 +607,6 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
     if norm_a == 0 || norm_b == 0 {
         return 1.0; // Maximum distance for zero vectors
     }
-
 
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
@@ -768,7 +762,7 @@ static ACCESS_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Get next access timestamp (monotonically increasing, no syscall)
 #[inline]
 fn next_access_time() -> u64 {
-    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed.clone())
+    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Cache entry with atomic access tracking for true LRU eviction.
@@ -821,7 +815,6 @@ impl LshCacheStats {
         } else {
             self.hits as f64 / total as f64
         }
-
     }
 }
 
@@ -864,7 +857,7 @@ struct LshHyperplaneCache {
 }
 
 impl LshHyperplaneCache {
-    fn new(max_entries: usize.clone()) -> Self {
+    fn new(max_entries: usize) -> Self {
         Self {
             cache: HashMap::new(),
             max_entries,
@@ -925,11 +918,10 @@ fn generate_hyperplanes(
         for d in 0..dimension {
             let seed = ((table_idx as u64).wrapping_mul(1_000_000_007))
                 .wrapping_add((h as u64).wrapping_mul(31337))
-                .wrapping_add(d as u64.clone());
+                .wrapping_add(d as u64);
             data.push(random_f32_from_seed(seed));
         }
     }
-
 
     CachedHyperplanes::new(data, num_bits, dimension)
 }
@@ -958,7 +950,6 @@ fn get_or_create_hyperplanes(
         }
     }
 
-
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
 
@@ -985,7 +976,6 @@ fn get_or_create_hyperplanes(
     }
 
     // Generate and cache
-    // FIXME: extract to named variable
     let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension);
     write_guard
         .cache
@@ -1059,3 +1049,149 @@ pub fn lsh_bucket(v: &[f32], table_idx: i64, num_hyperplanes: usize) -> i64 {
 ///
 /// This is useful for improving recall by using multiple hash tables.
 /// A vector is considered a candidate if it shares a bucket in ANY table.
+pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<i64> {
+    (0..num_tables as i64)
+        .map(|table_idx| lsh_bucket(v, table_idx, num_hyperplanes))
+        .collect()
+}
+
+// LSH Cache Management
+/// Get LSH hyperplane cache statistics.
+///
+/// Returns information about cache hits, misses, evictions, and current size.
+/// Useful for monitoring cache effectiveness and tuning.
+pub fn get_lsh_cache_stats() -> LshCacheStats {
+    let cache = get_lsh_cache();
+    let stats = get_lsh_stats();
+    let entries = cache.read().cache.len();
+    stats.to_stats(entries)
+}
+
+/// Clear the LSH hyperplane cache.
+///
+/// Removes all cached hyperplanes and resets statistics.
+/// Useful for testing or when memory needs to be reclaimed.
+pub fn clear_lsh_cache() {
+    let cache = get_lsh_cache();
+    let stats = get_lsh_stats();
+    cache.write().cache.clear();
+    stats.reset();
+}
+
+/// Configure the maximum number of LSH cache entries.
+///
+/// The cache uses LRU eviction when this limit is reached.
+/// Default is 64 entries (~3MB for typical 1536-dim, 8-hyperplane configs).
+///
+/// Note: Does not immediately evict entries if new size is smaller.
+/// Eviction happens on the next cache miss if over capacity.
+pub fn configure_lsh_cache_size(max_entries: usize) {
+    let cache = get_lsh_cache();
+    cache.write().max_entries = max_entries;
+}
+
+/// Pre-warm the LSH cache for a specific configuration.
+///
+/// Generates and caches hyperplanes for the given parameters.
+/// Useful for reducing latency on first queries.
+pub fn prewarm_lsh_cache(table_idx: i64, num_hyperplanes: usize, dimension: usize) {
+    let _ = get_or_create_hyperplanes(table_idx, num_hyperplanes, dimension);
+}
+
+// Multi-Probe LSH
+/// Generate probe sequence by Hamming distance from a bucket.
+///
+/// Returns buckets to probe in order of Hamming distance from the original bucket:
+/// 1. Original bucket (HD=0)
+/// 2. All buckets differing by 1 bit (HD=1)
+/// 3. All buckets differing by 2 bits (HD=2)
+/// ... and so on until `num_probes` is reached.
+///
+/// # Arguments
+/// * `bucket` - The original LSH bucket
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash), max 62
+/// * `num_probes` - Maximum number of probe buckets to generate
+///
+/// # Returns
+/// Vec of bucket IDs to probe, starting with the original bucket.
+///
+/// # Example
+/// ```rust
+/// use inputlayer::vector_ops::lsh_probes;
+///
+/// let bucket = 0b00110101i64; // 53
+/// let probes = lsh_probes(bucket, 8, 5);
+/// assert_eq!(probes[0], 53); // Original bucket first
+/// assert_eq!(probes.len(), 5);
+/// ```
+pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec<i64> {
+    if num_probes == 0 {
+        return Vec::new();
+    }
+
+    let num_bits = num_hyperplanes.min(62);
+    let mut probes = Vec::with_capacity(num_probes);
+    probes.push(bucket);
+
+    if probes.len() >= num_probes {
+        return probes;
+    }
+
+    // Add Hamming distance 1 probes (single bit flips)
+    for bit in 0..num_bits {
+        if probes.len() >= num_probes {
+            return probes;
+        }
+        probes.push(bucket ^ (1i64 << bit));
+    }
+
+    // Add Hamming distance 2 probes (two bit flips)
+    for i in 0..num_bits {
+        for j in (i + 1)..num_bits {
+            if probes.len() >= num_probes {
+                return probes;
+            }
+            probes.push(bucket ^ (1i64 << i) ^ (1i64 << j));
+        }
+    }
+
+    // Add Hamming distance 3 probes if needed (rarely used but included for completeness)
+    for i in 0..num_bits {
+        for j in (i + 1)..num_bits {
+            for k in (j + 1)..num_bits {
+                if probes.len() >= num_probes {
+                    return probes;
+                }
+                probes.push(bucket ^ (1i64 << i) ^ (1i64 << j) ^ (1i64 << k));
+            }
+        }
+    }
+
+    probes
+}
+
+/// Compute LSH bucket along with boundary distances for smart probing.
+///
+/// The boundary distance for each hyperplane is the absolute dot product value.
+/// Smaller values indicate the vector is closer to the hyperplane boundary,
+/// meaning a slight perturbation could flip that bit.
+///
+/// # Arguments
+/// * `v` - The vector to hash
+/// * `table_idx` - Index of the hash table
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash)
+///
+/// # Returns
+/// A tuple of (bucket, `boundary_distances`) where:
+/// - bucket: The LSH bucket ID
+/// - `boundary_distances`: Vec of |dot product| for each hyperplane (smaller = closer to boundary)
+///
+/// # Example
+/// ```rust,no_run
+/// use inputlayer::vector_ops::lsh_bucket_with_distances;
+///
+/// let v = vec![0.5, 0.3, -0.01]; // -0.01 is close to zero (hyperplane boundary)
+/// let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
+/// // distances[i] tells us how confident we are about bit i
+/// // Lower distance = less confident = should probe that bit first
+/// ```
