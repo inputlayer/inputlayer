@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_eq_n07t14
+Knowledge graph 'test_str_eq_n07t14' created.
+Switched to knowledge graph: test_str_eq_n07t14
+> .kg use test_str_eq_n07t14
+Switched to knowledge graph: test_str_eq_n07t14
+> +users[(1, "admin", "active"), (2, "user", "active"), (3, "admin", "inactive")].
+Inserted 3 fact(s) into 'users'.
+> admins(Id, Status) :- users(Id, "admin", Status).
+2 rows:
+  (1, "active")
+  (3, "inactive")
+(session: 1 rule(s))
+> active(Id, Role) :- users(Id, Role, "active").
+2 rows:
+  (1, "admin")
+  (2, "user")
+(session: 2 rule(s))
+> ?- admins(Id, S).
+2 rows:
+  (1, "active")
+  (3, "inactive")
+> ?- active(Id, R).
+2 rows:
+  (1, "admin")
+  (2, "user")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_str_eq_n07t14
+Knowledge graph 'test_str_eq_n07t14' dropped.
