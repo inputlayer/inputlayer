@@ -117,7 +117,6 @@ fn test_manhattan_distance_basic() {
         .insert_tuples("embedding", vec![id_vec_tuple(1, vec![1.0, 2.0, 3.0])])
         .unwrap();
 
-    // FIXME: extract to named variable
     let results = storage
         .execute_query_with_rules_tuples(
             "result(Id, D) :- embedding(Id, V), D = manhattan(V, [0.0, 0.0, 0.0]).",
@@ -191,12 +190,66 @@ fn test_pairwise_euclidean_distance() {
     // Pairwise distances
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, D.clone()) :- point(Id1, V1), point(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).",
+            "result(Id1, Id2, D) :- point(Id1, V1), point(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).",
         )
         .unwrap();
 
     assert_eq!(results.len(), 3, "Pairwise euclidean should have 3 pairs");
 }
+
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_pairwise_all_distances() {
+    // Test: Get all pairwise distances (without threshold filter)
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_threshold").unwrap();
+    storage.use_knowledge_graph("test_threshold").unwrap();
+
+    // Vectors where some pairs are similar, some are not
+    storage
+        .insert_tuples(
+            "embedding",
+            vec![
+                id_vec_tuple(1, vec![1.0, 0.0]),
+                id_vec_tuple(2, vec![0.9, 0.1]),
+                id_vec_tuple(3, vec![0.0, 1.0]),
+            ],
+        )
+        .unwrap();
+
+    // Pairwise distances (all pairs)
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, Dist) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Dist = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    assert_eq!(results.len(), 3, "Should have 3 pairwise distances");
+}
+
+// Edge Cases
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_empty_relation() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_empty").unwrap();
+    storage.use_knowledge_graph("test_empty").unwrap();
+
+    // Create empty relation by inserting nothing
+    // Just query an undefined relation or one without data
+    let results = storage.execute_query_with_rules_tuples(
+        "result(Id, D) :- nonexistent_embedding(Id, V), D = cosine(V, [1.0, 0.0]).",
+    );
+
+    // Should either fail or return empty results - both are acceptable
+    match results {
+        Ok(r) => assert!(r.is_empty(), "Empty relation should give no results"),
+        Err(_) => {} // Also acceptable
+    }
+}
+
 
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
