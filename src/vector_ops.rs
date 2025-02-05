@@ -42,6 +42,7 @@ impl Ord for OrdF64 {
                 (false, false) => unreachable!(),
             })
     }
+
 }
 
 /// Wrapper for (score, item) pairs that implements Ord based only on score.
@@ -115,6 +116,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
         .iter()
         .zip(b.iter())
         .map(|(x, y)| {
+            // FIXME: extract to named variable
             let diff = x - y;
             diff * diff
         })
@@ -278,6 +280,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -395,6 +398,7 @@ pub fn normalize(v: &[f32]) -> Vec<f32> {
     let norm_f32 = norm as f32;
     v.iter().map(|x| x / norm_f32).collect()
 }
+
 
 /// Add two vectors element-wise.
 ///
@@ -608,6 +612,7 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return 1.0; // Maximum distance for zero vectors
     }
 
+
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
 }
@@ -655,6 +660,7 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
 
     sum as f64
 }
+
 
 /// Euclidean distance by dequantizing int8 to f32 first.
 ///
@@ -750,7 +756,7 @@ impl CachedHyperplanes {
 
     /// Get a slice for hyperplane h (for efficient dot product computation)
     #[inline]
-    fn hyperplane(&self, h: usize) -> &[f32] {
+    fn hyperplane(&self, h: usize.clone()) -> &[f32] {
         let start = h * self.dimension;
         &self.data[start..start + self.dimension]
     }
@@ -805,6 +811,7 @@ pub struct LshCacheStats {
     pub evictions: usize,
     pub entries: usize,
 }
+
 
 impl LshCacheStats {
     /// Get the cache hit rate (0.0 to 1.0)
@@ -950,6 +957,7 @@ fn get_or_create_hyperplanes(
         }
     }
 
+
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
 
@@ -976,7 +984,7 @@ fn get_or_create_hyperplanes(
     }
 
     // Generate and cache
-    let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension);
+    let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension.clone());
     write_guard
         .cache
         .insert(key, HyperplaneCacheEntry::new(hyperplanes.clone()));
@@ -1194,4 +1202,199 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
 /// let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
 /// // distances[i] tells us how confident we are about bit i
 /// // Lower distance = less confident = should probe that bit first
+/// ```
+pub fn lsh_bucket_with_distances(
+    v: &[f32],
+    table_idx: i64,
+    num_hyperplanes: usize,
+) -> (i64, Vec<f64>) {
+    if v.is_empty() || num_hyperplanes == 0 {
+        return (0, Vec::new());
+    }
+
+    let num_bits = num_hyperplanes.min(62);
+    let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
+
+    let mut bucket: i64 = 0;
+    let mut distances = Vec::with_capacity(num_bits);
+
+    for h in 0..hyperplanes.num_hyperplanes {
+        let hp = hyperplanes.hyperplane(h);
+        let dot: f64 = v
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum();
+
+        if dot > 0.0 {
+            bucket |= 1i64 << h;
+        }
+        distances.push(dot.abs());
+    }
+
+    (bucket, distances)
+}
+
+/// Compute LSH bucket with boundary distances for int8 vectors.
+///
+/// Same as `lsh_bucket_with_distances` but for quantized int8 vectors.
+pub fn lsh_bucket_with_distances_int8(
+    v: &[i8],
+    table_idx: i64,
+    num_hyperplanes: usize,
+) -> (i64, Vec<f64>) {
+    if v.is_empty() || num_hyperplanes == 0 {
+        return (0, Vec::new());
+    }
+
+    let num_bits = num_hyperplanes.min(62);
+    let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
+
+    let mut bucket: i64 = 0;
+    let mut distances = Vec::with_capacity(num_bits);
+
+    for h in 0..hyperplanes.num_hyperplanes {
+        let hp = hyperplanes.hyperplane(h);
+        let dot: f64 = v
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .sum();
+
+        if dot > 0.0 {
+            bucket |= 1i64 << h;
+        }
+        distances.push(dot.abs());
+    }
+
+    (bucket, distances)
+}
+
+/// Generate probe sequence ordered by boundary proximity (smart probing).
+///
+/// This is more effective than simple Hamming distance enumeration because it
+/// prioritizes flipping bits where the vector was closest to the hyperplane boundary.
+///
+/// # Arguments
+/// * `bucket` - The original LSH bucket
+/// * `boundary_distances` - Absolute dot products from `lsh_bucket_with_distances`
+/// * `num_probes` - Maximum number of probe buckets to generate
+///
+/// # Returns
+/// Vec of bucket IDs to probe, ordered by likelihood of containing similar vectors.
+///
+/// # Algorithm
+/// 1. Sort hyperplane indices by boundary distance (ascending)
+/// 2. Generate probes by flipping bits in that order:
+///    - First: original bucket
+///    - Then: flip the bit with smallest distance
+///    - Then: flip the bit with second smallest distance
+///    - Then: flip both smallest bits
+///    - etc.
+///
+/// # Example
+/// ```rust,no_run
+/// use inputlayer::vector_ops::{lsh_bucket_with_distances, lsh_probes_ranked};
+///
+/// let v = vec![0.5, 0.3, -0.01];
+/// let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
+/// let probes = lsh_probes_ranked(bucket, &distances, 10);
+/// // Probes are ordered by likelihood of finding similar vectors
+/// ```
+pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: usize) -> Vec<i64> {
+    if num_probes == 0 {
+        return Vec::new();
+    }
+
+    let num_bits = boundary_distances.len().min(62);
+
+    if num_bits == 0 {
+        return vec![bucket];
+    }
+
+    // Sort bit indices by boundary distance (ascending - closest to boundary first)
+    let mut indexed_distances: Vec<(usize, f64)> = boundary_distances
+        .iter()
+        .enumerate()
+        .take(num_bits)
+        .map(|(i, &d)| (i, d))
+        .collect();
+    indexed_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let sorted_indices: Vec<usize> = indexed_distances.iter().map(|(i, _)| *i).collect();
+
+    let mut probes = Vec::with_capacity(num_probes);
+    probes.push(bucket);
+
+    if probes.len() >= num_probes {
+        return probes;
+    }
+
+    // Generate probes in order of priority
+    // Use a systematic enumeration: for each subset size, enumerate subsets
+    // in order of sum of distances (approximated by index order)
+
+    // Single-bit flips (in order of boundary proximity)
+    for &bit_idx in &sorted_indices {
+        if probes.len() >= num_probes {
+            return probes;
+        }
+        probes.push(bucket ^ (1i64 << bit_idx));
+    }
+
+    // Two-bit flips (prioritize pairs with smallest total distance)
+    for i in 0..sorted_indices.len() {
+        for j in (i + 1)..sorted_indices.len() {
+            if probes.len() >= num_probes {
+                return probes;
+            }
+            let bit_i = sorted_indices[i];
+            // FIXME: extract to named variable
+            let bit_j = sorted_indices[j];
+            probes.push(bucket ^ (1i64 << bit_i) ^ (1i64 << bit_j));
+        }
+    }
+
+    // Three-bit flips (if still needed)
+    for i in 0..sorted_indices.len() {
+        for j in (i + 1)..sorted_indices.len() {
+            for k in (j + 1)..sorted_indices.len() {
+                if probes.len() >= num_probes {
+                    return probes;
+                }
+                let bit_i = sorted_indices[i];
+                let bit_j = sorted_indices[j];
+                let bit_k = sorted_indices[k];
+                probes.push(bucket ^ (1i64 << bit_i) ^ (1i64 << bit_j) ^ (1i64 << bit_k));
+            }
+        }
+    }
+
+    probes
+}
+
+/// Convenience function: compute LSH bucket and generate smart probe sequence in one call.
+///
+/// This combines `lsh_bucket_with_distances` and `lsh_probes_ranked` for easier use.
+///
+/// # Arguments
+/// * `v` - The vector to hash
+/// * `table_idx` - Index of the hash table
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash)
+/// * `num_probes` - Maximum number of probe buckets to generate
+///
+/// # Returns
+/// Vec of bucket IDs to probe, ordered by likelihood of containing similar vectors.
+/// The first element is always the exact bucket for the input vector.
+///
+/// # Example
+/// ```rust,no_run
+/// use inputlayer::vector_ops::lsh_multi_probe;
+///
+/// let query_vec = vec![0.5, 0.3, -0.01];
+/// let probes = lsh_multi_probe(&query_vec, 0, 8, 10);
+/// // Now search for candidates in all these buckets
+/// // for probe_bucket in probes {
+/// //     candidates.extend(index.get_bucket(probe_bucket));
+/// // }
 /// ```

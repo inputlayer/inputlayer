@@ -1,0 +1,15 @@
+% Test: Not exists filter
+
+.kg create test_not_exists_n07t24
+.kg use test_not_exists_n07t24
+
++products[(1, "Widget"), (2, "Gadget"), (3, "Gizmo")].
++orders[(101, 1), (102, 1)].
+
+% Products with no orders
+no_orders(ProdId, Name) :- products(ProdId, Name), !orders(_, ProdId).
+
+?- no_orders(Id, N).
+
+.kg use default
+.kg drop test_not_exists_n07t24
