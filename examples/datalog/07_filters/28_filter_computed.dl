@@ -1,0 +1,19 @@
+% Test: Filter on computed value
+
+.kg create test_filter_computed_n07t28
+.kg use test_filter_computed_n07t28
+
++numbers[(1,), (2,), (3,), (4,), (5,), (6,)].
+
+% Filter on doubled value
+big_doubled(X, D) :- numbers(X), D = X * 2, D > 6.
+
+?- big_doubled(X, D).
+
+% Filter on sum
+above_threshold(X, S) :- numbers(X), S = X + 10, S >= 14.
+
+?- above_threshold(X, S).
+
+.kg use default
+.kg drop test_filter_computed_n07t28

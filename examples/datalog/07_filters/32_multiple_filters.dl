@@ -1,0 +1,14 @@
+% Test: Multiple filter conditions
+
+.kg create test_multi_filter_n07t32
+.kg use test_multi_filter_n07t32
+
++data[(1, "A", 100), (2, "B", 200), (3, "A", 300), (4, "B", 400)].
+
+% Multiple conditions
+filtered(Id, Cat, Val) :- data(Id, Cat, Val), Cat = "A", Val > 50.
+
+?- filtered(Id, Cat, Val).
+
+.kg use default
+.kg drop test_multi_filter_n07t32

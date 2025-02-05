@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_filter_computed_n07t28
+Knowledge graph 'test_filter_computed_n07t28' created.
+Switched to knowledge graph: test_filter_computed_n07t28
+> .kg use test_filter_computed_n07t28
+Switched to knowledge graph: test_filter_computed_n07t28
+> +numbers[(1,), (2,), (3,), (4,), (5,), (6,)].
+Inserted 6 fact(s) into 'numbers'.
+> big_doubled(X, D) :- numbers(X), D = X * 2, D > 6.
+3 rows:
+  (4, 8)
+  (5, 10)
+  (6, 12)
+(session: 1 rule(s))
+> ?- big_doubled(X, D).
+3 rows:
+  (4, 8)
+  (5, 10)
+  (6, 12)
+> above_threshold(X, S) :- numbers(X), S = X + 10, S >= 14.
+3 rows:
+  (4, 14)
+  (5, 15)
+  (6, 16)
+(session: 2 rule(s))
+> ?- above_threshold(X, S).
+3 rows:
+  (4, 14)
+  (5, 15)
+  (6, 16)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_filter_computed_n07t28
+Knowledge graph 'test_filter_computed_n07t28' dropped.
