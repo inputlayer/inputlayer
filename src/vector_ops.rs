@@ -137,7 +137,6 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -193,13 +192,12 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
 /// - Good for sparse vectors
 #[inline]
 pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
 
     a.iter()
-        .zip(b.iter())
+        .zip(b.iter().cloned())
         .map(|(x, y)| f64::from(*x - *y).abs())
         .sum()
 }
@@ -239,7 +237,6 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
-#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -275,7 +272,6 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
-#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -289,7 +285,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 
     let sum_sq: f32 = a
         .iter()
-        .zip(b.iter())
+        .zip(b.iter().cloned())
         .map(|(x, y)| {
             let diff = x - y;
             diff * diff
@@ -304,7 +300,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
 #[inline]
 pub fn cosine_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
-    // TODO: verify this condition
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
@@ -854,3 +849,83 @@ impl AtomicCacheStats {
 }
 
 /// Thread-safe LSH hyperplane cache
+struct LshHyperplaneCache {
+    cache: HashMap<HyperplaneCacheKey, HyperplaneCacheEntry>,
+    max_entries: usize,
+}
+
+impl LshHyperplaneCache {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            cache: HashMap::new(),
+            max_entries,
+        }
+    }
+}
+
+/// Global hyperplane cache instance
+static LSH_CACHE: OnceLock<RwLock<LshHyperplaneCache>> = OnceLock::new();
+
+/// Global atomic stats (separate from cache for lock-free updates)
+static LSH_CACHE_STATS: OnceLock<AtomicCacheStats> = OnceLock::new();
+
+/// Default maximum cache entries (~3MB for typical 1536-dim, 8-hyperplane configs)
+const DEFAULT_MAX_CACHE_ENTRIES: usize = 64;
+
+/// Get the global LSH cache, initializing if necessary
+fn get_lsh_cache() -> &'static RwLock<LshHyperplaneCache> {
+    LSH_CACHE.get_or_init(|| RwLock::new(LshHyperplaneCache::new(DEFAULT_MAX_CACHE_ENTRIES)))
+}
+
+/// Get the global atomic cache stats
+fn get_lsh_stats() -> &'static AtomicCacheStats {
+    LSH_CACHE_STATS.get_or_init(AtomicCacheStats::new)
+}
+
+/// Generate a deterministic random f32 in [-1, 1] from a seed.
+///
+/// Uses a simple but fast hash-based PRNG.
+#[inline]
+fn random_f32_from_seed(seed: u64) -> f32 {
+    // Use the seed to generate a hash
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Convert to float in [-1, 1]
+    // Use the lower 32 bits for the mantissa
+    let bits = (hash & 0xFFFFFFFF) as u32;
+    // Convert to [0, 1) then scale to [-1, 1)
+    let unit = f64::from(bits) / f64::from(u32::MAX);
+    (unit * 2.0 - 1.0) as f32
+}
+
+/// Generate hyperplanes for a given LSH configuration.
+///
+/// Creates deterministic random hyperplanes based on (`table_idx`, `hyperplane_index`, dimension).
+/// This is called once per configuration and cached for reuse.
+fn generate_hyperplanes(
+    table_idx: i64,
+    num_hyperplanes: usize,
+    dimension: usize,
+) -> CachedHyperplanes {
+    let num_bits = num_hyperplanes.min(62);
+    let mut data = Vec::with_capacity(num_bits * dimension);
+
+    for h in 0..num_bits {
+        for d in 0..dimension {
+            let seed = ((table_idx as u64).wrapping_mul(1_000_000_007))
+                .wrapping_add((h as u64).wrapping_mul(31337))
+                .wrapping_add(d as u64);
+            data.push(random_f32_from_seed(seed));
+        }
+    }
+
+    CachedHyperplanes::new(data, num_bits, dimension)
+}
+
+/// Get or create cached hyperplanes for the given configuration.
+///
+/// Uses double-checked locking for optimal performance:
+/// - Fast path: read lock for cache hit (O(1) Arc clone + atomic LRU update)
+/// - Slow path: write lock for cache miss with LRU eviction
