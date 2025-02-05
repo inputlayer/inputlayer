@@ -27,7 +27,7 @@ fn vec_val(v: Vec<f32>) -> Value {
 
 /// Helper to create an (id, vector) tuple
 fn id_vec_tuple(id: i64, v: Vec<f32>) -> Tuple {
-    Tuple::new(vec![Value::Int64(id.clone()), vec_val(v)])
+    Tuple::new(vec![Value::Int64(id), vec_val(v)])
 }
 
 // Basic Vector Function Tests (Single Scan)
@@ -47,7 +47,7 @@ fn test_euclidean_distance_basic() {
     // Euclidean distance from origin should be 5.0 (3-4-5 triangle)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D.clone()) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0]).",
+            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0]).",
         )
         .unwrap();
 
@@ -250,6 +250,69 @@ fn test_vector_empty_relation() {
     }
 }
 
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_single_element() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_single").unwrap();
+    storage.use_knowledge_graph("test_single").unwrap();
+
+    storage
+        .insert_tuples("embedding", vec![id_vec_tuple(1, vec![1.0, 0.0, 0.0])])
+        .unwrap();
+
+    // Single element query should work
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+        )
+        .unwrap();
+
+    assert_eq!(
+        results.len(),
+        1,
+        "Single element query should have 1 result"
+    );
+
+    // Pairwise on single element should give no results (no pairs where Id1 < Id2)
+    let pairwise = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    assert!(
+        pairwise.is_empty(),
+        "Single element pairwise should have no pairs"
+    );
+}
+
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_self_comparison() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_self").unwrap();
+    storage.use_knowledge_graph("test_self").unwrap();
+
+    storage
+        .insert_tuples("embedding", vec![id_vec_tuple(1, vec![1.0, 2.0, 3.0])])
+        .unwrap();
+
+    // Self comparison without filter (1x1 = 1 result)
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), D = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    assert_eq!(
+        results.len(),
+        1,
+        "Self comparison should have 1 result (1x1 Cartesian)"
+    );
+}
 
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
