@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_exists_filter_n07t23
+Knowledge graph 'test_exists_filter_n07t23' created.
+Switched to knowledge graph: test_exists_filter_n07t23
+> .kg use test_exists_filter_n07t23
+Switched to knowledge graph: test_exists_filter_n07t23
+> +customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'customers'.
+> +orders[(101, 1), (102, 1), (103, 2)].
+Inserted 3 fact(s) into 'orders'.
+> has_order(CustId, Name) :- customers(CustId, Name), orders(_, CustId).
+2 rows:
+  (1, "Alice")
+  (2, "Bob")
+(session: 1 rule(s))
+> ?- has_order(Id, N).
+2 rows:
+  (1, "Alice")
+  (2, "Bob")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_exists_filter_n07t23
+Knowledge graph 'test_exists_filter_n07t23' dropped.

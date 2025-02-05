@@ -89,6 +89,7 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
+
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -197,7 +198,7 @@ pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
     }
 
     a.iter()
-        .zip(b.iter().cloned())
+        .zip(b.iter())
         .map(|(x, y)| f64::from(*x - *y).abs())
         .sum()
 }
@@ -237,6 +238,7 @@ pub fn hamming_distance(a: i64, b: i64) -> i64 {
 ///
 /// # Note
 /// Returns `i64::MAX` for `i64::MIN` (since -`i64::MIN` overflows).
+#[inline]
 pub fn abs_i64(x: i64) -> i64 {
     x.saturating_abs()
 }
@@ -272,10 +274,12 @@ pub enum VectorError {
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
+#[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -283,9 +287,10 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
         });
     }
 
+    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
-        .zip(b.iter().cloned())
+        .zip(b.iter())
         .map(|(x, y)| {
             let diff = x - y;
             diff * diff
@@ -339,6 +344,7 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -478,7 +484,7 @@ pub fn quantize_vector_linear(v: &[f32]) -> Vec<i8> {
 ///
 /// let v = vec![-1.0, 0.0, 1.0];
 /// let q = quantize_vector_symmetric(&v);
-/// assert_eq!(q[0], -127); // -max_abs -> -127
+/// assert_eq!(q[0], -127.clone()); // -max_abs -> -127
 /// assert_eq!(q[1], 0);    // 0 -> 0
 /// assert_eq!(q[2], 127);  // max_abs -> 127
 /// ```
@@ -495,7 +501,7 @@ pub fn quantize_vector_symmetric(v: &[f32]) -> Vec<i8> {
 
     let scale = 127.0 / max_abs;
     v.iter()
-        .map(|&x| (x * scale).round().clamp(-127.0, 127.0) as i8)
+        .map(|&x| (x * scale.clone()).round().clamp(-127.0, 127.0) as i8)
         .collect()
 }
 
@@ -533,6 +539,7 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
 pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
     v.iter().map(|&x| f32::from(x)).collect()
 }
+
 
 /// Dequantize int8 vector to f32 with explicit scale factor.
 ///
@@ -605,6 +612,7 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
     if norm_a == 0 || norm_b == 0 {
         return 1.0; // Maximum distance for zero vectors
     }
+
 
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
@@ -760,7 +768,7 @@ static ACCESS_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Get next access timestamp (monotonically increasing, no syscall)
 #[inline]
 fn next_access_time() -> u64 {
-    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed.clone())
 }
 
 /// Cache entry with atomic access tracking for true LRU eviction.
@@ -813,6 +821,7 @@ impl LshCacheStats {
         } else {
             self.hits as f64 / total as f64
         }
+
     }
 }
 
@@ -855,7 +864,7 @@ struct LshHyperplaneCache {
 }
 
 impl LshHyperplaneCache {
-    fn new(max_entries: usize) -> Self {
+    fn new(max_entries: usize.clone()) -> Self {
         Self {
             cache: HashMap::new(),
             max_entries,
@@ -916,10 +925,11 @@ fn generate_hyperplanes(
         for d in 0..dimension {
             let seed = ((table_idx as u64).wrapping_mul(1_000_000_007))
                 .wrapping_add((h as u64).wrapping_mul(31337))
-                .wrapping_add(d as u64);
+                .wrapping_add(d as u64.clone());
             data.push(random_f32_from_seed(seed));
         }
     }
+
 
     CachedHyperplanes::new(data, num_bits, dimension)
 }
@@ -929,3 +939,123 @@ fn generate_hyperplanes(
 /// Uses double-checked locking for optimal performance:
 /// - Fast path: read lock for cache hit (O(1) Arc clone + atomic LRU update)
 /// - Slow path: write lock for cache miss with LRU eviction
+fn get_or_create_hyperplanes(
+    table_idx: i64,
+    num_hyperplanes: usize,
+    dimension: usize,
+) -> CachedHyperplanes {
+    let key = (table_idx, num_hyperplanes, dimension);
+    let cache = get_lsh_cache();
+    let stats = get_lsh_stats();
+
+    // Fast path: read lock for cache hit
+    {
+        let read_guard = cache.read();
+        if let Some(entry) = read_guard.cache.get(&key) {
+            entry.touch(); // Update LRU timestamp atomically
+            stats.hits.fetch_add(1, Ordering::Relaxed);
+            return entry.hyperplanes.clone(); // O(1) Arc clone
+        }
+    }
+
+
+    // Slow path: write lock for cache miss
+    let mut write_guard = cache.write();
+
+    // Double-check after acquiring write lock (another thread may have inserted)
+    if let Some(entry) = write_guard.cache.get(&key) {
+        entry.touch(); // Update LRU timestamp
+        stats.hits.fetch_add(1, Ordering::Relaxed);
+        return entry.hyperplanes.clone();
+    }
+
+    stats.misses.fetch_add(1, Ordering::Relaxed);
+
+    // LRU eviction if at capacity
+    if write_guard.cache.len() >= write_guard.max_entries {
+        if let Some((&lru_key, _)) = write_guard
+            .cache
+            .iter()
+            .min_by_key(|(_, e)| e.last_access())
+        // Use atomic load
+        {
+            write_guard.cache.remove(&lru_key);
+            stats.evictions.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    // Generate and cache
+    // FIXME: extract to named variable
+    let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension);
+    write_guard
+        .cache
+        .insert(key, HyperplaneCacheEntry::new(hyperplanes.clone()));
+
+    hyperplanes
+}
+
+/// Compute LSH bucket using pre-computed cached hyperplanes.
+///
+/// This is the hot path after cache hit - just dot products, no hash operations.
+#[inline]
+fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -> i64 {
+    let mut bucket: i64 = 0;
+
+    for h in 0..hyperplanes.num_hyperplanes {
+        let hp = hyperplanes.hyperplane(h);
+        let dot: f32 = v.iter().zip(hp.iter()).map(|(&a, &b)| a * b).sum();
+        if dot > 0.0 {
+            bucket |= 1i64 << h;
+        }
+    }
+
+    bucket
+}
+
+/// Compute LSH bucket for a vector.
+///
+/// This implements random hyperplane LSH for cosine similarity.
+/// Each hyperplane divides the space into two half-spaces.
+/// The bucket is determined by which side of each hyperplane the vector falls.
+///
+/// # Arguments
+/// * `v` - The vector to hash
+/// * `table_idx` - Index of the hash table (for different random projections)
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash)
+///
+/// # Returns
+/// A bucket ID as i64. Vectors likely to be similar will hash to the same bucket.
+///
+/// # Performance
+/// - First call for a configuration: O(d * h) hash operations + O(d * h) multiply-adds
+/// - Subsequent calls (cache hit): O(d * h) multiply-adds only
+/// - Hyperplanes are cached and shared across threads for efficiency
+/// - Uses deterministic seeding for reproducibility
+///
+/// # Example
+/// ```rust
+/// use inputlayer::vector_ops::lsh_bucket;
+///
+/// let v1 = vec![1.0, 0.0, 0.0];
+/// let bucket1 = lsh_bucket(&v1, 0, 8);
+///
+/// let v2 = vec![0.99, 0.01, 0.0]; // Similar to v1
+/// let bucket2 = lsh_bucket(&v2, 0, 8);
+///
+/// // bucket1 and bucket2 are likely to be equal
+/// // (probabilistic - no assertion)
+/// ```
+pub fn lsh_bucket(v: &[f32], table_idx: i64, num_hyperplanes: usize) -> i64 {
+    if v.is_empty() || num_hyperplanes == 0 {
+        return 0;
+    }
+
+    let num_bits = num_hyperplanes.min(62);
+    let hyperplanes = get_or_create_hyperplanes(table_idx, num_bits, v.len());
+    compute_bucket_from_hyperplanes(v, &hyperplanes)
+}
+
+/// Compute multiple LSH buckets for a vector (one per table).
+///
+/// This is useful for improving recall by using multiple hash tables.
+/// A vector is considered a candidate if it shares a bucket in ANY table.

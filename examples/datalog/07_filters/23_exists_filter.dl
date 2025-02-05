@@ -1,0 +1,15 @@
+% Test: Exists-style filter
+
+.kg create test_exists_filter_n07t23
+.kg use test_exists_filter_n07t23
+
++customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++orders[(101, 1), (102, 1), (103, 2)].
+
+% Customers with at least one order
+has_order(CustId, Name) :- customers(CustId, Name), orders(_, CustId).
+
+?- has_order(Id, N).
+
+.kg use default
+.kg drop test_exists_filter_n07t23

@@ -1,0 +1,18 @@
+% Test: Null check simulation
+
+.kg create test_null_sim_n07t17
+.kg use test_null_sim_n07t17
+
++data[(1, 100), (2, 0), (3, 50), (4, 0)].
+
+% Non-zero values (simulating NOT NULL)
+has_value(Id, V) :- data(Id, V), V != 0.
+
+% Zero values (simulating NULL)
+no_value(Id) :- data(Id, 0).
+
+?- has_value(Id, V).
+?- no_value(Id).
+
+.kg use default
+.kg drop test_null_sim_n07t17

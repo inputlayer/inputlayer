@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ge_n07t20
+Knowledge graph 'test_ge_n07t20' created.
+Switched to knowledge graph: test_ge_n07t20
+> .kg use test_ge_n07t20
+Switched to knowledge graph: test_ge_n07t20
+> +scores[(1, 70), (2, 80), (3, 90), (4, 60)].
+Inserted 4 fact(s) into 'scores'.
+> passing(Id, S) :- scores(Id, S), S >= 80.
+2 rows:
+  (2, 80)
+  (3, 90)
+(session: 1 rule(s))
+> ?- passing(Id, S).
+2 rows:
+  (2, 80)
+  (3, 90)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_ge_n07t20
+Knowledge graph 'test_ge_n07t20' dropped.
