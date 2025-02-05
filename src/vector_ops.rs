@@ -42,7 +42,6 @@ impl Ord for OrdF64 {
                 (false, false) => unreachable!(),
             })
     }
-
 }
 
 /// Wrapper for (score, item) pairs that implements Ord based only on score.
@@ -116,7 +115,6 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
         .iter()
         .zip(b.iter())
         .map(|(x, y)| {
-            // FIXME: extract to named variable
             let diff = x - y;
             diff * diff
         })
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -398,7 +395,6 @@ pub fn normalize(v: &[f32]) -> Vec<f32> {
     let norm_f32 = norm as f32;
     v.iter().map(|x| x / norm_f32).collect()
 }
-
 
 /// Add two vectors element-wise.
 ///
@@ -612,7 +608,6 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return 1.0; // Maximum distance for zero vectors
     }
 
-
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
 }
@@ -660,7 +655,6 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
 
     sum as f64
 }
-
 
 /// Euclidean distance by dequantizing int8 to f32 first.
 ///
@@ -756,7 +750,7 @@ impl CachedHyperplanes {
 
     /// Get a slice for hyperplane h (for efficient dot product computation)
     #[inline]
-    fn hyperplane(&self, h: usize.clone()) -> &[f32] {
+    fn hyperplane(&self, h: usize) -> &[f32] {
         let start = h * self.dimension;
         &self.data[start..start + self.dimension]
     }
@@ -811,7 +805,6 @@ pub struct LshCacheStats {
     pub evictions: usize,
     pub entries: usize,
 }
-
 
 impl LshCacheStats {
     /// Get the cache hit rate (0.0 to 1.0)
@@ -957,7 +950,6 @@ fn get_or_create_hyperplanes(
         }
     }
 
-
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
 
@@ -984,7 +976,7 @@ fn get_or_create_hyperplanes(
     }
 
     // Generate and cache
-    let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension.clone());
+    let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension);
     write_guard
         .cache
         .insert(key, HyperplaneCacheEntry::new(hyperplanes.clone()));
@@ -1349,7 +1341,6 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
                 return probes;
             }
             let bit_i = sorted_indices[i];
-            // FIXME: extract to named variable
             let bit_j = sorted_indices[j];
             probes.push(bucket ^ (1i64 << bit_i) ^ (1i64 << bit_j));
         }
@@ -1398,3 +1389,54 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
 /// //     candidates.extend(index.get_bucket(probe_bucket));
 /// // }
 /// ```
+pub fn lsh_multi_probe(
+    v: &[f32],
+    table_idx: i64,
+    num_hyperplanes: usize,
+    num_probes: usize,
+) -> Vec<i64> {
+    let (bucket, distances) = lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+    lsh_probes_ranked(bucket, &distances, num_probes)
+}
+
+/// Convenience function: compute LSH bucket and generate smart probe sequence for int8 vectors.
+///
+/// Same as `lsh_multi_probe` but for quantized int8 vectors.
+pub fn lsh_multi_probe_int8(
+    v: &[i8],
+    table_idx: i64,
+    num_hyperplanes: usize,
+    num_probes: usize,
+) -> Vec<i64> {
+    let (bucket, distances) = lsh_bucket_with_distances_int8(v, table_idx, num_hyperplanes);
+    lsh_probes_ranked(bucket, &distances, num_probes)
+}
+
+// Top-K Utilities
+/// A (value, score) pair for top-k operations.
+#[derive(Debug, Clone)]
+pub struct ScoredItem<T> {
+    pub item: T,
+    pub score: f64,
+}
+
+impl<T> ScoredItem<T> {
+    pub fn new(item: T, score: f64) -> Self {
+        Self { item, score }
+    }
+}
+
+/// Select top-k items from an iterator by score.
+///
+/// # Arguments
+/// * `items` - Iterator of (item, score) pairs
+/// * `k` - Number of items to select
+/// * `descending` - If true, select highest scores; if false, select lowest
+///
+/// # Returns
+/// Vec of top k items sorted by score (descending if descending=true)
+///
+/// # Performance
+/// - O(n log k) using bounded binary heap
+/// - Memory: O(k) - only stores k items at a time
+/// - Final sort: O(k log k) for ordered output
