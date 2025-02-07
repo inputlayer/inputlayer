@@ -378,3 +378,87 @@ fn test_vector_inline_rule() {
 
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_inline_similarity() {
+    // Test: Get all pairwise similarities between 4 vectors
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_inline_sim").unwrap();
+    storage.use_knowledge_graph("test_inline_sim").unwrap();
+
+    storage
+        .insert_tuples(
+            "embedding",
+            vec![
+                id_vec_tuple(1, vec![1.0, 0.0]),
+                id_vec_tuple(2, vec![0.9, 0.1]),
+                id_vec_tuple(3, vec![0.0, 1.0]),
+                id_vec_tuple(4, vec![0.1, 0.9]),
+            ],
+        )
+        .unwrap();
+
+    // Direct pairwise similarity query (all pairs where Id1 < Id2)
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    // 4 choose 2 = 6 pairs
+    assert_eq!(
+        results.len(),
+        6,
+        "Should have 6 pairwise similarity results"
+    );
+}
+
+// Vector Operations Variety
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_all_vector_operations() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_all_ops").unwrap();
+    storage.use_knowledge_graph("test_all_ops").unwrap();
+
+    storage
+        .insert_tuples(
+            "v",
+            vec![
+                id_vec_tuple(1, vec![1.0, 2.0, 3.0]),
+                id_vec_tuple(2, vec![4.0, 5.0, 6.0]),
+            ],
+        )
+        .unwrap();
+
+    // Test each operation
+    let euclidean = storage
+        .execute_query_with_rules_tuples(
+            "result(Id, D) :- v(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+        )
+        .unwrap();
+    assert_eq!(euclidean.len(), 2, "Euclidean should work");
+
+    let cosine = storage
+        .execute_query_with_rules_tuples(
+            "result(Id, D) :- v(Id, V), D = cosine(V, [1.0, 0.0, 0.0]).",
+        )
+        .unwrap();
+    assert_eq!(cosine.len(), 2, "Cosine should work");
+
+    let dot = storage
+        .execute_query_with_rules_tuples("result(Id, D) :- v(Id, V), D = dot(V, [1.0, 1.0, 1.0]).")
+        .unwrap();
+    assert_eq!(dot.len(), 2, "Dot should work");
+
+    let manhattan = storage
+        .execute_query_with_rules_tuples(
+            "result(Id, D) :- v(Id, V), D = manhattan(V, [0.0, 0.0, 0.0]).",
+        )
+        .unwrap();
+    assert_eq!(manhattan.len(), 2, "Manhattan should work");
+}
+
+// Cartesian Product with Multiple Filters
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
