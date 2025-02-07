@@ -1,0 +1,14 @@
+% Test: Boolean value filter
+
+.kg create test_bool_filter_n07t46
+.kg use test_bool_filter_n07t46
+
++items[(1, true), (2, false), (3, true), (4, false)].
+
+% Filter enabled items
+enabled(Id) :- items(Id, true).
+
+?- enabled(Id).
+
+.kg use default
+.kg drop test_bool_filter_n07t46

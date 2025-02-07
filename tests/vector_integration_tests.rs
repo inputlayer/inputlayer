@@ -316,3 +316,65 @@ fn test_vector_self_comparison() {
 
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_high_dimensional() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_highdim").unwrap();
+    storage.use_knowledge_graph("test_highdim").unwrap();
+
+    // 10-dimensional vectors
+    let mut v1 = vec![0.0f32; 10];
+    let mut v2 = vec![0.0f32; 10];
+    v1[0] = 1.0;
+    v2[1] = 1.0;
+
+    storage
+        .insert_tuples("embedding", vec![id_vec_tuple(1, v1), id_vec_tuple(2, v2)])
+        .unwrap();
+
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    assert_eq!(results.len(), 1, "High dimensional vectors should work");
+}
+
+// Additional Vector Query Tests
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_vector_inline_rule() {
+    // Test vector function in a directly executed query (not persistent rule)
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_inline").unwrap();
+    storage.use_knowledge_graph("test_inline").unwrap();
+
+    storage
+        .insert_tuples(
+            "embedding",
+            vec![
+                id_vec_tuple(1, vec![1.0, 0.0, 0.0]),
+                id_vec_tuple(2, vec![0.0, 1.0, 0.0]),
+                id_vec_tuple(3, vec![0.7, 0.7, 0.0]),
+            ],
+        )
+        .unwrap();
+
+    // Direct query with vector function
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+        )
+        .unwrap();
+
+    assert_eq!(
+        results.len(),
+        3,
+        "Inline distance query should produce 3 results"
+    );
+}
+
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed

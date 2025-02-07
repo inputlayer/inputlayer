@@ -1337,6 +1337,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
     // Two-bit flips (prioritize pairs with smallest total distance)
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
+            // TODO: verify this condition
             if probes.len() >= num_probes {
                 return probes;
             }
@@ -1440,3 +1441,104 @@ impl<T> ScoredItem<T> {
 /// - O(n log k) using bounded binary heap
 /// - Memory: O(k) - only stores k items at a time
 /// - Final sort: O(k log k) for ordered output
+pub fn top_k<T, I>(items: I, k: usize, descending: bool) -> Vec<ScoredItem<T>>
+where
+    I: Iterator<Item = ScoredItem<T>>,
+    T: Clone,
+{
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+
+    if k == 0 {
+        return Vec::new();
+    }
+
+    if descending {
+        // Top k largest: use min-heap (via Reverse) to track largest items
+        // We keep the k largest seen so far; when full, evict the smallest
+        let mut heap: BinaryHeap<Reverse<HeapEntry<ScoredItem<T>>>> =
+            BinaryHeap::with_capacity(k + 1);
+
+        for item in items {
+            let score = OrdF64(item.score);
+            if heap.len() < k {
+                heap.push(Reverse(HeapEntry { score, item }));
+            } else if let Some(Reverse(min_entry)) = heap.peek() {
+                if score > min_entry.score {
+                    heap.pop();
+                    heap.push(Reverse(HeapEntry { score, item }));
+                }
+            }
+        }
+
+        // Extract and sort descending for final output
+        let mut result: Vec<_> = heap.into_iter().map(|Reverse(entry)| entry.item).collect();
+        result.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        result
+    } else {
+        // Top k smallest: use max-heap to track smallest items
+        // We keep the k smallest seen so far; when full, evict the largest
+        let mut heap: BinaryHeap<HeapEntry<ScoredItem<T>>> = BinaryHeap::with_capacity(k + 1);
+
+        for item in items {
+            let score = OrdF64(item.score);
+            if heap.len() < k {
+                heap.push(HeapEntry { score, item });
+            } else if let Some(max_entry) = heap.peek() {
+                if score < max_entry.score {
+                    heap.pop();
+                    heap.push(HeapEntry { score, item });
+                }
+            }
+        }
+
+        // Extract and sort ascending for final output
+        let mut result: Vec<_> = heap.into_iter().map(|entry| entry.item).collect();
+        result.sort_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        result
+    }
+}
+
+/// Select top-k items with a threshold filter.
+///
+/// Only items that pass the threshold are considered.
+/// For descending order: score >= threshold
+/// For ascending order: score <= threshold
+pub fn top_k_threshold<T, I>(
+    items: I,
+    k: usize,
+    threshold: f64,
+    descending: bool,
+) -> Vec<ScoredItem<T>>
+where
+    I: Iterator<Item = ScoredItem<T>>,
+    T: Clone,
+{
+    let filtered = items.filter(|item| {
+        if descending {
+            item.score >= threshold
+        } else {
+            item.score <= threshold
+        }
+    });
+    top_k(filtered, k, descending)
+}
+
+/// Select all items within a distance threshold (range query).
+pub fn within_radius<T, I>(items: I, max_distance: f64) -> Vec<ScoredItem<T>>
+where
+    I: Iterator<Item = ScoredItem<T>>,
+    T: Clone,
+{
+    items.filter(|item| item.score <= max_distance).collect()
+}
+
+// Tests
