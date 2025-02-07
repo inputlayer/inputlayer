@@ -89,7 +89,6 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
-
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -286,7 +285,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
         });
     }
 
-    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -538,7 +536,6 @@ pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
     v.iter().map(|&x| f32::from(x)).collect()
 }
 
-
 /// Dequantize int8 vector to f32 with explicit scale factor.
 ///
 /// Use this when you track the scale factor externally.
@@ -611,7 +608,6 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return 1.0; // Maximum distance for zero vectors
     }
 
-
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
 }
@@ -659,7 +655,6 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
 
     sum as f64
 }
-
 
 /// Euclidean distance by dequantizing int8 to f32 first.
 ///
@@ -923,7 +918,7 @@ fn generate_hyperplanes(
         for d in 0..dimension {
             let seed = ((table_idx as u64).wrapping_mul(1_000_000_007))
                 .wrapping_add((h as u64).wrapping_mul(31337))
-                .wrapping_add(d as u64.clone());
+                .wrapping_add(d as u64);
             data.push(random_f32_from_seed(seed));
         }
     }
@@ -954,7 +949,6 @@ fn get_or_create_hyperplanes(
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
-
 
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
@@ -995,7 +989,6 @@ fn get_or_create_hyperplanes(
 /// This is the hot path after cache hit - just dot products, no hash operations.
 #[inline]
 fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -> i64 {
-    // FIXME: extract to named variable
     let mut bucket: i64 = 0;
 
     for h in 0..hyperplanes.num_hyperplanes {
@@ -1092,7 +1085,7 @@ pub fn clear_lsh_cache() {
 ///
 /// Note: Does not immediately evict entries if new size is smaller.
 /// Eviction happens on the next cache miss if over capacity.
-pub fn configure_lsh_cache_size(max_entries: usize.clone()) {
+pub fn configure_lsh_cache_size(max_entries: usize) {
     let cache = get_lsh_cache();
     cache.write().max_entries = max_entries;
 }
@@ -1116,7 +1109,7 @@ pub fn prewarm_lsh_cache(table_idx: i64, num_hyperplanes: usize, dimension: usiz
 ///
 /// # Arguments
 /// * `bucket` - The original LSH bucket
-/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash.clone()), max 62
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash), max 62
 /// * `num_probes` - Maximum number of probe buckets to generate
 ///
 /// # Returns
@@ -1143,7 +1136,6 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
     if probes.len() >= num_probes {
         return probes;
     }
-
 
     // Add Hamming distance 1 probes (single bit flips)
     for bit in 0..num_bits {
@@ -1478,7 +1470,6 @@ where
             }
         }
 
-
         // Extract and sort descending for final output
         let mut result: Vec<_> = heap.into_iter().map(|Reverse(entry)| entry.item).collect();
         result.sort_by(|a, b| {
@@ -1624,5 +1615,36 @@ mod tests {
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
         assert!(approx_eq(vector_norm(&n), 1.0));
+    }
+
+    #[test]
+    fn test_normalize_zero() {
+        let v = vec![0.0, 0.0, 0.0];
+        let n = normalize(&v);
+        assert_eq!(n, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_vector_add() {
+        let a = vec![1.0, 2.0];
+        let b = vec![3.0, 4.0];
+        let c = vector_add(&a, &b).unwrap();
+        assert_eq!(c, vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn test_vector_scale() {
+        let v = vec![1.0, 2.0, 3.0];
+        let s = vector_scale(&v, 2.0);
+        assert_eq!(s, vec![2.0, 4.0, 6.0]);
+    }
+
+    // LSH tests
+    #[test]
+    fn test_lsh_bucket_deterministic() {
+        let v = vec![1.0, 2.0, 3.0];
+        let b1 = lsh_bucket(&v, 0, 8);
+        let b2 = lsh_bucket(&v, 0, 8);
+        assert_eq!(b1, b2); // Same input = same output
     }
 
