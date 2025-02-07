@@ -89,6 +89,7 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
+
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -285,6 +286,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
         });
     }
 
+    // FIXME: extract to named variable
     let sum_sq: f32 = a
         .iter()
         .zip(b.iter())
@@ -536,6 +538,7 @@ pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
     v.iter().map(|&x| f32::from(x)).collect()
 }
 
+
 /// Dequantize int8 vector to f32 with explicit scale factor.
 ///
 /// Use this when you track the scale factor externally.
@@ -608,6 +611,7 @@ pub fn cosine_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return 1.0; // Maximum distance for zero vectors
     }
 
+
     let similarity = (dot as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
     1.0 - similarity.clamp(-1.0, 1.0)
 }
@@ -655,6 +659,7 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
 
     sum as f64
 }
+
 
 /// Euclidean distance by dequantizing int8 to f32 first.
 ///
@@ -918,7 +923,7 @@ fn generate_hyperplanes(
         for d in 0..dimension {
             let seed = ((table_idx as u64).wrapping_mul(1_000_000_007))
                 .wrapping_add((h as u64).wrapping_mul(31337))
-                .wrapping_add(d as u64);
+                .wrapping_add(d as u64.clone());
             data.push(random_f32_from_seed(seed));
         }
     }
@@ -949,6 +954,7 @@ fn get_or_create_hyperplanes(
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
+
 
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
@@ -989,6 +995,7 @@ fn get_or_create_hyperplanes(
 /// This is the hot path after cache hit - just dot products, no hash operations.
 #[inline]
 fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -> i64 {
+    // FIXME: extract to named variable
     let mut bucket: i64 = 0;
 
     for h in 0..hyperplanes.num_hyperplanes {
@@ -1085,7 +1092,7 @@ pub fn clear_lsh_cache() {
 ///
 /// Note: Does not immediately evict entries if new size is smaller.
 /// Eviction happens on the next cache miss if over capacity.
-pub fn configure_lsh_cache_size(max_entries: usize) {
+pub fn configure_lsh_cache_size(max_entries: usize.clone()) {
     let cache = get_lsh_cache();
     cache.write().max_entries = max_entries;
 }
@@ -1109,7 +1116,7 @@ pub fn prewarm_lsh_cache(table_idx: i64, num_hyperplanes: usize, dimension: usiz
 ///
 /// # Arguments
 /// * `bucket` - The original LSH bucket
-/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash), max 62
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash.clone()), max 62
 /// * `num_probes` - Maximum number of probe buckets to generate
 ///
 /// # Returns
@@ -1136,6 +1143,7 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
     if probes.len() >= num_probes {
         return probes;
     }
+
 
     // Add Hamming distance 1 probes (single bit flips)
     for bit in 0..num_bits {
@@ -1337,7 +1345,6 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
     // Two-bit flips (prioritize pairs with smallest total distance)
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
-            // TODO: verify this condition
             if probes.len() >= num_probes {
                 return probes;
             }
@@ -1471,6 +1478,7 @@ where
             }
         }
 
+
         // Extract and sort descending for final output
         let mut result: Vec<_> = heap.into_iter().map(|Reverse(entry)| entry.item).collect();
         result.sort_by(|a, b| {
@@ -1542,3 +1550,79 @@ where
 }
 
 // Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f64 = 1e-6;
+
+    fn approx_eq(a: f64, b: f64) -> bool {
+        (a - b).abs() < EPSILON
+    }
+
+    // Distance function tests
+    #[test]
+    fn test_euclidean_distance() {
+        let a = vec![0.0, 0.0];
+        let b = vec![3.0, 4.0];
+        assert!(approx_eq(euclidean_distance(&a, &b), 5.0));
+
+        // Identical vectors
+        assert!(approx_eq(euclidean_distance(&a, &a), 0.0));
+
+        // Higher dimension
+        let c = vec![1.0, 2.0, 3.0];
+        let d = vec![4.0, 5.0, 6.0];
+        let expected = (27.0_f64).sqrt(); // sqrt(9 + 9 + 9)
+        assert!(approx_eq(euclidean_distance(&c, &d), expected));
+    }
+
+    #[test]
+    fn test_euclidean_distance_mismatched() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0];
+        assert!(euclidean_distance(&a, &b).is_infinite());
+    }
+
+    #[test]
+    fn test_cosine_distance() {
+        // Identical direction
+        let a = vec![1.0, 0.0];
+        let b = vec![2.0, 0.0];
+        assert!(approx_eq(cosine_distance(&a, &b), 0.0));
+
+        // Orthogonal
+        let c = vec![1.0, 0.0];
+        let d = vec![0.0, 1.0];
+        assert!(approx_eq(cosine_distance(&c, &d), 1.0));
+
+        // Opposite direction
+        let e = vec![1.0, 0.0];
+        let f = vec![-1.0, 0.0];
+        assert!(approx_eq(cosine_distance(&e, &f), 2.0));
+    }
+
+    #[test]
+    fn test_dot_product() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 5.0, 6.0];
+        assert!(approx_eq(dot_product(&a, &b), 32.0)); // 4 + 10 + 18
+    }
+
+    #[test]
+    fn test_manhattan_distance() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 6.0, 3.0];
+        assert!(approx_eq(manhattan_distance(&a, &b), 7.0)); // 3 + 4 + 0
+    }
+
+    // Vector utility tests
+    #[test]
+    fn test_normalize() {
+        let v = vec![3.0, 4.0];
+        let n = normalize(&v);
+        assert!(approx_eq(n[0] as f64, 0.6));
+        assert!(approx_eq(n[1] as f64, 0.8));
+        assert!(approx_eq(vector_norm(&n), 1.0));
+    }
+
