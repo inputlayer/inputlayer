@@ -1,0 +1,19 @@
+% Test: Constant vs constant comparison
+
+.kg create test_const_cmp_n07t42
+.kg use test_const_cmp_n07t42
+
++data[(1, "a"), (2, "b"), (3, "c")].
+
+% True constant comparison
+always_true(X, V) :- data(X, V), 5 > 3.
+
+?- always_true(X, V).
+
+% False constant comparison - should return empty
+always_false(X, V) :- data(X, V), 3 > 5.
+
+?- always_false(X, V).
+
+.kg use default
+.kg drop test_const_cmp_n07t42
