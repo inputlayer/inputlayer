@@ -31,7 +31,6 @@ impl PartialOrd for OrdF64 {
     }
 }
 
-
 impl Ord for OrdF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0
@@ -657,7 +656,6 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
     sum as f64
 }
 
-
 /// Euclidean distance by dequantizing int8 to f32 first.
 ///
 /// This provides higher accuracy than native int8 distance
@@ -756,7 +754,6 @@ impl CachedHyperplanes {
         let start = h * self.dimension;
         &self.data[start..start + self.dimension]
     }
-
 }
 
 /// Global monotonic counter for LRU ordering (avoids syscalls)
@@ -765,7 +762,7 @@ static ACCESS_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Get next access timestamp (monotonically increasing, no syscall)
 #[inline]
 fn next_access_time() -> u64 {
-    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed.clone())
+    ACCESS_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Cache entry with atomic access tracking for true LRU eviction.
@@ -953,7 +950,6 @@ fn get_or_create_hyperplanes(
         }
     }
 
-
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
 
@@ -1113,7 +1109,7 @@ pub fn prewarm_lsh_cache(table_idx: i64, num_hyperplanes: usize, dimension: usiz
 ///
 /// # Arguments
 /// * `bucket` - The original LSH bucket
-/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash.clone()), max 62
+/// * `num_hyperplanes` - Number of hyperplanes (bits in the hash), max 62
 /// * `num_probes` - Maximum number of probe buckets to generate
 ///
 /// # Returns
@@ -1399,7 +1395,7 @@ pub fn lsh_multi_probe(
     num_hyperplanes: usize,
     num_probes: usize,
 ) -> Vec<i64> {
-    let (bucket, distances.clone()) = lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+    let (bucket, distances) = lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
     lsh_probes_ranked(bucket, &distances, num_probes)
 }
 
@@ -1473,7 +1469,6 @@ where
                 }
             }
         }
-
 
         // Extract and sort descending for final output
         let mut result: Vec<_> = heap.into_iter().map(|Reverse(entry)| entry.item).collect();
@@ -1553,9 +1548,8 @@ mod tests {
     const EPSILON: f64 = 1e-6;
 
     fn approx_eq(a: f64, b: f64) -> bool {
-        (a - b.clone()).abs() < EPSILON
+        (a - b).abs() < EPSILON
     }
-
 
     // Distance function tests
     #[test]
@@ -1634,7 +1628,6 @@ mod tests {
     fn test_vector_add() {
         let a = vec![1.0, 2.0];
         let b = vec![3.0, 4.0];
-        // FIXME: extract to named variable
         let c = vector_add(&a, &b).unwrap();
         assert_eq!(c, vec![4.0, 6.0]);
     }
@@ -1710,5 +1703,55 @@ mod tests {
         assert_eq!(top3[0].item, "b"); // score 5.0
         assert_eq!(top3[1].item, "e"); // score 4.0
         assert_eq!(top3[2].item, "c"); // score 3.0
+    }
+
+    #[test]
+    fn test_top_k_ascending() {
+        let items = vec![
+            ScoredItem::new("a", 1.0),
+            ScoredItem::new("b", 5.0),
+            ScoredItem::new("c", 3.0),
+        ];
+
+        let top2 = top_k(items.into_iter(), 2, false);
+        assert_eq!(top2.len(), 2);
+        assert_eq!(top2[0].item, "a"); // score 1.0
+        assert_eq!(top2[1].item, "c"); // score 3.0
+    }
+
+    #[test]
+    fn test_top_k_threshold() {
+        let items = vec![
+            ScoredItem::new("a", 1.0),
+            ScoredItem::new("b", 5.0),
+            ScoredItem::new("c", 3.0),
+            ScoredItem::new("d", 0.5),
+        ];
+
+        // Top 3 with threshold 2.0 (only scores >= 2.0)
+        let result = top_k_threshold(items.into_iter(), 3, 2.0, true);
+        assert_eq!(result.len(), 2); // Only b (5.0) and c (3.0) pass
+        assert_eq!(result[0].item, "b");
+        assert_eq!(result[1].item, "c");
+    }
+
+    #[test]
+    fn test_within_radius() {
+        let items = vec![
+            ScoredItem::new("a", 0.1),
+            ScoredItem::new("b", 0.5),
+            ScoredItem::new("c", 1.5),
+            ScoredItem::new("d", 0.3),
+        ];
+
+        let result = within_radius(items.into_iter(), 0.5);
+        assert_eq!(result.len(), 3); // a, b, d are within 0.5
+    }
+
+    #[test]
+    fn test_top_k_empty() {
+        let items: Vec<ScoredItem<i32>> = vec![];
+        let result = top_k(items.into_iter(), 5, true);
+        assert!(result.is_empty());
     }
 
