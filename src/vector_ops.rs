@@ -1755,3 +1755,41 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    #[test]
+    fn test_top_k_k_zero() {
+        let items = vec![ScoredItem::new("a", 1.0)];
+        let result = top_k(items.into_iter(), 0, true);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_top_k_k_greater_than_n() {
+        // When k > n, should return all items sorted
+        let items = vec![
+            ScoredItem::new(1, 3.0),
+            ScoredItem::new(2, 1.0),
+            ScoredItem::new(3, 2.0),
+        ];
+        let result = top_k(items.into_iter(), 10, false); // k=10 > n=3
+        assert_eq!(result.len(), 3);
+        // Should be sorted ascending
+        assert_eq!(result[0].score, 1.0);
+        assert_eq!(result[1].score, 2.0);
+        assert_eq!(result[2].score, 3.0);
+    }
+
+    #[test]
+    fn test_top_k_with_nan() {
+        // NaN should be treated as less than all other values
+        let items = vec![
+            ScoredItem::new(1, f64::NAN),
+            ScoredItem::new(2, 2.0),
+            ScoredItem::new(3, 1.0),
+        ];
+        // Top 2 descending should be [2.0, 1.0], excluding NaN
+        let result = top_k(items.into_iter(), 2, true);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].score, 2.0);
+        assert_eq!(result[1].score, 1.0);
+    }
+
