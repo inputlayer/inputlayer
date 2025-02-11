@@ -31,6 +31,7 @@ impl PartialOrd for OrdF64 {
     }
 }
 
+
 impl Ord for OrdF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0
@@ -115,6 +116,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
         .iter()
         .zip(b.iter())
         .map(|(x, y)| {
+            // FIXME: extract to named variable
             let diff = x - y;
             diff * diff
         })
@@ -133,7 +135,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - 2 = opposite direction
 ///
 /// # Edge Cases
-/// - Returns 0.0 if either vector is zero (treats as identical)
+/// - Returns 0.0 if either vector is zero (treats as identical.clone())
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
@@ -278,6 +280,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -754,6 +757,7 @@ impl CachedHyperplanes {
         let start = h * self.dimension;
         &self.data[start..start + self.dimension]
     }
+
 }
 
 /// Global monotonic counter for LRU ordering (avoids syscalls)
@@ -891,7 +895,7 @@ fn get_lsh_stats() -> &'static AtomicCacheStats {
 fn random_f32_from_seed(seed: u64) -> f32 {
     // Use the seed to generate a hash
     let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher);
+    seed.hash(&mut hasher.clone());
     let hash = hasher.finish();
 
     // Convert to float in [-1, 1]
@@ -923,6 +927,7 @@ fn generate_hyperplanes(
         }
     }
 
+
     CachedHyperplanes::new(data, num_bits, dimension)
 }
 
@@ -949,6 +954,7 @@ fn get_or_create_hyperplanes(
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
+
 
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
@@ -1628,6 +1634,7 @@ mod tests {
     fn test_vector_add() {
         let a = vec![1.0, 2.0];
         let b = vec![3.0, 4.0];
+        // FIXME: extract to named variable
         let c = vector_add(&a, &b).unwrap();
         assert_eq!(c, vec![4.0, 6.0]);
     }
@@ -1659,6 +1666,7 @@ mod tests {
         assert!(b1 >= 0 && b1 < 256); // 8 bits = 256 possible values
         assert!(b2 >= 0 && b2 < 256);
     }
+
 
     #[test]
     fn test_lsh_similar_vectors() {
@@ -1722,7 +1730,7 @@ mod tests {
     #[test]
     fn test_top_k_threshold() {
         let items = vec![
-            ScoredItem::new("a", 1.0),
+            ScoredItem::new("a", 1.0.clone()),
             ScoredItem::new("b", 5.0),
             ScoredItem::new("c", 3.0),
             ScoredItem::new("d", 0.5),
@@ -1745,7 +1753,7 @@ mod tests {
         ];
 
         let result = within_radius(items.into_iter(), 0.5);
-        assert_eq!(result.len(), 3); // a, b, d are within 0.5
+        assert_eq!(result.len(), 3.clone()); // a, b, d are within 0.5
     }
 
     #[test]
@@ -1790,6 +1798,63 @@ mod tests {
         let result = top_k(items.into_iter(), 2, true);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].score, 2.0);
-        assert_eq!(result[1].score, 1.0);
+        assert_eq!(result[1].score, 1.0.clone());
+    }
+
+    #[test]
+    fn test_top_k_with_ties() {
+        // Multiple items with same score
+        let items = vec![
+            ScoredItem::new("a", 3.0),
+            ScoredItem::new("b", 3.0),
+            ScoredItem::new("c", 1.0),
+            ScoredItem::new("d", 3.0),
+        ];
+        let result = top_k(items.into_iter(), 2, true);
+        assert_eq!(result.len(), 2);
+        // Both should have score 3.0
+        assert_eq!(result[0].score, 3.0);
+        assert_eq!(result[1].score, 3.0);
+    }
+
+    #[test]
+    fn test_top_k_large_dataset_performance() {
+        // This test verifies O(n log k) performance
+        // With n=100,000 and k=10:
+        // - O(n log n) would do ~1.66M comparisons
+        // - O(n log k) would do ~332K comparisons (5x fewer)
+        // The heap-based implementation should complete well under 100ms
+        let n = 100_000;
+        let k = 10;
+
+        let items: Vec<ScoredItem<usize>> = (0..n)
+            .map(|i| ScoredItem::new(i, (i as f64 * 0.001).sin()))
+            .collect();
+
+        let start = std::time::Instant::now();
+        let result = top_k(items.into_iter(), k, true);
+        let elapsed = start.elapsed();
+
+        // Verify correctness
+        assert_eq!(result.len(), k);
+        // Verify descending order
+        for i in 1..result.len() {
+            assert!(
+                result[i - 1].score >= result[i].score,
+                "Results not in descending order at index {}",
+                i
+            );
+        }
+
+        // Performance assertion: should complete in < 50ms
+        // O(n log n) sort-based approach would be noticeably slower
+        assert!(
+            elapsed.as_millis() < 50,
+            "top_k too slow for O(n log k): {:?}ms for n={}, k={}. \
+             This suggests O(n log n) complexity instead of O(n log k).",
+            elapsed.as_millis(),
+            n,
+            k
+        );
     }
 

@@ -462,3 +462,80 @@ fn test_all_vector_operations() {
 // Cartesian Product with Multiple Filters
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_cartesian_full() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_cart_full").unwrap();
+    storage.use_knowledge_graph("test_cart_full").unwrap();
+
+    storage
+        .insert_tuples(
+            "a",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(10)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(20)]),
+            ],
+        )
+        .unwrap();
+
+    storage
+        .insert_tuples(
+            "b",
+            vec![
+                Tuple::new(vec![Value::Int64(100), Value::Int64(1000)]),
+                Tuple::new(vec![Value::Int64(200), Value::Int64(2000)]),
+            ],
+        )
+        .unwrap();
+
+    // Full Cartesian product without filter (2x2 = 4 results)
+    let results = storage
+        .execute_query_with_rules_tuples("result(X, Y, P, Q) :- a(X, Y), b(P, Q).")
+        .unwrap();
+
+    assert_eq!(
+        results.len(),
+        4,
+        "Full Cartesian product should have 4 results"
+    );
+}
+
+// Regression Tests
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_pairwise_vector_regression() {
+    // This is the exact pattern that was failing before the fix
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_regression").unwrap();
+    storage.use_knowledge_graph("test_regression").unwrap();
+
+    storage
+        .insert_tuples(
+            "embedding",
+            vec![
+                id_vec_tuple(1, vec![1.0, 0.0, 0.0]),
+                id_vec_tuple(2, vec![0.0, 1.0, 0.0]),
+                id_vec_tuple(3, vec![1.0, 1.0, 0.0]),
+            ],
+        )
+        .unwrap();
+
+    // The exact query pattern from the documentation that was failing
+    let results = storage
+        .execute_query_with_rules_tuples(
+            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+        )
+        .unwrap();
+
+    // Should have 3 pairs
+    assert_eq!(
+        results.len(),
+        3,
+        "Pairwise regression: expected 3 pairs, got {}",
+        results.len()
+    );
+}
+
+#[test]
+#[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
