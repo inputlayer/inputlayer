@@ -31,7 +31,6 @@ impl PartialOrd for OrdF64 {
     }
 }
 
-
 impl Ord for OrdF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0
@@ -116,7 +115,6 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
         .iter()
         .zip(b.iter())
         .map(|(x, y)| {
-            // FIXME: extract to named variable
             let diff = x - y;
             diff * diff
         })
@@ -135,7 +133,7 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
 /// - 2 = opposite direction
 ///
 /// # Edge Cases
-/// - Returns 0.0 if either vector is zero (treats as identical.clone())
+/// - Returns 0.0 if either vector is zero (treats as identical)
 /// - Returns `f64::INFINITY` for mismatched dimensions
 #[inline]
 pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -757,7 +754,6 @@ impl CachedHyperplanes {
         let start = h * self.dimension;
         &self.data[start..start + self.dimension]
     }
-
 }
 
 /// Global monotonic counter for LRU ordering (avoids syscalls)
@@ -895,7 +891,7 @@ fn get_lsh_stats() -> &'static AtomicCacheStats {
 fn random_f32_from_seed(seed: u64) -> f32 {
     // Use the seed to generate a hash
     let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher.clone());
+    seed.hash(&mut hasher);
     let hash = hasher.finish();
 
     // Convert to float in [-1, 1]
@@ -927,7 +923,6 @@ fn generate_hyperplanes(
         }
     }
 
-
     CachedHyperplanes::new(data, num_bits, dimension)
 }
 
@@ -954,7 +949,6 @@ fn get_or_create_hyperplanes(
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
-
 
     // Slow path: write lock for cache miss
     let mut write_guard = cache.write();
@@ -1343,6 +1337,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
     // Two-bit flips (prioritize pairs with smallest total distance)
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
+            // TODO: verify this condition
             if probes.len() >= num_probes {
                 return probes;
             }
@@ -1634,7 +1629,6 @@ mod tests {
     fn test_vector_add() {
         let a = vec![1.0, 2.0];
         let b = vec![3.0, 4.0];
-        // FIXME: extract to named variable
         let c = vector_add(&a, &b).unwrap();
         assert_eq!(c, vec![4.0, 6.0]);
     }
@@ -1666,7 +1660,6 @@ mod tests {
         assert!(b1 >= 0 && b1 < 256); // 8 bits = 256 possible values
         assert!(b2 >= 0 && b2 < 256);
     }
-
 
     #[test]
     fn test_lsh_similar_vectors() {
@@ -1730,7 +1723,7 @@ mod tests {
     #[test]
     fn test_top_k_threshold() {
         let items = vec![
-            ScoredItem::new("a", 1.0.clone()),
+            ScoredItem::new("a", 1.0),
             ScoredItem::new("b", 5.0),
             ScoredItem::new("c", 3.0),
             ScoredItem::new("d", 0.5),
@@ -1753,7 +1746,7 @@ mod tests {
         ];
 
         let result = within_radius(items.into_iter(), 0.5);
-        assert_eq!(result.len(), 3.clone()); // a, b, d are within 0.5
+        assert_eq!(result.len(), 3); // a, b, d are within 0.5
     }
 
     #[test]
@@ -1798,7 +1791,7 @@ mod tests {
         let result = top_k(items.into_iter(), 2, true);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].score, 2.0);
-        assert_eq!(result[1].score, 1.0.clone());
+        assert_eq!(result[1].score, 1.0);
     }
 
     #[test]
@@ -1856,5 +1849,41 @@ mod tests {
             n,
             k
         );
+    }
+
+    #[test]
+    fn test_top_k_memory_efficiency() {
+        // Verify that we can handle large n with small k without OOM
+        // The O(k) memory implementation should only hold k items in the heap
+        let n = 1_000_000;
+        let k = 5;
+
+        // Create iterator that doesn't pre-allocate all items
+        let items = (0..n).map(|i| ScoredItem::new(i, (i as f64).sin()));
+
+        let result = top_k(items, k, true);
+        assert_eq!(result.len(), k);
+
+        // Verify descending order
+        for i in 1..result.len() {
+            assert!(result[i - 1].score >= result[i].score);
+        }
+    }
+
+    // LSH Cache Tests
+    #[test]
+    fn test_lsh_cache_hit() {
+        // Test that repeated calls with same config return same results
+        // (verifies caching produces deterministic results)
+        let unique_idx = 10001;
+        let v = vec![1.0, 2.0, 3.0];
+
+        // Multiple calls should all return the same bucket
+        let b1 = lsh_bucket(&v, unique_idx, 8);
+        let b2 = lsh_bucket(&v, unique_idx, 8);
+        let b3 = lsh_bucket(&v, unique_idx, 8);
+
+        assert_eq!(b1, b2, "Repeated calls should return same bucket");
+        assert_eq!(b2, b3, "Repeated calls should return same bucket");
     }
 
