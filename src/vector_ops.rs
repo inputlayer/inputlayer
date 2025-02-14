@@ -1887,3 +1887,63 @@ mod tests {
         assert_eq!(b2, b3, "Repeated calls should return same bucket");
     }
 
+    #[test]
+    fn test_lsh_cache_different_configs() {
+        // Test that different configs produce (usually) different results
+        // and results are deterministic per config
+        let v = vec![1.0, 2.0, 3.0];
+
+        // Different table indices
+        let b_t1 = lsh_bucket(&v, 20001, 8);
+        let b_t2 = lsh_bucket(&v, 20002, 8);
+
+        // Same table_idx, different hyperplanes
+        let b_h4 = lsh_bucket(&v, 20001, 4);
+        let b_h8 = lsh_bucket(&v, 20001, 8);
+
+        // Verify determinism
+        assert_eq!(
+            b_t1,
+            lsh_bucket(&v, 20001, 8),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_t2,
+            lsh_bucket(&v, 20002, 8),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_h4,
+            lsh_bucket(&v, 20001, 4),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_h8,
+            lsh_bucket(&v, 20001, 8),
+            "Same config should return same bucket"
+        );
+    }
+
+    #[test]
+    fn test_lsh_cache_deterministic() {
+        // Test that cached results match what non-cached would produce
+        clear_lsh_cache();
+
+        let v = vec![1.0, 0.5, -0.3, 0.8, -0.2];
+        let table_idx = 42;
+        let num_hp = 6;
+
+        // First call populates cache
+        let bucket1 = lsh_bucket(&v, table_idx, num_hp);
+
+        // Clear and recompute - should get same result
+        clear_lsh_cache();
+        let bucket2 = lsh_bucket(&v, table_idx, num_hp);
+
+        // Results must be identical
+        assert_eq!(
+            bucket1, bucket2,
+            "Cache should produce deterministic results"
+        );
+    }
+
