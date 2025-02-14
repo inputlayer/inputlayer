@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_abs_float64_n32t02
+Knowledge graph 'test_abs_float64_n32t02' created.
+Switched to knowledge graph: test_abs_float64_n32t02
+> .kg use test_abs_float64_n32t02
+Switched to knowledge graph: test_abs_float64_n32t02
+> +floats[(1, 3.14)].
+Inserted 1 fact(s) into 'floats'.
+> +floats[(2, -3.14)].
+Inserted 1 fact(s) into 'floats'.
+> +floats[(3, 0.0)].
+Inserted 1 fact(s) into 'floats'.
+> +floats[(4, -0.001)].
+Inserted 1 fact(s) into 'floats'.
+> +floats[(5, 999.999)].
+Inserted 1 fact(s) into 'floats'.
+> abs_float_result(Id, X, Absolute) :- floats(Id, X), Absolute = abs_float64(X).
+5 rows:
+  (1, 3.14, 3.14)
+  (2, -3.14, 3.14)
+  (3, 0.0, 0.0)
+  (4, -0.001, 0.001)
+  (5, 999.999, 999.999)
+(session: 1 rule(s))
+> ?- abs_float_result(Id, X, Absolute).
+5 rows:
+  (1, 3.14, 3.14)
+  (2, -3.14, 3.14)
+  (3, 0.0, 0.0)
+  (4, -0.001, 0.001)
+  (5, 999.999, 999.999)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_abs_float64_n32t02
+Knowledge graph 'test_abs_float64_n32t02' dropped.

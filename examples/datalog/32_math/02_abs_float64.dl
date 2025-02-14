@@ -1,0 +1,22 @@
+% Test: abs_float64 function
+% Absolute value for floats
+.kg create test_abs_float64_n32t02
+.kg use test_abs_float64_n32t02
+
+% Create test data with positive, negative, and zero float values
++floats[(1, 3.14)].
++floats[(2, -3.14)].
++floats[(3, 0.0)].
++floats[(4, -0.001)].
++floats[(5, 999.999)].
+
+% Compute absolute values
+abs_float_result(Id, X, Absolute) :- floats(Id, X), Absolute = abs_float64(X).
+?- abs_float_result(Id, X, Absolute).
+
+% Verify: -3.14 should give 3.14
+% Verify: 0.0 should give 0.0
+% Verify: -0.001 should give 0.001
+
+.kg use default
+.kg drop test_abs_float64_n32t02
