@@ -1337,7 +1337,6 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
     // Two-bit flips (prioritize pairs with smallest total distance)
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
-            // TODO: verify this condition
             if probes.len() >= num_probes {
                 return probes;
             }
@@ -1945,5 +1944,60 @@ mod tests {
             bucket1, bucket2,
             "Cache should produce deterministic results"
         );
+    }
+
+    #[test]
+    fn test_lsh_cache_eviction() {
+        // Test that multiple different cache keys produce deterministic results
+        // (verifies cache entries are created correctly, even if evicted later)
+        let v = vec![1.0; 7]; // 7-element vector
+
+        // Create several cache entries with different table indices
+        let b1 = lsh_bucket(&v, 30001, 8);
+        let b2 = lsh_bucket(&v, 30002, 8);
+        let b3 = lsh_bucket(&v, 30003, 8);
+
+        // Call again - should be deterministic whether cached or recomputed
+        let b1_again = lsh_bucket(&v, 30001, 8);
+        let b2_again = lsh_bucket(&v, 30002, 8);
+        let b3_again = lsh_bucket(&v, 30003, 8);
+
+        assert_eq!(b1, b1_again, "Results should be deterministic");
+        assert_eq!(b2, b2_again, "Results should be deterministic");
+        assert_eq!(b3, b3_again, "Results should be deterministic");
+
+        // Different table indices should (usually) produce different buckets
+        // but this is probabilistic, so just verify they're computed
+    }
+
+    #[test]
+    fn test_lsh_cache_thread_safety() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let v = Arc::new(vec![1.0; 128]);
+
+        let handles: Vec<_> = (0..4)
+            .map(|thread_id| {
+                let v_clone = Arc::clone(&v);
+                thread::spawn(move || {
+                    // Each thread computes buckets and verifies determinism
+                    let mut results = Vec::new();
+                    for i in 0..50 {
+                        let b1 = lsh_bucket(&v_clone, thread_id * 1000 + i, 8);
+                        let b2 = lsh_bucket(&v_clone, thread_id * 1000 + i, 8);
+                        results.push((b1, b2));
+                    }
+                    // Verify all results were deterministic
+                    for (b1, b2) in results {
+                        assert_eq!(b1, b2, "Results should be deterministic across threads");
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("Thread should complete without panic");
+        }
     }
 

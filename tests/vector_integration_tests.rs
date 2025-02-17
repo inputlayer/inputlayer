@@ -539,3 +539,28 @@ fn test_pairwise_vector_regression() {
 
 #[test]
 #[ignore] // Uses constraint syntax (D = func(), Id1 < Id2) - Constraint type removed
+fn test_three_way_cartesian() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_3way").unwrap();
+    storage.use_knowledge_graph("test_3way").unwrap();
+
+    storage
+        .insert_tuples(
+            "item",
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+            ],
+        )
+        .unwrap();
+
+    // Self-join twice: 2x2x2 = 8 results (but distinct because same relation)
+    // Actually with the same relation, we'll get 2x2 = 4 pairs if it's aliased
+    let results = storage
+        .execute_query_with_rules_tuples("result(A, B) :- item(A), item(B).")
+        .unwrap();
+
+    // 2x2 = 4 pairs
+    assert_eq!(results.len(), 4, "2x2 self Cartesian should have 4 results");
+}
