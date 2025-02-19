@@ -2001,3 +2001,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_lsh_cache_prewarm() {
+        // Test that prewarm followed by lsh_bucket produces identical results
+        // (proving the cache is being used correctly)
+        //
+        // Note: This test focuses on functional behavior, not cache state,
+        // because tests run in parallel and other tests may call clear_lsh_cache()
+
+        // Use a unique table_idx that won't conflict with other tests
+        let unique_table_idx = 888888;
+        let v = vec![1.0; 256];
+
+        // Prewarm the cache
+        prewarm_lsh_cache(unique_table_idx, 6, 256);
+
+        // Call lsh_bucket multiple times with the same config
+        let bucket1 = lsh_bucket(&v, unique_table_idx, 6);
+        let bucket2 = lsh_bucket(&v, unique_table_idx, 6);
+        let bucket3 = lsh_bucket(&v, unique_table_idx, 6);
+
+        // All results should be identical (deterministic cache)
+        assert_eq!(bucket1, bucket2, "Cached results should be deterministic");
+        assert_eq!(bucket2, bucket3, "Cached results should be deterministic");
+
+        // Verify prewarm produces same result as a fresh computation
+        clear_lsh_cache();
+        let bucket_fresh = lsh_bucket(&v, unique_table_idx, 6);
+        assert_eq!(
+            bucket1, bucket_fresh,
+            "Prewarm should produce same result as fresh computation"
+        );
+    }
+
+    #[test]
+    fn test_lsh_cache_stats_hit_rate() {
+        // Test that LshCacheStats.hit_rate() computes correctly
+        // This tests the stats struct itself, not the global cache
+
+        let stats_zero = LshCacheStats {
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            entries: 0,
+        };
+        assert_eq!(
+            stats_zero.hit_rate(),
+            0.0,
+            "Zero total should give 0 hit rate"
+        );
+
+        let stats_all_hits = LshCacheStats {
+            hits: 10,
+            misses: 0,
+            evictions: 0,
+            entries: 1,
+        };
+        assert_eq!(stats_all_hits.hit_rate(), 1.0, "All hits should give 1.0");
+
+        let stats_all_misses = LshCacheStats {
+            hits: 0,
+            misses: 10,
+            evictions: 0,
+            entries: 1,
+        };
+        assert_eq!(
+            stats_all_misses.hit_rate(),
+            0.0,
+            "All misses should give 0.0"
+        );
+
+        let stats_mixed = LshCacheStats {
+            hits: 9,
+            misses: 1,
+            evictions: 0,
+            entries: 1,
+        };
+        assert!(
+            (stats_mixed.hit_rate() - 0.9).abs() < 0.001,
+            "9/10 should give 0.9"
+        );
+    }
+
+    // Edge Case Tests for LSH Cache
