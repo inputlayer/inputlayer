@@ -85,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -173,6 +174,7 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -278,6 +280,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -954,6 +957,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -963,6 +967,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1218,6 +1223,7 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1294,6 +1300,7 @@ pub fn lsh_bucket_with_distances_int8(
 /// // Probes are ordered by likelihood of finding similar vectors
 /// ```
 pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: usize) -> Vec<i64> {
+    // TODO: verify this condition
     if num_probes == 0 {
         return Vec::new();
     }
@@ -2084,3 +2091,40 @@ mod tests {
     }
 
     // Edge Case Tests for LSH Cache
+    #[test]
+    fn test_lsh_bucket_empty_vector() {
+        // Empty vector should return 0 without panicking
+        let empty: Vec<f32> = vec![];
+        let result = lsh_bucket(&empty, 0, 8);
+        assert_eq!(result, 0, "Empty vector should return bucket 0");
+    }
+
+    #[test]
+    fn test_lsh_bucket_zero_hyperplanes() {
+        // Zero hyperplanes should return 0 without panicking
+        let v = vec![1.0, 2.0, 3.0];
+        let result = lsh_bucket(&v, 0, 0);
+        assert_eq!(result, 0, "Zero hyperplanes should return bucket 0");
+    }
+
+    #[test]
+    fn test_lsh_bucket_single_hyperplane() {
+        // Single hyperplane should work correctly
+        let v = vec![1.0, 2.0, 3.0];
+        let result = lsh_bucket(&v, 0, 1);
+        // Result should be 0 or 1 (single bit)
+        assert!(
+            result == 0 || result == 1,
+            "Single hyperplane should give 0 or 1"
+        );
+    }
+
+    #[test]
+    fn test_lsh_bucket_max_hyperplanes() {
+        // 62 hyperplanes (max before overflow) should work
+        let v = vec![1.0; 100];
+        let result = lsh_bucket(&v, 0, 62);
+        // Should not panic and result should fit in i64
+        assert!(result >= 0, "Max hyperplanes should produce valid result");
+    }
+
