@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -174,7 +173,6 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -957,7 +954,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -967,7 +963,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1223,7 +1218,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1300,7 +1294,6 @@ pub fn lsh_bucket_with_distances_int8(
 /// // Probes are ordered by likelihood of finding similar vectors
 /// ```
 pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: usize) -> Vec<i64> {
-    // TODO: verify this condition
     if num_probes == 0 {
         return Vec::new();
     }
@@ -2191,5 +2184,55 @@ mod tests {
 
         // The buckets for different dimensions will likely differ
         // (but this is not guaranteed, so we just verify determinism)
+    }
+
+    #[test]
+    fn test_lsh_bucket_single_element_vector() {
+        // Single element vector should work
+        let v = vec![1.0];
+        let result = lsh_bucket(&v, 0, 8);
+        // Should produce some bucket, verify no panic
+        assert!(
+            result >= 0,
+            "Single element vector should produce valid bucket"
+        );
+    }
+
+    #[test]
+    fn test_lsh_bucket_large_dimension() {
+        // Large dimension vectors should work (simulating embeddings)
+        let v = vec![0.1; 1536]; // Common embedding dimension
+        let result = lsh_bucket(&v, 0, 8);
+        assert!(
+            result >= 0,
+            "Large dimension vector should produce valid bucket"
+        );
+
+        // Verify it's cached and deterministic
+        let result2 = lsh_bucket(&v, 0, 8);
+        assert_eq!(
+            result, result2,
+            "Large dimension results should be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_lsh_bucket_all_zeros() {
+        // All-zero vector has undefined dot product direction, but should not panic
+        let v = vec![0.0; 100];
+        let result = lsh_bucket(&v, 0, 8);
+        // Result is implementation-defined (0s dot anything = 0, not > 0)
+        assert_eq!(result, 0, "All-zero vector should return bucket 0");
+    }
+
+    #[test]
+    fn test_lsh_bucket_all_negative() {
+        // All-negative vector should still produce valid buckets
+        let v = vec![-1.0; 100];
+        let result = lsh_bucket(&v, 0, 8);
+        assert!(
+            result >= 0,
+            "All-negative vector should produce valid bucket"
+        );
     }
 
