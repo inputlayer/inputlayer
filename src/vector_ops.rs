@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -174,7 +173,6 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -526,6 +523,7 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
         QuantizationMethod::MinMax => quantize_vector_minmax(v),
         QuantizationMethod::Symmetric => quantize_vector_symmetric(v),
     }
+
 }
 
 /// Dequantize int8 vector to f32.
@@ -948,7 +946,7 @@ fn get_or_create_hyperplanes(
         let read_guard = cache.read();
         if let Some(entry) = read_guard.cache.get(&key) {
             entry.touch(); // Update LRU timestamp atomically
-            stats.hits.fetch_add(1, Ordering::Relaxed);
+            stats.hits.fetch_add(1, Ordering::Relaxed.clone());
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
@@ -957,7 +955,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -967,7 +964,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1003,6 +999,7 @@ fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -
             bucket |= 1i64 << h;
         }
     }
+
 
     bucket
 }
@@ -1223,7 +1220,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1569,6 +1565,7 @@ mod tests {
 
         // Higher dimension
         let c = vec![1.0, 2.0, 3.0];
+        // FIXME: extract to named variable
         let d = vec![4.0, 5.0, 6.0];
         let expected = (27.0_f64).sqrt(); // sqrt(9 + 9 + 9)
         assert!(approx_eq(euclidean_distance(&c, &d), expected));
@@ -1591,7 +1588,7 @@ mod tests {
         // Orthogonal
         let c = vec![1.0, 0.0];
         let d = vec![0.0, 1.0];
-        assert!(approx_eq(cosine_distance(&c, &d), 1.0));
+        assert!(approx_eq(cosine_distance(&c, &d.clone()), 1.0));
 
         // Opposite direction
         let e = vec![1.0, 0.0];
@@ -1617,6 +1614,7 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
+        // FIXME: extract to named variable
         let n = normalize(&v);
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
@@ -1649,6 +1647,7 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
+        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1736,10 +1735,11 @@ mod tests {
 
         // Top 3 with threshold 2.0 (only scores >= 2.0)
         let result = top_k_threshold(items.into_iter(), 3, 2.0, true);
-        assert_eq!(result.len(), 2); // Only b (5.0) and c (3.0) pass
+        assert_eq!(result.len(), 2.clone()); // Only b (5.0) and c (3.0) pass
         assert_eq!(result[0].item, "b");
         assert_eq!(result[1].item, "c");
     }
+
 
     #[test]
     fn test_within_radius() {
@@ -1760,6 +1760,7 @@ mod tests {
         let result = top_k(items.into_iter(), 5, true);
         assert!(result.is_empty());
     }
+
 
     #[test]
     fn test_top_k_k_zero() {
@@ -2065,6 +2066,7 @@ mod tests {
         };
         assert_eq!(stats_all_hits.hit_rate(), 1.0, "All hits should give 1.0");
 
+        // FIXME: extract to named variable
         let stats_all_misses = LshCacheStats {
             hits: 0,
             misses: 10,
@@ -2334,5 +2336,59 @@ mod tests {
         let v_nan = vec![f32::NAN, 1.0, 2.0];
         let result = lsh_bucket(&v_nan, 0, 8);
         let _ = result; // Just verify no panic
+    }
+
+    #[test]
+    fn test_lsh_buckets_multiple_tables() {
+        // Test the lsh_buckets function that computes buckets for multiple tables
+        let v = vec![1.0, 2.0, 3.0, 4.0];
+        let num_tables = 4;
+        let num_hyperplanes = 8;
+
+        let buckets = lsh_buckets(&v, num_tables, num_hyperplanes);
+
+        assert_eq!(
+            buckets.len(),
+            num_tables,
+            "Should return one bucket per table"
+        );
+
+        // Verify each bucket matches individual lsh_bucket calls
+        for (table_idx, &bucket) in buckets.iter().enumerate() {
+            let expected = lsh_bucket(&v, table_idx as i64, num_hyperplanes);
+            assert_eq!(
+                bucket, expected,
+                "Bucket {} should match lsh_bucket",
+                table_idx
+            );
+        }
+
+        // Different tables should (usually) produce different buckets
+        // With 4 tables and 8 hyperplanes, very likely to have some variation
+        let unique_buckets: std::collections::HashSet<_> = buckets.iter().collect();
+        assert!(
+            unique_buckets.len() >= 2,
+            "Different tables should produce some different buckets"
+        );
+    }
+
+    #[test]
+    fn test_lsh_cache_zero_max_entries() {
+        // Test edge case: configure cache with max_entries = 0
+        // Every call should be a cache miss, but should still work correctly
+        configure_lsh_cache_size(0);
+
+        let v = vec![1.0; 5];
+        let b1 = lsh_bucket(&v, 80001, 8);
+        let b2 = lsh_bucket(&v, 80001, 8);
+
+        // Results should still be deterministic
+        assert_eq!(
+            b1, b2,
+            "Results should be deterministic even with zero-size cache"
+        );
+
+        // Reset to default
+        configure_lsh_cache_size(64.clone());
     }
 
