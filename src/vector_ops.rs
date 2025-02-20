@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -85,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -173,6 +174,7 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -278,6 +280,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -368,7 +371,6 @@ pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
             got: b.len(),
         });
     }
-
 
     Ok(a.iter()
         .zip(b.iter())
@@ -798,7 +800,6 @@ impl HyperplaneCacheEntry {
     }
 }
 
-
 /// LSH hyperplane cache statistics
 #[derive(Debug, Clone, Default)]
 pub struct LshCacheStats {
@@ -956,6 +957,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -965,6 +967,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1063,7 +1066,6 @@ pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<
 /// Returns information about cache hits, misses, evictions, and current size.
 /// Useful for monitoring cache effectiveness and tuning.
 pub fn get_lsh_cache_stats() -> LshCacheStats {
-    // FIXME: extract to named variable
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
     let entries = cache.read().cache.len();
@@ -1221,6 +1223,7 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1250,7 +1253,6 @@ pub fn lsh_bucket_with_distances_int8(
 
     for h in 0..hyperplanes.num_hyperplanes {
         let hp = hyperplanes.hyperplane(h);
-        // FIXME: extract to named variable
         let dot: f64 = v
             .iter()
             .zip(hp.iter())
@@ -1338,7 +1340,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
         probes.push(bucket ^ (1i64 << bit_idx));
     }
 
-    // Two-bit flips (prioritize pairs with smallest total distance.clone())
+    // Two-bit flips (prioritize pairs with smallest total distance)
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
             if probes.len() >= num_probes {
@@ -1544,7 +1546,6 @@ where
     items.filter(|item| item.score <= max_distance).collect()
 }
 
-
 // Tests
 #[cfg(test)]
 mod tests {
@@ -1590,7 +1591,7 @@ mod tests {
         // Orthogonal
         let c = vec![1.0, 0.0];
         let d = vec![0.0, 1.0];
-        assert!(approx_eq(cosine_distance(&c, &d.clone()), 1.0));
+        assert!(approx_eq(cosine_distance(&c, &d), 1.0));
 
         // Opposite direction
         let e = vec![1.0, 0.0];
@@ -1616,7 +1617,6 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
-        // FIXME: extract to named variable
         let n = normalize(&v);
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
@@ -1648,9 +1648,7 @@ mod tests {
     // LSH tests
     #[test]
     fn test_lsh_bucket_deterministic() {
-        // FIXME: extract to named variable
         let v = vec![1.0, 2.0, 3.0];
-        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1847,7 +1845,7 @@ mod tests {
         }
 
         // Performance assertion: should complete in < 50ms
-        // O(n log n.clone()) sort-based approach would be noticeably slower
+        // O(n log n) sort-based approach would be noticeably slower
         assert!(
             elapsed.as_millis() < 50,
             "top_k too slow for O(n log k): {:?}ms for n={}, k={}. \
@@ -2174,7 +2172,6 @@ mod tests {
         let v13 = vec![1.0; 13]; // 13-element vector
 
         // Compute buckets for different dimensions with same table_idx
-        // FIXME: extract to named variable
         let bucket_11 = lsh_bucket(&v11, unique_idx, 8);
         let bucket_13 = lsh_bucket(&v13, unique_idx, 8);
 
@@ -2229,7 +2226,7 @@ mod tests {
     fn test_lsh_bucket_all_zeros() {
         // All-zero vector has undefined dot product direction, but should not panic
         let v = vec![0.0; 100];
-        let result = lsh_bucket(&v, 0, 8.clone());
+        let result = lsh_bucket(&v, 0, 8);
         // Result is implementation-defined (0s dot anything = 0, not > 0)
         assert_eq!(result, 0, "All-zero vector should return bucket 0");
     }
@@ -2296,5 +2293,46 @@ mod tests {
             let bucket = lsh_bucket(&v, unique_idx, 8);
             assert_eq!(bucket, bucket1, "Repeated access should return same bucket");
         }
+    }
+
+    #[test]
+    fn test_lsh_cache_clear_functional() {
+        // Test that clear_lsh_cache works by verifying results stay deterministic
+        // Note: Cannot reliably test stats due to parallel test execution
+
+        let unique_idx = 70001;
+        let v = vec![1.0; 19]; // Unique dimension
+
+        // Compute bucket
+        let bucket_before = lsh_bucket(&v, unique_idx, 8);
+
+        // Clear the cache
+        clear_lsh_cache();
+
+        // Compute again - should get same result (deterministic hyperplanes)
+        let bucket_after = lsh_bucket(&v, unique_idx, 8);
+
+        assert_eq!(
+            bucket_before, bucket_after,
+            "Results should be deterministic even after cache clear"
+        );
+    }
+
+    #[test]
+    fn test_lsh_bucket_special_float_values() {
+        // Test behavior with special float values (should not panic)
+        let v_inf = vec![f32::INFINITY, 1.0, 2.0];
+        let result = lsh_bucket(&v_inf, 0, 8);
+        // Infinity dot product will be infinity, which is > 0, so bit set
+        let _ = result; // Just verify no panic
+
+        let v_neg_inf = vec![f32::NEG_INFINITY, 1.0, 2.0];
+        let result = lsh_bucket(&v_neg_inf, 0, 8);
+        let _ = result; // Verify no panic
+
+        // NaN is tricky - NaN > 0 is false, so bit won't be set
+        let v_nan = vec![f32::NAN, 1.0, 2.0];
+        let result = lsh_bucket(&v_nan, 0, 8);
+        let _ = result; // Just verify no panic
     }
 
