@@ -1,0 +1,19 @@
+% Test: Rounding operations
+
+.kg create test_rounding_n32t25
+.kg use test_rounding_n32t25
+
++vals[(7,), (10,), (15,), (23,)].
+
+% Floor division (integer division)
+floor_div5(X, Y) :- vals(X), Y = X / 5.
+
+?- floor_div5(X, Y).
+
+% Modulo
+mod5(X, Y) :- vals(X), Y = X % 5.
+
+?- mod5(X, Y).
+
+.kg use default
+.kg drop test_rounding_n32t25
