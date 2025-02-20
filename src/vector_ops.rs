@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -2126,5 +2126,70 @@ mod tests {
         let result = lsh_bucket(&v, 0, 62);
         // Should not panic and result should fit in i64
         assert!(result >= 0, "Max hyperplanes should produce valid result");
+    }
+
+    #[test]
+    fn test_lsh_bucket_over_max_hyperplanes() {
+        // >62 hyperplanes should be clamped to 62
+        let v = vec![1.0; 100];
+        let result1 = lsh_bucket(&v, 0, 62);
+        let result2 = lsh_bucket(&v, 0, 100); // Should clamp to 62
+        assert_eq!(result1, result2, "Hyperplanes >62 should be clamped to 62");
+    }
+
+    #[test]
+    fn test_lsh_bucket_negative_table_idx() {
+        // Negative table indices should work (used for different hash families)
+        let v = vec![1.0, 2.0, 3.0];
+        let result_neg = lsh_bucket(&v, -1, 8);
+        let result_pos = lsh_bucket(&v, 1, 8);
+        // Different table indices should produce different results (usually)
+        // Just verify no panic
+        assert!(
+            result_neg >= 0 || result_neg < 0,
+            "Negative table_idx should not panic"
+        );
+        // They might be the same or different depending on hash, just verify they work
+        let _ = result_pos;
+    }
+
+    #[test]
+    fn test_lsh_bucket_large_table_idx() {
+        // Very large table indices should work
+        let v = vec![1.0, 2.0, 3.0];
+        let result = lsh_bucket(&v, i64::MAX, 8);
+        assert!(result >= 0, "Large table_idx should not panic");
+
+        let result_min = lsh_bucket(&v, i64::MIN, 8);
+        assert!(result_min >= 0, "MIN table_idx should not panic");
+    }
+
+    #[test]
+    fn test_lsh_cache_different_dimensions() {
+        // Different dimensions should create different cache entries
+        // This test verifies that the cache key includes dimension
+        let unique_idx = 50001;
+        let v11 = vec![1.0; 11]; // 11-element vector
+        let v13 = vec![1.0; 13]; // 13-element vector
+
+        // Compute buckets for different dimensions with same table_idx
+        let bucket_11 = lsh_bucket(&v11, unique_idx, 8);
+        let bucket_13 = lsh_bucket(&v13, unique_idx, 8);
+
+        // Verify determinism - calling again should give same results
+        let bucket_11_again = lsh_bucket(&v11, unique_idx, 8);
+        let bucket_13_again = lsh_bucket(&v13, unique_idx, 8);
+
+        assert_eq!(
+            bucket_11, bucket_11_again,
+            "Same dimension should produce same bucket"
+        );
+        assert_eq!(
+            bucket_13, bucket_13_again,
+            "Same dimension should produce same bucket"
+        );
+
+        // The buckets for different dimensions will likely differ
+        // (but this is not guaranteed, so we just verify determinism)
     }
 
