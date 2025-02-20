@@ -1,0 +1,15 @@
+% Test: Trigonometric functions
+
+.kg create test_trig_n32t10
+.kg use test_trig_n32t10
+
++angles[(0,), (1,), (3.14159,)].
+
+sin_val(X, Y) :- angles(X), Y = SIN(X).
+cos_val(X, Y) :- angles(X), Y = COS(X).
+
+?- sin_val(X, Y).
+?- cos_val(X, Y).
+
+.kg use default
+.kg drop test_trig_n32t10

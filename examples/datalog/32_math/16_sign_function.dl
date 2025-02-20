@@ -1,0 +1,13 @@
+% Test: Sign function
+
+.kg create test_sign_n32t16
+.kg use test_sign_n32t16
+
++nums[(-10,), (-1,), (0,), (1,), (10,)].
+
+sign_result(X, S) :- nums(X), S = SIGN(X).
+
+?- sign_result(X, S).
+
+.kg use default
+.kg drop test_sign_n32t16
