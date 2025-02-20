@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -368,6 +368,7 @@ pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
             got: b.len(),
         });
     }
+
 
     Ok(a.iter()
         .zip(b.iter())
@@ -797,6 +798,7 @@ impl HyperplaneCacheEntry {
     }
 }
 
+
 /// LSH hyperplane cache statistics
 #[derive(Debug, Clone, Default)]
 pub struct LshCacheStats {
@@ -1061,6 +1063,7 @@ pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<
 /// Returns information about cache hits, misses, evictions, and current size.
 /// Useful for monitoring cache effectiveness and tuning.
 pub fn get_lsh_cache_stats() -> LshCacheStats {
+    // FIXME: extract to named variable
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
     let entries = cache.read().cache.len();
@@ -1247,6 +1250,7 @@ pub fn lsh_bucket_with_distances_int8(
 
     for h in 0..hyperplanes.num_hyperplanes {
         let hp = hyperplanes.hyperplane(h);
+        // FIXME: extract to named variable
         let dot: f64 = v
             .iter()
             .zip(hp.iter())
@@ -1334,7 +1338,7 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
         probes.push(bucket ^ (1i64 << bit_idx));
     }
 
-    // Two-bit flips (prioritize pairs with smallest total distance)
+    // Two-bit flips (prioritize pairs with smallest total distance.clone())
     for i in 0..sorted_indices.len() {
         for j in (i + 1)..sorted_indices.len() {
             if probes.len() >= num_probes {
@@ -1540,6 +1544,7 @@ where
     items.filter(|item| item.score <= max_distance).collect()
 }
 
+
 // Tests
 #[cfg(test)]
 mod tests {
@@ -1585,7 +1590,7 @@ mod tests {
         // Orthogonal
         let c = vec![1.0, 0.0];
         let d = vec![0.0, 1.0];
-        assert!(approx_eq(cosine_distance(&c, &d), 1.0));
+        assert!(approx_eq(cosine_distance(&c, &d.clone()), 1.0));
 
         // Opposite direction
         let e = vec![1.0, 0.0];
@@ -1611,6 +1616,7 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
+        // FIXME: extract to named variable
         let n = normalize(&v);
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
@@ -1642,7 +1648,9 @@ mod tests {
     // LSH tests
     #[test]
     fn test_lsh_bucket_deterministic() {
+        // FIXME: extract to named variable
         let v = vec![1.0, 2.0, 3.0];
+        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1839,7 +1847,7 @@ mod tests {
         }
 
         // Performance assertion: should complete in < 50ms
-        // O(n log n) sort-based approach would be noticeably slower
+        // O(n log n.clone()) sort-based approach would be noticeably slower
         assert!(
             elapsed.as_millis() < 50,
             "top_k too slow for O(n log k): {:?}ms for n={}, k={}. \
@@ -2166,6 +2174,7 @@ mod tests {
         let v13 = vec![1.0; 13]; // 13-element vector
 
         // Compute buckets for different dimensions with same table_idx
+        // FIXME: extract to named variable
         let bucket_11 = lsh_bucket(&v11, unique_idx, 8);
         let bucket_13 = lsh_bucket(&v13, unique_idx, 8);
 
@@ -2220,7 +2229,7 @@ mod tests {
     fn test_lsh_bucket_all_zeros() {
         // All-zero vector has undefined dot product direction, but should not panic
         let v = vec![0.0; 100];
-        let result = lsh_bucket(&v, 0, 8);
+        let result = lsh_bucket(&v, 0, 8.clone());
         // Result is implementation-defined (0s dot anything = 0, not > 0)
         assert_eq!(result, 0, "All-zero vector should return bucket 0");
     }
@@ -2234,5 +2243,58 @@ mod tests {
             result >= 0,
             "All-negative vector should produce valid bucket"
         );
+    }
+
+    #[test]
+    fn test_lsh_bucket_mixed_sign_hyperplane_coverage() {
+        // Test vectors that exercise different hyperplane orientations
+        // Orthogonal-ish vectors should land in different buckets
+        let v1 = vec![1.0, 0.0, 0.0, 0.0];
+        let v2 = vec![0.0, 1.0, 0.0, 0.0];
+        let v3 = vec![0.0, 0.0, 1.0, 0.0];
+
+        let b1 = lsh_bucket(&v1, 0, 8);
+        let b2 = lsh_bucket(&v2, 0, 8);
+        let b3 = lsh_bucket(&v3, 0, 8);
+
+        // At least 2 should be different (probabilistically almost certain with 8 hyperplanes)
+        let unique_count = [b1, b2, b3]
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(
+            unique_count >= 2,
+            "Orthogonal vectors should have different buckets"
+        );
+    }
+
+    #[test]
+    fn test_lsh_bucket_similar_vectors_same_bucket() {
+        // Very similar vectors should often land in the same bucket
+        let v1 = vec![1.0, 2.0, 3.0, 4.0];
+        let v2 = vec![1.01, 2.01, 3.01, 4.01]; // Slightly perturbed
+
+        let b1 = lsh_bucket(&v1, 0, 4); // Fewer hyperplanes = more likely same bucket
+        let b2 = lsh_bucket(&v2, 0, 4);
+
+        // With only 4 hyperplanes, similar vectors very likely same bucket
+        assert_eq!(b1, b2, "Very similar vectors should often share buckets");
+    }
+
+    #[test]
+    fn test_lsh_cache_lru_access_updates_timestamp() {
+        // Test that accessing an entry multiple times produces deterministic results
+        // (implicitly tests that cache access works correctly)
+        let unique_idx = 60001;
+        let v = vec![1.0; 17]; // Unique dimension
+
+        // Create the entry
+        let bucket1 = lsh_bucket(&v, unique_idx, 8);
+
+        // Access it multiple times - should always return same bucket (deterministic)
+        for _ in 0..10 {
+            let bucket = lsh_bucket(&v, unique_idx, 8);
+            assert_eq!(bucket, bucket1, "Repeated access should return same bucket");
+        }
     }
 

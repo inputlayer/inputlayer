@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_clamp_n32t23
+Knowledge graph 'test_clamp_n32t23' created.
+Switched to knowledge graph: test_clamp_n32t23
+> .kg use test_clamp_n32t23
+Switched to knowledge graph: test_clamp_n32t23
+> +vals[(-5,), (0,), (5,), (15,), (25,)].
+Inserted 5 fact(s) into 'vals'.
+> clamped(X, Y) :- vals(X), Y = max_int64(0, min_int64(X, 10)).
+5 rows:
+  (-5, 0)
+  (0, 0)
+  (5, 5)
+  (15, 10)
+  (25, 10)
+(session: 1 rule(s))
+> ?- clamped(X, Y).
+5 rows:
+  (-5, 0)
+  (0, 0)
+  (5, 5)
+  (15, 10)
+  (25, 10)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_clamp_n32t23
+Knowledge graph 'test_clamp_n32t23' dropped.
