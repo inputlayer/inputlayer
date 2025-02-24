@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -174,7 +173,6 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -957,7 +954,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -967,7 +963,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1223,7 +1218,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -2448,3 +2442,40 @@ mod tests {
     }
 
     // VectorError and Checked Function Tests
+    #[test]
+    fn test_vector_error_display() {
+        let err = VectorError::DimensionMismatch {
+            expected: 3,
+            got: 5,
+        };
+        assert_eq!(
+            err.to_string(),
+            "Vector dimension mismatch: expected 3-dimensional, got 5-dimensional"
+        );
+
+        let err = VectorError::EmptyVector;
+        assert_eq!(err.to_string(), "Cannot compute distance on empty vector");
+    }
+
+    #[test]
+    fn test_euclidean_distance_checked_success() {
+        let a = vec![0.0, 0.0];
+        let b = vec![3.0, 4.0];
+        let result = euclidean_distance_checked(&a, &b).unwrap();
+        assert!(approx_eq(result, 5.0));
+    }
+
+    #[test]
+    fn test_euclidean_distance_checked_dimension_mismatch() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0];
+        let result = euclidean_distance_checked(&a, &b);
+        assert!(matches!(
+            result,
+            Err(VectorError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            })
+        ));
+    }
+
