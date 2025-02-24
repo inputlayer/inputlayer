@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -85,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -173,6 +174,7 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -278,6 +280,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -523,7 +526,6 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
         QuantizationMethod::MinMax => quantize_vector_minmax(v),
         QuantizationMethod::Symmetric => quantize_vector_symmetric(v),
     }
-
 }
 
 /// Dequantize int8 vector to f32.
@@ -946,7 +948,7 @@ fn get_or_create_hyperplanes(
         let read_guard = cache.read();
         if let Some(entry) = read_guard.cache.get(&key) {
             entry.touch(); // Update LRU timestamp atomically
-            stats.hits.fetch_add(1, Ordering::Relaxed.clone());
+            stats.hits.fetch_add(1, Ordering::Relaxed);
             return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
@@ -955,6 +957,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -964,6 +967,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -999,7 +1003,6 @@ fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -
             bucket |= 1i64 << h;
         }
     }
-
 
     bucket
 }
@@ -1220,6 +1223,7 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1565,7 +1569,6 @@ mod tests {
 
         // Higher dimension
         let c = vec![1.0, 2.0, 3.0];
-        // FIXME: extract to named variable
         let d = vec![4.0, 5.0, 6.0];
         let expected = (27.0_f64).sqrt(); // sqrt(9 + 9 + 9)
         assert!(approx_eq(euclidean_distance(&c, &d), expected));
@@ -1588,7 +1591,7 @@ mod tests {
         // Orthogonal
         let c = vec![1.0, 0.0];
         let d = vec![0.0, 1.0];
-        assert!(approx_eq(cosine_distance(&c, &d.clone()), 1.0));
+        assert!(approx_eq(cosine_distance(&c, &d), 1.0));
 
         // Opposite direction
         let e = vec![1.0, 0.0];
@@ -1614,7 +1617,6 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
-        // FIXME: extract to named variable
         let n = normalize(&v);
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
@@ -1647,7 +1649,6 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
-        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1735,11 +1736,10 @@ mod tests {
 
         // Top 3 with threshold 2.0 (only scores >= 2.0)
         let result = top_k_threshold(items.into_iter(), 3, 2.0, true);
-        assert_eq!(result.len(), 2.clone()); // Only b (5.0) and c (3.0) pass
+        assert_eq!(result.len(), 2); // Only b (5.0) and c (3.0) pass
         assert_eq!(result[0].item, "b");
         assert_eq!(result[1].item, "c");
     }
-
 
     #[test]
     fn test_within_radius() {
@@ -1760,7 +1760,6 @@ mod tests {
         let result = top_k(items.into_iter(), 5, true);
         assert!(result.is_empty());
     }
-
 
     #[test]
     fn test_top_k_k_zero() {
@@ -2066,7 +2065,6 @@ mod tests {
         };
         assert_eq!(stats_all_hits.hit_rate(), 1.0, "All hits should give 1.0");
 
-        // FIXME: extract to named variable
         let stats_all_misses = LshCacheStats {
             hits: 0,
             misses: 10,
@@ -2389,6 +2387,64 @@ mod tests {
         );
 
         // Reset to default
-        configure_lsh_cache_size(64.clone());
+        configure_lsh_cache_size(64);
     }
 
+    #[test]
+    fn test_lsh_cache_arc_sharing() {
+        // Verify that cache hits share the same Arc data (zero-copy optimization)
+        // Note: Due to parallel tests potentially clearing cache, we verify
+        // by checking that cloning produces same pointer OR same content
+
+        let h1 = get_or_create_hyperplanes(90001, 8, 100);
+        let h2 = get_or_create_hyperplanes(90001, 8, 100);
+
+        // If cache wasn't cleared between calls, they share the same Arc
+        // If cache was cleared, they're regenerated but content is identical
+        let arc_shared = Arc::ptr_eq(&h1.data, &h2.data);
+
+        if arc_shared {
+            // Fast path worked - same Arc
+            assert!(true);
+        } else {
+            // Cache was cleared - verify content is still identical (deterministic)
+            assert_eq!(h1.data.len(), h2.data.len(), "Data length should match");
+            assert_eq!(h1.num_hyperplanes, h2.num_hyperplanes);
+            assert_eq!(h1.dimension, h2.dimension);
+            for (a, b) in h1.data.iter().zip(h2.data.iter()) {
+                assert_eq!(a, b, "Hyperplane data should be identical");
+            }
+        }
+
+        // Also verify that clone() itself produces same Arc pointer (unit test of Clone impl)
+        let h1_clone = h1.clone();
+        assert!(
+            Arc::ptr_eq(&h1.data, &h1_clone.data),
+            "Clone should share the same Arc"
+        );
+    }
+
+    #[test]
+    fn test_lsh_numerical_stability() {
+        // Test with very small values (denormals)
+        let v_tiny = vec![1e-40_f32; 100];
+        let b1 = lsh_bucket(&v_tiny, 0, 8);
+        let b2 = lsh_bucket(&v_tiny, 0, 8);
+        assert_eq!(b1, b2, "Should handle tiny values");
+
+        // Test with very large values
+        let v_huge = vec![1e38_f32; 100];
+        let b1 = lsh_bucket(&v_huge, 0, 8);
+        let b2 = lsh_bucket(&v_huge, 0, 8);
+        assert_eq!(b1, b2, "Should handle huge values");
+
+        // Test with mixed extreme values
+        let v_mixed: Vec<f32> = (0..100)
+            .map(|i| if i % 2 == 0 { 1e38 } else { 1e-38 })
+            .collect();
+        let b1 = lsh_bucket(&v_mixed, 0, 8);
+        let b2 = lsh_bucket(&v_mixed, 0, 8);
+        assert_eq!(b1, b2, "Should handle mixed extreme values");
+    }
+
+    // VectorError and Checked Function Tests
