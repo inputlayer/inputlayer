@@ -2523,3 +2523,66 @@ mod tests {
         assert!(approx_eq(result, 32.0)); // 4 + 10 + 18
     }
 
+    #[test]
+    fn test_dot_product_checked_dimension_mismatch() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0, 4.0];
+        let result = dot_product_checked(&a, &b);
+        assert!(matches!(
+            result,
+            Err(VectorError::DimensionMismatch {
+                expected: 2,
+                got: 4
+            })
+        ));
+    }
+
+    #[test]
+    fn test_manhattan_distance_checked_success() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 6.0, 3.0];
+        let result = manhattan_distance_checked(&a, &b).unwrap();
+        assert!(approx_eq(result, 7.0)); // 3 + 4 + 0
+    }
+
+    #[test]
+    fn test_manhattan_distance_checked_dimension_mismatch() {
+        let a = vec![1.0];
+        let b = vec![1.0, 2.0];
+        let result = manhattan_distance_checked(&a, &b);
+        assert!(matches!(
+            result,
+            Err(VectorError::DimensionMismatch {
+                expected: 1,
+                got: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn test_checked_vs_unchecked_consistency() {
+        // When dimensions match, checked and unchecked should give same results
+        let a = vec![1.0, 2.0, 3.0, 4.0];
+        let b = vec![5.0, 6.0, 7.0, 8.0];
+
+        assert!(approx_eq(
+            euclidean_distance(&a, &b),
+            euclidean_distance_checked(&a, &b).unwrap()
+        ));
+
+        assert!(approx_eq(
+            cosine_distance(&a, &b),
+            cosine_distance_checked(&a, &b).unwrap()
+        ));
+
+        assert!(approx_eq(
+            dot_product(&a, &b),
+            dot_product_checked(&a, &b).unwrap()
+        ));
+
+        assert!(approx_eq(
+            manhattan_distance(&a, &b),
+            manhattan_distance_checked(&a, &b).unwrap()
+        ));
+    }
+

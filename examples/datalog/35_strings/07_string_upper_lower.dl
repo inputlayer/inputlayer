@@ -1,0 +1,15 @@
+% Test: String case conversion
+
+.kg create test_case_n35t07
+.kg use test_case_n35t07
+
++words[("Hello",), ("WORLD",), ("MiXeD",)].
+
+upper_result(S, U) :- words(S), U = UPPER(S).
+lower_result(S, L) :- words(S), L = LOWER(S).
+
+?- upper_result(S, U).
+?- lower_result(S, L).
+
+.kg use default
+.kg drop test_case_n35t07

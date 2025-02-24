@@ -1,0 +1,13 @@
+% Test: String length function
+
+.kg create test_strlen_n35t05
+.kg use test_strlen_n35t05
+
++words[("",), ("a",), ("hello",), ("hello world",)].
+
+len_result(S, L) :- words(S), L = LEN(S).
+
+?- len_result(S, L).
+
+.kg use default
+.kg drop test_strlen_n35t05
