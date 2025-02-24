@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_replace_n35t15
+Knowledge graph 'test_replace_n35t15' created.
+Switched to knowledge graph: test_replace_n35t15
+> .kg use test_replace_n35t15
+Switched to knowledge graph: test_replace_n35t15
+> +words[("hello world",), ("hello there",)].
+Inserted 2 fact(s) into 'words'.
+> replaced(S, R) :- words(S), R = REPLACE(S, "hello", "hi").
+2 rows:
+  ("hello there", "hi there")
+  ("hello world", "hi world")
+(session: 1 rule(s))
+> ?- replaced(S, R).
+2 rows:
+  ("hello there", "hi there")
+  ("hello world", "hi world")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_replace_n35t15
+Knowledge graph 'test_replace_n35t15' dropped.

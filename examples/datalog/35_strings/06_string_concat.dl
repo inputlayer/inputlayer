@@ -1,0 +1,13 @@
+% Test: String concatenation
+
+.kg create test_concat_n35t06
+.kg use test_concat_n35t06
+
++parts[("hello", " ", "world"), ("foo", "", "bar")].
+
+concat_result(A, B, C, R) :- parts(A, B, C), R = CONCAT(A, B, C).
+
+?- concat_result(A, B, C, R).
+
+.kg use default
+.kg drop test_concat_n35t06

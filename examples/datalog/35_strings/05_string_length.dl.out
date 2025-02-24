@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_strlen_n35t05
+Knowledge graph 'test_strlen_n35t05' created.
+Switched to knowledge graph: test_strlen_n35t05
+> .kg use test_strlen_n35t05
+Switched to knowledge graph: test_strlen_n35t05
+> +words[("",), ("a",), ("hello",), ("hello world",)].
+Inserted 4 fact(s) into 'words'.
+> len_result(S, L) :- words(S), L = LEN(S).
+4 rows:
+  ("", 0)
+  ("a", 1)
+  ("hello", 5)
+  ("hello world", 11)
+(session: 1 rule(s))
+> ?- len_result(S, L).
+4 rows:
+  ("", 0)
+  ("a", 1)
+  ("hello", 5)
+  ("hello world", 11)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_strlen_n35t05
+Knowledge graph 'test_strlen_n35t05' dropped.
