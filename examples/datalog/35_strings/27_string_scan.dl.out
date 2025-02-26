@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_substr_n35t27
+Knowledge graph 'test_substr_n35t27' created.
+Switched to knowledge graph: test_substr_n35t27
+> .kg use test_substr_n35t27
+Switched to knowledge graph: test_substr_n35t27
+> +files[("readme.md",), ("config.json",), ("data.csv",), ("script.js",), ("style.css",)].
+Inserted 5 fact(s) into 'files'.
+> ?- files(F).
+5 rows:
+  ("config.json")
+  ("data.csv")
+  ("readme.md")
+  ("script.js")
+  ("style.css")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_substr_n35t27
+Knowledge graph 'test_substr_n35t27' dropped.

@@ -1,0 +1,14 @@
+% Test: String padding operations
+
+.kg create test_padding_n35t26
+.kg use test_padding_n35t26
+
++nums[(1,), (12,), (123,)].
+
+% Convert to string and check length
+num_info(N, L) :- nums(N), L = N.
+
+?- num_info(N, L).
+
+.kg use default
+.kg drop test_padding_n35t26

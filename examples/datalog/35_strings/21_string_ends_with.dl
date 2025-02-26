@@ -1,0 +1,14 @@
+% Test: String ends with check
+
+.kg create test_ends_n35t21
+.kg use test_ends_n35t21
+
++files[("test.txt",), ("data.csv",), ("report.txt",), ("image.png",)].
+
+% Find files ending with ".txt"
+txt_files(F) :- files(F), ENDS_WITH(F, ".txt").
+
+?- txt_files(F).
+
+.kg use default
+.kg drop test_ends_n35t21

@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unicode_n35t28
+Knowledge graph 'test_unicode_n35t28' created.
+Switched to knowledge graph: test_unicode_n35t28
+> .kg use test_unicode_n35t28
+Switched to knowledge graph: test_unicode_n35t28
+> +greeting[(1, "Hello World"), (2, "Bonjour"), (3, "Hola")].
+Inserted 3 fact(s) into 'greeting'.
+> ?- greeting(Id, Msg).
+3 rows:
+  (1, "Hello World")
+  (2, "Bonjour")
+  (3, "Hola")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unicode_n35t28
+Knowledge graph 'test_unicode_n35t28' dropped.
