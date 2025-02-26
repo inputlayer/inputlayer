@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -174,7 +173,6 @@ pub fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 /// - 0.0 for mismatched dimensions
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return 0.0;
     }
@@ -280,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -957,7 +954,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -967,7 +963,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1223,7 +1218,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -2583,6 +2577,76 @@ mod tests {
         assert!(approx_eq(
             manhattan_distance(&a, &b),
             manhattan_distance_checked(&a, &b).unwrap()
+        ));
+    }
+
+    #[test]
+    fn test_checked_asymmetric_empty() {
+        // One empty, one non-empty should return DimensionMismatch
+        let empty: Vec<f32> = vec![];
+        let non_empty = vec![1.0, 2.0, 3.0];
+
+        assert!(matches!(
+            euclidean_distance_checked(&empty, &non_empty),
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
+        ));
+
+        assert!(matches!(
+            euclidean_distance_checked(&non_empty, &empty),
+            Err(VectorError::DimensionMismatch {
+                expected: 3,
+                got: 0
+            })
+        ));
+
+        assert!(matches!(
+            cosine_distance_checked(&empty, &non_empty),
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
+        ));
+
+        assert!(matches!(
+            dot_product_checked(&empty, &non_empty),
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
+        ));
+
+        assert!(matches!(
+            manhattan_distance_checked(&empty, &non_empty),
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn test_checked_high_dimensional() {
+        // Test with OpenAI embedding dimensions (1536)
+        let a: Vec<f32> = (0..1536).map(|i| (i as f32) / 1000.0).collect();
+        let b: Vec<f32> = (0..1536).map(|i| (i as f32) / 1000.0 + 0.1).collect();
+
+        // Should succeed
+        assert!(euclidean_distance_checked(&a, &b).is_ok());
+        assert!(cosine_distance_checked(&a, &b).is_ok());
+        assert!(dot_product_checked(&a, &b).is_ok());
+        assert!(manhattan_distance_checked(&a, &b).is_ok());
+
+        // Mismatched dimensions (768 vs 1536)
+        let c: Vec<f32> = (0..768).map(|i| (i as f32) / 1000.0).collect();
+        assert!(matches!(
+            euclidean_distance_checked(&a, &c),
+            Err(VectorError::DimensionMismatch {
+                expected: 1536,
+                got: 768
+            })
         ));
     }
 
