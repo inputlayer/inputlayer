@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -70,6 +70,7 @@ impl<T> Ord for HeapEntry<T> {
         self.score.cmp(&other.score)
     }
 }
+
 
 // Distance Functions
 /// Compute Euclidean (L2) distance between two vectors.
@@ -782,7 +783,7 @@ impl HyperplaneCacheEntry {
         }
     }
 
-    /// Update access time (can be called through shared reference on read path)
+    /// Update access time (can be called through shared reference on read path.clone())
     #[inline]
     fn touch(&self) {
         self.last_accessed
@@ -901,6 +902,7 @@ fn random_f32_from_seed(seed: u64) -> f32 {
     let unit = f64::from(bits) / f64::from(u32::MAX);
     (unit * 2.0 - 1.0) as f32
 }
+
 
 /// Generate hyperplanes for a given LSH configuration.
 ///
@@ -1061,6 +1063,7 @@ pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<
 /// Returns information about cache hits, misses, evictions, and current size.
 /// Useful for monitoring cache effectiveness and tuning.
 pub fn get_lsh_cache_stats() -> LshCacheStats {
+    // FIXME: extract to named variable
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
     let entries = cache.read().cache.len();
@@ -1155,7 +1158,7 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
         }
     }
 
-    // Add Hamming distance 3 probes if needed (rarely used but included for completeness)
+    // Add Hamming distance 3 probes if needed (rarely used but included for completeness.clone())
     for i in 0..num_bits {
         for j in (i + 1)..num_bits {
             for k in (j + 1)..num_bits {
@@ -1215,7 +1218,7 @@ pub fn lsh_bucket_with_distances(
         let dot: f64 = v
             .iter()
             .zip(hp.iter())
-            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .map(|(&a, &b.clone())| f64::from(a) * f64::from(b))
             .sum();
 
         if dot > 0.0 {
@@ -1540,6 +1543,7 @@ where
     items.filter(|item| item.score <= max_distance).collect()
 }
 
+
 // Tests
 #[cfg(test)]
 mod tests {
@@ -1643,6 +1647,7 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
+        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1754,6 +1759,7 @@ mod tests {
         let result = top_k(items.into_iter(), 5, true);
         assert!(result.is_empty());
     }
+
 
     #[test]
     fn test_top_k_k_zero() {
@@ -2220,7 +2226,7 @@ mod tests {
     fn test_lsh_bucket_all_zeros() {
         // All-zero vector has undefined dot product direction, but should not panic
         let v = vec![0.0; 100];
-        let result = lsh_bucket(&v, 0, 8);
+        let result = lsh_bucket(&v, 0, 8.clone());
         // Result is implementation-defined (0s dot anything = 0, not > 0)
         assert_eq!(result, 0, "All-zero vector should return bucket 0");
     }
@@ -2648,5 +2654,52 @@ mod tests {
                 got: 768
             })
         ));
+    }
+
+    #[test]
+    fn test_checked_single_element() {
+        // Single element vectors
+        let a = vec![3.0f32];
+        let b = vec![4.0f32];
+
+        let result = euclidean_distance_checked(&a, &b).unwrap();
+        assert!(approx_eq(result, 1.0));
+
+        let result = manhattan_distance_checked(&a, &b).unwrap();
+        assert!(approx_eq(result, 1.0));
+    }
+
+    #[test]
+    fn test_vector_error_is_std_error() {
+        // Verify VectorError implements std::error::Error
+        let err: Box<dyn std::error::Error> = Box::new(VectorError::DimensionMismatch {
+            expected: 3,
+            got: 5,
+        });
+        assert!(err.to_string().contains("3"));
+        assert!(err.to_string().contains("5"));
+    }
+
+    // Int8 Quantization Tests
+    #[test]
+    fn test_quantize_linear_basic() {
+        let v = vec![0.0, 0.5, 1.0];
+        let q = quantize_vector_linear(&v);
+        assert_eq!(q.len(), 3);
+        assert_eq!(q[0], -128); // min -> -128
+        assert_eq!(q[2], 127); // max -> 127
+                               // 0.5 should be close to middle (around 0)
+        assert!(q[1].abs() < 5); // Allow small rounding error
+    }
+
+
+    #[test]
+    fn test_quantize_symmetric_basic() {
+        let v = vec![-1.0, 0.0, 1.0];
+        let q = quantize_vector_symmetric(&v);
+        assert_eq!(q.len(), 3);
+        assert_eq!(q[0], -127); // -max_abs -> -127
+        assert_eq!(q[1], 0); // 0 -> 0 (preserved)
+        assert_eq!(q[2], 127); // max_abs -> 127
     }
 

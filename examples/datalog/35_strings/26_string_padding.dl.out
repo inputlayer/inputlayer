@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_padding_n35t26
+Knowledge graph 'test_padding_n35t26' created.
+Switched to knowledge graph: test_padding_n35t26
+> .kg use test_padding_n35t26
+Switched to knowledge graph: test_padding_n35t26
+> +nums[(1,), (12,), (123,)].
+Inserted 3 fact(s) into 'nums'.
+> num_info(N, L) :- nums(N), L = N.
+3 rows:
+  (1, 1)
+  (12, 12)
+  (123, 123)
+(session: 1 rule(s))
+> ?- num_info(N, L).
+3 rows:
+  (1, 1)
+  (12, 12)
+  (123, 123)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_padding_n35t26
+Knowledge graph 'test_padding_n35t26' dropped.
