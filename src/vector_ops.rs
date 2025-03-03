@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -70,7 +70,6 @@ impl<T> Ord for HeapEntry<T> {
         self.score.cmp(&other.score)
     }
 }
-
 
 // Distance Functions
 /// Compute Euclidean (L2) distance between two vectors.
@@ -86,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -279,6 +279,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -783,7 +784,7 @@ impl HyperplaneCacheEntry {
         }
     }
 
-    /// Update access time (can be called through shared reference on read path.clone())
+    /// Update access time (can be called through shared reference on read path)
     #[inline]
     fn touch(&self) {
         self.last_accessed
@@ -903,7 +904,6 @@ fn random_f32_from_seed(seed: u64) -> f32 {
     (unit * 2.0 - 1.0) as f32
 }
 
-
 /// Generate hyperplanes for a given LSH configuration.
 ///
 /// Creates deterministic random hyperplanes based on (`table_idx`, `hyperplane_index`, dimension).
@@ -956,6 +956,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -965,6 +966,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1063,7 +1065,6 @@ pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<
 /// Returns information about cache hits, misses, evictions, and current size.
 /// Useful for monitoring cache effectiveness and tuning.
 pub fn get_lsh_cache_stats() -> LshCacheStats {
-    // FIXME: extract to named variable
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
     let entries = cache.read().cache.len();
@@ -1158,7 +1159,7 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
         }
     }
 
-    // Add Hamming distance 3 probes if needed (rarely used but included for completeness.clone())
+    // Add Hamming distance 3 probes if needed (rarely used but included for completeness)
     for i in 0..num_bits {
         for j in (i + 1)..num_bits {
             for k in (j + 1)..num_bits {
@@ -1218,9 +1219,10 @@ pub fn lsh_bucket_with_distances(
         let dot: f64 = v
             .iter()
             .zip(hp.iter())
-            .map(|(&a, &b.clone())| f64::from(a) * f64::from(b))
+            .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1543,7 +1545,6 @@ where
     items.filter(|item| item.score <= max_distance).collect()
 }
 
-
 // Tests
 #[cfg(test)]
 mod tests {
@@ -1647,7 +1648,6 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
-        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1759,7 +1759,6 @@ mod tests {
         let result = top_k(items.into_iter(), 5, true);
         assert!(result.is_empty());
     }
-
 
     #[test]
     fn test_top_k_k_zero() {
@@ -2226,7 +2225,7 @@ mod tests {
     fn test_lsh_bucket_all_zeros() {
         // All-zero vector has undefined dot product direction, but should not panic
         let v = vec![0.0; 100];
-        let result = lsh_bucket(&v, 0, 8.clone());
+        let result = lsh_bucket(&v, 0, 8);
         // Result is implementation-defined (0s dot anything = 0, not > 0)
         assert_eq!(result, 0, "All-zero vector should return bucket 0");
     }
@@ -2692,7 +2691,6 @@ mod tests {
         assert!(q[1].abs() < 5); // Allow small rounding error
     }
 
-
     #[test]
     fn test_quantize_symmetric_basic() {
         let v = vec![-1.0, 0.0, 1.0];
@@ -2701,5 +2699,36 @@ mod tests {
         assert_eq!(q[0], -127); // -max_abs -> -127
         assert_eq!(q[1], 0); // 0 -> 0 (preserved)
         assert_eq!(q[2], 127); // max_abs -> 127
+    }
+
+    #[test]
+    fn test_quantize_empty() {
+        let v: Vec<f32> = vec![];
+        assert!(quantize_vector_linear(&v).is_empty());
+        assert!(quantize_vector_symmetric(&v).is_empty());
+    }
+
+    #[test]
+    fn test_quantize_constant() {
+        // All same values should map to 0
+        let v = vec![5.0, 5.0, 5.0];
+        let q = quantize_vector_linear(&v);
+        assert_eq!(q, vec![0i8, 0, 0]);
+    }
+
+    #[test]
+    fn test_quantize_method_enum() {
+        let v = vec![0.0, 1.0];
+
+        let q_linear = quantize_vector(&v, QuantizationMethod::Linear);
+        let q_minmax = quantize_vector(&v, QuantizationMethod::MinMax);
+        let q_symmetric = quantize_vector(&v, QuantizationMethod::Symmetric);
+
+        // Linear and MinMax should be identical
+        assert_eq!(q_linear, q_minmax);
+
+        // All should have same length
+        assert_eq!(q_linear.len(), 2);
+        assert_eq!(q_symmetric.len(), 2);
     }
 

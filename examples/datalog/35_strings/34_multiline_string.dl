@@ -1,0 +1,16 @@
+% Test: String with embedded newline
+
+.kg create test_multiline_n35t34
+.kg use test_multiline_n35t34
+
++text[("line1\nline2",), ("single",)].
+
+?- text(T).
+
+% String comparison
+has_newline(T) :- text(T), T = "line1\nline2".
+
+?- has_newline(T).
+
+.kg use default
+.kg drop test_multiline_n35t34
