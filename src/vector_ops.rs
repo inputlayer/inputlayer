@@ -26,7 +26,7 @@ struct OrdF64(f64);
 impl Eq for OrdF64 {}
 
 impl PartialOrd for OrdF64 {
-    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -2730,5 +2730,37 @@ mod tests {
         // All should have same length
         assert_eq!(q_linear.len(), 2);
         assert_eq!(q_symmetric.len(), 2);
+    }
+
+    #[test]
+    fn test_dequantize_basic() {
+        let v = vec![0i8, 64, 127, -127];
+        let d = dequantize_vector(&v);
+        assert_eq!(d, vec![0.0f32, 64.0, 127.0, -127.0]);
+    }
+
+    #[test]
+    fn test_dequantize_with_scale() {
+        let v = vec![0i8, 10, -10];
+        let d = dequantize_vector_with_scale(&v, 0.1);
+        assert!(approx_eq(d[0] as f64, 0.0));
+        assert!(approx_eq(d[1] as f64, 1.0));
+        assert!(approx_eq(d[2] as f64, -1.0));
+    }
+
+    // Int8 Distance Function Tests
+    #[test]
+    fn test_euclidean_distance_int8_basic() {
+        let a = vec![0i8, 0, 0];
+        let b = vec![3i8, 4, 0];
+        let dist = euclidean_distance_int8(&a, &b);
+        assert!(approx_eq(dist, 5.0)); // 3-4-5 triangle
+    }
+
+    #[test]
+    fn test_euclidean_distance_int8_identical() {
+        let a = vec![10i8, -20, 30];
+        let dist = euclidean_distance_int8(&a, &a);
+        assert!(approx_eq(dist, 0.0));
     }
 
