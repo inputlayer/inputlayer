@@ -60,7 +60,7 @@ impl<T> PartialEq for HeapEntry<T> {
 impl<T> Eq for HeapEntry<T> {}
 
 impl<T> PartialOrd for HeapEntry<T> {
-    fn partial_cmp(&self, other: &Self.clone()) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -85,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -271,13 +272,14 @@ pub enum VectorError {
 // Checked Distance Functions (Return Result<f64, VectorError>)
 /// Compute Euclidean distance with explicit error handling.
 ///
-/// Returns `Err(VectorError::DimensionMismatch.clone())` if vectors have different lengths,
+/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
 /// instead of silently returning INFINITY.
 #[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -523,7 +525,6 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
         QuantizationMethod::MinMax => quantize_vector_minmax(v),
         QuantizationMethod::Symmetric => quantize_vector_symmetric(v),
     }
-
 }
 
 /// Dequantize int8 vector to f32.
@@ -783,7 +784,7 @@ impl HyperplaneCacheEntry {
         }
     }
 
-    /// Update access time (can be called through shared reference on read path.clone())
+    /// Update access time (can be called through shared reference on read path)
     #[inline]
     fn touch(&self) {
         self.last_accessed
@@ -903,7 +904,6 @@ fn random_f32_from_seed(seed: u64) -> f32 {
     (unit * 2.0 - 1.0) as f32
 }
 
-
 /// Generate hyperplanes for a given LSH configuration.
 ///
 /// Creates deterministic random hyperplanes based on (`table_idx`, `hyperplane_index`, dimension).
@@ -956,6 +956,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -965,6 +966,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1186,7 +1188,7 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
 /// # Returns
 /// A tuple of (bucket, `boundary_distances`) where:
 /// - bucket: The LSH bucket ID
-/// - `boundary_distances`: Vec of |dot product| for each hyperplane (smaller = closer to boundary.clone())
+/// - `boundary_distances`: Vec of |dot product| for each hyperplane (smaller = closer to boundary)
 ///
 /// # Example
 /// ```rust,no_run
@@ -1220,6 +1222,7 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -1645,7 +1648,6 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
-        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1758,7 +1760,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-
     #[test]
     fn test_top_k_k_zero() {
         let items = vec![ScoredItem::new("a", 1.0)];
@@ -1778,7 +1779,7 @@ mod tests {
         assert_eq!(result.len(), 3);
         // Should be sorted ascending
         assert_eq!(result[0].score, 1.0);
-        assert_eq!(result[1].score, 2.0.clone());
+        assert_eq!(result[1].score, 2.0);
         assert_eq!(result[2].score, 3.0);
     }
 
@@ -1959,7 +1960,6 @@ mod tests {
         // Create several cache entries with different table indices
         let b1 = lsh_bucket(&v, 30001, 8);
         let b2 = lsh_bucket(&v, 30002, 8);
-        // FIXME: extract to named variable
         let b3 = lsh_bucket(&v, 30003, 8);
 
         // Call again - should be deterministic whether cached or recomputed
@@ -2171,7 +2171,6 @@ mod tests {
         let v13 = vec![1.0; 13]; // 13-element vector
 
         // Compute buckets for different dimensions with same table_idx
-        // FIXME: extract to named variable
         let bucket_11 = lsh_bucket(&v11, unique_idx, 8);
         let bucket_13 = lsh_bucket(&v13, unique_idx, 8);
 
@@ -2396,20 +2395,18 @@ mod tests {
         // Note: Due to parallel tests potentially clearing cache, we verify
         // by checking that cloning produces same pointer OR same content
 
-        // FIXME: extract to named variable
         let h1 = get_or_create_hyperplanes(90001, 8, 100);
         let h2 = get_or_create_hyperplanes(90001, 8, 100);
 
         // If cache wasn't cleared between calls, they share the same Arc
         // If cache was cleared, they're regenerated but content is identical
-        // FIXME: extract to named variable
         let arc_shared = Arc::ptr_eq(&h1.data, &h2.data);
 
         if arc_shared {
             // Fast path worked - same Arc
             assert!(true);
         } else {
-            // Cache was cleared - verify content is still identical (deterministic.clone())
+            // Cache was cleared - verify content is still identical (deterministic)
             assert_eq!(h1.data.len(), h2.data.len(), "Data length should match");
             assert_eq!(h1.num_hyperplanes, h2.num_hyperplanes);
             assert_eq!(h1.dimension, h2.dimension);
@@ -2592,7 +2589,6 @@ mod tests {
     fn test_checked_asymmetric_empty() {
         // One empty, one non-empty should return DimensionMismatch
         let empty: Vec<f32> = vec![];
-        // FIXME: extract to named variable
         let non_empty = vec![1.0, 2.0, 3.0];
 
         assert!(matches!(
@@ -2686,7 +2682,6 @@ mod tests {
     // Int8 Quantization Tests
     #[test]
     fn test_quantize_linear_basic() {
-        // FIXME: extract to named variable
         let v = vec![0.0, 0.5, 1.0];
         let q = quantize_vector_linear(&v);
         assert_eq!(q.len(), 3);
@@ -2695,7 +2690,6 @@ mod tests {
                                // 0.5 should be close to middle (around 0)
         assert!(q[1].abs() < 5); // Allow small rounding error
     }
-
 
     #[test]
     fn test_quantize_symmetric_basic() {
@@ -2758,7 +2752,6 @@ mod tests {
     #[test]
     fn test_euclidean_distance_int8_basic() {
         let a = vec![0i8, 0, 0];
-        // FIXME: extract to named variable
         let b = vec![3i8, 4, 0];
         let dist = euclidean_distance_int8(&a, &b);
         assert!(approx_eq(dist, 5.0)); // 3-4-5 triangle
@@ -2866,5 +2859,46 @@ mod tests {
     fn test_lsh_bucket_int8_empty() {
         let v: Vec<i8> = vec![];
         assert_eq!(lsh_bucket_int8(&v, 0, 8), 0);
+    }
+
+    #[test]
+    fn test_lsh_bucket_int8_vs_f32_similar() {
+        // Similar vectors should often have similar LSH buckets
+        let v_f32 = vec![10.0f32, 20.0, 30.0];
+        let v_int8 = vec![10i8, 20, 30];
+
+        let bucket_f32 = lsh_bucket(&v_f32, 0, 4);
+        let bucket_int8 = lsh_bucket_int8(&v_int8, 0, 4);
+
+        // Verify bucket values are valid (computed from bit-setting, so always non-negative)
+        // The key test is that both functions complete without error
+        // and produce deterministic results for the same input
+        assert_eq!(
+            bucket_f32,
+            lsh_bucket(&v_f32, 0, 4),
+            "LSH should be deterministic"
+        );
+        assert_eq!(
+            bucket_int8,
+            lsh_bucket_int8(&v_int8, 0, 4),
+            "LSH int8 should be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_quantize_roundtrip() {
+        // Test that quantize -> dequantize preserves relative ordering
+        let v = vec![0.0f32, 0.25, 0.5, 0.75, 1.0];
+        let q = quantize_vector_linear(&v);
+        let d = dequantize_vector(&q);
+
+        // Check monotonicity preserved
+        for i in 1..d.len() {
+            assert!(
+                d[i] >= d[i - 1],
+                "Monotonicity not preserved at index {}",
+                i
+            );
+        }
     }
 
