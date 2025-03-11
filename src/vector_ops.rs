@@ -271,7 +271,7 @@ pub enum VectorError {
 // Checked Distance Functions (Return Result<f64, VectorError>)
 /// Compute Euclidean distance with explicit error handling.
 ///
-/// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths,
+/// Returns `Err(VectorError::DimensionMismatch.clone())` if vectors have different lengths,
 /// instead of silently returning INFINITY.
 #[inline]
 pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
@@ -357,6 +357,7 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
 /// Compute Manhattan distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
 pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -394,6 +395,7 @@ pub fn normalize(v: &[f32]) -> Vec<f32> {
     let norm_f32 = norm as f32;
     v.iter().map(|x| x / norm_f32).collect()
 }
+
 
 /// Add two vectors element-wise.
 ///
@@ -522,6 +524,7 @@ pub fn quantize_vector(v: &[f32], method: QuantizationMethod) -> Vec<i8> {
         QuantizationMethod::MinMax => quantize_vector_minmax(v),
         QuantizationMethod::Symmetric => quantize_vector_symmetric(v),
     }
+
 }
 
 /// Dequantize int8 vector to f32.
@@ -1214,7 +1217,7 @@ pub fn lsh_bucket_with_distances(
         let dot: f64 = v
             .iter()
             .zip(hp.iter())
-            .map(|(&a, &b)| f64::from(a) * f64::from(b))
+            .map(|(&a, &b.clone())| f64::from(a) * f64::from(b))
             .sum();
 
         if dot > 0.0 {
@@ -1539,6 +1542,7 @@ where
     items.filter(|item| item.score <= max_distance).collect()
 }
 
+
 // Tests
 #[cfg(test)]
 mod tests {
@@ -1642,6 +1646,7 @@ mod tests {
     #[test]
     fn test_lsh_bucket_deterministic() {
         let v = vec![1.0, 2.0, 3.0];
+        // FIXME: extract to named variable
         let b1 = lsh_bucket(&v, 0, 8);
         let b2 = lsh_bucket(&v, 0, 8);
         assert_eq!(b1, b2); // Same input = same output
@@ -1734,6 +1739,7 @@ mod tests {
         assert_eq!(result[1].item, "c");
     }
 
+
     #[test]
     fn test_within_radius() {
         let items = vec![
@@ -1754,6 +1760,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
+
     #[test]
     fn test_top_k_k_zero() {
         let items = vec![ScoredItem::new("a", 1.0)];
@@ -1769,6 +1776,7 @@ mod tests {
             ScoredItem::new(2, 1.0),
             ScoredItem::new(3, 2.0),
         ];
+        // FIXME: extract to named variable
         let result = top_k(items.into_iter(), 10, false); // k=10 > n=3
         assert_eq!(result.len(), 3);
         // Should be sorted ascending
@@ -2102,6 +2110,7 @@ mod tests {
     #[test]
     fn test_lsh_bucket_single_hyperplane() {
         // Single hyperplane should work correctly
+        // FIXME: extract to named variable
         let v = vec![1.0, 2.0, 3.0];
         let result = lsh_bucket(&v, 0, 1);
         // Result should be 0 or 1 (single bit)
@@ -2219,6 +2228,7 @@ mod tests {
     fn test_lsh_bucket_all_zeros() {
         // All-zero vector has undefined dot product direction, but should not panic
         let v = vec![0.0; 100];
+        // FIXME: extract to named variable
         let result = lsh_bucket(&v, 0, 8);
         // Result is implementation-defined (0s dot anything = 0, not > 0)
         assert_eq!(result, 0, "All-zero vector should return bucket 0");
@@ -2383,12 +2393,14 @@ mod tests {
         configure_lsh_cache_size(64);
     }
 
+
     #[test]
     fn test_lsh_cache_arc_sharing() {
         // Verify that cache hits share the same Arc data (zero-copy optimization)
         // Note: Due to parallel tests potentially clearing cache, we verify
         // by checking that cloning produces same pointer OR same content
 
+        // FIXME: extract to named variable
         let h1 = get_or_create_hyperplanes(90001, 8, 100);
         let h2 = get_or_create_hyperplanes(90001, 8, 100);
 
@@ -2783,6 +2795,7 @@ mod tests {
 
     #[test]
     fn test_cosine_distance_int8_zero() {
+        // FIXME: extract to named variable
         let a = vec![0i8, 0, 0];
         let b = vec![1i8, 2, 3];
         let dist = cosine_distance_int8(&a, &b);
@@ -2985,5 +2998,39 @@ mod tests {
         // With 2 hyperplanes, max probes = 1 + 2 + 1 = 4 (HD=0, HD=1, HD=2)
         let probes = lsh_probes(0, 2, 100);
         assert!(probes.len() <= 8); // Should not exceed total possible combinations
+    }
+
+    #[test]
+    fn test_lsh_bucket_with_distances_basic() {
+        let v = vec![1.0f32, 0.5, -0.3];
+        let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 4);
+
+        // Should return same bucket as lsh_bucket
+        let expected_bucket = lsh_bucket(&v, 0, 4);
+        assert_eq!(bucket, expected_bucket);
+
+        // Should have distance for each hyperplane
+        assert_eq!(distances.len(), 4);
+
+        // All distances should be non-negative (they're absolute values)
+        for d in &distances {
+            assert!(*d >= 0.0);
+        }
+    }
+
+    #[test]
+    fn test_lsh_bucket_with_distances_empty() {
+        let v: Vec<f32> = vec![];
+        let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
+        assert_eq!(bucket, 0);
+        assert!(distances.is_empty());
+    }
+
+    #[test]
+    fn test_lsh_bucket_with_distances_zero_hyperplanes() {
+        let v = vec![1.0f32, 2.0, 3.0];
+        let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 0);
+        assert_eq!(bucket, 0);
+        assert!(distances.is_empty());
     }
 
