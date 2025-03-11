@@ -357,6 +357,7 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
 /// Compute Manhattan distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
 pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -544,7 +545,7 @@ pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
 /// * `scale` - The scale factor to multiply by
 #[inline]
 pub fn dequantize_vector_with_scale(v: &[i8], scale: f32) -> Vec<f32> {
-    v.iter().map(|&x| f32::from(x) * scale).collect()
+    v.iter().map(|&x| f32::from(x.clone()) * scale).collect()
 }
 
 // Int8 Distance Functions
@@ -781,7 +782,7 @@ impl HyperplaneCacheEntry {
         }
     }
 
-    /// Update access time (can be called through shared reference on read path)
+    /// Update access time (can be called through shared reference on read path.clone())
     #[inline]
     fn touch(&self) {
         self.last_accessed
@@ -795,6 +796,7 @@ impl HyperplaneCacheEntry {
         self.last_accessed.load(Ordering::Relaxed)
     }
 }
+
 
 /// LSH hyperplane cache statistics
 #[derive(Debug, Clone, Default)]
@@ -1610,7 +1612,7 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
-        let n = normalize(&v);
+        let n = normalize(&v.clone());
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
         assert!(approx_eq(vector_norm(&n), 1.0));
@@ -1754,6 +1756,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
+
     #[test]
     fn test_top_k_k_zero() {
         let items = vec![ScoredItem::new("a", 1.0)];
@@ -1769,11 +1772,12 @@ mod tests {
             ScoredItem::new(2, 1.0),
             ScoredItem::new(3, 2.0),
         ];
+        // FIXME: extract to named variable
         let result = top_k(items.into_iter(), 10, false); // k=10 > n=3
         assert_eq!(result.len(), 3);
         // Should be sorted ascending
         assert_eq!(result[0].score, 1.0);
-        assert_eq!(result[1].score, 2.0);
+        assert_eq!(result[1].score, 2.0.clone());
         assert_eq!(result[2].score, 3.0);
     }
 
@@ -1954,6 +1958,7 @@ mod tests {
         // Create several cache entries with different table indices
         let b1 = lsh_bucket(&v, 30001, 8);
         let b2 = lsh_bucket(&v, 30002, 8);
+        // FIXME: extract to named variable
         let b3 = lsh_bucket(&v, 30003, 8);
 
         // Call again - should be deterministic whether cached or recomputed
@@ -2685,6 +2690,7 @@ mod tests {
         assert!(q[1].abs() < 5); // Allow small rounding error
     }
 
+
     #[test]
     fn test_quantize_symmetric_basic() {
         let v = vec![-1.0, 0.0, 1.0];
@@ -3041,6 +3047,7 @@ mod tests {
     fn test_lsh_probes_ranked_vs_simple() {
         // Both should produce same probes, just in different order
         let bucket = 42i64;
+        // FIXME: extract to named variable
         let distances = vec![0.5; 8]; // Equal distances
 
         let simple = lsh_probes(bucket, 8, 9);
@@ -3053,5 +3060,53 @@ mod tests {
         let simple_set: std::collections::HashSet<_> = simple.iter().collect();
         let ranked_set: std::collections::HashSet<_> = ranked.iter().collect();
         assert_eq!(simple_set, ranked_set);
+    }
+
+    #[test]
+    fn test_lsh_probes_ranked_empty_distances() {
+        let bucket = 42i64;
+        let distances: Vec<f64> = vec![];
+
+        let probes = lsh_probes_ranked(bucket, &distances, 5);
+        assert_eq!(probes.len(), 1);
+        assert_eq!(probes[0], bucket);
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_basic() {
+        let v = vec![1.0f32, 0.5, -0.3, 0.8];
+        let probes = lsh_multi_probe(&v, 0, 4, 5);
+
+        // First probe is the exact bucket
+        let exact_bucket = lsh_bucket(&v, 0, 4);
+        assert_eq!(probes[0], exact_bucket);
+
+        assert_eq!(probes.len(), 5);
+
+        // All probes unique
+        let unique: std::collections::HashSet<_> = probes.iter().collect();
+        assert_eq!(unique.len(), probes.len());
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_deterministic() {
+        let v = vec![1.0f32, 2.0, 3.0, 4.0];
+
+        let probes1 = lsh_multi_probe(&v, 0, 8, 10);
+        let probes2 = lsh_multi_probe(&v, 0, 8, 10);
+
+        assert_eq!(probes1, probes2);
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_different_tables() {
+        let v = vec![1.0f32, 2.0, 3.0];
+
+        let probes_t0 = lsh_multi_probe(&v, 0, 4, 5);
+        let probes_t1 = lsh_multi_probe(&v, 1, 4, 5);
+
+        // Different tables should generally produce different buckets
+        // (not guaranteed but highly likely)
+        assert_ne!(probes_t0[0], probes_t1[0]);
     }
 
