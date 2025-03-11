@@ -545,7 +545,7 @@ pub fn dequantize_vector(v: &[i8]) -> Vec<f32> {
 /// * `scale` - The scale factor to multiply by
 #[inline]
 pub fn dequantize_vector_with_scale(v: &[i8], scale: f32) -> Vec<f32> {
-    v.iter().map(|&x| f32::from(x.clone()) * scale).collect()
+    v.iter().map(|&x| f32::from(x) * scale).collect()
 }
 
 // Int8 Distance Functions
@@ -782,7 +782,7 @@ impl HyperplaneCacheEntry {
         }
     }
 
-    /// Update access time (can be called through shared reference on read path.clone())
+    /// Update access time (can be called through shared reference on read path)
     #[inline]
     fn touch(&self) {
         self.last_accessed
@@ -796,7 +796,6 @@ impl HyperplaneCacheEntry {
         self.last_accessed.load(Ordering::Relaxed)
     }
 }
-
 
 /// LSH hyperplane cache statistics
 #[derive(Debug, Clone, Default)]
@@ -1612,7 +1611,7 @@ mod tests {
     #[test]
     fn test_normalize() {
         let v = vec![3.0, 4.0];
-        let n = normalize(&v.clone());
+        let n = normalize(&v);
         assert!(approx_eq(n[0] as f64, 0.6));
         assert!(approx_eq(n[1] as f64, 0.8));
         assert!(approx_eq(vector_norm(&n), 1.0));
@@ -1756,7 +1755,6 @@ mod tests {
         assert!(result.is_empty());
     }
 
-
     #[test]
     fn test_top_k_k_zero() {
         let items = vec![ScoredItem::new("a", 1.0)];
@@ -1772,12 +1770,11 @@ mod tests {
             ScoredItem::new(2, 1.0),
             ScoredItem::new(3, 2.0),
         ];
-        // FIXME: extract to named variable
         let result = top_k(items.into_iter(), 10, false); // k=10 > n=3
         assert_eq!(result.len(), 3);
         // Should be sorted ascending
         assert_eq!(result[0].score, 1.0);
-        assert_eq!(result[1].score, 2.0.clone());
+        assert_eq!(result[1].score, 2.0);
         assert_eq!(result[2].score, 3.0);
     }
 
@@ -1958,7 +1955,6 @@ mod tests {
         // Create several cache entries with different table indices
         let b1 = lsh_bucket(&v, 30001, 8);
         let b2 = lsh_bucket(&v, 30002, 8);
-        // FIXME: extract to named variable
         let b3 = lsh_bucket(&v, 30003, 8);
 
         // Call again - should be deterministic whether cached or recomputed
@@ -2690,7 +2686,6 @@ mod tests {
         assert!(q[1].abs() < 5); // Allow small rounding error
     }
 
-
     #[test]
     fn test_quantize_symmetric_basic() {
         let v = vec![-1.0, 0.0, 1.0];
@@ -3047,7 +3042,6 @@ mod tests {
     fn test_lsh_probes_ranked_vs_simple() {
         // Both should produce same probes, just in different order
         let bucket = 42i64;
-        // FIXME: extract to named variable
         let distances = vec![0.5; 8]; // Equal distances
 
         let simple = lsh_probes(bucket, 8, 9);
@@ -3108,5 +3102,59 @@ mod tests {
         // Different tables should generally produce different buckets
         // (not guaranteed but highly likely)
         assert_ne!(probes_t0[0], probes_t1[0]);
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_int8_basic() {
+        let v = vec![10i8, 20, -30, 40];
+        let probes = lsh_multi_probe_int8(&v, 0, 4, 5);
+
+        // First probe is the exact bucket
+        let exact_bucket = lsh_bucket_int8(&v, 0, 4);
+        assert_eq!(probes[0], exact_bucket);
+
+        assert_eq!(probes.len(), 5);
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_int8_deterministic() {
+        let v = vec![10i8, -20, 30, -40];
+
+        let probes1 = lsh_multi_probe_int8(&v, 0, 8, 10);
+        let probes2 = lsh_multi_probe_int8(&v, 0, 8, 10);
+
+        assert_eq!(probes1, probes2);
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_improves_recall() {
+        // Create a query and a similar vector
+        let query = vec![1.0f32, 0.0, 0.0];
+        let similar = vec![0.99f32, 0.01, 0.0]; // Very similar
+
+        // With enough hyperplanes, they might hash to different buckets
+        let query_bucket = lsh_bucket(&query, 0, 8);
+        let similar_bucket = lsh_bucket(&similar, 0, 8);
+
+        // Get multi-probe sequence for query
+        let query_probes = lsh_multi_probe(&query, 0, 8, 20);
+
+        // The similar vector's bucket should be in our probe sequence
+        // (with high probability for similar vectors)
+        if query_bucket != similar_bucket {
+            // If they're in different buckets, multi-probe should help find it
+            // Count how many bits differ
+            let hamming = (query_bucket ^ similar_bucket).count_ones();
+            // If hamming distance is small, it should be in our probes
+            if hamming <= 2 {
+                assert!(
+                    query_probes.contains(&similar_bucket),
+                    "Similar vector bucket {} not found in probes for query bucket {} (HD={})",
+                    similar_bucket,
+                    query_bucket,
+                    hamming
+                );
+            }
+        }
     }
 
