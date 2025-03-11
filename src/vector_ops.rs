@@ -2902,3 +2902,52 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_int8_distance_overflow_safety() {
+        // Verify no overflow with extreme values
+        let a = vec![127i8; 10000]; // Large vector with max values
+        let b = vec![-128i8; 10000];
+
+        // These should not panic or overflow
+        let e = euclidean_distance_int8(&a, &b);
+        let c = cosine_distance_int8(&a, &b);
+        let d = dot_product_int8(&a, &b);
+        let m = manhattan_distance_int8(&a, &b);
+
+        assert!(e.is_finite());
+        assert!(c.is_finite());
+        assert!(d.is_finite());
+        assert!(m.is_finite());
+    }
+
+    // Multi-Probe LSH Tests
+    #[test]
+    fn test_lsh_probes_basic() {
+        let bucket = 53i64; // binary: 00110101
+        let probes = lsh_probes(bucket, 8, 5);
+
+        // First probe is always the original bucket
+        assert_eq!(probes[0], bucket);
+        assert_eq!(probes.len(), 5);
+
+        // All probes should be unique
+        let unique: std::collections::HashSet<_> = probes.iter().collect();
+        assert_eq!(unique.len(), probes.len());
+    }
+
+    #[test]
+    fn test_lsh_probes_hamming_distance_1() {
+        let bucket = 0b00110101i64;
+        let probes = lsh_probes(bucket, 8, 9); // 1 original + 8 HD=1
+
+        // First should be original
+        assert_eq!(probes[0], bucket);
+
+        // Next 8 should differ by exactly 1 bit
+        for i in 1..9 {
+            let diff = probes[i] ^ bucket;
+            // diff should have exactly one bit set (Hamming distance 1)
+            assert_eq!(diff.count_ones(), 1, "Probe {} has HD != 1", i);
+        }
+    }
+
