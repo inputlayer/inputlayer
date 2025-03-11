@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -279,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -359,7 +357,6 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
 /// Compute Manhattan distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
-#[inline]
 pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -956,7 +953,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -966,7 +962,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1222,7 +1217,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -2949,5 +2943,47 @@ mod tests {
             // diff should have exactly one bit set (Hamming distance 1)
             assert_eq!(diff.count_ones(), 1, "Probe {} has HD != 1", i);
         }
+    }
+
+    #[test]
+    fn test_lsh_probes_hamming_distance_2() {
+        let bucket = 0b00110101i64;
+        // With 4 hyperplanes: 1 + 4 (HD=1) + 6 (HD=2) = 11 probes
+        let probes = lsh_probes(bucket, 4, 11);
+
+        assert_eq!(probes[0], bucket);
+
+        // HD=1 probes (indices 1-4)
+        for i in 1..5 {
+            let diff = probes[i] ^ bucket;
+            assert_eq!(diff.count_ones(), 1);
+        }
+
+        // HD=2 probes (indices 5-10)
+        for i in 5..11 {
+            let diff = probes[i] ^ bucket;
+            assert_eq!(diff.count_ones(), 2, "Probe {} should have HD=2", i);
+        }
+    }
+
+    #[test]
+    fn test_lsh_probes_zero_probes() {
+        let probes = lsh_probes(42, 8, 0);
+        assert!(probes.is_empty());
+    }
+
+    #[test]
+    fn test_lsh_probes_one_probe() {
+        let bucket = 42i64;
+        let probes = lsh_probes(bucket, 8, 1);
+        assert_eq!(probes.len(), 1);
+        assert_eq!(probes[0], bucket);
+    }
+
+    #[test]
+    fn test_lsh_probes_more_than_available() {
+        // With 2 hyperplanes, max probes = 1 + 2 + 1 = 4 (HD=0, HD=1, HD=2)
+        let probes = lsh_probes(0, 2, 100);
+        assert!(probes.len() <= 8); // Should not exceed total possible combinations
     }
 
