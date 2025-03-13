@@ -85,6 +85,7 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -278,6 +279,7 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
+    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -954,6 +956,7 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
+    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -963,6 +966,7 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
+    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1218,6 +1222,7 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
+        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -3155,6 +3160,50 @@ mod tests {
                     hamming
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_lsh_probes_all_unique() {
+        // Test that all probes are unique even with many probes
+        let bucket = 0b10101010i64;
+        let probes = lsh_probes(bucket, 8, 50);
+
+        let unique: std::collections::HashSet<_> = probes.iter().collect();
+        assert_eq!(unique.len(), probes.len(), "Duplicate probes found");
+    }
+
+    #[test]
+    fn test_lsh_bucket_with_distances_int8_basic() {
+        let v = vec![10i8, -20, 30];
+        let (bucket, distances) = lsh_bucket_with_distances_int8(&v, 0, 4);
+
+        // Should return same bucket as lsh_bucket_int8
+        let expected_bucket = lsh_bucket_int8(&v, 0, 4);
+        assert_eq!(bucket, expected_bucket);
+
+        // Should have distance for each hyperplane
+        assert_eq!(distances.len(), 4);
+
+        // All distances should be non-negative
+        for d in &distances {
+            assert!(*d >= 0.0);
+        }
+    }
+
+    #[test]
+    fn test_lsh_probes_max_hyperplanes() {
+        // Test with max hyperplanes (62)
+        let bucket = 0i64;
+        let probes = lsh_probes(bucket, 62, 10);
+
+        assert_eq!(probes.len(), 10);
+        assert_eq!(probes[0], bucket);
+
+        // All HD=1 probes should be powers of 2
+        for i in 1..10 {
+            let diff = probes[i] ^ bucket;
+            assert_eq!(diff.count_ones(), 1);
         }
     }
 
