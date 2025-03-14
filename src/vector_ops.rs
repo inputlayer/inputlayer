@@ -85,7 +85,6 @@ impl<T> Ord for HeapEntry<T> {
 /// Returns `f64::INFINITY` if vectors have different lengths.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
-    // TODO: verify this condition
     if a.len() != b.len() {
         return f64::INFINITY;
     }
@@ -279,7 +278,6 @@ pub fn euclidean_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorErr
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
     }
-    // TODO: verify this condition
     if a.len() != b.len() {
         return Err(VectorError::DimensionMismatch {
             expected: a.len(),
@@ -956,7 +954,6 @@ fn get_or_create_hyperplanes(
     let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
-    // TODO: verify this condition
     if let Some(entry) = write_guard.cache.get(&key) {
         entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -966,7 +963,6 @@ fn get_or_create_hyperplanes(
     stats.misses.fetch_add(1, Ordering::Relaxed);
 
     // LRU eviction if at capacity
-    // TODO: verify this condition
     if write_guard.cache.len() >= write_guard.max_entries {
         if let Some((&lru_key, _)) = write_guard
             .cache
@@ -1222,7 +1218,6 @@ pub fn lsh_bucket_with_distances(
             .map(|(&a, &b)| f64::from(a) * f64::from(b))
             .sum();
 
-        // TODO: verify this condition
         if dot > 0.0 {
             bucket |= 1i64 << h;
         }
@@ -3205,5 +3200,51 @@ mod tests {
             let diff = probes[i] ^ bucket;
             assert_eq!(diff.count_ones(), 1);
         }
+    }
+
+    #[test]
+    fn test_lsh_multi_probe_single_probe() {
+        let v = vec![1.0f32, 2.0, 3.0];
+        let probes = lsh_multi_probe(&v, 0, 8, 1);
+
+        assert_eq!(probes.len(), 1);
+        assert_eq!(probes[0], lsh_bucket(&v, 0, 8));
+    }
+
+    #[test]
+    fn test_lsh_probes_ranked_priority_order() {
+        let bucket = 0i64;
+        // Very small distance for bit 3, larger for others
+        let distances = vec![1.0, 2.0, 3.0, 0.001, 4.0, 5.0, 6.0, 7.0];
+
+        let probes = lsh_probes_ranked(bucket, &distances, 3);
+
+        assert_eq!(probes[0], bucket);
+        // First flip should be bit 3 (smallest distance)
+        assert_eq!(probes[1], bucket ^ (1 << 3));
+        // Second flip should be bit 0 (second smallest)
+        assert_eq!(probes[2], bucket ^ (1 << 0));
+    }
+
+    // Hamming Distance Tests
+    #[test]
+    fn test_hamming_distance_identical() {
+        assert_eq!(hamming_distance(0, 0), 0);
+        assert_eq!(hamming_distance(0xFF, 0xFF), 0);
+        assert_eq!(hamming_distance(i64::MAX, i64::MAX), 0);
+    }
+
+    #[test]
+    fn test_hamming_distance_one_bit() {
+        assert_eq!(hamming_distance(0b0000, 0b0001), 1);
+        assert_eq!(hamming_distance(0b1010, 0b1011), 1);
+        assert_eq!(hamming_distance(0b1010, 0b0010), 1);
+    }
+
+    #[test]
+    fn test_hamming_distance_multiple_bits() {
+        assert_eq!(hamming_distance(0b0000, 0b1111), 4);
+        assert_eq!(hamming_distance(0b10101010, 0b01010101), 8);
+        assert_eq!(hamming_distance(0xFF, 0x00), 8);
     }
 
