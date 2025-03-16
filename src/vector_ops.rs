@@ -357,6 +357,7 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
 /// Compute Manhattan distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
+#[inline]
 pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -3281,3 +3282,46 @@ mod tests {
         assert_eq!(abs_i64(i64::MAX), i64::MAX);
     }
 
+    #[test]
+    fn test_abs_i64_negative() {
+        assert_eq!(abs_i64(-5), 5);
+        assert_eq!(abs_i64(-100), 100);
+        assert_eq!(abs_i64(-1), 1);
+    }
+
+    #[test]
+    fn test_abs_i64_zero() {
+        assert_eq!(abs_i64(0), 0);
+    }
+
+    #[test]
+    fn test_abs_i64_min_saturates() {
+        // i64::MIN cannot be negated, so saturating_abs returns i64::MAX
+        assert_eq!(abs_i64(i64::MIN), i64::MAX);
+    }
+
+    #[test]
+    fn test_abs_f64_positive() {
+        assert_eq!(abs_f64(5.5), 5.5);
+        assert_eq!(abs_f64(100.0), 100.0);
+    }
+
+    #[test]
+    fn test_abs_f64_negative() {
+        assert_eq!(abs_f64(-5.5), 5.5);
+        assert_eq!(abs_f64(-100.0), 100.0);
+    }
+
+    #[test]
+    fn test_abs_f64_zero() {
+        assert_eq!(abs_f64(0.0), 0.0);
+        assert_eq!(abs_f64(-0.0), 0.0);
+    }
+
+    #[test]
+    fn test_abs_f64_special() {
+        assert!(abs_f64(f64::INFINITY).is_infinite());
+        assert!(abs_f64(f64::NEG_INFINITY).is_infinite());
+        assert!(abs_f64(f64::NAN).is_nan());
+    }
+}
