@@ -357,7 +357,6 @@ pub fn dot_product_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
 /// Compute Manhattan distance with explicit error handling.
 ///
 /// Returns `Err(VectorError::DimensionMismatch)` if vectors have different lengths.
-#[inline]
 pub fn manhattan_distance_checked(a: &[f32], b: &[f32]) -> Result<f64, VectorError> {
     if a.is_empty() && b.is_empty() {
         return Ok(0.0);
@@ -3246,5 +3245,39 @@ mod tests {
         assert_eq!(hamming_distance(0b0000, 0b1111), 4);
         assert_eq!(hamming_distance(0b10101010, 0b01010101), 8);
         assert_eq!(hamming_distance(0xFF, 0x00), 8);
+    }
+
+    #[test]
+    fn test_hamming_distance_symmetric() {
+        let a = 0xABCD1234i64;
+        let b = 0x12345678i64;
+        assert_eq!(hamming_distance(a, b), hamming_distance(b, a));
+    }
+
+    #[test]
+    fn test_hamming_distance_phash_example() {
+        // Simulating perceptual hash comparison (using smaller values to avoid overflow)
+        let phash1 = 0x0BCD_1234_5678_9ABCu64 as i64;
+        let phash2 = 0x0BCD_1234_5678_9ABDu64 as i64; // 1 bit different
+        assert_eq!(hamming_distance(phash1, phash2), 1);
+
+        let phash3 = 0x0BCD_1234_5678_0000u64 as i64; // Many bits different
+        let dist = hamming_distance(phash1, phash3);
+        assert!(dist > 5); // Very different
+    }
+
+    #[test]
+    fn test_hamming_distance_negative_numbers() {
+        // Works with negative numbers (treats as bit patterns)
+        assert_eq!(hamming_distance(-1, 0), 64); // All bits differ
+        assert_eq!(hamming_distance(-1, -2), 1); // Only LSB differs
+    }
+
+    // Abs Tests
+    #[test]
+    fn test_abs_i64_positive() {
+        assert_eq!(abs_i64(5), 5);
+        assert_eq!(abs_i64(100), 100);
+        assert_eq!(abs_i64(i64::MAX), i64::MAX);
     }
 
