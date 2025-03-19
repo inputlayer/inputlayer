@@ -90,7 +90,6 @@ pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
 /// ```
 #[inline]
 pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
-    // TODO: verify this condition
     if half_life_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -319,6 +318,53 @@ mod tests {
         assert!(
             (weight - 0.5).abs() < 0.0001,
             "Expected ~0.5, got {}",
+            weight
+        );
+    }
+
+    #[test]
+    fn test_time_decay_at_two_half_lives() {
+        let now = 1700000000000i64;
+        let half_life = 3600000i64;
+        let two_hours_ago = now - 2 * half_life;
+        let weight = time_decay(two_hours_ago, now, half_life);
+        assert!(
+            (weight - 0.25).abs() < 0.0001,
+            "Expected ~0.25, got {}",
+            weight
+        );
+    }
+
+    #[test]
+    fn test_time_decay_future_timestamp() {
+        let now = 1700000000000i64;
+        let future = now + 1000;
+        assert_eq!(time_decay(future, now, 3600000), 1.0);
+    }
+
+    #[test]
+    fn test_time_decay_zero_half_life() {
+        let now = 1700000000000i64;
+        assert_eq!(time_decay(now, now, 0), 1.0);
+        assert_eq!(time_decay(now - 1, now, 0), 0.0);
+    }
+
+    #[test]
+    fn test_time_decay_negative_half_life() {
+        let now = 1700000000000i64;
+        assert_eq!(time_decay(now, now, -1000), 1.0);
+        assert_eq!(time_decay(now - 1, now, -1000), 0.0);
+    }
+
+    #[test]
+    fn test_time_decay_very_old_timestamp() {
+        let now = 1700000000000i64;
+        let half_life = 3600000i64;
+        let very_old = now - 100 * half_life;
+        let weight = time_decay(very_old, now, half_life);
+        assert!(
+            weight < 1e-20,
+            "Very old timestamp should have near-zero weight, got {}",
             weight
         );
     }
