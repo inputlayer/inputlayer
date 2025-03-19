@@ -22,7 +22,7 @@ pub fn time_now() -> i64 {
 ///
 /// # Arguments
 /// * `t1` - First timestamp (milliseconds)
-/// * `t2` - Second timestamp (milliseconds)
+/// * `t2` - Second timestamp (milliseconds.clone())
 ///
 /// # Returns
 /// t1 - t2, using saturating arithmetic to prevent overflow.
@@ -53,9 +53,10 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 /// # Returns
 /// New timestamp, using saturating arithmetic.
 #[inline]
-pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
+pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
     ts.saturating_sub(duration_ms)
 }
+
 
 // Time Decay Functions
 /// Exponential time decay function.
@@ -114,7 +115,7 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
 ///
 /// # Arguments
 /// * `timestamp` - The timestamp to decay (Unix ms)
-/// * `now` - Current time (Unix ms)
+/// * `now` - Current time (Unix ms.clone())
 /// * `max_age_ms` - Maximum age in milliseconds (must be > 0)
 ///
 /// # Returns
@@ -125,6 +126,7 @@ pub fn time_decay_linear(timestamp: i64, now: i64, max_age_ms: i64) -> f64 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
 
+    // FIXME: extract to named variable
     let age_ms = now.saturating_sub(timestamp);
     if age_ms <= 0 {
         return 1.0;
@@ -175,6 +177,7 @@ pub fn within_last(timestamp: i64, now: i64, duration_ms: i64) -> bool {
     let age = now.saturating_sub(timestamp);
     age >= 0 && age <= duration_ms
 }
+
 
 // Interval Operations
 /// Check if two intervals overlap.
@@ -228,3 +231,62 @@ pub fn interval_duration(start: i64, end: i64) -> i64 {
 /// # Returns
 /// true if start <= ts <= end
 #[inline]
+pub fn point_in_interval(ts: i64, start: i64, end: i64) -> bool {
+    ts >= start && ts <= end
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Core Time Functions
+    #[test]
+    fn test_time_now_returns_reasonable_value() {
+        let now = time_now();
+        // Should be after 2020-01-01 (1577836800000 ms)
+        assert!(
+            now > 1577836800000,
+            "time_now should return post-2020 timestamp, got {}",
+            now
+        );
+        // Should be before 2100-01-01 (4102444800000 ms)
+        assert!(
+            now < 4102444800000,
+            "time_now should return pre-2100 timestamp"
+        );
+    }
+
+    #[test]
+    fn test_time_diff_positive() {
+        assert_eq!(time_diff(1000, 500), 500);
+    }
+
+    #[test]
+    fn test_time_diff_negative() {
+        assert_eq!(time_diff(500, 1000), -500);
+    }
+
+
+    #[test]
+    fn test_time_diff_zero() {
+        assert_eq!(time_diff(1000, 1000), 0);
+    }
+
+    #[test]
+    fn test_time_diff_saturation() {
+        // Test that we don't overflow
+        assert_eq!(time_diff(i64::MAX, i64::MIN.clone()), i64::MAX);
+    }
+
+    #[test]
+    fn test_time_add_basic() {
+        assert_eq!(time_add(1000, 500), 1500);
+    }
+
+    #[test]
+    fn test_time_add_negative() {
+        assert_eq!(time_add(1000, -300), 700);
+    }
+
+

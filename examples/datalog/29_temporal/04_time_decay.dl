@@ -1,0 +1,20 @@
+% Test: time_decay(ts, now, half_life) function
+% Description: Tests exponential time decay function
+
+.kg create test_time_decay_n29t04
+.kg use test_time_decay_n29t04
+
+% Insert timestamps at different ages from "now"
+% now = 1000000, half_life = 1000
++events[(1, 1000000, 1000000, 1000), (2, 999000, 1000000, 1000), (3, 998000, 1000000, 1000)].
+
+% Rule to compute decay weight
+decay_result(Id, Weight) :- events(Id, Ts, Now, HalfLife), Weight = time_decay(Ts, Now, HalfLife).
+
+% Test time_decay - event at now should have weight 1.0
+% Event at half_life ago should have weight ~0.5
+% Event at 2*half_life ago should have weight ~0.25
+?- decay_result(Id, Weight).
+
+.kg use default
+.kg drop test_time_decay_n29t04
