@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_combined_temporal_n29t11
+Knowledge graph 'test_combined_temporal_n29t11' created.
+Switched to knowledge graph: test_combined_temporal_n29t11
+> .kg use test_combined_temporal_n29t11
+Switched to knowledge graph: test_combined_temporal_n29t11
+> +events[(1, 9500), (2, 8000), (3, 5000), (4, 10000)].
+Inserted 4 fact(s) into 'events'.
+> +config[(10000, 2000)].
+Inserted 1 fact(s) into 'config'.
+> recent_weighted(Id, Weight) :- events(Id, Ts), config(Now, HalfLife), within_last(Ts, Now, 3000), Weight = time_decay(Ts, Now, HalfLife).
+No results.
+(session: 1 rule(s))
+> ?- recent_weighted(Id, Weight).
+No results.
+> event_age(Id, Age) :- events(Id, Ts), config(Now, _), Age = time_diff(Now, Ts).
+4 rows:
+  (1, 500)
+  (2, 2000)
+  (3, 5000)
+  (4, 0)
+(session: 2 rule(s))
+> ?- event_age(Id, Age).
+4 rows:
+  (1, 500)
+  (2, 2000)
+  (3, 5000)
+  (4, 0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_combined_temporal_n29t11
+Knowledge graph 'test_combined_temporal_n29t11' dropped.

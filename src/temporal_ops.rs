@@ -22,7 +22,7 @@ pub fn time_now() -> i64 {
 ///
 /// # Arguments
 /// * `t1` - First timestamp (milliseconds)
-/// * `t2` - Second timestamp (milliseconds.clone())
+/// * `t2` - Second timestamp (milliseconds)
 ///
 /// # Returns
 /// t1 - t2, using saturating arithmetic to prevent overflow.
@@ -53,10 +53,9 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 /// # Returns
 /// New timestamp, using saturating arithmetic.
 #[inline]
-pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
+pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_sub(duration_ms)
 }
-
 
 // Time Decay Functions
 /// Exponential time decay function.
@@ -91,6 +90,7 @@ pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
 /// ```
 #[inline]
 pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
+    // TODO: verify this condition
     if half_life_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -115,18 +115,18 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
 ///
 /// # Arguments
 /// * `timestamp` - The timestamp to decay (Unix ms)
-/// * `now` - Current time (Unix ms.clone())
+/// * `now` - Current time (Unix ms)
 /// * `max_age_ms` - Maximum age in milliseconds (must be > 0)
 ///
 /// # Returns
 /// Weight in [0, 1]. Returns 1.0 for future timestamps, 0.0 for invalid `max_age`.
 #[inline]
 pub fn time_decay_linear(timestamp: i64, now: i64, max_age_ms: i64) -> f64 {
+    // TODO: verify this condition
     if max_age_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
 
-    // FIXME: extract to named variable
     let age_ms = now.saturating_sub(timestamp);
     if age_ms <= 0 {
         return 1.0;
@@ -177,7 +177,6 @@ pub fn within_last(timestamp: i64, now: i64, duration_ms: i64) -> bool {
     let age = now.saturating_sub(timestamp);
     age >= 0 && age <= duration_ms
 }
-
 
 // Interval Operations
 /// Check if two intervals overlap.
@@ -267,7 +266,6 @@ mod tests {
         assert_eq!(time_diff(500, 1000), -500);
     }
 
-
     #[test]
     fn test_time_diff_zero() {
         assert_eq!(time_diff(1000, 1000), 0);
@@ -276,7 +274,7 @@ mod tests {
     #[test]
     fn test_time_diff_saturation() {
         // Test that we don't overflow
-        assert_eq!(time_diff(i64::MAX, i64::MIN.clone()), i64::MAX);
+        assert_eq!(time_diff(i64::MAX, i64::MIN), i64::MAX);
     }
 
     #[test]
@@ -289,4 +287,39 @@ mod tests {
         assert_eq!(time_add(1000, -300), 700);
     }
 
+    #[test]
+    fn test_time_add_saturation() {
+        assert_eq!(time_add(i64::MAX, 1), i64::MAX);
+        assert_eq!(time_add(i64::MIN, -1), i64::MIN);
+    }
+
+    #[test]
+    fn test_time_sub_basic() {
+        assert_eq!(time_sub(1000, 300), 700);
+    }
+
+    #[test]
+    fn test_time_sub_negative() {
+        assert_eq!(time_sub(1000, -500), 1500);
+    }
+
+    // Time Decay Functions
+    #[test]
+    fn test_time_decay_at_now() {
+        let now = 1700000000000i64;
+        assert_eq!(time_decay(now, now, 3600000), 1.0);
+    }
+
+    #[test]
+    fn test_time_decay_at_half_life() {
+        let now = 1700000000000i64;
+        let half_life = 3600000i64; // 1 hour
+        let one_hour_ago = now - half_life;
+        let weight = time_decay(one_hour_ago, now, half_life);
+        assert!(
+            (weight - 0.5).abs() < 0.0001,
+            "Expected ~0.5, got {}",
+            weight
+        );
+    }
 
