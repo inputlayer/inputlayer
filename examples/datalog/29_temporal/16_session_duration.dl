@@ -1,0 +1,16 @@
+% Test: Session duration calculation
+
+.kg create test_session_dur_n29t16
+.kg use test_session_dur_n29t16
+
++sessions[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2300)].
+
+session_duration(SessId, Duration) :-
+    sessions(SessId, "start", StartTime),
+    sessions(SessId, "end", EndTime),
+    Duration = EndTime - StartTime.
+
+?- session_duration(SessId, Duration).
+
+.kg use default
+.kg drop test_session_dur_n29t16

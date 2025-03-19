@@ -1,0 +1,18 @@
+% Test: Time window aggregation
+
+.kg create test_time_win_n29t19
+.kg use test_time_win_n29t19
+
++readings[(1, 100, 10), (2, 105, 20), (3, 110, 15), (4, 200, 30), (5, 205, 25)].
+
+% Count readings in 20-unit windows starting at 100
+window_count(Start, count<Id>) :-
+    readings(Id, Time, _),
+    Start = 100,
+    Time >= Start,
+    Time < Start + 20.
+
+?- window_count(Start, N).
+
+.kg use default
+.kg drop test_time_win_n29t19
