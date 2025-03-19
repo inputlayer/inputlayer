@@ -1,0 +1,18 @@
+% Test: within_last(ts, now, duration) function
+% Description: Tests checking if timestamp is within duration of now
+
+.kg create test_within_last_n29t07
+.kg use test_within_last_n29t07
+
+% Insert events at various times relative to "now"
+% now = 10000, duration = 5000
++events[(1, 9000, 10000, 5000), (2, 5000, 10000, 5000), (3, 4000, 10000, 5000), (4, 10000, 10000, 5000)].
+
+% Rule to filter recent events
+recent(Id) :- events(Id, Ts, Now, Duration), within_last(Ts, Now, Duration).
+
+% Query within_last - should match events where 0 <= (now - ts) <= duration
+?- recent(Id).
+
+.kg use default
+.kg drop test_within_last_n29t07
