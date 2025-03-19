@@ -1,0 +1,17 @@
+% Test: interval_duration(start, end) function
+% Description: Tests calculating interval duration in milliseconds
+
+.kg create test_interval_dur_n29t10
+.kg use test_interval_dur_n29t10
+
+% Insert intervals (id, start, end)
++intervals[(1, 100, 200), (2, 0, 1000), (3, 500, 500)].
+
+% Rule to compute duration
+duration_result(Id, Duration) :- intervals(Id, Start, End), Duration = interval_duration(Start, End).
+
+% Query interval_duration - should return end - start
+?- duration_result(Id, Duration).
+
+.kg use default
+.kg drop test_interval_dur_n29t10

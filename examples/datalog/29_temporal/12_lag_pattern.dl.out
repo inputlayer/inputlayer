@@ -1,0 +1,55 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lag_n29t12
+Knowledge graph 'test_lag_n29t12' created.
+Switched to knowledge graph: test_lag_n29t12
+> .kg use test_lag_n29t12
+Switched to knowledge graph: test_lag_n29t12
+> +timeseries[(1, 10), (2, 15), (3, 12), (4, 20)].
+Inserted 4 fact(s) into 'timeseries'.
+> consecutive(T1, V1, T2, V2) :- timeseries(T1, V1), timeseries(T2, V2), T2 = T1 + 1.
+16 rows:
+  (1, 10, 1, 10)
+  (1, 10, 2, 15)
+  (1, 10, 3, 12)
+  (1, 10, 4, 20)
+  (2, 15, 1, 10)
+  (2, 15, 2, 15)
+  (2, 15, 3, 12)
+  (2, 15, 4, 20)
+  (3, 12, 1, 10)
+  (3, 12, 2, 15)
+  (3, 12, 3, 12)
+  (3, 12, 4, 20)
+  (4, 20, 1, 10)
+  (4, 20, 2, 15)
+  (4, 20, 3, 12)
+  (4, 20, 4, 20)
+(session: 1 rule(s))
+> ?- consecutive(T1, V1, T2, V2).
+16 rows:
+  (1, 10, 1, 10)
+  (1, 10, 2, 15)
+  (1, 10, 3, 12)
+  (1, 10, 4, 20)
+  (2, 15, 1, 10)
+  (2, 15, 2, 15)
+  (2, 15, 3, 12)
+  (2, 15, 4, 20)
+  (3, 12, 1, 10)
+  (3, 12, 2, 15)
+  (3, 12, 3, 12)
+  (3, 12, 4, 20)
+  (4, 20, 1, 10)
+  (4, 20, 2, 15)
+  (4, 20, 3, 12)
+  (4, 20, 4, 20)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_lag_n29t12
+Knowledge graph 'test_lag_n29t12' dropped.

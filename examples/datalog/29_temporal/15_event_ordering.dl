@@ -1,0 +1,17 @@
+% Test: Event ordering by timestamp
+
+.kg create test_event_order_n29t15
+.kg use test_event_order_n29t15
+
++events[(1, "login", 1000), (2, "click", 1100), (3, "logout", 1500), (4, "error", 1050)].
+
+% Find events before logout
+before_logout(Id, Action, Time) :-
+    events(Id, Action, Time),
+    events(_, "logout", LogoutTime),
+    Time < LogoutTime.
+
+?- before_logout(Id, Action, Time).
+
+.kg use default
+.kg drop test_event_order_n29t15
