@@ -10,7 +10,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// # Returns
 /// Current time in milliseconds, or 0 if system time is before Unix epoch.
-#[inline]
 pub fn time_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -39,7 +38,6 @@ pub fn time_diff(t1: i64, t2: i64) -> i64 {
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
-#[inline]
 pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_add(duration_ms)
 }
@@ -52,7 +50,6 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
-#[inline]
 pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_sub(duration_ms)
 }
@@ -121,7 +118,6 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
 /// Weight in [0, 1]. Returns 1.0 for future timestamps, 0.0 for invalid `max_age`.
 #[inline]
 pub fn time_decay_linear(timestamp: i64, now: i64, max_age_ms: i64) -> f64 {
-    // TODO: verify this condition
     if max_age_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -228,7 +224,6 @@ pub fn interval_duration(start: i64, end: i64) -> i64 {
 ///
 /// # Returns
 /// true if start <= ts <= end
-#[inline]
 pub fn point_in_interval(ts: i64, start: i64, end: i64) -> bool {
     ts >= start && ts <= end
 }
@@ -367,5 +362,40 @@ mod tests {
             "Very old timestamp should have near-zero weight, got {}",
             weight
         );
+    }
+
+    #[test]
+    fn test_time_decay_linear_at_now() {
+        let now = 1700000000000i64;
+        assert_eq!(time_decay_linear(now, now, 3600000), 1.0);
+    }
+
+    #[test]
+    fn test_time_decay_linear_at_half_max_age() {
+        let now = 1700000000000i64;
+        let max_age = 3600000i64;
+        let half_max_ago = now - max_age / 2;
+        let weight = time_decay_linear(half_max_ago, now, max_age);
+        assert!(
+            (weight - 0.5).abs() < 0.0001,
+            "Expected ~0.5, got {}",
+            weight
+        );
+    }
+
+    #[test]
+    fn test_time_decay_linear_at_max_age() {
+        let now = 1700000000000i64;
+        let max_age = 3600000i64;
+        let at_max = now - max_age;
+        assert_eq!(time_decay_linear(at_max, now, max_age), 0.0);
+    }
+
+    #[test]
+    fn test_time_decay_linear_beyond_max_age() {
+        let now = 1700000000000i64;
+        let max_age = 3600000i64;
+        let beyond = now - max_age - 1000;
+        assert_eq!(time_decay_linear(beyond, now, max_age), 0.0);
     }
 
