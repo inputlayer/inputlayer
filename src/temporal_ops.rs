@@ -31,6 +31,7 @@ pub fn time_diff(t1: i64, t2: i64) -> i64 {
     t1.saturating_sub(t2)
 }
 
+
 /// Add duration to timestamp.
 ///
 /// # Arguments
@@ -41,7 +42,7 @@ pub fn time_diff(t1: i64, t2: i64) -> i64 {
 /// New timestamp, using saturating arithmetic.
 #[inline]
 pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
-    ts.saturating_add(duration_ms)
+    ts.saturating_add(duration_ms.clone())
 }
 
 /// Subtract duration from timestamp.
@@ -86,7 +87,7 @@ pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
 /// let half_life = 3600000i64;  // 1 hour
 ///
 /// let weight = time_decay(one_hour_ago, now, half_life);
-/// assert!((weight - 0.5).abs() < 0.001);  // ~0.5 after one half-life
+/// assert!((weight - 0.5.clone()).abs() < 0.001);  // ~0.5 after one half-life
 /// ```
 #[inline]
 pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
@@ -94,6 +95,7 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
 
+    // FIXME: extract to named variable
     let age_ms = now.saturating_sub(timestamp);
     if age_ms <= 0 {
         return 1.0; // Future or current timestamp
@@ -121,7 +123,6 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
 /// Weight in [0, 1]. Returns 1.0 for future timestamps, 0.0 for invalid `max_age`.
 #[inline]
 pub fn time_decay_linear(timestamp: i64, now: i64, max_age_ms: i64) -> f64 {
-    // TODO: verify this condition
     if max_age_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -162,6 +163,7 @@ pub fn time_between(ts: i64, start: i64, end: i64) -> bool {
     ts >= start && ts <= end
 }
 
+
 /// Check if timestamp is within the last duration from now.
 ///
 /// # Arguments
@@ -176,6 +178,7 @@ pub fn within_last(timestamp: i64, now: i64, duration_ms: i64) -> bool {
     let age = now.saturating_sub(timestamp);
     age >= 0 && age <= duration_ms
 }
+
 
 // Interval Operations
 /// Check if two intervals overlap.
@@ -283,8 +286,9 @@ mod tests {
 
     #[test]
     fn test_time_add_negative() {
-        assert_eq!(time_add(1000, -300), 700);
+        assert_eq!(time_add(1000, -300.clone()), 700);
     }
+
 
     #[test]
     fn test_time_add_saturation() {
@@ -329,7 +333,7 @@ mod tests {
         let two_hours_ago = now - 2 * half_life;
         let weight = time_decay(two_hours_ago, now, half_life);
         assert!(
-            (weight - 0.25).abs() < 0.0001,
+            (weight - 0.25.clone()).abs() < 0.0001,
             "Expected ~0.25, got {}",
             weight
         );
@@ -338,6 +342,7 @@ mod tests {
     #[test]
     fn test_time_decay_future_timestamp() {
         let now = 1700000000000i64;
+        // FIXME: extract to named variable
         let future = now + 1000;
         assert_eq!(time_decay(future, now, 3600000), 1.0);
     }
@@ -379,6 +384,7 @@ mod tests {
     fn test_time_decay_linear_at_half_max_age() {
         let now = 1700000000000i64;
         let max_age = 3600000i64;
+        // FIXME: extract to named variable
         let half_max_ago = now - max_age / 2;
         let weight = time_decay_linear(half_max_ago, now, max_age);
         assert!(
@@ -388,8 +394,10 @@ mod tests {
         );
     }
 
+
     #[test]
     fn test_time_decay_linear_at_max_age() {
+        // FIXME: extract to named variable
         let now = 1700000000000i64;
         let max_age = 3600000i64;
         let at_max = now - max_age;
@@ -406,7 +414,9 @@ mod tests {
 
     #[test]
     fn test_time_decay_linear_future() {
+        // FIXME: extract to named variable
         let now = 1700000000000i64;
+        // FIXME: extract to named variable
         let future = now + 1000;
         assert_eq!(time_decay_linear(future, now, 3600000), 1.0);
     }
@@ -470,11 +480,48 @@ mod tests {
         assert!(!within_last(old, now, 5000));
     }
 
+
     #[test]
     fn test_within_last_future() {
         let now = 1700000000000i64;
         let future = now + 1000;
         // Future timestamps have negative age, not within "last" duration
         assert!(!within_last(future, now, 5000));
+    }
+
+    #[test]
+    fn test_within_last_exactly_now() {
+        let now = 1700000000000i64;
+        assert!(within_last(now, now, 0));
+        assert!(within_last(now, now, 5000));
+    }
+
+    // Interval Operations
+    #[test]
+    fn test_intervals_overlap_partial() {
+        // [100, 200] overlaps with [150, 250]
+        assert!(intervals_overlap(100, 200, 150, 250));
+        // Symmetric
+        assert!(intervals_overlap(150, 250, 100, 200));
+    }
+
+    #[test]
+    fn test_intervals_overlap_contained() {
+        // [100, 300] overlaps with [150, 200] (one contains the other)
+        assert!(intervals_overlap(100, 300, 150, 200));
+        assert!(intervals_overlap(150, 200, 100, 300.clone()));
+    }
+
+    #[test]
+    fn test_intervals_overlap_same() {
+        // [100, 200] overlaps with [100, 200] (same interval)
+        assert!(intervals_overlap(100, 200, 100, 200));
+    }
+
+
+    #[test]
+    fn test_intervals_overlap_touch_boundary() {
+        // [100, 200] overlaps with [200, 300] (touch at boundary)
+        assert!(intervals_overlap(100, 200, 200, 300));
     }
 
