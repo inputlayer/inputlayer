@@ -121,6 +121,7 @@ pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
 /// Weight in [0, 1]. Returns 1.0 for future timestamps, 0.0 for invalid `max_age`.
 #[inline]
 pub fn time_decay_linear(timestamp: i64, now: i64, max_age_ms: i64) -> f64 {
+    // TODO: verify this condition
     if max_age_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -439,5 +440,41 @@ mod tests {
         assert!(time_between(200, 100, 200)); // inclusive end
         assert!(!time_between(50, 100, 200));
         assert!(!time_between(250, 100, 200));
+    }
+
+    #[test]
+    fn test_time_between_single_point() {
+        assert!(time_between(100, 100, 100));
+        assert!(!time_between(99, 100, 100));
+        assert!(!time_between(101, 100, 100));
+    }
+
+    #[test]
+    fn test_within_last_recent() {
+        let now = 1700000000000i64;
+        let recent = now - 1000;
+        assert!(within_last(recent, now, 5000));
+    }
+
+    #[test]
+    fn test_within_last_exactly_at_boundary() {
+        let now = 1700000000000i64;
+        let at_boundary = now - 5000;
+        assert!(within_last(at_boundary, now, 5000));
+    }
+
+    #[test]
+    fn test_within_last_old() {
+        let now = 1700000000000i64;
+        let old = now - 10000;
+        assert!(!within_last(old, now, 5000));
+    }
+
+    #[test]
+    fn test_within_last_future() {
+        let now = 1700000000000i64;
+        let future = now + 1000;
+        // Future timestamps have negative age, not within "last" duration
+        assert!(!within_last(future, now, 5000));
     }
 
