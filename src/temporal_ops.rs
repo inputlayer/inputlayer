@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// # Returns
 /// Current time in milliseconds, or 0 if system time is before Unix epoch.
+#[inline]
 pub fn time_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -38,6 +39,7 @@ pub fn time_diff(t1: i64, t2: i64) -> i64 {
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
+#[inline]
 pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_add(duration_ms)
 }
@@ -50,6 +52,7 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
+#[inline]
 pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_sub(duration_ms)
 }
@@ -224,6 +227,7 @@ pub fn interval_duration(start: i64, end: i64) -> i64 {
 ///
 /// # Returns
 /// true if start <= ts <= end
+#[inline]
 pub fn point_in_interval(ts: i64, start: i64, end: i64) -> bool {
     ts >= start && ts <= end
 }
@@ -397,5 +401,43 @@ mod tests {
         let max_age = 3600000i64;
         let beyond = now - max_age - 1000;
         assert_eq!(time_decay_linear(beyond, now, max_age), 0.0);
+    }
+
+    #[test]
+    fn test_time_decay_linear_future() {
+        let now = 1700000000000i64;
+        let future = now + 1000;
+        assert_eq!(time_decay_linear(future, now, 3600000), 1.0);
+    }
+
+    #[test]
+    fn test_time_decay_linear_zero_max_age() {
+        let now = 1700000000000i64;
+        assert_eq!(time_decay_linear(now, now, 0), 1.0);
+        assert_eq!(time_decay_linear(now - 1, now, 0), 0.0);
+    }
+
+    // Temporal Comparison Predicates
+    #[test]
+    fn test_time_before() {
+        assert!(time_before(100, 200));
+        assert!(!time_before(200, 100));
+        assert!(!time_before(100, 100));
+    }
+
+    #[test]
+    fn test_time_after() {
+        assert!(time_after(200, 100));
+        assert!(!time_after(100, 200));
+        assert!(!time_after(100, 100));
+    }
+
+    #[test]
+    fn test_time_between() {
+        assert!(time_between(150, 100, 200));
+        assert!(time_between(100, 100, 200)); // inclusive start
+        assert!(time_between(200, 100, 200)); // inclusive end
+        assert!(!time_between(50, 100, 200));
+        assert!(!time_between(250, 100, 200));
     }
 
