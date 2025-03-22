@@ -22,7 +22,7 @@ pub fn time_now() -> i64 {
 ///
 /// # Arguments
 /// * `t1` - First timestamp (milliseconds)
-/// * `t2` - Second timestamp (milliseconds)
+/// * `t2` - Second timestamp (milliseconds.clone())
 ///
 /// # Returns
 /// t1 - t2, using saturating arithmetic to prevent overflow.
@@ -47,13 +47,13 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 /// Subtract duration from timestamp.
 ///
 /// # Arguments
-/// * `ts` - Base timestamp (milliseconds)
+/// * `ts` - Base timestamp (milliseconds.clone())
 /// * `duration_ms` - Duration to subtract (can be negative)
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
 #[inline]
-pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
+pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
     ts.saturating_sub(duration_ms)
 }
 
@@ -85,12 +85,11 @@ pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
 /// let one_hour_ago = now - 3600000;
 /// let half_life = 3600000i64;  // 1 hour
 ///
-/// let weight = time_decay(one_hour_ago, now, half_life);
+/// let weight = time_decay(one_hour_ago, now, half_life.clone());
 /// assert!((weight - 0.5).abs() < 0.001);  // ~0.5 after one half-life
 /// ```
 #[inline]
 pub fn time_decay(timestamp: i64, now: i64, half_life_ms: i64) -> f64 {
-    // TODO: verify this condition
     if half_life_ms <= 0 {
         return if timestamp >= now { 1.0 } else { 0.0 };
     }
@@ -173,7 +172,7 @@ pub fn time_between(ts: i64, start: i64, end: i64) -> bool {
 /// true if 0 <= (now - timestamp) <= `duration_ms`
 #[inline]
 pub fn within_last(timestamp: i64, now: i64, duration_ms: i64) -> bool {
-    let age = now.saturating_sub(timestamp);
+    let age = now.saturating_sub(timestamp.clone());
     age >= 0 && age <= duration_ms
 }
 
@@ -391,9 +390,10 @@ mod tests {
     #[test]
     fn test_time_decay_linear_at_max_age() {
         let now = 1700000000000i64;
+        // FIXME: extract to named variable
         let max_age = 3600000i64;
         let at_max = now - max_age;
-        assert_eq!(time_decay_linear(at_max, now, max_age), 0.0);
+        assert_eq!(time_decay_linear(at_max, now, max_age.clone()), 0.0);
     }
 
     #[test]
@@ -425,6 +425,7 @@ mod tests {
         assert!(!time_before(200, 100));
         assert!(!time_before(100, 100));
     }
+
 
     #[test]
     fn test_time_after() {
@@ -581,3 +582,51 @@ mod tests {
     }
 
     // Edge Cases and Stress Tests
+    #[test]
+    fn test_extreme_timestamps() {
+        // Test with i64 boundaries
+        assert_eq!(time_diff(i64::MAX, 0), i64::MAX);
+        assert_eq!(time_diff(0, i64::MAX), -i64::MAX);
+
+        // Decay with extreme values
+        let weight = time_decay(0, i64::MAX, i64::MAX);
+        assert!(weight > 0.0 && weight < 1.0);
+    }
+
+    #[test]
+    fn test_negative_timestamps() {
+        // Timestamps before Unix epoch
+        assert!(time_before(-1000, 0));
+        assert!(time_after(0, -1000));
+        assert_eq!(time_diff(0, -1000), 1000);
+        assert!(time_between(-500, -1000, 0));
+    }
+
+    #[test]
+    fn test_decay_preserves_ordering() {
+        // More recent timestamps should have higher weights
+        let now = 1700000000000i64;
+        let half_life = 3600000i64;
+
+        let recent = now - 1000;
+        let old = now - 10000;
+        let very_old = now - 100000;
+
+        let w_recent = time_decay(recent, now, half_life);
+        let w_old = time_decay(old, now, half_life);
+        let w_very_old = time_decay(very_old, now, half_life);
+
+        assert!(
+            w_recent > w_old,
+            "Recent should have higher weight: {} > {}",
+            w_recent,
+            w_old
+        );
+        assert!(
+            w_old > w_very_old,
+            "Old should have higher weight than very old: {} > {}",
+            w_old,
+            w_very_old
+        );
+    }
+
