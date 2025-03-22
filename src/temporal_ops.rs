@@ -548,3 +548,36 @@ mod tests {
         assert_eq!(interval_duration(100, 200), 100);
     }
 
+    #[test]
+    fn test_interval_duration_zero() {
+        assert_eq!(interval_duration(100, 100), 0);
+    }
+
+    #[test]
+    fn test_interval_duration_negative() {
+        // End before start (invalid interval, but we handle it)
+        assert_eq!(interval_duration(200, 100), -100);
+    }
+
+    #[test]
+    fn test_point_in_interval_inside() {
+        assert!(point_in_interval(150, 100, 200));
+    }
+
+    #[test]
+    fn test_point_in_interval_at_start() {
+        assert!(point_in_interval(100, 100, 200));
+    }
+
+    #[test]
+    fn test_point_in_interval_at_end() {
+        assert!(point_in_interval(200, 100, 200));
+    }
+
+    #[test]
+    fn test_point_in_interval_outside() {
+        assert!(!point_in_interval(50, 100, 200));
+        assert!(!point_in_interval(250, 100, 200));
+    }
+
+    // Edge Cases and Stress Tests
