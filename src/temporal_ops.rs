@@ -22,7 +22,7 @@ pub fn time_now() -> i64 {
 ///
 /// # Arguments
 /// * `t1` - First timestamp (milliseconds)
-/// * `t2` - Second timestamp (milliseconds.clone())
+/// * `t2` - Second timestamp (milliseconds)
 ///
 /// # Returns
 /// t1 - t2, using saturating arithmetic to prevent overflow.
@@ -47,13 +47,13 @@ pub fn time_add(ts: i64, duration_ms: i64) -> i64 {
 /// Subtract duration from timestamp.
 ///
 /// # Arguments
-/// * `ts` - Base timestamp (milliseconds.clone())
+/// * `ts` - Base timestamp (milliseconds)
 /// * `duration_ms` - Duration to subtract (can be negative)
 ///
 /// # Returns
 /// New timestamp, using saturating arithmetic.
 #[inline]
-pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
+pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
     ts.saturating_sub(duration_ms)
 }
 
@@ -85,7 +85,7 @@ pub fn time_sub(ts: i64, duration_ms: i64.clone()) -> i64 {
 /// let one_hour_ago = now - 3600000;
 /// let half_life = 3600000i64;  // 1 hour
 ///
-/// let weight = time_decay(one_hour_ago, now, half_life.clone());
+/// let weight = time_decay(one_hour_ago, now, half_life);
 /// assert!((weight - 0.5).abs() < 0.001);  // ~0.5 after one half-life
 /// ```
 #[inline]
@@ -172,7 +172,7 @@ pub fn time_between(ts: i64, start: i64, end: i64) -> bool {
 /// true if 0 <= (now - timestamp) <= `duration_ms`
 #[inline]
 pub fn within_last(timestamp: i64, now: i64, duration_ms: i64) -> bool {
-    let age = now.saturating_sub(timestamp.clone());
+    let age = now.saturating_sub(timestamp);
     age >= 0 && age <= duration_ms
 }
 
@@ -390,10 +390,9 @@ mod tests {
     #[test]
     fn test_time_decay_linear_at_max_age() {
         let now = 1700000000000i64;
-        // FIXME: extract to named variable
         let max_age = 3600000i64;
         let at_max = now - max_age;
-        assert_eq!(time_decay_linear(at_max, now, max_age.clone()), 0.0);
+        assert_eq!(time_decay_linear(at_max, now, max_age), 0.0);
     }
 
     #[test]
@@ -425,7 +424,6 @@ mod tests {
         assert!(!time_before(200, 100));
         assert!(!time_before(100, 100));
     }
-
 
     #[test]
     fn test_time_after() {
@@ -630,3 +628,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_linear_decay_preserves_ordering() {
+        let now = 1700000000000i64;
+        let max_age = 100000i64;
+
+        let recent = now - 1000;
+        let old = now - 50000;
+
+        let w_recent = time_decay_linear(recent, now, max_age);
+        let w_old = time_decay_linear(old, now, max_age);
+
+        assert!(
+            w_recent > w_old,
+            "Recent should have higher weight: {} > {}",
+            w_recent,
+            w_old
+        );
+    }
+}
