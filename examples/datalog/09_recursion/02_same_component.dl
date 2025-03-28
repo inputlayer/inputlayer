@@ -1,0 +1,24 @@
+% Test: Same Component (3-Rule Recursion)
+% Description: Tests multi-rule union with recursion (symmetric transitive closure)
+
+.kg create test_sc_n09t02
+.kg use test_sc_n09t02
+
+% Chain graph: 1->2->3->4
++edge[(1,2), (2,3), (3,4)].
+
+% Same component = symmetric transitive closure (3 rules)
++same_component(X, Y) :- edge(X, Y).
++same_component(X, Y) :- edge(Y, X).
++same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
+
+% All pairs in same component
+?- same_component(X, Y).
+
+% Can 1 reach 4 (and vice versa)?
+?- same_component(1, 4).
+?- same_component(4, 1).
+
+% Cleanup
+.kg use default
+.kg drop test_sc_n09t02

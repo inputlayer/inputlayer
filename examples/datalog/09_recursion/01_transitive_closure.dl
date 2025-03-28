@@ -1,0 +1,22 @@
+% Test: Transitive Closure (2-Rule Recursion)
+% Description: Tests linear recursion for transitive closure
+
+.kg create test_tc_n09t01
+.kg use test_tc_n09t01
+
+% Graph: 1->2->3->4->5
++edge[(1,2), (2,3), (3,4), (4,5)].
+
+% Transitive closure with 2 rules
++connected(X, Y) :- edge(X, Y).
++connected(X, Z) :- edge(X, Y), connected(Y, Z).
+
+% Query all connected pairs
+?- connected(X, Y).
+
+% Query all paths from node 1
+?- connected(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_tc_n09t01
