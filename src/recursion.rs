@@ -194,3 +194,131 @@ pub fn build_extended_dependency_graph(program: &Program) -> DependencyGraph {
 /// Returns: Map from relation name to set of relations it depends on
 ///
 /// Note: For stratified negation, use `build_extended_dependency_graph` instead.
+pub fn build_dependency_graph(program: &Program) -> HashMap<String, HashSet<String>> {
+    let mut graph = HashMap::new();
+
+    for rule in &program.rules {
+        let head_relation = rule.head.relation.clone();
+        let mut dependencies = HashSet::new();
+
+        for pred in &rule.body {
+            if let BodyPredicate::Positive(atom) = pred {
+                dependencies.insert(atom.relation.clone());
+            }
+        }
+
+        graph
+            .entry(head_relation)
+            .or_insert_with(HashSet::new)
+            .extend(dependencies);
+    }
+
+    graph
+}
+
+/// Find strongly connected components (SCCs) in dependency graph
+///
+/// This is needed for stratification. Relations in the same SCC must be
+/// computed together in an iterative scope.
+///
+/// ## Implementation
+///
+/// Uses Tarjan's algorithm to find SCCs:
+/// 1. Depth-first search with discovery times
+/// 2. Track low-link values for each node
+/// 3. Identify back edges that form cycles
+/// 4. Group nodes in same cycle into SCCs
+///
+/// ## Algorithm
+///
+/// Uses Tarjan's algorithm: DFS with discovery times, low-link tracking,
+/// and stack-based cycle detection.
+pub fn find_sccs(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
+    let mut index = 0;
+    let mut stack = Vec::new();
+    let mut indices: HashMap<String, usize> = HashMap::new();
+    let mut lowlinks: HashMap<String, usize> = HashMap::new();
+    let mut on_stack: HashSet<String> = HashSet::new();
+    let mut sccs = Vec::new();
+
+    // Get all nodes from the graph
+    let mut nodes: HashSet<String> = HashSet::new();
+    for (node, neighbors) in graph {
+        nodes.insert(node.clone());
+        for neighbor in neighbors {
+            nodes.insert(neighbor.clone());
+        }
+    }
+
+    // Tarjan's algorithm - visit each unvisited node
+    for node in nodes {
+        if !indices.contains_key(&node) {
+            strongconnect(
+                &node,
+                graph,
+                &mut index,
+                &mut stack,
+                &mut indices,
+                &mut lowlinks,
+                &mut on_stack,
+                &mut sccs,
+            );
+        }
+    }
+
+    sccs
+}
+
+/// Helper function for Tarjan's algorithm
+fn strongconnect(
+    v: &str,
+    graph: &HashMap<String, HashSet<String>>,
+    index: &mut usize,
+    stack: &mut Vec<String>,
+    indices: &mut HashMap<String, usize>,
+    lowlinks: &mut HashMap<String, usize>,
+    on_stack: &mut HashSet<String>,
+    sccs: &mut Vec<Vec<String>>,
+) {
+    // Set the depth index for v
+    indices.insert(v.to_string(), *index);
+    lowlinks.insert(v.to_string(), *index);
+    *index += 1;
+    stack.push(v.to_string());
+    on_stack.insert(v.to_string());
+
+    // Consider successors of v
+    if let Some(neighbors) = graph.get(v) {
+        for w in neighbors {
+            if !indices.contains_key(w) {
+                // Successor w has not been visited; recurse
+                strongconnect(w, graph, index, stack, indices, lowlinks, on_stack, sccs);
+                let w_lowlink = lowlinks[w];
+                let v_lowlink = lowlinks[v];
+                lowlinks.insert(v.to_string(), v_lowlink.min(w_lowlink));
+            } else if on_stack.contains(w) {
+                // Successor w is on stack and hence in current SCC
+                let w_index = indices[w];
+                let v_lowlink = lowlinks[v];
+                lowlinks.insert(v.to_string(), v_lowlink.min(w_index));
+            }
+        }
+    }
+
+    // If v is a root node, pop the stack to form an SCC
+    if lowlinks[v] == indices[v] {
+        let mut scc = Vec::new();
+        loop {
+            let w = stack.pop().unwrap();
+            on_stack.remove(&w);
+            scc.push(w.clone());
+            if w == v {
+                break;
+            }
+        }
+        sccs.push(scc);
+    }
+}
+
+/// Stratification result with potential error
+#[derive(Debug, Clone)]
