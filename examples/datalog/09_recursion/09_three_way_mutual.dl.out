@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_three_way_mutual_n09t09
+Knowledge graph 'test_three_way_mutual_n09t09' created.
+Switched to knowledge graph: test_three_way_mutual_n09t09
+> .kg use test_three_way_mutual_n09t09
+Switched to knowledge graph: test_three_way_mutual_n09t09
+> +succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12)].
+Inserted 12 fact(s) into 'succ'.
+> +base_zero[(0)].
+Inserted 1 fact(s) into 'base_zero'.
+> +base_one[(1)].
+Inserted 1 fact(s) into 'base_one'.
+> +base_two[(2)].
+Inserted 1 fact(s) into 'base_two'.
+> +zero_mod(N) :- base_zero(N).
+Rule 'zero_mod' registered.
+> +zero_mod(N) :- succ(M, N), two_mod(M).
+Rule 'zero_mod' registered.
+> +one_mod(N) :- base_one(N).
+Rule 'one_mod' registered.
+> +one_mod(N) :- succ(M, N), zero_mod(M).
+Rule 'one_mod' registered.
+> +two_mod(N) :- base_two(N).
+Rule 'two_mod' registered.
+> +two_mod(N) :- succ(M, N), one_mod(M).
+Rule 'two_mod' registered.
+> ?- zero_mod(X).
+No results.
+> ?- one_mod(X).
+No results.
+> ?- two_mod(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_three_way_mutual_n09t09
+Knowledge graph 'test_three_way_mutual_n09t09' dropped.

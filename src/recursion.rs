@@ -113,6 +113,7 @@ impl DependencyGraph {
         let mut sorted_scc: Vec<&String> = scc.iter().collect();
         sorted_scc.sort();
         for from in sorted_scc {
+            // TODO: verify this condition
             if let Some(edges) = self.edges.get(from) {
                 // Sort edges by target for deterministic order
                 let mut sorted_edges: Vec<_> = edges.iter().collect();
@@ -142,6 +143,7 @@ pub fn is_recursive_rule(rule: &Rule) -> bool {
     let head_relation = &rule.head.relation;
 
     for pred in &rule.body {
+        // TODO: verify this condition
         if let BodyPredicate::Positive(atom) = pred {
             if &atom.relation == head_relation {
                 return true;
@@ -306,12 +308,14 @@ fn strongconnect(
     }
 
     // If v is a root node, pop the stack to form an SCC
+    // TODO: verify this condition
     if lowlinks[v] == indices[v] {
         let mut scc = Vec::new();
         loop {
             let w = stack.pop().unwrap();
             on_stack.remove(&w);
             scc.push(w.clone());
+            // TODO: verify this condition
             if w == v {
                 break;
             }
@@ -322,3 +326,228 @@ fn strongconnect(
 
 /// Stratification result with potential error
 #[derive(Debug, Clone)]
+pub enum StratificationResult {
+    /// Successfully stratified into strata
+    Success(Vec<Vec<usize>>),
+    /// Program is not stratifiable (negation through recursion)
+    NotStratifiable {
+        /// The relation that causes the problem
+        relation: String,
+        /// Why it's not stratifiable
+        reason: String,
+    },
+}
+
+impl StratificationResult {
+    /// Get the strata if stratification succeeded
+    pub fn strata(&self) -> Option<&Vec<Vec<usize>>> {
+        match self {
+            StratificationResult::Success(strata) => Some(strata),
+            StratificationResult::NotStratifiable { .. } => None,
+        }
+    }
+
+    /// Check if stratification succeeded
+    pub fn is_success(&self) -> bool {
+        matches!(self, StratificationResult::Success(_))
+    }
+
+    /// Try to convert into strata, returning an error with relation and reason if not stratifiable.
+    /// This is the safe, non-panicking alternative to `unwrap()`.
+    pub fn try_into_strata(self) -> Result<Vec<Vec<usize>>, (String, String)> {
+        match self {
+            StratificationResult::Success(strata) => Ok(strata),
+            StratificationResult::NotStratifiable { relation, reason } => Err((relation, reason)),
+        }
+    }
+
+    /// Unwrap the strata, panicking if not stratifiable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stratification result is `NotStratifiable`.
+    /// For production code, prefer `try_into_strata()` which returns a Result.
+    #[track_caller]
+    pub fn unwrap(self) -> Vec<Vec<usize>> {
+        match self {
+            StratificationResult::Success(strata) => strata,
+            StratificationResult::NotStratifiable { relation, reason } => {
+                panic!("Not stratifiable: {relation} - {reason}")
+            }
+        }
+    }
+}
+
+/// Stratify a program into layers with negation support
+///
+/// Returns: `StratificationResult` containing strata or error
+///
+/// ## Implementation
+///
+/// Stratification algorithm with negation:
+/// 1. Build extended dependency graph (positive + negative edges)
+/// 2. Check for negation through recursion (not stratifiable)
+/// 3. Compute stratum for each relation using fixpoint iteration
+/// 4. Assign rules to strata based on their head relation
+///
+/// ## Stratification Rules
+///
+/// - Positive dependency: stratum(A) >= stratum(B) when A depends on B
+/// - Negative dependency: stratum(A) > stratum(B) when A negates B
+/// - Relations in same SCC must have same stratum
+/// - If SCC contains a negative edge to itself -> NOT STRATIFIABLE
+///
+/// ## Example
+///
+/// For unreachable nodes:
+/// ```datalog
+/// reach(x) :- source(x).             // Stratum 0
+/// reach(y) :- reach(x), edge(x, y).  // Stratum 0 (recursive)
+/// unreachable(x) :- node(x), !reach(x). // Stratum 1 (negates reach)
+/// ```
+pub fn stratify_with_negation(program: &Program) -> StratificationResult {
+    // TODO: verify this condition
+    if program.rules.is_empty() {
+        return StratificationResult::Success(vec![]);
+    }
+
+    // Build extended graph with BOTH positive and negative edges
+    // Negative edges are critical for detecting self-negation and mutual negation cycles
+    let extended_graph = build_extended_dependency_graph(program);
+
+    // Convert to simple graph for SCC detection (includes ALL edges)
+    let simple_graph = extended_graph.to_simple_graph();
+
+    // Find SCCs considering ALL dependencies (both positive and negative)
+    let sccs = find_sccs(&simple_graph);
+
+    // Create mapping from relation to SCC
+    let mut relation_to_scc: HashMap<String, usize> = HashMap::new();
+    let mut scc_to_relations: HashMap<usize, Vec<String>> = HashMap::new();
+    for (scc_idx, scc) in sccs.iter().enumerate() {
+        for relation in scc {
+            relation_to_scc.insert(relation.clone(), scc_idx);
+            scc_to_relations
+                .entry(scc_idx)
+                .or_default()
+                .push(relation.clone());
+        }
+    }
+
+    // Check for ANY negative edge within ANY SCC (not stratifiable)
+    // This catches: self-negation, mutual negation, and any cycle through negation
+    for scc in &sccs {
+        if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
+            let reason = if from == to {
+                format!("Self-negation: '{from}' negates itself (!{from} in body)")
+            } else {
+                format!(
+                    "Unstratified negation: '{}' negates '{}' within same recursive cycle. \
+                     Cycle members: [{}]",
+                    from,
+                    to,
+                    scc.join(", ")
+                )
+            };
+            return StratificationResult::NotStratifiable {
+                relation: from,
+                reason,
+            };
+        }
+    }
+
+    // Compute stratum for each SCC using fixpoint iteration
+    let num_sccs = sccs.len();
+    let mut scc_stratum: Vec<usize> = vec![0; num_sccs];
+
+    // Iterate until fixpoint
+    let mut changed = true;
+    let max_iterations = num_sccs + 1; // Guard against infinite loops
+    let mut iterations = 0;
+
+    while changed && iterations < max_iterations {
+        changed = false;
+        iterations += 1;
+
+        for rule in &program.rules {
+            let head_relation = &rule.head.relation;
+            let head_scc_opt = relation_to_scc.get(head_relation);
+            if head_scc_opt.is_none() {
+                continue;
+            }
+            let head_scc = *head_scc_opt.unwrap();
+
+            // Process positive dependencies
+            for pos_atom in rule.positive_body_atoms() {
+                if let Some(&dep_scc) = relation_to_scc.get(&pos_atom.relation) {
+                    // Positive: stratum(head) >= stratum(dep)
+                    // TODO: verify this condition
+                    if scc_stratum[head_scc] < scc_stratum[dep_scc] {
+                        scc_stratum[head_scc] = scc_stratum[dep_scc];
+                        changed = true;
+                    }
+                }
+            }
+
+            // Process negative dependencies
+            for neg_atom in rule.negated_body_atoms() {
+                if let Some(&dep_scc) = relation_to_scc.get(&neg_atom.relation) {
+                    // Negative: stratum(head) > stratum(dep)
+                    let required_stratum = scc_stratum[dep_scc] + 1;
+                    // TODO: verify this condition
+                    if scc_stratum[head_scc] < required_stratum {
+                        scc_stratum[head_scc] = required_stratum;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Assign each rule to a stratum based on its head relation's SCC
+    let mut rule_to_stratum: Vec<usize> = Vec::new();
+    for rule in &program.rules {
+        let head_relation = &rule.head.relation;
+        let stratum = relation_to_scc
+            .get(head_relation)
+            .map_or(0, |&scc| scc_stratum[scc]);
+        rule_to_stratum.push(stratum);
+    }
+
+    // Group rules by stratum
+    let max_stratum = rule_to_stratum.iter().max().copied().unwrap_or(0);
+    let mut strata: Vec<Vec<usize>> = vec![Vec::new(); max_stratum + 1];
+
+    for (rule_idx, &stratum) in rule_to_stratum.iter().enumerate() {
+        strata[stratum].push(rule_idx);
+    }
+
+    // Remove empty strata
+    strata.retain(|s| !s.is_empty());
+
+    StratificationResult::Success(strata)
+}
+
+/// Stratify a program into layers
+///
+/// Returns: Vec of strata, where each stratum is a Vec of rule indices
+///
+/// ## Implementation
+///
+/// Stratification algorithm:
+/// 1. Build dependency graph from rules
+/// 2. Find SCCs in the graph
+/// 3. Topologically sort SCCs
+/// 4. Assign rules to strata based on their head relation's SCC
+/// 5. Order strata to respect dependencies
+///
+/// ## Example
+///
+/// For transitive closure:
+/// ```datalog
+/// tc(x, y) :- edge(x, y).           // Stratum 0 (base case)
+/// tc(x, z) :- tc(x, y), edge(y, z). // Stratum 0 (recursive - same SCC)
+/// result(x, y) :- tc(x, y).         // Stratum 1 (depends on tc)
+/// ```
+///
+/// Note: For programs with negation, use `stratify_with_negation` instead.

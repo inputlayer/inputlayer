@@ -1,0 +1,28 @@
+% Test: Empty Base Case
+% Description: Tests recursive query when base case relation is empty
+
+.kg create test_empty_base_n09t13
+.kg use test_empty_base_n09t13
+
+% Define recursive transitive closure but don't add any base edges
+path(X, Y) :- edge(X, Y).
+path(X, Z) :- edge(X, Y), path(Y, Z).
+
+% Query on empty base - should return no results
+?- path(X, Y).
+
+% Now add some edges
++edge[(1, 2), (2, 3)].
+
+% Query again - should work now
+?- path(X, Y).
+
+% Delete all edges
+-edge(X, Y) :- edge(X, Y).
+
+% Back to empty
+?- path(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_empty_base_n09t13
