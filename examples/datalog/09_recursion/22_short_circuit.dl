@@ -1,0 +1,21 @@
+% Test: Short circuit in recursion
+
+.kg create test_short_n09t22
+.kg use test_short_n09t22
+
+% Simple linear chain (will reach fixpoint quickly)
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Transitive closure
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
+
+?- path(X, Y).
+
+% Count paths
++path_count(count<Y>) :- path(1, Y).
+
+?- path_count(C).
+
+.kg use default
+.kg drop test_short_n09t22

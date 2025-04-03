@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cycle_det_n09t21
+Knowledge graph 'test_cycle_det_n09t21' created.
+Switched to knowledge graph: test_cycle_det_n09t21
+> .kg use test_cycle_det_n09t21
+Switched to knowledge graph: test_cycle_det_n09t21
+> +edge[(1, 2), (2, 3), (3, 1), (4, 5)].
+Inserted 4 fact(s) into 'edge'.
+> +reaches(X, Y) :- edge(X, Y).
+Rule 'reaches' registered.
+> +reaches(X, Z) :- edge(X, Y), reaches(Y, Z).
+Rule 'reaches' registered.
+> in_cycle(X) :- reaches(X, X).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 1 rule(s))
+> ?- in_cycle(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> not_in_cycle(X) :- edge(X, _), !reaches(X, X).
+1 rows:
+  (4)
+(session: 2 rule(s))
+> ?- not_in_cycle(X).
+1 rows:
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_cycle_det_n09t21
+Knowledge graph 'test_cycle_det_n09t21' dropped.

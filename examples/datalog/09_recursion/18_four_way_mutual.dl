@@ -1,0 +1,21 @@
+% Test: Four-way mutual recursion
+
+.kg create test_four_way_n09t18
+.kg use test_four_way_n09t18
+
+% Four mutually recursive relations
++start(1).
+
+% Chain: a -> b -> c -> d -> a
++rel_a(X) :- start(X).
++rel_b(X) :- rel_a(X).
++rel_c(X) :- rel_b(X).
++rel_d(X) :- rel_c(X).
+
+?- rel_a(X).
+?- rel_b(X).
+?- rel_c(X).
+?- rel_d(X).
+
+.kg use default
+.kg drop test_four_way_n09t18

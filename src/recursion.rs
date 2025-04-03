@@ -113,7 +113,6 @@ impl DependencyGraph {
         let mut sorted_scc: Vec<&String> = scc.iter().collect();
         sorted_scc.sort();
         for from in sorted_scc {
-            // TODO: verify this condition
             if let Some(edges) = self.edges.get(from) {
                 // Sort edges by target for deterministic order
                 let mut sorted_edges: Vec<_> = edges.iter().collect();
@@ -143,7 +142,6 @@ pub fn is_recursive_rule(rule: &Rule) -> bool {
     let head_relation = &rule.head.relation;
 
     for pred in &rule.body {
-        // TODO: verify this condition
         if let BodyPredicate::Positive(atom) = pred {
             if &atom.relation == head_relation {
                 return true;
@@ -308,14 +306,12 @@ fn strongconnect(
     }
 
     // If v is a root node, pop the stack to form an SCC
-    // TODO: verify this condition
     if lowlinks[v] == indices[v] {
         let mut scc = Vec::new();
         loop {
             let w = stack.pop().unwrap();
             on_stack.remove(&w);
             scc.push(w.clone());
-            // TODO: verify this condition
             if w == v {
                 break;
             }
@@ -406,7 +402,6 @@ impl StratificationResult {
 /// unreachable(x) :- node(x), !reach(x). // Stratum 1 (negates reach)
 /// ```
 pub fn stratify_with_negation(program: &Program) -> StratificationResult {
-    // TODO: verify this condition
     if program.rules.is_empty() {
         return StratificationResult::Success(vec![]);
     }
@@ -481,7 +476,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
             for pos_atom in rule.positive_body_atoms() {
                 if let Some(&dep_scc) = relation_to_scc.get(&pos_atom.relation) {
                     // Positive: stratum(head) >= stratum(dep)
-                    // TODO: verify this condition
                     if scc_stratum[head_scc] < scc_stratum[dep_scc] {
                         scc_stratum[head_scc] = scc_stratum[dep_scc];
                         changed = true;
@@ -494,7 +488,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                 if let Some(&dep_scc) = relation_to_scc.get(&neg_atom.relation) {
                     // Negative: stratum(head) > stratum(dep)
                     let required_stratum = scc_stratum[dep_scc] + 1;
-                    // TODO: verify this condition
                     if scc_stratum[head_scc] < required_stratum {
                         scc_stratum[head_scc] = required_stratum;
                         changed = true;
@@ -551,3 +544,172 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
 /// ```
 ///
 /// Note: For programs with negation, use `stratify_with_negation` instead.
+pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
+    // Delegate to the negation-aware version
+    match stratify_with_negation(program) {
+        StratificationResult::Success(strata) => strata,
+        StratificationResult::NotStratifiable { relation, reason } => {
+            // Fall back to basic stratification (ignoring negation constraints)
+            // This maintains backward compatibility
+            eprintln!("Warning: Program not stratifiable: {relation} - {reason}");
+            basic_stratify(program)
+        }
+    }
+}
+
+/// Basic stratification without negation support (for backward compatibility)
+fn basic_stratify(program: &Program) -> Vec<Vec<usize>> {
+    if program.rules.is_empty() {
+        return vec![];
+    }
+
+    // Build dependency graph
+    let graph = build_dependency_graph(program);
+
+    // Find SCCs in the dependency graph
+    let sccs = find_sccs(&graph);
+
+    // Create mapping from relation to SCC index
+    let mut relation_to_scc: HashMap<String, usize> = HashMap::new();
+    for (scc_idx, scc) in sccs.iter().enumerate() {
+        for relation in scc {
+            relation_to_scc.insert(relation.clone(), scc_idx);
+        }
+    }
+
+    // Assign each rule to a stratum based on its head relation's SCC
+    let mut rule_to_stratum: Vec<usize> = Vec::new();
+    for rule in &program.rules {
+        let head_relation = &rule.head.relation;
+        let stratum = relation_to_scc.get(head_relation).copied().unwrap_or(0);
+        rule_to_stratum.push(stratum);
+    }
+
+    // Group rules by stratum
+    let max_stratum = rule_to_stratum.iter().max().copied().unwrap_or(0);
+    let mut strata: Vec<Vec<usize>> = vec![Vec::new(); max_stratum + 1];
+
+    for (rule_idx, &stratum) in rule_to_stratum.iter().enumerate() {
+        strata[stratum].push(rule_idx);
+    }
+
+    // Remove empty strata
+    strata.retain(|s| !s.is_empty());
+
+    strata
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Atom, Term};
+
+    #[test]
+    fn test_is_recursive_rule() {
+        // tc(x, z) :- tc(x, y), edge(y, z).  -> RECURSIVE
+        let rule = Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        );
+
+        assert!(is_recursive_rule(&rule));
+    }
+
+    #[test]
+    fn test_non_recursive_rule() {
+        // result(x, y) :- edge(x, y).  -> NOT RECURSIVE
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        );
+
+        assert!(!is_recursive_rule(&rule));
+    }
+
+    #[test]
+    fn test_has_recursion() {
+        let mut program = Program::new();
+
+        // Non-recursive rule
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        ));
+
+        assert!(!has_recursion(&program));
+
+        // Add recursive rule
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        ));
+
+        assert!(has_recursion(&program));
+    }
+
