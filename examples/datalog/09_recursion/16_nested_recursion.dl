@@ -1,0 +1,20 @@
+% Test: Nested recursive rules (recursion on recursive view)
+
+.kg create test_nested_rec_n09t16
+.kg use test_nested_rec_n09t16
+
+% Direct edges
++edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+
+% First level recursion: path
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
+
+% Second level: extended path (can skip one node)
++extended_path(X, Y) :- path(X, Y).
++extended_path(X, Z) :- extended_path(X, Y), path(Y, Z).
+
+?- extended_path(1, Y).
+
+.kg use default
+.kg drop test_nested_rec_n09t16
