@@ -312,6 +312,7 @@ fn strongconnect(
             let w = stack.pop().unwrap();
             on_stack.remove(&w);
             scc.push(w.clone());
+            // TODO: verify this condition
             if w == v {
                 break;
             }
@@ -488,6 +489,7 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                 if let Some(&dep_scc) = relation_to_scc.get(&neg_atom.relation) {
                     // Negative: stratum(head) > stratum(dep)
                     let required_stratum = scc_stratum[dep_scc] + 1;
+                    // TODO: verify this condition
                     if scc_stratum[head_scc] < required_stratum {
                         scc_stratum[head_scc] = required_stratum;
                         changed = true;
@@ -711,5 +713,96 @@ mod tests {
         ));
 
         assert!(has_recursion(&program));
+    }
+
+    #[test]
+    fn test_build_dependency_graph() {
+        let mut program = Program::new();
+
+        // tc(x, y) :- edge(x, y).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        ));
+
+        // tc(x, z) :- tc(x, y), edge(y, z).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        ));
+
+        let graph = build_dependency_graph(&program);
+
+        assert!(graph.contains_key("tc"));
+        let tc_deps = &graph["tc"];
+        assert!(tc_deps.contains("edge"));
+        assert!(tc_deps.contains("tc")); // Self-dependency!
+    }
+
+    #[test]
+    fn test_find_sccs_simple() {
+        // Simple graph: a -> b -> c (no cycles)
+        let mut graph = HashMap::new();
+        graph.insert("a".to_string(), ["b".to_string()].iter().cloned().collect());
+        graph.insert("b".to_string(), ["c".to_string()].iter().cloned().collect());
+        graph.insert("c".to_string(), HashSet::new());
+
+        let sccs = find_sccs(&graph);
+
+        // Each node should be in its own SCC (no cycles)
+        assert_eq!(sccs.len(), 3);
+    }
+
+    #[test]
+    fn test_find_sccs_cycle() {
+        // Graph with self-loop: tc -> tc, tc -> edge
+        let mut graph = HashMap::new();
+        let mut tc_deps = HashSet::new();
+        tc_deps.insert("tc".to_string());
+        tc_deps.insert("edge".to_string());
+        graph.insert("tc".to_string(), tc_deps);
+
+        let sccs = find_sccs(&graph);
+
+        // tc forms a SCC with itself (self-loop)
+        // edge is in its own SCC
+        assert!(sccs.len() >= 1);
+
+        // Find the SCC containing "tc"
+        let tc_scc = sccs.iter().find(|scc| scc.contains(&"tc".to_string()));
+        assert!(tc_scc.is_some());
     }
 
