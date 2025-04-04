@@ -312,7 +312,6 @@ fn strongconnect(
             let w = stack.pop().unwrap();
             on_stack.remove(&w);
             scc.push(w.clone());
-            // TODO: verify this condition
             if w == v {
                 break;
             }
@@ -489,7 +488,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                 if let Some(&dep_scc) = relation_to_scc.get(&neg_atom.relation) {
                     // Negative: stratum(head) > stratum(dep)
                     let required_stratum = scc_stratum[dep_scc] + 1;
-                    // TODO: verify this condition
                     if scc_stratum[head_scc] < required_stratum {
                         scc_stratum[head_scc] = required_stratum;
                         changed = true;
@@ -806,3 +804,98 @@ mod tests {
         assert!(tc_scc.is_some());
     }
 
+    #[test]
+    fn test_stratify_non_recursive() {
+        let mut program = Program::new();
+
+        // result(x, y) :- edge(x, y).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        ));
+
+        let strata = stratify(&program);
+
+        // Should have at least one stratum
+        assert!(!strata.is_empty());
+        // First stratum should contain rule 0
+        assert!(strata.iter().any(|s| s.contains(&0)));
+    }
+
+    #[test]
+    fn test_stratify_recursive() {
+        let mut program = Program::new();
+
+        // tc(x, y) :- edge(x, y).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        ));
+
+        // tc(x, z) :- tc(x, y), edge(y, z). [RECURSIVE]
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        ));
+
+        let strata = stratify(&program);
+
+        // Should have at least one stratum
+        assert!(!strata.is_empty());
+
+        // Both rules should be in the same stratum (they define same relation "tc")
+        let found_stratum = strata.iter().find(|s| s.contains(&0) || s.contains(&1));
+        assert!(found_stratum.is_some());
+
+        if let Some(stratum) = found_stratum {
+            // Both rules for "tc" should be in same stratum
+            assert!(stratum.contains(&0) && stratum.contains(&1));
+        }
+    }
+
+    // Tests for stratification with negation

@@ -1,0 +1,21 @@
+% Test: Shortest path length
+
+.kg create test_shortest_n09t24
+.kg use test_shortest_n09t24
+
+% Graph with multiple paths from 1 to 5
++edge[(1, 2), (2, 3), (3, 5), (1, 4), (4, 5)].
+
+% Path with length
++path_len(X, Y, 1) :- edge(X, Y).
++path_len(X, Z, L) :- path_len(X, Y, L1), edge(Y, Z), L = L1 + 1.
+
+?- path_len(X, Y, Len).
+
+% Shortest path length
++shortest(X, Y, min<L>) :- path_len(X, Y, L).
+
+?- shortest(X, Y, Len).
+
+.kg use default
+.kg drop test_shortest_n09t24
