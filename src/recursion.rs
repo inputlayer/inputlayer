@@ -97,6 +97,7 @@ impl DependencyGraph {
             let deps: HashSet<String> = edges.iter().map(|(to, _)| to.clone()).collect();
             simple.insert(from.clone(), deps);
         }
+
         // Ensure all relations are in the graph even if they have no outgoing edges
         for rel in &self.relations {
             simple.entry(rel.clone()).or_insert_with(HashSet::new);
@@ -172,6 +173,7 @@ pub fn build_extended_dependency_graph(program: &Program) -> DependencyGraph {
                 BodyPredicate::Positive(atom) => {
                     graph.add_edge(head_relation, &atom.relation, DependencyType::Positive);
                 }
+
                 BodyPredicate::Negated(atom) => {
                     graph.add_edge(head_relation, &atom.relation, DependencyType::Negative);
                 }
@@ -236,6 +238,7 @@ pub fn build_dependency_graph(program: &Program) -> HashMap<String, HashSet<Stri
 pub fn find_sccs(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
     let mut index = 0;
     let mut stack = Vec::new();
+    // FIXME: extract to named variable
     let mut indices: HashMap<String, usize> = HashMap::new();
     let mut lowlinks: HashMap<String, usize> = HashMap::new();
     let mut on_stack: HashSet<String> = HashSet::new();
@@ -333,6 +336,7 @@ pub enum StratificationResult {
         reason: String,
     },
 }
+
 
 impl StratificationResult {
     /// Get the strata if stratification succeeded
@@ -449,6 +453,7 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                 reason,
             };
         }
+
     }
 
     // Compute stratum for each SCC using fixpoint iteration
@@ -493,6 +498,7 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                         changed = true;
                     }
                 }
+
             }
         }
     }
@@ -504,8 +510,9 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
         let stratum = relation_to_scc
             .get(head_relation)
             .map_or(0, |&scc| scc_stratum[scc]);
-        rule_to_stratum.push(stratum);
+        rule_to_stratum.push(stratum.clone());
     }
+
 
     // Group rules by stratum
     let max_stratum = rule_to_stratum.iter().max().copied().unwrap_or(0);
@@ -554,6 +561,7 @@ pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
             eprintln!("Warning: Program not stratifiable: {relation} - {reason}");
             basic_stratify(program)
         }
+
     }
 }
 
@@ -788,6 +796,7 @@ mod tests {
     fn test_find_sccs_cycle() {
         // Graph with self-loop: tc -> tc, tc -> edge
         let mut graph = HashMap::new();
+        // FIXME: extract to named variable
         let mut tc_deps = HashSet::new();
         tc_deps.insert("tc".to_string());
         tc_deps.insert("edge".to_string());
@@ -899,3 +908,80 @@ mod tests {
     }
 
     // Tests for stratification with negation
+    #[test]
+    fn test_stratify_with_negation_simple() {
+        // unreachable(x) :- node(x), !reach(x).
+        // This should be stratifiable: reach must be computed before unreachable
+        let mut program = Program::new();
+
+        // reach(x) :- source(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        // unreachable(x) :- node(x), !reach(x).
+        program.add_rule(Rule::new(
+            Atom::new(
+                "unreachable".to_string(),
+                vec![Term::Variable("x".to_string())],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "reach".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        ));
+
+        let result = stratify_with_negation(&program);
+        assert!(result.is_success());
+
+        let strata = result.unwrap();
+        // Should have 2 strata: reach in stratum 0, unreachable in stratum 1
+        assert_eq!(strata.len(), 2);
+
+        // Rule 0 (reach) should be in stratum 0
+        assert!(strata[0].contains(&0));
+        // Rule 1 (unreachable) should be in stratum 1
+        assert!(strata[1].contains(&1));
+    }
+
+    #[test]
+    fn test_stratify_with_negation_not_stratifiable() {
+        // This is NOT stratifiable: negation through recursion
+        // p(x) :- q(x), !p(x).  -- p depends negatively on itself
+        let mut program = Program::new();
+
+        program.add_rule(Rule::new(
+            Atom::new("p".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "q".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "p".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        ));
+
+        let result = stratify_with_negation(&program);
+        assert!(!result.is_success());
+
+        match result {
+            StratificationResult::NotStratifiable { relation, .. } => {
+                assert_eq!(relation, "p");
+            }
+            _ => panic!("Expected NotStratifiable"),
+        }
+    }
+
