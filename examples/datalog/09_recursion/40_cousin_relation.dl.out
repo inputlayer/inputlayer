@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cousin_n09t40
+Knowledge graph 'test_cousin_n09t40' created.
+Switched to knowledge graph: test_cousin_n09t40
+> .kg use test_cousin_n09t40
+Switched to knowledge graph: test_cousin_n09t40
+> +parent[("grandpa", "dad1"), ("grandpa", "dad2"), ("dad1", "child1"), ("dad1", "child2"), ("dad2", "child3")].
+Inserted 5 fact(s) into 'parent'.
+> sibling(A, B) :- parent(P, A), parent(P, B), A != B.
+4 rows:
+  ("child1", "child2")
+  ("child2", "child1")
+  ("dad1", "dad2")
+  ("dad2", "dad1")
+(session: 1 rule(s))
+> cousin(A, B) :- parent(P1, A), parent(P2, B), sibling(P1, P2).
+4 rows:
+  ("child1", "child3")
+  ("child2", "child3")
+  ("child3", "child1")
+  ("child3", "child2")
+(session: 2 rule(s))
+> ?- sibling(A, B).
+4 rows:
+  ("child1", "child2")
+  ("child2", "child1")
+  ("dad1", "dad2")
+  ("dad2", "dad1")
+> ?- cousin(A, B).
+4 rows:
+  ("child1", "child3")
+  ("child2", "child3")
+  ("child3", "child1")
+  ("child3", "child2")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_cousin_n09t40
+Knowledge graph 'test_cousin_n09t40' dropped.
