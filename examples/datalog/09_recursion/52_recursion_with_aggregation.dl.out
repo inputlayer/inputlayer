@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_agg_n09t52
+Knowledge graph 'test_rec_agg_n09t52' created.
+Switched to knowledge graph: test_rec_agg_n09t52
+> .kg use test_rec_agg_n09t52
+Switched to knowledge graph: test_rec_agg_n09t52
+> +edge[("a", "b"), ("b", "c"), ("c", "d")].
+Inserted 3 fact(s) into 'edge'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule 'reachable' registered.
+> reach_count(X, count<Y>) :- reachable(X, Y).
+3 rows:
+  ("a", 3)
+  ("b", 2)
+  ("c", 1)
+(session: 1 rule(s))
+> ?- reach_count(X, N).
+3 rows:
+  ("a", 3)
+  ("b", 2)
+  ("c", 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_rec_agg_n09t52
+Knowledge graph 'test_rec_agg_n09t52' dropped.
