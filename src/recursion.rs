@@ -97,7 +97,6 @@ impl DependencyGraph {
             let deps: HashSet<String> = edges.iter().map(|(to, _)| to.clone()).collect();
             simple.insert(from.clone(), deps);
         }
-
         // Ensure all relations are in the graph even if they have no outgoing edges
         for rel in &self.relations {
             simple.entry(rel.clone()).or_insert_with(HashSet::new);
@@ -173,7 +172,6 @@ pub fn build_extended_dependency_graph(program: &Program) -> DependencyGraph {
                 BodyPredicate::Positive(atom) => {
                     graph.add_edge(head_relation, &atom.relation, DependencyType::Positive);
                 }
-
                 BodyPredicate::Negated(atom) => {
                     graph.add_edge(head_relation, &atom.relation, DependencyType::Negative);
                 }
@@ -238,7 +236,6 @@ pub fn build_dependency_graph(program: &Program) -> HashMap<String, HashSet<Stri
 pub fn find_sccs(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
     let mut index = 0;
     let mut stack = Vec::new();
-    // FIXME: extract to named variable
     let mut indices: HashMap<String, usize> = HashMap::new();
     let mut lowlinks: HashMap<String, usize> = HashMap::new();
     let mut on_stack: HashSet<String> = HashSet::new();
@@ -336,7 +333,6 @@ pub enum StratificationResult {
         reason: String,
     },
 }
-
 
 impl StratificationResult {
     /// Get the strata if stratification succeeded
@@ -453,7 +449,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                 reason,
             };
         }
-
     }
 
     // Compute stratum for each SCC using fixpoint iteration
@@ -498,7 +493,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
                         changed = true;
                     }
                 }
-
             }
         }
     }
@@ -510,9 +504,8 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
         let stratum = relation_to_scc
             .get(head_relation)
             .map_or(0, |&scc| scc_stratum[scc]);
-        rule_to_stratum.push(stratum.clone());
+        rule_to_stratum.push(stratum);
     }
-
 
     // Group rules by stratum
     let max_stratum = rule_to_stratum.iter().max().copied().unwrap_or(0);
@@ -561,7 +554,6 @@ pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
             eprintln!("Warning: Program not stratifiable: {relation} - {reason}");
             basic_stratify(program)
         }
-
     }
 }
 
@@ -796,7 +788,6 @@ mod tests {
     fn test_find_sccs_cycle() {
         // Graph with self-loop: tc -> tc, tc -> edge
         let mut graph = HashMap::new();
-        // FIXME: extract to named variable
         let mut tc_deps = HashSet::new();
         tc_deps.insert("tc".to_string());
         tc_deps.insert("edge".to_string());
@@ -983,5 +974,154 @@ mod tests {
             }
             _ => panic!("Expected NotStratifiable"),
         }
+    }
+
+    #[test]
+    fn test_stratify_with_negation_chain() {
+        // a(x) :- base(x).
+        // b(x) :- a(x), !c(x).   -- b depends negatively on c
+        // c(x) :- base(x).
+        // This is stratifiable: c computed first, then b
+        let mut program = Program::new();
+
+        // a(x) :- base(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        // b(x) :- a(x), !c(x).
+        program.add_rule(Rule::new(
+            Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "a".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        ));
+
+        // c(x) :- base(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        let result = stratify_with_negation(&program);
+        assert!(result.is_success());
+
+        let strata = result.unwrap();
+        // b must be in a higher stratum than c
+        // Find which stratum b is in
+        let b_stratum = strata.iter().position(|s| s.contains(&1)).unwrap();
+        let c_stratum = strata.iter().position(|s| s.contains(&2)).unwrap();
+        assert!(b_stratum > c_stratum, "b must be in higher stratum than c");
+    }
+
+    #[test]
+    fn test_stratify_with_negation_recursive_and_negation() {
+        // Transitive closure with negation (stratifiable)
+        // tc(x, y) :- edge(x, y).
+        // tc(x, z) :- tc(x, y), edge(y, z).
+        // not_connected(x, y) :- node(x), node(y), !tc(x, y).
+        let mut program = Program::new();
+
+        // tc(x, y) :- edge(x, y).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        ));
+
+        // tc(x, z) :- tc(x, y), edge(y, z).
+        program.add_rule(Rule::new_simple(
+            Atom::new(
+                "tc".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
+                ),
+            ],
+        ));
+
+        // not_connected(x, y) :- node(x), node(y), !tc(x, y).
+        program.add_rule(Rule::new(
+            Atom::new(
+                "not_connected".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("y".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "tc".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                )),
+            ],
+        ));
+
+        let result = stratify_with_negation(&program);
+        assert!(result.is_success());
+
+        let strata = result.unwrap();
+        // tc (rules 0, 1) should be in stratum 0
+        // not_connected (rule 2) should be in stratum 1
+        assert!(strata.len() >= 2);
+
+        let tc_stratum = strata.iter().position(|s| s.contains(&0)).unwrap();
+        let not_connected_stratum = strata.iter().position(|s| s.contains(&2)).unwrap();
+        assert!(
+            not_connected_stratum > tc_stratum,
+            "not_connected must be after tc"
+        );
     }
 

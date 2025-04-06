@@ -1,0 +1,18 @@
+% Test: Cousin relation
+
+.kg create test_cousin_n09t40
+.kg use test_cousin_n09t40
+
++parent[("grandpa", "dad1"), ("grandpa", "dad2"), ("dad1", "child1"), ("dad1", "child2"), ("dad2", "child3")].
+
+% Siblings share a parent
+sibling(A, B) :- parent(P, A), parent(P, B), A != B.
+
+% Cousins: their parents are siblings
+cousin(A, B) :- parent(P1, A), parent(P2, B), sibling(P1, P2).
+
+?- sibling(A, B).
+?- cousin(A, B).
+
+.kg use default
+.kg drop test_cousin_n09t40

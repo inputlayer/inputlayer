@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_filter_n09t46
+Knowledge graph 'test_rec_filter_n09t46' created.
+Switched to knowledge graph: test_rec_filter_n09t46
+> .kg use test_rec_filter_n09t46
+Switched to knowledge graph: test_rec_filter_n09t46
+> +edge[("a", "b", 1), ("b", "c", 2), ("c", "d", 3), ("d", "e", 4)].
+Inserted 4 fact(s) into 'edge'.
+> +light_path(X, Y) :- edge(X, Y, W), W <= 2.
+Rule 'light_path' registered.
+> +light_path(X, Z) :- light_path(X, Y), edge(Y, Z, W), W <= 2.
+Rule 'light_path' registered.
+> ?- light_path(X, Y).
+3 rows:
+  ("a", "b")
+  ("a", "c")
+  ("b", "c")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rec_filter_n09t46
+Knowledge graph 'test_rec_filter_n09t46' dropped.
