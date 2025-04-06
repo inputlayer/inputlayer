@@ -1125,3 +1125,102 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_extended_dependency_graph() {
+        // Test building extended dependency graph with positive/negative edges
+        let mut program = Program::new();
+
+        // a(x) :- b(x), !c(x).
+        program.add_rule(Rule::new(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "b".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        ));
+
+        let graph = build_extended_dependency_graph(&program);
+
+        // Check that 'a' has positive dep on 'b'
+        let pos_deps = graph.positive_deps("a");
+        assert!(pos_deps.contains(&"b"));
+
+        // Check that 'a' has negative dep on 'c'
+        let neg_deps = graph.negative_deps("a");
+        assert!(neg_deps.contains(&"c"));
+
+        // Check has_negative_deps
+        assert!(graph.has_negative_deps("a"));
+    }
+
+    #[test]
+    fn test_stratify_multiple_negations() {
+        // d(x) :- a(x), !b(x), !c(x).
+        // All of a, b, c must be computed before d
+        let mut program = Program::new();
+
+        // a(x) :- base(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        // b(x) :- base(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        // c(x) :- base(x).
+        program.add_rule(Rule::new_simple(
+            Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        // d(x) :- a(x), !b(x), !c(x).
+        program.add_rule(Rule::new(
+            Atom::new("d".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "a".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "b".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        ));
+
+        let result = stratify_with_negation(&program);
+        assert!(result.is_success());
+
+        let strata = result.unwrap();
+        // d must be in a higher stratum than a, b, and c
+        let d_stratum = strata.iter().position(|s| s.contains(&3)).unwrap();
+        let b_stratum = strata.iter().position(|s| s.contains(&1)).unwrap();
+        let c_stratum = strata.iter().position(|s| s.contains(&2)).unwrap();
+
+        assert!(d_stratum > b_stratum, "d must be after b");
+        assert!(d_stratum > c_stratum, "d must be after c");
+    }
+}

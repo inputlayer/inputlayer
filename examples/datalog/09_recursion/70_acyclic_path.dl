@@ -1,0 +1,17 @@
+% Test: Acyclic path detection
+
+.kg create test_acyclic_path_n09t70
+.kg use test_acyclic_path_n09t70
+
++edge[(1, 2), (2, 3), (3, 4), (2, 4), (4, 1)].
+
+% Direct edges as acyclic paths
++acyclic_path(X, Y, 1) :- edge(X, Y).
+
+% Extended paths (simplified - just depth tracking)
++acyclic_path(X, Z, D2) :- acyclic_path(X, Y, D), edge(Y, Z), D2 = D + 1, D < 4.
+
+?- acyclic_path(X, Y, D).
+
+.kg use default
+.kg drop test_acyclic_path_n09t70

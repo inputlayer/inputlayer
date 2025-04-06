@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_paths_n09t56
+Knowledge graph 'test_all_paths_n09t56' created.
+Switched to knowledge graph: test_all_paths_n09t56
+> .kg use test_all_paths_n09t56
+Switched to knowledge graph: test_all_paths_n09t56
+> +edge[("s", "a"), ("s", "b"), ("a", "t"), ("b", "t"), ("a", "b")].
+Inserted 5 fact(s) into 'edge'.
+> +reachable("s", "s", 0).
+Inserted 1 fact(s) into 'reachable'.
+> +reachable(Start, End, D) :- reachable(Start, Mid, D1), edge(Mid, End), D = D1 + 1, D < 5.
+Rule 'reachable' registered.
+> ?- reachable("s", End, D).
+2 rows:
+  ("s", "a", 1)
+  ("s", "b", 1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_paths_n09t56
+Knowledge graph 'test_all_paths_n09t56' dropped.
