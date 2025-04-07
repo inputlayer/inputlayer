@@ -1,0 +1,19 @@
+% Test: Reverse path
+
+.kg create test_reverse_n09t90
+.kg use test_reverse_n09t90
+
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Forward path
++forward(X, Y) :- edge(X, Y).
++forward(X, Z) :- forward(X, Y), edge(Y, Z).
+
+% Reverse (edge goes other way)
++reverse(Y, X) :- edge(X, Y).
+
+?- forward(X, Y).
+?- reverse(X, Y).
+
+.kg use default
+.kg drop test_reverse_n09t90

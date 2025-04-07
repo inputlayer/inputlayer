@@ -1,0 +1,26 @@
+% Test: No New Tuples on First Iteration
+% Description: Tests when recursive rule produces no new tuples immediately
+
+.kg create test_no_new_n09t92
+.kg use test_no_new_n09t92
+
+% Single disconnected node - no edges lead anywhere
++edge(1, 2).
++node[(1), (2), (3)].
+
+% Recursive reachability starting from node 3
+% Node 3 has no outgoing edges, so recursion should terminate immediately
+reachable(X, Y) :- edge(X, Y), X = 3.
+reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+?- reachable(X, Y).
+
+% Now from node 1, which has an edge
+reachable2(X, Y) :- edge(X, Y), X = 1.
+reachable2(X, Z) :- reachable2(X, Y), edge(Y, Z).
+
+?- reachable2(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_no_new_n09t92
