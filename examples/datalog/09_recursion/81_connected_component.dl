@@ -1,0 +1,18 @@
+% Test: Connected components
+
+.kg create test_connected_n09t81
+.kg use test_connected_n09t81
+
++edge[(1, 2), (2, 3), (4, 5)].
+
+% Bidirectional connectivity
++connected(X, Y) :- edge(X, Y).
++connected(X, Y) :- edge(Y, X).
++connected(X, Z) :- connected(X, Y), edge(Y, Z).
++connected(X, Z) :- connected(X, Y), edge(Z, Y).
+
+% What's connected to 1?
+?- connected(1, X).
+
+.kg use default
+.kg drop test_connected_n09t81
