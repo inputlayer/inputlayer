@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_no_new_n09t92
+Knowledge graph 'test_no_new_n09t92' created.
+Switched to knowledge graph: test_no_new_n09t92
+> .kg use test_no_new_n09t92
+Switched to knowledge graph: test_no_new_n09t92
+> +edge(1, 2).
+Inserted 1 fact(s) into 'edge'.
+> +node[(1), (2), (3)].
+Inserted 3 fact(s) into 'node'.
+> reachable(X, Y) :- edge(X, Y), X = 3.
+No results.
+(session: 1 rule(s))
+> reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+No results.
+(session: 2 rule(s))
+> ?- reachable(X, Y).
+No results.
+> reachable2(X, Y) :- edge(X, Y), X = 1.
+1 rows:
+  (1, 2)
+(session: 3 rule(s))
+> reachable2(X, Z) :- reachable2(X, Y), edge(Y, Z).
+1 rows:
+  (1, 2)
+(session: 4 rule(s))
+> ?- reachable2(X, Y).
+1 rows:
+  (1, 2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_no_new_n09t92
+Knowledge graph 'test_no_new_n09t92' dropped.

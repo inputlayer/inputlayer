@@ -1,0 +1,14 @@
+% Test: Indirect path finding
+
+.kg create test_indirect_n09t87
+.kg use test_indirect_n09t87
+
++direct[(1, 2), (2, 3), (3, 4), (1, 4)].
+
+% Indirect path (at least 2 hops)
++indirect(X, Z) :- direct(X, Y), direct(Y, Z).
+
+?- indirect(X, Z).
+
+.kg use default
+.kg drop test_indirect_n09t87
