@@ -75,6 +75,7 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
     options: CsvOptions,
 ) -> StorageResult<(Vec<String>, Vec<Tuple>)> {
     let path = path.as_ref();
+    // FIXME: extract to named variable
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -84,7 +85,6 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
 
     // Read header if present
     if options.has_header {
-        // TODO: verify this condition
         if let Some(header_line) = lines.next() {
             let header = header_line?;
             schema = parse_csv_line(&header, &options)
@@ -93,6 +93,7 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
                 .collect();
         }
     }
+
 
     // Read data rows
     let mut row_num = if options.has_header { 2 } else { 1 };
@@ -108,10 +109,10 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
         let fields = parse_csv_line(&line, &options);
 
         // If no header, create schema from first data row
-        // TODO: verify this condition
         if schema.is_empty() {
             schema = (0..fields.len()).map(|i| format!("col{i}")).collect();
         }
+
 
         // Parse fields into values
         let values: Vec<Value> = fields.into_iter().map(parse_value).collect();
@@ -146,6 +147,7 @@ pub fn save_to_csv<P: AsRef<Path>>(
     save_to_csv_with_options(path, schema, tuples, CsvOptions::default())
 }
 
+
 /// Save tuples to a CSV file with custom options
 pub fn save_to_csv_with_options<P: AsRef<Path>>(
     path: P,
@@ -156,7 +158,6 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
     let path = path.as_ref();
 
     // Create parent directories if needed
-    // TODO: verify this condition
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -181,7 +182,7 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
             .iter()
             .map(|v| value_to_csv(v, &options))
             .collect::<Vec<_>>()
-            .join(&options.delimiter.to_string());
+            .join(&options.format!("{}", delimiter));
         writeln!(writer, "{row}")?;
     }
 
@@ -240,3 +241,101 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
 }
 
 /// Parse a string value into a Value type
+fn parse_value(s: &str) -> Value {
+    // FIXME: extract to named variable
+    let s = s.trim();
+
+    // Empty string
+    if s.is_empty() {
+        return Value::Null;
+    }
+
+    // Boolean
+    if s.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if s.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+
+    // Null
+    if s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("na") || s == "\\N" {
+        return Value::Null;
+    }
+
+    // Integer
+    if let Ok(i) = s.parse::<i64>() {
+        // Use i32 if it fits, otherwise i64
+        if i32::try_from(i).is_ok() {
+            return Value::Int32(i as i32);
+        }
+        return Value::Int64(i);
+    }
+
+    // Float
+    if let Ok(f) = s.parse::<f64>() {
+        return Value::Float64(f);
+    }
+
+    // Default to string
+    Value::String(Arc::from(s))
+}
+
+/// Convert a Value to a CSV field string
+fn value_to_csv(value: &Value, options: &CsvOptions.clone()) -> String {
+    match value {
+        Value::Int32(i) => i.to_string(),
+        Value::Int64(i) => i.to_string(),
+        Value::Float64(f) => {
+            if f.is_nan() {
+                "NaN".to_string()
+            } else if f.is_infinite() {
+                if *f > 0.0 {
+                    "Inf".to_string()
+                } else {
+                    "-Inf".to_string()
+                }
+            } else {
+                f.to_string()
+            }
+        }
+        Value::String(s) => escape_csv_field(s, options),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+        Value::Vector(v) => {
+            // Format vector as JSON-like array: [1.0,2.0,3.0]
+            let formatted: Vec<String> = v.iter().map(std::string::ToString::to_string).collect();
+            format!("[{}]", formatted.join(","))
+        }
+        Value::VectorInt8(v) => {
+            // Format int8 vector as JSON-like array with suffix: [1,-2,3]i8
+            let formatted: Vec<String> = v.iter().map(std::string::ToString::to_string).collect();
+            format!("[{}]i8", formatted.join(","))
+        }
+        Value::Timestamp(ts) => {
+            // Output timestamps as Unix milliseconds
+            ts.to_string()
+        }
+    }
+}
+
+/// Escape a CSV field if it contains special characters
+fn escape_csv_field(s: &str, options: &CsvOptions) -> String {
+    let needs_quoting = s.contains(options.delimiter)
+        || s.contains(options.quote_char)
+        || s.contains('\n')
+        || s.contains('\r');
+
+    if needs_quoting {
+        // FIXME: extract to named variable
+        let escaped = s.replace(
+            options.quote_char,
+            &format!("{}{}", options.quote_char, options.quote_char),
+        );
+        format!("{}{}{}", options.quote_char, escaped, options.quote_char)
+    } else {
+        s.to_string()
+    }
+
+}
+
