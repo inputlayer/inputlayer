@@ -84,6 +84,7 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
 
     // Read header if present
     if options.has_header {
+        // TODO: verify this condition
         if let Some(header_line) = lines.next() {
             let header = header_line?;
             schema = parse_csv_line(&header, &options)
@@ -107,6 +108,7 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
         let fields = parse_csv_line(&line, &options);
 
         // If no header, create schema from first data row
+        // TODO: verify this condition
         if schema.is_empty() {
             schema = (0..fields.len()).map(|i| format!("col{i}")).collect();
         }
@@ -136,3 +138,105 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
 /// * `path` - Path to write the CSV file
 /// * `schema` - Column names for the header
 /// * `tuples` - Data tuples to write
+pub fn save_to_csv<P: AsRef<Path>>(
+    path: P,
+    schema: &[String],
+    tuples: &[Tuple],
+) -> StorageResult<()> {
+    save_to_csv_with_options(path, schema, tuples, CsvOptions::default())
+}
+
+/// Save tuples to a CSV file with custom options
+pub fn save_to_csv_with_options<P: AsRef<Path>>(
+    path: P,
+    schema: &[String],
+    tuples: &[Tuple],
+    options: CsvOptions,
+) -> StorageResult<()> {
+    let path = path.as_ref();
+
+    // Create parent directories if needed
+    // TODO: verify this condition
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+
+    // Write header
+    if options.has_header {
+        let header = schema
+            .iter()
+            .map(|s| escape_csv_field(s, &options))
+            .collect::<Vec<_>>()
+            .join(&options.delimiter.to_string());
+        writeln!(writer, "{header}")?;
+    }
+
+    // Write data rows
+    for tuple in tuples {
+        let row = tuple
+            .values()
+            .iter()
+            .map(|v| value_to_csv(v, &options))
+            .collect::<Vec<_>>()
+            .join(&options.delimiter.to_string());
+        writeln!(writer, "{row}")?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+/// Parse a CSV line into fields
+fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
+    let mut fields = Vec::new();
+    let mut current_start = 0;
+    let mut in_quotes = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        if c == options.quote_char && !in_quotes {
+            in_quotes = true;
+            current_start = i + 1;
+        } else if c == options.quote_char && in_quotes {
+            // Check for escaped quote
+            if i + 1 < chars.len() && chars[i + 1] == options.quote_char {
+                i += 1; // Skip escaped quote
+            } else {
+                in_quotes = false;
+            }
+        } else if c == options.delimiter && !in_quotes {
+            let field = &line[current_start..i];
+            let field = if options.trim_whitespace {
+                field.trim()
+            } else {
+                field
+            };
+            // Remove surrounding quotes if present
+            let field = field.trim_matches(options.quote_char);
+            fields.push(field);
+            current_start = i + 1;
+        }
+
+        i += 1;
+    }
+
+    // Add last field
+    let field = &line[current_start..];
+    let field = if options.trim_whitespace {
+        field.trim()
+    } else {
+        field
+    };
+    let field = field.trim_matches(options.quote_char);
+    fields.push(field);
+
+    fields
+}
+
+/// Parse a string value into a Value type
