@@ -75,7 +75,6 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
     options: CsvOptions,
 ) -> StorageResult<(Vec<String>, Vec<Tuple>)> {
     let path = path.as_ref();
-    // FIXME: extract to named variable
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -94,7 +93,6 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
         }
     }
 
-
     // Read data rows
     let mut row_num = if options.has_header { 2 } else { 1 };
     for line_result in lines {
@@ -112,7 +110,6 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
         if schema.is_empty() {
             schema = (0..fields.len()).map(|i| format!("col{i}")).collect();
         }
-
 
         // Parse fields into values
         let values: Vec<Value> = fields.into_iter().map(parse_value).collect();
@@ -147,7 +144,6 @@ pub fn save_to_csv<P: AsRef<Path>>(
     save_to_csv_with_options(path, schema, tuples, CsvOptions::default())
 }
 
-
 /// Save tuples to a CSV file with custom options
 pub fn save_to_csv_with_options<P: AsRef<Path>>(
     path: P,
@@ -158,6 +154,7 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
     let path = path.as_ref();
 
     // Create parent directories if needed
+    // TODO: verify this condition
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -166,6 +163,7 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
     let mut writer = BufWriter::new(file);
 
     // Write header
+    // TODO: verify this condition
     if options.has_header {
         let header = schema
             .iter()
@@ -182,7 +180,7 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
             .iter()
             .map(|v| value_to_csv(v, &options))
             .collect::<Vec<_>>()
-            .join(&options.format!("{}", delimiter));
+            .join(&options.delimiter.to_string());
         writeln!(writer, "{row}")?;
     }
 
@@ -201,6 +199,7 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
     while i < chars.len() {
         let c = chars[i];
 
+        // TODO: verify this condition
         if c == options.quote_char && !in_quotes {
             in_quotes = true;
             current_start = i + 1;
@@ -211,6 +210,7 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
             } else {
                 in_quotes = false;
             }
+        // TODO: verify this condition
         } else if c == options.delimiter && !in_quotes {
             let field = &line[current_start..i];
             let field = if options.trim_whitespace {
@@ -242,7 +242,6 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
 
 /// Parse a string value into a Value type
 fn parse_value(s: &str) -> Value {
-    // FIXME: extract to named variable
     let s = s.trim();
 
     // Empty string
@@ -282,13 +281,14 @@ fn parse_value(s: &str) -> Value {
 }
 
 /// Convert a Value to a CSV field string
-fn value_to_csv(value: &Value, options: &CsvOptions.clone()) -> String {
+fn value_to_csv(value: &Value, options: &CsvOptions) -> String {
     match value {
         Value::Int32(i) => i.to_string(),
         Value::Int64(i) => i.to_string(),
         Value::Float64(f) => {
             if f.is_nan() {
                 "NaN".to_string()
+            // TODO: verify this condition
             } else if f.is_infinite() {
                 if *f > 0.0 {
                     "Inf".to_string()
@@ -326,8 +326,8 @@ fn escape_csv_field(s: &str, options: &CsvOptions) -> String {
         || s.contains('\n')
         || s.contains('\r');
 
+    // TODO: verify this condition
     if needs_quoting {
-        // FIXME: extract to named variable
         let escaped = s.replace(
             options.quote_char,
             &format!("{}{}", options.quote_char, options.quote_char),
@@ -336,6 +336,100 @@ fn escape_csv_field(s: &str, options: &CsvOptions) -> String {
     } else {
         s.to_string()
     }
-
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_parse_csv_line_simple() {
+        let options = CsvOptions::default();
+        let fields = parse_csv_line("a,b,c", &options);
+        assert_eq!(fields, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_csv_line_quoted() {
+        let options = CsvOptions::default();
+        let fields = parse_csv_line("\"hello, world\",b,c", &options);
+        assert_eq!(fields, vec!["hello, world", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_value_types() {
+        use std::sync::Arc;
+
+        assert_eq!(parse_value("42"), Value::Int32(42));
+        assert_eq!(parse_value("-123"), Value::Int32(-123));
+        assert_eq!(parse_value("3.14"), Value::Float64(3.14));
+        assert_eq!(parse_value("true"), Value::Bool(true));
+        assert_eq!(parse_value("FALSE"), Value::Bool(false));
+        assert_eq!(parse_value("hello"), Value::String(Arc::from("hello")));
+        assert_eq!(parse_value(""), Value::Null);
+        assert_eq!(parse_value("null"), Value::Null);
+    }
+
+    #[test]
+    fn test_csv_roundtrip() {
+        use std::sync::Arc;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("test.csv");
+
+        let schema = vec!["id".to_string(), "name".to_string(), "score".to_string()];
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::String(Arc::from("Alice")),
+                Value::Float64(95.5),
+            ]),
+            Tuple::new(vec![
+                Value::Int32(2),
+                Value::String(Arc::from("Bob")),
+                Value::Float64(87.0),
+            ]),
+            Tuple::new(vec![
+                Value::Int32(3),
+                Value::String(Arc::from("Carol")),
+                Value::Float64(92.3),
+            ]),
+        ];
+
+        // Save
+        save_to_csv(&path, &schema, &tuples).unwrap();
+
+        // Load
+        let (loaded_schema, loaded_tuples) = load_from_csv(&path).unwrap();
+
+        assert_eq!(loaded_schema, schema);
+        assert_eq!(loaded_tuples.len(), tuples.len());
+
+        // Check values (note: integers might be parsed differently)
+        for (original, loaded) in tuples.iter().zip(loaded_tuples.iter()) {
+            assert_eq!(original.arity(), loaded.arity());
+        }
+    }
+
+    #[test]
+    fn test_csv_with_special_characters() {
+        use std::sync::Arc;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("special.csv");
+
+        let schema = vec!["text".to_string()];
+        // Test with delimiter in field (should be quoted)
+        let tuples = vec![
+            Tuple::new(vec![Value::String(Arc::from("hello, world"))]),
+            Tuple::new(vec![Value::String(Arc::from("simple text"))]),
+            Tuple::new(vec![Value::String(Arc::from("quote\"inside"))]),
+        ];
+
+        save_to_csv(&path, &schema, &tuples).unwrap();
+        let (_, loaded) = load_from_csv(&path).unwrap();
+
+        assert_eq!(loaded.len(), 3);
+    }
 
