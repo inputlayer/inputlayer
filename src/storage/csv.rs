@@ -154,7 +154,6 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
     let path = path.as_ref();
 
     // Create parent directories if needed
-    // TODO: verify this condition
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -163,7 +162,6 @@ pub fn save_to_csv_with_options<P: AsRef<Path>>(
     let mut writer = BufWriter::new(file);
 
     // Write header
-    // TODO: verify this condition
     if options.has_header {
         let header = schema
             .iter()
@@ -199,7 +197,6 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
     while i < chars.len() {
         let c = chars[i];
 
-        // TODO: verify this condition
         if c == options.quote_char && !in_quotes {
             in_quotes = true;
             current_start = i + 1;
@@ -210,7 +207,6 @@ fn parse_csv_line<'a>(line: &'a str, options: &CsvOptions) -> Vec<&'a str> {
             } else {
                 in_quotes = false;
             }
-        // TODO: verify this condition
         } else if c == options.delimiter && !in_quotes {
             let field = &line[current_start..i];
             let field = if options.trim_whitespace {
@@ -288,7 +284,6 @@ fn value_to_csv(value: &Value, options: &CsvOptions) -> String {
         Value::Float64(f) => {
             if f.is_nan() {
                 "NaN".to_string()
-            // TODO: verify this condition
             } else if f.is_infinite() {
                 if *f > 0.0 {
                     "Inf".to_string()
@@ -326,7 +321,6 @@ fn escape_csv_field(s: &str, options: &CsvOptions) -> String {
         || s.contains('\n')
         || s.contains('\r');
 
-    // TODO: verify this condition
     if needs_quoting {
         let escaped = s.replace(
             options.quote_char,
@@ -433,3 +427,26 @@ mod tests {
         assert_eq!(loaded.len(), 3);
     }
 
+    #[test]
+    fn test_csv_custom_delimiter() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("tabs.csv");
+
+        let options = CsvOptions {
+            delimiter: '\t',
+            ..Default::default()
+        };
+
+        let schema = vec!["a".to_string(), "b".to_string()];
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+            Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+        ];
+
+        save_to_csv_with_options(&path, &schema, &tuples, options.clone()).unwrap();
+        let (loaded_schema, loaded_tuples) = load_from_csv_with_options(&path, options).unwrap();
+
+        assert_eq!(loaded_schema, schema);
+        assert_eq!(loaded_tuples.len(), 2);
+    }
+}
