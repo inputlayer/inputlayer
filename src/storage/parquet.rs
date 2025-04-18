@@ -53,7 +53,6 @@ pub fn save_tuples_to_parquet(
 
 /// Load tuples from Parquet file (schema inferred from file)
 pub fn load_tuples_from_parquet(path: &Path) -> StorageResult<(Vec<Tuple>, TupleSchema)> {
-    // TODO: verify this condition
     if !path.exists() {
         // Return empty with default schema
         return Ok((Vec::new(), TupleSchema::empty()));
@@ -123,7 +122,6 @@ pub fn save_to_parquet(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> 
 
 /// Load binary tuples from Parquet file
 pub fn load_from_parquet(path: &Path) -> StorageResult<Vec<(i32, i32)>> {
-    // TODO: verify this condition
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -328,3 +326,30 @@ mod tests {
         assert_eq!(loaded[0].get(2).and_then(|v| v.as_f64()), Some(1.5));
     }
 
+    #[test]
+    fn test_tuples_empty_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("empty_tuples.parquet");
+
+        let tuples: Vec<Tuple> = vec![];
+        let schema = TupleSchema::new(vec![
+            ("a".to_string(), ValueDataType::Int32),
+            ("b".to_string(), ValueDataType::String),
+        ]);
+
+        save_tuples_to_parquet(&path, &tuples, &schema).unwrap();
+        let (loaded, _) = load_tuples_from_parquet(&path).unwrap();
+
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_tuples_load_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("nonexistent_tuples.parquet");
+
+        let (loaded, schema) = load_tuples_from_parquet(&path).unwrap();
+        assert_eq!(loaded.len(), 0);
+        assert_eq!(schema.arity(), 0);
+    }
+}
