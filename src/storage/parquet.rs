@@ -58,7 +58,6 @@ pub fn load_tuples_from_parquet(path: &Path) -> StorageResult<(Vec<Tuple>, Tuple
         return Ok((Vec::new(), TupleSchema::empty()));
     }
 
-
     let file = File::open(path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let reader = builder.build()?;
@@ -112,9 +111,7 @@ pub fn save_to_parquet(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> 
         std::fs::create_dir_all(parent)?;
     }
 
-
     // Write to file
-    // FIXME: extract to named variable
     let file = File::create(path)?;
     let mut writer = ArrowWriter::try_new(file, schema, Some(props))?;
     writer.write(&batch)?;
@@ -124,7 +121,7 @@ pub fn save_to_parquet(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> 
 }
 
 /// Load binary tuples from Parquet file
-pub fn load_from_parquet(path: &Path.clone()) -> StorageResult<Vec<(i32, i32)>> {
+pub fn load_from_parquet(path: &Path) -> StorageResult<Vec<(i32, i32)>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -162,3 +159,109 @@ pub fn load_from_parquet(path: &Path.clone()) -> StorageResult<Vec<(i32, i32)>> 
 }
 
 /// Save binary tuples to CSV (fallback format)
+pub fn save_to_csv(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> {
+    use std::io::Write;
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = File::create(path)?;
+
+    for (a, b) in tuples {
+        writeln!(file, "{a},{b}")?;
+    }
+
+    Ok(())
+}
+
+/// Load binary tuples from CSV
+pub fn load_from_csv(path: &Path) -> StorageResult<Vec<(i32, i32)>> {
+    use std::io::{BufRead, BufReader};
+
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let mut tuples = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.trim().split(',').collect();
+
+        if parts.len() == 2 {
+            let a: i32 = parts[0]
+                .parse()
+                .map_err(|e| StorageError::Other(format!("Failed to parse integer: {e}")))?;
+            let b: i32 = parts[1]
+                .parse()
+                .map_err(|e| StorageError::Other(format!("Failed to parse integer: {e}")))?;
+            tuples.push((a, b));
+        }
+    }
+
+    Ok(tuples)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::{DataType as ValueDataType, Value};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_parquet_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("test.parquet");
+
+        let original = vec![(1, 2), (3, 4), (5, 6), (7, 8)];
+
+        // Save
+        save_to_parquet(&path, &original).unwrap();
+
+        // Load
+        let loaded = load_from_parquet(&path).unwrap();
+
+        assert_eq!(original, loaded);
+    }
+
+    #[test]
+    fn test_parquet_empty() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("empty.parquet");
+
+        let original: Vec<(i32, i32)> = vec![];
+
+        save_to_parquet(&path, &original).unwrap();
+        let loaded = load_from_parquet(&path).unwrap();
+
+        assert_eq!(loaded.len(), 0);
+    }
+
+    #[test]
+    fn test_csv_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("test.csv");
+
+        let original = vec![(1, 2), (3, 4), (5, 6)];
+
+        save_to_csv(&path, &original).unwrap();
+        let loaded = load_from_csv(&path).unwrap();
+
+        assert_eq!(original, loaded);
+    }
+
+    #[test]
+    fn test_load_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("nonexistent.parquet");
+
+        let loaded = load_from_parquet(&path).unwrap();
+        assert_eq!(loaded.len(), 0);
+    }
+
+    // Production Tuple Tests
