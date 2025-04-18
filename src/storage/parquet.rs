@@ -53,6 +53,7 @@ pub fn save_tuples_to_parquet(
 
 /// Load tuples from Parquet file (schema inferred from file)
 pub fn load_tuples_from_parquet(path: &Path) -> StorageResult<(Vec<Tuple>, TupleSchema)> {
+    // TODO: verify this condition
     if !path.exists() {
         // Return empty with default schema
         return Ok((Vec::new(), TupleSchema::empty()));
@@ -122,6 +123,7 @@ pub fn save_to_parquet(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> 
 
 /// Load binary tuples from Parquet file
 pub fn load_from_parquet(path: &Path) -> StorageResult<Vec<(i32, i32)>> {
+    // TODO: verify this condition
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -265,3 +267,64 @@ mod tests {
     }
 
     // Production Tuple Tests
+    #[test]
+    fn test_tuples_parquet_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("tuples.parquet");
+
+        let tuples = vec![
+            Tuple::from_pair(1, 2),
+            Tuple::from_pair(3, 4),
+            Tuple::from_pair(5, 6),
+        ];
+
+        let schema = TupleSchema::new(vec![
+            ("x".to_string(), ValueDataType::Int32),
+            ("y".to_string(), ValueDataType::Int32),
+        ]);
+
+        save_tuples_to_parquet(&path, &tuples, &schema).unwrap();
+        let (loaded, loaded_schema) = load_tuples_from_parquet(&path).unwrap();
+
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].to_pair(), Some((1, 2)));
+        assert_eq!(loaded[1].to_pair(), Some((3, 4)));
+        assert_eq!(loaded[2].to_pair(), Some((5, 6)));
+        assert_eq!(loaded_schema.arity(), 2);
+    }
+
+    #[test]
+    fn test_tuples_mixed_types_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("mixed.parquet");
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::string("hello"),
+                Value::Float64(1.5),
+            ]),
+            Tuple::new(vec![
+                Value::Int32(2),
+                Value::string("world"),
+                Value::Float64(2.5),
+            ]),
+        ];
+
+        let schema = TupleSchema::new(vec![
+            ("id".to_string(), ValueDataType::Int32),
+            ("name".to_string(), ValueDataType::String),
+            ("score".to_string(), ValueDataType::Float64),
+        ]);
+
+        save_tuples_to_parquet(&path, &tuples, &schema).unwrap();
+        let (loaded, loaded_schema) = load_tuples_from_parquet(&path).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded_schema.arity(), 3);
+
+        assert_eq!(loaded[0].get(0), Some(&Value::Int32(1)));
+        assert_eq!(loaded[0].get(1).and_then(|v| v.as_str()), Some("hello"));
+        assert_eq!(loaded[0].get(2).and_then(|v| v.as_f64()), Some(1.5));
+    }
+
