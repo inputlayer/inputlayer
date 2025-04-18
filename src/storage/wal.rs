@@ -205,3 +205,120 @@ impl Wal {
 }
 
 /// Replay WAL entries into a data structure
+pub fn replay_wal(
+    entries: &[WalEntry],
+    data: &mut std::collections::HashMap<String, Vec<(i32, i32)>>,
+) {
+    for entry in entries {
+        match entry.op {
+            WalOp::Insert => {
+                let relation_data = data.entry(entry.relation.clone()).or_default();
+                for tuple in &entry.tuples {
+                    if !relation_data.contains(tuple) {
+                        relation_data.push(*tuple);
+                    }
+                }
+            }
+            WalOp::Delete => {
+                if let Some(relation_data) = data.get_mut(&entry.relation) {
+                    relation_data.retain(|t| !entry.tuples.contains(t));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_wal_append_and_read() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+
+        // Write some entries
+        wal.log_insert("edge", vec![(1, 2), (3, 4)]).unwrap();
+        wal.log_insert("edge", vec![(5, 6)]).unwrap();
+        wal.log_delete("edge", vec![(1, 2)]).unwrap();
+
+        // Read back
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].op, WalOp::Insert);
+        assert_eq!(entries[0].relation, "edge");
+        assert_eq!(entries[0].tuples, vec![(1, 2), (3, 4)]);
+
+        assert_eq!(entries[1].op, WalOp::Insert);
+        assert_eq!(entries[1].tuples, vec![(5, 6)]);
+
+        assert_eq!(entries[2].op, WalOp::Delete);
+        assert_eq!(entries[2].tuples, vec![(1, 2)]);
+    }
+
+    #[test]
+    fn test_wal_replay() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+
+        // Simulate operations
+        wal.log_insert("edge", vec![(1, 2), (3, 4)]).unwrap();
+        wal.log_insert("node", vec![(10, 20)]).unwrap();
+        wal.log_delete("edge", vec![(1, 2)]).unwrap();
+        wal.log_insert("edge", vec![(5, 6)]).unwrap();
+
+        // Replay
+        let entries = wal.read_all().unwrap();
+        let mut data = std::collections::HashMap::new();
+        replay_wal(&entries, &mut data);
+
+        // Check results
+        let edge = data.get("edge").unwrap();
+        assert_eq!(edge.len(), 2);
+        assert!(edge.contains(&(3, 4)));
+        assert!(edge.contains(&(5, 6)));
+        assert!(!edge.contains(&(1, 2))); // Was deleted
+
+        let node = data.get("node").unwrap();
+        assert_eq!(node.len(), 1);
+        assert!(node.contains(&(10, 20)));
+    }
+
+    #[test]
+    fn test_wal_clear() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.log_insert("edge", vec![(1, 2)]).unwrap();
+        assert_eq!(wal.entries_since_compaction(), 1);
+
+        wal.clear().unwrap();
+        assert_eq!(wal.entries_since_compaction(), 0);
+
+        // New entries should work
+        wal.log_insert("edge", vec![(3, 4)]).unwrap();
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tuples, vec![(3, 4)]);
+    }
+
+    #[test]
+    fn test_wal_compaction_threshold() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+        wal.set_compaction_threshold(3);
+
+        assert!(!wal.needs_compaction());
+
+        wal.log_insert("edge", vec![(1, 2)]).unwrap();
+        assert!(!wal.needs_compaction());
+
+        wal.log_insert("edge", vec![(3, 4)]).unwrap();
+        assert!(!wal.needs_compaction());
+
+        wal.log_insert("edge", vec![(5, 6)]).unwrap();
+        assert!(wal.needs_compaction()); // Threshold reached
+    }
+}
