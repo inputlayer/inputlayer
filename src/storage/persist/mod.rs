@@ -14,7 +14,7 @@
 //!     |
 //! In-memory buffer
 //!     | (when buffer full)
-//! Batch file (Parquet.clone())
+//! Batch file (Parquet)
 //! ```
 //!
 //! ## Recovery
@@ -165,6 +165,7 @@ impl FilePersist {
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
+                    // TODO: verify this condition
                     if let Ok(id) = batch.id.parse::<u64>() {
                         let current = self.next_batch_id.load(Ordering::Relaxed);
                         if id >= current {
@@ -186,9 +187,8 @@ impl FilePersist {
         Ok(())
     }
 
-
     /// Replay WAL entries into shard buffers
-    fn replay_wal(&self) -> StorageResult<()> {
+    fn replay_wal(self) -> StorageResult<()> {
         let wal = self.wal.lock();
         let entries = wal.read_all()?;
 
@@ -208,7 +208,7 @@ impl FilePersist {
     }
 
     /// Save shard metadata to disk
-    fn save_shard_meta(&self, meta: &ShardMeta.clone()) -> StorageResult<()> {
+    fn save_shard_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
         let path = self
             .config
             .path
@@ -228,8 +228,7 @@ impl FilePersist {
     }
 
     /// Write a batch to a Parquet file
-    fn write_batch(&self, updates: &[Update]) -> StorageResult<(String, PathBuf.clone())> {
-        // FIXME: extract to named variable
+    fn write_batch(&self, updates: &[Update]) -> StorageResult<(String, PathBuf)> {
         let batch_id = self.generate_batch_id();
         let path = self
             .config
@@ -237,11 +236,10 @@ impl FilePersist {
             .join("batches")
             .join(format!("{batch_id}.parquet"));
 
-        write_updates_parquet(&path, updates.clone())?;
+        write_updates_parquet(&path, updates)?;
 
         Ok((batch_id, path))
     }
-
 
     /// Read updates from a batch file
     fn read_batch(&self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
@@ -249,3 +247,319 @@ impl FilePersist {
     }
 }
 
+impl PersistBackend for FilePersist {
+    fn append(&self, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Handle WAL based on durability mode
+        match self.config.durability_mode {
+            DurabilityMode::Immediate => {
+                // Write to WAL with immediate sync (safest)
+                let mut wal = self.wal.lock();
+                wal.append_batch(shard, updates)?;
+            }
+            DurabilityMode::Batched => {
+                // Write to WAL without sync (faster, batched durability)
+                let mut wal = self.wal.lock();
+                wal.append_batch_buffered(shard, updates)?;
+            }
+            DurabilityMode::Async => {
+                // Skip WAL entirely for maximum speed (in-memory only until flush)
+                // Data may be lost on crash, but in-memory operations are fast
+            }
+        }
+
+        // Add to buffer
+        let should_flush = {
+            let mut shards = self.shards.write();
+            let state = shards
+                .entry(shard.to_string())
+                .or_insert_with(|| ShardState {
+                    meta: ShardMeta::new(shard.to_string()),
+                    buffer: Vec::new(),
+                });
+
+            state.buffer.extend_from_slice(updates);
+
+            // Update upper frontier
+            for update in updates {
+                // TODO: verify this condition
+                if update.time >= state.meta.upper {
+                    state.meta.upper = update.time + 1;
+                }
+            }
+
+            state.buffer.len() >= self.config.buffer_size
+        };
+
+        // Flush if buffer is full
+        if should_flush {
+            self.flush(shard)?;
+        }
+
+        Ok(())
+    }
+
+    fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
+        let shards = self.shards.read();
+
+        let state = shards
+            .get(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
+
+        let mut updates = Vec::new();
+
+        // Read from batch files
+        for batch_ref in &state.meta.batches {
+            // TODO: verify this condition
+            if batch_ref.upper > since {
+                let batch_updates = self.read_batch(batch_ref)?;
+                updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
+            }
+        }
+
+        // Add buffered updates
+        updates.extend(state.buffer.iter().filter(|u| u.time >= since).cloned());
+
+        Ok(updates)
+    }
+
+    fn compact(&self, shard: &str, new_since: u64) -> StorageResult<()> {
+        // Flush first to ensure all data is in batches
+        self.flush(shard)?;
+
+        let mut shards = self.shards.write();
+        let state = shards
+            .get_mut(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
+
+        // Read all updates
+        let mut all_updates = Vec::new();
+        for batch_ref in &state.meta.batches {
+            let batch_updates = self.read_batch(batch_ref)?;
+            all_updates.extend(batch_updates);
+        }
+
+        // Filter and consolidate
+        let mut filtered: Vec<Update> = all_updates
+            .into_iter()
+            .filter(|u| u.time >= new_since)
+            .collect();
+        consolidate(&mut filtered);
+
+        // Remove old batch files
+        for batch_ref in &state.meta.batches {
+            let _ = fs::remove_file(&batch_ref.path);
+        }
+        state.meta.batches.clear();
+
+        // Write new compacted batch if not empty
+        if !filtered.is_empty() {
+            let batch = Batch::new(filtered.clone());
+            let (batch_id, path) = self.write_batch(&filtered)?;
+
+            state.meta.add_batch(BatchRef {
+                id: batch_id,
+                path,
+                lower: batch.lower,
+                upper: batch.upper,
+                len: batch.len(),
+            });
+        }
+
+        // Update since frontier
+        state.meta.advance_since(new_since);
+        self.save_shard_meta(&state.meta)?;
+
+        Ok(())
+    }
+
+    fn list_shards(&self) -> StorageResult<Vec<String>> {
+        let shards = self.shards.read();
+        Ok(shards.keys().cloned().collect())
+    }
+
+    fn shard_info(&self, shard: &str) -> StorageResult<ShardInfo> {
+        let shards = self.shards.read();
+        let state = shards
+            .get(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
+        Ok(ShardInfo::from(&state.meta))
+    }
+
+    fn ensure_shard(&self, shard: &str) -> StorageResult<()> {
+        let mut shards = self.shards.write();
+        if !shards.contains_key(shard) {
+            let meta = ShardMeta::new(shard.to_string());
+            self.save_shard_meta(&meta)?;
+            shards.insert(
+                shard.to_string(),
+                ShardState {
+                    meta,
+                    buffer: Vec::new(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn sync(&self) -> StorageResult<()> {
+        let mut wal = self.wal.lock();
+        wal.sync()
+    }
+
+    fn flush(&self, shard: &str) -> StorageResult<()> {
+        let mut shards = self.shards.write();
+        let state = shards
+            .get_mut(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
+
+        if state.buffer.is_empty() {
+            return Ok(());
+        }
+
+        // Write buffer to batch file
+        let batch = Batch::new(state.buffer.clone());
+        let (batch_id, path) = self.write_batch(&state.buffer)?;
+
+        state.meta.add_batch(BatchRef {
+            id: batch_id,
+            path,
+            lower: batch.lower,
+            upper: batch.upper,
+            len: batch.len(),
+        });
+
+        state.buffer.clear();
+
+        // Save metadata
+        self.save_shard_meta(&state.meta)?;
+
+        // Clear WAL (data is now durable in batch file)
+        {
+            let mut wal = self.wal.lock();
+            wal.clear()?;
+        }
+
+        Ok(())
+    }
+}
+
+// Parquet I/O for Update batches
+/// Infer schema from updates - needed because we don't have stored schema yet
+fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
+    if updates.is_empty() {
+        // Default to 2-column Int32 schema for backwards compatibility
+        return TupleSchema::new(vec![
+            ("col0".to_string(), DataType::Int32),
+            ("col1".to_string(), DataType::Int32),
+        ]);
+    }
+
+    let first = &updates[0].data;
+    let fields: Vec<(String, DataType)> = first
+        .values()
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (format!("col{i}"), v.data_type()))
+        .collect();
+
+    TupleSchema::new(fields)
+}
+
+/// Write updates to a Parquet file
+///
+/// The file format is:
+/// - N data columns (from the Tuple)
+/// - time column (`UInt64`)
+/// - diff column (Int64)
+fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()> {
+    if updates.is_empty() {
+        // Write empty file with default schema
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("col0", ArrowDataType::Int32, false),
+            Field::new("col1", ArrowDataType::Int32, false),
+            Field::new("time", ArrowDataType::UInt64, false),
+            Field::new("diff", ArrowDataType::Int64, false),
+        ]));
+
+        let file = fs::File::create(path)?;
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
+            .map_err(StorageError::Parquet)?;
+
+        let empty_batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int32Array::from(Vec::<i32>::new())),
+                Arc::new(Int32Array::from(Vec::<i32>::new())),
+                Arc::new(UInt64Array::from(Vec::<u64>::new())),
+                Arc::new(Int64Array::from(Vec::<i64>::new())),
+            ],
+        )
+        .map_err(StorageError::Arrow)?;
+
+        writer.write(&empty_batch).map_err(StorageError::Parquet)?;
+        writer.close().map_err(StorageError::Parquet)?;
+
+        // Ensure data is durably written to disk
+        fs::File::open(path)?.sync_all()?;
+
+        return Ok(());
+    }
+
+    // Infer schema from the data
+    let tuple_schema = infer_schema_from_updates(updates);
+
+    // Extract tuples for conversion
+    let tuples: Vec<Tuple> = updates.iter().map(|u| u.data.clone()).collect();
+
+    // Convert tuples to record batch
+    let data_batch = tuples_to_record_batch(&tuples, &tuple_schema)
+        .map_err(|e| StorageError::Other(format!("Arrow conversion error: {e}")))?;
+
+    // Build full schema with time and diff columns
+    let mut fields: Vec<Field> = data_batch
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
+    fields.push(Field::new("time", ArrowDataType::UInt64, false));
+    fields.push(Field::new("diff", ArrowDataType::Int64, false));
+    let full_schema = Arc::new(Schema::new(fields));
+
+    // Build columns array
+    let mut columns: Vec<ArrayRef> = data_batch.columns().to_vec();
+
+    // Add time and diff columns
+    let times: Vec<u64> = updates.iter().map(|u| u.time).collect();
+    let diffs: Vec<i64> = updates.iter().map(|u| u.diff).collect();
+    columns.push(Arc::new(UInt64Array::from(times)));
+    columns.push(Arc::new(Int64Array::from(diffs)));
+
+    let batch = RecordBatch::try_new(full_schema.clone(), columns).map_err(StorageError::Arrow)?;
+
+    let file = fs::File::create(path)?;
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+
+    let mut writer =
+        ArrowWriter::try_new(file, full_schema, Some(props)).map_err(StorageError::Parquet)?;
+
+    writer.write(&batch).map_err(StorageError::Parquet)?;
+    writer.close().map_err(StorageError::Parquet)?;
+
+    // Ensure data is durably written to disk
+    fs::File::open(path)?.sync_all()?;
+
+    Ok(())
+}
+
+/// Read updates from a Parquet file
