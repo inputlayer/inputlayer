@@ -41,3 +41,42 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Parquet I/O for batches
+use arrow::array::{ArrayRef, Int32Array, Int64Array, UInt64Array};
+use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::sync::Arc;
+
+use crate::config::DurabilityMode;
+
+/// Configuration for the persist layer
+#[derive(Debug, Clone)]
+pub struct PersistConfig {
+    /// Base directory for persist data
+    pub path: PathBuf,
+    /// Buffer size before flushing to batch file
+    pub buffer_size: usize,
+    /// Whether to sync WAL immediately on each write (DEPRECATED)
+    pub immediate_sync: bool,
+    /// Durability mode for writes
+    pub durability_mode: DurabilityMode,
+}
+
+impl Default for PersistConfig {
+    fn default() -> Self {
+        PersistConfig {
+            path: PathBuf::from("./data/persist"),
+            buffer_size: 10000,
+            immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
+        }
+    }
+}
+
+/// Trait for persist backends
