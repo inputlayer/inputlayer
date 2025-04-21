@@ -100,7 +100,7 @@ pub trait PersistBackend: Send + Sync {
     fn ensure_shard(&self, shard: &str) -> StorageResult<()>;
 
     /// Sync all pending writes to disk
-    fn sync(&self) -> StorageResult<()>;
+    fn sync(self) -> StorageResult<()>;
 
     /// Flush buffered updates for a shard to a batch file
     fn flush(&self, shard: &str) -> StorageResult<()>;
@@ -188,7 +188,7 @@ impl FilePersist {
     }
 
     /// Replay WAL entries into shard buffers
-    fn replay_wal(self) -> StorageResult<()> {
+    fn replay_wal(&self) -> StorageResult<()> {
         let wal = self.wal.lock();
         let entries = wal.read_all()?;
 
@@ -302,7 +302,7 @@ impl PersistBackend for FilePersist {
         Ok(())
     }
 
-    fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
+    fn read(self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
         let shards = self.shards.read();
 
         let state = shards
@@ -410,7 +410,7 @@ impl PersistBackend for FilePersist {
         wal.sync()
     }
 
-    fn flush(&self, shard: &str) -> StorageResult<()> {
+    fn flush(self, shard: &str) -> StorageResult<()> {
         let mut shards = self.shards.write();
         let state = shards
             .get_mut(shard)
@@ -450,6 +450,7 @@ impl PersistBackend for FilePersist {
 // Parquet I/O for Update batches
 /// Infer schema from updates - needed because we don't have stored schema yet
 fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
+    // TODO: verify this condition
     if updates.is_empty() {
         // Default to 2-column Int32 schema for backwards compatibility
         return TupleSchema::new(vec![
@@ -563,3 +564,179 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
 }
 
 /// Read updates from a Parquet file
+fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
+    let file = fs::File::open(path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(StorageError::Parquet)?;
+
+    let reader = builder.build().map_err(StorageError::Parquet)?;
+
+    let mut updates = Vec::new();
+
+    for batch_result in reader {
+        let batch = batch_result.map_err(StorageError::Arrow)?;
+        let num_cols = batch.num_columns();
+
+        // Last two columns are always time and diff
+        // Data columns are all columns except the last two
+        if num_cols < 2 {
+            return Err(StorageError::Other(
+                "Invalid parquet file: not enough columns".to_string(),
+            ));
+        }
+
+        let time_col_idx = num_cols - 2;
+        let diff_col_idx = num_cols - 1;
+
+        let times = batch
+            .column(time_col_idx)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| StorageError::Other("Invalid time column type".to_string()))?;
+        let diffs = batch
+            .column(diff_col_idx)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .ok_or_else(|| StorageError::Other("Invalid diff column type".to_string()))?;
+
+        // Create a sub-batch with only data columns
+        let data_schema = Arc::new(Schema::new(
+            batch.schema().fields()[..time_col_idx]
+                .iter()
+                .map(|f| f.as_ref().clone())
+                .collect::<Vec<_>>(),
+        ));
+        let data_columns: Vec<ArrayRef> = batch.columns()[..time_col_idx].to_vec();
+
+        if data_columns.is_empty() {
+            // No data columns - shouldn't happen but handle gracefully
+            continue;
+        }
+
+        let data_batch =
+            RecordBatch::try_new(data_schema, data_columns).map_err(StorageError::Arrow)?;
+
+        // Convert data batch back to tuples
+        let (tuples, _) = record_batch_to_tuples(&data_batch)
+            .map_err(|e| StorageError::Other(format!("Arrow conversion error: {e}")))?;
+
+        // Combine with time and diff
+        for (i, tuple) in tuples.into_iter().enumerate() {
+            updates.push(Update {
+                data: tuple,
+                time: times.value(i),
+                diff: diffs.value(i),
+            });
+        }
+    }
+
+    Ok(updates)
+}
+
+/// Sanitize a shard name for use as a filename
+fn sanitize_name(name: &str) -> String {
+    name.replace([':', '/'], "_")
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Value;
+    use tempfile::TempDir;
+
+    fn create_test_persist() -> (TempDir, FilePersist) {
+        let temp = TempDir::new().unwrap();
+        let config = PersistConfig {
+            path: temp.path().to_path_buf(),
+            buffer_size: 5,
+            immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
+        };
+        let persist = FilePersist::new(config).unwrap();
+        (temp, persist)
+    }
+
+    #[test]
+    fn test_append_and_read() {
+        let (_temp, persist) = create_test_persist();
+
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+        ];
+
+        persist.ensure_shard("db:edge").unwrap();
+        persist.append("db:edge", &updates).unwrap();
+
+        let read = persist.read("db:edge", 0).unwrap();
+        assert_eq!(read.len(), 2);
+    }
+
+    #[test]
+    fn test_flush_and_read() {
+        let (_temp, persist) = create_test_persist();
+
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+        ];
+
+        persist.ensure_shard("db:edge").unwrap();
+        persist.append("db:edge", &updates).unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // After flush, data should be in batch file
+        let info = persist.shard_info("db:edge").unwrap();
+        assert_eq!(info.batch_count, 1);
+
+        let read = persist.read("db:edge", 0).unwrap();
+        assert_eq!(read.len(), 2);
+    }
+
+    #[test]
+    fn test_auto_flush_on_buffer_full() {
+        let (_temp, persist) = create_test_persist(); // buffer_size = 5
+
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Add 6 updates (exceeds buffer of 5)
+        for i in 0..6 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+
+        // Should have flushed
+        let info = persist.shard_info("db:edge").unwrap();
+        assert!(info.batch_count >= 1);
+    }
+
+    #[test]
+    fn test_consolidate_on_read() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Insert and delete the same tuple
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::delete(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+
+        let mut updates = persist.read("db:edge", 0).unwrap();
+        consolidate(&mut updates);
+
+        // (1,2) should cancel out
+        let tuples = to_tuples(&updates);
+        assert_eq!(tuples.len(), 1);
+        assert_eq!(tuples[0].to_pair(), Some((3, 4)));
+    }
+
