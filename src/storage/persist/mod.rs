@@ -100,7 +100,7 @@ pub trait PersistBackend: Send + Sync {
     fn ensure_shard(&self, shard: &str) -> StorageResult<()>;
 
     /// Sync all pending writes to disk
-    fn sync(self) -> StorageResult<()>;
+    fn sync(&self) -> StorageResult<()>;
 
     /// Flush buffered updates for a shard to a batch file
     fn flush(&self, shard: &str) -> StorageResult<()>;
@@ -165,7 +165,6 @@ impl FilePersist {
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
-                    // TODO: verify this condition
                     if let Ok(id) = batch.id.parse::<u64>() {
                         let current = self.next_batch_id.load(Ordering::Relaxed);
                         if id >= current {
@@ -285,7 +284,6 @@ impl PersistBackend for FilePersist {
 
             // Update upper frontier
             for update in updates {
-                // TODO: verify this condition
                 if update.time >= state.meta.upper {
                     state.meta.upper = update.time + 1;
                 }
@@ -302,7 +300,7 @@ impl PersistBackend for FilePersist {
         Ok(())
     }
 
-    fn read(self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
+    fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
         let shards = self.shards.read();
 
         let state = shards
@@ -313,7 +311,6 @@ impl PersistBackend for FilePersist {
 
         // Read from batch files
         for batch_ref in &state.meta.batches {
-            // TODO: verify this condition
             if batch_ref.upper > since {
                 let batch_updates = self.read_batch(batch_ref)?;
                 updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
@@ -410,7 +407,7 @@ impl PersistBackend for FilePersist {
         wal.sync()
     }
 
-    fn flush(self, shard: &str) -> StorageResult<()> {
+    fn flush(&self, shard: &str) -> StorageResult<()> {
         let mut shards = self.shards.write();
         let state = shards
             .get_mut(shard)
@@ -450,7 +447,6 @@ impl PersistBackend for FilePersist {
 // Parquet I/O for Update batches
 /// Infer schema from updates - needed because we don't have stored schema yet
 fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
-    // TODO: verify this condition
     if updates.is_empty() {
         // Default to 2-column Int32 schema for backwards compatibility
         return TupleSchema::new(vec![
@@ -738,5 +734,49 @@ mod tests {
         let tuples = to_tuples(&updates);
         assert_eq!(tuples.len(), 1);
         assert_eq!(tuples[0].to_pair(), Some((3, 4)));
+    }
+
+    #[test]
+    fn test_compaction() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Add updates at different times
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(5, 6), 30)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // Compact to time 15 (should discard time 10)
+        persist.compact("db:edge", 15).unwrap();
+
+        let info = persist.shard_info("db:edge").unwrap();
+        assert_eq!(info.since, 15);
+
+        let updates = persist.read("db:edge", 0).unwrap();
+        // Only updates at time >= 15 should remain
+        assert!(updates.iter().all(|u| u.time >= 15));
+    }
+
+    #[test]
+    fn test_list_shards() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db1:edge").unwrap();
+        persist.ensure_shard("db1:node").unwrap();
+        persist.ensure_shard("db2:edge").unwrap();
+
+        let shards = persist.list_shards().unwrap();
+        assert_eq!(shards.len(), 3);
+        assert!(shards.contains(&"db1:edge".to_string()));
+        assert!(shards.contains(&"db1:node".to_string()));
+        assert!(shards.contains(&"db2:edge".to_string()));
     }
 
