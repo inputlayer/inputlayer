@@ -165,6 +165,7 @@ impl FilePersist {
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
+                    // TODO: verify this condition
                     if let Ok(id) = batch.id.parse::<u64>() {
                         let current = self.next_batch_id.load(Ordering::Relaxed);
                         if id >= current {
@@ -241,7 +242,7 @@ impl FilePersist {
     }
 
     /// Read updates from a batch file
-    fn read_batch(&self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
+    fn read_batch(self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
         read_updates_parquet(&batch_ref.path)
     }
 }
@@ -284,6 +285,7 @@ impl PersistBackend for FilePersist {
 
             // Update upper frontier
             for update in updates {
+                // TODO: verify this condition
                 if update.time >= state.meta.upper {
                     state.meta.upper = update.time + 1;
                 }
@@ -311,6 +313,7 @@ impl PersistBackend for FilePersist {
 
         // Read from batch files
         for batch_ref in &state.meta.batches {
+            // TODO: verify this condition
             if batch_ref.upper > since {
                 let batch_updates = self.read_batch(batch_ref)?;
                 updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
@@ -778,5 +781,78 @@ mod tests {
         assert!(shards.contains(&"db1:edge".to_string()));
         assert!(shards.contains(&"db1:node".to_string()));
         assert!(shards.contains(&"db2:edge".to_string()));
+    }
+
+    #[test]
+    fn test_persistence_across_restarts() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        // First instance: write data
+        {
+            let config = PersistConfig {
+                path: path.clone(),
+                buffer_size: 100,
+                immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+
+            persist.ensure_shard("db:edge").unwrap();
+            persist
+                .append(
+                    "db:edge",
+                    &[
+                        Update::insert(Tuple::from_pair(1, 2), 10),
+                        Update::insert(Tuple::from_pair(3, 4), 20),
+                    ],
+                )
+                .unwrap();
+            persist.flush("db:edge").unwrap();
+        }
+
+        // Second instance: should see the data
+        {
+            let config = PersistConfig {
+                path: path.clone(),
+                buffer_size: 100,
+                immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+
+            let shards = persist.list_shards().unwrap();
+            assert!(shards.contains(&"db:edge".to_string()));
+
+            let updates = persist.read("db:edge", 0).unwrap();
+            assert_eq!(updates.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_multi_arity_tuples() {
+        let (_temp, persist) = create_test_persist();
+
+        // Test with 3-arity tuples
+        let updates = vec![
+            Update::insert(
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]),
+                10,
+            ),
+            Update::insert(
+                Tuple::new(vec![Value::Int32(4), Value::Int32(5), Value::Int32(6)]),
+                20,
+            ),
+        ];
+
+        persist.ensure_shard("db:triple").unwrap();
+        persist.append("db:triple", &updates).unwrap();
+        persist.flush("db:triple").unwrap();
+
+        let read = persist.read("db:triple", 0).unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].data.arity(), 3);
+        assert_eq!(read[0].data.get(0), Some(&Value::Int32(1)));
+        assert_eq!(read[0].data.get(2), Some(&Value::Int32(3)));
     }
 
