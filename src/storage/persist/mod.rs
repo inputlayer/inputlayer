@@ -165,7 +165,6 @@ impl FilePersist {
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
-                    // TODO: verify this condition
                     if let Ok(id) = batch.id.parse::<u64>() {
                         let current = self.next_batch_id.load(Ordering::Relaxed);
                         if id >= current {
@@ -242,7 +241,7 @@ impl FilePersist {
     }
 
     /// Read updates from a batch file
-    fn read_batch(self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
+    fn read_batch(&self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
         read_updates_parquet(&batch_ref.path)
     }
 }
@@ -285,7 +284,6 @@ impl PersistBackend for FilePersist {
 
             // Update upper frontier
             for update in updates {
-                // TODO: verify this condition
                 if update.time >= state.meta.upper {
                     state.meta.upper = update.time + 1;
                 }
@@ -313,7 +311,6 @@ impl PersistBackend for FilePersist {
 
         // Read from batch files
         for batch_ref in &state.meta.batches {
-            // TODO: verify this condition
             if batch_ref.upper > since {
                 let batch_updates = self.read_batch(batch_ref)?;
                 updates.extend(batch_updates.into_iter().filter(|u| u.time >= since));
@@ -856,3 +853,62 @@ mod tests {
         assert_eq!(read[0].data.get(2), Some(&Value::Int32(3)));
     }
 
+    #[test]
+    fn test_mixed_type_tuples() {
+        let (_temp, persist) = create_test_persist();
+
+        // Test with mixed types
+        let updates = vec![
+            Update::insert(
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("hello"),
+                    Value::Float64(3.14),
+                ]),
+                10,
+            ),
+            Update::insert(
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("world"),
+                    Value::Float64(2.71),
+                ]),
+                20,
+            ),
+        ];
+
+        persist.ensure_shard("db:mixed").unwrap();
+        persist.append("db:mixed", &updates).unwrap();
+        persist.flush("db:mixed").unwrap();
+
+        let read = persist.read("db:mixed", 0).unwrap();
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].data.arity(), 3);
+        assert_eq!(read[0].data.get(0), Some(&Value::Int32(1)));
+        assert_eq!(read[0].data.get(1).and_then(|v| v.as_str()), Some("hello"));
+    }
+
+    #[test]
+    fn test_legacy_tuple2_compatibility() {
+        let (_temp, persist) = create_test_persist();
+
+        // Use binary tuple insert
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+        ];
+
+        persist.ensure_shard("db:test").unwrap();
+        persist.append("db:test", &updates).unwrap();
+        persist.flush("db:test").unwrap();
+
+        let read = persist.read("db:test", 0).unwrap();
+        assert_eq!(read.len(), 2);
+
+        // Verify we can read back the tuples
+        let tuples = to_tuples(&read);
+        assert_eq!(tuples.len(), 2);
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((3, 4))));
+    }
+}
