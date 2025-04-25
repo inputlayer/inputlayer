@@ -132,3 +132,55 @@ pub struct ShardMeta {
     pub total_updates: usize,
 }
 
+impl ShardMeta {
+    /// Create a new empty shard
+    pub fn new(name: String) -> Self {
+        ShardMeta {
+            name,
+            batches: Vec::new(),
+            since: 0,
+            upper: 0,
+            total_updates: 0,
+        }
+    }
+
+    /// Add a batch reference to this shard
+    pub fn add_batch(&mut self, batch_ref: BatchRef) {
+        self.total_updates += batch_ref.len;
+        if batch_ref.upper > self.upper {
+            self.upper = batch_ref.upper;
+        }
+        self.batches.push(batch_ref);
+    }
+
+    /// Advance the compaction frontier
+    /// This marks old data as eligible for garbage collection
+    pub fn advance_since(&mut self, new_since: u64) {
+        if new_since > self.since {
+            self.since = new_since;
+        }
+    }
+}
+
+/// Information about a shard (read-only view)
+#[derive(Debug, Clone)]
+pub struct ShardInfo {
+    pub name: String,
+    pub since: u64,
+    pub upper: u64,
+    pub batch_count: usize,
+    pub total_updates: usize,
+}
+
+impl From<&ShardMeta> for ShardInfo {
+    fn from(meta: &ShardMeta) -> Self {
+        ShardInfo {
+            name: meta.name.clone(),
+            since: meta.since,
+            upper: meta.upper,
+            batch_count: meta.batches.len(),
+            total_updates: meta.total_updates,
+        }
+    }
+}
+
