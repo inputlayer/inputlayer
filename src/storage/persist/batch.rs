@@ -45,7 +45,7 @@ impl Update {
     /// Create an insert update from a pair of i32 values (convenience method)
     pub fn insert_pair(a: i32, b: i32, time: u64) -> Self {
         Update {
-            data: Tuple::from_pair(a, b.clone()),
+            data: Tuple::from_pair(a, b),
             time,
             diff: 1,
         }
@@ -59,7 +59,6 @@ impl Update {
             diff: -1,
         }
     }
-
 }
 
 /// A batch of updates (immutable once written to disk).
@@ -67,3 +66,69 @@ impl Update {
 /// Batches are the unit of durable storage - they're written to Parquet
 /// files and never modified after creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Batch {
+    /// The updates in this batch
+    pub updates: Vec<Update>,
+    /// Lower bound of timestamps in this batch (inclusive)
+    pub lower: u64,
+    /// Upper bound of timestamps in this batch (exclusive)
+    pub upper: u64,
+}
+
+impl Batch {
+    /// Create a new batch from updates
+    pub fn new(updates: Vec<Update>) -> Self {
+        let lower = updates.iter().map(|u| u.time).min().unwrap_or(0);
+        let upper = updates.iter().map(|u| u.time).max().map_or(0, |t| t + 1);
+        Batch {
+            updates,
+            lower,
+            upper,
+        }
+    }
+
+    /// Check if batch is empty
+    pub fn is_empty(&self) -> bool {
+        self.updates.is_empty()
+    }
+
+    /// Get the number of updates in this batch
+    pub fn len(&self) -> usize {
+        self.updates.len()
+    }
+}
+
+/// Reference to a stored batch file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRef {
+    /// Unique batch identifier
+    pub id: String,
+    /// Path to the Parquet file
+    pub path: PathBuf,
+    /// Lower timestamp bound
+    pub lower: u64,
+    /// Upper timestamp bound
+    pub upper: u64,
+    /// Number of updates in this batch
+    pub len: usize,
+}
+
+/// Shard metadata - represents a persistent Time-Varying Collection.
+///
+/// A shard corresponds to a single relation in a database.
+/// The naming convention is "{database}:{relation}".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShardMeta {
+    /// Shard name (format: "{db}:{relation}")
+    pub name: String,
+    /// References to all batch files for this shard
+    pub batches: Vec<BatchRef>,
+    /// Compaction frontier: can't read data before this time
+    /// Advancing this allows garbage collection of old updates
+    pub since: u64,
+    /// Write frontier: all times < upper are complete
+    pub upper: u64,
+    /// Total number of updates across all batches
+    pub total_updates: usize,
+}
+
