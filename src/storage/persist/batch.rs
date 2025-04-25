@@ -184,3 +184,74 @@ impl From<&ShardMeta> for ShardInfo {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_insert() {
+        let update = Update::insert(Tuple::from_pair(1, 2), 100);
+        assert_eq!(update.data, Tuple::from_pair(1, 2));
+        assert_eq!(update.time, 100);
+        assert_eq!(update.diff, 1);
+    }
+
+    #[test]
+    fn test_update_delete() {
+        let update = Update::delete(Tuple::from_pair(1, 2), 100);
+        assert_eq!(update.data, Tuple::from_pair(1, 2));
+        assert_eq!(update.time, 100);
+        assert_eq!(update.diff, -1);
+    }
+
+    #[test]
+    fn test_update_insert_pair() {
+        let update = Update::insert_pair(1, 2, 100);
+        assert_eq!(update.data.to_pair(), Some((1, 2)));
+        assert_eq!(update.time, 100);
+        assert_eq!(update.diff, 1);
+    }
+
+    #[test]
+    fn test_update_delete_pair() {
+        let update = Update::delete_pair(1, 2, 100);
+        assert_eq!(update.data.to_pair(), Some((1, 2)));
+        assert_eq!(update.time, 100);
+        assert_eq!(update.diff, -1);
+    }
+
+    #[test]
+    fn test_batch_bounds() {
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+            Update::insert(Tuple::from_pair(5, 6), 15),
+        ];
+        let batch = Batch::new(updates);
+        assert_eq!(batch.lower, 10);
+        assert_eq!(batch.upper, 21); // max + 1
+        assert_eq!(batch.len(), 3);
+    }
+
+    #[test]
+    fn test_shard_meta() {
+        let mut shard = ShardMeta::new("default:edge".to_string());
+        assert_eq!(shard.since, 0);
+        assert_eq!(shard.upper, 0);
+
+        shard.add_batch(BatchRef {
+            id: "batch1".to_string(),
+            path: PathBuf::from("batches/batch1.parquet"),
+            lower: 0,
+            upper: 100,
+            len: 50,
+        });
+
+        assert_eq!(shard.upper, 100);
+        assert_eq!(shard.total_updates, 50);
+        assert_eq!(shard.batches.len(), 1);
+
+        shard.advance_since(50);
+        assert_eq!(shard.since, 50);
+    }
+}
