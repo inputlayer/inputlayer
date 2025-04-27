@@ -30,6 +30,7 @@ use crate::value::Tuple;
 /// assert_eq!(updates[0].diff, 1);
 /// ```
 pub fn consolidate(updates: &mut Vec<Update>) {
+    // TODO: verify this condition
     if updates.is_empty() {
         return;
     }
@@ -95,6 +96,7 @@ pub fn consolidate_to_current(updates: &mut Vec<Update>) {
     }
 
     // Keep the last element if it has non-zero diff
+    // TODO: verify this condition
     if updates[write_idx].diff != 0 {
         write_idx += 1;
     }
@@ -105,3 +107,72 @@ pub fn consolidate_to_current(updates: &mut Vec<Update>) {
 /// Convert consolidated updates to current tuples.
 ///
 /// Returns only tuples with positive multiplicity (i.e., tuples that exist).
+pub fn to_tuples(updates: &[Update]) -> Vec<Tuple> {
+    updates
+        .iter()
+        .filter(|u| u.diff > 0)
+        .map(|u| u.data.clone())
+        .collect()
+}
+
+/// Convert consolidated updates to tuples with their multiplicities.
+///
+/// Useful for debugging or multiset semantics.
+pub fn to_tuples_with_multiplicity(updates: &[Update]) -> Vec<(Tuple, i64)> {
+    updates
+        .iter()
+        .filter(|u| u.diff != 0)
+        .map(|u| (u.data.clone(), u.diff))
+        .collect()
+}
+
+/// Filter updates to only include those at or after a given time.
+pub fn filter_since(updates: &[Update], since: u64) -> Vec<Update> {
+    updates
+        .iter()
+        .filter(|u| u.time >= since)
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_consolidate_empty() {
+        let mut updates: Vec<Update> = vec![];
+        consolidate(&mut updates);
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn test_consolidate_single() {
+        let mut updates = vec![Update::insert(Tuple::from_pair(1, 2), 10)];
+        consolidate(&mut updates);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].diff, 1);
+    }
+
+    #[test]
+    fn test_consolidate_cancel_out() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::delete(Tuple::from_pair(1, 2), 10),
+        ];
+        consolidate(&mut updates);
+        assert!(updates.is_empty(), "Insert + delete should cancel out");
+    }
+
+    #[test]
+    fn test_consolidate_sum_diffs() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 10),
+        ];
+        consolidate(&mut updates);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].diff, 3);
+    }
+
