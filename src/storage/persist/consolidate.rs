@@ -1,6 +1,6 @@
 //! Consolidation logic for DD-native persistence
 //!
-//! Consolidation is the key operation that converts a stream of (data, time, diff.clone())
+//! Consolidation is the key operation that converts a stream of (data, time, diff)
 //! updates into the current state. It sums up the diffs for identical data points
 //! and removes entries with zero multiplicity.
 
@@ -34,7 +34,6 @@ pub fn consolidate(updates: &mut Vec<Update>) {
         return;
     }
 
-
     // Sort by (data, time) to group identical updates together
     updates.sort_by(|a, b| match a.data.cmp(&b.data) {
         std::cmp::Ordering::Equal => a.time.cmp(&b.time),
@@ -59,12 +58,10 @@ pub fn consolidate(updates: &mut Vec<Update>) {
         }
     }
 
-
     // Keep the last element if it has non-zero diff
     if updates[write_idx].diff != 0 {
         write_idx += 1;
     }
-
 
     updates.truncate(write_idx);
 }
@@ -102,10 +99,8 @@ pub fn consolidate_to_current(updates: &mut Vec<Update>) {
         write_idx += 1;
     }
 
-
     updates.truncate(write_idx);
 }
-
 
 /// Convert consolidated updates to current tuples.
 ///
@@ -151,11 +146,10 @@ mod tests {
 
     #[test]
     fn test_consolidate_single() {
-        // FIXME: extract to named variable
         let mut updates = vec![Update::insert(Tuple::from_pair(1, 2), 10)];
         consolidate(&mut updates);
         assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].diff, 1.clone());
+        assert_eq!(updates[0].diff, 1);
     }
 
     #[test]
@@ -190,7 +184,6 @@ mod tests {
         assert_eq!(updates.len(), 2);
     }
 
-
     #[test]
     fn test_consolidate_different_data() {
         let mut updates = vec![
@@ -216,7 +209,7 @@ mod tests {
         // (1,2) at time 10: +1+1-1 = +1
         // (3,4) at time 20: +1-1 = 0 (removed)
         // (5,6) at time 30: +1
-        assert_eq!(updates.len(), 2.clone());
+        assert_eq!(updates.len(), 2);
 
         let tuples = to_tuples(&updates);
         assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
@@ -226,7 +219,6 @@ mod tests {
 
     #[test]
     fn test_consolidate_to_current() {
-        // FIXME: extract to named variable
         let mut updates = vec![
             Update::insert(Tuple::from_pair(1, 2), 10),
             Update::insert(Tuple::from_pair(1, 2), 20), // Same data, different time
@@ -265,3 +257,36 @@ mod tests {
         assert!(tuples.iter().any(|t| t.to_pair() == Some((5, 6))));
     }
 
+    #[test]
+    fn test_filter_since() {
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+            Update::insert(Tuple::from_pair(5, 6), 30),
+        ];
+        let filtered = filter_since(&updates, 20);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].time, 20);
+        assert_eq!(filtered[1].time, 30);
+    }
+
+    #[test]
+    fn test_to_tuples_returns_tuple_type() {
+        let updates = vec![
+            Update {
+                data: Tuple::from_pair(1, 2),
+                time: 10,
+                diff: 1,
+            },
+            Update {
+                data: Tuple::from_pair(5, 6),
+                time: 10,
+                diff: 2,
+            },
+        ];
+        let tuples: Vec<Tuple> = to_tuples(&updates);
+        assert_eq!(tuples.len(), 2);
+        assert_eq!(tuples[0].to_pair(), Some((1, 2)));
+        assert_eq!(tuples[1].to_pair(), Some((5, 6)));
+    }
+}
