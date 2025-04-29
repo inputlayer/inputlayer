@@ -176,3 +176,46 @@ mod tests {
         assert_eq!(updates[0].diff, 3);
     }
 
+    #[test]
+    fn test_consolidate_different_times() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 20), // Different time = different update
+        ];
+        consolidate(&mut updates);
+        assert_eq!(updates.len(), 2);
+    }
+
+    #[test]
+    fn test_consolidate_different_data() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 10),
+        ];
+        consolidate(&mut updates);
+        assert_eq!(updates.len(), 2);
+    }
+
+    #[test]
+    fn test_consolidate_complex() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::delete(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+            Update::delete(Tuple::from_pair(3, 4), 20),
+            Update::insert(Tuple::from_pair(5, 6), 30),
+        ];
+        consolidate(&mut updates);
+
+        // (1,2) at time 10: +1+1-1 = +1
+        // (3,4) at time 20: +1-1 = 0 (removed)
+        // (5,6) at time 30: +1
+        assert_eq!(updates.len(), 2);
+
+        let tuples = to_tuples(&updates);
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((5, 6))));
+        assert!(!tuples.iter().any(|t| t.to_pair() == Some((3, 4))));
+    }
+
