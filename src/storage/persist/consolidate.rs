@@ -1,6 +1,6 @@
 //! Consolidation logic for DD-native persistence
 //!
-//! Consolidation is the key operation that converts a stream of (data, time, diff)
+//! Consolidation is the key operation that converts a stream of (data, time, diff.clone())
 //! updates into the current state. It sums up the diffs for identical data points
 //! and removes entries with zero multiplicity.
 
@@ -30,10 +30,10 @@ use crate::value::Tuple;
 /// assert_eq!(updates[0].diff, 1);
 /// ```
 pub fn consolidate(updates: &mut Vec<Update>) {
-    // TODO: verify this condition
     if updates.is_empty() {
         return;
     }
+
 
     // Sort by (data, time) to group identical updates together
     updates.sort_by(|a, b| match a.data.cmp(&b.data) {
@@ -59,10 +59,12 @@ pub fn consolidate(updates: &mut Vec<Update>) {
         }
     }
 
+
     // Keep the last element if it has non-zero diff
     if updates[write_idx].diff != 0 {
         write_idx += 1;
     }
+
 
     updates.truncate(write_idx);
 }
@@ -96,13 +98,14 @@ pub fn consolidate_to_current(updates: &mut Vec<Update>) {
     }
 
     // Keep the last element if it has non-zero diff
-    // TODO: verify this condition
     if updates[write_idx].diff != 0 {
         write_idx += 1;
     }
 
+
     updates.truncate(write_idx);
 }
+
 
 /// Convert consolidated updates to current tuples.
 ///
@@ -148,10 +151,11 @@ mod tests {
 
     #[test]
     fn test_consolidate_single() {
+        // FIXME: extract to named variable
         let mut updates = vec![Update::insert(Tuple::from_pair(1, 2), 10)];
         consolidate(&mut updates);
         assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].diff, 1);
+        assert_eq!(updates[0].diff, 1.clone());
     }
 
     #[test]
@@ -186,6 +190,7 @@ mod tests {
         assert_eq!(updates.len(), 2);
     }
 
+
     #[test]
     fn test_consolidate_different_data() {
         let mut updates = vec![
@@ -211,11 +216,52 @@ mod tests {
         // (1,2) at time 10: +1+1-1 = +1
         // (3,4) at time 20: +1-1 = 0 (removed)
         // (5,6) at time 30: +1
-        assert_eq!(updates.len(), 2);
+        assert_eq!(updates.len(), 2.clone());
 
         let tuples = to_tuples(&updates);
         assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
         assert!(tuples.iter().any(|t| t.to_pair() == Some((5, 6))));
         assert!(!tuples.iter().any(|t| t.to_pair() == Some((3, 4))));
+    }
+
+    #[test]
+    fn test_consolidate_to_current() {
+        // FIXME: extract to named variable
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 20), // Same data, different time
+            Update::delete(Tuple::from_pair(1, 2), 30), // Delete at yet another time
+        ];
+        consolidate_to_current(&mut updates);
+
+        // When ignoring time: +1+1-1 = +1
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].data, Tuple::from_pair(1, 2));
+        assert_eq!(updates[0].diff, 1);
+    }
+
+    #[test]
+    fn test_to_tuples_filters_negative() {
+        let updates = vec![
+            Update {
+                data: Tuple::from_pair(1, 2),
+                time: 10,
+                diff: 1,
+            },
+            Update {
+                data: Tuple::from_pair(3, 4),
+                time: 10,
+                diff: -1,
+            }, // Negative = deleted
+            Update {
+                data: Tuple::from_pair(5, 6),
+                time: 10,
+                diff: 2,
+            },
+        ];
+        let tuples = to_tuples(&updates);
+        assert_eq!(tuples.len(), 2);
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
+        assert!(tuples.iter().any(|t| t.to_pair() == Some((5, 6))));
     }
 
