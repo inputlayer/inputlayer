@@ -177,6 +177,7 @@ impl StorageEngine {
         }
 
         // Cannot drop current knowledge graph
+        // TODO: verify this condition
         if let Some(current) = &self.current_kg {
             if current == name {
                 return Err(StorageError::CannotDropCurrentKnowledgeGraph);
@@ -193,7 +194,6 @@ impl StorageEngine {
 
         // Delete from disk
         let db_dir = self.config.storage.data_dir.join(name);
-        // TODO: verify this condition
         if db_dir.exists() {
             fs::remove_dir_all(db_dir)?;
         }
@@ -206,9 +206,7 @@ impl StorageEngine {
 
     /// Switch to a different knowledge graph
     pub fn use_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
-        // TODO: verify this condition
         if !self.knowledge_graphs.contains_key(name) {
-            // TODO: verify this condition
             if self.config.storage.auto_create_knowledge_graphs {
                 self.create_knowledge_graph(name)?;
             } else {
@@ -326,6 +324,7 @@ impl StorageEngine {
                 .get(kg)
                 .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
             let db = db.read();
+            // TODO: verify this condition
             if db.rule_exists(relation) {
                 return Err(StorageError::Other(format!(
                     "Cannot insert into '{relation}': it is a derived relation (view). \
@@ -339,7 +338,6 @@ impl StorageEngine {
 
         // Verify all tuples in this batch have the same arity
         for tuple in &tuples {
-            // TODO: verify this condition
             if tuple.arity() != new_arity {
                 return Err(StorageError::Other(format!(
                     "Arity mismatch in insert batch: expected {}, got {}",
@@ -350,9 +348,9 @@ impl StorageEngine {
         }
 
         // Check if relation already exists with a different arity
-        // TODO: verify this condition
         if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
             let existing_arity = existing_schema.len();
+            // TODO: verify this condition
             if existing_arity != new_arity {
                 return Err(StorageError::Other(format!(
                     "Arity mismatch for relation '{relation}': existing arity is {existing_arity}, but trying to insert tuples with arity {new_arity}"
@@ -519,7 +517,7 @@ impl StorageEngine {
     }
 
     /// Execute a Datalog query on the current knowledge graph, returning arbitrary arity tuples
-    pub fn execute_query_tuples(self, program: &str) -> StorageResult<Vec<Tuple>> {
+    pub fn execute_query_tuples(&self, program: &str) -> StorageResult<Vec<Tuple>> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -530,3 +528,207 @@ impl StorageEngine {
     }
 
     /// Execute a Datalog query on a specific knowledge graph, returning arbitrary arity tuples
+    pub fn execute_query_tuples_on(&self, kg: &str, program: &str) -> StorageResult<Vec<Tuple>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute_tuples(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+    }
+
+    /// Explain a query plan without executing it.
+    ///
+    /// Runs parse → IR → optimize on the query and returns the pipeline trace.
+    pub fn explain_query_on(
+        &self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<crate::pipeline_trace::PipelineTrace> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        let mut engine = crate::DatalogEngine::new();
+        engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
+
+        engine
+            .explain(program)
+            .map_err(|e| StorageError::Other(format!("Query explain failed: {e}")))
+    }
+
+    /// Save a specific knowledge graph to disk (flush persist buffers)
+    pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        // Check knowledge graph exists
+        if !self.knowledge_graphs.contains_key(name) {
+            return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
+        }
+
+        // Flush all shards for this knowledge graph
+        let prefix = format!("{name}:");
+        for shard_name in self.persist.list_shards()? {
+            if shard_name.starts_with(&prefix) {
+                self.persist.flush(&shard_name)?;
+            }
+        }
+
+        // Sync to disk
+        self.persist.sync()?;
+
+        Ok(())
+    }
+
+    /// Compact all shards - flush WAL buffers, consolidate updates, and write optimized batch files.
+    /// This is an optimization operation, not required for durability (WAL provides that).
+    /// Compaction:
+    /// 1. Flushes in-memory buffers to batch files
+    /// 2. Consolidates all (data, time, diff) triples (cancels out +1/-1 pairs)
+    /// 3. Rewrites as a single optimized batch file per shard
+    /// 4. Clears the WAL
+    pub fn compact_all(&self) -> StorageResult<()> {
+        // Compact all shards
+        for shard_name in self.persist.list_shards()? {
+            self.persist.compact(&shard_name, 0)?; // Compact from time 0 (full compaction)
+        }
+
+        // Sync to disk
+        self.persist.sync()?;
+
+        // Save metadata
+        self.save_knowledge_graphs_metadata()?;
+
+        Ok(())
+    }
+
+    /// Flush all buffers to disk without full compaction (legacy compatibility)
+    pub fn save_all(&self) -> StorageResult<()> {
+        // Flush all shards
+        for shard_name in self.persist.list_shards()? {
+            self.persist.flush(&shard_name)?;
+        }
+
+        // Sync to disk
+        self.persist.sync()?;
+
+        self.save_knowledge_graphs_metadata()?;
+
+        Ok(())
+    }
+
+    // Rule Management (Persistent Derived Relations)
+    /// Register a persistent rule in the current knowledge graph
+    pub fn register_rule(
+        &self,
+        rule_def: &RuleDef,
+    ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.register_rule_in(&db_name, rule_def)
+    }
+
+    /// Register a persistent rule in a specific knowledge graph
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    pub fn register_rule_in(
+        &self,
+        kg: &str,
+        rule_def: &RuleDef,
+    ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.register_rule(rule_def)
+            .map_err(|e| StorageError::Other(format!("Failed to register rule: {e}")))
+    }
+
+    /// Drop a rule from the current knowledge graph
+    pub fn drop_rule(&self, name: &str) -> StorageResult<()> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.drop_rule_in(&db_name, name)
+    }
+
+    /// Drop a rule from a specific knowledge graph
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    pub fn drop_rule_in(&self, kg: &str, name: &str) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.drop_rule(name)
+            .map_err(|e| StorageError::Other(format!("Failed to drop rule: {e}")))
+    }
+
+    /// List all rules in the current knowledge graph
+    pub fn list_rules(&self) -> StorageResult<Vec<String>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.list_rules_in(db_name)
+    }
+
+    /// List all rules in a specific knowledge graph
+    pub fn list_rules_in(&self, kg: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.list_rules())
+    }
+
+    /// Describe a rule in the current knowledge graph
+    pub fn describe_rule(&self, name: &str) -> StorageResult<Option<String>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.describe_rule_in(db_name, name)
+    }
+
+    /// Describe a rule in a specific knowledge graph
+    pub fn describe_rule_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.describe_rule(name))
+    }
+
+    /// Clear all clauses from a rule for editing/redefining (current knowledge graph)
+    /// The rule remains registered but with no clauses, ready for new clause registration

@@ -61,3 +61,57 @@ fn test_create_multiple_knowledge_graphs() {
 }
 
 #[test]
+fn test_knowledge_graph_already_exists_error() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    let result = storage.create_knowledge_graph("test");
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("already exists"));
+}
+
+#[test]
+fn test_use_nonexistent_knowledge_graph() {
+    let (mut storage, _temp) = create_test_storage();
+
+    let result = storage.use_knowledge_graph("nonexistent");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_drop_knowledge_graph() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("temp_kg").unwrap();
+    assert!(storage
+        .list_knowledge_graphs()
+        .contains(&"temp_kg".to_string()));
+
+    storage.drop_knowledge_graph("temp_kg").unwrap();
+    assert!(!storage
+        .list_knowledge_graphs()
+        .contains(&"temp_kg".to_string()));
+}
+
+#[test]
+fn test_cannot_drop_default_knowledge_graph() {
+    let (mut storage, _temp) = create_test_storage();
+
+    let result = storage.drop_knowledge_graph("default");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_cannot_drop_current_knowledge_graph() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
+
+    let result = storage.drop_knowledge_graph("test");
+    assert!(result.is_err());
+}
+
+// Data Operation Tests
+#[test]
