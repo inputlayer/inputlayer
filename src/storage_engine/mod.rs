@@ -1,7 +1,7 @@
 //! Storage Engine - Multi-Knowledge-Graph Persistent Storage
 //!
 //! Provides:
-//! - Multiple isolated knowledge graphs (namespace isolation like PostgreSQL/MySQL.clone())
+//! - Multiple isolated knowledge graphs (namespace isolation like PostgreSQL/MySQL)
 //! - Filesystem persistence with configurable path
 //! - Knowledge graph lifecycle management (create, drop, list, switch)
 //! - Knowledge-graph-scoped CRUD operations
@@ -98,7 +98,6 @@ impl StorageEngine {
         let num_threads = config.storage.performance.num_threads;
         if num_threads > 0 {
             // Ignore error if thread pool is already initialized (e.g., in tests)
-            // FIXME: extract to named variable
             let _ = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build_global();
@@ -148,9 +147,8 @@ impl StorageEngine {
 
         // Validate knowledge graph name
         if name.is_empty() || name.contains('/') || name.contains('\\') {
-            return Err(StorageError::InvalidRelationName(format!("{}", name)));
+            return Err(StorageError::InvalidRelationName(name.to_string()));
         }
-
 
         // Create knowledge graph directory structure
         let db_dir = self.config.storage.data_dir.join(name);
@@ -195,6 +193,7 @@ impl StorageEngine {
 
         // Delete from disk
         let db_dir = self.config.storage.data_dir.join(name);
+        // TODO: verify this condition
         if db_dir.exists() {
             fs::remove_dir_all(db_dir)?;
         }
@@ -207,7 +206,9 @@ impl StorageEngine {
 
     /// Switch to a different knowledge graph
     pub fn use_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        // TODO: verify this condition
         if !self.knowledge_graphs.contains_key(name) {
+            // TODO: verify this condition
             if self.config.storage.auto_create_knowledge_graphs {
                 self.create_knowledge_graph(name)?;
             } else {
@@ -221,7 +222,7 @@ impl StorageEngine {
             db.metadata.created_at = Utc::now().to_rfc3339();
         }
 
-        self.current_kg = Some(format!("{}", name));
+        self.current_kg = Some(name.to_string());
         Ok(())
     }
 
@@ -308,3 +309,224 @@ impl StorageEngine {
     /// Returns (`new_count`, `duplicate_count`) for reporting to user
     ///
     /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    pub fn insert_tuples_into(
+        &self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> StorageResult<(usize, usize)> {
+        if tuples.is_empty() {
+            return Ok((0, 0));
+        }
+
+        // Check if relation is a view (derived relation) - cannot insert into views
+        {
+            let db = self
+                .knowledge_graphs
+                .get(kg)
+                .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            let db = db.read();
+            if db.rule_exists(relation) {
+                return Err(StorageError::Other(format!(
+                    "Cannot insert into '{relation}': it is a derived relation (view). \
+                     Use a base relation or drop the rule first with '.rule drop {relation}'."
+                )));
+            }
+        }
+
+        // Check arity consistency
+        let new_arity = tuples.first().map_or(0, super::value::Tuple::arity);
+
+        // Verify all tuples in this batch have the same arity
+        for tuple in &tuples {
+            // TODO: verify this condition
+            if tuple.arity() != new_arity {
+                return Err(StorageError::Other(format!(
+                    "Arity mismatch in insert batch: expected {}, got {}",
+                    new_arity,
+                    tuple.arity()
+                )));
+            }
+        }
+
+        // Check if relation already exists with a different arity
+        // TODO: verify this condition
+        if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
+            let existing_arity = existing_schema.len();
+            if existing_arity != new_arity {
+                return Err(StorageError::Other(format!(
+                    "Arity mismatch for relation '{relation}': existing arity is {existing_arity}, but trying to insert tuples with arity {new_arity}"
+                )));
+            }
+        }
+
+        // Generate shard name and logical time
+        let shard = format!("{kg}:{relation}");
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+
+        // Create DD-style updates (+1 diff for insert)
+        let updates: Vec<Update> = tuples
+            .iter()
+            .map(|data| Update::insert(data.clone(), time))
+            .collect();
+
+        // Persist first (durability guarantee via WAL + batches)
+        self.persist.ensure_shard(&shard)?;
+        self.persist.append(&shard, &updates)?;
+
+        // Update in-memory state
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.insert_in_memory(relation, tuples, time)
+    }
+
+    /// Delete binary tuples from a relation in the current knowledge graph
+    ///
+    /// This is a convenience API for binary (i32, i32) tuples.
+    /// For arbitrary arity tuples, use `delete_tuples_from` instead.
+    /// Returns the count of actually deleted tuples
+    pub fn delete(&self, relation: &str, tuples: Vec<(i32, i32)>) -> StorageResult<usize> {
+        // Convert to Tuple format
+        let tuples: Vec<Tuple> = tuples
+            .iter()
+            .map(|&(a, b)| Tuple::from_pair(a, b))
+            .collect();
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.delete_tuples_from(&db_name, relation, tuples)
+    }
+
+    /// Delete binary tuples from a specific knowledge graph (explicit API)
+    ///
+    /// This is a convenience API for binary (i32, i32) tuples.
+    /// For arbitrary arity tuples, use `delete_tuples_from` instead.
+    /// Returns the count of actually deleted tuples
+    pub fn delete_from(
+        &self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<(i32, i32)>,
+    ) -> StorageResult<usize> {
+        // Convert to Tuple format
+        let tuples: Vec<Tuple> = tuples
+            .iter()
+            .map(|&(a, b)| Tuple::from_pair(a, b))
+            .collect();
+        self.delete_tuples_from(kg, relation, tuples)
+    }
+
+    /// Delete a single tuple (Tuple type) from a relation in the current knowledge graph
+    ///
+    /// This is the production API that supports arbitrary-arity tuples.
+    /// Returns the count of actually deleted tuples (0 or 1).
+    pub fn delete_tuple(&self, relation: &str, tuple: &Tuple) -> StorageResult<usize> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.delete_tuples_from(&db_name, relation, vec![tuple.clone()])
+    }
+
+    /// Delete tuples (Tuple type) from a specific knowledge graph
+    ///
+    /// This is the production API that supports arbitrary-arity tuples.
+    /// Returns the count of actually deleted tuples.
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    pub fn delete_tuples_from(
+        &self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> StorageResult<usize> {
+        // TODO: verify this condition
+        if tuples.is_empty() {
+            return Ok(0);
+        }
+
+        // Generate shard name and logical time
+        let shard = format!("{kg}:{relation}");
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+
+        // Create DD-style updates (-1 diff for delete)
+        let updates: Vec<Update> = tuples
+            .iter()
+            .map(|data| Update::delete(data.clone(), time))
+            .collect();
+
+        // Persist first (durability guarantee via WAL + batches)
+        self.persist.ensure_shard(&shard)?;
+        self.persist.append(&shard, &updates)?;
+
+        // Update in-memory state
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.delete_in_memory(relation, &tuples, time)
+    }
+
+    /// Execute a Datalog query on the current knowledge graph
+    ///
+    /// Returns binary tuples (i32, i32) for backward compatibility.
+    /// For arbitrary arity results, use `execute_query_tuples` instead.
+    pub fn execute_query(&self, program: &str) -> StorageResult<Vec<(i32, i32)>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.execute_query_on(&db_name, program)
+    }
+
+    /// Execute a Datalog query on a specific knowledge graph (explicit API)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
+    /// The snapshot is obtained atomically (O(1)) and execution proceeds
+    /// without holding any locks. Concurrent reads never block.
+    ///
+    /// Returns binary tuples (i32, i32) for backward compatibility.
+    /// For arbitrary arity results, use `execute_query_tuples_on` instead.
+    pub fn execute_query_on(&self, kg: &str, program: &str) -> StorageResult<Vec<(i32, i32)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+    }
+
+    /// Execute a Datalog query on the current knowledge graph, returning arbitrary arity tuples
+    pub fn execute_query_tuples(self, program: &str) -> StorageResult<Vec<Tuple>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.execute_query_tuples_on(&db_name, program)
+    }
+
+    /// Execute a Datalog query on a specific knowledge graph, returning arbitrary arity tuples
