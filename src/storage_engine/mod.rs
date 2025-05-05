@@ -177,7 +177,6 @@ impl StorageEngine {
         }
 
         // Cannot drop current knowledge graph
-        // TODO: verify this condition
         if let Some(current) = &self.current_kg {
             if current == name {
                 return Err(StorageError::CannotDropCurrentKnowledgeGraph);
@@ -324,7 +323,6 @@ impl StorageEngine {
                 .get(kg)
                 .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
             let db = db.read();
-            // TODO: verify this condition
             if db.rule_exists(relation) {
                 return Err(StorageError::Other(format!(
                     "Cannot insert into '{relation}': it is a derived relation (view). \
@@ -350,7 +348,6 @@ impl StorageEngine {
         // Check if relation already exists with a different arity
         if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
             let existing_arity = existing_schema.len();
-            // TODO: verify this condition
             if existing_arity != new_arity {
                 return Err(StorageError::Other(format!(
                     "Arity mismatch for relation '{relation}': existing arity is {existing_arity}, but trying to insert tuples with arity {new_arity}"
@@ -364,7 +361,7 @@ impl StorageEngine {
 
         // Create DD-style updates (+1 diff for insert)
         let updates: Vec<Update> = tuples
-            .iter()
+            .iter().cloned()
             .map(|data| Update::insert(data.clone(), time))
             .collect();
 
@@ -447,7 +444,6 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<usize> {
-        // TODO: verify this condition
         if tuples.is_empty() {
             return Ok(0);
         }
@@ -732,3 +728,217 @@ impl StorageEngine {
 
     /// Clear all clauses from a rule for editing/redefining (current knowledge graph)
     /// The rule remains registered but with no clauses, ready for new clause registration
+    pub fn clear_rule(&mut self, name: &str) -> StorageResult<()> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.clear_rule_in(&db_name, name)
+    }
+
+    /// Clear all clauses from a rule for editing/redefining (specific knowledge graph)
+    pub fn clear_rule_in(&mut self, kg: &str, name: &str) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.clear_rule(name)
+            .map_err(|e| StorageError::Other(format!("Failed to clear rule: {e}")))
+    }
+
+    /// Replace a specific clause in a rule (current knowledge graph)
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> StorageResult<()> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.replace_rule_in(&db_name, name, index, new_rule)
+    }
+
+    /// Replace a specific clause in a rule (specific knowledge graph)
+    pub fn replace_rule_in(
+        &mut self,
+        kg: &str,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.replace_rule(name, index, new_rule)
+            .map_err(|e| StorageError::Other(format!("Failed to replace rule clause: {e}")))
+    }
+
+    /// Remove a specific clause from a rule (current knowledge graph)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause(&self, name: &str, index: usize) -> StorageResult<bool> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.remove_rule_clause_in(&db_name, name, index)
+    }
+
+    /// Remove a specific clause from a rule (specific knowledge graph)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause_in(&self, kg: &str, name: &str, index: usize) -> StorageResult<bool> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.remove_rule_clause(name, index)
+            .map_err(|e| StorageError::Other(format!("Failed to remove rule clause: {e}")))
+    }
+
+    /// Get the number of clauses in a rule (current knowledge graph)
+    pub fn rule_count(&self, name: &str) -> StorageResult<Option<usize>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.rule_count_in(db_name, name)
+    }
+
+    /// Get the number of clauses in a rule (specific knowledge graph)
+    pub fn rule_count_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.rule_count(name))
+    }
+
+    /// Get the arity (number of arguments) of a rule/view (current knowledge graph)
+    pub fn rule_arity(&self, name: &str) -> StorageResult<Option<usize>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.rule_arity_in(&db_name, name)
+    }
+
+    /// Get the arity (number of arguments) of a rule/view (specific knowledge graph)
+    pub fn rule_arity_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.rule_arity(name))
+    }
+
+    // Schema Catalog (per-KG type validation)
+    /// Register a schema for a relation in the current knowledge graph
+    pub fn register_schema(&self, schema: RelationSchema) -> StorageResult<()> {
+        let kg_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+        self.register_schema_in(&kg_name, schema)
+    }
+
+    /// Register a schema for a relation in a specific knowledge graph
+    pub fn register_schema_in(&self, kg: &str, schema: RelationSchema) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.register_schema(schema).map_err(StorageError::Other)
+    }
+
+    /// Get schema for a relation in the current knowledge graph
+    pub fn get_schema(&self, relation: &str) -> StorageResult<Option<RelationSchema>> {
+        let kg_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+        self.get_schema_in(&kg_name, relation)
+    }
+
+    /// Get schema for a relation in a specific knowledge graph
+    pub fn get_schema_in(&self, kg: &str, relation: &str) -> StorageResult<Option<RelationSchema>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.get_schema(relation).cloned())
+    }
+
+    /// Check if a schema exists for a relation in the current knowledge graph
+    pub fn has_schema(&self, relation: &str) -> StorageResult<bool> {
+        let kg_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+        self.has_schema_in(&kg_name, relation)
+    }
+
+    /// Check if a schema exists for a relation in a specific knowledge graph
+    pub fn has_schema_in(&self, kg: &str, relation: &str) -> StorageResult<bool> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.has_schema(relation))
+    }
+
+    /// Remove schema for a relation in the current knowledge graph
+    pub fn remove_schema(&self, relation: &str) -> StorageResult<Option<RelationSchema>> {
+        let kg_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+        self.remove_schema_in(&kg_name, relation)
+    }
+
+    /// Remove schema for a relation in a specific knowledge graph
+    pub fn remove_schema_in(
+        &self,
+        kg: &str,
+        relation: &str,
+    ) -> StorageResult<Option<RelationSchema>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.remove_schema(relation).map_err(StorageError::Other)
+    }
+
+    /// List all schemas in the current knowledge graph

@@ -115,3 +115,54 @@ fn test_cannot_drop_current_knowledge_graph() {
 
 // Data Operation Tests
 #[test]
+fn test_insert_and_query() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test_kg").unwrap();
+    storage.use_knowledge_graph("test_kg").unwrap();
+
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert_eq!(results.len(), 3);
+    assert!(results.contains(&(1, 2)));
+    assert!(results.contains(&(2, 3)));
+    assert!(results.contains(&(3, 4)));
+}
+
+#[test]
+fn test_insert_multiple_relations() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.use_knowledge_graph("default").unwrap();
+    storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+    storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
+
+    let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let person_results = storage
+        .execute_query("result(X,Y) :- person(X,Y).")
+        .unwrap();
+
+    assert_eq!(edge_results.len(), 2);
+    assert_eq!(person_results.len(), 2);
+}
+
+#[test]
+fn test_delete_tuples() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.use_knowledge_graph("default").unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
+
+    storage.delete("edge", vec![(2, 3)]).unwrap();
+
+    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(!results.contains(&(2, 3)));
+}
+
+#[test]
