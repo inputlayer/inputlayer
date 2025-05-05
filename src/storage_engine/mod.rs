@@ -46,3 +46,48 @@ use crate::storage::{
     KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
 };
 use crate::value::Tuple;
+use crate::DatalogEngine;
+use arc_swap::ArcSwap;
+use chrono::Utc;
+use dashmap::DashMap;
+use parking_lot::RwLock;
+use rayon::prelude::*;
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+/// Storage Engine - manages multiple knowledge graphs
+///
+/// Uses `DashMap` for concurrent access to knowledge graphs without global locks.
+pub struct StorageEngine {
+    config: Config,
+    /// Knowledge graphs with lock-free concurrent access
+    knowledge_graphs: DashMap<String, Arc<RwLock<KnowledgeGraph>>>,
+    current_kg: Option<String>,
+    /// DD-native persist backend
+    persist: Arc<FilePersist>,
+    /// Logical timestamp for DD updates (monotonically increasing)
+    logical_time: AtomicU64,
+}
+
+/// Single knowledge graph instance
+pub struct KnowledgeGraph {
+    name: String,
+    engine: DatalogEngine,
+    metadata: KnowledgeGraphMetadata,
+    /// Data directory for this knowledge graph (used for rule and schema persistence)
+    data_dir: PathBuf,
+    /// Rule catalog for persistent derived relations
+    rule_catalog: RuleCatalog,
+    /// Schema catalog for relation type definitions (per-KG isolation)
+    schema_catalog: SchemaCatalog,
+    /// Current snapshot for lock-free reads (updated atomically on writes)
+    snapshot: ArcSwap<KnowledgeGraphSnapshot>,
+    /// Persistent DD computation for incremental updates (shadow writes)
+    dd_computation: Option<DDComputation>,
+    /// Number of workers for parallel query execution
+    num_workers: usize,
+}
+
