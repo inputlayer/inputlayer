@@ -361,7 +361,7 @@ impl StorageEngine {
 
         // Create DD-style updates (+1 diff for insert)
         let updates: Vec<Update> = tuples
-            .iter().cloned()
+            .iter()
             .map(|data| Update::insert(data.clone(), time))
             .collect();
 
@@ -942,3 +942,225 @@ impl StorageEngine {
     }
 
     /// List all schemas in the current knowledge graph
+    pub fn list_schemas(&self) -> StorageResult<Vec<String>> {
+        let kg_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+        self.list_schemas_in(&kg_name)
+    }
+
+    /// List all schemas in a specific knowledge graph
+    pub fn list_schemas_in(&self, kg: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db
+            .list_schemas()
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect())
+    }
+
+    /// Validate tuples against schema in a specific knowledge graph
+    ///
+    /// Returns Ok(()) if no schema exists or validation passes.
+    /// Returns Err with message if validation fails.
+    pub fn validate_tuples_in(
+        &self,
+        kg: &str,
+        relation: &str,
+        tuples: &[Tuple],
+    ) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        db.validate_tuples(relation, tuples)
+            .map_err(StorageError::Other)
+    }
+
+    /// Register or update a persistent schema in a specific knowledge graph
+    pub fn register_or_update_schema_in(
+        &self,
+        kg: &str,
+        schema: RelationSchema,
+    ) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.register_or_update_schema(schema)
+            .map_err(StorageError::Other)
+    }
+
+    /// Register or update a session schema in a specific knowledge graph (not persisted)
+    pub fn register_or_update_session_schema_in(
+        &self,
+        kg: &str,
+        schema: RelationSchema,
+    ) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.register_or_update_session_schema(schema)
+            .map_err(StorageError::Other)
+    }
+
+    /// Execute a query with rules prepended (current knowledge graph)
+    ///
+    /// Returns binary tuples (i32, i32) for backward compatibility.
+    /// For arbitrary arity results, use `execute_query_with_rules_tuples` instead.
+    pub fn execute_query_with_rules(&self, program: &str) -> StorageResult<Vec<(i32, i32)>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.execute_query_with_rules_on(&db_name, program)
+    }
+
+    /// Execute a query with rules prepended (specific knowledge graph)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
+    ///
+    /// Returns binary tuples (i32, i32) for backward compatibility.
+    /// For arbitrary arity results, use `execute_query_with_rules_tuples_on` instead.
+    pub fn execute_query_with_rules_on(
+        &self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<Vec<(i32, i32)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute_with_rules(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+    }
+
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (current knowledge graph)
+    pub fn execute_query_with_rules_tuples(&self, program: &str) -> StorageResult<Vec<Tuple>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .clone();
+
+        self.execute_query_with_rules_tuples_on(&db_name, program)
+    }
+
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific knowledge graph)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
+    pub fn execute_query_with_rules_tuples_on(
+        &self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<Vec<Tuple>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute_with_rules_tuples(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+    }
+
+    /// Execute a query with session facts on a specific knowledge graph
+    ///
+    /// Session facts are added to an ISOLATED COPY of the snapshot's data,
+    /// providing request-scoped isolation. Concurrent queries cannot see
+    /// each other's session facts.
+    ///
+    /// This fixes the race condition where the old approach of:
+    /// 1. Insert session facts to shared store
+    /// 2. Execute query
+    /// 3. Delete session facts
+    /// could expose session facts to concurrent queries.
+    pub fn execute_query_with_session_facts_on(
+        &self,
+        kg: &str,
+        program: &str,
+        session_facts: Vec<(String, Tuple)>,
+    ) -> StorageResult<Vec<Tuple>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute with session facts on isolated snapshot copy - completely lock-free
+        // The session facts are added to a CLONE of the data, not the shared store
+        snapshot
+            .execute_with_session_facts(program, session_facts)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+    }
+
+    /// List all relations (base facts) in the current knowledge graph
+    pub fn list_relations(&self) -> StorageResult<Vec<String>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.list_relations_in(db_name)
+    }
+
+    /// List all relations in a specific knowledge graph
+    pub fn list_relations_in(&self, kg: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        let relations: Vec<String> = db.metadata.relations.keys().cloned().collect();
+        Ok(relations)
+    }
+
+    /// Describe a relation in the current knowledge graph
+    pub fn describe_relation(&self, name: &str) -> StorageResult<Option<String>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.describe_relation_in(db_name, name)
+    }
+
+    /// Describe a relation in a specific knowledge graph
