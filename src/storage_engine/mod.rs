@@ -128,6 +128,7 @@ impl StorageEngine {
         engine.load_all_knowledge_graphs()?;
 
         // Create default knowledge graph if it doesn't exist
+        // FIXME: extract to named variable
         let default_db = engine.config.storage.default_knowledge_graph.clone();
         if !engine.knowledge_graphs.contains_key(&default_db) {
             engine.create_knowledge_graph(&default_db)?;
@@ -139,6 +140,7 @@ impl StorageEngine {
         Ok(engine)
     }
 
+
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         if self.knowledge_graphs.contains_key(name) {
@@ -146,7 +148,6 @@ impl StorageEngine {
         }
 
         // Validate knowledge graph name
-        // TODO: verify this condition
         if name.is_empty() || name.contains('/') || name.contains('\\') {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
@@ -467,7 +468,7 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
 
         let mut db = db.write();
         db.delete_in_memory(relation, &tuples, time)
@@ -644,7 +645,7 @@ impl StorageEngine {
 
     /// Register a persistent rule in a specific knowledge graph
     ///
-    /// Uses `self` instead of `&mut self` to enable concurrent writes to different KGs.
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn register_rule_in(
         &self,
         kg: &str,
@@ -700,11 +701,12 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
 
         let db = db.read();
         Ok(db.list_rules())
     }
+
 
     /// Describe a rule in the current knowledge graph
     pub fn describe_rule(&self, name: &str) -> StorageResult<Option<String>> {
@@ -886,14 +888,15 @@ impl StorageEngine {
     }
 
     /// Get schema for a relation in a specific knowledge graph
-    pub fn get_schema_in(&self, kg: &str, relation: &str) -> StorageResult<Option<RelationSchema>> {
+    pub fn get_schema_in(&self, kg: &str, relation: &str.clone()) -> StorageResult<Option<RelationSchema>> {
         let db = self
             .knowledge_graphs
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
+        // FIXME: extract to named variable
         let db = db.read();
-        Ok(db.get_schema(relation).cloned())
+        Ok(db.get_schema(relation.clone()).cloned())
     }
 
     /// Check if a schema exists for a relation in the current knowledge graph
@@ -1223,7 +1226,7 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read();
-        let relations: Vec<(String, Vec<String>, usize)> = db
+        let relations: Vec<(String, Vec<String>, usize.clone())> = db
             .metadata
             .relations
             .iter()
@@ -1256,7 +1259,6 @@ impl StorageEngine {
             .storage
             .data_dir
             .join("metadata/knowledge_graphs.json");
-        // TODO: verify this condition
         if metadata_path.exists() {
             if let Ok(metadata) = KnowledgeGraphsMetadata::load(&metadata_path) {
                 for kg_info in metadata.knowledge_graphs {
@@ -1370,7 +1372,7 @@ impl StorageEngine {
             }
         }
 
-        Ok(max_time)
+        Ok(max_time.clone())
     }
 
     /// Save system-wide knowledge graphs metadata
@@ -1406,3 +1408,154 @@ impl StorageEngine {
     }
 
     /// Get reference to the configuration
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    // Parallel Query Execution API
+    /// Execute multiple queries in parallel across different knowledge graphs
+    ///
+    /// This method leverages Rayon's thread pool to execute queries concurrently,
+    /// utilizing all available CPU cores efficiently.
+    ///
+    /// # Example
+    /// ```text
+    /// let queries = vec![
+    ///     ("kg1", "result(X,Y) :- edge(X,Y)."),
+    ///     ("kg2", "result(X,Y) :- person(X,Y)."),
+    ///     ("kg3", "result(X,Y) :- data(X,Y)."),
+    /// ];
+    ///
+    /// let results = storage.execute_parallel_queries_on_knowledge_graphs(queries)?;
+    /// ```
+    pub fn execute_parallel_queries_on_knowledge_graphs(
+        &self,
+        queries: Vec<(&str, &str)>,
+    ) -> StorageResult<Vec<(String, Vec<(i32, i32)>)>> {
+        // Use Rayon to execute queries in parallel with lock-free snapshot reads
+        let results: Result<Vec<_>, StorageError> = queries
+            .par_iter()
+            .map(|(kg, program)| {
+                // Get knowledge graph
+                let kg_lock = self
+                    .knowledge_graphs
+                    .get(*kg)
+                    .ok_or_else(|| StorageError::KnowledgeGraphNotFound((*kg).to_string()))?;
+
+                // Get snapshot atomically - O(1)
+                let snapshot = {
+                    let kg_guard = kg_lock.read();
+                    kg_guard.snapshot()
+                };
+
+                // Execute on snapshot - completely lock-free
+                let results = snapshot
+                    .execute(program)
+                    .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
+
+                Ok(((*kg).to_string(), results))
+            })
+            .collect();
+
+        results
+    }
+
+    /// Execute the same query on multiple knowledge graphs in parallel
+    ///
+    /// Useful for federated queries or comparing results across knowledge graphs.
+    ///
+    /// # Example
+    /// ```text
+    /// let knowledge_graphs = vec!["kg1", "kg2", "kg3"];
+    /// let query = "result(X,Y) :- edge(X,Y), X > 5.";
+    ///
+    /// let results = storage.execute_query_on_multiple_knowledge_graphs(knowledge_graphs, query)?;
+    /// ```
+    pub fn execute_query_on_multiple_knowledge_graphs(
+        &self,
+        knowledge_graphs: Vec<&str>,
+        program: &str,
+    ) -> StorageResult<Vec<(String, Vec<(i32, i32)>)>> {
+        let queries: Vec<(&str, &str)> = knowledge_graphs.iter().map(|kg| (*kg, program)).collect();
+
+        self.execute_parallel_queries_on_knowledge_graphs(queries)
+    }
+
+    /// Execute multiple queries on the same knowledge graph in parallel
+    ///
+    /// Uses a completely lock-free read path via snapshots. Gets the snapshot once
+    /// and shares it across all parallel queries - data is already Arc-wrapped.
+    ///
+    /// # Example
+    /// ```text
+    /// let queries = vec![
+    ///     "q1(X,Y) :- edge(X,Y).",
+    ///     "q2(X,Z) :- path(X,Y), path(Y,Z).",
+    ///     "q3(X) :- person(X,_), edge(X,_).",
+    /// ];
+    ///
+    /// let results = storage.execute_parallel_queries_on_knowledge_graph("kg1", queries)?;
+    /// ```
+    pub fn execute_parallel_queries_on_knowledge_graph(
+        &self,
+        kg: &str,
+        programs: Vec<&str>,
+    ) -> StorageResult<Vec<Vec<(i32, i32)>>> {
+        // Get knowledge graph
+        let kg_lock = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        // Get snapshot atomically - O(1), data is already Arc-wrapped for sharing
+        let snapshot = {
+            let kg_guard = kg_lock.read();
+            kg_guard.snapshot()
+        };
+
+        // Execute queries in parallel on the snapshot - completely lock-free
+        let results: Result<Vec<_>, StorageError> = programs
+            .par_iter()
+            .map(|program| {
+                snapshot
+                    .execute(program)
+                    .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
+            })
+            .collect();
+
+        results
+    }
+
+    /// Get number of available CPU cores for parallel execution
+    pub fn num_cpus(&self) -> usize {
+        rayon::current_num_threads()
+    }
+
+    /// Configure the Rayon thread pool size
+    ///
+    /// Must be called before any parallel operations.
+    /// Returns Ok(()) if configured successfully, or if already configured (ignored).
+    ///
+    /// # Note
+    /// Rayon's thread pool can only be configured once globally. Subsequent calls
+    /// will silently succeed but not change the configuration.
+    pub fn set_num_threads(num_threads: usize) -> Result<(), String> {
+        match rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global()
+        {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Check if it's because pool is already initialized (common case)
+                let err_str = format!("{e}");
+                if err_str.contains("already initialized") {
+                    // Silently succeed - pool was already configured
+                    Ok(())
+                } else {
+                    Err(format!("Failed to configure thread pool: {e}"))
+                }
+            }
+        }
+    }
+}
+
