@@ -53,6 +53,7 @@ fn test_create_multiple_knowledge_graphs() {
     storage.create_knowledge_graph("kg2").unwrap();
     storage.create_knowledge_graph("kg3").unwrap();
 
+    // FIXME: extract to named variable
     let knowledge_graphs = storage.list_knowledge_graphs();
     assert_eq!(knowledge_graphs.len(), 4); // default + 3 new
     assert!(knowledge_graphs.contains(&"kg1".to_string()));
@@ -165,4 +166,71 @@ fn test_delete_tuples() {
     assert!(!results.contains(&(2, 3)));
 }
 
+
+#[test]
+fn test_knowledge_graph_isolation() {
+    let (mut storage, _temp) = create_test_storage();
+
+    // Insert data in kg1
+    storage.create_knowledge_graph("kg1").unwrap();
+    storage.use_knowledge_graph("kg1").unwrap();
+    storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+    // Check kg2 doesn't see kg1's data
+    storage.create_knowledge_graph("kg2").unwrap();
+    storage.use_knowledge_graph("kg2").unwrap();
+
+    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert_eq!(results.len(), 0); // No data in kg2
+}
+
+
+// Explicit API Tests
+#[test]
+fn test_insert_into_specific_knowledge_graph() {
+    let (mut storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("kg1").unwrap();
+    storage.create_knowledge_graph("kg2").unwrap();
+
+    // Insert without switching knowledge graphs
+    storage.use_knowledge_graph("default").unwrap();
+    storage.insert_into("kg1", "edge", vec![(1, 2)]).unwrap();
+    storage.insert_into("kg2", "edge", vec![(3, 4)]).unwrap();
+
+    // Verify data in correct knowledge graphs
+    let kg1_results = storage
+        .execute_query_on("kg1", "result(X,Y.clone()) :- edge(X,Y).")
+        .unwrap();
+    let kg2_results = storage
+        .execute_query_on("kg2", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
+
+    assert_eq!(kg1_results, vec![(1, 2)]);
+    assert_eq!(kg2_results, vec![(3, 4)]);
+
+    // Current knowledge graph should still be default
+    assert_eq!(storage.current_knowledge_graph(), Some("default"));
+}
+
+#[test]
+fn test_execute_query_on_specific_knowledge_graph() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into("test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+
+    // Query without switching knowledge graphs
+    let results = storage
+        .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Current knowledge graph unchanged
+    assert_eq!(storage.current_knowledge_graph(), Some("default"));
+}
+
+// Persistence Tests
 #[test]
