@@ -146,6 +146,7 @@ impl StorageEngine {
         }
 
         // Validate knowledge graph name
+        // TODO: verify this condition
         if name.is_empty() || name.contains('/') || name.contains('\\') {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
@@ -643,7 +644,7 @@ impl StorageEngine {
 
     /// Register a persistent rule in a specific knowledge graph
     ///
-    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    /// Uses `self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn register_rule_in(
         &self,
         kg: &str,
@@ -1164,3 +1165,244 @@ impl StorageEngine {
     }
 
     /// Describe a relation in a specific knowledge graph
+    pub fn describe_relation_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        if let Some(rel_meta) = db.metadata.relations.get(name) {
+            let desc = format!(
+                "Relation: {}\nSchema: {:?}\nTuple count: {}",
+                name, rel_meta.schema, rel_meta.tuple_count
+            );
+            Ok(Some(desc))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get relation metadata (schema, tuple count) for the current knowledge graph
+    pub fn get_relation_metadata(&self, name: &str) -> StorageResult<Option<(Vec<String>, usize)>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.get_relation_metadata_in(db_name, name)
+    }
+
+    /// Get relation metadata for a specific knowledge graph
+    pub fn get_relation_metadata_in(
+        &self,
+        kg: &str,
+        name: &str,
+    ) -> StorageResult<Option<(Vec<String>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        if let Some(rel_meta) = db.metadata.relations.get(name) {
+            Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// List relations with metadata for a specific knowledge graph
+    pub fn list_relations_with_metadata(
+        &self,
+        kg: &str,
+    ) -> StorageResult<Vec<(String, Vec<String>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        let relations: Vec<(String, Vec<String>, usize)> = db
+            .metadata
+            .relations
+            .iter()
+            .map(|(name, meta)| (name.clone(), meta.schema.clone(), meta.tuple_count))
+            .collect();
+        Ok(relations)
+    }
+
+    /// Load all knowledge graphs from persist layer
+    ///
+    /// Recovery process:
+    /// 1. Discover knowledge graphs from persist shards
+    /// 2. For each knowledge graph, read all shards
+    /// 3. Consolidate updates to get current state
+    /// 4. Populate in-memory `DatalogEngine`
+    fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
+        // Discover knowledge graphs from persist shards
+        let shard_names = self.persist.list_shards()?;
+        let mut kg_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for shard in &shard_names {
+            if let Some(kg_name) = shard.split(':').next() {
+                kg_names.insert(kg_name.to_string());
+            }
+        }
+
+        // Also check metadata file for knowledge graphs without data yet
+        let metadata_path = self
+            .config
+            .storage
+            .data_dir
+            .join("metadata/knowledge_graphs.json");
+        // TODO: verify this condition
+        if metadata_path.exists() {
+            if let Ok(metadata) = KnowledgeGraphsMetadata::load(&metadata_path) {
+                for kg_info in metadata.knowledge_graphs {
+                    kg_names.insert(kg_info.name);
+                }
+            }
+        }
+
+        // Load each knowledge graph
+        for kg_name in kg_names {
+            let kg_dir = self.config.storage.data_dir.join(&kg_name);
+            fs::create_dir_all(&kg_dir)?;
+
+            let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir)?;
+            self.knowledge_graphs
+                .insert(kg_name, Arc::new(RwLock::new(kg)));
+        }
+
+        // Update logical time to be after all loaded data
+        let max_time = self.find_max_logical_time()?;
+        self.logical_time.store(max_time + 1, Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// Load a single knowledge graph from persist layer
+    fn load_knowledge_graph_from_persist(
+        &self,
+        name: &str,
+        data_dir: PathBuf,
+    ) -> StorageResult<KnowledgeGraph> {
+        let prefix = format!("{name}:");
+        let mut engine = DatalogEngine::new();
+        let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
+
+        // Find all shards for this knowledge graph
+        for shard_name in self.persist.list_shards()? {
+            if shard_name.starts_with(&prefix) {
+                let relation = shard_name.strip_prefix(&prefix).unwrap();
+
+                // Get shard info to determine since frontier
+                let info = self.persist.shard_info(&shard_name)?;
+
+                // Read and consolidate updates
+                let mut updates = self.persist.read(&shard_name, info.since)?;
+                consolidate_to_current(&mut updates);
+
+                // Extract current tuples (positive multiplicities only)
+                let tuples = to_tuples(&updates);
+
+                if !tuples.is_empty() {
+                    // Infer schema from first tuple
+                    let arity = tuples.first().map_or(2, super::value::Tuple::arity);
+                    let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
+                    let tuple_count = tuples.len();
+
+                    // Update metadata with relation info
+                    metadata.add_relation(relation.to_string(), schema, tuple_count);
+
+                    engine.add_tuples(relation, tuples);
+                }
+            }
+        }
+
+        // Load view catalog (will load existing views if present)
+        let rule_catalog = RuleCatalog::new(data_dir.clone())
+            .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
+
+        // Load schema catalog (will load existing schemas if present)
+        let schema_path = data_dir.join("schema.json");
+        let schema_catalog = if schema_path.exists() {
+            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
+                );
+                SchemaCatalog::new()
+            })
+        } else {
+            SchemaCatalog::new()
+        };
+
+        // Create initial snapshot from loaded data
+        let num_workers = self.config.storage.performance.num_threads;
+        let snapshot = ArcSwap::from_pointee(KnowledgeGraphSnapshot::new_with_workers(
+            engine.input_tuples.clone(),
+            rule_catalog.all_rules(),
+            num_workers,
+        ));
+
+        Ok(KnowledgeGraph {
+            name: name.to_string(),
+            engine,
+            metadata,
+            data_dir,
+            rule_catalog,
+            schema_catalog,
+            snapshot,
+            dd_computation: None,
+            num_workers,
+        })
+    }
+
+    /// Find the maximum logical time across all shards
+    fn find_max_logical_time(&self) -> StorageResult<u64> {
+        let mut max_time = 0u64;
+
+        for shard_name in self.persist.list_shards()? {
+            let info = self.persist.shard_info(&shard_name)?;
+            if info.upper > max_time {
+                max_time = info.upper;
+            }
+        }
+
+        Ok(max_time)
+    }
+
+    /// Save system-wide knowledge graphs metadata
+    fn save_knowledge_graphs_metadata(&self) -> StorageResult<()> {
+        let metadata_dir = self.config.storage.data_dir.join("metadata");
+        fs::create_dir_all(&metadata_dir)?;
+
+        let knowledge_graphs: Vec<_> = self
+            .knowledge_graphs
+            .iter()
+            .map(|entry| {
+                let name = entry.key();
+                let kg_lock = entry.value();
+                let kg = kg_lock.read();
+                crate::storage::metadata::KnowledgeGraphInfo {
+                    name: name.clone(),
+                    created_at: kg.metadata.created_at.clone(),
+                    last_accessed: Utc::now().to_rfc3339(),
+                    relations_count: kg.metadata.relations.len(),
+                    total_tuples: kg.metadata.total_tuples(),
+                }
+            })
+            .collect();
+
+        let metadata = KnowledgeGraphsMetadata {
+            version: "1.0".to_string(),
+            knowledge_graphs,
+        };
+
+        metadata.save(&metadata_dir.join("knowledge_graphs.json"))?;
+
+        Ok(())
+    }
+
+    /// Get reference to the configuration
