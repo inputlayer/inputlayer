@@ -661,7 +661,7 @@ impl StorageEngine {
     }
 
     /// Drop a rule from the current knowledge graph
-    pub fn drop_rule(&self, name: &str) -> StorageResult<()> {
+    pub fn drop_rule(self, name: &str) -> StorageResult<()> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -1524,7 +1524,7 @@ impl StorageEngine {
     }
 
     /// Get number of available CPU cores for parallel execution
-    pub fn num_cpus(&self) -> usize {
+    pub fn num_cpus(self) -> usize {
         rayon::current_num_threads()
     }
 
@@ -1803,3 +1803,236 @@ impl KnowledgeGraph {
     ///
     /// # Errors
     /// Returns error if DD shadow write fails.
+    fn delete_in_memory(
+        &mut self,
+        relation: &str,
+        tuples_to_remove: &[Tuple],
+        time: u64,
+    ) -> StorageResult<usize> {
+        // Get schema from metadata (which has the correct arity from insert time)
+        // Avoid using catalog which may not have the schema for base facts
+        let schema = self.metadata.relations.get(relation).map_or_else(
+            || vec!["col0".to_string(), "col1".to_string()],
+            |r| r.schema.clone(),
+        );
+
+        let mut found = false;
+        let mut final_count = 0;
+        let mut deleted_count = 0;
+
+        // Collect actually-deleted tuples for DD shadow write
+        let mut deleted_tuples_for_dd = Vec::new();
+
+        // Update production format (input_tuples)
+        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
+            // Find which tuples will actually be deleted
+            for t in tuples_to_remove {
+                if existing.contains(t) {
+                    deleted_tuples_for_dd.push(t.clone());
+                }
+            }
+            let count_before = existing.len();
+            // Remove tuples
+            existing.retain(|tuple| !tuples_to_remove.contains(tuple));
+            final_count = existing.len();
+            deleted_count = count_before - final_count;
+            found = true;
+        }
+
+        // Update metadata if we found and modified data
+        if found {
+            self.metadata
+                .add_relation(relation.to_string(), schema, final_count);
+
+            // Shadow write deletes to DDComputation (only if DD exists).
+            // Uses the logical timestamp from StorageEngine.
+            if !deleted_tuples_for_dd.is_empty() {
+                // TODO: verify this condition
+                if let Some(dd) = &self.dd_computation {
+                    dd.delete(relation, deleted_tuples_for_dd, time)
+                        .map_err(StorageError::DDComputationError)?;
+                    // Invalidate derived relations that depend on this base
+                    dd.notify_base_update(relation)
+                        .map_err(StorageError::DDComputationError)?;
+                    // Invalidate indexes that depend on this base relation
+                    dd.notify_indexes_base_update(relation)
+                        .map_err(StorageError::DDComputationError)?;
+                    // Auto-rematerialize invalidated rules
+                    self.auto_rematerialize_invalid_rules();
+                }
+            }
+
+            // Publish new snapshot for lock-free reads
+            self.publish_snapshot();
+        }
+
+        Ok(deleted_count)
+    }
+
+    /// Get knowledge graph name
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get knowledge graph metadata
+    pub fn metadata(&self) -> &KnowledgeGraphMetadata {
+        &self.metadata
+    }
+
+    // View Management
+    /// Register a persistent view
+    /// Returns whether view was created or rule was added
+    ///
+    /// When a persistent rule is registered, we automatically:
+    /// 1. Register it with DDComputation for dependency tracking
+    /// 2. Execute the rule against current base data
+    /// 3. Store the results as materialized data
+    /// This enables session rules to immediately use the materialized output.
+    pub fn register_rule(
+        &mut self,
+        rule_def: &RuleDef,
+    ) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
+        let result = self.rule_catalog.register_rule(rule_def)?;
+
+        // Register with DDComputation for materialization
+        if let Some(ref dd) = self.dd_computation {
+            let compiled_rule = self.compile_rule_for_dd(rule_def);
+            if let Err(e) = dd.register_rule(compiled_rule) {
+                eprintln!("Warning: failed to register rule with DDComputation: {e}");
+            }
+
+            // Auto-materialize the rule
+            // Execute the rule against current base data and store results
+            if let Err(e) = self.auto_materialize_rule(&rule_def.name) {
+                eprintln!(
+                    "Warning: failed to auto-materialize rule '{}': {e}",
+                    rule_def.name
+                );
+            }
+        }
+
+        self.publish_snapshot();
+        Ok(result)
+    }
+
+    /// Auto-materialize a single rule by executing it and storing results
+    ///
+    /// This is called when a rule is registered to ensure session rules
+    /// can immediately use the materialized output.
+    fn auto_materialize_rule(&self, rule_name: &str) -> Result<(), String> {
+        // Get the rule definition
+        let rule = self
+            .rule_catalog
+            .get(rule_name)
+            .ok_or_else(|| format!("Rule '{rule_name}' not found"))?;
+
+        // Build program from all rule clauses
+        let clauses = rule.to_rules();
+        if clauses.is_empty() {
+            return Ok(());
+        }
+
+        // Build the query program
+        let mut program = String::new();
+        for clause in &clauses {
+            program.push_str(&format_rule(clause));
+            program.push('\n');
+        }
+
+        // Query for all results: ?- rule_name(X, Y, ...).
+        // We need to figure out the arity from the head
+        let first_clause = &clauses[0];
+        let arity = first_clause.head.args.len();
+        let vars: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
+        let query = format!("?- {}({}).", rule_name, vars.join(", "));
+        program.push_str(&query);
+
+        // Execute using a fresh engine with cloned data (like snapshot execution)
+        // This avoids needing &mut self
+        let mut temp_engine = crate::DatalogEngine::new();
+        temp_engine
+            .input_tuples
+            .clone_from(&self.engine.input_tuples);
+        temp_engine.set_num_workers(self.num_workers);
+        let tuples = temp_engine.execute_tuples(&program)?;
+
+        // Store as materialized
+        if let Some(ref dd) = self.dd_computation {
+            dd.set_materialized(rule_name, tuples)?;
+        }
+
+        Ok(())
+    }
+
+    /// Auto-rematerialize all invalid derived relations
+    ///
+    /// Called after base data changes to ensure materializations stay current.
+    /// This enables session rules to always see up-to-date materialized data.
+    fn auto_rematerialize_invalid_rules(&self) {
+        let dd = match &self.dd_computation {
+            Some(dd) => dd,
+            None => return,
+        };
+
+        // Get list of invalid (needs rematerialization) relations
+        let invalid_relations = {
+            let manager = dd.derived_relations();
+            let guard = manager.lock();
+            guard.get_invalid_relations()
+        };
+
+        // Rematerialize each invalid relation
+        for relation in invalid_relations {
+            if let Err(e) = self.auto_materialize_rule(&relation) {
+                // Log warning but don't fail - best effort rematerialization
+                eprintln!("Warning: failed to rematerialize '{relation}': {e}");
+            }
+        }
+    }
+
+    /// Compile a RuleDef into a CompiledRule for DDComputation
+    fn compile_rule_for_dd(&self, rule_def: &RuleDef) -> CompiledRule {
+        use std::collections::HashSet;
+
+        let name = rule_def.name.clone();
+
+        // Extract dependencies from rule body
+        let mut dependencies: HashSet<String> = HashSet::new();
+        for body_pred in &rule_def.rule.body {
+            if let SerializableBodyPred::Atom { relation, .. } = body_pred {
+                // Don't count the rule's own head as a dependency (for recursive rules)
+                if relation != &name {
+                    dependencies.insert(relation.clone());
+                }
+            }
+        }
+
+        // Check if rule is recursive (references itself in body)
+        let is_recursive = rule_def.rule.body.iter().any(|p| {
+            if let SerializableBodyPred::Atom { relation, .. } = p {
+                relation == &name
+            } else {
+                false
+            }
+        });
+
+        // Extract output schema from head args
+        let output_schema: Vec<String> = rule_def
+            .rule
+            .head_args
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("col{i}"))
+            .collect();
+
+        CompiledRule {
+            name,
+            clauses: vec![], // IR compilation deferred to execution time
+            dependencies,
+            is_recursive,
+            output_schema,
+            stratum: 0, // Stratum computed by RuleCatalog
+        }
+    }
+
+    /// Drop a view
