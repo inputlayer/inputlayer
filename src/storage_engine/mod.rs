@@ -128,7 +128,6 @@ impl StorageEngine {
         engine.load_all_knowledge_graphs()?;
 
         // Create default knowledge graph if it doesn't exist
-        // FIXME: extract to named variable
         let default_db = engine.config.storage.default_knowledge_graph.clone();
         if !engine.knowledge_graphs.contains_key(&default_db) {
             engine.create_knowledge_graph(&default_db)?;
@@ -140,7 +139,6 @@ impl StorageEngine {
         Ok(engine)
     }
 
-
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         if self.knowledge_graphs.contains_key(name) {
@@ -148,6 +146,7 @@ impl StorageEngine {
         }
 
         // Validate knowledge graph name
+        // TODO: verify this condition
         if name.is_empty() || name.contains('/') || name.contains('\\') {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
@@ -468,7 +467,7 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write();
         db.delete_in_memory(relation, &tuples, time)
@@ -701,12 +700,11 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read();
         Ok(db.list_rules())
     }
-
 
     /// Describe a rule in the current knowledge graph
     pub fn describe_rule(&self, name: &str) -> StorageResult<Option<String>> {
@@ -888,15 +886,14 @@ impl StorageEngine {
     }
 
     /// Get schema for a relation in a specific knowledge graph
-    pub fn get_schema_in(&self, kg: &str, relation: &str.clone()) -> StorageResult<Option<RelationSchema>> {
+    pub fn get_schema_in(&self, kg: &str, relation: &str) -> StorageResult<Option<RelationSchema>> {
         let db = self
             .knowledge_graphs
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // FIXME: extract to named variable
         let db = db.read();
-        Ok(db.get_schema(relation.clone()).cloned())
+        Ok(db.get_schema(relation).cloned())
     }
 
     /// Check if a schema exists for a relation in the current knowledge graph
@@ -1226,7 +1223,7 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read();
-        let relations: Vec<(String, Vec<String>, usize.clone())> = db
+        let relations: Vec<(String, Vec<String>, usize)> = db
             .metadata
             .relations
             .iter()
@@ -1372,7 +1369,7 @@ impl StorageEngine {
             }
         }
 
-        Ok(max_time.clone())
+        Ok(max_time)
     }
 
     /// Save system-wide knowledge graphs metadata
@@ -1559,3 +1556,250 @@ impl StorageEngine {
     }
 }
 
+impl KnowledgeGraph {
+    /// Create a new empty knowledge graph with configurable worker count
+    fn new_with_workers(name: String, data_dir: PathBuf, num_workers: usize) -> Self {
+        // Create rule catalog (will load existing rules if present)
+        let rule_catalog = RuleCatalog::new(data_dir.clone()).unwrap_or_else(|e| {
+            // Log warning but create empty catalog to avoid panic
+            eprintln!(
+                "Warning: Failed to load rule catalog for '{name}': {e}. Creating empty catalog."
+            );
+            RuleCatalog::empty()
+        });
+
+        // Create schema catalog (will load existing schemas if present)
+        let schema_path = data_dir.join("schema.json");
+        let schema_catalog = if schema_path.exists() {
+            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
+                );
+                SchemaCatalog::new()
+            })
+        } else {
+            SchemaCatalog::new()
+        };
+
+        // Create initial empty snapshot
+        let snapshot = ArcSwap::from_pointee(KnowledgeGraphSnapshot::empty());
+
+        KnowledgeGraph {
+            name: name.clone(),
+            engine: DatalogEngine::new(),
+            metadata: KnowledgeGraphMetadata::new(name),
+            data_dir,
+            rule_catalog,
+            schema_catalog,
+            snapshot,
+            dd_computation: None,
+            num_workers,
+        }
+    }
+
+    /// Enable the DDComputation for incremental updates.
+    ///
+    /// Creates a persistent DD computation worker thread for this knowledge graph.
+    /// Once enabled, all inserts and deletes are shadow-written to DD.
+    /// This is required for reading from arrangements and HNSW indexing.
+    ///
+    /// # Errors
+    /// Returns error if worker thread fails to spawn or replaying existing data fails.
+    pub fn enable_dd_computation(&mut self) -> StorageResult<()> {
+        if self.dd_computation.is_none() {
+            let dd = DDComputation::new(vec![]).map_err(StorageError::DDComputationError)?;
+
+            // Replay existing data into DDComputation so arrangements are
+            // populated immediately. This handles the case where data was
+            // loaded from persistence before DDComputation was enabled.
+            for (relation, tuples) in &self.engine.input_tuples {
+                if !tuples.is_empty() {
+                    dd.insert(relation, tuples.clone(), 0)
+                        .map_err(StorageError::DDComputationError)?;
+                }
+            }
+
+            self.dd_computation = Some(dd);
+        }
+        Ok(())
+    }
+
+    /// Get a reference to the DDComputation (if enabled).
+    ///
+    /// Used for reading from DD arrangements and verifying consistency.
+    pub fn dd_computation(&self) -> Option<&DDComputation> {
+        self.dd_computation.as_ref()
+    }
+
+    /// Publish a new snapshot atomically
+    ///
+    /// Called after data modifications to make changes visible to readers.
+    /// This is O(1) - just an atomic pointer swap.
+    ///
+    /// If DDComputation has valid materializations, includes them
+    /// in the snapshot. Materialized tuples are merged into input_tuples,
+    /// and their rules are skipped during query execution.
+    ///
+    /// IMPORTANT: This method holds the DerivedRelationsManager lock through
+    /// the entire snapshot creation AND publication to prevent TOCTOU races.
+    /// Without this, another thread could invalidate materializations between
+    /// reading them and publishing the snapshot.
+    fn publish_snapshot(&self) {
+        // Start with base relation data
+        let mut input_tuples = self.engine.input_tuples.clone();
+        let rules = self.rule_catalog.all_rules();
+
+        // Gather valid materializations from DDComputation
+        // CRITICAL: Hold the lock through snapshot creation AND publication
+        // to prevent TOCTOU race conditions.
+        if let Some(ref dd) = self.dd_computation {
+            let manager = dd.derived_relations();
+            let manager_guard = manager.lock();
+
+            // Get all valid materializations
+            let materializations = manager_guard.get_all_valid_materializations();
+
+            // Merge materialized tuples into input_tuples
+            // They appear as base facts so the rules don't need to recompute them
+            for (rel_name, tuples) in materializations {
+                input_tuples
+                    .entry(rel_name.clone())
+                    .or_default()
+                    .extend(tuples);
+            }
+
+            // Get names of materialized relations
+            let materialized_names = manager_guard.get_materialized_relation_names();
+
+            // Create AND publish snapshot while still holding the lock
+            // This ensures no concurrent invalidation can occur between
+            // reading materializations and making them visible to readers.
+            let new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+                input_tuples,
+                rules,
+                self.num_workers,
+                materialized_names,
+            );
+            self.snapshot.store(Arc::new(new_snapshot));
+
+            // Lock drops here AFTER publication - this is the fix for TOCTOU
+        } else {
+            // No DD computation - publish without materializations
+            let new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+                input_tuples,
+                rules,
+                self.num_workers,
+                HashSet::new(),
+            );
+            self.snapshot.store(Arc::new(new_snapshot));
+        }
+    }
+
+    /// Get the current snapshot for lock-free reads
+    ///
+    /// Returns an Arc to the current snapshot. This is O(1) and lock-free.
+    pub fn snapshot(&self) -> Arc<KnowledgeGraphSnapshot> {
+        self.snapshot.load_full()
+    }
+
+    /// Materialize a derived relation and publish a new snapshot
+    ///
+    /// This is the proper way to store materialized data:
+    /// 1. Stores the tuples in DDComputation's DerivedRelationsManager
+    /// 2. Publishes a new snapshot that includes the materialized data
+    ///
+    /// After this call, queries via `snapshot()` will see the materialized data.
+    pub fn materialize_derived_relation(
+        &self,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> Result<(), String> {
+        if let Some(ref dd) = self.dd_computation {
+            dd.set_materialized(relation, tuples)?;
+            self.publish_snapshot();
+            Ok(())
+        } else {
+            Err("DDComputation not enabled".to_string())
+        }
+    }
+
+    /// Insert tuples into in-memory state only
+    ///
+    /// Persistence is handled by `StorageEngine` via the persist layer.
+    /// Returns (`new_count`, `duplicate_count`) for caller to report.
+    ///
+    /// # Errors
+    /// Returns error if DD shadow write fails.
+    fn insert_in_memory(
+        &mut self,
+        relation: &str,
+        tuples: Vec<Tuple>,
+        time: u64,
+    ) -> StorageResult<(usize, usize)> {
+        // Infer schema from first tuple if available
+        let schema = if let Some(first) = tuples.first() {
+            (0..first.arity())
+                .map(|i| format!("col{i}"))
+                .collect::<Vec<_>>()
+        } else {
+            vec!["col0".to_string(), "col1".to_string()]
+        };
+
+        // Update in-memory production format (input_tuples)
+        let mut new_count = 0;
+        let mut dup_count = 0;
+        let mut new_tuples_for_dd = Vec::new();
+
+        // Get or create the relation's tuple storage
+        let existing_tuples = self
+            .engine
+            .input_tuples
+            .entry(relation.to_string())
+            .or_default();
+
+        for tuple in tuples {
+            if existing_tuples.contains(&tuple) {
+                dup_count += 1;
+            } else {
+                new_tuples_for_dd.push(tuple.clone());
+                existing_tuples.push(tuple);
+                new_count += 1;
+            }
+        }
+        let tuple_count = existing_tuples.len();
+
+        // Update metadata
+        self.metadata
+            .add_relation(relation.to_string(), schema, tuple_count);
+
+        // Shadow write new tuples to DDComputation (if enabled).
+        // Uses the logical timestamp from StorageEngine for proper time tracking.
+        // Time advancement is lazy  -  only happens when a consistent read is requested.
+        if !new_tuples_for_dd.is_empty() {
+            if let Some(dd) = &self.dd_computation {
+                dd.insert(relation, new_tuples_for_dd, time)
+                    .map_err(StorageError::DDComputationError)?;
+                // Invalidate derived relations that depend on this base
+                dd.notify_base_update(relation)
+                    .map_err(StorageError::DDComputationError)?;
+                // Invalidate indexes that depend on this base relation
+                dd.notify_indexes_base_update(relation)
+                    .map_err(StorageError::DDComputationError)?;
+                // Auto-rematerialize invalidated rules
+                self.auto_rematerialize_invalid_rules();
+            }
+        }
+
+        // Publish new snapshot for lock-free reads
+        self.publish_snapshot();
+
+        Ok((new_count, dup_count))
+    }
+
+    /// Delete tuples from in-memory state only
+    ///
+    /// Persistence is handled by `StorageEngine` via the persist layer.
+    /// Returns the count of actually deleted tuples.
+    ///
+    /// # Errors
+    /// Returns error if DD shadow write fails.

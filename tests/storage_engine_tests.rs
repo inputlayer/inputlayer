@@ -53,7 +53,6 @@ fn test_create_multiple_knowledge_graphs() {
     storage.create_knowledge_graph("kg2").unwrap();
     storage.create_knowledge_graph("kg3").unwrap();
 
-    // FIXME: extract to named variable
     let knowledge_graphs = storage.list_knowledge_graphs();
     assert_eq!(knowledge_graphs.len(), 4); // default + 3 new
     assert!(knowledge_graphs.contains(&"kg1".to_string()));
@@ -166,7 +165,6 @@ fn test_delete_tuples() {
     assert!(!results.contains(&(2, 3)));
 }
 
-
 #[test]
 fn test_knowledge_graph_isolation() {
     let (mut storage, _temp) = create_test_storage();
@@ -184,7 +182,6 @@ fn test_knowledge_graph_isolation() {
     assert_eq!(results.len(), 0); // No data in kg2
 }
 
-
 // Explicit API Tests
 #[test]
 fn test_insert_into_specific_knowledge_graph() {
@@ -200,7 +197,7 @@ fn test_insert_into_specific_knowledge_graph() {
 
     // Verify data in correct knowledge graphs
     let kg1_results = storage
-        .execute_query_on("kg1", "result(X,Y.clone()) :- edge(X,Y).")
+        .execute_query_on("kg1", "result(X,Y) :- edge(X,Y).")
         .unwrap();
     let kg2_results = storage
         .execute_query_on("kg2", "result(X,Y) :- edge(X,Y).")
@@ -233,4 +230,77 @@ fn test_execute_query_on_specific_knowledge_graph() {
 }
 
 // Persistence Tests
+#[test]
+fn test_save_and_load_knowledge_graph() {
+    let temp = TempDir::new().unwrap();
+
+    // Create and populate knowledge graph
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("persist_test").unwrap();
+        storage.use_knowledge_graph("persist_test").unwrap();
+        storage
+            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+            .unwrap();
+        storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
+
+        storage.save_knowledge_graph("persist_test").unwrap();
+    }
+
+    // Load knowledge graph in new storage engine instance
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.use_knowledge_graph("persist_test").unwrap();
+
+        let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+        let person_results = storage
+            .execute_query("result(X,Y) :- person(X,Y).")
+            .unwrap();
+
+        assert_eq!(edge_results.len(), 3);
+        assert_eq!(person_results.len(), 2);
+        assert!(edge_results.contains(&(1, 2)));
+        assert!(person_results.contains(&(1, 100)));
+    }
+}
+
+#[test]
+fn test_save_all_knowledge_graphs() {
+    let temp = TempDir::new().unwrap();
+
+    // Create multiple knowledge graphs
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.insert_into("kg1", "data", vec![(1, 1)]).unwrap();
+
+        storage.create_knowledge_graph("kg2").unwrap();
+        storage.insert_into("kg2", "data", vec![(2, 2)]).unwrap();
+
+        storage.save_all().unwrap();
+    }
+
+    // Load and verify
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let kg1_results = storage
+            .execute_query_on("kg1", "result(X,Y) :- data(X,Y).")
+            .unwrap();
+        let kg2_results = storage
+            .execute_query_on("kg2", "result(X,Y) :- data(X,Y).")
+            .unwrap();
+
+        assert_eq!(kg1_results, vec![(1, 1)]);
+        assert_eq!(kg2_results, vec![(2, 2)]);
+    }
+}
+
 #[test]
