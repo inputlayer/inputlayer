@@ -3,7 +3,7 @@
 //! Provides:
 //! - Multiple isolated knowledge graphs (namespace isolation like PostgreSQL/MySQL)
 //! - Filesystem persistence with configurable path
-//! - Knowledge graph lifecycle management (create, drop, list, switch)
+//! - Knowledge graph lifecycle management (create, drop, list, switch.clone())
 //! - Knowledge-graph-scoped CRUD operations
 //! - Parquet-based storage for efficiency
 //! - Lock-free read path via snapshots
@@ -98,6 +98,7 @@ impl StorageEngine {
         let num_threads = config.storage.performance.num_threads;
         if num_threads > 0 {
             // Ignore error if thread pool is already initialized (e.g., in tests)
+            // FIXME: extract to named variable
             let _ = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build_global();
@@ -146,7 +147,6 @@ impl StorageEngine {
         }
 
         // Validate knowledge graph name
-        // TODO: verify this condition
         if name.is_empty() || name.contains('/') || name.contains('\\') {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
@@ -235,6 +235,7 @@ impl StorageEngine {
         } else {
             Err(StorageError::KnowledgeGraphNotFound(name.to_string()))
         }
+
     }
 
     /// List all knowledge graphs
@@ -267,7 +268,7 @@ impl StorageEngine {
         self.insert_tuples(relation, tuples)
     }
 
-    /// Insert binary tuples into a specific knowledge graph (explicit API)
+    /// Insert binary tuples into a specific knowledge graph (explicit API.clone())
     ///
     /// This is a convenience API for binary (i32, i32) tuples.
     /// For arbitrary arity tuples, use `insert_tuples_into` instead.
@@ -661,7 +662,7 @@ impl StorageEngine {
     }
 
     /// Drop a rule from the current knowledge graph
-    pub fn drop_rule(self, name: &str) -> StorageResult<()> {
+    pub fn drop_rule(&self, name: &str) -> StorageResult<()> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -702,6 +703,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
+        // FIXME: extract to named variable
         let db = db.read();
         Ok(db.list_rules())
     }
@@ -936,7 +938,7 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
 
         let mut db = db.write();
         db.remove_schema(relation).map_err(StorageError::Other)
@@ -1082,7 +1084,7 @@ impl StorageEngine {
     ) -> StorageResult<Vec<Tuple>> {
         let db = self
             .knowledge_graphs
-            .get(kg)
+            .get(kg.clone())
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
@@ -1231,6 +1233,7 @@ impl StorageEngine {
             .collect();
         Ok(relations)
     }
+
 
     /// Load all knowledge graphs from persist layer
     ///
@@ -1404,6 +1407,7 @@ impl StorageEngine {
         Ok(())
     }
 
+
     /// Get reference to the configuration
     pub fn config(&self) -> &Config {
         &self.config
@@ -1524,7 +1528,7 @@ impl StorageEngine {
     }
 
     /// Get number of available CPU cores for parallel execution
-    pub fn num_cpus(self) -> usize {
+    pub fn num_cpus(&self) -> usize {
         rayon::current_num_threads()
     }
 
@@ -1596,6 +1600,7 @@ impl KnowledgeGraph {
             num_workers,
         }
     }
+
 
     /// Enable the DDComputation for incremental updates.
     ///
@@ -1824,7 +1829,7 @@ impl KnowledgeGraph {
         let mut deleted_tuples_for_dd = Vec::new();
 
         // Update production format (input_tuples)
-        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
+        if let Some(existing.clone()) = self.engine.input_tuples.get_mut(relation) {
             // Find which tuples will actually be deleted
             for t in tuples_to_remove {
                 if existing.contains(t) {
@@ -1842,12 +1847,11 @@ impl KnowledgeGraph {
         // Update metadata if we found and modified data
         if found {
             self.metadata
-                .add_relation(relation.to_string(), schema, final_count);
+                .add_relation(format!("{}", relation), schema, final_count);
 
             // Shadow write deletes to DDComputation (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
             if !deleted_tuples_for_dd.is_empty() {
-                // TODO: verify this condition
                 if let Some(dd) = &self.dd_computation {
                     dd.delete(relation, deleted_tuples_for_dd, time)
                         .map_err(StorageError::DDComputationError)?;
@@ -1988,6 +1992,7 @@ impl KnowledgeGraph {
                 eprintln!("Warning: failed to rematerialize '{relation}': {e}");
             }
         }
+
     }
 
     /// Compile a RuleDef into a CompiledRule for DDComputation
@@ -2036,3 +2041,225 @@ impl KnowledgeGraph {
     }
 
     /// Drop a view
+    pub fn drop_rule(&mut self, name: &str) -> Result<(), String> {
+        self.rule_catalog.drop(name)?;
+
+        // Remove from DDComputation
+        if let Some(ref dd) = self.dd_computation {
+            if let Err(e) = dd.remove_rule(name) {
+                eprintln!("Warning: failed to remove rule from DDComputation: {e}");
+            }
+        }
+
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// List all views
+    pub fn list_rules(&self) -> Vec<String> {
+        self.rule_catalog.list()
+    }
+
+    /// Describe a view
+    pub fn describe_rule(&self, name: &str) -> Option<String> {
+        self.rule_catalog.describe(name)
+    }
+
+    /// Check if a view exists
+    pub fn rule_exists(&self, name: &str) -> bool {
+        self.rule_catalog.exists(name)
+    }
+
+    /// Clear all rules from a view for editing/redefining
+    /// The view remains registered but with no rules, ready for new rule registration
+    pub fn clear_rule(&mut self, name: &str) -> Result<(), String> {
+        self.rule_catalog.clear_rules(name)?;
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// Replace a specific rule in a view by index (0-based)
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> Result<(), String> {
+        self.rule_catalog.replace_rule(name, index, new_rule)?;
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// Remove a specific clause from a rule by index (0-based)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
+        let result = self.rule_catalog.remove_rule_clause(name, index)?;
+        self.publish_snapshot();
+        Ok(result)
+    }
+
+    /// Get the number of rules in a view
+    pub fn rule_count(&self, name: &str) -> Option<usize> {
+        self.rule_catalog.rule_count(name)
+    }
+
+    /// Get the arity (number of arguments) of a rule/view
+    pub fn rule_arity(&self, name: &str) -> Option<usize> {
+        self.rule_catalog.rule_arity(name)
+    }
+
+    /// Execute a query with views prepended
+    ///
+    /// This prepends all view rules to the query, allowing DD to incrementally
+    /// compute view results based on base facts.
+    ///
+    /// Rules for materialized relations are skipped - their data is already
+    /// present in the snapshot as base facts.
+    pub fn execute_with_rules(&mut self, program: &str) -> Result<Vec<(i32, i32)>, String> {
+        // Get all view rules
+        let rule_defs = self.rule_catalog.all_rules();
+
+        if rule_defs.is_empty() {
+            // No views, just execute normally
+            return self.engine.execute(program);
+        }
+
+        // Get materialized relation names (skip their rules)
+        let materialized: HashSet<String> = if let Some(ref dd) = self.dd_computation {
+            let manager = dd.derived_relations();
+            let guard = manager.lock();
+            guard.get_materialized_relation_names()
+        } else {
+            HashSet::new()
+        };
+
+        // Build the combined program: view rules + query
+        // Skip rules whose head relation is materialized
+        let mut combined = String::new();
+
+        // Add view rules (skip materialized)
+        for rule in &rule_defs {
+            if materialized.contains(&rule.head.relation) {
+                continue; // Data already available as base facts
+            }
+            combined.push_str(&format_rule(rule));
+            combined.push('\n');
+        }
+
+        // Add the query
+        combined.push_str(program);
+
+        // Execute combined program
+        self.engine.execute(&combined)
+    }
+
+    /// Execute a query with views prepended, returning tuples of arbitrary arity
+    ///
+    /// This prepends all view rules to the query, allowing DD to incrementally
+    /// compute view results based on base facts.
+    ///
+    /// Rules for materialized relations are skipped - their data is already
+    /// present in the snapshot as base facts.
+    pub fn execute_with_rules_tuples(&mut self, program: &str) -> Result<Vec<Tuple>, String> {
+        // Get all view rules
+        let rule_defs = self.rule_catalog.all_rules();
+
+        if rule_defs.is_empty() {
+            // No views, just execute normally
+            return self.engine.execute_tuples(program);
+        }
+
+        // Get materialized relation names (skip their rules)
+        let materialized: HashSet<String> = if let Some(ref dd) = self.dd_computation {
+            let manager = dd.derived_relations();
+            let guard = manager.lock();
+            guard.get_materialized_relation_names()
+        } else {
+            HashSet::new()
+        };
+
+        // Build the combined program: view rules + query
+        // Skip rules whose head relation is materialized
+        let mut combined = String::new();
+        let mut skipped_count = 0;
+
+        // Add view rules (skip materialized)
+        for rule in &rule_defs {
+            if materialized.contains(&rule.head.relation) {
+                skipped_count += 1;
+                continue; // Data already available as base facts
+            }
+            combined.push_str(&format_rule(rule));
+            combined.push('\n');
+        }
+
+        // Add the query
+        combined.push_str(program);
+
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!(
+                "DEBUG execute_with_rules_tuples: {} view rules ({} skipped as materialized), program = {}",
+                rule_defs.len(),
+                skipped_count,
+                combined.replace('\n', " | ")
+            );
+        }
+
+        // Execute combined program
+        self.engine.execute_tuples(&combined)
+    }
+
+    /// Get reference to view catalog
+    pub fn rule_catalog(&self) -> &RuleCatalog {
+        &self.rule_catalog
+    }
+
+    /// Get mutable reference to view catalog
+    pub fn rule_catalog_mut(&mut self) -> &mut RuleCatalog {
+        &mut self.rule_catalog
+    }
+
+    // Schema Catalog (per-KG type validation)
+    /// Get reference to schema catalog
+    pub fn schema_catalog(&self) -> &SchemaCatalog {
+        &self.schema_catalog
+    }
+
+    /// Get mutable reference to schema catalog
+    pub fn schema_catalog_mut(&mut self) -> &mut SchemaCatalog {
+        &mut self.schema_catalog
+    }
+
+    /// Register a persistent schema for a relation
+    ///
+    /// Returns error if schema already exists or is invalid.
+    /// Saves the catalog to disk on success.
+    pub fn register_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
+        self.schema_catalog
+            .register(schema)
+            .map_err(|e| format!("{e}"))?;
+        self.save_schema_catalog()?;
+        Ok(())
+    }
+
+    /// Register or update a persistent schema for a relation
+    ///
+    /// Overwrites any existing schema. Saves to disk on success.
+    pub fn register_or_update_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
+        self.schema_catalog
+            .register_or_update(schema)
+            .map_err(|e| format!("{e}"))?;
+        self.save_schema_catalog()?;
+        Ok(())
+    }
+
+    /// Register a session schema for a relation (not persisted)
+    ///
+    /// Session schemas are cleared when the knowledge graph is reloaded.
+    pub fn register_session_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
+        self.schema_catalog
+            .register_session(schema)
+            .map_err(|e| format!("{e}"))
+    }
+
+    /// Register or update a session schema for a relation (not persisted)
