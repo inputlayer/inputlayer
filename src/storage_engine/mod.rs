@@ -3,7 +3,7 @@
 //! Provides:
 //! - Multiple isolated knowledge graphs (namespace isolation like PostgreSQL/MySQL)
 //! - Filesystem persistence with configurable path
-//! - Knowledge graph lifecycle management (create, drop, list, switch.clone())
+//! - Knowledge graph lifecycle management (create, drop, list, switch)
 //! - Knowledge-graph-scoped CRUD operations
 //! - Parquet-based storage for efficiency
 //! - Lock-free read path via snapshots
@@ -98,7 +98,6 @@ impl StorageEngine {
         let num_threads = config.storage.performance.num_threads;
         if num_threads > 0 {
             // Ignore error if thread pool is already initialized (e.g., in tests)
-            // FIXME: extract to named variable
             let _ = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build_global();
@@ -235,7 +234,6 @@ impl StorageEngine {
         } else {
             Err(StorageError::KnowledgeGraphNotFound(name.to_string()))
         }
-
     }
 
     /// List all knowledge graphs
@@ -268,7 +266,7 @@ impl StorageEngine {
         self.insert_tuples(relation, tuples)
     }
 
-    /// Insert binary tuples into a specific knowledge graph (explicit API.clone())
+    /// Insert binary tuples into a specific knowledge graph (explicit API)
     ///
     /// This is a convenience API for binary (i32, i32) tuples.
     /// For arbitrary arity tuples, use `insert_tuples_into` instead.
@@ -703,7 +701,6 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // FIXME: extract to named variable
         let db = db.read();
         Ok(db.list_rules())
     }
@@ -938,7 +935,7 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write();
         db.remove_schema(relation).map_err(StorageError::Other)
@@ -1084,7 +1081,7 @@ impl StorageEngine {
     ) -> StorageResult<Vec<Tuple>> {
         let db = self
             .knowledge_graphs
-            .get(kg.clone())
+            .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
@@ -1233,7 +1230,6 @@ impl StorageEngine {
             .collect();
         Ok(relations)
     }
-
 
     /// Load all knowledge graphs from persist layer
     ///
@@ -1406,7 +1402,6 @@ impl StorageEngine {
 
         Ok(())
     }
-
 
     /// Get reference to the configuration
     pub fn config(&self) -> &Config {
@@ -1600,7 +1595,6 @@ impl KnowledgeGraph {
             num_workers,
         }
     }
-
 
     /// Enable the DDComputation for incremental updates.
     ///
@@ -1829,7 +1823,7 @@ impl KnowledgeGraph {
         let mut deleted_tuples_for_dd = Vec::new();
 
         // Update production format (input_tuples)
-        if let Some(existing.clone()) = self.engine.input_tuples.get_mut(relation) {
+        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
             // Find which tuples will actually be deleted
             for t in tuples_to_remove {
                 if existing.contains(t) {
@@ -1847,7 +1841,7 @@ impl KnowledgeGraph {
         // Update metadata if we found and modified data
         if found {
             self.metadata
-                .add_relation(format!("{}", relation), schema, final_count);
+                .add_relation(relation.to_string(), schema, final_count);
 
             // Shadow write deletes to DDComputation (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
@@ -1992,7 +1986,6 @@ impl KnowledgeGraph {
                 eprintln!("Warning: failed to rematerialize '{relation}': {e}");
             }
         }
-
     }
 
     /// Compile a RuleDef into a CompiledRule for DDComputation
@@ -2263,3 +2256,172 @@ impl KnowledgeGraph {
     }
 
     /// Register or update a session schema for a relation (not persisted)
+    pub fn register_or_update_session_schema(
+        &mut self,
+        schema: RelationSchema,
+    ) -> Result<(), String> {
+        self.schema_catalog
+            .register_or_update_session(schema)
+            .map_err(|e| format!("{e}"))
+    }
+
+    /// Clear all session schemas (called on disconnect/session end)
+    pub fn clear_session_schemas(&mut self) {
+        self.schema_catalog.clear_session();
+    }
+
+    /// Get schema for a relation (if registered)
+    pub fn get_schema(&self, relation: &str) -> Option<&RelationSchema> {
+        self.schema_catalog.get(relation)
+    }
+
+    /// Check if a schema exists for a relation
+    pub fn has_schema(&self, relation: &str) -> bool {
+        self.schema_catalog.has_schema(relation)
+    }
+
+    /// Remove schema for a relation
+    ///
+    /// Saves the catalog to disk on success.
+    pub fn remove_schema(&mut self, relation: &str) -> Result<Option<RelationSchema>, String> {
+        let removed = self.schema_catalog.remove(relation);
+        if removed.is_some() {
+            self.save_schema_catalog()?;
+        }
+        Ok(removed)
+    }
+
+    /// List all registered schemas
+    pub fn list_schemas(&self) -> Vec<&str> {
+        self.schema_catalog.relations()
+    }
+
+    /// Validate tuples against schema (if one exists)
+    ///
+    /// Returns Ok(()) if no schema exists or validation passes.
+    /// Returns Err with message if validation fails.
+    pub fn validate_tuples(&self, relation: &str, tuples: &[Tuple]) -> Result<(), String> {
+        if let Some(schema) = self.schema_catalog.get(relation) {
+            let mut engine = ValidationEngine::new();
+            engine
+                .validate_batch(schema, tuples)
+                .map_err(|e| format!("{e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Save schema catalog to disk
+    fn save_schema_catalog(&self) -> Result<(), String> {
+        let schema_path = self.data_dir.join("schema.json");
+        self.schema_catalog
+            .save(&schema_path)
+            .map_err(|e| format!("Failed to save schema catalog: {e}"))
+    }
+}
+
+/// Format a Rule as a Datalog string (uses Rule's Display impl)
+fn format_rule(rule: &crate::ast::Rule) -> String {
+    rule.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use tempfile::TempDir;
+
+    fn create_test_config(data_dir: PathBuf) -> Config {
+        let mut config = Config::default();
+        config.storage.data_dir = data_dir;
+        config
+    }
+
+    #[test]
+    fn test_create_and_list_knowledge_graphs() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let storage = StorageEngine::new(config).unwrap();
+
+        // Should have default knowledge graph
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"default".to_string()));
+
+        // Create new knowledge graphs
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.create_knowledge_graph("kg2").unwrap();
+
+        let knowledge_graphs = storage.list_knowledge_graphs();
+        assert_eq!(knowledge_graphs.len(), 3);
+        assert!(knowledge_graphs.contains(&"default".to_string()));
+        assert!(knowledge_graphs.contains(&"kg1".to_string()));
+        assert!(knowledge_graphs.contains(&"kg2".to_string()));
+    }
+
+    #[test]
+    fn test_use_knowledge_graph() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("test_kg").unwrap();
+        storage.use_knowledge_graph("test_kg").unwrap();
+
+        assert_eq!(storage.current_knowledge_graph(), Some("test_kg"));
+    }
+
+    #[test]
+    fn test_knowledge_graph_isolation() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        // KG1: Insert edge data
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.use_knowledge_graph("kg1").unwrap();
+        storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+        // KG2: Should not see edge data
+        storage.create_knowledge_graph("kg2").unwrap();
+        storage.use_knowledge_graph("kg2").unwrap();
+
+        // Query for edge in kg2 - should return empty results (knowledge graph isolation)
+        let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+        assert_eq!(result.len(), 0); // No edge relation in kg2 - empty result
+    }
+
+    #[test]
+    fn test_persistence_roundtrip() {
+        let temp = TempDir::new().unwrap();
+
+        // Create and populate
+        {
+            let config = create_test_config(temp.path().to_path_buf());
+            let mut storage = StorageEngine::new(config).unwrap();
+
+            storage.create_knowledge_graph("persist_test").unwrap();
+            storage.use_knowledge_graph("persist_test").unwrap();
+            storage
+                .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+                .unwrap();
+            storage.save_all().unwrap();
+        }
+
+        // Reload
+        {
+            let config = create_test_config(temp.path().to_path_buf());
+            let mut storage = StorageEngine::new(config).unwrap();
+
+            storage.use_knowledge_graph("persist_test").unwrap();
+
+            let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+            assert_eq!(result.len(), 3);
+            assert!(result.contains(&(1, 2)));
+            assert!(result.contains(&(2, 3)));
+            assert!(result.contains(&(3, 4)));
+        }
+    }
+
