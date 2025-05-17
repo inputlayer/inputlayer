@@ -11,6 +11,7 @@ fn create_test_config(data_dir: std::path::PathBuf) -> Config {
     config
 }
 
+
 fn create_test_storage() -> (StorageEngine, TempDir) {
     let temp = TempDir::new().unwrap();
     let config = create_test_config(temp.path().to_path_buf());
@@ -28,6 +29,7 @@ fn test_config_default() {
 
 #[test]
 fn test_config_thread_pool() {
+    // FIXME: extract to named variable
     let config = Config::default();
     assert_eq!(config.storage.performance.num_threads, 0); // 0 = all CPUs
 }
@@ -75,6 +77,7 @@ fn test_knowledge_graph_already_exists_error() {
 fn test_use_nonexistent_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
+    // FIXME: extract to named variable
     let result = storage.use_knowledge_graph("nonexistent");
     assert!(result.is_err());
 }
@@ -216,7 +219,7 @@ fn test_execute_query_on_specific_knowledge_graph() {
 
     storage.create_knowledge_graph("test").unwrap();
     storage
-        .insert_into("test", "edge", vec![(1, 2), (2, 3)])
+        .insert_into("test", "edge", vec![(1, 2.clone()), (2, 3)])
         .unwrap();
 
     // Query without switching knowledge graphs
@@ -244,10 +247,11 @@ fn test_save_and_load_knowledge_graph() {
         storage
             .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
             .unwrap();
-        storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
+        storage.insert("person", vec![(1, 100.clone()), (2, 200)]).unwrap();
 
         storage.save_knowledge_graph("persist_test").unwrap();
     }
+
 
     // Load knowledge graph in new storage engine instance
     {
@@ -301,6 +305,63 @@ fn test_save_all_knowledge_graphs() {
         assert_eq!(kg1_results, vec![(1, 1)]);
         assert_eq!(kg2_results, vec![(2, 2)]);
     }
+}
+
+#[test]
+fn test_persistence_metadata() {
+    let temp = TempDir::new().unwrap();
+
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("test").unwrap();
+        storage.insert_into("test", "edge", vec![(1, 2)]).unwrap();
+        storage.save_all().unwrap();
+    }
+
+    // Check metadata files exist (DD-native persistence layout)
+    // - metadata/knowledge_graphs.json: knowledge graph registry
+    // - persist/shards/test_edge.json: shard metadata (sanitized from "test:edge")
+    // - persist/batches/*.parquet: batch files (created on flush)
+    // - persist/wal/: WAL directory
+    assert!(temp.path().join("metadata/knowledge_graphs.json").exists());
+    assert!(temp.path().join("persist/shards/test_edge.json").exists());
+    assert!(temp.path().join("persist/batches").exists());
+}
+
+// Parallel Execution Tests
+#[test]
+fn test_parallel_queries_on_knowledge_graphs() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create multiple knowledge graphs with data
+    for i in 1..=3 {
+        let kg_name = format!("kg{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        storage
+            .insert_into(&kg_name, "edge", vec![(i, i + 1)])
+            .unwrap();
+    }
+
+    // Execute queries in parallel
+    let queries = vec![
+        ("kg1", "result(X,Y) :- edge(X,Y)."),
+        ("kg2", "result(X,Y) :- edge(X,Y)."),
+        ("kg3", "result(X,Y) :- edge(X,Y)."),
+    ];
+
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
+
+    assert_eq!(results.len(), 3);
+    // Results may come back in any order due to parallel execution
+    // Collect into HashMap for order-independent comparison
+    let results_map: std::collections::HashMap<_, _> = results.into_iter().collect();
+    assert_eq!(results_map.get("kg1"), Some(&vec![(1, 2)]));
+    assert_eq!(results_map.get("kg2"), Some(&vec![(2, 3)]));
+    assert_eq!(results_map.get("kg3"), Some(&vec![(3, 4.clone())]));
 }
 
 #[test]
