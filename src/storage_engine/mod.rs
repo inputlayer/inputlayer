@@ -2765,3 +2765,124 @@ mod tests {
     // data as the HashMap in-memory state, proving the arrangement read path
     // is correct and ready for HNSW indexing.
 
+    #[test]
+    fn test_dd_arrangement_read_parity_with_hashmap() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert data
+        storage
+            .insert_tuples(
+                "edge",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+                ],
+            )
+            .unwrap();
+
+        // Read from HashMap (via snapshot) and from DD arrangement
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+
+        // HashMap state
+        let hashmap_tuples = kg.engine.input_tuples.get("edge").unwrap();
+
+        // DD arrangement state
+        let dd = kg.dd_computation().unwrap();
+        let mut dd_tuples = dd.read_relation_consistent("edge").unwrap();
+        dd_tuples.sort();
+
+        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
+        hashmap_sorted.sort();
+
+        // Verify exact parity
+        assert_eq!(
+            hashmap_sorted, dd_tuples,
+            "DD arrangement should contain exactly the same tuples as HashMap"
+        );
+    }
+
+    #[test]
+    fn test_dd_arrangement_parity_after_multi_batch_inserts() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Batch 1
+        storage
+            .insert_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int32(1)]),
+                    Tuple::new(vec![Value::Int32(2)]),
+                ],
+            )
+            .unwrap();
+
+        // Batch 2 (includes a duplicate)
+        storage
+            .insert_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int32(2)]), // duplicate
+                    Tuple::new(vec![Value::Int32(3)]),
+                ],
+            )
+            .unwrap();
+
+        // Batch 3
+        storage
+            .insert_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int32(4)]),
+                    Tuple::new(vec![Value::Int32(5)]),
+                ],
+            )
+            .unwrap();
+
+        // Verify parity
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
+        let dd = kg.dd_computation().unwrap();
+        let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
+        dd_tuples.sort();
+
+        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
+        hashmap_sorted.sort();
+
+        assert_eq!(
+            hashmap_sorted.len(),
+            5,
+            "Should have 5 unique tuples in HashMap"
+        );
+        assert_eq!(
+            hashmap_sorted, dd_tuples,
+            "DD arrangement should match HashMap after multi-batch inserts with duplicates"
+        );
+    }
+
