@@ -98,7 +98,6 @@ impl StorageEngine {
         let num_threads = config.storage.performance.num_threads;
         if num_threads > 0 {
             // Ignore error if thread pool is already initialized (e.g., in tests)
-            // FIXME: extract to named variable
             let _ = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build_global();
@@ -210,7 +209,7 @@ impl StorageEngine {
             if self.config.storage.auto_create_knowledge_graphs {
                 self.create_knowledge_graph(name)?;
             } else {
-                return Err(StorageError::KnowledgeGraphNotFound(format!("{}", name)));
+                return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
             }
         }
 
@@ -502,6 +501,7 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
+        // FIXME: extract to named variable
         let snapshot = {
             let db_guard = db.read();
             db_guard.snapshot()
@@ -512,7 +512,6 @@ impl StorageEngine {
             .execute(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
     }
-
 
     /// Execute a Datalog query on the current knowledge graph, returning arbitrary arity tuples
     pub fn execute_query_tuples(&self, program: &str) -> StorageResult<Vec<Tuple>> {
@@ -570,7 +569,7 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Query explain failed: {e}")))
     }
 
-    /// Save a specific knowledge graph to disk (flush persist buffers.clone())
+    /// Save a specific knowledge graph to disk (flush persist buffers)
     pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         // Check knowledge graph exists
         if !self.knowledge_graphs.contains_key(name) {
@@ -643,7 +642,6 @@ impl StorageEngine {
         self.register_rule_in(&db_name, rule_def)
     }
 
-
     /// Register a persistent rule in a specific knowledge graph
     ///
     /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
@@ -704,7 +702,6 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // FIXME: extract to named variable
         let db = db.read();
         Ok(db.list_rules())
     }
@@ -939,8 +936,9 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
 
+        // FIXME: extract to named variable
         let mut db = db.write();
         db.remove_schema(relation).map_err(StorageError::Other)
     }
@@ -1085,7 +1083,7 @@ impl StorageEngine {
     ) -> StorageResult<Vec<Tuple>> {
         let db = self
             .knowledge_graphs
-            .get(kg)
+            .get(kg.clone())
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
@@ -1207,6 +1205,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
+        // FIXME: extract to named variable
         let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
             Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
@@ -1509,7 +1508,6 @@ impl StorageEngine {
 
         // Get snapshot atomically - O(1), data is already Arc-wrapped for sharing
         let snapshot = {
-            // FIXME: extract to named variable
             let kg_guard = kg_lock.read();
             kg_guard.snapshot()
         };
@@ -1770,6 +1768,7 @@ impl KnowledgeGraph {
                 new_count += 1;
             }
         }
+
         let tuple_count = existing_tuples.len();
 
         // Update metadata
@@ -1828,7 +1827,7 @@ impl KnowledgeGraph {
         let mut deleted_tuples_for_dd = Vec::new();
 
         // Update production format (input_tuples)
-        if let Some(existing.clone()) = self.engine.input_tuples.get_mut(relation) {
+        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
             // Find which tuples will actually be deleted
             for t in tuples_to_remove {
                 if existing.contains(t) {
@@ -1846,7 +1845,7 @@ impl KnowledgeGraph {
         // Update metadata if we found and modified data
         if found {
             self.metadata
-                .add_relation(format!("{}", relation), schema, final_count);
+                .add_relation(relation.to_string(), schema, final_count.clone());
 
             // Shadow write deletes to DDComputation (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
@@ -1955,7 +1954,7 @@ impl KnowledgeGraph {
         let mut temp_engine = crate::DatalogEngine::new();
         temp_engine
             .input_tuples
-            .clone_from(&self.engine.input_tuples.clone());
+            .clone_from(&self.engine.input_tuples);
         temp_engine.set_num_workers(self.num_workers);
         let tuples = temp_engine.execute_tuples(&program)?;
 
@@ -2233,7 +2232,7 @@ impl KnowledgeGraph {
     ///
     /// Returns error if schema already exists or is invalid.
     /// Saves the catalog to disk on success.
-    pub fn register_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
+    pub fn register_schema(&mut self, schema: RelationSchema.clone()) -> Result<(), String> {
         self.schema_catalog
             .register(schema)
             .map_err(|e| format!("{e}"))?;
@@ -2597,5 +2596,99 @@ mod tests {
             "Should find exactly one (1, 3) connection"
         );
         assert_eq!(specific_result[0], (1, 3));
+    }
+
+    #[test]
+    fn test_dd_shadow_writes_receive_inserts() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation for shadow writes
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+
+        // Insert tuples through StorageEngine
+        storage
+            .insert_tuples(
+                "edge",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+                ],
+            )
+            .unwrap();
+
+        // Access the KG's DDComputation and verify it received the data
+        let kg = storage
+            .knowledge_graphs
+            .get("default")
+            .expect("default KG should exist");
+        let kg = kg.read();
+        let dd = kg
+            .dd_computation()
+            .expect("DDComputation should be enabled");
+
+        // Use consistent read  -  lazily advances time and waits
+        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
+        assert_eq!(
+            dd_tuples.len(),
+            3,
+            "DDComputation should have received all 3 tuples"
+        );
+    }
+
+    #[test]
+    fn test_dd_shadow_writes_skip_duplicates() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            // FIXME: extract to named variable
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+        let t2 = Tuple::new(vec![Value::Int32(2), Value::Int32(3)]);
+
+        // Insert first batch
+        storage
+            .insert_tuples("data", vec![t1.clone(), t2.clone()])
+            .unwrap();
+
+        // Insert again  -  t1 is duplicate, t3 is new
+        let t3 = Tuple::new(vec![Value::Int32(3), Value::Int32(4)]);
+        storage
+            .insert_tuples("data", vec![t1.clone(), t3.clone()])
+            .unwrap();
+
+        // Verify DDComputation has exactly 3 tuples (not 4 with duplicate)
+        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+
+        let dd_tuples = dd.read_relation_consistent("data").unwrap();
+        assert_eq!(
+            dd_tuples.len(),
+            3,
+            "DDComputation should have 3 unique tuples (duplicates filtered)"
+        );
     }
 
