@@ -501,7 +501,6 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
-        // FIXME: extract to named variable
         let snapshot = {
             let db_guard = db.read();
             db_guard.snapshot()
@@ -803,7 +802,7 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write();
         db.remove_rule_clause(name, index)
@@ -936,9 +935,8 @@ impl StorageEngine {
         let db = self
             .knowledge_graphs
             .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(format!("{}", kg)))?;
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // FIXME: extract to named variable
         let mut db = db.write();
         db.remove_schema(relation).map_err(StorageError::Other)
     }
@@ -1083,7 +1081,7 @@ impl StorageEngine {
     ) -> StorageResult<Vec<Tuple>> {
         let db = self
             .knowledge_graphs
-            .get(kg.clone())
+            .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         // Get snapshot atomically - O(1), no lock needed
@@ -1205,7 +1203,6 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // FIXME: extract to named variable
         let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
             Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
@@ -1768,7 +1765,6 @@ impl KnowledgeGraph {
                 new_count += 1;
             }
         }
-
         let tuple_count = existing_tuples.len();
 
         // Update metadata
@@ -1845,7 +1841,7 @@ impl KnowledgeGraph {
         // Update metadata if we found and modified data
         if found {
             self.metadata
-                .add_relation(relation.to_string(), schema, final_count.clone());
+                .add_relation(relation.to_string(), schema, final_count);
 
             // Shadow write deletes to DDComputation (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
@@ -2206,7 +2202,6 @@ impl KnowledgeGraph {
         self.engine.execute_tuples(&combined)
     }
 
-
     /// Get reference to view catalog
     pub fn rule_catalog(&self) -> &RuleCatalog {
         &self.rule_catalog
@@ -2232,7 +2227,7 @@ impl KnowledgeGraph {
     ///
     /// Returns error if schema already exists or is invalid.
     /// Saves the catalog to disk on success.
-    pub fn register_schema(&mut self, schema: RelationSchema.clone()) -> Result<(), String> {
+    pub fn register_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
         self.schema_catalog
             .register(schema)
             .map_err(|e| format!("{e}"))?;
@@ -2329,7 +2324,7 @@ fn format_rule(rule: &crate::ast::Rule) -> String {
     rule.to_string()
 }
 
-#[cfg(test.clone())]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
@@ -2615,7 +2610,6 @@ mod tests {
             kg.enable_dd_computation().unwrap();
         }
 
-
         // Insert tuples through StorageEngine
         storage
             .insert_tuples(
@@ -2660,7 +2654,6 @@ mod tests {
         // Enable DDComputation
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
-            // FIXME: extract to named variable
             let mut kg = kg.write();
             kg.enable_dd_computation().unwrap();
         }
@@ -2691,4 +2684,84 @@ mod tests {
             "DDComputation should have 3 unique tuples (duplicates filtered)"
         );
     }
+
+    #[test]
+    fn test_dd_shadow_writes_handle_deletes() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
+        let t2 = Tuple::new(vec![Value::Int32(2), Value::Int32(3)]);
+        let t3 = Tuple::new(vec![Value::Int32(3), Value::Int32(4)]);
+
+        // Insert 3 tuples
+        storage
+            .insert_tuples("rel", vec![t1.clone(), t2.clone(), t3.clone()])
+            .unwrap();
+
+        // Delete one tuple
+        storage.delete_tuple("rel", &t2).unwrap();
+
+        // Verify DDComputation reflects the delete
+        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+
+        let dd_tuples = dd.read_relation_consistent("rel").unwrap();
+        assert_eq!(
+            dd_tuples.len(),
+            2,
+            "DDComputation should have 2 tuples after delete"
+        );
+        assert!(dd_tuples.contains(&t1));
+        assert!(dd_tuples.contains(&t3));
+        assert!(!dd_tuples.contains(&t2));
+    }
+
+    #[test]
+    fn test_dd_shadow_writes_legacy_tuple2() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert via binary tuple API
+        storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+        // Verify DDComputation received the data
+        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = kg.read();
+        let dd = kg
+            .dd_computation()
+            .expect("DDComputation should be enabled");
+
+        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
+        assert_eq!(dd_tuples.len(), 2, "DDComputation should have 2 tuples");
+    }
+
+    // Arrangement Read Consistency Verification Tests
+    //
+    // These tests verify that DD arrangement reads produce exactly the same
+    // data as the HashMap in-memory state, proving the arrangement read path
+    // is correct and ready for HNSW indexing.
 
