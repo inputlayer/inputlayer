@@ -2886,3 +2886,116 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_dd_arrangement_parity_after_inserts_and_deletes() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        let t1 = Tuple::new(vec![Value::Int32(1), Value::string("a")]);
+        let t2 = Tuple::new(vec![Value::Int32(2), Value::string("b")]);
+        let t3 = Tuple::new(vec![Value::Int32(3), Value::string("c")]);
+        let t4 = Tuple::new(vec![Value::Int32(4), Value::string("d")]);
+
+        // Insert 4 tuples
+        storage
+            .insert_tuples(
+                "mixed",
+                vec![t1.clone(), t2.clone(), t3.clone(), t4.clone()],
+            )
+            .unwrap();
+
+        // Delete 2 tuples
+        storage.delete_tuple("mixed", &t2).unwrap();
+        storage.delete_tuple("mixed", &t4).unwrap();
+
+        // Insert one more
+        let t5 = Tuple::new(vec![Value::Int32(5), Value::string("e")]);
+        storage.insert_tuples("mixed", vec![t5.clone()]).unwrap();
+
+        // Verify parity
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let hashmap_tuples = kg.engine.input_tuples.get("mixed").unwrap();
+        let dd = kg.dd_computation().unwrap();
+        let mut dd_tuples = dd.read_relation_consistent("mixed").unwrap();
+        dd_tuples.sort();
+
+        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
+        hashmap_sorted.sort();
+
+        assert_eq!(hashmap_sorted.len(), 3, "Should have t1, t3, t5");
+        assert_eq!(
+            hashmap_sorted, dd_tuples,
+            "DD arrangement should match HashMap after mixed inserts and deletes"
+        );
+    }
+
+    #[test]
+    fn test_dd_arrangement_parity_multi_relation() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert into multiple relations
+        storage
+            .insert_tuples(
+                "edges",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                ],
+            )
+            .unwrap();
+
+        storage
+            .insert_tuples(
+                "nodes",
+                vec![
+                    Tuple::new(vec![Value::string("a"), Value::Float64(1.0)]),
+                    Tuple::new(vec![Value::string("b"), Value::Float64(2.0)]),
+                    Tuple::new(vec![Value::string("c"), Value::Float64(3.0)]),
+                ],
+            )
+            .unwrap();
+
+        // Verify parity for each relation
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+
+        for rel_name in &["edges", "nodes"] {
+            let hashmap_tuples = kg.engine.input_tuples.get(*rel_name).unwrap();
+            let mut dd_tuples = dd.read_relation_consistent(rel_name).unwrap();
+            dd_tuples.sort();
+
+            let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
+            hashmap_sorted.sort();
+
+            assert_eq!(
+                hashmap_sorted, dd_tuples,
+                "DD arrangement for '{rel_name}' should match HashMap"
+            );
+        }
+    }
+

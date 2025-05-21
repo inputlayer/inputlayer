@@ -416,3 +416,65 @@ fn test_multiple_queries_on_same_knowledge_graph() {
 }
 
 #[test]
+fn test_worker_pool_configuration() {
+    let (storage, _temp) = create_test_storage();
+
+    // Should have configured worker pool
+    let num_cpus = storage.num_cpus();
+    assert!(num_cpus > 0); // At least 1 CPU
+}
+
+// Error Handling Tests
+#[test]
+fn test_query_nonexistent_knowledge_graph() {
+    let (storage, _temp) = create_test_storage();
+
+    let result = storage.execute_query_on("nonexistent", "result(X,Y) :- edge(X,Y).");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_insert_without_current_knowledge_graph() {
+    let temp = TempDir::new().unwrap();
+    let config = create_test_config(temp.path().to_path_buf());
+    let storage = StorageEngine::new(config).unwrap();
+
+    // Drop default knowledge graph and try to insert (should use current_knowledge_graph)
+    // This should work because default is current
+    let result = storage.insert("edge", vec![(1, 2)]);
+    assert!(result.is_ok());
+}
+
+// Complex Scenario Tests
+#[test]
+fn test_multi_knowledge_graph_workflow() {
+    let (mut storage, _temp) = create_test_storage();
+
+    // Create staging and production knowledge graphs
+    storage.create_knowledge_graph("staging").unwrap();
+    storage.create_knowledge_graph("production").unwrap();
+
+    // Add data to staging
+    storage.use_knowledge_graph("staging").unwrap();
+    storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+    // Verify staging
+    let staging_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert_eq!(staging_results.len(), 2);
+
+    // Add different data to production
+    storage.use_knowledge_graph("production").unwrap();
+    storage.insert("edge", vec![(10, 20), (20, 30)]).unwrap();
+
+    // Verify production
+    let prod_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert_eq!(prod_results.len(), 2);
+    assert!(prod_results.contains(&(10, 20)));
+
+    // Verify isolation
+    storage.use_knowledge_graph("staging").unwrap();
+    let staging_results2 = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    assert!(!staging_results2.contains(&(10, 20))); // Production data not in staging
+}
+
+#[test]
