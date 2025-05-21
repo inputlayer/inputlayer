@@ -2999,3 +2999,92 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_dd_arrangement_max_write_time_tracks_logical_time() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Record logical time before insert
+        let time_before = storage.logical_time.load(Ordering::SeqCst);
+
+        // Insert triggers logical_time.fetch_add(1)
+        storage
+            .insert_tuples("data", vec![Tuple::new(vec![Value::Int32(42)])])
+            .unwrap();
+
+        // DD's max_write_time should be >= time_before (the time used for this insert)
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+
+        assert!(
+            dd.max_write_time() >= time_before,
+            "DD max_write_time ({}) should be >= logical time at insert ({})",
+            dd.max_write_time(),
+            time_before
+        );
+    }
+
+    // WAL Replay into DDComputation Tests
+    #[test]
+    fn test_dd_replay_existing_data_on_enable() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Insert data BEFORE enabling DDComputation
+        storage
+            .insert_tuples(
+                "edge",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                    Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+                ],
+            )
+            .unwrap();
+
+        storage
+            .insert_tuples(
+                "node",
+                vec![
+                    Tuple::new(vec![Value::string("a")]),
+                    Tuple::new(vec![Value::string("b")]),
+                ],
+            )
+            .unwrap();
+
+        // NOW enable DDComputation  -  should replay existing data
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Verify DDComputation has all pre-existing data
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+
+        let edges = dd.read_relation_consistent("edge").unwrap();
+        assert_eq!(edges.len(), 3, "DD should have 3 edges from replay");
+
+        let nodes = dd.read_relation_consistent("node").unwrap();
+        assert_eq!(nodes.len(), 2, "DD should have 2 nodes from replay");
+    }
+
