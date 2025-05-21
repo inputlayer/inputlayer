@@ -178,6 +178,7 @@ impl StorageEngine {
 
         // Cannot drop current knowledge graph
         if let Some(current) = &self.current_kg {
+            // TODO: verify this condition
             if current == name {
                 return Err(StorageError::CannotDropCurrentKnowledgeGraph);
             }
@@ -1774,6 +1775,7 @@ impl KnowledgeGraph {
         // Shadow write new tuples to DDComputation (if enabled).
         // Uses the logical timestamp from StorageEngine for proper time tracking.
         // Time advancement is lazy  -  only happens when a consistent read is requested.
+        // TODO: verify this condition
         if !new_tuples_for_dd.is_empty() {
             if let Some(dd) = &self.dd_computation {
                 dd.insert(relation, new_tuples_for_dd, time)
@@ -1823,6 +1825,7 @@ impl KnowledgeGraph {
         let mut deleted_tuples_for_dd = Vec::new();
 
         // Update production format (input_tuples)
+        // TODO: verify this condition
         if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
             // Find which tuples will actually be deleted
             for t in tuples_to_remove {
@@ -1950,7 +1953,7 @@ impl KnowledgeGraph {
         let mut temp_engine = crate::DatalogEngine::new();
         temp_engine
             .input_tuples
-            .clone_from(&self.engine.input_tuples);
+            .clone_from(self.engine.input_tuples);
         temp_engine.set_num_workers(self.num_workers);
         let tuples = temp_engine.execute_tuples(&program)?;
 
@@ -3307,6 +3310,145 @@ mod tests {
                     negated: false,
                 }],
             },
+        }
+    }
+
+    #[test]
+    fn test_materialization_snapshot_includes_valid_materializations() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert base data
+        storage
+            .insert_tuples(
+                "edge",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                ],
+            )
+            .unwrap();
+
+        // Register a rule
+        let rule_def = make_path_rule_def();
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.register_rule(&rule_def).unwrap();
+        }
+
+        // Materialize the derived relation (uses the new method that also publishes snapshot)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+
+            // Simulate materializing path with some tuples
+            let path_tuples = vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra tuple
+            ];
+            kg.materialize_derived_relation("path", path_tuples)
+                .unwrap();
+        }
+
+        // Get the updated snapshot
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let snapshot = kg.snapshot();
+
+        // Verify snapshot has the materialized relation
+        assert!(
+            snapshot.is_materialized("path"),
+            "path should be marked as materialized"
+        );
+        assert_eq!(snapshot.materialized_count(), 1);
+
+        // Verify the materialized tuples are in input_tuples
+        let path_tuples = snapshot.input_tuples.get("path");
+        assert!(path_tuples.is_some(), "path tuples should be in snapshot");
+        assert_eq!(
+            path_tuples.unwrap().len(),
+            3,
+            "should have 3 materialized tuples"
+        );
+    }
+
+    #[test]
+    fn test_materialization_invalidation_removes_from_snapshot() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert base data and register rule
+        storage
+            .insert_tuples(
+                "edge",
+                vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+            )
+            .unwrap();
+
+        let rule_def = make_path_rule_def();
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.register_rule(&rule_def).unwrap();
+        }
+
+        // Materialize (uses the new method that also publishes snapshot)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            kg.materialize_derived_relation(
+                "path",
+                vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+            )
+            .unwrap();
+        }
+
+        // Verify materialized
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let snapshot = kg.snapshot();
+            assert!(snapshot.is_materialized("path"));
+        }
+
+        // Insert more data - this should invalidate the materialization
+        // (insert triggers notify_base_update which invalidates derived relations)
+        storage
+            .insert_tuples(
+                "edge",
+                vec![Tuple::new(vec![Value::Int32(2), Value::Int32(3)])],
+            )
+            .unwrap();
+
+        // Verify no longer materialized (invalidated)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let snapshot = kg.snapshot();
+            assert!(
+                !snapshot.is_materialized("path"),
+                "path should be invalidated after base data change"
+            );
         }
     }
 
