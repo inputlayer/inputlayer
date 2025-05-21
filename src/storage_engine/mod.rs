@@ -3196,3 +3196,117 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_dd_replay_legacy_tuple2_data() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Insert data before enabling DD
+        storage
+            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+            .unwrap();
+
+        // Enable DD (should replay legacy data)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Verify DD has the replayed data
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+        let dd_tuples = dd.read_relation_consistent("edge").unwrap();
+        assert_eq!(
+            dd_tuples.len(),
+            3,
+            "DD should have 3 edges from legacy replay"
+        );
+    }
+
+    #[test]
+    fn test_dd_replay_from_persistence() {
+        let temp = TempDir::new().unwrap();
+
+        // Create and populate, then save
+        {
+            let config = create_test_config(temp.path().to_path_buf());
+            let mut storage = StorageEngine::new(config).unwrap();
+            storage.use_knowledge_graph("default").unwrap();
+            storage
+                .insert("edge", vec![(10, 20), (20, 30), (30, 40)])
+                .unwrap();
+            storage.save_all().unwrap();
+        }
+
+        // Reload from persistence
+        {
+            let config = create_test_config(temp.path().to_path_buf());
+            let mut storage = StorageEngine::new(config).unwrap();
+            storage.use_knowledge_graph("default").unwrap();
+
+            // Enable DDComputation  -  should replay persisted data
+            {
+                let kg = storage.knowledge_graphs.get("default").unwrap();
+                let mut kg = kg.write();
+                kg.enable_dd_computation().unwrap();
+            }
+
+            // Verify DD has the persisted data
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let dd = kg.dd_computation().unwrap();
+            let dd_tuples = dd.read_relation_consistent("edge").unwrap();
+            assert_eq!(
+                dd_tuples.len(),
+                3,
+                "DD should have 3 edges from persistence replay"
+            );
+        }
+    }
+
+    // === Materialization Pipeline Integration Tests ===
+
+    use crate::statement::{RuleDef, SerializableBodyPred, SerializableRule, SerializableTerm};
+    use crate::value::Value;
+
+    fn make_path_rule_def() -> RuleDef {
+        RuleDef {
+            name: "path".to_string(),
+            rule: SerializableRule {
+                head_relation: "path".to_string(),
+                head_args: vec![
+                    SerializableTerm::Variable("X".to_string()),
+                    SerializableTerm::Variable("Y".to_string()),
+                ],
+                body: vec![SerializableBodyPred::Atom {
+                    relation: "edge".to_string(),
+                    args: vec![
+                        SerializableTerm::Variable("X".to_string()),
+                        SerializableTerm::Variable("Y".to_string()),
+                    ],
+                    negated: false,
+                }],
+            },
+        }
+    }
+
+    fn make_simple_rule_def(name: &str, base_relation: &str) -> RuleDef {
+        RuleDef {
+            name: name.to_string(),
+            rule: SerializableRule {
+                head_relation: name.to_string(),
+                head_args: vec![SerializableTerm::Variable("X".to_string())],
+                body: vec![SerializableBodyPred::Atom {
+                    relation: base_relation.to_string(),
+                    args: vec![SerializableTerm::Variable("X".to_string())],
+                    negated: false,
+                }],
+            },
+        }
+    }
+
