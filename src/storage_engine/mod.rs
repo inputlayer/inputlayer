@@ -3088,3 +3088,111 @@ mod tests {
         assert_eq!(nodes.len(), 2, "DD should have 2 nodes from replay");
     }
 
+    #[test]
+    fn test_dd_replay_parity_with_hashmap() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Insert data before enabling DD
+        storage
+            .insert_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int32(10), Value::string("x")]),
+                    Tuple::new(vec![Value::Int32(20), Value::string("y")]),
+                    Tuple::new(vec![Value::Int32(30), Value::string("z")]),
+                ],
+            )
+            .unwrap();
+
+        // Enable DD (triggers replay)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Verify exact parity between DD and HashMap
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
+        let dd = kg.dd_computation().unwrap();
+        let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
+        dd_tuples.sort();
+
+        let mut hashmap_sorted: Vec<_> = hashmap_tuples.clone();
+        hashmap_sorted.sort();
+
+        assert_eq!(
+            hashmap_sorted, dd_tuples,
+            "DD arrangement after replay should match HashMap exactly"
+        );
+    }
+
+    #[test]
+    fn test_dd_replay_then_new_writes() {
+        use crate::value::Value;
+
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Insert data before enabling DD
+        storage
+            .insert_tuples(
+                "items",
+                vec![
+                    Tuple::new(vec![Value::Int32(1)]),
+                    Tuple::new(vec![Value::Int32(2)]),
+                ],
+            )
+            .unwrap();
+
+        // Enable DD (triggers replay)
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Now insert MORE data (after DD is enabled)
+        storage
+            .insert_tuples(
+                "items",
+                vec![
+                    Tuple::new(vec![Value::Int32(3)]),
+                    Tuple::new(vec![Value::Int32(4)]),
+                ],
+            )
+            .unwrap();
+
+        // Verify DD has ALL data (replayed + new)
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = kg.read();
+        let dd = kg.dd_computation().unwrap();
+        let mut dd_tuples = dd.read_relation_consistent("items").unwrap();
+        dd_tuples.sort();
+
+        assert_eq!(
+            dd_tuples.len(),
+            4,
+            "DD should have 4 items (2 replayed + 2 new)"
+        );
+
+        // Verify parity with HashMap
+        let mut hashmap_sorted: Vec<_> = kg.engine.input_tuples.get("items").unwrap().clone();
+        hashmap_sorted.sort();
+
+        assert_eq!(
+            hashmap_sorted, dd_tuples,
+            "DD should match HashMap after replay + new writes"
+        );
+    }
+
