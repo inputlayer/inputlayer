@@ -478,3 +478,40 @@ fn test_multi_knowledge_graph_workflow() {
 }
 
 #[test]
+fn test_persistence_with_updates() {
+    let temp = TempDir::new().unwrap();
+
+    // Initial save
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("test").unwrap();
+        storage.insert_into("test", "edge", vec![(1, 2)]).unwrap();
+        storage.save_knowledge_graph("test").unwrap();
+    }
+
+    // Load and update
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.use_knowledge_graph("test").unwrap();
+        storage.insert("edge", vec![(2, 3), (3, 4)]).unwrap();
+        storage.save_knowledge_graph("test").unwrap();
+    }
+
+    // Load and verify all data
+    {
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let results = storage
+            .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+            .unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results.contains(&(1, 2)));
+        assert!(results.contains(&(2, 3)));
+        assert!(results.contains(&(3, 4)));
+    }
+}
