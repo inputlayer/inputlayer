@@ -178,7 +178,6 @@ impl StorageEngine {
 
         // Cannot drop current knowledge graph
         if let Some(current) = &self.current_kg {
-            // TODO: verify this condition
             if current == name {
                 return Err(StorageError::CannotDropCurrentKnowledgeGraph);
             }
@@ -1775,7 +1774,6 @@ impl KnowledgeGraph {
         // Shadow write new tuples to DDComputation (if enabled).
         // Uses the logical timestamp from StorageEngine for proper time tracking.
         // Time advancement is lazy  -  only happens when a consistent read is requested.
-        // TODO: verify this condition
         if !new_tuples_for_dd.is_empty() {
             if let Some(dd) = &self.dd_computation {
                 dd.insert(relation, new_tuples_for_dd, time)
@@ -1825,7 +1823,6 @@ impl KnowledgeGraph {
         let mut deleted_tuples_for_dd = Vec::new();
 
         // Update production format (input_tuples)
-        // TODO: verify this condition
         if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
             // Find which tuples will actually be deleted
             for t in tuples_to_remove {
@@ -1953,7 +1950,7 @@ impl KnowledgeGraph {
         let mut temp_engine = crate::DatalogEngine::new();
         temp_engine
             .input_tuples
-            .clone_from(self.engine.input_tuples);
+            .clone_from(&self.engine.input_tuples);
         temp_engine.set_num_workers(self.num_workers);
         let tuples = temp_engine.execute_tuples(&program)?;
 
@@ -3452,3 +3449,119 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_materialization_query_uses_cached_data() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Insert base data
+        storage
+            .insert_tuples(
+                "edge",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                ],
+            )
+            .unwrap();
+
+        // Register rule
+        let rule_def = make_path_rule_def();
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.register_rule(&rule_def).unwrap();
+        }
+
+        // Materialize with DIFFERENT data than what the rule would produce
+        // This proves the query uses cached data, not the rule
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            kg.materialize_derived_relation(
+                "path",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                    Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                    Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra!
+                ],
+            )
+            .unwrap();
+        }
+
+        // Query path - should get 3 results (from materialized), not 2 (from rule)
+        let results = storage
+            .execute_query_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            3,
+            "Should use materialized data (3 tuples), not rule evaluation (2 tuples)"
+        );
+    }
+
+    #[test]
+    fn test_materialization_stats() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Enable DDComputation
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.enable_dd_computation().unwrap();
+        }
+
+        // Register two rules
+        let rule1 = make_simple_rule_def("derived1", "base");
+        let rule2 = make_simple_rule_def("derived2", "base");
+
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let mut kg = kg.write();
+            kg.register_rule(&rule1).unwrap();
+            kg.register_rule(&rule2).unwrap();
+        }
+
+        // Check stats - 2 rules, 0 materialized, 2 invalid
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let dd = kg.dd_computation().unwrap();
+            let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
+            assert_eq!(total, 2, "should have 2 rules");
+            assert_eq!(materialized, 0, "nothing materialized yet");
+            assert_eq!(invalid, 2, "both should be invalid (not materialized)");
+        }
+
+        // Materialize one
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let dd = kg.dd_computation().unwrap();
+            dd.set_materialized("derived1", vec![]).unwrap();
+        }
+
+        // Check stats - 2 rules, 1 materialized, 1 invalid
+        {
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read();
+            let dd = kg.dd_computation().unwrap();
+            let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
+            assert_eq!(total, 2);
+            assert_eq!(materialized, 1);
+            assert_eq!(invalid, 1);
+        }
+    }
+}
