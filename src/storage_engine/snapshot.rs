@@ -154,8 +154,7 @@ impl KnowledgeGraphSnapshot {
     ///
     /// Rules for materialized relations are skipped - their data is already
     /// present in `input_tuples` as base facts (injected at snapshot creation).
-    pub fn execute_with_rules_tuples(self, program: &str) -> Result<Vec<Tuple>, String> {
-        // TODO: verify this condition
+    pub fn execute_with_rules_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
         if self.rules.is_empty() {
             return self.execute_tuples(program);
         }
@@ -166,7 +165,6 @@ impl KnowledgeGraphSnapshot {
         for rule in self.rules.iter() {
             // Skip rules whose head relation is materialized
             // (their data is already in input_tuples as base facts)
-            // TODO: verify this condition
             if self.materialized_relations.contains(&rule.head.relation) {
                 continue;
             }
@@ -221,7 +219,6 @@ impl KnowledgeGraphSnapshot {
         // Build combined program with rules (skip materialized)
         let mut combined = String::new();
         for rule in self.rules.iter() {
-            // TODO: verify this condition
             if self.materialized_relations.contains(&rule.head.relation) {
                 continue;
             }
@@ -259,4 +256,127 @@ impl KnowledgeGraphSnapshot {
         self.materialized_relations.contains(relation)
     }
 }
+
+impl std::fmt::Debug for KnowledgeGraphSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KnowledgeGraphSnapshot")
+            .field("version", &self.version)
+            .field("timestamp", &self.timestamp)
+            .field("relations", &self.relation_count())
+            .field("tuples", &self.tuple_count())
+            .field("rules", &self.rules.len())
+            .field("materialized", &self.materialized_count())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::Value;
+
+    #[test]
+    fn test_snapshot_creation() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+
+        assert_eq!(snapshot.relation_count(), 1);
+        assert_eq!(snapshot.tuple_count(), 2);
+        assert!(!snapshot.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_execute() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+
+        let results = snapshot.execute("result(X,Y) :- edge(X,Y).").unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_snapshot_clone_is_cheap() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+        );
+
+        let snapshot1 = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let snapshot2 = snapshot1.clone();
+
+        // Both snapshots share the same underlying data (Arc)
+        assert!(Arc::ptr_eq(
+            &snapshot1.input_tuples,
+            &snapshot2.input_tuples
+        ));
+    }
+
+    #[test]
+    fn test_empty_snapshot() {
+        let snapshot = KnowledgeGraphSnapshot::empty();
+        assert!(snapshot.is_empty());
+        assert_eq!(snapshot.relation_count(), 0);
+        assert_eq!(snapshot.tuple_count(), 0);
+    }
+
+    // === Materialization Tests ===
+
+    #[test]
+    fn test_snapshot_with_materializations() {
+        // Base relation
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+        );
+
+        // Simulate materialized derived relation
+        let mut materialized_names = HashSet::new();
+        materialized_names.insert("path".to_string());
+
+        // Add "path" tuples as if they were materialized
+        input_tuples.insert(
+            "path".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(3)]), // transitive closure
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            input_tuples,
+            Vec::new(), // No rules needed since path is materialized
+            1,
+            materialized_names,
+        );
+
+        assert_eq!(snapshot.materialized_count(), 1);
+        assert!(snapshot.is_materialized("path"));
+        assert!(!snapshot.is_materialized("edge"));
+    }
 
