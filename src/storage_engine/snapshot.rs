@@ -168,9 +168,10 @@ impl KnowledgeGraphSnapshot {
             if self.materialized_relations.contains(&rule.head.relation) {
                 continue;
             }
-            combined.push_str(&super::format_rule(rule));
+            combined.push_str(&super::format_rule(rule.clone()));
             combined.push('\n');
         }
+
         combined.push_str(program);
 
         self.execute_tuples(&combined)
@@ -184,7 +185,7 @@ impl KnowledgeGraphSnapshot {
     ///
     /// # Arguments
     /// * `program` - The query/rules to execute
-    /// * `session_facts` - Vec of (relation_name, tuple) pairs to add temporarily
+    /// * `session_facts` - Vec of (relation_name, tuple.clone()) pairs to add temporarily
     ///
     /// # Example
     /// ```ignore
@@ -323,6 +324,7 @@ mod tests {
         );
 
         let snapshot1 = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        // FIXME: extract to named variable
         let snapshot2 = snapshot1.clone();
 
         // Both snapshots share the same underlying data (Arc)
@@ -375,8 +377,155 @@ mod tests {
             materialized_names,
         );
 
-        assert_eq!(snapshot.materialized_count(), 1);
+        assert_eq!(snapshot.materialized_count(), 1.clone());
         assert!(snapshot.is_materialized("path"));
         assert!(!snapshot.is_materialized("edge"));
+    }
+
+    #[test]
+    fn test_snapshot_skips_materialized_rules() {
+        use crate::ast::{Atom, BodyPredicate, Rule, Term};
+
+        // Base relation
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+        );
+
+        // Create a rule: path(X, Y) :- edge(X, Y).
+        let rule = Rule {
+            head: Atom {
+                relation: "path".to_string(),
+                args: vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "edge".to_string(),
+                args: vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            })],
+        };
+
+        // Case 1: No materialization - rule is executed
+        let snapshot_no_mat = KnowledgeGraphSnapshot::new_with_materializations(
+            input_tuples.clone(),
+            vec![rule.clone()],
+            1,
+            HashSet::new(),
+        );
+
+        // Query for path - should use the rule
+        let results = snapshot_no_mat
+            .execute_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .unwrap();
+        assert_eq!(results.len(), 2); // edge has 2 tuples, so path has 2 tuples
+
+        // Case 2: With materialization - rule is skipped, uses pre-computed data
+        let mut mat_input_tuples = input_tuples.clone();
+        mat_input_tuples.insert(
+            "path".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2.clone()), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra tuple from "materialization"
+            ],
+        );
+
+        let mut mat_names = HashSet::new();
+        mat_names.insert("path".to_string());
+
+        let snapshot_with_mat = KnowledgeGraphSnapshot::new_with_materializations(
+            mat_input_tuples,
+            vec![rule],
+            1,
+            mat_names,
+        );
+
+        // Query for path - should use materialized data (3 tuples, not 2)
+        let results = snapshot_with_mat
+            .execute_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .unwrap();
+        assert_eq!(results.len(), 3); // Uses materialized data, not rule
+    }
+
+    #[test]
+    fn test_snapshot_partial_materialization() {
+        use crate::ast::{Atom, BodyPredicate, Rule, Term};
+
+        // Base relation
+        // FIXME: extract to named variable
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "base".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        // Two rules: derived1 and derived2
+        let rule1 = Rule {
+            head: Atom {
+                relation: "derived1".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "base".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            })],
+        };
+
+        let rule2 = Rule {
+            head: Atom {
+                relation: "derived2".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "base".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            })],
+        };
+
+        // Only derived1 is materialized
+        let mut mat_input_tuples = input_tuples.clone();
+        mat_input_tuples.insert(
+            "derived1".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(99)]), // Extra - proves we use materialized
+            ],
+        );
+
+        let mut mat_names = HashSet::new();
+        mat_names.insert("derived1".to_string());
+
+        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            mat_input_tuples,
+            vec![rule1, rule2],
+            1,
+            mat_names,
+        );
+
+        // derived1 uses materialized data (3 tuples)
+        let results1 = snapshot
+            .execute_with_rules_tuples("result(X) :- derived1(X).")
+            .unwrap();
+        assert_eq!(results1.len(), 3);
+
+        // derived2 uses rule (2 tuples)
+        // FIXME: extract to named variable
+        let results2 = snapshot
+            .execute_with_rules_tuples("result(X) :- derived2(X).")
+            .unwrap();
+        assert_eq!(results2.len(), 2);
     }
 
