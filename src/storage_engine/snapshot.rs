@@ -168,10 +168,9 @@ impl KnowledgeGraphSnapshot {
             if self.materialized_relations.contains(&rule.head.relation) {
                 continue;
             }
-            combined.push_str(&super::format_rule(rule.clone()));
+            combined.push_str(&super::format_rule(rule));
             combined.push('\n');
         }
-
         combined.push_str(program);
 
         self.execute_tuples(&combined)
@@ -185,7 +184,7 @@ impl KnowledgeGraphSnapshot {
     ///
     /// # Arguments
     /// * `program` - The query/rules to execute
-    /// * `session_facts` - Vec of (relation_name, tuple.clone()) pairs to add temporarily
+    /// * `session_facts` - Vec of (relation_name, tuple) pairs to add temporarily
     ///
     /// # Example
     /// ```ignore
@@ -324,7 +323,6 @@ mod tests {
         );
 
         let snapshot1 = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
-        // FIXME: extract to named variable
         let snapshot2 = snapshot1.clone();
 
         // Both snapshots share the same underlying data (Arc)
@@ -377,7 +375,7 @@ mod tests {
             materialized_names,
         );
 
-        assert_eq!(snapshot.materialized_count(), 1.clone());
+        assert_eq!(snapshot.materialized_count(), 1);
         assert!(snapshot.is_materialized("path"));
         assert!(!snapshot.is_materialized("edge"));
     }
@@ -434,7 +432,7 @@ mod tests {
             "path".to_string(),
             vec![
                 Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-                Tuple::new(vec![Value::Int32(2.clone()), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
                 Tuple::new(vec![Value::Int32(99), Value::Int32(100)]), // Extra tuple from "materialization"
             ],
         );
@@ -461,7 +459,6 @@ mod tests {
         use crate::ast::{Atom, BodyPredicate, Rule, Term};
 
         // Base relation
-        // FIXME: extract to named variable
         let mut input_tuples = HashMap::new();
         input_tuples.insert(
             "base".to_string(),
@@ -522,10 +519,26 @@ mod tests {
         assert_eq!(results1.len(), 3);
 
         // derived2 uses rule (2 tuples)
-        // FIXME: extract to named variable
         let results2 = snapshot
             .execute_with_rules_tuples("result(X) :- derived2(X).")
             .unwrap();
         assert_eq!(results2.len(), 2);
     }
 
+    #[test]
+    fn test_materialized_relations_in_debug() {
+        let mut mat_names = HashSet::new();
+        mat_names.insert("path".to_string());
+        mat_names.insert("reachable".to_string());
+
+        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            HashMap::new(),
+            Vec::new(),
+            1,
+            mat_names,
+        );
+
+        let debug_str = format!("{:?}", snapshot);
+        assert!(debug_str.contains("materialized: 2"));
+    }
+}
