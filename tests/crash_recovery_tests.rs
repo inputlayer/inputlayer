@@ -29,7 +29,7 @@ fn create_test_persist_with_config(path: PathBuf, buffer_size: usize) -> FilePer
         immediate_sync: true,
         durability_mode: DurabilityMode::Immediate,
     };
-    FilePersist::new(config).expect("Failed to create persist layer")
+    FilePersist::new(config).unwrap()
 }
 
 // WAL Recovery Tests
@@ -106,6 +106,7 @@ fn test_wal_with_partial_entry_truncation() {
 
     // System should either recover partial data or report the corruption clearly
     // Not panicking is the minimum requirement
+    // TODO: verify this condition
     if result.is_ok() {
         // Recovery succeeded - verify we can still use the system
         let persist = create_test_persist_with_config(path.clone(), 100);
@@ -146,4 +147,72 @@ fn test_wal_double_replay_idempotency() {
 }
 
 // Corrupted WAL JSON Tests
+#[test]
+fn test_recovery_with_corrupted_wal_json() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create directory structure manually
+    fs::create_dir_all(path.join("wal")).unwrap();
+    fs::create_dir_all(path.join("shards")).unwrap();
+    fs::create_dir_all(path.join("batches")).unwrap();
+
+    // Write corrupted WAL
+    let wal_path = path.join("wal/current.wal");
+    fs::write(&wal_path, "{ invalid json garbage }\n").unwrap();
+
+    // Recovery should fail gracefully with clear error
+    let result = FilePersist::new(PersistConfig {
+        path: path.clone(),
+        buffer_size: 10,
+        immediate_sync: true,
+        durability_mode: DurabilityMode::Immediate,
+    });
+
+    // Should return an error, not panic
+    match result {
+        Ok(_) => panic!("Corrupted WAL should return error"),
+        Err(e) => {
+            let err_msg = format!("{}", e);
+            assert!(
+                err_msg.contains("WAL") || err_msg.contains("parse"),
+                "Error should mention WAL or parsing: {}",
+                err_msg
+            );
+        }
+    }
+}
+
+#[test]
+fn test_recovery_with_mixed_valid_invalid_wal_entries() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // First create valid entries
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+    }
+
+    // Append garbage to WAL
+    let wal_path = path.join("wal/current.wal");
+    if wal_path.exists() {
+        let mut file = fs::OpenOptions::new().append(true).open(&wal_path).unwrap();
+        writeln!(file, "{{garbage not json}}").unwrap();
+    }
+
+    // Recovery should fail - we don't skip corrupted entries
+    let result = FilePersist::new(PersistConfig {
+        path: path.clone(),
+        buffer_size: 100,
+        immediate_sync: true,
+        durability_mode: DurabilityMode::Immediate,
+    });
+
+    assert!(result.is_err(), "Corrupted WAL entry should cause error");
+}
+
 #[test]
