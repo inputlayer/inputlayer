@@ -29,7 +29,7 @@ fn create_test_persist_with_config(path: PathBuf, buffer_size: usize) -> FilePer
         immediate_sync: true,
         durability_mode: DurabilityMode::Immediate,
     };
-    FilePersist::new(config).unwrap()
+    FilePersist::new(config).expect("Failed to create persist layer")
 }
 
 // WAL Recovery Tests
@@ -106,7 +106,6 @@ fn test_wal_with_partial_entry_truncation() {
 
     // System should either recover partial data or report the corruption clearly
     // Not panicking is the minimum requirement
-    // TODO: verify this condition
     if result.is_ok() {
         // Recovery succeeded - verify we can still use the system
         let persist = create_test_persist_with_config(path.clone(), 100);
@@ -213,6 +212,65 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
     });
 
     assert!(result.is_err(), "Corrupted WAL entry should cause error");
+}
+
+#[test]
+fn test_empty_wal_file_recovery() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create empty WAL file
+    fs::create_dir_all(path.join("wal")).unwrap();
+    fs::create_dir_all(path.join("shards")).unwrap();
+    fs::create_dir_all(path.join("batches")).unwrap();
+    fs::write(path.join("wal/current.wal"), "").unwrap();
+
+    // Should handle empty WAL gracefully
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert!(shards.is_empty(), "No shards should exist with empty WAL");
+}
+
+#[test]
+fn test_wal_with_only_whitespace() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create WAL with only whitespace
+    fs::create_dir_all(path.join("wal")).unwrap();
+    fs::create_dir_all(path.join("shards")).unwrap();
+    fs::create_dir_all(path.join("batches")).unwrap();
+    fs::write(path.join("wal/current.wal"), "   \n\n   \n").unwrap();
+
+    // Should handle whitespace-only WAL gracefully
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert!(shards.is_empty());
+}
+
+// Corrupted Metadata Tests
+#[test]
+fn test_recovery_with_corrupted_shard_metadata() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create directory structure
+    fs::create_dir_all(path.join("wal")).unwrap();
+    fs::create_dir_all(path.join("shards")).unwrap();
+    fs::create_dir_all(path.join("batches")).unwrap();
+
+    // Write corrupted shard metadata
+    fs::write(path.join("shards/db_edge.json"), "{ corrupted metadata }").unwrap();
+
+    // Recovery should fail gracefully
+    let result = FilePersist::new(PersistConfig {
+        path: path.clone(),
+        buffer_size: 10,
+        immediate_sync: true,
+        durability_mode: DurabilityMode::Immediate,
+    });
+
+    assert!(result.is_err(), "Corrupted metadata should return error");
 }
 
 #[test]
