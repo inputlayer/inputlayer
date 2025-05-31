@@ -274,3 +274,75 @@ fn test_recovery_with_corrupted_shard_metadata() {
 }
 
 #[test]
+fn test_recovery_with_missing_required_metadata_fields() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create directory structure
+    fs::create_dir_all(path.join("wal")).unwrap();
+    fs::create_dir_all(path.join("shards")).unwrap();
+    fs::create_dir_all(path.join("batches")).unwrap();
+
+    // Write metadata with missing required fields
+    fs::write(
+        path.join("shards/db_edge.json"),
+        r#"{"name": "db:edge"}"#, // Missing other required fields
+    )
+    .unwrap();
+
+    // Recovery should fail gracefully
+    let result = FilePersist::new(PersistConfig {
+        path: path.clone(),
+        buffer_size: 10,
+        immediate_sync: true,
+        durability_mode: DurabilityMode::Immediate,
+    });
+
+    assert!(
+        result.is_err(),
+        "Missing metadata fields should return error"
+    );
+}
+
+// Corrupted Batch File (Parquet) Tests
+#[test]
+fn test_read_with_corrupted_parquet_file() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create valid data and flush to parquet
+    {
+        let persist = create_test_persist_with_config(path.clone(), 5);
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Add enough data to trigger flush
+        for i in 0..6 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Corrupt the parquet file
+    let batches_dir = path.join("batches");
+    for entry in fs::read_dir(&batches_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().and_then(|s| s.to_str()) == Some("parquet") {
+            fs::write(entry.path(), b"corrupted parquet data").unwrap();
+            break;
+        }
+    }
+
+    // Re-create persist and try to read
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let result = persist.read("db:edge", 0);
+
+    // Should return error for corrupted parquet
+    assert!(result.is_err(), "Corrupted parquet should return error");
+}
+
+#[test]
