@@ -346,3 +346,84 @@ fn test_read_with_corrupted_parquet_file() {
 }
 
 #[test]
+fn test_read_with_truncated_parquet_file() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create valid data and flush to parquet
+    {
+        let persist = create_test_persist_with_config(path.clone(), 5);
+        persist.ensure_shard("db:edge").unwrap();
+
+        for i in 0..6 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Truncate the parquet file
+    let batches_dir = path.join("batches");
+    for entry in fs::read_dir(&batches_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().and_then(|s| s.to_str()) == Some("parquet") {
+            let content = fs::read(entry.path()).unwrap();
+            if content.len() > 10 {
+                fs::write(entry.path(), &content[..content.len() / 2]).unwrap();
+            }
+            break;
+        }
+    }
+
+    // Re-create persist and try to read
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let result = persist.read("db:edge", 0);
+
+    // Should return error for truncated parquet
+    assert!(result.is_err(), "Truncated parquet should return error");
+}
+
+#[test]
+fn test_read_with_missing_batch_file() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create valid data and flush to parquet
+    {
+        let persist = create_test_persist_with_config(path.clone(), 5);
+        persist.ensure_shard("db:edge").unwrap();
+
+        for i in 0..6 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Delete the batch file but leave metadata
+    let batches_dir = path.join("batches");
+    for entry in fs::read_dir(&batches_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().and_then(|s| s.to_str()) == Some("parquet") {
+            fs::remove_file(entry.path()).unwrap();
+        }
+    }
+
+    // Re-create persist and try to read
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let result = persist.read("db:edge", 0);
+
+    // Should return error for missing batch file
+    assert!(result.is_err(), "Missing batch file should return error");
+}
+
+// Recovery After Disk Full
+#[test]
