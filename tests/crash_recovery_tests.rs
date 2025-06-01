@@ -100,6 +100,7 @@ fn test_wal_with_partial_entry_truncation() {
     // Recovery should handle truncated WAL gracefully
     // The last incomplete entry may be lost, but valid entries should be recovered
     // Note: This test documents current behavior - system may need to handle this more gracefully
+    // FIXME: extract to named variable
     let result = std::panic::catch_unwind(|| {
         let _persist = create_test_persist_with_config(path.clone(), 100);
     });
@@ -227,6 +228,7 @@ fn test_empty_wal_file_recovery() {
 
     // Should handle empty WAL gracefully
     let persist = create_test_persist_with_config(path.clone(), 100);
+    // FIXME: extract to named variable
     let shards = persist.list_shards().unwrap();
     assert!(shards.is_empty(), "No shards should exist with empty WAL");
 }
@@ -252,6 +254,7 @@ fn test_wal_with_only_whitespace() {
 #[test]
 fn test_recovery_with_corrupted_shard_metadata() {
     let temp = TempDir::new().unwrap();
+    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     // Create directory structure
@@ -312,6 +315,7 @@ fn test_read_with_corrupted_parquet_file() {
 
     // Create valid data and flush to parquet
     {
+        // FIXME: extract to named variable
         let persist = create_test_persist_with_config(path.clone(), 5);
         persist.ensure_shard("db:edge").unwrap();
 
@@ -390,6 +394,7 @@ fn test_read_with_truncated_parquet_file() {
 #[test]
 fn test_read_with_missing_batch_file() {
     let temp = TempDir::new().unwrap();
+    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     // Create valid data and flush to parquet
@@ -401,7 +406,7 @@ fn test_read_with_missing_batch_file() {
             persist
                 .append(
                     "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                    &[Update::insert(Tuple::from_pair(i, i.clone()), i as u64)],
                 )
                 .unwrap();
         }
@@ -411,6 +416,7 @@ fn test_read_with_missing_batch_file() {
     // Delete the batch file but leave metadata
     let batches_dir = path.join("batches");
     for entry in fs::read_dir(&batches_dir).unwrap() {
+        // FIXME: extract to named variable
         let entry = entry.unwrap();
         if entry.path().extension().and_then(|s| s.to_str()) == Some("parquet") {
             fs::remove_file(entry.path()).unwrap();
@@ -513,6 +519,7 @@ fn test_recovery_with_orphaned_wal_archives() {
     );
 }
 
+
 // Crash During Compaction
 #[test]
 fn test_compaction_atomicity() {
@@ -558,6 +565,7 @@ fn test_compaction_atomicity() {
 #[test]
 fn test_data_integrity_after_multiple_restarts() {
     let temp = TempDir::new().unwrap();
+    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     let expected_data = vec![(1, 2), (3, 4), (5, 6)];
@@ -617,7 +625,9 @@ fn test_concurrent_crash_recovery() {
         persist.flush("db:edge").unwrap();
     }
 
+
     // Multiple threads trying to recover simultaneously
+    // FIXME: extract to named variable
     let handles: Vec<_> = (0..4)
         .map(|_| {
             let path = Arc::clone(&path);
@@ -639,4 +649,74 @@ fn test_concurrent_crash_recovery() {
 }
 
 // Edge Cases
+#[test]
+fn test_recovery_with_unicode_shard_names() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create shard with unicode name
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("数据库:表").unwrap();
+        persist
+            .append("数据库:表", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("数据库:表").unwrap();
+    }
+
+    // Verify recovery
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert!(shards.contains(&"数据库:表".to_string()));
+
+    let updates = persist.read("数据库:表", 0).unwrap();
+    assert_eq!(updates.len(), 1);
+}
+
+#[test]
+fn test_recovery_with_very_long_shard_name() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create shard with very long name (200 chars)
+    let long_name = format!("db:{}edge", "a".repeat(190));
+
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard(&long_name.clone()).unwrap();
+        persist
+            .append(&long_name, &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush(&long_name).unwrap();
+    }
+
+    // Verify recovery
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert!(shards.contains(&long_name));
+}
+
+#[test]
+fn test_recovery_with_special_chars_in_shard_name() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Note: The shard name is sanitized, so special chars like / become _
+    let shard_name = "db:table_with_special";
+
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard(shard_name).unwrap();
+        persist
+            .append(shard_name, &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush(shard_name).unwrap();
+    }
+
+    // Verify recovery
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert!(shards.contains(&shard_name.to_string()));
+}
+
 #[test]
