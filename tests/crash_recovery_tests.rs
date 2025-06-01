@@ -477,3 +477,82 @@ fn test_recovery_with_orphaned_batch_files() {
 }
 
 #[test]
+fn test_recovery_with_orphaned_wal_archives() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create a valid persist instance first
+    {
+        let persist = create_test_persist_with_config(path.clone(), 5);
+        persist.ensure_shard("db:edge").unwrap();
+
+        for i in 0..6 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Create orphaned WAL archive files
+    fs::write(
+        path.join("wal/wal_12345.archived"),
+        r#"{"shard":"old:data","update":{}}"#,
+    )
+    .unwrap();
+
+    // System should start up without issues
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let updates = persist.read("db:edge", 0).unwrap();
+    assert!(
+        !updates.is_empty(),
+        "Should recover valid data despite orphaned archives"
+    );
+}
+
+// Crash During Compaction
+#[test]
+fn test_compaction_atomicity() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create data and flush
+    {
+        let persist = create_test_persist_with_config(path.clone(), 5);
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Add data at different times
+        for i in 0..20i32 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+
+        // Compact
+        persist.compact("db:edge", 10).unwrap();
+
+        // Verify compaction worked
+        let info = persist.shard_info("db:edge").unwrap();
+        assert_eq!(info.since, 10);
+    }
+
+    // Verify data after restart
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let updates = persist.read("db:edge", 0).unwrap();
+
+    // All remaining updates should have time >= 10
+    assert!(
+        updates.iter().all(|u| u.time >= 10),
+        "Compaction should have removed old data"
+    );
+}
+
+// Data Integrity Verification
+#[test]
