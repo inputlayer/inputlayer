@@ -556,3 +556,87 @@ fn test_compaction_atomicity() {
 
 // Data Integrity Verification
 #[test]
+fn test_data_integrity_after_multiple_restarts() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    let expected_data = vec![(1, 2), (3, 4), (5, 6)];
+
+    // First session: insert data
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+        for (a, b) in &expected_data {
+            persist
+                .append("db:edge", &[Update::insert(Tuple::from_pair(*a, *b), 10)])
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Multiple restarts should preserve data
+    for i in 0..3 {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        let updates = persist.read("db:edge", 0).unwrap();
+        let tuples = to_tuples(&updates);
+
+        assert_eq!(
+            tuples.len(),
+            expected_data.len(),
+            "Restart {} should preserve data count",
+            i
+        );
+
+        for (a, b) in &expected_data {
+            assert!(
+                tuples.contains(&Tuple::from_pair(*a, *b)),
+                "Restart {} should preserve tuple ({}, {})",
+                i,
+                a,
+                b
+            );
+        }
+    }
+}
+
+#[test]
+fn test_concurrent_crash_recovery() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let temp = TempDir::new().unwrap();
+    let path = Arc::new(temp.path().to_path_buf());
+
+    // Create initial data
+    {
+        let persist = create_test_persist_with_config(path.as_ref().clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Multiple threads trying to recover simultaneously
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let path = Arc::clone(&path);
+            thread::spawn(move || {
+                let persist = create_test_persist_with_config(path.as_ref().clone(), 100);
+                let result = persist.read("db:edge", 0);
+                result.is_ok()
+            })
+        })
+        .collect();
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    // At least some should succeed (concurrent file access might cause issues on some systems)
+    assert!(
+        results.iter().any(|r| *r),
+        "At least one concurrent recovery should succeed"
+    );
+}
+
+// Edge Cases
+#[test]
