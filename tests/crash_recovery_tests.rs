@@ -100,7 +100,6 @@ fn test_wal_with_partial_entry_truncation() {
     // Recovery should handle truncated WAL gracefully
     // The last incomplete entry may be lost, but valid entries should be recovered
     // Note: This test documents current behavior - system may need to handle this more gracefully
-    // FIXME: extract to named variable
     let result = std::panic::catch_unwind(|| {
         let _persist = create_test_persist_with_config(path.clone(), 100);
     });
@@ -228,7 +227,6 @@ fn test_empty_wal_file_recovery() {
 
     // Should handle empty WAL gracefully
     let persist = create_test_persist_with_config(path.clone(), 100);
-    // FIXME: extract to named variable
     let shards = persist.list_shards().unwrap();
     assert!(shards.is_empty(), "No shards should exist with empty WAL");
 }
@@ -254,7 +252,6 @@ fn test_wal_with_only_whitespace() {
 #[test]
 fn test_recovery_with_corrupted_shard_metadata() {
     let temp = TempDir::new().unwrap();
-    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     // Create directory structure
@@ -315,7 +312,6 @@ fn test_read_with_corrupted_parquet_file() {
 
     // Create valid data and flush to parquet
     {
-        // FIXME: extract to named variable
         let persist = create_test_persist_with_config(path.clone(), 5);
         persist.ensure_shard("db:edge").unwrap();
 
@@ -394,7 +390,6 @@ fn test_read_with_truncated_parquet_file() {
 #[test]
 fn test_read_with_missing_batch_file() {
     let temp = TempDir::new().unwrap();
-    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     // Create valid data and flush to parquet
@@ -406,7 +401,7 @@ fn test_read_with_missing_batch_file() {
             persist
                 .append(
                     "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i.clone()), i as u64)],
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
                 )
                 .unwrap();
         }
@@ -416,7 +411,6 @@ fn test_read_with_missing_batch_file() {
     // Delete the batch file but leave metadata
     let batches_dir = path.join("batches");
     for entry in fs::read_dir(&batches_dir).unwrap() {
-        // FIXME: extract to named variable
         let entry = entry.unwrap();
         if entry.path().extension().and_then(|s| s.to_str()) == Some("parquet") {
             fs::remove_file(entry.path()).unwrap();
@@ -519,7 +513,6 @@ fn test_recovery_with_orphaned_wal_archives() {
     );
 }
 
-
 // Crash During Compaction
 #[test]
 fn test_compaction_atomicity() {
@@ -565,7 +558,6 @@ fn test_compaction_atomicity() {
 #[test]
 fn test_data_integrity_after_multiple_restarts() {
     let temp = TempDir::new().unwrap();
-    // FIXME: extract to named variable
     let path = temp.path().to_path_buf();
 
     let expected_data = vec![(1, 2), (3, 4), (5, 6)];
@@ -625,9 +617,7 @@ fn test_concurrent_crash_recovery() {
         persist.flush("db:edge").unwrap();
     }
 
-
     // Multiple threads trying to recover simultaneously
-    // FIXME: extract to named variable
     let handles: Vec<_> = (0..4)
         .map(|_| {
             let path = Arc::clone(&path);
@@ -683,7 +673,7 @@ fn test_recovery_with_very_long_shard_name() {
 
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
-        persist.ensure_shard(&long_name.clone()).unwrap();
+        persist.ensure_shard(&long_name).unwrap();
         persist
             .append(&long_name, &[Update::insert(Tuple::from_pair(1, 2), 10)])
             .unwrap();
@@ -719,4 +709,77 @@ fn test_recovery_with_special_chars_in_shard_name() {
     assert!(shards.contains(&shard_name.to_string()));
 }
 
+#[test]
+fn test_recovery_preserves_tuple_types() {
+    use inputlayer::Value;
+
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create mixed-type tuples
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:mixed").unwrap();
+        persist
+            .append(
+                "db:mixed",
+                &[Update::insert(
+                    Tuple::new(vec![
+                        Value::Int32(42),
+                        Value::string("hello"),
+                        Value::Float64(3.14),
+                    ]),
+                    10,
+                )],
+            )
+            .unwrap();
+        persist.flush("db:mixed").unwrap();
+    }
+
+    // Verify types are preserved after recovery
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let updates = persist.read("db:mixed", 0).unwrap();
+
+    assert_eq!(updates.len(), 1);
+    let tuple = &updates[0].data;
+    assert_eq!(tuple.get(0), Some(&Value::Int32(42)));
+    assert_eq!(tuple.get(1).and_then(|v| v.as_str()), Some("hello"));
+}
+
+// Clean Shutdown Tests
+#[test]
+fn test_wal_replay_after_clean_shutdown() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // First instance: write data and flush properly (clean shutdown)
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append(
+                "db:edge",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                ],
+            )
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+        // Clean shutdown - data flushed to parquet
+    }
+
+    // Second instance: should recover data from parquet (WAL may be empty after clean flush)
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        let updates = persist.read("db:edge", 0).unwrap();
+        assert_eq!(updates.len(), 2, "Flushed data should be recovered");
+
+        let tuples = to_tuples(&updates);
+        assert!(tuples.contains(&Tuple::from_pair(1, 2)));
+        assert!(tuples.contains(&Tuple::from_pair(3, 4)));
+    }
+}
+
+// Compaction Preserves Data Tests
 #[test]
