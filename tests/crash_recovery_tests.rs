@@ -783,3 +783,59 @@ fn test_wal_replay_after_clean_shutdown() {
 
 // Compaction Preserves Data Tests
 #[test]
+fn test_compaction_preserves_all_data() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // Create data with many updates at different times
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Insert data at various times
+        for i in 0..100i32 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i * 2), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+
+        // Read data before compaction
+        let before = persist.read("db:edge", 0).unwrap();
+        assert_eq!(before.len(), 100);
+
+        // Compact with time threshold at 50 (keep updates >= 50)
+        persist.compact("db:edge", 50).unwrap();
+
+        // Read data after compaction
+        let after = persist.read("db:edge", 50).unwrap();
+
+        // All data with time >= 50 should still be present
+        assert_eq!(after.len(), 50, "Should keep 50 updates after compaction");
+
+        // Verify the correct data is preserved
+        let tuples = to_tuples(&after);
+        for i in 50..100 {
+            assert!(
+                tuples.contains(&Tuple::from_pair(i, i * 2)),
+                "Tuple ({}, {}) should be preserved after compaction",
+                i,
+                i * 2
+            );
+        }
+    }
+
+    // Verify after restart
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let updates = persist.read("db:edge", 50).unwrap();
+    assert_eq!(
+        updates.len(),
+        50,
+        "Compacted data should persist across restart"
+    );
+}
+
+#[test]
