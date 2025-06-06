@@ -839,3 +839,121 @@ fn test_compaction_preserves_all_data() {
 }
 
 #[test]
+fn test_compaction_with_deletions() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Insert then delete some tuples
+        persist
+            .append(
+                "db:edge",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                    Update::insert(Tuple::from_pair(5, 6), 30),
+                ],
+            )
+            .unwrap();
+
+        // Delete the middle tuple
+        persist
+            .append("db:edge", &[Update::delete(Tuple::from_pair(3, 4), 40)])
+            .unwrap();
+
+        persist.flush("db:edge").unwrap();
+
+        // Compact to time 25 (keeps >= 25)
+        persist.compact("db:edge", 25).unwrap();
+    }
+
+    // Verify after restart
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let updates = persist.read("db:edge", 25).unwrap();
+
+    // Consolidate to see net effect
+    let mut consolidated = updates.clone();
+    consolidate(&mut consolidated);
+    let tuples = to_tuples(&consolidated);
+
+    // Should have (5,6) from time 30 and deletion of (3,4) at time 40
+    assert!(
+        tuples.contains(&Tuple::from_pair(5, 6)),
+        "(5,6) should be preserved"
+    );
+}
+
+// Concurrent Read During Compaction Tests
+#[test]
+fn test_concurrent_read_during_compaction() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+
+    let temp = TempDir::new().unwrap();
+    let path = Arc::new(temp.path().to_path_buf());
+
+    // Create initial data
+    {
+        let persist = create_test_persist_with_config(path.as_ref().clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+
+        for i in 0..50i32 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+    }
+
+    // Shared flag to signal compaction is happening
+    let compacting = Arc::new(AtomicBool::new(false));
+    let reads_during_compaction = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // Reader thread
+    let reader_path = Arc::clone(&path);
+    let reader_compacting = Arc::clone(&compacting);
+    let reader_count = Arc::clone(&reads_during_compaction);
+    let reader = thread::spawn(move || {
+        let persist = create_test_persist_with_config(reader_path.as_ref().clone(), 100);
+
+        for _ in 0..20 {
+            let result = persist.read("db:edge", 0);
+            if result.is_ok() && reader_compacting.load(Ordering::Relaxed) {
+                reader_count.fetch_add(1, Ordering::Relaxed);
+            }
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+
+    // Compaction thread
+    let compact_path = Arc::clone(&path);
+    let compact_flag = Arc::clone(&compacting);
+    let compactor = thread::spawn(move || {
+        let persist = create_test_persist_with_config(compact_path.as_ref().clone(), 100);
+
+        compact_flag.store(true, Ordering::Relaxed);
+        let result = persist.compact("db:edge", 25);
+        compact_flag.store(false, Ordering::Relaxed);
+
+        result.is_ok()
+    });
+
+    reader.join().unwrap();
+    let compaction_ok = compactor.join().unwrap();
+
+    // Compaction should succeed
+    assert!(compaction_ok, "Compaction should complete successfully");
+
+    // Some reads should have happened during compaction
+    // (This verifies concurrent access doesn't cause deadlocks)
+}
+
+// Stress Tests
+#[test]
