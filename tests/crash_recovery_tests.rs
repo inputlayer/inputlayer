@@ -957,3 +957,64 @@ fn test_concurrent_read_during_compaction() {
 
 // Stress Tests
 #[test]
+fn test_many_restarts_with_incremental_data() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    // 10 restart cycles, each adding more data
+    for cycle in 0..10 {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Add new data each cycle
+        persist
+            .append(
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(cycle, cycle), cycle as u64)],
+            )
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // Verify cumulative data
+        let updates = persist.read("db:edge", 0).unwrap();
+        assert_eq!(
+            updates.len(),
+            (cycle + 1) as usize,
+            "Cycle {} should have {} updates",
+            cycle,
+            cycle + 1
+        );
+    }
+}
+
+#[test]
+fn test_recovery_with_many_shards() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+
+    let num_shards = 50;
+
+    // Create many shards
+    {
+        let persist = create_test_persist_with_config(path.clone(), 100);
+        for i in 0..num_shards {
+            let shard = format!("db:shard_{}", i);
+            persist.ensure_shard(&shard).unwrap();
+            persist
+                .append(&shard, &[Update::insert(Tuple::from_pair(i, i), 10)])
+                .unwrap();
+            persist.flush(&shard).unwrap();
+        }
+    }
+
+    // Verify all shards recover
+    let persist = create_test_persist_with_config(path.clone(), 100);
+    let shards = persist.list_shards().unwrap();
+    assert_eq!(shards.len(), num_shards as usize);
+
+    for i in 0..num_shards {
+        let shard = format!("db:shard_{}", i);
+        let updates = persist.read(&shard, 0).unwrap();
+        assert_eq!(updates.len(), 1, "Shard {} should have data", i);
+    }
+}
