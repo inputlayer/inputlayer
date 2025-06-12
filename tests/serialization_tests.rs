@@ -41,7 +41,7 @@ fn test_int64_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).unwrap();
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
             "Int64 roundtrip failed for {:?}",
@@ -103,7 +103,7 @@ fn test_string_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).unwrap();
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
             "String roundtrip failed for {:?}",
@@ -131,7 +131,7 @@ fn test_bool_json_roundtrip() {
 fn test_null_json_roundtrip() {
     let original = Value::Null;
     let json = serde_json::to_string(&original).expect("Serialization failed");
-    let deserialized: Value = serde_json::from_str(&json).unwrap();
+    let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
     assert_eq!(original, deserialized, "Null roundtrip failed");
 }
 
@@ -147,8 +147,8 @@ fn test_vector_json_roundtrip() {
     ];
 
     for original in values {
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: Value = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
 
         match (&original, &deserialized) {
             (Value::Vector(a), Value::Vector(b)) => {
@@ -165,6 +165,72 @@ fn test_vector_json_roundtrip() {
             }
             _ => panic!("Expected Vector values"),
         }
+    }
+}
+
+#[test]
+fn test_vector_int8_json_roundtrip() {
+    let values = vec![
+        Value::vector_int8(vec![]),
+        Value::vector_int8(vec![0]),
+        Value::vector_int8(vec![1, -1, 0]),
+        Value::vector_int8(vec![i8::MIN, i8::MAX]),
+        Value::vector_int8((-64..64).collect()), // 128-dim quantized embedding
+    ];
+
+    for original in values {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(original, deserialized, "VectorInt8 roundtrip failed");
+    }
+}
+
+#[test]
+fn test_timestamp_json_roundtrip() {
+    let values = vec![
+        Value::Timestamp(0),
+        Value::Timestamp(1),
+        Value::Timestamp(-1),
+        Value::Timestamp(1704067200000), // 2024-01-01 00:00:00 UTC
+        Value::Timestamp(i64::MAX),
+        Value::Timestamp(i64::MIN),
+    ];
+
+    for original in values {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(
+            original, deserialized,
+            "Timestamp roundtrip failed for {:?}",
+            original
+        );
+    }
+}
+
+// Tuple Serialization Tests
+#[test]
+fn test_tuple_json_roundtrip() {
+    let tuples = vec![
+        Tuple::new(vec![]),
+        Tuple::new(vec![Value::Int32(1)]),
+        Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+        Tuple::new(vec![
+            Value::Int32(1),
+            Value::String(Arc::from("hello")),
+            Value::Float64(3.14),
+        ]),
+        Tuple::new(vec![
+            Value::Int64(100),
+            Value::Bool(true),
+            Value::Null,
+            Value::Timestamp(1704067200000),
+        ]),
+    ];
+
+    for original in tuples {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(original, deserialized, "Tuple roundtrip failed");
     }
 }
 
