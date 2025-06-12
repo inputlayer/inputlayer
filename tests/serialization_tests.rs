@@ -41,7 +41,7 @@ fn test_int64_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        let deserialized: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
             original, deserialized,
             "Int64 roundtrip failed for {:?}",
@@ -103,12 +103,68 @@ fn test_string_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        let deserialized: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
             original, deserialized,
             "String roundtrip failed for {:?}",
             original
         );
+    }
+}
+
+#[test]
+fn test_bool_json_roundtrip() {
+    let values = vec![Value::Bool(true), Value::Bool(false)];
+
+    for original in values {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(
+            original, deserialized,
+            "Bool roundtrip failed for {:?}",
+            original
+        );
+    }
+}
+
+#[test]
+fn test_null_json_roundtrip() {
+    let original = Value::Null;
+    let json = serde_json::to_string(&original).expect("Serialization failed");
+    let deserialized: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(original, deserialized, "Null roundtrip failed");
+}
+
+#[test]
+fn test_vector_json_roundtrip() {
+    let values = vec![
+        Value::vector(vec![]),
+        Value::vector(vec![1.0]),
+        Value::vector(vec![1.0, 2.0, 3.0]),
+        Value::vector(vec![0.0, -1.0, 1.0, 0.5, -0.5]),
+        Value::vector(vec![f32::MIN, f32::MAX]),
+        Value::vector((0..128).map(|i| i as f32 * 0.1).collect()), // 128-dim embedding
+    ];
+
+    for original in values {
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: Value = serde_json::from_str(&json).unwrap();
+
+        match (&original, &deserialized) {
+            (Value::Vector(a), Value::Vector(b)) => {
+                assert_eq!(a.len(), b.len(), "Vector length mismatch");
+                for (va, vb) in a.iter().zip(b.iter()) {
+                    // Use 1e-5 tolerance for f32 (has ~7 significant digits)
+                    assert!(
+                        (va - vb).abs() < 1e-5,
+                        "Vector element mismatch: {} vs {}",
+                        va,
+                        vb
+                    );
+                }
+            }
+            _ => panic!("Expected Vector values"),
+        }
     }
 }
 
