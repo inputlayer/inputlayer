@@ -319,3 +319,65 @@ fn test_special_float_values_serialization() {
 }
 
 #[test]
+fn test_unicode_string_serialization() {
+    let values = vec![
+        Value::String(Arc::from("café")),
+        Value::String(Arc::from("日本語")),
+        Value::String(Arc::from("🎉🎊🎈")),
+        Value::String(Arc::from("Ñoño")),
+        Value::String(Arc::from("Привет")),
+        Value::String(Arc::from("مرحبا")),
+        Value::String(Arc::from("שלום")),
+        Value::String(Arc::from("🇺🇸🇯🇵🇩🇪")),
+        Value::String(Arc::from("a\u{0000}b")), // Null character
+        Value::String(Arc::from("\u{FEFF}BOM")), // Byte order mark
+    ];
+
+    for original in values {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(
+            original, deserialized,
+            "Unicode roundtrip failed for {:?}",
+            original
+        );
+    }
+}
+
+#[test]
+fn test_empty_vector_serialization() {
+    let empty_f32 = Value::vector(vec![]);
+    let empty_i8 = Value::vector_int8(vec![]);
+
+    let json1 = serde_json::to_string(&empty_f32).expect("Serialization failed");
+    let json2 = serde_json::to_string(&empty_i8).expect("Serialization failed");
+
+    let deser1: Value = serde_json::from_str(&json1).expect("Deserialization failed");
+    let deser2: Value = serde_json::from_str(&json2).expect("Deserialization failed");
+
+    assert_eq!(empty_f32, deser1);
+    assert_eq!(empty_i8, deser2);
+}
+
+#[test]
+fn test_large_value_serialization() {
+    // Large vector (1000 dimensions)
+    let large_vector = Value::vector((0..1000).map(|i| i as f32 * 0.001).collect());
+    let json = serde_json::to_string(&large_vector).expect("Serialization failed");
+    let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+
+    match (&large_vector, &deserialized) {
+        (Value::Vector(a), Value::Vector(b)) => {
+            assert_eq!(a.len(), b.len());
+        }
+        _ => panic!("Expected Vector"),
+    }
+
+    // Large string (10KB)
+    let large_string = Value::String(Arc::from("x".repeat(10000)));
+    let json = serde_json::to_string(&large_string).expect("Serialization failed");
+    let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+    assert_eq!(large_string, deserialized);
+}
+
+#[test]
