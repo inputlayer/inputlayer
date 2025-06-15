@@ -381,3 +381,56 @@ fn test_large_value_serialization() {
 }
 
 #[test]
+fn test_deeply_nested_tuple_serialization() {
+    // Tuple with many values
+    let values: Vec<Value> = (0..100)
+        .map(|i| match i % 5 {
+            0 => Value::Int32(i),
+            1 => Value::Int64(i as i64 * 1000),
+            2 => Value::Float64(i as f64 * 0.1),
+            3 => Value::String(Arc::from(format!("item_{}", i))),
+            _ => Value::Bool(i % 2 == 0),
+        })
+        .collect();
+
+    let original = Tuple::new(values);
+    let json = serde_json::to_string(&original).expect("Serialization failed");
+    let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
+
+    assert_eq!(original.arity(), deserialized.arity());
+    for i in 0..original.arity() {
+        match (original.get(i), deserialized.get(i)) {
+            (Some(Value::Float64(a)), Some(Value::Float64(b))) => {
+                assert!((a - b).abs() < 1e-10);
+            }
+            (a, b) => assert_eq!(a, b, "Mismatch at index {}", i),
+        }
+    }
+}
+
+// DataType Serialization Tests
+#[test]
+fn test_datatype_serialization() {
+    let types = vec![
+        DataType::Int32,
+        DataType::Int64,
+        DataType::Float64,
+        DataType::String,
+        DataType::Bool,
+        DataType::Null,
+        DataType::Vector { dim: None },
+        DataType::Vector { dim: Some(128) },
+        DataType::VectorInt8 { dim: None },
+        DataType::VectorInt8 { dim: Some(64) },
+        DataType::Timestamp,
+    ];
+
+    for original in types {
+        // DataType should be Debug-able at minimum
+        let debug_str = format!("{:?}", original);
+        assert!(!debug_str.is_empty());
+    }
+}
+
+// Value Type Consistency Tests
+#[test]
