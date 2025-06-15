@@ -235,3 +235,87 @@ fn test_tuple_json_roundtrip() {
 }
 
 #[test]
+fn test_tuple_with_vectors_roundtrip() {
+    let original = Tuple::new(vec![
+        Value::Int32(1),
+        Value::vector(vec![0.1, 0.2, 0.3]),
+        Value::vector_int8(vec![1, 2, 3]),
+    ]);
+
+    let json = serde_json::to_string(&original).expect("Serialization failed");
+    let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
+
+    // Compare element by element for vectors
+    assert_eq!(original.arity(), deserialized.arity());
+    assert_eq!(original.get(0), deserialized.get(0));
+
+    // Vector comparison with tolerance (f32 has ~7 significant digits, use 1e-5)
+    match (original.get(1), deserialized.get(1)) {
+        (Some(Value::Vector(a)), Some(Value::Vector(b))) => {
+            assert_eq!(a.len(), b.len());
+            for (va, vb) in a.iter().zip(b.iter()) {
+                assert!((va - vb).abs() < 1e-5);
+            }
+        }
+        _ => panic!("Expected Vector"),
+    }
+
+    assert_eq!(original.get(2), deserialized.get(2));
+}
+
+// Edge Case Tests
+#[test]
+fn test_special_float_values_serialization() {
+    // Note: JSON doesn't natively support NaN/Infinity, so we test that
+    // our serialization handles these gracefully
+
+    let infinity = Value::Float64(f64::INFINITY);
+    let neg_infinity = Value::Float64(f64::NEG_INFINITY);
+    let nan = Value::Float64(f64::NAN);
+
+    // Our Value type serializes Infinity/NaN as null (which is valid JSON)
+    // This is a graceful fallback since standard JSON doesn't support these values
+    let inf_result = serde_json::to_string(&infinity);
+    let neg_inf_result = serde_json::to_string(&neg_infinity);
+    let nan_result = serde_json::to_string(&nan);
+
+    // Serialization should succeed (converting to null or similar representation)
+    assert!(
+        inf_result.is_ok(),
+        "Infinity should serialize (typically to null): {:?}",
+        inf_result
+    );
+    assert!(
+        neg_inf_result.is_ok(),
+        "Negative infinity should serialize (typically to null): {:?}",
+        neg_inf_result
+    );
+    assert!(
+        nan_result.is_ok(),
+        "NaN should serialize (typically to null): {:?}",
+        nan_result
+    );
+
+    // Verify the serialized values contain null for the value field
+    let inf_json = inf_result.unwrap();
+    let neg_inf_json = neg_inf_result.unwrap();
+    let nan_json = nan_result.unwrap();
+
+    assert!(
+        inf_json.contains("null"),
+        "Infinity should serialize value as null: {}",
+        inf_json
+    );
+    assert!(
+        neg_inf_json.contains("null"),
+        "Neg infinity should serialize value as null: {}",
+        neg_inf_json
+    );
+    assert!(
+        nan_json.contains("null"),
+        "NaN should serialize value as null: {}",
+        nan_json
+    );
+}
+
+#[test]
