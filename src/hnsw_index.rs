@@ -50,3 +50,248 @@ struct HnswInnerOwned {
 // - The HNSW graph uses atomic operations for concurrent access
 // - The storage is Arc<Vec<Vec<f32>>> which is Send + Sync
 // - index_to_tuple_id is Vec<TupleId> which is Send + Sync
+unsafe impl Send for HnswInnerOwned {}
+unsafe impl Sync for HnswInnerOwned {}
+
+impl HnswIndex {
+    /// Create a new HNSW index with the given configuration
+    pub fn new(config: HnswConfig) -> Self {
+        Self {
+            inner: RwLock::new(None),
+            config,
+            tombstones: RwLock::new(HashSet::new()),
+            vectors: RwLock::new(Vec::new()),
+            dimension: RwLock::new(0),
+        }
+    }
+
+    /// Initialize or rebuild the HNSW structure from stored vectors
+    fn rebuild_hnsw(&self) -> Result<(), String> {
+        let vectors = self.vectors.read();
+        let tombstones = self.tombstones.read();
+
+        // Filter out tombstoned vectors, keeping tuple_ids
+        let active_vectors: Vec<(TupleId, &Vec<f32>)> = vectors
+            .iter()
+            .filter(|(tuple_id, _)| !tombstones.contains(tuple_id))
+            .map(|(tuple_id, vec)| (*tuple_id, vec))
+            .collect();
+
+        if active_vectors.is_empty() {
+            *self.inner.write() = None;
+            return Ok(());
+        }
+
+        // Create storage for vectors and mapping
+        let dim = active_vectors[0].1.len();
+        let storage: Vec<Vec<f32>> = active_vectors.iter().map(|(_, v)| (*v).clone()).collect();
+        let index_to_tuple_id: Vec<TupleId> = active_vectors.iter().map(|(id, _)| *id).collect();
+        let storage = Arc::new(storage);
+
+        // Create a &'static reference to storage backed by the Arc.
+        // Sound because HnswInnerOwned keeps the Arc alive for the reference's lifetime.
+        let storage_ref: &'static Vec<Vec<f32>> = unsafe {
+            // SAFETY: We keep storage alive via Arc in HnswInnerOwned
+            // The reference is only valid as long as HnswInnerOwned exists
+            &*Arc::as_ptr(&storage).cast::<Vec<Vec<f32>>>()
+        };
+
+        let max_elements = storage_ref.len().max(1000);
+        let hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
+            self.config.m,
+            max_elements,
+            16,
+            self.config.ef_construction,
+            DistL2,
+        );
+
+        // Insert all vectors with their indices
+        for (idx, vec) in storage_ref.iter().enumerate() {
+            hnsw.insert((vec, idx));
+        }
+
+        *self.inner.write() = Some(HnswInnerOwned {
+            hnsw: Box::new(hnsw),
+            _storage: storage,
+            index_to_tuple_id,
+        });
+
+        *self.dimension.write() = dim;
+
+        Ok(())
+    }
+
+    /// Get the ef_search parameter to use
+    fn get_ef_search(&self, ef_override: Option<usize>) -> usize {
+        ef_override.unwrap_or(self.config.ef_search)
+    }
+
+    /// Transform distance based on metric
+    fn transform_distance(&self, dist: f32) -> f64 {
+        match self.config.metric {
+            DistanceMetric::Euclidean => dist as f64,
+            DistanceMetric::Cosine => {
+                // L2 on normalized vectors: d^2 = 2(1 - cos(theta))
+                // So cosine distance = 1 - cos(theta) = d^2 / 2
+                (dist * dist / 2.0) as f64
+            }
+            DistanceMetric::DotProduct => {
+                // Dot product on unit vectors equals cosine
+                // Convert L2 to approximate dot product similarity
+                // Higher similarity = lower distance, so negate
+                -(1.0 - dist * dist / 2.0) as f64
+            }
+            DistanceMetric::Manhattan => {
+                // Approximate L1 from L2 (rough approximation)
+                dist as f64
+            }
+        }
+    }
+
+    /// Normalize a vector (for cosine similarity)
+    fn normalize_vector(vec: &[f32]) -> Vec<f32> {
+        let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 1e-10 {
+            vec.iter().map(|x| x / norm).collect()
+        } else {
+            vec.to_vec()
+        }
+    }
+
+    /// Prepare vector for insertion based on metric
+    fn prepare_vector(&self, vec: &[f32]) -> Vec<f32> {
+        match self.config.metric {
+            DistanceMetric::Cosine | DistanceMetric::DotProduct => Self::normalize_vector(vec),
+            _ => vec.to_vec(),
+        }
+    }
+}
+
+impl Index for HnswIndex {
+    fn search(&self, query: &[f32], k: usize, ef: Option<usize>) -> Vec<(TupleId, f64)> {
+        let inner_guard = self.inner.read();
+        let inner = match &*inner_guard {
+            Some(h) => h,
+            None => return Vec::new(),
+        };
+
+        let ef_search = self.get_ef_search(ef);
+
+        // Prepare query vector
+        let prepared_query = self.prepare_vector(query);
+
+        // Search HNSW
+        let raw_results = inner.hnsw.search(&prepared_query, k, ef_search);
+
+        // Map internal indices to tuple IDs using the stored mapping
+        let mut results: Vec<(TupleId, f64)> = raw_results
+            .into_iter()
+            .filter_map(|neighbour| {
+                let internal_idx = neighbour.d_id;
+                if internal_idx < inner.index_to_tuple_id.len() {
+                    let tuple_id = inner.index_to_tuple_id[internal_idx];
+                    let dist = self.transform_distance(neighbour.distance);
+                    Some((tuple_id, dist))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by distance (HNSW should return sorted, but ensure it)
+        results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        results
+    }
+
+    fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String> {
+        // Track dimension
+        {
+            let mut dim = self.dimension.write();
+            if *dim == 0 {
+                *dim = vector.len();
+            } else if *dim != vector.len() {
+                return Err(format!(
+                    "Dimension mismatch: index has dimension {}, got vector of dimension {}",
+                    *dim,
+                    vector.len()
+                ));
+            }
+        }
+
+        // Prepare and store vector
+        let prepared = self.prepare_vector(vector);
+        self.vectors.write().push((id, prepared));
+
+        // Rebuild HNSW structure
+        // Note: For better performance, we could batch inserts and rebuild less frequently
+        self.rebuild_hnsw()?;
+
+        Ok(())
+    }
+
+    fn delete(&mut self, id: TupleId) {
+        self.tombstones.write().insert(id);
+    }
+
+    fn tombstone_ratio(&self) -> f64 {
+        let vectors = self.vectors.read();
+        let tombstones = self.tombstones.read();
+
+        if vectors.is_empty() {
+            0.0
+        } else {
+            tombstones.len() as f64 / vectors.len() as f64
+        }
+    }
+
+    fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String> {
+        // Clear state
+        self.tombstones.write().clear();
+        *self.inner.write() = None;
+
+        // Reset dimension
+        if let Some((_, vec)) = vectors.first() {
+            *self.dimension.write() = vec.len();
+        } else {
+            *self.dimension.write() = 0;
+            self.vectors.write().clear();
+            return Ok(());
+        }
+
+        // Prepare and store vectors
+        {
+            let mut stored = self.vectors.write();
+            stored.clear();
+            for (id, vec) in vectors {
+                let prepared = self.prepare_vector(vec);
+                stored.push((*id, prepared));
+            }
+        }
+
+        // Rebuild HNSW
+        self.rebuild_hnsw()
+    }
+
+    fn len(&self) -> usize {
+        self.vectors.read().len()
+    }
+
+    fn index_type(&self) -> &'static str {
+        "hnsw"
+    }
+
+    fn metric(&self) -> DistanceMetric {
+        self.config.metric
+    }
+
+    fn tombstone_count(&self) -> usize {
+        self.tombstones.read().len()
+    }
+
+    fn dimension(&self) -> usize {
+        *self.dimension.read()
+    }
+}
+
+// Safety: HnswIndex uses RwLock internally for thread safety
