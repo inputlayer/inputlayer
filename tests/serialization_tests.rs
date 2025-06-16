@@ -568,3 +568,58 @@ fn test_float_boundary_values() {
 
 // Concurrent Serialization Tests
 #[test]
+fn test_concurrent_serialization() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let values: Vec<Value> = (0..100).map(|i| Value::Int32(i)).collect();
+    let values = Arc::new(values);
+
+    let handles: Vec<_> = (0..10)
+        .map(|_| {
+            let values = Arc::clone(&values);
+            thread::spawn(move || {
+                for value in values.iter() {
+                    let json = serde_json::to_string(value).unwrap();
+                    let _: Value = serde_json::from_str(&json).unwrap();
+                }
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        handle.join().expect("Thread panicked during serialization");
+    }
+}
+
+// Performance Sanity Tests
+#[test]
+fn test_serialization_performance_sanity() {
+    use std::time::Instant;
+
+    // Create a moderately sized tuple
+    let values: Vec<Value> = (0..100)
+        .flat_map(|i| {
+            vec![
+                Value::Int32(i),
+                Value::String(Arc::from(format!("item_{}", i))),
+                Value::Float64(i as f64 * 0.1),
+            ]
+        })
+        .collect();
+    let tuple = Tuple::new(values);
+
+    let start = Instant::now();
+    for _ in 0..1000 {
+        let json = serde_json::to_string(&tuple).unwrap();
+        let _: Tuple = serde_json::from_str(&json).unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    // Should complete 1000 roundtrips in reasonable time (< 5 seconds)
+    assert!(
+        elapsed.as_secs() < 5,
+        "Serialization too slow: {:?} for 1000 roundtrips",
+        elapsed
+    );
+}
