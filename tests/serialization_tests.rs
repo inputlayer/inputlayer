@@ -41,7 +41,7 @@ fn test_int64_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).unwrap();
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
             "Int64 roundtrip failed for {:?}",
@@ -179,7 +179,7 @@ fn test_vector_int8_json_roundtrip() {
     ];
 
     for original in values {
-        let json = serde_json::to_string(&original).unwrap();
+        let json = serde_json::to_string(&original).expect("Serialization failed");
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(original, deserialized, "VectorInt8 roundtrip failed");
     }
@@ -198,7 +198,7 @@ fn test_timestamp_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).unwrap();
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
             "Timestamp roundtrip failed for {:?}",
@@ -229,7 +229,7 @@ fn test_tuple_json_roundtrip() {
 
     for original in tuples {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Tuple = serde_json::from_str(&json).unwrap();
+        let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(original, deserialized, "Tuple roundtrip failed");
     }
 }
@@ -334,7 +334,7 @@ fn test_unicode_string_serialization() {
     ];
 
     for original in values {
-        let json = serde_json::to_string(&original).unwrap();
+        let json = serde_json::to_string(&original).expect("Serialization failed");
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
@@ -353,7 +353,7 @@ fn test_empty_vector_serialization() {
     let json2 = serde_json::to_string(&empty_i8).expect("Serialization failed");
 
     let deser1: Value = serde_json::from_str(&json1).expect("Deserialization failed");
-    let deser2: Value = serde_json::from_str(&json2).unwrap();
+    let deser2: Value = serde_json::from_str(&json2).expect("Deserialization failed");
 
     assert_eq!(empty_f32, deser1);
     assert_eq!(empty_i8, deser2);
@@ -394,7 +394,7 @@ fn test_deeply_nested_tuple_serialization() {
         .collect();
 
     let original = Tuple::new(values);
-    let json = serde_json::to_string(&original).unwrap();
+    let json = serde_json::to_string(&original).expect("Serialization failed");
     let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
 
     assert_eq!(original.arity(), deserialized.arity());
@@ -491,4 +491,80 @@ fn test_value_json_format() {
     assert!(json.contains("Null"));
 }
 
+#[test]
+fn test_malformed_json_handling() {
+    // Test that malformed JSON is handled gracefully
+    let bad_inputs = vec![
+        "",
+        "{}",
+        "{\"type\": \"Int32\"}",
+        "{\"value\": 42}",
+        "{\"type\": \"Unknown\", \"value\": 42}",
+        "null",
+        "42",
+        "\"string\"",
+    ];
+
+    for input in bad_inputs {
+        let result: Result<Value, _> = serde_json::from_str(input);
+        // Should either succeed or fail gracefully (no panic)
+        let _ = result;
+    }
+}
+
+// Boundary Value Tests
+#[test]
+fn test_integer_boundary_values() {
+    let boundaries = vec![
+        Value::Int32(i32::MAX),
+        Value::Int32(i32::MIN),
+        Value::Int32(0),
+        Value::Int64(i64::MAX),
+        Value::Int64(i64::MIN),
+        Value::Int64(0),
+    ];
+
+    for original in boundaries {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(original, deserialized, "Boundary value roundtrip failed");
+    }
+}
+
+#[test]
+fn test_float_boundary_values() {
+    let boundaries = vec![
+        Value::Float64(f64::MIN_POSITIVE),
+        Value::Float64(-f64::MIN_POSITIVE),
+        Value::Float64(f64::EPSILON),
+        Value::Float64(1.0 + f64::EPSILON),
+        Value::Float64(1.0 - f64::EPSILON),
+    ];
+
+    for original in boundaries {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+
+        match (&original, &deserialized) {
+            (Value::Float64(a), Value::Float64(b)) => {
+                // Allow for floating point precision loss in JSON
+                let relative_error = if a.abs() > 1e-300 {
+                    (a - b).abs() / a.abs()
+                } else {
+                    (a - b).abs()
+                };
+                assert!(
+                    relative_error < 1e-10,
+                    "Float boundary roundtrip failed: {} vs {} (error: {})",
+                    a,
+                    b,
+                    relative_error
+                );
+            }
+            _ => panic!("Expected Float64"),
+        }
+    }
+}
+
+// Concurrent Serialization Tests
 #[test]
