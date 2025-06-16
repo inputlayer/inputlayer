@@ -41,7 +41,7 @@ fn test_int64_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        let deserialized: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
             original, deserialized,
             "Int64 roundtrip failed for {:?}",
@@ -179,7 +179,7 @@ fn test_vector_int8_json_roundtrip() {
     ];
 
     for original in values {
-        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let json = serde_json::to_string(&original).unwrap();
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(original, deserialized, "VectorInt8 roundtrip failed");
     }
@@ -198,7 +198,7 @@ fn test_timestamp_json_roundtrip() {
 
     for original in values {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+        let deserialized: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
             original, deserialized,
             "Timestamp roundtrip failed for {:?}",
@@ -229,7 +229,7 @@ fn test_tuple_json_roundtrip() {
 
     for original in tuples {
         let json = serde_json::to_string(&original).expect("Serialization failed");
-        let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
+        let deserialized: Tuple = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized, "Tuple roundtrip failed");
     }
 }
@@ -334,7 +334,7 @@ fn test_unicode_string_serialization() {
     ];
 
     for original in values {
-        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let json = serde_json::to_string(&original).unwrap();
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
@@ -353,7 +353,7 @@ fn test_empty_vector_serialization() {
     let json2 = serde_json::to_string(&empty_i8).expect("Serialization failed");
 
     let deser1: Value = serde_json::from_str(&json1).expect("Deserialization failed");
-    let deser2: Value = serde_json::from_str(&json2).expect("Deserialization failed");
+    let deser2: Value = serde_json::from_str(&json2).unwrap();
 
     assert_eq!(empty_f32, deser1);
     assert_eq!(empty_i8, deser2);
@@ -394,7 +394,7 @@ fn test_deeply_nested_tuple_serialization() {
         .collect();
 
     let original = Tuple::new(values);
-    let json = serde_json::to_string(&original).expect("Serialization failed");
+    let json = serde_json::to_string(&original).unwrap();
     let deserialized: Tuple = serde_json::from_str(&json).expect("Deserialization failed");
 
     assert_eq!(original.arity(), deserialized.arity());
@@ -433,4 +433,62 @@ fn test_datatype_serialization() {
 }
 
 // Value Type Consistency Tests
+#[test]
+fn test_value_type_preserved_after_roundtrip() {
+    let values = vec![
+        (Value::Int32(42), DataType::Int32),
+        (Value::Int64(42), DataType::Int64),
+        (Value::Float64(42.0), DataType::Float64),
+        (Value::String(Arc::from("test")), DataType::String),
+        (Value::Bool(true), DataType::Bool),
+        (Value::Null, DataType::Null),
+        (Value::Timestamp(1000), DataType::Timestamp),
+    ];
+
+    for (original, expected_type) in values {
+        let json = serde_json::to_string(&original).expect("Serialization failed");
+        let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+
+        // Verify the data type is preserved (ignoring vector dimension specifics)
+        match (&deserialized.data_type(), &expected_type) {
+            (DataType::Vector { .. }, DataType::Vector { .. }) => {}
+            (DataType::VectorInt8 { .. }, DataType::VectorInt8 { .. }) => {}
+            (a, b) => assert_eq!(a, b, "Type changed after roundtrip"),
+        }
+    }
+}
+
+#[test]
+fn test_vector_dimension_preserved() {
+    let original = Value::vector(vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    let json = serde_json::to_string(&original).expect("Serialization failed");
+    let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
+
+    match deserialized.data_type() {
+        DataType::Vector { dim: Some(n) } => assert_eq!(n, 5),
+        _ => panic!("Expected Vector with dimension 5"),
+    }
+}
+
+// JSON Format Verification Tests
+#[test]
+fn test_value_json_format() {
+    // Verify the JSON structure matches expectations
+    let int_val = Value::Int32(42);
+    let json = serde_json::to_string(&int_val).unwrap();
+    assert!(json.contains("\"type\""));
+    assert!(json.contains("\"value\""));
+    assert!(json.contains("Int32"));
+    assert!(json.contains("42"));
+
+    let str_val = Value::String(Arc::from("hello"));
+    let json = serde_json::to_string(&str_val).unwrap();
+    assert!(json.contains("String"));
+    assert!(json.contains("hello"));
+
+    let null_val = Value::Null;
+    let json = serde_json::to_string(&null_val).unwrap();
+    assert!(json.contains("Null"));
+}
+
 #[test]
