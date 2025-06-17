@@ -295,3 +295,134 @@ impl Index for HnswIndex {
 }
 
 // Safety: HnswIndex uses RwLock internally for thread safety
+unsafe impl Send for HnswIndex {}
+unsafe impl Sync for HnswIndex {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_config(metric: DistanceMetric) -> HnswConfig {
+        HnswConfig {
+            m: 8,
+            ef_construction: 100,
+            ef_search: 32,
+            metric,
+        }
+    }
+
+    #[test]
+    fn test_hnsw_insert_search_euclidean() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        // Insert vectors at known positions
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+        index.insert(2, &[0.0, 1.0]).unwrap();
+        index.insert(3, &[1.0, 1.0]).unwrap();
+
+        assert_eq!(index.len(), 4);
+        assert_eq!(index.dimension(), 2);
+
+        // Search near origin
+        let results = index.search(&[0.1, 0.1], 2, None);
+        assert!(!results.is_empty());
+        // Closest should be origin (id=0)
+        assert_eq!(results[0].0, 0);
+    }
+
+    #[test]
+    fn test_hnsw_insert_search_cosine() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Cosine));
+
+        // Insert some vectors
+        index.insert(0, &[1.0, 0.0, 0.0]).unwrap();
+        index.insert(1, &[0.0, 1.0, 0.0]).unwrap();
+        index.insert(2, &[0.0, 0.0, 1.0]).unwrap();
+        index.insert(3, &[0.707, 0.707, 0.0]).unwrap();
+
+        assert_eq!(index.len(), 4);
+        assert_eq!(index.dimension(), 3);
+
+        // Search for vector most similar to [1, 0, 0]
+        // Use high ef to ensure exhaustive search (HNSW is approximate)
+        let results = index.search(&[1.0, 0.0, 0.0], 2, Some(100));
+        assert_eq!(results.len(), 2);
+        // First result should be the identical vector
+        assert_eq!(results[0].0, 0);
+    }
+
+    #[test]
+    fn test_hnsw_delete_tombstone() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+        index.insert(2, &[2.0, 0.0]).unwrap();
+
+        assert_eq!(index.len(), 3);
+        assert_eq!(index.tombstone_count(), 0);
+
+        // Delete the closest one to origin
+        index.delete(0);
+
+        assert_eq!(index.len(), 3); // Still 3 (tombstone)
+        assert_eq!(index.tombstone_count(), 1);
+        assert!(index.tombstone_ratio() > 0.3);
+
+        // Rebuild to actually remove tombstoned entries
+        // Note: Current implementation doesn't automatically exclude tombstones from search
+        // until the next rebuild. For the test, let's manually rebuild.
+        let active: Vec<(TupleId, Vec<f32>)> = vec![(1, vec![1.0, 0.0]), (2, vec![2.0, 0.0])];
+        index.rebuild(&active).unwrap();
+
+        // Now search should not include id=0
+        let results = index.search(&[0.0, 0.0], 2, None);
+        assert!(results.iter().all(|(id, _)| *id != 0));
+    }
+
+    #[test]
+    fn test_hnsw_rebuild() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+        index.insert(2, &[2.0, 0.0]).unwrap();
+
+        // Rebuild with only one vector
+        index.rebuild(&[(2, vec![2.0, 0.0])]).unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.tombstone_count(), 0);
+        assert_eq!(index.tombstone_ratio(), 0.0);
+
+        // Search should find the remaining vector
+        let results = index.search(&[2.0, 0.0], 1, None);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 2);
+    }
+
+    #[test]
+    fn test_hnsw_dimension_mismatch() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(0, &[1.0, 2.0, 3.0]).unwrap();
+
+        let result = index.insert(1, &[1.0, 2.0]); // Wrong dimension
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Dimension mismatch"));
+    }
+
+    #[test]
+    fn test_hnsw_empty_index() {
+        let index = HnswIndex::new(make_config(DistanceMetric::Cosine));
+
+        assert_eq!(index.len(), 0);
+        assert!(index.is_empty());
+        assert_eq!(index.dimension(), 0);
+
+        // Search on empty index should return empty
+        let results = index.search(&[1.0, 2.0, 3.0], 10, None);
+        assert!(results.is_empty());
+    }
+
