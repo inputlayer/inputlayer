@@ -426,3 +426,65 @@ mod tests {
         assert!(results.is_empty());
     }
 
+    #[test]
+    fn test_hnsw_custom_ef_search() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        for i in 0..50 {
+            index.insert(i, &[i as f32, 0.0]).unwrap();
+        }
+
+        // Search with default ef
+        let results1 = index.search(&[25.0, 0.0], 5, None);
+        assert_eq!(results1.len(), 5);
+
+        // Search with custom ef (higher should potentially give better results)
+        let results2 = index.search(&[25.0, 0.0], 5, Some(100));
+        assert_eq!(results2.len(), 5);
+
+        // Both should find the same nearest neighbor
+        assert_eq!(results1[0].0, results2[0].0);
+    }
+
+    #[test]
+    fn test_hnsw_all_metrics() {
+        // Test all distance metrics work
+        for metric in [
+            DistanceMetric::Cosine,
+            DistanceMetric::Euclidean,
+            DistanceMetric::DotProduct,
+            DistanceMetric::Manhattan,
+        ] {
+            let mut index = HnswIndex::new(make_config(metric));
+
+            // Use enough vectors for reliable HNSW graph construction
+            // Grid of vectors ensures good connectivity
+            let mut vectors = Vec::new();
+            for i in 0..10 {
+                for j in 0..10 {
+                    let id = (i * 10 + j) as TupleId;
+                    vectors.push((id, vec![i as f32 / 10.0, j as f32 / 10.0]));
+                }
+            }
+            index.rebuild(&vectors).unwrap();
+
+            assert_eq!(index.len(), 100);
+            assert_eq!(index.metric(), metric);
+
+            // Search for vector at origin (id=0)
+            let results = index.search(&[0.0, 0.0], 5, Some(100));
+            assert!(
+                results.len() >= 5,
+                "Expected at least 5 results for {:?}, got {}",
+                metric,
+                results.len()
+            );
+            // First result should be id=0 (exact match at origin)
+            assert_eq!(
+                results[0].0, 0,
+                "First result should be id=0 for {:?}, got {}",
+                metric, results[0].0
+            );
+        }
+    }
+
