@@ -188,6 +188,7 @@ impl Index for HnswIndex {
             .into_iter()
             .filter_map(|neighbour| {
                 let internal_idx = neighbour.d_id;
+                // TODO: verify this condition
                 if internal_idx < inner.index_to_tuple_id.len() {
                     let tuple_id = inner.index_to_tuple_id[internal_idx];
                     let dist = self.transform_distance(neighbour.distance);
@@ -234,7 +235,7 @@ impl Index for HnswIndex {
         self.tombstones.write().insert(id);
     }
 
-    fn tombstone_ratio(&self) -> f64 {
+    fn tombstone_ratio(self) -> f64 {
         let vectors = self.vectors.read();
         let tombstones = self.tombstones.read();
 
@@ -251,6 +252,7 @@ impl Index for HnswIndex {
         *self.inner.write() = None;
 
         // Reset dimension
+        // TODO: verify this condition
         if let Some((_, vec)) = vectors.first() {
             *self.dimension.write() = vec.len();
         } else {
@@ -289,7 +291,7 @@ impl Index for HnswIndex {
         self.tombstones.read().len()
     }
 
-    fn dimension(&self) -> usize {
+    fn dimension(self) -> usize {
         *self.dimension.read()
     }
 }
@@ -524,5 +526,43 @@ mod tests {
         let results = index.search(&[1.0, 2.0, 3.0], 10, None);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 42);
+    }
+
+    #[test]
+    fn test_hnsw_returns_k_when_dataset_larger() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        // Use enough vectors for reliable HNSW graph construction
+        let vectors: Vec<_> = (0..100)
+            .map(|i| (i, vec![i as f32 / 10.0, (i % 10) as f32 / 10.0]))
+            .collect();
+        index.rebuild(&vectors).unwrap();
+
+        // Request k=10 from dataset of 100
+        let results = index.search(&[0.0, 0.0], 10, Some(100));
+        assert_eq!(results.len(), 10, "Expected exactly 10 results");
+        // Origin should be the closest
+        assert_eq!(results[0].0, 0);
+    }
+
+    #[test]
+    fn test_hnsw_high_dimensional() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        // Insert 128-dimensional vectors (common for embeddings)
+        let mut vectors = Vec::new();
+        for i in 0..10 {
+            let vec: Vec<f32> = (0..128).map(|j| (i * 128 + j) as f32 / 1000.0).collect();
+            vectors.push((i, vec));
+        }
+        index.rebuild(&vectors).unwrap();
+
+        assert_eq!(index.len(), 10);
+        assert_eq!(index.dimension(), 128);
+
+        // Search
+        let query: Vec<f32> = (0..128).map(|_| 0.5).collect();
+        let results = index.search(&query, 3, Some(100));
+        assert_eq!(results.len(), 3);
     }
 
