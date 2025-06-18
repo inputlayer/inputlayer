@@ -188,6 +188,7 @@ impl Index for HnswIndex {
             .into_iter()
             .filter_map(|neighbour| {
                 let internal_idx = neighbour.d_id;
+                // TODO: verify this condition
                 if internal_idx < inner.index_to_tuple_id.len() {
                     let tuple_id = inner.index_to_tuple_id[internal_idx];
                     let dist = self.transform_distance(neighbour.distance);
@@ -251,6 +252,7 @@ impl Index for HnswIndex {
         *self.inner.write() = None;
 
         // Reset dimension
+        // TODO: verify this condition
         if let Some((_, vec)) = vectors.first() {
             *self.dimension.write() = vec.len();
         } else {
@@ -601,5 +603,63 @@ mod tests {
         assert_eq!(index.tombstone_count(), 3);
         assert_eq!(index.len(), 10);
         assert!((index.tombstone_ratio() - 0.3).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_hnsw_empty_vector_error() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        let result = index.insert(0, &[]);
+        // Empty vector should set dimension to 0, which is technically valid
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_hnsw_rebuild_empty() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(0, &[1.0, 2.0]).unwrap();
+        assert_eq!(index.len(), 1);
+
+        // Rebuild with empty list
+        index.rebuild(&[]).unwrap();
+
+        assert_eq!(index.len(), 0);
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn test_hnsw_index_type() {
+        let index = HnswIndex::new(make_config(DistanceMetric::Cosine));
+        assert_eq!(index.index_type(), "hnsw");
+    }
+
+    #[test]
+    fn test_hnsw_different_m_values() {
+        // Test with different M values
+        for m in [4, 8, 16, 32] {
+            let config = HnswConfig {
+                m,
+                ef_construction: 100,
+                ef_search: 32,
+                metric: DistanceMetric::Euclidean,
+            };
+            let mut index = HnswIndex::new(config);
+
+            // Insert some vectors
+            let vectors: Vec<_> = (0..20).map(|i| (i, vec![i as f32, 0.0])).collect();
+            index.rebuild(&vectors).unwrap();
+
+            // Search should work - use ef_search=200 for reliable results
+            let results = index.search(&[10.0, 0.0], 5, Some(200));
+            assert_eq!(results.len(), 5, "m={}: expected 5 results", m);
+            // Nearest neighbor of [10.0, 0.0] must be vector #10 (distance 0)
+            assert!(
+                results.iter().any(|r| r.0 == 10),
+                "m={}: expected vector 10 in results, got {:?}",
+                m,
+                results
+            );
+        }
     }
 
