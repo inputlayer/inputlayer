@@ -488,3 +488,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_hnsw_larger_dataset() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        // Insert 100 vectors in a grid
+        for i in 0..10 {
+            for j in 0..10 {
+                let id = i * 10 + j;
+                index.insert(id, &[i as f32, j as f32]).unwrap();
+            }
+        }
+
+        assert_eq!(index.len(), 100);
+
+        // Search for a specific location
+        let results = index.search(&[5.0, 5.0], 5, None);
+        assert_eq!(results.len(), 5);
+
+        // The closest should be at [5, 5]
+        // ID for [5, 5] = 5*10 + 5 = 55
+        assert_eq!(results[0].0, 55);
+    }
+
+    #[test]
+    fn test_hnsw_single_vector() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(42, &[1.0, 2.0, 3.0]).unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.dimension(), 3);
+
+        // Search should return the only vector
+        let results = index.search(&[1.0, 2.0, 3.0], 10, None);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 42);
+    }
+
