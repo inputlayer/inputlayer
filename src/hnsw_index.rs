@@ -188,7 +188,6 @@ impl Index for HnswIndex {
             .into_iter()
             .filter_map(|neighbour| {
                 let internal_idx = neighbour.d_id;
-                // TODO: verify this condition
                 if internal_idx < inner.index_to_tuple_id.len() {
                     let tuple_id = inner.index_to_tuple_id[internal_idx];
                     let dist = self.transform_distance(neighbour.distance);
@@ -252,7 +251,6 @@ impl Index for HnswIndex {
         *self.inner.write() = None;
 
         // Reset dimension
-        // TODO: verify this condition
         if let Some((_, vec)) = vectors.first() {
             *self.dimension.write() = vec.len();
         } else {
@@ -663,3 +661,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_hnsw_manhattan_metric() {
+        let config = HnswConfig {
+            m: 8,
+            ef_construction: 100,
+            ef_search: 32,
+            metric: DistanceMetric::Manhattan,
+        };
+        let mut index = HnswIndex::new(config);
+
+        let vectors = vec![
+            (0, vec![0.0, 0.0]),
+            (1, vec![1.0, 0.0]),
+            (2, vec![0.0, 1.0]),
+            (3, vec![1.0, 1.0]),
+        ];
+        index.rebuild(&vectors).unwrap();
+
+        assert_eq!(index.metric(), DistanceMetric::Manhattan);
+
+        // Search near origin
+        let results = index.search(&[0.1, 0.1], 2, Some(100));
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, 0); // Origin is closest
+    }
+}
