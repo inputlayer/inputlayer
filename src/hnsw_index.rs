@@ -188,7 +188,6 @@ impl Index for HnswIndex {
             .into_iter()
             .filter_map(|neighbour| {
                 let internal_idx = neighbour.d_id;
-                // TODO: verify this condition
                 if internal_idx < inner.index_to_tuple_id.len() {
                     let tuple_id = inner.index_to_tuple_id[internal_idx];
                     let dist = self.transform_distance(neighbour.distance);
@@ -235,7 +234,7 @@ impl Index for HnswIndex {
         self.tombstones.write().insert(id);
     }
 
-    fn tombstone_ratio(self) -> f64 {
+    fn tombstone_ratio(&self) -> f64 {
         let vectors = self.vectors.read();
         let tombstones = self.tombstones.read();
 
@@ -252,7 +251,6 @@ impl Index for HnswIndex {
         *self.inner.write() = None;
 
         // Reset dimension
-        // TODO: verify this condition
         if let Some((_, vec)) = vectors.first() {
             *self.dimension.write() = vec.len();
         } else {
@@ -291,7 +289,7 @@ impl Index for HnswIndex {
         self.tombstones.read().len()
     }
 
-    fn dimension(self) -> usize {
+    fn dimension(&self) -> usize {
         *self.dimension.read()
     }
 }
@@ -564,5 +562,44 @@ mod tests {
         let query: Vec<f32> = (0..128).map(|_| 0.5).collect();
         let results = index.search(&query, 3, Some(100));
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_hnsw_rebuild_clears_tombstones() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 1.0]).unwrap();
+        index.insert(2, &[2.0, 2.0]).unwrap();
+
+        // Delete one
+        index.delete(1);
+        assert_eq!(index.tombstone_count(), 1);
+
+        // Rebuild without the deleted one
+        let vectors = vec![(0, vec![0.0, 0.0]), (2, vec![2.0, 2.0])];
+        index.rebuild(&vectors).unwrap();
+
+        assert_eq!(index.len(), 2);
+        assert_eq!(index.tombstone_count(), 0);
+        assert_eq!(index.tombstone_ratio(), 0.0);
+    }
+
+    #[test]
+    fn test_hnsw_multiple_deletes() {
+        let mut index = HnswIndex::new(make_config(DistanceMetric::Euclidean));
+
+        for i in 0..10 {
+            index.insert(i, &[i as f32, 0.0]).unwrap();
+        }
+
+        // Delete multiple
+        index.delete(2);
+        index.delete(5);
+        index.delete(8);
+
+        assert_eq!(index.tombstone_count(), 3);
+        assert_eq!(index.len(), 10);
+        assert!((index.tombstone_ratio() - 0.3).abs() < 0.01);
     }
 
