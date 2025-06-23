@@ -115,7 +115,7 @@ pub enum IndexType {
 }
 
 impl IndexType {
-    pub fn type_name(self) -> &'static str {
+    pub fn type_name(&self) -> &'static str {
         match self {
             Self::Hnsw(_) => "hnsw",
         }
@@ -123,3 +123,87 @@ impl IndexType {
 }
 
 /// Common interface for all index types
+pub trait Index: Send + Sync {
+    /// Search for k nearest neighbors to the query vector
+    ///
+    /// Returns a vector of (tuple_id, distance) pairs, sorted by distance
+    /// (ascending for distance metrics, descending for similarity metrics)
+    fn search(&self, query: &[f32], k: usize, ef: Option<usize>) -> Vec<(TupleId, f64)>;
+
+    /// Insert a vector with the given tuple ID
+    fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String>;
+
+    /// Mark a tuple ID as deleted (tombstone)
+    ///
+    /// The actual data is not removed immediately - it's marked with a tombstone.
+    /// Call `rebuild()` to compact the index and remove tombstones.
+    fn delete(&mut self, id: TupleId);
+
+    /// Get the ratio of tombstones to total entries
+    ///
+    /// Used to decide when to trigger a rebuild. A high ratio (e.g., > 0.3)
+    /// indicates the index should be rebuilt.
+    fn tombstone_ratio(&self) -> f64;
+
+    /// Rebuild the index from scratch, removing tombstones
+    ///
+    /// `vectors` contains the current valid (id, vector) pairs to index.
+    fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String>;
+
+    /// Get the number of vectors in the index (including tombstones)
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn index_type(&self) -> &str;
+
+    fn metric(&self) -> DistanceMetric;
+
+    /// Get the number of tombstones (deleted entries)
+    fn tombstone_count(&self) -> usize;
+
+    /// Get the vector dimension (0 if empty)
+    fn dimension(&self) -> usize;
+}
+
+/// Index registration metadata
+#[derive(Clone, Debug)]
+pub struct RegisteredIndex {
+    /// Unique name for this index
+    pub name: String,
+    /// Relation this index is built on
+    pub relation: String,
+    /// Column index containing the vector data
+    pub column_idx: usize,
+    /// Column name (for display)
+    pub column_name: String,
+    /// Type of index and its configuration
+    pub index_type: IndexType,
+}
+
+/// Materialized index with validity tracking
+pub struct MaterializedIndex {
+    /// The actual index structure
+    pub index: Box<dyn Index + Send + Sync>,
+
+    /// Arc-wrapped index for sharing with snapshots
+    index_arc: Arc<dyn Index + Send + Sync>,
+
+    /// Version when this was last built
+    pub version: u64,
+
+    /// Base relation versions this index was built from
+    pub base_versions: HashMap<String, u64>,
+
+    /// Whether the materialization is currently valid
+    pub valid: bool,
+
+    /// Timestamp when built (microseconds since epoch)
+    pub built_at: u64,
+
+    /// Number of vectors in the index
+    pub tuple_count: usize,
+}
+
