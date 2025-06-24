@@ -207,3 +207,89 @@ pub struct MaterializedIndex {
     pub tuple_count: usize,
 }
 
+impl MaterializedIndex {
+    pub fn new(
+        index: Box<dyn Index + Send + Sync>,
+        base_versions: HashMap<String, u64>,
+        tuple_count: usize,
+    ) -> Self {
+        let version = INDEX_VERSION.fetch_add(1, Ordering::SeqCst);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as u64)
+            .unwrap_or(0);
+
+        // Create Arc wrapper for the index
+        // Box<dyn Index> and Arc<dyn Index> require different ownership,
+        // so we use an IndexWrapper to bridge between them.
+        let index_arc = Arc::from(index);
+
+        Self {
+            index: Box::new(IndexWrapper(Arc::clone(&index_arc))),
+            index_arc,
+            version,
+            base_versions,
+            valid: true,
+            built_at: now,
+            tuple_count,
+        }
+    }
+
+    /// Mark this materialization as invalid
+    pub fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    /// Get an Arc reference to the index for snapshot sharing
+    pub fn arc(&self) -> Arc<dyn Index + Send + Sync> {
+        Arc::clone(&self.index_arc)
+    }
+}
+
+/// Wrapper to allow Arc<dyn Index> to be used as Box<dyn Index>
+struct IndexWrapper(Arc<dyn Index + Send + Sync>);
+
+impl Index for IndexWrapper {
+    fn search(&self, query: &[f32], k: usize, ef: Option<usize>) -> Vec<(TupleId, f64)> {
+        self.0.search(query, k, ef)
+    }
+
+    fn insert(&mut self, _id: TupleId, _vector: &[f32]) -> Result<(), String> {
+        Err("Cannot insert into Arc-wrapped index".to_string())
+    }
+
+    fn delete(&mut self, _id: TupleId) {
+        // No-op for Arc-wrapped index
+    }
+
+    fn tombstone_ratio(&self) -> f64 {
+        self.0.tombstone_ratio()
+    }
+
+    fn rebuild(&mut self, _vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String> {
+        Err("Cannot rebuild Arc-wrapped index".to_string())
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn index_type(&self) -> &str {
+        self.0.index_type()
+    }
+
+    fn metric(&self) -> DistanceMetric {
+        self.0.metric()
+    }
+
+    fn tombstone_count(&self) -> usize {
+        self.0.tombstone_count()
+    }
+
+    fn dimension(&self) -> usize {
+        self.0.dimension()
+    }
+}
+
+/// Statistics about an index for reporting
+#[derive(Clone, Debug)]
