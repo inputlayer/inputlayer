@@ -293,3 +293,232 @@ impl Index for IndexWrapper {
 
 /// Statistics about an index for reporting
 #[derive(Clone, Debug)]
+pub struct IndexStats {
+    /// Index name
+    pub name: String,
+    /// Relation the index is built on
+    pub relation: String,
+    /// Column name
+    pub column: String,
+    /// Index type name
+    pub index_type: String,
+    /// Distance metric
+    pub metric: DistanceMetric,
+    /// Number of vectors
+    pub tuple_count: usize,
+    /// Number of tombstones
+    pub tombstone_count: usize,
+    /// Whether the index is valid
+    pub valid: bool,
+    /// When the index was built
+    pub built_at: u64,
+    /// Vector dimension
+    pub dimension: usize,
+}
+
+/// Manages indexes for a single KnowledgeGraph
+///
+/// Follows the same pattern as `DerivedRelationsManager`:
+/// - Per-KG isolation (no global state)
+/// - Dependency tracking for cascade invalidation
+/// - Validity tracking with version numbers
+#[derive(Default)]
+pub struct IndexManager {
+    /// Registered indexes by name
+    indexes: HashMap<String, RegisteredIndex>,
+
+    /// Materialized index data
+    materialized: HashMap<String, MaterializedIndex>,
+
+    /// Forward dependency map: base_relation -> [index_names]
+    base_to_indexes: HashMap<String, HashSet<String>>,
+
+    /// Current version of each base relation
+    base_versions: HashMap<String, u64>,
+}
+
+impl IndexManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a new index (does not build it)
+    ///
+    /// Returns an error if an index with the same name already exists.
+    pub fn register_index(&mut self, index: RegisteredIndex) -> Result<(), String> {
+        let name = index.name.clone();
+        let relation = index.relation.clone();
+
+        if self.indexes.contains_key(&name) {
+            return Err(format!("Index '{name}' already exists"));
+        }
+
+        // Track dependency: base_relation -> index
+        self.base_to_indexes
+            .entry(relation)
+            .or_default()
+            .insert(name.clone());
+
+        self.indexes.insert(name, index);
+        Ok(())
+    }
+
+    /// Remove an index by name
+    pub fn remove_index(&mut self, name: &str) -> Result<(), String> {
+        if let Some(index) = self.indexes.remove(name) {
+            // Clean up dependency tracking
+            if let Some(deps) = self.base_to_indexes.get_mut(&index.relation) {
+                deps.remove(name);
+            }
+            self.materialized.remove(name);
+            Ok(())
+        } else {
+            Err(format!("Index '{name}' not found"))
+        }
+    }
+
+    /// Get a registered index by name
+    pub fn get_registered(&self, name: &str) -> Option<&RegisteredIndex> {
+        self.indexes.get(name)
+    }
+
+    pub fn has_index(&self, name: &str) -> bool {
+        self.indexes.contains_key(name)
+    }
+
+    /// Store a built index
+    pub fn set_materialized(
+        &mut self,
+        name: &str,
+        index: Box<dyn Index + Send + Sync>,
+        tuple_count: usize,
+    ) {
+        let base_versions = self.base_versions.clone();
+
+        self.materialized.insert(
+            name.to_string(),
+            MaterializedIndex::new(index, base_versions, tuple_count),
+        );
+    }
+
+    /// Get a materialized index if valid
+    pub fn get_materialized(&self, name: &str) -> Option<&MaterializedIndex> {
+        self.materialized.get(name).filter(|m| m.valid)
+    }
+
+    /// Get a mutable reference to a materialized index
+    pub fn get_materialized_mut(&mut self, name: &str) -> Option<&mut MaterializedIndex> {
+        self.materialized.get_mut(name)
+    }
+
+    /// Notify that a base relation was updated
+    ///
+    /// This invalidates all indexes that depend on the relation.
+    /// Returns the names of indexes that were invalidated.
+    pub fn notify_base_update(&mut self, base_relation: &str) -> Vec<String> {
+        let mut invalidated = Vec::new();
+
+        // Bump base version
+        let version = self
+            .base_versions
+            .entry(base_relation.to_string())
+            .or_insert(0);
+        *version += 1;
+
+        // Invalidate all indexes on this relation
+        if let Some(index_names) = self.base_to_indexes.get(base_relation) {
+            for name in index_names {
+                if let Some(mat) = self.materialized.get_mut(name) {
+                    if mat.valid {
+                        mat.invalidate();
+                        invalidated.push(name.clone());
+                    }
+                }
+            }
+        }
+
+        invalidated
+    }
+
+    /// Get all valid indexes for snapshot publication
+    pub fn get_all_valid_indexes(&self) -> HashMap<String, Arc<dyn Index + Send + Sync>> {
+        self.materialized
+            .iter()
+            .filter(|(_, m)| m.valid)
+            .map(|(name, m)| (name.clone(), m.arc()))
+            .collect()
+    }
+
+    /// Get the names of all invalid indexes (need rebuild)
+    pub fn get_invalid_indexes(&self) -> Vec<String> {
+        self.indexes
+            .keys()
+            .filter(|name| self.materialized.get(*name).is_none_or(|m| !m.valid))
+            .cloned()
+            .collect()
+    }
+
+    /// Get all indexes for a relation
+    pub fn get_indexes_for_relation(&self, relation: &str) -> Vec<&RegisteredIndex> {
+        self.base_to_indexes
+            .get(relation)
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|name| self.indexes.get(name))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get index statistics
+    pub fn get_stats(&self, name: &str) -> Option<IndexStats> {
+        let registered = self.indexes.get(name)?;
+        let materialized = self.materialized.get(name);
+
+        let (tuple_count, tombstone_count, valid, built_at, dimension) =
+            materialized.map_or((0, 0, false, 0, 0), |m| {
+                (
+                    m.tuple_count,
+                    m.index.tombstone_count(),
+                    m.valid,
+                    m.built_at,
+                    m.index.dimension(),
+                )
+            });
+
+        Some(IndexStats {
+            name: registered.name.clone(),
+            relation: registered.relation.clone(),
+            column: registered.column_name.clone(),
+            index_type: registered.index_type.type_name().to_string(),
+            metric: match &registered.index_type {
+                IndexType::Hnsw(config) => config.metric,
+            },
+            tuple_count,
+            tombstone_count,
+            valid,
+            built_at,
+            dimension,
+        })
+    }
+
+    /// Get all index statistics
+    pub fn get_all_stats(&self) -> Vec<IndexStats> {
+        self.indexes
+            .keys()
+            .filter_map(|name| self.get_stats(name))
+            .collect()
+    }
+
+    /// Get the number of registered indexes
+    pub fn index_count(&self) -> usize {
+        self.indexes.len()
+    }
+
+    /// Get the number of valid materialized indexes
+    pub fn valid_count(&self) -> usize {
+        self.materialized.values().filter(|m| m.valid).count()
+    }
+}
+
