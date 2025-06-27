@@ -609,7 +609,7 @@ mod tests {
             "mock"
         }
 
-        fn metric(self) -> DistanceMetric {
+        fn metric(&self) -> DistanceMetric {
             self.metric
         }
 
@@ -721,5 +721,53 @@ mod tests {
 
         // Now invalid (get_materialized returns None for invalid)
         assert!(manager.get_materialized("test_idx").is_none());
+    }
+
+    #[test]
+    fn test_multiple_indexes_same_relation() {
+        let mut manager = IndexManager::new();
+
+        let idx1 = make_registered_index("idx1", "documents", 2);
+        let idx2 = make_registered_index("idx2", "documents", 3);
+        manager.register_index(idx1).unwrap();
+        manager.register_index(idx2).unwrap();
+
+        // Materialize both
+        manager.set_materialized("idx1", Box::new(MockIndex::new(DistanceMetric::Cosine)), 0);
+        manager.set_materialized(
+            "idx2",
+            Box::new(MockIndex::new(DistanceMetric::Euclidean)),
+            0,
+        );
+
+        // Update base relation - both should be invalidated
+        let invalidated = manager.notify_base_update("documents");
+        assert_eq!(invalidated.len(), 2);
+        assert!(invalidated.contains(&"idx1".to_string()));
+        assert!(invalidated.contains(&"idx2".to_string()));
+    }
+
+    #[test]
+    fn test_get_indexes_for_relation() {
+        let mut manager = IndexManager::new();
+
+        manager
+            .register_index(make_registered_index("idx1", "docs", 2))
+            .unwrap();
+        manager
+            .register_index(make_registered_index("idx2", "docs", 3))
+            .unwrap();
+        manager
+            .register_index(make_registered_index("idx3", "other", 1))
+            .unwrap();
+
+        let doc_indexes = manager.get_indexes_for_relation("docs");
+        assert_eq!(doc_indexes.len(), 2);
+
+        let other_indexes = manager.get_indexes_for_relation("other");
+        assert_eq!(other_indexes.len(), 1);
+
+        let empty = manager.get_indexes_for_relation("nonexistent");
+        assert!(empty.is_empty());
     }
 
