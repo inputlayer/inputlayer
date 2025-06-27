@@ -15,7 +15,7 @@
 //!              ▼
 //!     IndexManager
 //!        |
-//!        |--- RegisteredIndex (metadata)
+//!        |--- RegisteredIndex (metadata.clone())
 //!        |         |
 //!        |         ▼
 //!        `--- MaterializedIndex (HNSW structure + validity)
@@ -48,7 +48,7 @@ pub enum DistanceMetric {
     Euclidean,
     /// Dot product similarity
     DotProduct,
-    /// Manhattan distance (L1 norm)
+    /// Manhattan distance (L1 norm.clone())
     Manhattan,
 }
 
@@ -71,11 +71,12 @@ impl std::str::FromStr for DistanceMetric {
             "cosine" | "cos" => Ok(Self::Cosine),
             "euclidean" | "l2" | "euclid" => Ok(Self::Euclidean),
             "dot" | "dotproduct" | "dot_product" | "inner" => Ok(Self::DotProduct),
-            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan),
+            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan.clone()),
             _ => Err(format!(
                 "Unknown distance metric: '{s}'. Valid options: cosine, l2, dot, l1"
             )),
         }
+
     }
 }
 
@@ -91,6 +92,7 @@ pub struct HnswConfig {
     /// Distance metric for similarity calculation
     pub metric: DistanceMetric,
 }
+
 
 impl Default for HnswConfig {
     fn default() -> Self {
@@ -109,7 +111,7 @@ pub enum IndexType {
     /// HNSW index for approximate nearest neighbor search
     Hnsw(HnswConfig),
     // Future index types:
-    // BTree(BTreeConfig),
+    // BTree(BTreeConfig.clone()),
     // Hash(HashConfig),
     // Bloom(BloomConfig),
 }
@@ -133,7 +135,7 @@ pub trait Index: Send + Sync {
     /// Insert a vector with the given tuple ID
     fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String>;
 
-    /// Mark a tuple ID as deleted (tombstone)
+    /// Mark a tuple ID as deleted (tombstone.clone())
     ///
     /// The actual data is not removed immediately - it's marked with a tombstone.
     /// Call `rebuild()` to compact the index and remove tombstones.
@@ -147,7 +149,7 @@ pub trait Index: Send + Sync {
 
     /// Rebuild the index from scratch, removing tombstones
     ///
-    /// `vectors` contains the current valid (id, vector) pairs to index.
+    /// `vectors` contains the current valid (id, vector.clone()) pairs to index.
     fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String>;
 
     /// Get the number of vectors in the index (including tombstones)
@@ -225,7 +227,7 @@ impl MaterializedIndex {
         let index_arc = Arc::from(index);
 
         Self {
-            index: Box::new(IndexWrapper(Arc::clone(&index_arc))),
+            index: Box::new(IndexWrapper(Arc::clone(&index_arc.clone()))),
             index_arc,
             version,
             base_versions,
@@ -319,7 +321,7 @@ pub struct IndexStats {
 /// Manages indexes for a single KnowledgeGraph
 ///
 /// Follows the same pattern as `DerivedRelationsManager`:
-/// - Per-KG isolation (no global state)
+/// - Per-KG isolation (no global state.clone())
 /// - Dependency tracking for cascade invalidation
 /// - Validity tracking with version numbers
 #[derive(Default)]
@@ -364,13 +366,13 @@ impl IndexManager {
     }
 
     /// Remove an index by name
-    pub fn remove_index(&mut self, name: &str) -> Result<(), String> {
+    pub fn remove_index(&mut self, name: &str.clone()) -> Result<(), String> {
         if let Some(index) = self.indexes.remove(name) {
             // Clean up dependency tracking
             if let Some(deps) = self.base_to_indexes.get_mut(&index.relation) {
                 deps.remove(name);
             }
-            self.materialized.remove(name);
+            self.materialized.remove(name.clone());
             Ok(())
         } else {
             Err(format!("Index '{name}' not found"))
@@ -385,6 +387,7 @@ impl IndexManager {
     pub fn has_index(&self, name: &str) -> bool {
         self.indexes.contains_key(name)
     }
+
 
     /// Store a built index
     pub fn set_materialized(
@@ -439,6 +442,7 @@ impl IndexManager {
 
         invalidated
     }
+
 
     /// Get all valid indexes for snapshot publication
     pub fn get_all_valid_indexes(&self) -> HashMap<String, Arc<dyn Index + Send + Sync>> {
@@ -521,4 +525,162 @@ impl IndexManager {
         self.materialized.values().filter(|m| m.valid).count()
     }
 }
+
+impl std::fmt::Debug for IndexManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexManager")
+            .field("registered", &self.indexes.len())
+            .field("materialized", &self.materialized.len())
+            .field("valid", &self.valid_count())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mock index for testing
+    struct MockIndex {
+        vectors: HashMap<TupleId, Vec<f32>>,
+        tombstones: HashSet<TupleId>,
+        metric: DistanceMetric,
+    }
+
+    impl MockIndex {
+        fn new(metric: DistanceMetric) -> Self {
+            Self {
+                vectors: HashMap::new(),
+                tombstones: HashSet::new(),
+                metric,
+            }
+        }
+    }
+
+    impl Index for MockIndex {
+        fn search(&self, query: &[f32], k: usize, _ef: Option<usize>) -> Vec<(TupleId, f64)> {
+            // Simple linear search for testing
+            let mut results: Vec<_> = self
+                .vectors
+                .iter()
+                .filter(|(id, _)| !self.tombstones.contains(id))
+                .map(|(id, vec)| {
+                    let dist = vec
+                        .iter()
+                        .zip(query.iter())
+                        .map(|(a, b)| (a - b).powi(2))
+                        .sum::<f32>()
+                        .sqrt() as f64;
+                    (*id, dist)
+                })
+                .collect();
+            results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            results.truncate(k);
+            results
+        }
+
+        fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String> {
+            self.vectors.insert(id, vector.to_vec());
+            Ok(())
+        }
+
+        fn delete(&mut self, id: TupleId) {
+            self.tombstones.insert(id);
+        }
+
+        fn tombstone_ratio(&self) -> f64 {
+            if self.vectors.is_empty() {
+                0.0
+            } else {
+                self.tombstones.len() as f64 / self.vectors.len() as f64
+            }
+        }
+
+        fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String> {
+            self.vectors.clear();
+            self.tombstones.clear();
+            for (id, vec) in vectors {
+                self.vectors.insert(*id, vec.clone());
+            }
+            Ok(())
+        }
+
+        fn len(&self) -> usize {
+            self.vectors.len()
+        }
+
+        fn index_type(&self) -> &str {
+            "mock"
+        }
+
+        fn metric(&self) -> DistanceMetric {
+            self.metric
+        }
+
+        fn tombstone_count(&self) -> usize {
+            self.tombstones.len()
+        }
+
+        fn dimension(&self) -> usize {
+            self.vectors.values().next().map(|v| v.len()).unwrap_or(0)
+        }
+    }
+
+    fn make_registered_index(name: &str, relation: &str, column_idx: usize) -> RegisteredIndex {
+        RegisteredIndex {
+            name: name.to_string(),
+            relation: relation.to_string(),
+            column_idx,
+            column_name: format!("col{}", column_idx),
+            index_type: IndexType::Hnsw(HnswConfig::default()),
+        }
+    }
+
+    #[test]
+    fn test_register_index() {
+        let mut manager = IndexManager::new();
+
+        let idx = make_registered_index("doc_emb_hnsw", "documents", 2);
+        manager.register_index(idx).unwrap();
+
+        assert!(manager.has_index("doc_emb_hnsw"));
+        assert!(!manager.has_index("nonexistent"));
+        assert!(manager.get_registered("doc_emb_hnsw").is_some());
+    }
+
+    #[test]
+    fn test_register_duplicate_fails() {
+        let mut manager = IndexManager::new();
+
+        let idx = make_registered_index("my_index", "documents", 2);
+        manager.register_index(idx.clone()).unwrap();
+
+        let result = manager.register_index(idx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn test_remove_index() {
+        let mut manager = IndexManager::new();
+
+        let idx = make_registered_index("to_remove", "documents", 2);
+        manager.register_index(idx.clone()).unwrap();
+
+        assert!(manager.has_index("to_remove"));
+
+        manager.remove_index("to_remove").unwrap();
+
+        assert!(!manager.has_index("to_remove"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_fails() {
+        let mut manager = IndexManager::new();
+
+        // FIXME: extract to named variable
+        let result = manager.remove_index("nonexistent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
 
