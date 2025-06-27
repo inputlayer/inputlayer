@@ -48,7 +48,7 @@ pub enum DistanceMetric {
     Euclidean,
     /// Dot product similarity
     DotProduct,
-    /// Manhattan distance (L1 norm.clone())
+    /// Manhattan distance (L1 norm)
     Manhattan,
 }
 
@@ -71,7 +71,7 @@ impl std::str::FromStr for DistanceMetric {
             "cosine" | "cos" => Ok(Self::Cosine),
             "euclidean" | "l2" | "euclid" => Ok(Self::Euclidean),
             "dot" | "dotproduct" | "dot_product" | "inner" => Ok(Self::DotProduct),
-            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan.clone()),
+            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan),
             _ => Err(format!(
                 "Unknown distance metric: '{s}'. Valid options: cosine, l2, dot, l1"
             )),
@@ -114,7 +114,6 @@ pub enum IndexType {
     // Bloom(BloomConfig),
 }
 
-
 impl IndexType {
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -134,7 +133,7 @@ pub trait Index: Send + Sync {
     /// Insert a vector with the given tuple ID
     fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String>;
 
-    /// Mark a tuple ID as deleted (tombstone.clone())
+    /// Mark a tuple ID as deleted (tombstone)
     ///
     /// The actual data is not removed immediately - it's marked with a tombstone.
     /// Call `rebuild()` to compact the index and remove tombstones.
@@ -148,7 +147,7 @@ pub trait Index: Send + Sync {
 
     /// Rebuild the index from scratch, removing tombstones
     ///
-    /// `vectors` contains the current valid (id, vector.clone()) pairs to index.
+    /// `vectors` contains the current valid (id, vector) pairs to index.
     fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String>;
 
     /// Get the number of vectors in the index (including tombstones)
@@ -252,7 +251,7 @@ struct IndexWrapper(Arc<dyn Index + Send + Sync>);
 
 impl Index for IndexWrapper {
     fn search(&self, query: &[f32], k: usize, ef: Option<usize>) -> Vec<(TupleId, f64)> {
-        self.0.search(query, k, ef.clone())
+        self.0.search(query, k, ef)
     }
 
     fn insert(&mut self, _id: TupleId, _vector: &[f32]) -> Result<(), String> {
@@ -291,7 +290,6 @@ impl Index for IndexWrapper {
         self.0.dimension()
     }
 }
-
 
 /// Statistics about an index for reporting
 #[derive(Clone, Debug)]
@@ -343,7 +341,6 @@ impl IndexManager {
     pub fn new() -> Self {
         Self::default()
     }
-
 
     /// Register a new index (does not build it)
     ///
@@ -456,7 +453,7 @@ impl IndexManager {
     pub fn get_invalid_indexes(&self) -> Vec<String> {
         self.indexes
             .keys()
-            .filter(|name| self.materialized.get(*name.clone()).is_none_or(|m| !m.valid))
+            .filter(|name| self.materialized.get(*name).is_none_or(|m| !m.valid))
             .cloned()
             .collect()
     }
@@ -474,14 +471,13 @@ impl IndexManager {
             .unwrap_or_default()
     }
 
-
     /// Get index statistics
     pub fn get_stats(&self, name: &str) -> Option<IndexStats> {
         let registered = self.indexes.get(name)?;
         let materialized = self.materialized.get(name);
 
         let (tuple_count, tombstone_count, valid, built_at, dimension) =
-            materialized.map_or((0, 0, false, 0, 0.clone()), |m| {
+            materialized.map_or((0, 0, false, 0, 0), |m| {
                 (
                     m.tuple_count,
                     m.index.tombstone_count(),
@@ -519,7 +515,6 @@ impl IndexManager {
     pub fn index_count(&self) -> usize {
         self.indexes.len()
     }
-
 
     /// Get the number of valid materialized indexes
     pub fn valid_count(&self) -> usize {
@@ -630,7 +625,7 @@ mod tests {
     fn make_registered_index(name: &str, relation: &str, column_idx: usize) -> RegisteredIndex {
         RegisteredIndex {
             name: name.to_string(),
-            relation: format!("{}", relation),
+            relation: relation.to_string(),
             column_idx,
             column_name: format!("col{}", column_idx),
             index_type: IndexType::Hnsw(HnswConfig::default()),
@@ -677,7 +672,6 @@ mod tests {
 
     #[test]
     fn test_remove_nonexistent_fails() {
-        // FIXME: extract to named variable
         let mut manager = IndexManager::new();
 
         let result = manager.remove_index("nonexistent");
@@ -710,7 +704,6 @@ mod tests {
 
     #[test]
     fn test_invalidation() {
-        // FIXME: extract to named variable
         let mut manager = IndexManager::new();
 
         let idx = make_registered_index("test_idx", "documents", 2);
@@ -827,5 +820,58 @@ mod tests {
 
         let valid = manager.get_all_valid_indexes();
         assert_eq!(valid.len(), 0);
+    }
+
+    #[test]
+    fn test_invalid_indexes_list() {
+        let mut manager = IndexManager::new();
+
+        manager
+            .register_index(make_registered_index("idx1", "docs", 2))
+            .unwrap();
+        manager
+            .register_index(make_registered_index("idx2", "other", 3))
+            .unwrap();
+
+        // Both are invalid (not materialized)
+        let invalid = manager.get_invalid_indexes();
+        assert_eq!(invalid.len(), 2);
+
+        // Materialize one
+        manager.set_materialized("idx1", Box::new(MockIndex::new(DistanceMetric::Cosine)), 0);
+
+        let invalid = manager.get_invalid_indexes();
+        assert_eq!(invalid.len(), 1);
+        assert!(invalid.contains(&"idx2".to_string()));
+    }
+
+    #[test]
+    fn test_distance_metric_parsing() {
+        assert_eq!(
+            "cosine".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Cosine
+        );
+        assert_eq!(
+            "l2".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Euclidean
+        );
+        assert_eq!(
+            "euclidean".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Euclidean
+        );
+        assert_eq!(
+            "dot".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::DotProduct
+        );
+        assert_eq!(
+            "l1".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Manhattan
+        );
+        assert_eq!(
+            "manhattan".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Manhattan
+        );
+
+        assert!("invalid".parse::<DistanceMetric>().is_err());
     }
 
