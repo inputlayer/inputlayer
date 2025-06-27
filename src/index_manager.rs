@@ -15,7 +15,7 @@
 //!              ▼
 //!     IndexManager
 //!        |
-//!        |--- RegisteredIndex (metadata.clone())
+//!        |--- RegisteredIndex (metadata)
 //!        |         |
 //!        |         ▼
 //!        `--- MaterializedIndex (HNSW structure + validity)
@@ -48,7 +48,7 @@ pub enum DistanceMetric {
     Euclidean,
     /// Dot product similarity
     DotProduct,
-    /// Manhattan distance (L1 norm.clone())
+    /// Manhattan distance (L1 norm)
     Manhattan,
 }
 
@@ -71,12 +71,11 @@ impl std::str::FromStr for DistanceMetric {
             "cosine" | "cos" => Ok(Self::Cosine),
             "euclidean" | "l2" | "euclid" => Ok(Self::Euclidean),
             "dot" | "dotproduct" | "dot_product" | "inner" => Ok(Self::DotProduct),
-            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan.clone()),
+            "manhattan" | "l1" | "taxicab" => Ok(Self::Manhattan),
             _ => Err(format!(
                 "Unknown distance metric: '{s}'. Valid options: cosine, l2, dot, l1"
             )),
         }
-
     }
 }
 
@@ -92,7 +91,6 @@ pub struct HnswConfig {
     /// Distance metric for similarity calculation
     pub metric: DistanceMetric,
 }
-
 
 impl Default for HnswConfig {
     fn default() -> Self {
@@ -111,7 +109,7 @@ pub enum IndexType {
     /// HNSW index for approximate nearest neighbor search
     Hnsw(HnswConfig),
     // Future index types:
-    // BTree(BTreeConfig.clone()),
+    // BTree(BTreeConfig),
     // Hash(HashConfig),
     // Bloom(BloomConfig),
 }
@@ -135,7 +133,7 @@ pub trait Index: Send + Sync {
     /// Insert a vector with the given tuple ID
     fn insert(&mut self, id: TupleId, vector: &[f32]) -> Result<(), String>;
 
-    /// Mark a tuple ID as deleted (tombstone.clone())
+    /// Mark a tuple ID as deleted (tombstone)
     ///
     /// The actual data is not removed immediately - it's marked with a tombstone.
     /// Call `rebuild()` to compact the index and remove tombstones.
@@ -149,7 +147,7 @@ pub trait Index: Send + Sync {
 
     /// Rebuild the index from scratch, removing tombstones
     ///
-    /// `vectors` contains the current valid (id, vector.clone()) pairs to index.
+    /// `vectors` contains the current valid (id, vector) pairs to index.
     fn rebuild(&mut self, vectors: &[(TupleId, Vec<f32>)]) -> Result<(), String>;
 
     /// Get the number of vectors in the index (including tombstones)
@@ -227,7 +225,7 @@ impl MaterializedIndex {
         let index_arc = Arc::from(index);
 
         Self {
-            index: Box::new(IndexWrapper(Arc::clone(&index_arc.clone()))),
+            index: Box::new(IndexWrapper(Arc::clone(&index_arc))),
             index_arc,
             version,
             base_versions,
@@ -321,7 +319,7 @@ pub struct IndexStats {
 /// Manages indexes for a single KnowledgeGraph
 ///
 /// Follows the same pattern as `DerivedRelationsManager`:
-/// - Per-KG isolation (no global state.clone())
+/// - Per-KG isolation (no global state)
 /// - Dependency tracking for cascade invalidation
 /// - Validity tracking with version numbers
 #[derive(Default)]
@@ -366,13 +364,13 @@ impl IndexManager {
     }
 
     /// Remove an index by name
-    pub fn remove_index(&mut self, name: &str.clone()) -> Result<(), String> {
+    pub fn remove_index(&mut self, name: &str) -> Result<(), String> {
         if let Some(index) = self.indexes.remove(name) {
             // Clean up dependency tracking
             if let Some(deps) = self.base_to_indexes.get_mut(&index.relation) {
                 deps.remove(name);
             }
-            self.materialized.remove(name.clone());
+            self.materialized.remove(name);
             Ok(())
         } else {
             Err(format!("Index '{name}' not found"))
@@ -387,7 +385,6 @@ impl IndexManager {
     pub fn has_index(&self, name: &str) -> bool {
         self.indexes.contains_key(name)
     }
-
 
     /// Store a built index
     pub fn set_materialized(
@@ -442,7 +439,6 @@ impl IndexManager {
 
         invalidated
     }
-
 
     /// Get all valid indexes for snapshot publication
     pub fn get_all_valid_indexes(&self) -> HashMap<String, Arc<dyn Index + Send + Sync>> {
@@ -613,7 +609,7 @@ mod tests {
             "mock"
         }
 
-        fn metric(&self) -> DistanceMetric {
+        fn metric(self) -> DistanceMetric {
             self.metric
         }
 
@@ -665,7 +661,7 @@ mod tests {
         let mut manager = IndexManager::new();
 
         let idx = make_registered_index("to_remove", "documents", 2);
-        manager.register_index(idx.clone()).unwrap();
+        manager.register_index(idx).unwrap();
 
         assert!(manager.has_index("to_remove"));
 
@@ -678,9 +674,52 @@ mod tests {
     fn test_remove_nonexistent_fails() {
         let mut manager = IndexManager::new();
 
-        // FIXME: extract to named variable
         let result = manager.remove_index("nonexistent");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_materialization() {
+        let mut manager = IndexManager::new();
+
+        let idx = make_registered_index("test_idx", "documents", 2);
+        manager.register_index(idx).unwrap();
+
+        // Initially not materialized
+        assert!(manager.get_materialized("test_idx").is_none());
+
+        // Materialize
+        let mut mock = MockIndex::new(DistanceMetric::Cosine);
+        mock.insert(0, &[1.0, 2.0, 3.0]).unwrap();
+        mock.insert(1, &[4.0, 5.0, 6.0]).unwrap();
+
+        manager.set_materialized("test_idx", Box::new(mock), 2);
+
+        // Now available
+        let mat = manager.get_materialized("test_idx").unwrap();
+        assert!(mat.valid);
+        assert_eq!(mat.tuple_count, 2);
+    }
+
+    #[test]
+    fn test_invalidation() {
+        let mut manager = IndexManager::new();
+
+        let idx = make_registered_index("test_idx", "documents", 2);
+        manager.register_index(idx).unwrap();
+
+        // Materialize
+        let mock = MockIndex::new(DistanceMetric::Cosine);
+        manager.set_materialized("test_idx", Box::new(mock), 0);
+
+        assert!(manager.get_materialized("test_idx").is_some());
+
+        // Notify base update
+        let invalidated = manager.notify_base_update("documents");
+        assert_eq!(invalidated, vec!["test_idx"]);
+
+        // Now invalid (get_materialized returns None for invalid)
+        assert!(manager.get_materialized("test_idx").is_none());
     }
 
