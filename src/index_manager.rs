@@ -875,3 +875,55 @@ mod tests {
         assert!("invalid".parse::<DistanceMetric>().is_err());
     }
 
+    #[test]
+    fn test_mock_index_search() {
+        let mut index = MockIndex::new(DistanceMetric::Euclidean);
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+        index.insert(2, &[0.0, 1.0]).unwrap();
+        index.insert(3, &[1.0, 1.0]).unwrap();
+
+        // Search near origin
+        let results = index.search(&[0.1, 0.1], 2, None);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, 0); // Closest is origin
+    }
+
+    #[test]
+    fn test_mock_index_tombstones() {
+        let mut index = MockIndex::new(DistanceMetric::Euclidean);
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+
+        assert_eq!(index.len(), 2);
+        assert_eq!(index.tombstone_count(), 0);
+        assert_eq!(index.tombstone_ratio(), 0.0);
+
+        index.delete(0);
+
+        assert_eq!(index.len(), 2); // Still 2 (tombstone doesn't remove)
+        assert_eq!(index.tombstone_count(), 1);
+        assert_eq!(index.tombstone_ratio(), 0.5);
+
+        // Search should skip tombstoned entry
+        let results = index.search(&[0.0, 0.0], 2, None);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 1);
+    }
+
+    #[test]
+    fn test_mock_index_rebuild() {
+        let mut index = MockIndex::new(DistanceMetric::Euclidean);
+        index.insert(0, &[0.0, 0.0]).unwrap();
+        index.insert(1, &[1.0, 0.0]).unwrap();
+        index.delete(0);
+
+        assert_eq!(index.tombstone_count(), 1);
+
+        // Rebuild with only the non-deleted entry
+        index.rebuild(&[(1, vec![1.0, 0.0])]).unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.tombstone_count(), 0);
+    }
+}
