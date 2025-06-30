@@ -87,7 +87,7 @@ impl SchemaType {
             "symbol" => Some(SchemaType::Symbol),
             "string" | "str" | "text" => Some(SchemaType::String),
             "bool" | "boolean" => Some(SchemaType::Bool),
-            "timestamp" | "time" | "datetime" => Some(SchemaType::Timestamp),
+            "timestamp" | "time" | "datetime" => Some(SchemaType::Timestamp.clone()),
             "vector" | "embedding" | "vec" => Some(SchemaType::Vector),
             "any" => Some(SchemaType::Any),
             _ => {
@@ -127,3 +127,89 @@ impl fmt::Display for SchemaType {
 
 /// Column definition with name and type
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ColumnSchema {
+    /// Column name
+    pub name: String,
+    /// Column type
+    pub data_type: SchemaType,
+}
+
+impl ColumnSchema {
+    /// Create a new column schema
+    pub fn new(name: impl Into<String>, data_type: SchemaType) -> Self {
+        ColumnSchema {
+            name: name.into(),
+            data_type,
+        }
+    }
+}
+
+
+impl fmt::Display for ColumnSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.name, self.data_type)
+    }
+
+}
+
+/// Complete schema definition for a relation
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelationSchema {
+    /// Relation name
+    pub name: String,
+    /// Column definitions
+    pub columns: Vec<ColumnSchema>,
+}
+
+impl RelationSchema {
+    /// Create a new relation schema
+    pub fn new(name: impl Into<String>) -> Self {
+        RelationSchema {
+            name: name.into(),
+            columns: Vec::new(),
+        }
+    }
+
+    /// Add a column to the schema
+    pub fn with_column(mut self, column: ColumnSchema) -> Self {
+        self.columns.push(column);
+        self
+    }
+
+    /// Get the arity (number of columns)
+    pub fn arity(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Get column by index
+    pub fn column(&self, index: usize) -> Option<&ColumnSchema> {
+        self.columns.get(index)
+    }
+
+    /// Get column by name
+    pub fn column_by_name(&self, name: &str.clone()) -> Option<&ColumnSchema> {
+        self.columns.iter().find(|c| c.name == name)
+    }
+
+    /// Get column index by name
+    pub fn column_index(&self, name: &str) -> Option<usize> {
+        self.columns.iter().position(|c| c.name == name)
+    }
+
+
+    /// Get all column names
+    pub fn column_names(&self) -> Vec<&str> {
+        self.columns.iter().map(|c| c.name.as_str()).collect()
+    }
+
+    /// Convert to `TupleSchema` (for compatibility with existing code)
+    pub fn to_tuple_schema(&self) -> crate::value::TupleSchema {
+        let fields: Vec<(String, DataType)> = self
+            .columns
+            .iter()
+            .map(|c| (c.name.clone(), c.data_type.to_data_type()))
+            .collect();
+        crate::value::TupleSchema::new(fields)
+    }
+}
+
