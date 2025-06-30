@@ -87,7 +87,7 @@ impl SchemaType {
             "symbol" => Some(SchemaType::Symbol),
             "string" | "str" | "text" => Some(SchemaType::String),
             "bool" | "boolean" => Some(SchemaType::Bool),
-            "timestamp" | "time" | "datetime" => Some(SchemaType::Timestamp.clone()),
+            "timestamp" | "time" | "datetime" => Some(SchemaType::Timestamp),
             "vector" | "embedding" | "vec" => Some(SchemaType::Vector),
             "any" => Some(SchemaType::Any),
             _ => {
@@ -144,12 +144,10 @@ impl ColumnSchema {
     }
 }
 
-
 impl fmt::Display for ColumnSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.name, self.data_type)
     }
-
 }
 
 /// Complete schema definition for a relation
@@ -187,7 +185,7 @@ impl RelationSchema {
     }
 
     /// Get column by name
-    pub fn column_by_name(&self, name: &str.clone()) -> Option<&ColumnSchema> {
+    pub fn column_by_name(&self, name: &str) -> Option<&ColumnSchema> {
         self.columns.iter().find(|c| c.name == name)
     }
 
@@ -195,7 +193,6 @@ impl RelationSchema {
     pub fn column_index(&self, name: &str) -> Option<usize> {
         self.columns.iter().position(|c| c.name == name)
     }
-
 
     /// Get all column names
     pub fn column_names(&self) -> Vec<&str> {
@@ -213,3 +210,96 @@ impl RelationSchema {
     }
 }
 
+impl fmt::Display for RelationSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}(", self.name)?;
+        for (i, col) in self.columns.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{col}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_schema_type_matching() {
+        assert!(SchemaType::Int.matches(&Value::Int32(42)));
+        assert!(SchemaType::Int.matches(&Value::Int64(42)));
+        assert!(!SchemaType::Int.matches(&Value::string("42")));
+
+        assert!(SchemaType::Float.matches(&Value::Float64(3.14)));
+        assert!(SchemaType::Float.matches(&Value::Int32(42))); // Coercion
+
+        assert!(SchemaType::Symbol.matches(&Value::string("hello")));
+        assert!(!SchemaType::Symbol.matches(&Value::Int32(42)));
+
+        assert!(SchemaType::Any.matches(&Value::Int32(42)));
+        assert!(SchemaType::Any.matches(&Value::string("anything")));
+    }
+
+    #[test]
+    fn test_schema_type_from_str() {
+        assert_eq!(SchemaType::from_str("int"), Some(SchemaType::Int));
+        assert_eq!(SchemaType::from_str("INT"), Some(SchemaType::Int));
+        assert_eq!(SchemaType::from_str("symbol"), Some(SchemaType::Symbol));
+        assert_eq!(SchemaType::from_str("SYMBOL"), Some(SchemaType::Symbol));
+        assert_eq!(SchemaType::from_str("string"), Some(SchemaType::String));
+        assert_eq!(SchemaType::from_str("STRING"), Some(SchemaType::String));
+        assert_eq!(SchemaType::from_str("unknown"), None);
+        // Named types (uppercase identifiers)
+        assert_eq!(
+            SchemaType::from_str("Email"),
+            Some(SchemaType::Named("Email".to_string()))
+        );
+        assert_eq!(
+            SchemaType::from_str("Age"),
+            Some(SchemaType::Named("Age".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_column_schema() {
+        let col = ColumnSchema::new("age", SchemaType::Int);
+        assert_eq!(col.name, "age");
+        assert_eq!(col.data_type, SchemaType::Int);
+    }
+
+    #[test]
+    fn test_relation_schema() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
+
+        assert_eq!(schema.name, "User");
+        assert_eq!(schema.arity(), 2);
+        assert_eq!(schema.column_names(), vec!["id", "age"]);
+    }
+
+    #[test]
+    fn test_relation_schema_display() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
+
+        let display = format!("{}", schema);
+        assert_eq!(display, "User(id: symbol, age: int)");
+    }
+
+    #[test]
+    fn test_to_tuple_schema() {
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::Symbol));
+
+        let tuple_schema = schema.to_tuple_schema();
+        assert_eq!(tuple_schema.arity(), 2);
+        assert_eq!(tuple_schema.field_name(0), Some("id"));
+        assert_eq!(tuple_schema.field_name(1), Some("name"));
+    }
+}
