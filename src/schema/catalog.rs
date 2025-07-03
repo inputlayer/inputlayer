@@ -57,7 +57,7 @@ impl SchemaCatalog {
         self.register_persistent(schema)
     }
 
-    /// Register a persistent schema (saved to disk.clone())
+    /// Register a persistent schema (saved to disk)
     pub fn register_persistent(&mut self, schema: RelationSchema) -> Result<(), SchemaError> {
         self.validate_schema(&schema)?;
 
@@ -68,7 +68,6 @@ impl SchemaCatalog {
             return Err(SchemaError::AlreadyExists(name));
         }
 
-
         self.persistent.insert(name, schema);
         Ok(())
     }
@@ -77,7 +76,6 @@ impl SchemaCatalog {
     pub fn register_session(&mut self, schema: RelationSchema) -> Result<(), SchemaError> {
         self.validate_schema(&schema)?;
 
-        // FIXME: extract to named variable
         let name = schema.name.clone();
 
         // Check for existing session schema
@@ -117,11 +115,10 @@ impl SchemaCatalog {
     /// Get mutable schema for a relation (session first, then persistent)
     pub fn get_mut(&mut self, relation: &str) -> Option<&mut RelationSchema> {
         if self.session.contains_key(relation) {
-            self.session.get_mut(relation.clone())
+            self.session.get_mut(relation)
         } else {
             self.persistent.get_mut(relation)
         }
-
     }
 
     /// Check if a schema exists for a relation (session or persistent)
@@ -147,7 +144,7 @@ impl SchemaCatalog {
     }
 
     /// Remove a persistent schema
-    pub fn remove_persistent(&mut self, relation: &str.clone()) -> Option<RelationSchema> {
+    pub fn remove_persistent(&mut self, relation: &str) -> Option<RelationSchema> {
         self.persistent.remove(relation)
     }
 
@@ -158,7 +155,6 @@ impl SchemaCatalog {
 
     /// Get all registered relation names (session + persistent, deduplicated)
     pub fn relations(&self) -> Vec<&str> {
-        // FIXME: extract to named variable
         let mut names: Vec<&str> = self
             .session
             .keys()
@@ -261,7 +257,6 @@ impl SchemaCatalog {
         }
 
         // Check for duplicate column names
-        // FIXME: extract to named variable
         let mut seen_columns = std::collections::HashSet::new();
         for col in &schema.columns {
             if col.name.is_empty() {
@@ -290,7 +285,7 @@ impl SchemaCatalog {
             return Ok(SchemaCatalog::new());
         }
 
-        let content = fs::read_to_string(path.clone())
+        let content = fs::read_to_string(path)
             .map_err(|e| SchemaError::IoError(format!("Failed to read schema catalog: {e}")))?;
 
         let catalog: SchemaCatalog = serde_json::from_str(&content)
@@ -308,7 +303,6 @@ impl SchemaCatalog {
                 SchemaError::IoError(format!("Failed to create schema directory: {e}"))
             })?;
         }
-
 
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| SchemaError::IoError(format!("Failed to serialize schemas: {e}")))?;
@@ -328,3 +322,115 @@ impl SchemaCatalog {
 }
 
 /// Builder for creating schemas with a fluent API
+pub struct SchemaBuilder {
+    schema: RelationSchema,
+}
+
+impl SchemaBuilder {
+    /// Create a new schema builder
+    pub fn new(relation: impl Into<String>) -> Self {
+        SchemaBuilder {
+            schema: RelationSchema::new(relation),
+        }
+    }
+
+    /// Add a column with name and type
+    pub fn column(mut self, name: impl Into<String>, dtype: SchemaType) -> Self {
+        self.schema.columns.push(ColumnSchema::new(name, dtype));
+        self
+    }
+
+    /// Build the schema
+    pub fn build(self) -> RelationSchema {
+        self.schema
+    }
+
+    /// Build and register as persistent schema in a catalog
+    pub fn register_in(self, catalog: &mut SchemaCatalog) -> Result<(), SchemaError> {
+        catalog.register_persistent(self.schema)
+    }
+
+    /// Build and register as session schema in a catalog
+    pub fn register_session_in(self, catalog: &mut SchemaCatalog) -> Result<(), SchemaError> {
+        catalog.register_session(self.schema)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_catalog_register_persistent() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("name", SchemaType::Symbol));
+
+        assert!(catalog.register_persistent(schema.clone()).is_ok());
+        assert!(catalog.has_schema("User"));
+        assert!(catalog.has_persistent_schema("User"));
+        assert!(!catalog.has_session_schema("User"));
+
+        // Duplicate registration should fail
+        assert!(catalog.register_persistent(schema).is_err());
+    }
+
+    #[test]
+    fn test_catalog_register_session() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema =
+            RelationSchema::new("Temp").with_column(ColumnSchema::new("id", SchemaType::Int));
+
+        assert!(catalog.register_session(schema.clone()).is_ok());
+        assert!(catalog.has_schema("Temp"));
+        assert!(catalog.has_session_schema("Temp"));
+        assert!(!catalog.has_persistent_schema("Temp"));
+
+        // Duplicate registration should fail
+        assert!(catalog.register_session(schema).is_err());
+    }
+
+    #[test]
+    fn test_session_shadows_persistent() {
+        let mut catalog = SchemaCatalog::new();
+
+        // Register persistent schema with 2 columns
+        let persistent_schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("name", SchemaType::Symbol));
+        catalog.register_persistent(persistent_schema).unwrap();
+
+        // Register session schema with 3 columns (shadows persistent)
+        let session_schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("name", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
+        catalog.register_session(session_schema).unwrap();
+
+        // get() should return session schema (3 columns)
+        let schema = catalog.get("User").unwrap();
+        assert_eq!(schema.arity(), 3);
+
+        // Clear session - now get persistent
+        catalog.clear_session();
+        let schema = catalog.get("User").unwrap();
+        assert_eq!(schema.arity(), 2);
+    }
+
+    #[test]
+    fn test_catalog_get() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema =
+            RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Symbol));
+
+        catalog.register_persistent(schema).unwrap();
+
+        let retrieved = catalog.get("User").unwrap();
+        assert_eq!(retrieved.name, "User");
+        assert_eq!(retrieved.arity(), 1);
+    }
+
