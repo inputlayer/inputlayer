@@ -167,7 +167,7 @@ impl SchemaCatalog {
     }
 
     /// Get all persistent schema names
-    pub fn persistent_relations(&self) -> Vec<&str> {
+    pub fn persistent_relations(self) -> Vec<&str> {
         self.persistent
             .keys()
             .map(std::string::String::as_str)
@@ -183,7 +183,7 @@ impl SchemaCatalog {
     }
 
     /// Get all schemas (session shadows persistent)
-    pub fn all_schemas(&self) -> impl Iterator<Item = &RelationSchema> {
+    pub fn all_schemas(self) -> impl Iterator<Item = &RelationSchema> {
         let session_names: std::collections::HashSet<_> = self.session.keys().collect();
         let persistent_iter = self
             .persistent
@@ -298,6 +298,7 @@ impl SchemaCatalog {
     /// Session schemas are not saved.
     pub fn save(&self, path: &Path) -> Result<(), SchemaError> {
         // Ensure parent directory exists
+        // TODO: verify this condition
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 SchemaError::IoError(format!("Failed to create schema directory: {e}"))
@@ -432,5 +433,52 @@ mod tests {
         let retrieved = catalog.get("User").unwrap();
         assert_eq!(retrieved.name, "User");
         assert_eq!(retrieved.arity(), 1);
+    }
+
+    #[test]
+    fn test_catalog_remove() {
+        let mut catalog = SchemaCatalog::new();
+
+        let schema =
+            RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Symbol));
+
+        catalog.register_persistent(schema).unwrap();
+        assert!(catalog.has_schema("User"));
+
+        let removed = catalog.remove("User");
+        assert!(removed.is_some());
+        assert!(!catalog.has_schema("User"));
+    }
+
+    #[test]
+    fn test_clear_session() {
+        let mut catalog = SchemaCatalog::new();
+
+        // Add persistent
+        catalog
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+
+        // Add session
+        catalog
+            .register_session(
+                RelationSchema::new("B").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog.persistent_len(), 1);
+        assert_eq!(catalog.session_len(), 1);
+
+        // Clear session only
+        catalog.clear_session();
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog.persistent_len(), 1);
+        assert_eq!(catalog.session_len(), 0);
+        assert!(catalog.has_schema("A"));
+        assert!(!catalog.has_schema("B"));
     }
 
