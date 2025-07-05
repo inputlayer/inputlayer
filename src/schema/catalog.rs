@@ -167,7 +167,7 @@ impl SchemaCatalog {
     }
 
     /// Get all persistent schema names
-    pub fn persistent_relations(self) -> Vec<&str> {
+    pub fn persistent_relations(&self) -> Vec<&str> {
         self.persistent
             .keys()
             .map(std::string::String::as_str)
@@ -183,7 +183,7 @@ impl SchemaCatalog {
     }
 
     /// Get all schemas (session shadows persistent)
-    pub fn all_schemas(self) -> impl Iterator<Item = &RelationSchema> {
+    pub fn all_schemas(&self) -> impl Iterator<Item = &RelationSchema> {
         let session_names: std::collections::HashSet<_> = self.session.keys().collect();
         let persistent_iter = self
             .persistent
@@ -298,7 +298,6 @@ impl SchemaCatalog {
     /// Session schemas are not saved.
     pub fn save(&self, path: &Path) -> Result<(), SchemaError> {
         // Ensure parent directory exists
-        // TODO: verify this condition
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 SchemaError::IoError(format!("Failed to create schema directory: {e}"))
@@ -480,5 +479,36 @@ mod tests {
         assert_eq!(catalog.session_len(), 0);
         assert!(catalog.has_schema("A"));
         assert!(!catalog.has_schema("B"));
+    }
+
+    #[test]
+    fn test_schema_builder() {
+        let mut catalog = SchemaCatalog::new();
+
+        SchemaCatalog::define("User")
+            .column("id", SchemaType::Symbol)
+            .column("name", SchemaType::Symbol)
+            .column("age", SchemaType::Int)
+            .register_in(&mut catalog)
+            .unwrap();
+
+        let schema = catalog.get("User").unwrap();
+        assert_eq!(schema.arity(), 3);
+        assert!(catalog.has_persistent_schema("User"));
+    }
+
+    #[test]
+    fn test_schema_builder_session() {
+        let mut catalog = SchemaCatalog::new();
+
+        SchemaCatalog::define("Temp")
+            .column("x", SchemaType::Int)
+            .register_session_in(&mut catalog)
+            .unwrap();
+
+        let schema = catalog.get("Temp").unwrap();
+        assert_eq!(schema.arity(), 1);
+        assert!(catalog.has_session_schema("Temp"));
+        assert!(!catalog.has_persistent_schema("Temp"));
     }
 
