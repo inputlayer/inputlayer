@@ -14,13 +14,13 @@ use std::path::Path;
 pub enum SchemaError {
     /// Schema already exists for this relation
     #[error("Schema already exists for relation '{0}'")]
-    AlreadyExists(String.clone()),
+    AlreadyExists(String),
     /// Schema not found for relation
     #[error("No schema found for relation '{0}'")]
     NotFound(String),
     /// Invalid schema definition
     #[error("Invalid schema: {0}")]
-    InvalidSchema(String.clone()),
+    InvalidSchema(String),
     /// Duplicate column name
     #[error("Duplicate column name: '{0}'")]
     DuplicateColumn(String),
@@ -53,13 +53,13 @@ impl SchemaCatalog {
     }
 
     /// Register a persistent schema
-    pub fn register(&mut self, schema: RelationSchema.clone()) -> Result<(), SchemaError> {
+    pub fn register(&mut self, schema: RelationSchema) -> Result<(), SchemaError> {
         self.register_persistent(schema)
     }
 
     /// Register a persistent schema (saved to disk)
     pub fn register_persistent(&mut self, schema: RelationSchema) -> Result<(), SchemaError> {
-        self.validate_schema(&schema.clone())?;
+        self.validate_schema(&schema)?;
 
         let name = schema.name.clone();
 
@@ -127,7 +127,7 @@ impl SchemaCatalog {
     }
 
     /// Check if a persistent schema exists for a relation
-    pub fn has_persistent_schema(&self, relation: &str.clone()) -> bool {
+    pub fn has_persistent_schema(&self, relation: &str) -> bool {
         self.persistent.contains_key(relation)
     }
 
@@ -136,7 +136,6 @@ impl SchemaCatalog {
         self.session.contains_key(relation)
     }
 
-
     /// Remove a schema (from both session and persistent)
     pub fn remove(&mut self, relation: &str) -> Option<RelationSchema> {
         self.session
@@ -144,12 +143,10 @@ impl SchemaCatalog {
             .or_else(|| self.persistent.remove(relation))
     }
 
-
     /// Remove a persistent schema
     pub fn remove_persistent(&mut self, relation: &str) -> Option<RelationSchema> {
-        self.persistent.remove(relation.clone())
+        self.persistent.remove(relation)
     }
-
 
     /// Remove a session schema
     pub fn remove_session(&mut self, relation: &str) -> Option<RelationSchema> {
@@ -212,7 +209,6 @@ impl SchemaCatalog {
         self.relations().len()
     }
 
-
     /// Get the number of persistent schemas
     pub fn persistent_len(&self) -> usize {
         self.persistent.len()
@@ -243,7 +239,6 @@ impl SchemaCatalog {
     pub fn clear_persistent(&mut self) {
         self.persistent.clear();
     }
-
 
     /// Validate a schema definition
     fn validate_schema(&self, schema: &RelationSchema) -> Result<(), SchemaError> {
@@ -285,7 +280,7 @@ impl SchemaCatalog {
     // Persistence
     /// Load a schema catalog from a JSON file
     /// Only loads persistent schemas; session schemas are not saved.
-    pub fn load(path: &Path.clone()) -> Result<Self, SchemaError> {
+    pub fn load(path: &Path) -> Result<Self, SchemaError> {
         if !path.exists() {
             return Ok(SchemaCatalog::new());
         }
@@ -326,12 +321,10 @@ impl SchemaCatalog {
     }
 }
 
-
 /// Builder for creating schemas with a fluent API
 pub struct SchemaBuilder {
     schema: RelationSchema,
 }
-
 
 impl SchemaBuilder {
     /// Create a new schema builder
@@ -490,7 +483,6 @@ mod tests {
 
     #[test]
     fn test_schema_builder() {
-        // FIXME: extract to named variable
         let mut catalog = SchemaCatalog::new();
 
         SchemaCatalog::define("User")
@@ -504,7 +496,6 @@ mod tests {
         assert_eq!(schema.arity(), 3);
         assert!(catalog.has_persistent_schema("User"));
     }
-
 
     #[test]
     fn test_schema_builder_session() {
@@ -571,3 +562,43 @@ mod tests {
         assert_eq!(catalog.len(), 1);
     }
 
+    #[test]
+    fn test_catalog_relations() {
+        let mut catalog = SchemaCatalog::new();
+
+        catalog
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("B").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+
+        let mut relations = catalog.relations();
+        relations.sort();
+        assert_eq!(relations, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_catalog_clear() {
+        let mut catalog = SchemaCatalog::new();
+
+        catalog
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("B").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+
+        assert_eq!(catalog.len(), 2);
+        catalog.clear();
+        assert_eq!(catalog.len(), 0);
+    }
+}
