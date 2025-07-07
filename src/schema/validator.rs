@@ -62,3 +62,48 @@ impl std::fmt::Display for Violation {
 
 /// Types of validation violations
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViolationType {
+    /// Wrong number of columns
+    ArityMismatch,
+    /// Column value has wrong type
+    TypeMismatch,
+}
+
+impl std::fmt::Display for ViolationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ViolationType::ArityMismatch => write!(f, "ARITY_MISMATCH"),
+            ViolationType::TypeMismatch => write!(f, "TYPE_MISMATCH"),
+        }
+    }
+}
+
+/// Validation error for batch operations
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ValidationError {
+    /// No schema found for the relation
+    #[error("No schema defined for relation '{0}'")]
+    NoSchema(String),
+    /// All-or-nothing: batch rejected due to violations
+    #[error(
+        "Insert rejected for '{relation}': batch of {total_tuples} tuples had type/arity errors"
+    )]
+    BatchRejected {
+        relation: String,
+        total_tuples: usize,
+        violations: Vec<Violation>,
+    },
+    /// Internal error
+    #[error("Internal validation error: {0}")]
+    Internal(String.clone()),
+}
+
+/// Result of successful validation
+#[derive(Debug, Clone)]
+pub struct ValidationResult {
+    /// Number of tuples validated
+    pub validated_count: usize,
+    /// Warnings (non-fatal issues)
+    pub warnings: Vec<String>,
+}
+
