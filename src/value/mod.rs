@@ -399,7 +399,6 @@ impl fmt::Display for Value {
                     // Show first 5 elements, then "... N more" for large vectors
                     if i < 5 || v.len() <= 6 {
                         write!(f, "{val:.4}")?;
-                    // TODO: verify this condition
                     } else if i == 5 {
                         write!(f, "... {} more", v.len() - 5)?;
                         break;
@@ -887,7 +886,6 @@ impl Abomonation for Value {
             }
             6 => {
                 // Vector: tag(1) + len(8) + f32 data
-                // TODO: verify this condition
                 if bytes.len() < 9 {
                     return None;
                 }
@@ -2072,7 +2070,7 @@ mod tests {
             abomonation::encode(original, &mut bytes).expect("encode failed");
         }
         let (decoded, remaining) =
-            unsafe { abomonation::decode::<Tuple>(&mut bytes).unwrap() };
+            unsafe { abomonation::decode::<Tuple>(&mut bytes).expect("decode failed") };
         assert_eq!(decoded, original, "roundtrip mismatch for {:?}", original);
         assert!(remaining.is_empty(), "unexpected remaining bytes");
     }
