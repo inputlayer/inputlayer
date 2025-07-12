@@ -223,3 +223,131 @@ impl ValidationEngine {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::{ColumnSchema, SchemaType};
+    use crate::value::Value;
+
+    /// Simple schema for testing type/arity validation only
+    fn make_simple_schema() -> RelationSchema {
+        RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("name", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int))
+            .with_column(ColumnSchema::new("email", SchemaType::Symbol))
+    }
+
+    #[test]
+    fn test_validate_valid_tuple() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::string("u1"),
+            Value::string("Alice"),
+            Value::Int64(30),
+            Value::string("alice@example.com"),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_arity_mismatch() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![Value::string("u1"), Value::string("Alice")]); // Missing columns
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
+        }
+    }
+
+    #[test]
+    fn test_validate_type_mismatch() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::string("u1"),
+            Value::string("Alice"),
+            Value::string("not a number"), // Wrong type - expected Int
+            Value::string("alice@example.com"),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert!(violations
+                .iter()
+                .any(|v| v.violation_type == ViolationType::TypeMismatch));
+        }
+    }
+
+    #[test]
+    fn test_validate_batch_success() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::string("u1"),
+                Value::string("Alice"),
+                Value::Int64(30),
+                Value::string("alice@example.com"),
+            ]),
+            Tuple::new(vec![
+                Value::string("u2"),
+                Value::string("Bob"),
+                Value::Int64(25),
+                Value::string("bob@example.com"),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.validated_count, 2);
+    }
+
+    #[test]
+    fn test_validate_batch_type_error_rejects_all() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::string("u1"),
+                Value::string("Alice"),
+                Value::Int64(30),
+                Value::string("alice@example.com"),
+            ]),
+            Tuple::new(vec![
+                Value::string("u2"),
+                Value::string("Bob"),
+                Value::string("not an int"), // Type error
+                Value::string("bob@example.com"),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_err());
+
+        // Batch rejected due to type error in second tuple
+        if let Err(ValidationError::BatchRejected {
+            total_tuples,
+            violations,
+            ..
+        }) = result
+        {
+            assert_eq!(total_tuples, 2);
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].tuple_index, 1);
+        }
+    }
+}
