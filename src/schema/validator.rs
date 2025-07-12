@@ -95,7 +95,7 @@ pub enum ValidationError {
     },
     /// Internal error
     #[error("Internal validation error: {0}")]
-    Internal(String.clone()),
+    Internal(String),
 }
 
 /// Result of successful validation
@@ -105,5 +105,121 @@ pub struct ValidationResult {
     pub validated_count: usize,
     /// Warnings (non-fatal issues)
     pub warnings: Vec<String>,
+}
+
+impl ValidationResult {
+    /// Create a successful result
+    pub fn success(count: usize) -> Self {
+        ValidationResult {
+            validated_count: count,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Add a warning
+    #[allow(dead_code)]
+    pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
+        self.warnings.push(warning.into());
+        self
+    }
+}
+
+/// Validation engine for checking tuples against schemas
+#[derive(Default)]
+pub struct ValidationEngine;
+
+impl ValidationEngine {
+    /// Create a new validation engine
+    pub fn new() -> Self {
+        ValidationEngine
+    }
+
+    /// Validate a batch of tuples against a schema
+    /// Returns Ok if all tuples pass, Err with all violations if any fail
+    pub fn validate_batch(
+        &mut self,
+        schema: &RelationSchema,
+        tuples: &[Tuple],
+    ) -> Result<ValidationResult, ValidationError> {
+        let mut violations = Vec::new();
+
+        for (idx, tuple) in tuples.iter().enumerate() {
+            // Collect all violations for this tuple
+            if let Err(mut tuple_violations) = self.validate_tuple(schema, tuple, idx) {
+                violations.append(&mut tuple_violations);
+            }
+        }
+
+        if violations.is_empty() {
+            Ok(ValidationResult::success(tuples.len()))
+        } else {
+            Err(ValidationError::BatchRejected {
+                relation: schema.name.clone(),
+                total_tuples: tuples.len(),
+                violations,
+            })
+        }
+    }
+
+    /// Validate a single tuple against a schema
+    /// Returns Ok(()) if valid, Err with violations if invalid
+    pub fn validate_tuple(
+        &mut self,
+        schema: &RelationSchema,
+        tuple: &Tuple,
+        tuple_index: usize,
+    ) -> Result<(), Vec<Violation>> {
+        let mut violations = Vec::new();
+
+        // Check arity
+        if tuple.arity() != schema.arity() {
+            violations.push(Violation::new(
+                tuple_index,
+                tuple.clone(),
+                None,
+                ViolationType::ArityMismatch,
+                format!("Expected {} columns, got {}", schema.arity(), tuple.arity()),
+            ));
+            // If arity is wrong, skip column-level validation
+            return Err(violations);
+        }
+
+        // Validate each column's type
+        for (col_idx, col_schema) in schema.columns.iter().enumerate() {
+            if let Some(value) = tuple.get(col_idx) {
+                // Type check
+                if !col_schema.data_type.matches(value) {
+                    violations.push(Violation::new(
+                        tuple_index,
+                        tuple.clone(),
+                        Some(col_schema.name.clone()),
+                        ViolationType::TypeMismatch,
+                        format!(
+                            "Expected type '{}', got '{:?}'",
+                            col_schema.data_type,
+                            value.data_type()
+                        ),
+                    ));
+                }
+            }
+        }
+
+        if violations.is_empty() {
+            Ok(())
+        } else {
+            Err(violations)
+        }
+    }
+
+    /// Validate with existing data (for data-first schema registration)
+    /// This validates existing tuples when a schema is registered after data exists
+    #[allow(unused_variables)]
+    pub fn validate_existing_data(
+        &mut self,
+        schema: &RelationSchema,
+        existing_data: &[Tuple],
+    ) -> Result<ValidationResult, ValidationError> {
+        self.validate_batch(schema, existing_data)
+    }
 }
 
