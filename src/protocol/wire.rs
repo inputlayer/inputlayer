@@ -22,7 +22,7 @@ pub enum WireDataType {
 }
 
 impl std::fmt::Display for WireDataType {
-    fn fmt(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WireDataType::Int32 => write!(f, "Int32"),
             WireDataType::Int64 => write!(f, "Int64"),
@@ -62,3 +62,95 @@ pub enum WireValue {
     Bytes(Vec<u8>),
 }
 
+impl WireValue {
+    pub fn data_type(&self) -> WireDataType {
+        match self {
+            WireValue::Null => WireDataType::Int64, // Default null type
+            WireValue::Int32(_) => WireDataType::Int32,
+            WireValue::Int64(_) => WireDataType::Int64,
+            WireValue::Float64(_) => WireDataType::Float64,
+            WireValue::String(_) => WireDataType::String,
+            WireValue::Bool(_) => WireDataType::Bool,
+            WireValue::Timestamp(_) => WireDataType::Timestamp,
+            WireValue::Vector(v) => WireDataType::Vector { dim: Some(v.len()) },
+            WireValue::VectorInt8(v) => WireDataType::VectorInt8 { dim: Some(v.len()) },
+            WireValue::Bytes(_) => WireDataType::Bytes,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, WireValue::Null)
+    }
+
+    /// Try to get as i32
+    pub fn as_i32(&self) -> Option<i32> {
+        match self {
+            WireValue::Int32(v) => Some(*v),
+            WireValue::Int64(v) => i32::try_from(*v).ok(),
+            _ => None,
+        }
+    }
+
+    /// Try to get as i64
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            WireValue::Int32(v) => Some(i64::from(*v)),
+            WireValue::Int64(v) => Some(*v),
+            WireValue::Timestamp(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to get as f64
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            WireValue::Int32(v) => Some(f64::from(*v)),
+            WireValue::Int64(v) => Some(*v as f64),
+            WireValue::Float64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Try to get as string reference
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            WireValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Try to get as bool
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            WireValue::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for WireValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WireValue::Null => write!(f, "NULL"),
+            WireValue::Int32(v) => write!(f, "{v}"),
+            WireValue::Int64(v) => write!(f, "{v}"),
+            WireValue::Float64(v) => {
+                // Normalize exponent format across platforms (e+20 -> e20)
+                let s = format!("{v}");
+                write!(f, "{}", s.replace("e+", "e"))
+            }
+            WireValue::String(s) => write!(f, "\"{s}\""),
+            WireValue::Bool(b) => write!(f, "{b}"),
+            WireValue::Timestamp(t) => write!(f, "ts:{t}"),
+            WireValue::Vector(v) => write!(f, "vec[{}]", v.len()),
+            WireValue::VectorInt8(v) => write!(f, "vec8[{}]", v.len()),
+            WireValue::Bytes(b) => write!(f, "bytes[{}]", b.len()),
+        }
+    }
+}
+
+// Wire Tuple
+/// Wire-serializable tuple (row of values).
+///
+/// Represents a single row in a relation or query result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
