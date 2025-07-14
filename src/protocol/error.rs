@@ -166,3 +166,53 @@ impl From<String> for InputLayerError {
     }
 }
 
+impl From<&str> for InputLayerError {
+    fn from(message: &str) -> Self {
+        InputLayerError::InternalError {
+            message: message.to_string(),
+        }
+    }
+}
+
+// Result type alias
+/// Result type for `InputLayer` protocol operations.
+pub type InputLayerResult<T> = Result<T, InputLayerError>;
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let err = InputLayerError::KnowledgeGraphNotFound {
+            name: "test".to_string(),
+        };
+        assert_eq!(err.to_string(), "Knowledge graph not found: test");
+    }
+
+    #[test]
+    fn test_parse_error_display() {
+        let err = InputLayerError::ParseError {
+            message: "unexpected token".to_string(),
+            line: Some(10),
+            column: Some(5),
+        };
+        // thiserror uses simplified format - line/column still stored for programmatic access
+        assert_eq!(err.to_string(), "Parse error: unexpected token");
+    }
+
+    #[test]
+    fn test_error_serialization() {
+        let err = InputLayerError::Timeout { timeout_ms: 5000 };
+        let bytes = bincode::serialize(&err).unwrap();
+        let restored: InputLayerError = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(err.to_string(), restored.to_string());
+    }
+
+    #[test]
+    fn test_from_string() {
+        let err: InputLayerError = "something went wrong".into();
+        assert!(matches!(err, InputLayerError::InternalError { .. }));
+    }
+}
