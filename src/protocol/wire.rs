@@ -154,3 +154,78 @@ impl std::fmt::Display for WireValue {
 ///
 /// Represents a single row in a relation or query result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WireTuple {
+    pub values: Vec<WireValue>,
+}
+
+impl WireTuple {
+    pub fn new(values: Vec<WireValue>) -> Self {
+        Self { values }
+    }
+
+    pub fn empty() -> Self {
+        Self { values: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&WireValue> {
+        self.values.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut WireValue> {
+        self.values.get_mut(index)
+    }
+}
+
+// Conversions: (i32, i32) <-> WireTuple
+impl From<(i32, i32)> for WireTuple {
+    fn from((a, b): (i32, i32)) -> Self {
+        WireTuple {
+            values: vec![WireValue::Int32(a), WireValue::Int32(b)],
+        }
+    }
+}
+
+impl TryFrom<WireTuple> for (i32, i32) {
+    type Error = String;
+
+    fn try_from(tuple: WireTuple) -> Result<Self, Self::Error> {
+        if tuple.values.len() < 2 {
+            return Err(format!("Expected 2 values, got {}", tuple.values.len()));
+        }
+
+        let a = tuple.values[0]
+            .as_i32()
+            .ok_or_else(|| format!("First value is not an integer: {:?}", tuple.values[0]))?;
+
+        let b = tuple.values[1]
+            .as_i32()
+            .ok_or_else(|| format!("Second value is not an integer: {:?}", tuple.values[1]))?;
+
+        Ok((a, b))
+    }
+}
+
+impl From<&(i32, i32)> for WireTuple {
+    fn from((a, b): &(i32, i32)) -> Self {
+        WireTuple {
+            values: vec![WireValue::Int32(*a), WireValue::Int32(*b)],
+        }
+    }
+}
+
+// Column Definition
+/// Column definition for schema description.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: WireDataType,
+}
+
