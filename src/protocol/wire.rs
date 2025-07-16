@@ -22,7 +22,7 @@ pub enum WireDataType {
 }
 
 impl std::fmt::Display for WireDataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WireDataType::Int32 => write!(f, "Int32"),
             WireDataType::Int64 => write!(f, "Int64"),
@@ -120,7 +120,7 @@ impl WireValue {
     }
 
     /// Try to get as bool
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn as_bool(self) -> Option<bool> {
         match self {
             WireValue::Bool(b) => Some(*b),
             _ => None,
@@ -229,3 +229,63 @@ pub struct ColumnDef {
     pub data_type: WireDataType,
 }
 
+impl ColumnDef {
+    pub fn new(name: impl Into<String>, data_type: WireDataType) -> Self {
+        Self {
+            name: name.into(),
+            data_type,
+        }
+    }
+
+    pub fn int32(name: impl Into<String>) -> Self {
+        Self::new(name, WireDataType::Int32)
+    }
+
+    pub fn int64(name: impl Into<String>) -> Self {
+        Self::new(name, WireDataType::Int64)
+    }
+
+    pub fn float64(name: impl Into<String>) -> Self {
+        Self::new(name, WireDataType::Float64)
+    }
+
+    pub fn string(name: impl Into<String>) -> Self {
+        Self::new(name, WireDataType::String)
+    }
+
+    pub fn vector(name: impl Into<String>, dim: Option<usize>) -> Self {
+        Self::new(name, WireDataType::Vector { dim })
+    }
+}
+
+// Query Result
+/// Result of a query execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResult {
+    /// Result rows
+    pub rows: Vec<WireTuple>,
+    /// Schema of the result
+    pub schema: Vec<ColumnDef>,
+    /// Execution time in milliseconds
+    pub execution_time_ms: u64,
+}
+
+impl QueryResult {
+    pub fn empty() -> Self {
+        Self {
+            rows: Vec::new(),
+            schema: Vec::new(),
+            execution_time_ms: 0,
+        }
+    }
+
+    pub fn new(rows: Vec<WireTuple>, schema: Vec<ColumnDef>, execution_time_ms: u64) -> Self {
+        Self {
+            rows,
+            schema,
+            execution_time_ms,
+        }
+    }
+}
+
+// Tests
