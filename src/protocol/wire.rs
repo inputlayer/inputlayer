@@ -22,7 +22,7 @@ pub enum WireDataType {
 }
 
 impl std::fmt::Display for WireDataType {
-    fn fmt(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WireDataType::Int32 => write!(f, "Int32"),
             WireDataType::Int64 => write!(f, "Int64"),
@@ -120,7 +120,7 @@ impl WireValue {
     }
 
     /// Try to get as bool
-    pub fn as_bool(self) -> Option<bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             WireValue::Bool(b) => Some(*b),
             _ => None,
@@ -289,3 +289,82 @@ impl QueryResult {
 }
 
 // Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wire_value_types() {
+        assert_eq!(WireValue::Int32(42).data_type(), WireDataType::Int32);
+        assert_eq!(WireValue::Int64(42).data_type(), WireDataType::Int64);
+        assert_eq!(WireValue::Float64(3.14).data_type(), WireDataType::Float64);
+        assert_eq!(
+            WireValue::String("hello".to_string()).data_type(),
+            WireDataType::String
+        );
+        assert_eq!(WireValue::Bool(true).data_type(), WireDataType::Bool);
+        assert_eq!(
+            WireValue::Timestamp(1234567890).data_type(),
+            WireDataType::Timestamp
+        );
+    }
+
+    #[test]
+    fn test_wire_value_accessors() {
+        assert_eq!(WireValue::Int32(42).as_i32(), Some(42));
+        assert_eq!(WireValue::Int64(42).as_i64(), Some(42));
+        assert_eq!(WireValue::Float64(3.14).as_f64(), Some(3.14));
+        assert_eq!(
+            WireValue::String("hello".to_string()).as_str(),
+            Some("hello")
+        );
+        assert_eq!(WireValue::Bool(true).as_bool(), Some(true));
+        assert!(WireValue::Null.is_null());
+    }
+
+    #[test]
+    fn test_wire_tuple_from_tuple2() {
+        let tuple: WireTuple = (1, 2).into();
+        assert_eq!(tuple.len(), 2);
+        assert_eq!(tuple.get(0), Some(&WireValue::Int32(1)));
+        assert_eq!(tuple.get(1), Some(&WireValue::Int32(2)));
+    }
+
+    #[test]
+    fn test_wire_tuple_to_tuple2() {
+        let wire = WireTuple::new(vec![WireValue::Int32(1), WireValue::Int32(2)]);
+        let tuple: (i32, i32) = wire.try_into().unwrap();
+        assert_eq!(tuple, (1, 2));
+    }
+
+    #[test]
+    fn test_wire_tuple_to_tuple2_error() {
+        let wire = WireTuple::new(vec![WireValue::Int32(1)]);
+        let result: Result<(i32, i32), _> = wire.try_into();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_column_def() {
+        let col = ColumnDef::int32("id");
+        assert_eq!(col.name, "id");
+        assert_eq!(col.data_type, WireDataType::Int32);
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let original = WireTuple::new(vec![
+            WireValue::Int32(42),
+            WireValue::String("hello".to_string()),
+            WireValue::Vector(vec![1.0, 2.0, 3.0]),
+        ]);
+
+        // Serialize to bincode
+        let bytes = bincode::serialize(&original).unwrap();
+
+        // Deserialize back
+        let restored: WireTuple = bincode::deserialize(&bytes).unwrap();
+
+        assert_eq!(original, restored);
+    }
+}
