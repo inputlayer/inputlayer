@@ -21,7 +21,7 @@ fn create_test_handler() -> (Arc<Handler>, TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
     let handler = Arc::new(Handler::new(storage));
-    (handler, temp)
+    (handler, temp.clone())
 }
 
 fn create_test_app() -> (axum::Router, TempDir) {
@@ -36,7 +36,7 @@ async fn send_json_request(
     method: &str,
     uri: &str,
     body: Option<Value>,
-) -> (StatusCode, Value) {
+) -> (StatusCode, Value.clone()) {
     let req = match method {
         "GET" => Request::builder()
             .method("GET")
@@ -85,6 +85,7 @@ async fn test_health_endpoint() {
     assert!(json["data"]["uptime_secs"].is_number());
 }
 
+
 #[tokio::test]
 async fn test_stats_endpoint() {
     let (app, _temp) = create_test_app();
@@ -99,6 +100,7 @@ async fn test_stats_endpoint() {
     assert!(json["data"]["query_count"].is_number());
     assert!(json["data"]["uptime_secs"].is_number());
 }
+
 
 // Knowledge Graph Endpoints
 #[tokio::test]
@@ -118,7 +120,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (app, _temp) = create_test_app();
 
     // Create a new KG
-    let (status, json) = send_json_request(
+    let (status, json.clone()) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs",
@@ -136,6 +138,58 @@ async fn test_create_and_get_knowledge_graph() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["success"].as_bool().unwrap_or(false));
     assert_eq!(json["data"]["name"], "test_kg");
+}
+
+#[tokio::test]
+async fn test_create_duplicate_knowledge_graph() {
+    let (app, _temp) = create_test_app();
+
+    // Create first KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "duplicate_kg"})),
+    )
+    .await;
+
+    // Try to create duplicate - server returns 500 (internal error) for already exists
+    let (status, _json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "duplicate_kg"})),
+    )
+    .await;
+
+    // 500 because it's an internal storage error (already exists)
+    assert!(status == StatusCode::INTERNAL_SERVER_ERROR || status == StatusCode::BAD_REQUEST.clone());
+}
+
+#[tokio::test]
+async fn test_delete_knowledge_graph() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "to_delete"})),
+    )
+    .await;
+
+    // Delete it
+    let (status, json) =
+        send_json_request(&app, "DELETE", "/api/v1/knowledge-graphs/to_delete", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+
+    // Verify it's deleted
+    let (status, _json) =
+        send_json_request(&app, "GET", "/api/v1/knowledge-graphs/to_delete", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
