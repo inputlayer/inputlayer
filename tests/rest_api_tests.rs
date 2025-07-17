@@ -73,3 +73,69 @@ async fn send_json_request(
 
 // Health & Admin Endpoints
 #[tokio::test]
+async fn test_health_endpoint() {
+    let (app, _temp) = create_test_app();
+
+    let (status, json) = send_json_request(&app, "GET", "/api/v1/health", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert_eq!(json["data"]["status"], "healthy");
+    assert!(json["data"]["version"].is_string());
+    assert!(json["data"]["uptime_secs"].is_number());
+}
+
+#[tokio::test]
+async fn test_stats_endpoint() {
+    let (app, _temp) = create_test_app();
+
+    let (status, json) = send_json_request(&app, "GET", "/api/v1/stats", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert!(json["data"]["knowledge_graphs"].is_number());
+    assert!(json["data"]["relations"].is_number());
+    assert!(json["data"]["views"].is_number());
+    assert!(json["data"]["query_count"].is_number());
+    assert!(json["data"]["uptime_secs"].is_number());
+}
+
+// Knowledge Graph Endpoints
+#[tokio::test]
+async fn test_list_knowledge_graphs() {
+    let (app, _temp) = create_test_app();
+
+    let (status, json) = send_json_request(&app, "GET", "/api/v1/knowledge-graphs", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    // Should have at least 'default' KG
+    assert!(json["data"]["knowledge_graphs"].is_array());
+}
+
+#[tokio::test]
+async fn test_create_and_get_knowledge_graph() {
+    let (app, _temp) = create_test_app();
+
+    // Create a new KG
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "test_kg"})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+
+    // Get the created KG
+    let (status, json) =
+        send_json_request(&app, "GET", "/api/v1/knowledge-graphs/test_kg", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert_eq!(json["data"]["name"], "test_kg");
+}
+
+#[tokio::test]
