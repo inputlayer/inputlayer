@@ -79,7 +79,6 @@ impl Handler {
         self.storage.read()
     }
 
-
     /// Get mutable access to the storage engine (for REST API handlers).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
@@ -218,7 +217,6 @@ impl Handler {
                                     }
                                 }
                             }
-
                             statement::Statement::Insert(op) => {
                                 // Convert all terms to Values and create Tuples
                                 let mut tuples: Vec<Tuple> = Vec::new();
@@ -271,7 +269,6 @@ impl Handler {
                                     count, op.relation
                                 ));
                             }
-
                             statement::Statement::Fact(rule) => {
                                 // Session facts are NOT persisted - they are only available for
                                 // queries during this request. Use +relation(args). to persist.
@@ -306,7 +303,6 @@ impl Handler {
                                     rule.head.relation, rule.head.relation
                                 ));
                             }
-
                             statement::Statement::Delete(op) => {
                                 use statement::DeletePattern;
                                 match op.pattern {
@@ -355,7 +351,7 @@ impl Handler {
                                                         ))
                                                     }
                                                     Term::FloatConstant(f) => {
-                                                        Some(crate::value::Value::Float64(*f.clone()))
+                                                        Some(crate::value::Value::Float64(*f))
                                                     }
                                                     _ => None,
                                                 })
@@ -380,7 +376,6 @@ impl Handler {
                                     DeletePattern::Conditional { head_args, body } => {
                                         // Build query to find matching tuples
                                         // Collect variables from head_args
-                                        // FIXME: extract to named variable
                                         let mut all_vars: Vec<String> = Vec::new();
                                         for arg in &head_args {
                                             if let Term::Variable(v) = arg {
@@ -498,7 +493,7 @@ impl Handler {
                                     .map_err(|e| e.to_string())?;
                                 messages.push(format!("Rule '{}' registered.", rule.head.relation));
                             }
-                            statement::Statement::SessionRule(rule.clone()) => {
+                            statement::Statement::SessionRule(rule) => {
                                 // Validate session rule for safety constraints
                                 // (self-negation, head variable safety, range restriction)
                                 validate_rule(&rule, &rule.head.relation)?;
@@ -523,7 +518,6 @@ impl Handler {
                             }
                             statement::Statement::Update(op) => {
                                 // Build query to find matching tuples
-                                // FIXME: extract to named variable
                                 let mut all_vars: Vec<String> = Vec::new();
                                 for target in &op.deletes {
                                     for arg in &target.args {
@@ -624,12 +618,10 @@ impl Handler {
                                     }
                                 }
 
-
                                 messages.push(format!(
                                     "Update: {deleted} deleted, {inserted} inserted."
                                 ));
                             }
-
                             statement::Statement::TypeDecl(decl) => {
                                 messages.push(format!("Type '{}' declared.", decl.name));
                             }
@@ -637,7 +629,6 @@ impl Handler {
                                 messages
                                     .push("Meta commands not supported in query API.".to_string());
                             }
-
                         }
                     } else {
                         query_to_execute = Some(stmt_text.to_string());
@@ -704,7 +695,6 @@ impl Handler {
                         t
                     }
                     _ => {
-                        // FIXME: extract to named variable
                         let t = format!("_t{i}");
                         head_vars.push(t.clone());
                         t
@@ -749,7 +739,7 @@ impl Handler {
         let debug_session = std::env::var("IL_DEBUG_SESSION").is_ok();
         if debug_session && !session_fact_tuples.is_empty() {
             eprintln!(
-                "DEBUG: Executing with {} session facts (isolated.clone())",
+                "DEBUG: Executing with {} session facts (isolated)",
                 session_fact_tuples.len()
             );
             for (relation, tuple) in &session_fact_tuples {
@@ -781,7 +771,7 @@ impl Handler {
                     .map(|v| match v {
                         Value::Int32(n) => WireValue::Int32(*n),
                         Value::Int64(n) => WireValue::Int64(*n),
-                        Value::Float64(f.clone()) => WireValue::Float64(*f),
+                        Value::Float64(f) => WireValue::Float64(*f),
                         Value::String(s) => WireValue::String(s.to_string()),
                         Value::Vector(vec) => WireValue::Vector(vec.as_ref().clone()),
                         Value::VectorInt8(vec) => WireValue::VectorInt8(vec.as_ref().clone()),
@@ -874,4 +864,57 @@ impl Handler {
 }
 
 // Helper Functions
-/// Format a rule as Datalog text (uses Rule's Display impl.clone())
+/// Format a rule as Datalog text (uses Rule's Display impl)
+fn format_rule_text(rule: &crate::ast::Rule) -> String {
+    rule.to_string()
+}
+
+/// Format a body predicate as Datalog text (uses BodyPredicate's Display impl)
+fn format_body_pred(pred: &crate::ast::BodyPredicate) -> String {
+    pred.to_string()
+}
+
+/// Format a term as Datalog text (uses Term's Display impl)
+fn format_term(term: &Term) -> String {
+    term.to_string()
+}
+
+/// Extract variables from a body predicate and add to `head_vars`
+/// Used for Cartesian product queries like ?- foo(X), bar(Y).
+fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<String>) {
+    match pred {
+        crate::ast::BodyPredicate::Positive(atom) | crate::ast::BodyPredicate::Negated(atom) => {
+            for term in &atom.args {
+                if let Term::Variable(v) = term {
+                    if !head_vars.contains(v) {
+                        head_vars.push(v.clone());
+                    }
+                }
+            }
+        }
+        crate::ast::BodyPredicate::Comparison(left, _, right) => {
+            if let Term::Variable(v) = left {
+                if !head_vars.contains(v) {
+                    head_vars.push(v.clone());
+                }
+            }
+            if let Term::Variable(v) = right {
+                if !head_vars.contains(v) {
+                    head_vars.push(v.clone());
+                }
+            }
+        }
+        crate::ast::BodyPredicate::HnswNearest {
+            id_var,
+            distance_var,
+            ..
+        } => {
+            if !head_vars.contains(id_var) {
+                head_vars.push(id_var.clone());
+            }
+            if !head_vars.contains(distance_var) {
+                head_vars.push(distance_var.clone());
+            }
+        }
+    }
+}
