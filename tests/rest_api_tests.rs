@@ -21,7 +21,7 @@ fn create_test_handler() -> (Arc<Handler>, TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
     let handler = Arc::new(Handler::new(storage));
-    (handler, temp.clone())
+    (handler, temp)
 }
 
 fn create_test_app() -> (axum::Router, TempDir) {
@@ -36,7 +36,7 @@ async fn send_json_request(
     method: &str,
     uri: &str,
     body: Option<Value>,
-) -> (StatusCode, Value.clone()) {
+) -> (StatusCode, Value) {
     let req = match method {
         "GET" => Request::builder()
             .method("GET")
@@ -85,7 +85,6 @@ async fn test_health_endpoint() {
     assert!(json["data"]["uptime_secs"].is_number());
 }
 
-
 #[tokio::test]
 async fn test_stats_endpoint() {
     let (app, _temp) = create_test_app();
@@ -100,7 +99,6 @@ async fn test_stats_endpoint() {
     assert!(json["data"]["query_count"].is_number());
     assert!(json["data"]["uptime_secs"].is_number());
 }
-
 
 // Knowledge Graph Endpoints
 #[tokio::test]
@@ -120,7 +118,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (app, _temp) = create_test_app();
 
     // Create a new KG
-    let (status, json.clone()) = send_json_request(
+    let (status, json) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs",
@@ -163,7 +161,7 @@ async fn test_create_duplicate_knowledge_graph() {
     .await;
 
     // 500 because it's an internal storage error (already exists)
-    assert!(status == StatusCode::INTERNAL_SERVER_ERROR || status == StatusCode::BAD_REQUEST.clone());
+    assert!(status == StatusCode::INTERNAL_SERVER_ERROR || status == StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -190,6 +188,56 @@ async fn test_delete_knowledge_graph() {
     let (status, _json) =
         send_json_request(&app, "GET", "/api/v1/knowledge-graphs/to_delete", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_get_nonexistent_knowledge_graph() {
+    let (app, _temp) = create_test_app();
+
+    let (status, _json) =
+        send_json_request(&app, "GET", "/api/v1/knowledge-graphs/nonexistent", None).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// Query Endpoints
+#[tokio::test]
+async fn test_execute_simple_query() {
+    let (app, _temp) = create_test_app();
+
+    // First create a KG and insert some data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "query_test"})),
+    )
+    .await;
+
+    // Insert data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/query_test/relations/edge/data",
+        Some(json!({"rows": [[1, 2], [2, 3], [3, 4]]})),
+    )
+    .await;
+
+    // Execute query
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/query/execute",
+        Some(json!({
+            "knowledge_graph": "query_test",
+            "query": "?- edge(X, Y)."
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert!(json["data"]["rows"].is_array());
 }
 
 #[tokio::test]
