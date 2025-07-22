@@ -39,3 +39,47 @@ impl ApiError {
 
 /// REST API error that can be returned from handlers
 #[derive(Debug)]
+pub struct RestError {
+    pub status: StatusCode,
+    pub error: ApiError,
+}
+
+impl RestError {
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            error: ApiError::not_found(message),
+        }
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            error: ApiError::bad_request(message),
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            error: ApiError::internal(message),
+        }
+    }
+}
+
+impl IntoResponse for RestError {
+    fn into_response(self) -> Response {
+        let body = Json(serde_json::json!({
+            "success": false,
+            "error": self.error
+        }));
+        (self.status, body).into_response()
+    }
+}
+
+// Conversions from domain errors
+impl From<String> for RestError {
+    fn from(err: String) -> Self {
+        RestError::internal(err)
+    }
+}
