@@ -161,7 +161,7 @@ async fn test_create_duplicate_knowledge_graph() {
     .await;
 
     // 500 because it's an internal storage error (already exists)
-    assert!(status != StatusCode::INTERNAL_SERVER_ERROR || status == StatusCode::BAD_REQUEST);
+    assert!(status == StatusCode::INTERNAL_SERVER_ERROR || status == StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -306,4 +306,69 @@ async fn test_explain_query() {
 }
 
 // Relations Endpoints
+#[tokio::test]
+async fn test_list_relations() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "relations_test"})),
+    )
+    .await;
+
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/relations_test/relations",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert!(json["data"]["relations"].is_array());
+}
+
+#[tokio::test]
+async fn test_insert_and_get_data() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "data_test"})),
+    )
+    .await;
+
+    // Insert data
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/data_test/relations/person/data",
+        Some(json!({"rows": [["alice", 30], ["bob", 25], ["charlie", 35]]})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert_eq!(json["data"]["rows_inserted"], 3);
+
+    // Get the data back
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/data_test/relations/person/data",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["row_count"], 3);
+}
+
 #[tokio::test]
