@@ -54,7 +54,6 @@ pub struct KnowledgeGraphDto {
     pub views_count: usize,
 }
 
-
 /// List of knowledge graphs
 #[derive(Debug, Serialize, ToSchema)]
 pub struct KnowledgeGraphListDto {
@@ -87,3 +86,110 @@ pub struct QueryRequest {
     pub timeout_ms: u64,
 }
 
+fn default_timeout() -> u64 {
+    30000
+}
+
+/// Query execution response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct QueryResponse {
+    pub query: String,
+    pub status: QueryStatus,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub row_count: usize,
+    pub execution_time_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Query execution status
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QueryStatus {
+    Success,
+    Error,
+}
+
+/// Query explanation request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ExplainRequest {
+    pub query: String,
+    pub knowledge_graph: String,
+}
+
+/// Query explanation response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ExplainResponse {
+    pub query: String,
+    pub plan: String,
+    pub optimizations: Vec<String>,
+}
+
+// Relation DTOs
+/// Relation information
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RelationDto {
+    pub name: String,
+    pub arity: usize,
+    pub tuple_count: usize,
+    pub columns: Vec<String>,
+    pub is_view: bool,
+}
+
+/// Relation list response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RelationListDto {
+    pub relations: Vec<RelationDto>,
+}
+
+/// Relation data response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RelationDataDto {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<serde_json::Value>>,
+    pub row_count: usize,
+    pub total_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+/// Query parameters for relation data
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RelationDataQuery {
+    #[serde(default)]
+    pub offset: Option<usize>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+// View DTOs
+/// View information
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ViewDto {
+    pub name: String,
+    pub definition: String,
+    pub arity: usize,
+    pub columns: Vec<String>,
+    pub dependencies: Vec<String>,
+}
+
+/// View list response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ViewListDto {
+    pub views: Vec<ViewDto>,
+}
+
+/// Create view request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateViewRequest {
+    pub name: String,
+    pub definition: String,
+}
+
+// Admin DTOs
+/// Health check response
+#[derive(Debug, Serialize, ToSchema)]
