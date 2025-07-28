@@ -372,3 +372,76 @@ async fn test_insert_and_get_data() {
 }
 
 #[tokio::test]
+async fn test_delete_data() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "delete_data_test"})),
+    )
+    .await;
+
+    // Insert data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/delete_data_test/relations/numbers/data",
+        Some(json!({"rows": [[1], [2], [3]]})),
+    )
+    .await;
+
+    // Delete specific rows
+    let (status, json) = send_json_request(
+        &app,
+        "DELETE",
+        "/api/v1/knowledge-graphs/delete_data_test/relations/numbers/data",
+        Some(json!({"rows": [[1], [2]]})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["data"]["rows_deleted"].as_i64().unwrap() >= 0);
+}
+
+#[tokio::test]
+async fn test_insert_duplicate_data() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "dup_data_test"})),
+    )
+    .await;
+
+    // Insert data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/dup_data_test/relations/items/data",
+        Some(json!({"rows": [[1], [2]]})),
+    )
+    .await;
+
+    // Insert again with duplicates
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/dup_data_test/relations/items/data",
+        Some(json!({"rows": [[1], [2], [3]]})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    // Should report 1 inserted (only 3 is new) and 2 duplicates
+    assert_eq!(json["data"]["rows_inserted"], 1);
+    assert_eq!(json["data"]["duplicates"], 2);
+}
+
+// Rules Endpoints
+#[tokio::test]
