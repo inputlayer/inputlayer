@@ -193,3 +193,19 @@ pub struct CreateViewRequest {
 // Admin DTOs
 /// Health check response
 #[derive(Debug, Serialize, ToSchema)]
+pub struct HealthDto {
+    pub status: String,
+    pub version: String,
+    pub uptime_secs: u64,
+}
+
+/// Server statistics response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StatsDto {
+    pub knowledge_graphs: usize,
+    pub relations: usize,
+    pub views: usize,
+    pub memory_usage_bytes: u64,
+    pub query_count: u64,
+    pub uptime_secs: u64,
+}
