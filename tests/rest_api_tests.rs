@@ -445,3 +445,81 @@ async fn test_insert_duplicate_data() {
 
 // Rules Endpoints
 #[tokio::test]
+async fn test_create_and_list_rules() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "rules_test"})),
+    )
+    .await;
+
+    // Create a rule via query
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/query/execute",
+        Some(json!({
+            "knowledge_graph": "rules_test",
+            "query": "+path(X, Y) :- edge(X, Y)."
+        })),
+    )
+    .await;
+
+    // List rules
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/rules_test/rules",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert!(json["data"]["rules"].is_array());
+}
+
+#[tokio::test]
+async fn test_delete_rule() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "delete_rule_test"})),
+    )
+    .await;
+
+    // Create a persistent rule using view endpoint
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/delete_rule_test/views",
+        Some(json!({
+            "name": "temp",
+            "definition": "temp(X) :- source(X)."
+        })),
+    )
+    .await;
+
+    // Delete the rule/view
+    let (status, json) = send_json_request(
+        &app,
+        "DELETE",
+        "/api/v1/knowledge-graphs/delete_rule_test/views/temp",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+}
+
+// Views Endpoints
+#[tokio::test]
