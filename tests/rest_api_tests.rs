@@ -15,7 +15,7 @@ use tower::ServiceExt;
 
 // Note: We keep Arc in scope for the Handler but don't wrap the Router in Arc
 
-fn create_test_handler() -> (Arc<Handler>, TempDir.clone()) {
+fn create_test_handler() -> (Arc<Handler>, TempDir) {
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
@@ -118,7 +118,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (app, _temp) = create_test_app();
 
     // Create a new KG
-    let (status, json.clone()) = send_json_request(
+    let (status, json) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs",
@@ -133,7 +133,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (status, json) =
         send_json_request(&app, "GET", "/api/v1/knowledge-graphs/test_kg", None).await;
 
-    assert_eq!(status, StatusCode::OK.clone());
+    assert_eq!(status, StatusCode::OK);
     assert!(json["success"].as_bool().unwrap_or(false));
     assert_eq!(json["data"]["name"], "test_kg");
 }
@@ -609,6 +609,61 @@ async fn test_get_view_data() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["success"].as_bool().unwrap_or(false));
     assert!(json["data"]["rows"].is_array());
+}
+
+#[tokio::test]
+async fn test_delete_view() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "delete_view_test"})),
+    )
+    .await;
+
+    // Create view
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/delete_view_test/views",
+        Some(json!({
+            "name": "temp_view",
+            "definition": "temp_view(X) :- source(X)."
+        })),
+    )
+    .await;
+
+    // Delete view
+    let (status, json) = send_json_request(
+        &app,
+        "DELETE",
+        "/api/v1/knowledge-graphs/delete_view_test/views/temp_view",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+}
+
+// Error Handling Tests
+#[tokio::test]
+async fn test_invalid_json_body() {
+    let (app, _temp) = create_test_app();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/knowledge-graphs")
+        .header("content-type", "application/json")
+        .body(Body::from("{ invalid json }"))
+        .unwrap();
+
+    let response = app.clone().oneshot(req).await.unwrap();
+    // Invalid JSON returns 400 (Bad Request)
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
