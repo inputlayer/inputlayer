@@ -91,3 +91,37 @@ pub async fn execute_query(
         (status = 500, description = "Internal server error"),
     )
 )]
+pub async fn explain_query(
+    Extension(handler): Extension<Arc<Handler>>,
+    Json(request): Json<ExplainRequest>,
+) -> Result<Json<ApiResponse<ExplainResponse>>, RestError> {
+    // Transform ?- query syntax into a rule (same as execute endpoint)
+    let query = if request.query.trim().starts_with("?-") {
+        let q = request.query.trim().trim_start_matches("?-").trim();
+        // Strip trailing period if present
+        let q = q.strip_suffix('.').unwrap_or(q).trim();
+        format!("__explain__(X, Y) :- {q}.")
+    } else {
+        request.query.clone()
+    };
+
+    match handler.explain_query(Some(request.knowledge_graph.clone()), query) {
+        Ok((plan, optimizations)) => {
+            let response = ExplainResponse {
+                query: request.query,
+                plan,
+                optimizations,
+            };
+            Ok(Json(ApiResponse::success(response)))
+        }
+        Err(e) => {
+            // Return error as part of the plan, not as HTTP error
+            let response = ExplainResponse {
+                query: request.query,
+                plan: format!("Error generating query plan: {e}"),
+                optimizations: vec![],
+            };
+            Ok(Json(ApiResponse::success(response)))
+        }
+    }
+}
