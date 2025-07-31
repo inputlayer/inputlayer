@@ -84,3 +84,92 @@ pub async fn list_knowledge_graphs(
         (status = 500, description = "Internal server error"),
     )
 )]
+pub async fn get_knowledge_graph(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<KnowledgeGraphDto>>, RestError> {
+    let storage = handler.get_storage();
+
+    // Check if knowledge graph exists
+    storage
+        .ensure_knowledge_graph(&name)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{name}' not found: {e}")))?;
+
+    // Get relations count
+    let relations_count = storage
+        .list_relations_in(&name)
+        .map(|r| r.len())
+        .unwrap_or(0);
+
+    let kg = KnowledgeGraphDto {
+        name,
+        description: None,
+        relations_count,
+        views_count: 0,
+    };
+
+    Ok(Json(ApiResponse::success(kg)))
+}
+
+/// Create a new knowledge graph
+#[utoipa::path(
+    post,
+    path = "/knowledge-graphs",
+    tag = "knowledge-graphs",
+    request_body = CreateKnowledgeGraphRequest,
+    responses(
+        (status = 200, description = "Knowledge graph created", body = ApiResponse<KnowledgeGraphDto>),
+        (status = 400, description = "Invalid request"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn create_knowledge_graph(
+    Extension(handler): Extension<Arc<Handler>>,
+    Json(request): Json<CreateKnowledgeGraphRequest>,
+) -> Result<Json<ApiResponse<KnowledgeGraphDto>>, RestError> {
+    let storage = handler.get_storage();
+
+    storage
+        .create_knowledge_graph(&request.name)
+        .map_err(|e| RestError::internal(format!("{e}")))?;
+
+    let kg = KnowledgeGraphDto {
+        name: request.name,
+        description: request.description,
+        relations_count: 0,
+        views_count: 0,
+    };
+
+    Ok(Json(ApiResponse::success(kg)))
+}
+
+/// Delete a knowledge graph
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{name}",
+    tag = "knowledge-graphs",
+    params(
+        ("name" = String, Path, description = "Knowledge graph name")
+    ),
+    responses(
+        (status = 200, description = "Knowledge graph deleted", body = ApiResponse<()>),
+        (status = 404, description = "Knowledge graph not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn delete_knowledge_graph(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path(name): Path<String>,
+) -> Result<Json<ApiResponse<()>>, RestError> {
+    let mut storage = handler.get_storage_mut();
+
+    storage
+        .drop_knowledge_graph(&name)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{name}' not found: {e}")))?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        data: None,
+        error: None,
+    }))
+}
