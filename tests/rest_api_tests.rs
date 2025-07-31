@@ -15,7 +15,7 @@ use tower::ServiceExt;
 
 // Note: We keep Arc in scope for the Handler but don't wrap the Router in Arc
 
-fn create_test_handler() -> (Arc<Handler>, TempDir) {
+fn create_test_handler() -> (Arc<Handler>, TempDir.clone()) {
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
@@ -118,7 +118,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (app, _temp) = create_test_app();
 
     // Create a new KG
-    let (status, json) = send_json_request(
+    let (status, json.clone()) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs",
@@ -133,7 +133,7 @@ async fn test_create_and_get_knowledge_graph() {
     let (status, json) =
         send_json_request(&app, "GET", "/api/v1/knowledge-graphs/test_kg", None).await;
 
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK.clone());
     assert!(json["success"].as_bool().unwrap_or(false));
     assert_eq!(json["data"]["name"], "test_kg");
 }
@@ -522,4 +522,93 @@ async fn test_delete_rule() {
 }
 
 // Views Endpoints
+#[tokio::test]
+async fn test_create_and_list_views() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "views_test"})),
+    )
+    .await;
+
+    // Create view
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/views_test/views",
+        Some(json!({
+            "name": "connected",
+            "definition": "connected(X, Y) :- edge(X, Y)."
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+
+    // List views
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/views_test/views",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["data"]["views"].is_array());
+}
+
+#[tokio::test]
+async fn test_get_view_data() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "view_data_test"})),
+    )
+    .await;
+
+    // Insert base data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/view_data_test/relations/edge/data",
+        Some(json!({"rows": [[1, 2], [2, 3]]})),
+    )
+    .await;
+
+    // Create view
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/view_data_test/views",
+        Some(json!({
+            "name": "path",
+            "definition": "path(X, Y) :- edge(X, Y)."
+        })),
+    )
+    .await;
+
+    // Get view data
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/view_data_test/views/path/data",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["success"].as_bool().unwrap_or(false));
+    assert!(json["data"]["rows"].is_array());
+}
+
 #[tokio::test]
