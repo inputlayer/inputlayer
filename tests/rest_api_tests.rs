@@ -667,3 +667,68 @@ async fn test_invalid_json_body() {
 }
 
 #[tokio::test]
+async fn test_missing_required_field() {
+    let (app, _temp) = create_test_app();
+
+    // Try to create KG without name
+    let (status, _json) =
+        send_json_request(&app, "POST", "/api/v1/knowledge-graphs", Some(json!({}))).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_operations_on_nonexistent_kg() {
+    let (app, _temp) = create_test_app();
+
+    // Try to get relations from nonexistent KG
+    let (status, _json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/nonexistent/relations",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// Concurrent Operations Tests
+#[tokio::test]
+async fn test_concurrent_inserts() {
+    let (handler, _temp) = create_test_handler();
+    let http_config = HttpConfig::default();
+    let app = create_router(handler, &http_config);
+
+    // Create KG first
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/knowledge-graphs")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name": "concurrent_test"}"#))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    // Spawn multiple concurrent insert requests
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            let app = app.clone();
+            tokio::spawn(async move {
+                let req = Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/knowledge-graphs/concurrent_test/relations/items/data")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"rows": [[{}]]}}"#, i)))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            })
+        })
+        .collect();
+
+    // All should succeed
+    for handle in handles {
+        assert_eq!(handle.await.unwrap(), StatusCode::OK);
+    }
+}
+
+#[tokio::test]
