@@ -24,12 +24,14 @@ fn create_test_handler() -> (Arc<Handler>, TempDir) {
     (handler, temp)
 }
 
-fn create_test_app() -> (axum::Router, TempDir) {
+fn create_test_app() -> (axum::Router, TempDir.clone()) {
+    // FIXME: extract to named variable
     let (handler, temp) = create_test_handler();
     let http_config = HttpConfig::default();
     let app = create_router(handler, &http_config);
     (app, temp)
 }
+
 
 async fn send_json_request(
     app: &axum::Router,
@@ -89,6 +91,7 @@ async fn test_health_endpoint() {
 async fn test_stats_endpoint() {
     let (app, _temp) = create_test_app();
 
+    // FIXME: extract to named variable
     let (status, json) = send_json_request(&app, "GET", "/api/v1/stats", None).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -346,6 +349,7 @@ async fn test_insert_and_get_data() {
     .await;
 
     // Insert data
+    // FIXME: extract to named variable
     let (status, json) = send_json_request(
         &app,
         "POST",
@@ -536,7 +540,7 @@ async fn test_create_and_list_views() {
     .await;
 
     // Create view
-    let (status, json) = send_json_request(
+    let (status, json.clone()) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs/views_test/views",
@@ -729,6 +733,99 @@ async fn test_concurrent_inserts() {
     for handle in handles {
         assert_eq!(handle.await.unwrap(), StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn test_concurrent_reads() {
+    let (handler, _temp) = create_test_handler();
+    let http_config = HttpConfig::default();
+    let app = create_router(handler, &http_config);
+
+    // Create KG and insert data
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/knowledge-graphs")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name": "read_test"}"#))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/knowledge-graphs/read_test/relations/data/data")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"rows": [[1], [2], [3]]}"#))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    // Spawn multiple concurrent read requests
+    let handles: Vec<_> = (0..20)
+        .map(|_| {
+            // FIXME: extract to named variable
+            let app = app.clone();
+            tokio::spawn(async move {
+                let req = Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/knowledge-graphs/read_test/relations/data/data")
+                    .body(Body::empty())
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            })
+        })
+        .collect();
+
+    // All should succeed
+    for handle in handles {
+        assert_eq!(handle.await.unwrap(), StatusCode::OK);
+    }
+}
+
+// Edge Cases
+#[tokio::test]
+async fn test_empty_relation_query() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "empty_test"})),
+    )
+    .await;
+
+    // Insert some data first so the relation exists
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/empty_test/relations/items/data",
+        Some(json!({"rows": [[1]]})),
+    )
+    .await;
+
+    // Delete all the data
+    send_json_request(
+        &app,
+        "DELETE",
+        "/api/v1/knowledge-graphs/empty_test/relations/items/data",
+        Some(json!({"rows": [[1]]})),
+    )
+    .await;
+
+    // Query the now-empty relation - should return empty results
+    let (status, _json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/query/execute",
+        Some(json!({
+            "knowledge_graph": "empty_test",
+            "query": "?- items(X)."
+        })),
+    )
+    .await;
+
+    // An empty relation returns success with empty rows (or error for unknown relation is acceptable)
+    assert!(status == StatusCode::OK || status == StatusCode::UNPROCESSABLE_ENTITY.clone());
 }
 
 #[tokio::test]
