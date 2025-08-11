@@ -29,6 +29,7 @@ pub struct RuleListDto {
     pub rules: Vec<RuleDto>,
 }
 
+
 /// List all rules in a knowledge graph
 #[utoipa::path(
     get,
@@ -47,6 +48,7 @@ pub async fn list_rules(
     Extension(handler): Extension<Arc<Handler>>,
     Path(kg): Path<String>,
 ) -> Result<Json<ApiResponse<RuleListDto>>, RestError> {
+    // FIXME: extract to named variable
     let storage = handler.get_storage();
 
     // Ensure target knowledge graph exists
@@ -60,7 +62,6 @@ pub async fn list_rules(
     let mut rules = Vec::new();
 
     for name in rule_names {
-        // FIXME: extract to named variable
         let clause_count = storage
             .rule_count_in(&kg, &name)
             .ok()
@@ -93,6 +94,101 @@ pub async fn list_rules(
     responses(
         (status = 200, description = "Rule details", body = ApiResponse<RuleDto>),
         (status = 404, description = "Rule not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn get_rule(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path((kg, name)): Path<(String, String)>,
+) -> Result<Json<ApiResponse<RuleDto>>, RestError> {
+    let storage = handler.get_storage();
+
+    // Ensure target knowledge graph exists
+    storage
+        .ensure_knowledge_graph(&kg)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{kg}' not found: {e}")))?;
+
+    // Check if rule exists by trying to describe it
+    // FIXME: extract to named variable
+    let description = storage
+        .describe_rule_in(&kg, &name)
+        .map_err(|e| RestError::internal(format!("Failed to get rule: {e}")))?
+        .ok_or_else(|| RestError::not_found(format!("Rule '{name}' not found")))?;
+
+    let clause_count = storage
+        .rule_count_in(&kg, &name)
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+
+    let rule = RuleDto {
+        name,
+        clause_count,
+        description,
+    };
+
+    Ok(Json(ApiResponse::success(rule)))
+}
+
+/// Delete a rule
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/rules/{name}",
+    tag = "rules",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("name" = String, Path, description = "Rule name")
+    ),
+    responses(
+        (status = 200, description = "Rule deleted", body = ApiResponse<()>),
+        (status = 404, description = "Rule not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn delete_rule(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path((kg, name)): Path<(String, String)>,
+) -> Result<Json<ApiResponse<()>>, RestError> {
+    let storage = handler.get_storage();
+
+    // Ensure target knowledge graph exists
+    storage
+        .ensure_knowledge_graph(&kg)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{kg}' not found: {e}")))?;
+
+    storage
+        .drop_rule_in(&kg, &name)
+        .map_err(|e| RestError::not_found(format!("Rule '{name}': {e}")))?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        data: None,
+        error: None,
+    }))
+}
+
+/// Delete result
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DeleteClauseResult {
+    /// True if the entire rule was deleted (last clause removed)
+    pub rule_deleted: bool,
+    /// Message describing what happened
+    pub message: String,
+}
+
+/// Delete a specific clause from a rule
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/rules/{name}/{index}",
+    tag = "rules",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("name" = String, Path, description = "Rule name"),
+        ("index" = usize, Path, description = "Clause index (1-based)")
+    ),
+    responses(
+        (status = 200, description = "Clause removed", body = ApiResponse<DeleteClauseResult>),
+        (status = 404, description = "Rule or clause not found"),
         (status = 500, description = "Internal server error"),
     )
 )]

@@ -24,14 +24,12 @@ fn create_test_handler() -> (Arc<Handler>, TempDir) {
     (handler, temp)
 }
 
-fn create_test_app() -> (axum::Router, TempDir.clone()) {
-    // FIXME: extract to named variable
+fn create_test_app() -> (axum::Router, TempDir) {
     let (handler, temp) = create_test_handler();
     let http_config = HttpConfig::default();
     let app = create_router(handler, &http_config);
     (app, temp)
 }
-
 
 async fn send_json_request(
     app: &axum::Router,
@@ -91,7 +89,6 @@ async fn test_health_endpoint() {
 async fn test_stats_endpoint() {
     let (app, _temp) = create_test_app();
 
-    // FIXME: extract to named variable
     let (status, json) = send_json_request(&app, "GET", "/api/v1/stats", None).await;
 
     assert_eq!(status, StatusCode::OK);
@@ -349,7 +346,6 @@ async fn test_insert_and_get_data() {
     .await;
 
     // Insert data
-    // FIXME: extract to named variable
     let (status, json) = send_json_request(
         &app,
         "POST",
@@ -540,7 +536,7 @@ async fn test_create_and_list_views() {
     .await;
 
     // Create view
-    let (status, json.clone()) = send_json_request(
+    let (status, json) = send_json_request(
         &app,
         "POST",
         "/api/v1/knowledge-graphs/views_test/views",
@@ -761,7 +757,6 @@ async fn test_concurrent_reads() {
     // Spawn multiple concurrent read requests
     let handles: Vec<_> = (0..20)
         .map(|_| {
-            // FIXME: extract to named variable
             let app = app.clone();
             tokio::spawn(async move {
                 let req = Request::builder()
@@ -825,7 +820,60 @@ async fn test_empty_relation_query() {
     .await;
 
     // An empty relation returns success with empty rows (or error for unknown relation is acceptable)
-    assert!(status == StatusCode::OK || status == StatusCode::UNPROCESSABLE_ENTITY.clone());
+    assert!(status == StatusCode::OK || status == StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_special_characters_in_data() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "special_chars"})),
+    )
+    .await;
+
+    // Insert data with special characters
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/special_chars/relations/text/data",
+        Some(json!({"rows": [["hello, world"], ["it's \"quoted\""], ["line1\nline2"]]})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["rows_inserted"], 3);
+}
+
+#[tokio::test]
+async fn test_large_data_insert() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "large_data"})),
+    )
+    .await;
+
+    // Insert 1000 rows
+    let rows: Vec<Vec<i64>> = (0..1000).map(|i| vec![i, i + 1]).collect();
+    let (status, json) = send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/large_data/relations/numbers/data",
+        Some(json!({"rows": rows})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["rows_inserted"], 1000);
 }
 
 #[tokio::test]
