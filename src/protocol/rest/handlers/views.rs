@@ -211,3 +211,73 @@ pub async fn get_view_data(
         (status = 500, description = "Internal server error"),
     )
 )]
+pub async fn create_view(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path(kg): Path<String>,
+    Json(request): Json<CreateViewRequest>,
+) -> Result<Json<ApiResponse<ViewDto>>, RestError> {
+    // Register the view by executing the rule as a query
+    let rule_text = format!("+{}", request.definition);
+    handler
+        .query_program(Some(kg.clone()), rule_text)
+        .await
+        .map_err(|e| RestError::bad_request(format!("{e:?}")))?;
+
+    // Get the arity of the newly created view
+    let arity = {
+        let storage = handler.get_storage();
+        storage
+            .rule_arity_in(&kg, &request.name)
+            .ok()
+            .flatten()
+            .unwrap_or(0)
+    };
+
+    // Return the created view
+    let view = ViewDto {
+        name: request.name,
+        definition: request.definition,
+        arity,
+        columns: vec![],
+        dependencies: vec![],
+    };
+
+    Ok(Json(ApiResponse::success(view)))
+}
+
+/// Delete a view
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/views/{name}",
+    tag = "views",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("name" = String, Path, description = "View name")
+    ),
+    responses(
+        (status = 200, description = "View deleted", body = ApiResponse<()>),
+        (status = 404, description = "View not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn delete_view(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path((kg, name)): Path<(String, String)>,
+) -> Result<Json<ApiResponse<()>>, RestError> {
+    let storage = handler.get_storage();
+
+    // Ensure target knowledge graph exists
+    storage
+        .ensure_knowledge_graph(&kg)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{kg}' not found: {e}")))?;
+
+    storage
+        .drop_rule_in(&kg, &name)
+        .map_err(|e| RestError::not_found(format!("View '{name}' not found: {e}")))?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        data: None,
+        error: None,
+    }))
+}
