@@ -877,3 +877,84 @@ async fn test_large_data_insert() {
 }
 
 #[tokio::test]
+async fn test_pagination() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG and insert data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "pagination_test"})),
+    )
+    .await;
+
+    let rows: Vec<Vec<i64>> = (0..100).map(|i| vec![i]).collect();
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/pagination_test/relations/items/data",
+        Some(json!({"rows": rows})),
+    )
+    .await;
+
+    // Get paginated data
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/pagination_test/relations/items/data?offset=10&limit=20",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["row_count"], 20);
+    assert_eq!(json["data"]["total_count"], 100);
+}
+
+#[tokio::test]
+async fn test_view_with_different_arities() {
+    let (app, _temp) = create_test_app();
+
+    // Create KG
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs",
+        Some(json!({"name": "arity_test"})),
+    )
+    .await;
+
+    // Insert 3-arity data
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/arity_test/relations/triple/data",
+        Some(json!({"rows": [[1, 2, 3], [4, 5, 6]]})),
+    )
+    .await;
+
+    // Create a 3-arity view
+    send_json_request(
+        &app,
+        "POST",
+        "/api/v1/knowledge-graphs/arity_test/views",
+        Some(json!({
+            "name": "triple_view",
+            "definition": "triple_view(A, B, C) :- triple(A, B, C)."
+        })),
+    )
+    .await;
+
+    // Get view data - should work with 3-arity view
+    let (status, json) = send_json_request(
+        &app,
+        "GET",
+        "/api/v1/knowledge-graphs/arity_test/views/triple_view/data",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["rows"].as_array().unwrap().len(), 2);
+}
