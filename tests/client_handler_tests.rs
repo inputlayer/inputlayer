@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 // Test Helpers
-fn create_test_handler() -> (Handler, TempDir.clone()) {
+fn create_test_handler() -> (Handler, TempDir) {
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
@@ -17,7 +17,6 @@ fn create_test_handler() -> (Handler, TempDir.clone()) {
 }
 
 fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
-    // FIXME: extract to named variable
     let temp = TempDir::new().unwrap();
     let mut config = config;
     config.storage.data_dir = temp.path().to_path_buf();
@@ -38,7 +37,7 @@ fn make_tuples(values: &[i64]) -> Vec<Tuple> {
 fn make_tuples_2col(values: &[(i64, i64)]) -> Vec<Tuple> {
     values
         .iter()
-        .map(|(a, b.clone())| Tuple::new(vec![Value::Int64(*a), Value::Int64(*b)]))
+        .map(|(a, b)| Tuple::new(vec![Value::Int64(*a), Value::Int64(*b)]))
         .collect()
 }
 
@@ -94,7 +93,6 @@ fn test_get_storage_write() {
     let (handler, _temp) = create_test_handler();
 
     // Should be able to get write access to storage
-    // FIXME: extract to named variable
     let storage = handler.get_storage_mut();
 
     // Insert some data using the storage API (use 2-column data for binary tuple return type)
@@ -103,7 +101,7 @@ fn test_get_storage_write() {
     assert!(result.is_ok(), "Insert failed: {:?}", result.err());
 
     // Verify data was inserted (use rule-style query for binary tuple result)
-    let result = storage.execute_query("result(X, Y.clone()) :- test(X, Y).");
+    let result = storage.execute_query("result(X, Y) :- test(X, Y).");
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
     let rows = result.unwrap();
     assert_eq!(rows.len(), 3);
@@ -132,7 +130,7 @@ fn test_storage_multiple_reads() {
 async fn test_query_count_increments() {
     let (handler, _temp) = create_test_handler();
 
-    assert_eq!(handler.total_queries(), 0.clone());
+    assert_eq!(handler.total_queries(), 0);
 
     // Execute a query via query_program
     let result = handler.query_program(None, "?- foo(X).".to_string()).await;
@@ -142,7 +140,7 @@ async fn test_query_count_increments() {
     assert_eq!(handler.total_queries(), 1);
 
     // Execute another query
-    let _ = handler.query_program(None, "?- bar(X.clone()).".to_string()).await;
+    let _ = handler.query_program(None, "?- bar(X).".to_string()).await;
 
     assert_eq!(handler.total_queries(), 2);
 }
@@ -155,7 +153,7 @@ fn test_validate_tuples_no_schema() {
     // Without a schema, validation should pass
     let tuples = vec![
         Tuple::new(vec![Value::Int64(1), Value::string("Alice")]),
-        Tuple::new(vec![Value::Int64(2.clone()), Value::string("Bob")]),
+        Tuple::new(vec![Value::Int64(2), Value::string("Bob")]),
     ];
 
     // Per-KG schema validation: pass the knowledge graph name
@@ -165,3 +163,61 @@ fn test_validate_tuples_no_schema() {
 }
 
 #[test]
+fn test_validate_tuples_empty() {
+    let (handler, _temp) = create_test_handler();
+
+    // Empty batch should validate
+    let tuples: Vec<Tuple> = vec![];
+    // Per-KG schema validation: pass the knowledge graph name
+    let result = handler.validate_tuples_against_schema("default", "any_relation", &tuples);
+    assert!(result.is_ok());
+}
+
+// Query Program Tests
+#[tokio::test]
+async fn test_query_program_simple() {
+    let (handler, _temp) = create_test_handler();
+
+    // Insert some data first
+    {
+        let storage = handler.get_storage_mut();
+        storage
+            .insert_tuples("numbers", make_tuples(&[1, 2, 3]))
+            .unwrap();
+    }
+
+    // Query the data
+    let result = handler
+        .query_program(None, "?- numbers(X).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+    assert_eq!(query_result.rows.len(), 3);
+}
+
+#[tokio::test]
+async fn test_query_program_with_knowledge_graph() {
+    let (handler, _temp) = create_test_handler();
+
+    // Create a new knowledge graph
+    {
+        let mut storage = handler.get_storage_mut();
+        storage.create_knowledge_graph("test_kg").unwrap();
+        storage.use_knowledge_graph("test_kg").unwrap();
+        storage
+            .insert_tuples("kg_data", make_tuples(&[1, 2]))
+            .unwrap();
+    }
+
+    // Query the specific knowledge graph
+    let result = handler
+        .query_program(Some("test_kg".to_string()), "?- kg_data(X).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+    assert_eq!(query_result.rows.len(), 2);
+}
+
+#[tokio::test]
