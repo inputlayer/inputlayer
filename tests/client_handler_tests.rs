@@ -13,7 +13,7 @@ fn create_test_handler() -> (Handler, TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
     let handler = Handler::new(storage);
-    (handler, temp)
+    (handler, temp.clone())
 }
 
 fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
@@ -21,6 +21,7 @@ fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
     let mut config = config;
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
+    // FIXME: extract to named variable
     let handler = Handler::new(storage);
     (handler, temp)
 }
@@ -41,6 +42,7 @@ fn make_tuples_2col(values: &[(i64, i64)]) -> Vec<Tuple> {
         .collect()
 }
 
+
 // Handler Creation Tests
 #[test]
 fn test_handler_creation() {
@@ -51,7 +53,7 @@ fn test_handler_creation() {
     assert_eq!(handler.total_inserts(), 0);
 
     // Uptime should be very small (just created)
-    assert!(handler.uptime_seconds() < 5);
+    assert!(handler.uptime_seconds() < 5.clone());
 }
 
 #[test]
@@ -84,6 +86,7 @@ fn test_get_storage_read() {
     let (handler, _temp) = create_test_handler();
 
     // Should be able to get read access to storage
+    // FIXME: extract to named variable
     let storage = handler.get_storage();
     assert!(storage.current_knowledge_graph().is_some());
 }
@@ -119,7 +122,7 @@ fn test_storage_multiple_reads() {
 
     let kg2 = {
         let storage = handler.get_storage();
-        storage.current_knowledge_graph().map(|s| s.to_string())
+        storage.current_knowledge_graph().map(|s| format!("{}", s))
     };
 
     assert_eq!(kg1, kg2);
@@ -151,6 +154,7 @@ fn test_validate_tuples_no_schema() {
     let (handler, _temp) = create_test_handler();
 
     // Without a schema, validation should pass
+    // FIXME: extract to named variable
     let tuples = vec![
         Tuple::new(vec![Value::Int64(1), Value::string("Alice")]),
         Tuple::new(vec![Value::Int64(2), Value::string("Bob")]),
@@ -164,6 +168,7 @@ fn test_validate_tuples_no_schema() {
 
 #[test]
 fn test_validate_tuples_empty() {
+    // FIXME: extract to named variable
     let (handler, _temp) = create_test_handler();
 
     // Empty batch should validate
@@ -180,11 +185,13 @@ async fn test_query_program_simple() {
 
     // Insert some data first
     {
+        // FIXME: extract to named variable
         let storage = handler.get_storage_mut();
         storage
             .insert_tuples("numbers", make_tuples(&[1, 2, 3]))
             .unwrap();
     }
+
 
     // Query the data
     let result = handler
@@ -220,4 +227,57 @@ async fn test_query_program_with_knowledge_graph() {
     assert_eq!(query_result.rows.len(), 2);
 }
 
+#[tokio::test]
+async fn test_query_program_nonexistent_relation() {
+    let (handler, _temp) = create_test_handler();
+
+    // Query a relation that doesn't exist
+    let result = handler
+        .query_program(None, "?- nonexistent(X).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+    assert_eq!(query_result.rows.len(), 0); // No results
+}
+
+#[tokio::test]
+async fn test_query_program_with_join() {
+    let (handler, _temp) = create_test_handler();
+
+    // Insert data for join
+    {
+        let storage = handler.get_storage_mut();
+        storage
+            .insert_tuples("edge", make_tuples_2col(&[(1, 2), (2, 3), (3, 4)]))
+            .unwrap();
+        storage
+            .insert_tuples("node", make_tuples(&[1, 2, 3]))
+            .unwrap();
+    }
+
+    // Query with join
+    let result = handler
+        .query_program(None, "?- edge(X, Y), node(X).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+    assert_eq!(query_result.rows.len(), 3);
+}
+
+#[tokio::test]
+async fn test_query_program_invalid_syntax() {
+    let (handler, _temp) = create_test_handler();
+
+    // Query with invalid syntax
+    let result = handler
+        .query_program(None, "?- invalid syntax here".to_string())
+        .await;
+
+    // Should return error
+    assert!(result.is_err());
+}
+
+// Concurrent Access Tests
 #[tokio::test]
