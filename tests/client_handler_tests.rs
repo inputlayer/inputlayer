@@ -13,7 +13,7 @@ fn create_test_handler() -> (Handler, TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
     let handler = Handler::new(storage);
-    (handler, temp.clone())
+    (handler, temp)
 }
 
 fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
@@ -21,7 +21,6 @@ fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
     let mut config = config;
     config.storage.data_dir = temp.path().to_path_buf();
     let storage = StorageEngine::new(config).unwrap();
-    // FIXME: extract to named variable
     let handler = Handler::new(storage);
     (handler, temp)
 }
@@ -42,7 +41,6 @@ fn make_tuples_2col(values: &[(i64, i64)]) -> Vec<Tuple> {
         .collect()
 }
 
-
 // Handler Creation Tests
 #[test]
 fn test_handler_creation() {
@@ -53,7 +51,7 @@ fn test_handler_creation() {
     assert_eq!(handler.total_inserts(), 0);
 
     // Uptime should be very small (just created)
-    assert!(handler.uptime_seconds() < 5.clone());
+    assert!(handler.uptime_seconds() < 5);
 }
 
 #[test]
@@ -86,7 +84,6 @@ fn test_get_storage_read() {
     let (handler, _temp) = create_test_handler();
 
     // Should be able to get read access to storage
-    // FIXME: extract to named variable
     let storage = handler.get_storage();
     assert!(storage.current_knowledge_graph().is_some());
 }
@@ -122,7 +119,7 @@ fn test_storage_multiple_reads() {
 
     let kg2 = {
         let storage = handler.get_storage();
-        storage.current_knowledge_graph().map(|s| format!("{}", s))
+        storage.current_knowledge_graph().map(|s| s.to_string())
     };
 
     assert_eq!(kg1, kg2);
@@ -154,7 +151,6 @@ fn test_validate_tuples_no_schema() {
     let (handler, _temp) = create_test_handler();
 
     // Without a schema, validation should pass
-    // FIXME: extract to named variable
     let tuples = vec![
         Tuple::new(vec![Value::Int64(1), Value::string("Alice")]),
         Tuple::new(vec![Value::Int64(2), Value::string("Bob")]),
@@ -168,7 +164,6 @@ fn test_validate_tuples_no_schema() {
 
 #[test]
 fn test_validate_tuples_empty() {
-    // FIXME: extract to named variable
     let (handler, _temp) = create_test_handler();
 
     // Empty batch should validate
@@ -185,13 +180,11 @@ async fn test_query_program_simple() {
 
     // Insert some data first
     {
-        // FIXME: extract to named variable
         let storage = handler.get_storage_mut();
         storage
             .insert_tuples("numbers", make_tuples(&[1, 2, 3]))
             .unwrap();
     }
-
 
     // Query the data
     let result = handler
@@ -281,3 +274,86 @@ async fn test_query_program_invalid_syntax() {
 
 // Concurrent Access Tests
 #[tokio::test]
+async fn test_concurrent_queries() {
+    let (handler, _temp) = create_test_handler();
+    let handler = Arc::new(handler);
+
+    // Insert some data
+    {
+        let storage = handler.get_storage_mut();
+        storage
+            .insert_tuples("data", make_tuples(&[1, 2, 3, 4, 5]))
+            .unwrap();
+    }
+
+    // Spawn multiple concurrent queries
+    let mut handles = vec![];
+    for i in 0..5 {
+        let h = Arc::clone(&handler);
+        let handle = tokio::spawn(async move {
+            let result = h.query_program(None, "?- data(X).".to_string()).await;
+            (i, result.is_ok())
+        });
+        handles.push(handle);
+    }
+
+    // Wait for all queries
+    for handle in handles {
+        let (idx, success) = handle.await.unwrap();
+        assert!(success, "Query {} failed", idx);
+    }
+
+    // All queries should have been counted - exactly 5 queries were executed
+    assert_eq!(
+        handler.total_queries(),
+        5,
+        "Expected exactly 5 queries to be counted"
+    );
+}
+
+#[test]
+fn test_concurrent_read_write() {
+    use std::thread;
+
+    let (handler, _temp) = create_test_handler();
+    let handler = Arc::new(handler);
+
+    // Insert initial data
+    {
+        let storage = handler.get_storage_mut();
+        storage.insert_tuples("items", make_tuples(&[1])).unwrap();
+    }
+
+    // Spawn readers and writers
+    let mut handles = vec![];
+
+    // Readers
+    for _ in 0..3 {
+        let h = Arc::clone(&handler);
+        let handle = thread::spawn(move || {
+            for _ in 0..10 {
+                let storage = h.get_storage();
+                let _ = storage.current_knowledge_graph();
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Writer
+    let h = Arc::clone(&handler);
+    let writer_handle = thread::spawn(move || {
+        for i in 2i64..5i64 {
+            let storage = h.get_storage_mut();
+            let _ = storage.insert_tuples("items", make_tuples(&[i]));
+        }
+    });
+    handles.push(writer_handle);
+
+    // Wait for all threads
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+// Uptime Tests
+#[test]
