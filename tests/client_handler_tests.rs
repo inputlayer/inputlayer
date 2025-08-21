@@ -410,3 +410,79 @@ async fn test_query_nonexistent_knowledge_graph() {
 
 // Knowledge Graph Switching Tests
 #[tokio::test]
+async fn test_query_with_kg_switch() {
+    let (handler, _temp) = create_test_handler();
+
+    // Create and populate two knowledge graphs
+    {
+        let mut storage = handler.get_storage_mut();
+
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.use_knowledge_graph("kg1").unwrap();
+        storage
+            .insert_tuples("kg1_data", make_tuples(&[1]))
+            .unwrap();
+
+        storage.create_knowledge_graph("kg2").unwrap();
+        storage.use_knowledge_graph("kg2").unwrap();
+        storage
+            .insert_tuples("kg2_data", make_tuples(&[2]))
+            .unwrap();
+    }
+
+    // Query kg1
+    let result1 = handler
+        .query_program(Some("kg1".to_string()), "?- kg1_data(X).".to_string())
+        .await;
+    assert!(result1.is_ok());
+    assert_eq!(result1.unwrap().rows.len(), 1);
+
+    // Query kg2
+    let result2 = handler
+        .query_program(Some("kg2".to_string()), "?- kg2_data(X).".to_string())
+        .await;
+    assert!(result2.is_ok());
+    assert_eq!(result2.unwrap().rows.len(), 1);
+
+    // kg1 data should not be visible in kg2
+    let result3 = handler
+        .query_program(Some("kg2".to_string()), "?- kg1_data(X).".to_string())
+        .await;
+    assert!(result3.is_ok());
+    assert_eq!(result3.unwrap().rows.len(), 0);
+}
+
+// Query Result Format Tests
+#[tokio::test]
+async fn test_query_result_schema() {
+    let (handler, _temp) = create_test_handler();
+
+    // Insert data with multiple columns
+    {
+        let storage = handler.get_storage_mut();
+        let tuples = vec![
+            Tuple::new(vec![Value::string("Alice"), Value::Int64(30)]),
+            Tuple::new(vec![Value::string("Bob"), Value::Int64(25)]),
+        ];
+        storage.insert_tuples("people", tuples).unwrap();
+    }
+
+    // Query
+    let result = handler
+        .query_program(None, "?- people(Name, Age).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+
+    // Check structure
+    assert_eq!(query_result.rows.len(), 2);
+    // Schema should have exactly 2 fields (Name, Age)
+    assert_eq!(
+        query_result.schema.len(),
+        2,
+        "Schema should have exactly 2 fields"
+    );
+}
+
+#[tokio::test]
