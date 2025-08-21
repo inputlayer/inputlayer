@@ -357,3 +357,56 @@ fn test_concurrent_read_write() {
 
 // Uptime Tests
 #[test]
+fn test_uptime_increases() {
+    let (handler, _temp) = create_test_handler();
+
+    let uptime1 = handler.uptime_seconds();
+
+    // Sleep briefly
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let uptime2 = handler.uptime_seconds();
+
+    // Uptime should be >= (could be same if < 1 second)
+    assert!(uptime2 >= uptime1);
+}
+
+// Error Handling Tests
+#[tokio::test]
+async fn test_query_program_error_recovery() {
+    let (handler, _temp) = create_test_handler();
+
+    // First query with error
+    let result1 = handler
+        .query_program(None, "invalid query".to_string())
+        .await;
+    assert!(result1.is_err());
+
+    // Handler should still work after error
+    {
+        let storage = handler.get_storage_mut();
+        storage.insert_tuples("test", make_tuples(&[1])).unwrap();
+    }
+
+    let result2 = handler.query_program(None, "?- test(X).".to_string()).await;
+    assert!(result2.is_ok());
+}
+
+#[tokio::test]
+async fn test_query_nonexistent_knowledge_graph() {
+    let (handler, _temp) = create_test_handler();
+
+    // Query a knowledge graph that doesn't exist
+    let result = handler
+        .query_program(
+            Some("nonexistent_kg".to_string()),
+            "?- data(X).".to_string(),
+        )
+        .await;
+
+    // Should return error
+    assert!(result.is_err());
+}
+
+// Knowledge Graph Switching Tests
+#[tokio::test]
