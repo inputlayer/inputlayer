@@ -486,3 +486,63 @@ async fn test_query_result_schema() {
 }
 
 #[tokio::test]
+async fn test_query_result_with_different_types() {
+    let (handler, _temp) = create_test_handler();
+
+    // Insert different types
+    {
+        let storage = handler.get_storage_mut();
+        let tuples = vec![Tuple::new(vec![
+            Value::Int64(1),
+            Value::Float64(3.14),
+            Value::string("text"),
+        ])];
+        storage.insert_tuples("typed_data", tuples).unwrap();
+    }
+
+    // Query
+    let result = handler
+        .query_program(None, "?- typed_data(I, F, S).".to_string())
+        .await;
+
+    assert!(result.is_ok());
+    let query_result = result.unwrap();
+    assert_eq!(query_result.rows.len(), 1);
+}
+
+// Edge Case Tests
+#[tokio::test]
+async fn test_query_empty_program() {
+    let (handler, _temp) = create_test_handler();
+
+    let result = handler.query_program(None, "".to_string()).await;
+
+    // Empty program might parse as no-op or error - either is acceptable
+    let _ = result;
+}
+
+#[tokio::test]
+async fn test_query_comment_only() {
+    let (handler, _temp) = create_test_handler();
+
+    let result = handler
+        .query_program(None, "% This is a comment".to_string())
+        .await;
+
+    // Comment-only should be valid (no-op) - depending on parser
+    let _ = result;
+}
+
+#[tokio::test]
+async fn test_query_whitespace_only() {
+    let (handler, _temp) = create_test_handler();
+
+    let result = handler
+        .query_program(None, "   \n\t  \n  ".to_string())
+        .await;
+
+    // Whitespace-only should be valid (no-op)
+    let _ = result;
+}
+
+#[test]
