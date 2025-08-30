@@ -37,3 +37,104 @@ use tokio::sync::watch;
 // for completeness of the REST API contract.
 
 #[derive(Debug, Serialize, Deserialize)]
+struct ApiResponse<T> {
+    success: bool,
+    data: Option<T>,
+    error: Option<ApiError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiError {
+    code: String,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HealthResponse {
+    status: String,
+    version: String,
+    uptime_secs: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct KnowledgeGraphInfo {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    relations_count: usize,
+    views_count: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct KnowledgeGraphListResponse {
+    knowledge_graphs: Vec<KnowledgeGraphInfo>,
+    current: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateKnowledgeGraphRequest {
+    name: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct RelationInfo {
+    name: String,
+    arity: usize,
+    tuple_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelationListResponse {
+    relations: Vec<RelationInfo>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct RelationDataResponse {
+    name: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    row_count: usize,
+    total_count: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct ViewInfo {
+    name: String,
+    definition: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct ViewListResponse {
+    views: Vec<ViewInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct QueryRequest {
+    query: String,
+    knowledge_graph: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout_ms: Option<u64>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct ColumnDef {
+    name: String,
+    data_type: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct WireTuple {
+    values: Vec<WireValue>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
