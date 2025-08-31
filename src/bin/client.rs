@@ -138,3 +138,79 @@ struct WireTuple {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
+enum WireValue {
+    Null,
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+    Array(Vec<serde_json::Value>),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct QueryResponse {
+    query: String,
+    status: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    row_count: usize,
+    execution_time_ms: u64,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InsertDataRequest {
+    rows: Vec<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InsertDataResponse {
+    rows_inserted: usize,
+    duplicates: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DeleteDataRequest {
+    rows: Vec<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteDataResponse {
+    rows_deleted: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct RuleDto {
+    name: String,
+    clause_count: usize,
+    description: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuleListDto {
+    rules: Vec<RuleDto>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct StatsResponse {
+    knowledge_graphs: usize,
+    relations: usize,
+    views: usize,
+    memory_usage_bytes: u64,
+    query_count: u64,
+    uptime_secs: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize)]
+struct CreateViewRequest {
+    name: String,
+    definition: String,
+}
+
+// Client State
+/// Heartbeat configuration
