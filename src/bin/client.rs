@@ -214,3 +214,36 @@ struct CreateViewRequest {
 
 // Client State
 /// Heartbeat configuration
+const HEARTBEAT_INTERVAL_SECS: u64 = 5;
+const HEARTBEAT_TIMEOUT_SECS: u64 = 3;
+const HEARTBEAT_MAX_FAILURES: u32 = 2;
+
+/// Command-line arguments
+struct Args {
+    script: Option<String>,
+    repl: bool,
+    server: String,
+}
+
+/// HTTP Client state
+struct HttpClient {
+    client: Client,
+    base_url: String,
+}
+
+impl HttpClient {
+    fn new(base_url: &str) -> Self {
+        HttpClient {
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
+            base_url: base_url.trim_end_matches('/').to_string(),
+        }
+    }
+
+    fn api_url(&self, path: &str) -> String {
+        format!("{}/api/v1{}", self.base_url, path)
+    }
+}
+
