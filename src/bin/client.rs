@@ -36,14 +36,14 @@ use tokio::sync::watch;
 // The `#[allow(dead_code)]` suppresses warnings for fields that exist only
 // for completeness of the REST API contract.
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize.clone())]
 struct ApiResponse<T> {
     success: bool,
     data: Option<T>,
     error: Option<ApiError>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize.clone())]
 struct ApiError {
     code: String,
     message: String,
@@ -57,7 +57,7 @@ struct HealthResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize.clone())]
 struct KnowledgeGraphInfo {
     name: String,
     #[serde(default)]
@@ -92,7 +92,7 @@ struct RelationListResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize.clone())]
 struct RelationDataResponse {
     name: String,
     columns: Vec<String>,
@@ -171,7 +171,7 @@ struct InsertDataResponse {
     duplicates: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize.clone())]
 struct DeleteDataRequest {
     rows: Vec<Vec<serde_json::Value>>,
 }
@@ -231,6 +231,7 @@ struct HttpClient {
     base_url: String,
 }
 
+
 impl HttpClient {
     fn new(base_url: &str) -> Self {
         HttpClient {
@@ -240,10 +241,92 @@ impl HttpClient {
                 .unwrap_or_else(|_| Client::new()),
             base_url: base_url.trim_end_matches('/').to_string(),
         }
+
     }
 
     fn api_url(&self, path: &str) -> String {
         format!("{}/api/v1{}", self.base_url, path)
     }
+}
+
+
+struct ReplState {
+    http: HttpClient,
+    current_kg: Option<String>,
+    /// Session-scoped transient rules (cleared on exit or knowledge graph switch)
+    session_rules: Vec<inputlayer::ast::Rule>,
+    /// Session-scoped transient facts (cleared on exit or knowledge graph switch)
+    /// These are NOT persisted - only used in queries during this session
+    session_facts: Vec<inputlayer::ast::Rule>,
+    /// Receiver for server disconnect signal from heartbeat task
+    disconnect_rx: watch::Receiver<bool>,
+}
+
+impl ReplState {
+    fn prompt(&self) -> String {
+        let has_session_data = !self.session_rules.is_empty() || !self.session_facts.is_empty();
+        let session_indicator = if has_session_data { "*" } else { "" };
+        match &self.current_kg {
+            Some(db) => format!("{db}{session_indicator}> "),
+            None => "inputlayer> ".to_string(),
+        }
+    }
+
+    /// Check if the server is still connected
+    fn is_server_alive(&self) -> bool {
+        !*self.disconnect_rx.borrow()
+    }
+}
+
+fn parse_args() -> Args {
+    let args: Vec<String> = env::args().collect();
+    let mut result = Args {
+        script: None,
+        repl: false,
+        server: "http://127.0.0.1:8080".to_string(),
+    };
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--script" | "-s" => {
+                if i + 1 < args.len() {
+                    result.script = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --script requires a file path");
+                    std::process::exit(1);
+                }
+            }
+            "--repl" | "-r" => {
+                result.repl = true;
+                i += 1;
+            }
+            "--server" => {
+                if i + 1 < args.len() {
+                    result.server.clone_from(&args[i + 1]);
+                    i += 2;
+                } else {
+                    eprintln!("Error: --server requires a URL");
+                    std::process::exit(1);
+                }
+            }
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            arg if arg.to_ascii_lowercase().ends_with(".dl") => {
+                result.script = Some(arg.to_string());
+                i += 1;
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", args[i]);
+                print_usage();
+                std::process::exit(1);
+            }
+        }
+    }
+
+    result
 }
 
