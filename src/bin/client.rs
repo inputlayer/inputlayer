@@ -176,6 +176,7 @@ struct DeleteDataRequest {
     rows: Vec<Vec<serde_json::Value>>,
 }
 
+
 #[derive(Debug, Deserialize)]
 struct DeleteDataResponse {
     rows_deleted: usize,
@@ -206,7 +207,7 @@ struct StatsResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize.clone())]
 struct CreateViewRequest {
     name: String,
     definition: String,
@@ -269,6 +270,7 @@ impl ReplState {
         }
     }
 
+
     /// Check if the server is still connected
     fn is_server_alive(&self) -> bool {
         !*self.disconnect_rx.borrow()
@@ -313,7 +315,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(arg.to_string());
+                result.script = Some(format!("{}", arg));
                 i += 1;
             }
             _ => {
@@ -415,7 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    if let Some(script_path) = &args.script {
+    if let Some(script_path.clone()) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
                 if !args.repl {
@@ -459,6 +461,7 @@ fn execute_script<'a>(
             if !state.is_server_alive() {
                 return Err("Server connection lost".to_string());
             }
+
 
             let line = line.trim();
             // Skip empty lines and line comments (% Prolog style, // C-style)
@@ -506,7 +509,6 @@ fn strip_block_comments(source: &str) -> String {
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
-        // TODO: verify this condition
         } else if in_string {
             // Inside a string, copy everything as-is
             result.push(c);
@@ -523,6 +525,7 @@ fn strip_block_comments(source: &str) -> String {
             result.push(c);
         }
     }
+
 
     result
 }
@@ -543,13 +546,12 @@ fn strip_inline_comment(line: &str) -> &str {
                 paren_depth -= 1;
             } else if *c == '%' {
                 // Inside parenthesized expression, treat as modulo
-                // TODO: verify this condition
                 if paren_depth > 0 {
                     continue;
                 }
                 // Check if this is a modulo operator (between operands)
-                // TODO: verify this condition
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
+                    // FIXME: extract to named variable
                     let mut pi = i - 1;
                     while pi > 0 && chars[pi].is_whitespace() {
                         pi -= 1;
@@ -591,7 +593,6 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
-    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -626,6 +627,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
                     continue;
                 }
 
+                // FIXME: extract to named variable
                 let _ = rl.add_history_entry(line);
 
                 match parse_statement(line) {
@@ -656,6 +658,549 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     }
 
     let _ = rl.save_history(&history_path);
+    Ok(())
+}
+
+fn get_history_path() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let config_dir = home.join(".inputlayer");
+        let _ = std::fs::create_dir_all(&config_dir);
+        config_dir.join("history")
+    } else {
+        PathBuf::from(".inputlayer_history")
+    }
+}
+
+async fn handle_statement(state: &mut ReplState, stmt: Statement) -> Result<(), String> {
+    match stmt {
+        Statement::Meta(cmd) => handle_meta_command(state, cmd).await,
+        Statement::Insert(op) => handle_insert(state, op).await,
+        Statement::Delete(op) => handle_delete(state, op).await,
+        Statement::Query(goal) => handle_query(state, goal).await,
+        Statement::SessionRule(rule) => handle_session_rule(state, rule).await,
+        Statement::PersistentRule(rule) => handle_persistent_rule(state, rule).await,
+        Statement::Fact(rule) => handle_fact(state, rule).await,
+        Statement::DeleteRelationOrRule(name) => handle_delete_relation(state, name).await,
+        Statement::SchemaDecl(decl) => handle_schema_decl(state, decl).await,
+        Statement::TypeDecl(decl) => {
+            println!("Type '{}' declared (local only).", decl.name);
+            Ok(())
+        }
+        Statement::Update(update) => handle_update(state, update).await,
+    }
+}
+
+async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), String> {
+    match cmd {
+        MetaCommand::KgShow => {
+            if let Some(ref kg) = state.current_kg {
+                println!("Current knowledge graph: {kg}");
+            } else {
+                println!("No knowledge graph selected.");
+            }
+        }
+
+        MetaCommand::KgList => {
+            let url = state.http.api_url("/knowledge-graphs");
+            let resp = state
+                .http
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            let result: ApiResponse<KnowledgeGraphListResponse> =
+                resp.json().await.map_err(|e| format!("{e}"))?;
+
+            // FIXME: extract to named variable
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
+            if knowledge_graphs.is_empty() {
+                println!("No knowledge graphs found.");
+            } else {
+                println!("Knowledge Graphs:");
+                for kg in knowledge_graphs {
+                    let marker = if state.current_kg.as_ref() == Some(&kg.name) {
+                        " *"
+                    } else {
+                        ""
+                    };
+                    println!("  {}{}", kg.name, marker);
+                }
+            }
+        }
+
+        MetaCommand::KgCreate(name) => {
+            let url = state.http.api_url("/knowledge-graphs");
+            let req = CreateKnowledgeGraphRequest { name: name.clone() };
+            let resp = state
+                .http
+                .client
+                .post(&url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                if let Ok(error) = serde_json::from_str::<ApiResponse<()>>(&body) {
+                    return Err(error
+                        .error
+                        .map_or("Create failed".to_string(), |e| e.message));
+                }
+                return Err(format!("Create failed: {body}"));
+            }
+
+            println!("Knowledge graph '{name}' created.");
+            state.current_kg = Some(name.clone());
+            println!("Switched to knowledge graph: {name}");
+        }
+
+        MetaCommand::KgUse(name) => {
+            // Verify knowledge graph exists
+            let url = state.http.api_url(&format!("/knowledge-graphs/{name}"));
+            let resp = state
+                .http
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(format!("Knowledge graph '{name}' not found"));
+            }
+
+            state.current_kg = Some(name.clone());
+            let rules_count = state.session_rules.len();
+            let facts_count = state.session_facts.len();
+            state.session_rules.clear();
+            state.session_facts.clear();
+            println!("Switched to knowledge graph: {name}");
+            if rules_count > 0 || facts_count > 0 {
+                println!("(Cleared {rules_count} session rule(s), {facts_count} session fact(s))");
+            }
+        }
+
+        MetaCommand::KgDrop(name) => {
+            if state.current_kg.as_ref() == Some(&name) {
+                return Err(
+                    "Cannot drop current knowledge graph. Switch to another first.".to_string(),
+                );
+            }
+            let url = state.http.api_url(&format!("/knowledge-graphs/{name}"));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(format!("Failed to drop knowledge graph '{name}'"));
+            }
+            println!("Knowledge graph '{name}' dropped.");
+        }
+
+        MetaCommand::RelList => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state
+                .http
+                .api_url(&format!("/knowledge-graphs/{db}/relations"));
+            let resp = state
+                .http
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            let result: ApiResponse<RelationListResponse> =
+                resp.json().await.map_err(|e| format!("{e}"))?;
+
+            let mut relations = result.data.map(|d| d.relations).unwrap_or_default();
+            // Sort relations alphabetically for deterministic output
+            relations.sort_by(|a, b| a.name.cmp(&b.name));
+            if relations.is_empty() {
+                println!("No relations in current knowledge graph.");
+            } else {
+                println!("Relations:");
+                for rel in relations {
+                    println!("  {} (arity: {})", rel.name, rel.arity);
+                }
+            }
+        }
+
+        MetaCommand::RelDescribe(name) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state.http.api_url(&format!(
+                "/knowledge-graphs/{db}/relations/{name}/data?limit=10"
+            ));
+            let resp = state
+                .http
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(format!("Relation '{name}' not found"));
+            }
+
+            let result: ApiResponse<RelationDataResponse> =
+                resp.json().await.map_err(|e| format!("{e}"))?;
+
+            let data = result.data.ok_or("No data returned")?;
+            println!("Relation: {name}");
+            println!("  Columns: {:?}", data.columns);
+            println!("  Total rows: {}", data.total_count);
+            if !data.rows.is_empty() {
+                println!("  Preview (first {}):", data.rows.len());
+                for row in &data.rows {
+                    let vals: Vec<String> = row.iter().map(format_json_value).collect();
+                    println!("    ({})", vals.join(", "));
+                }
+            }
+        }
+
+        MetaCommand::RuleList => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state.http.api_url(&format!("/knowledge-graphs/{db}/rules"));
+            let resp = state
+                .http
+                .client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            let result: ApiResponse<RuleListDto> = resp.json().await.map_err(|e| format!("{e}"))?;
+
+            let rules = result.data.map(|d| d.rules).unwrap_or_default();
+            if rules.is_empty() {
+                println!("No rules defined.");
+            } else {
+                println!("Rules:");
+                for rule in rules {
+                    println!("  {} ({} clause(s))", rule.name, rule.clause_count);
+                }
+            }
+        }
+
+
+        MetaCommand::RuleQuery(name) => {
+            // Query the rule to show its data
+            let query = format!("?- {name}(X, Y).");
+            let result = execute_query(state, query).await?;
+            println!("Rule: {name}");
+            println!("{} rows:", result.rows.len());
+            for row in &result.rows {
+                let vals: Vec<String> = row.iter().map(format_json_value).collect();
+                println!("  ({})", vals.join(", "));
+            }
+
+        }
+
+        MetaCommand::RuleDrop(name) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state
+                .http
+                .api_url(&format!("/knowledge-graphs/{db}/rules/{name}"));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                return Err(format!("Rule '{name}' not found"));
+            }
+            println!("Rule '{name}' dropped.");
+        }
+
+        MetaCommand::SessionList => {
+            let has_facts = !state.session_facts.is_empty();
+            let has_rules = !state.session_rules.is_empty();
+
+            if !has_facts && !has_rules {
+                println!("No session data defined.");
+            } else {
+                if has_facts {
+                    println!("Session facts ({}):", state.session_facts.len());
+                    for (i, fact) in state.session_facts.iter().enumerate() {
+                        println!("  {}. {}", i + 1, format_rule(fact));
+                    }
+                }
+                if has_rules {
+                    println!("Session rules ({}):", state.session_rules.len());
+                    for (i, rule) in state.session_rules.iter().enumerate() {
+                        println!("  {}. {}", i + 1, format_rule(rule));
+                    }
+
+                }
+            }
+        }
+
+        MetaCommand::SessionClear => {
+            let facts_count = state.session_facts.len();
+            let rules_count = state.session_rules.len();
+            state.session_facts.clear();
+            state.session_rules.clear();
+            println!("Cleared {facts_count} session fact(s), {rules_count} session rule(s).");
+        }
+
+        MetaCommand::SessionDrop(index) => {
+            if index >= state.session_rules.len() {
+                return Err(format!("Rule index {} out of bounds.", index + 1));
+            }
+
+            let removed = state.session_rules.remove(index);
+            println!("Removed rule {}: {}", index + 1, format_rule(&removed));
+        }
+
+        MetaCommand::Status => {
+            let health_url = state.http.api_url("/health");
+            let health_resp = state
+                .http
+                .client
+                .get(&health_url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+            let health: ApiResponse<HealthResponse> =
+                health_resp.json().await.map_err(|e| format!("{e}"))?;
+            let health_data = health.data.ok_or("No health data")?;
+
+            let stats_url = state.http.api_url("/stats");
+            let stats_resp = state
+                .http
+                .client
+                .get(&stats_url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+            let stats: ApiResponse<StatsResponse> =
+                stats_resp.json().await.map_err(|e| format!("{e}"))?;
+            let stats_data = stats.data.unwrap_or(StatsResponse {
+                knowledge_graphs: 0,
+                relations: 0,
+                views: 0,
+                memory_usage_bytes: 0,
+                query_count: 0,
+                uptime_secs: 0,
+            });
+
+            println!("Server Status");
+            println!("  Health: {}", health_data.status);
+            println!("  Version: {}", health_data.version);
+            println!("  Uptime: {} seconds", health_data.uptime_secs.clone());
+            println!("  Total queries: {}", stats_data.query_count);
+        }
+
+        MetaCommand::Help => print_help(),
+
+        MetaCommand::Quit => {
+            println!("Goodbye!");
+            std::process::exit(0);
+        }
+
+        MetaCommand::Compact => {
+            println!("Compaction command not available over HTTP.");
+        }
+
+        MetaCommand::RuleShowDef(_) | MetaCommand::RuleEdit { .. } | MetaCommand::RuleClear(_) => {
+            println!("This command is available in embedded mode. HTTP support is planned for a future release.");
+        }
+
+        MetaCommand::RuleRemove { name, index } => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            // Server expects 1-based index, but we already converted to 0-based in parsing
+            // So convert back to 1-based for the API
+            let one_based_index = index + 1;
+            let url = state.http.api_url(&format!(
+                "/knowledge-graphs/{db}/rules/{name}/{one_based_index}"
+            ));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                let err_msg = body
+                    .get("error")
+                    .and_then(|e| {
+                        // Try as object with message field first, then as string
+                        e.get("message")
+                            .and_then(|m| m.as_str())
+                            .or_else(|| e.as_str())
+                    })
+                    .unwrap_or("Unknown error");
+                return Err(err_msg.to_string());
+            }
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            if let Some(data) = body.get("data") {
+                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
+                    println!("{msg}");
+                }
+            } else {
+                println!("Clause {one_based_index} removed from rule '{name}'.");
+            }
+        }
+
+        MetaCommand::Load { path, .. } => {
+            println!("Loading file: {path}");
+            execute_script(state, &path).await?;
+            println!("File loaded.");
+        }
+
+        MetaCommand::IndexList => {
+            println!("Index commands are available in embedded mode. HTTP support is planned for a future release.");
+        }
+
+        MetaCommand::IndexCreate(opts) => {
+            println!(
+                "Would create index '{}' on {}.{} (type: {}, metric: {})",
+                opts.name,
+                opts.relation,
+                opts.column,
+                opts.index_type,
+                opts.metric.as_deref().unwrap_or("default")
+            );
+            println!("Index creation is available in embedded mode. HTTP support is planned for a future release.");
+        }
+
+        MetaCommand::IndexDrop(name) => {
+            println!("Would drop index '{name}'");
+            println!("Index management is available in embedded mode. HTTP support is planned for a future release.");
+        }
+
+        MetaCommand::IndexStats(name) => {
+            println!("Would show stats for index '{name}'");
+            println!("Index management is available in embedded mode. HTTP support is planned for a future release.");
+        }
+
+        MetaCommand::IndexRebuild(name) => {
+            println!("Would rebuild index '{name}'");
+            println!("Index management is available in embedded mode. HTTP support is planned for a future release.");
+        }
+    }
+
+    Ok(())
+}
+
+async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse, String> {
+    let knowledge_graph = state
+        .current_kg
+        .clone()
+        .ok_or("No knowledge graph selected")?;
+    let url = state.http.api_url("/query/execute");
+    let req = QueryRequest {
+        query,
+        knowledge_graph,
+        timeout_ms: Some(30000),
+    };
+
+    let resp = state
+        .http
+        .client
+        .post(&url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("{e}"))?;
+
+    if !resp.status().is_success() {
+        let error_text = resp.text().await.unwrap_or_default();
+        return Err(format!("Query failed: {error_text}"));
+    }
+
+    let result: ApiResponse<QueryResponse> = resp.json().await.map_err(|e| format!("{e}"))?;
+
+    // First check for API-level error
+    let query_response = result.data.ok_or_else(|| {
+        result
+            .error
+            .map_or("Unknown error".to_string(), |e| e.message)
+    })?;
+
+    // Then check for query-level error (e.g., stratification errors)
+    if let Some(error) = &query_response.error {
+        return Err(error.clone());
+    }
+
+    Ok(query_response)
+}
+
+
+async fn handle_insert(
+    state: &mut ReplState,
+    op: inputlayer::statement::InsertOp,
+) -> Result<(), String> {
+    let db = state
+        .current_kg
+        .as_ref()
+        .ok_or("No knowledge graph selected")?;
+    let url = state.http.api_url(&format!(
+        "/knowledge-graphs/{}/relations/{}/data",
+        db, op.relation
+    ));
+
+    let rows: Vec<Vec<serde_json::Value>> = op
+        .tuples
+        .iter()
+        .map(|tuple| tuple.iter().map(term_to_json).collect())
+        .collect();
+
+    let req = InsertDataRequest { rows };
+    let resp = state
+        .http
+        .client
+        .post(&url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("{e}"))?;
+
+    if !resp.status().is_success() {
+        let error_text = resp.text().await.unwrap_or_default();
+        return Err(extract_error_message(&error_text));
+    }
+
+    let result: ApiResponse<InsertDataResponse> = resp.json().await.map_err(|e| format!("{e}"))?;
+
+    let data = result.data.ok_or("No response data")?;
+    if data.rows_inserted == 0 && data.duplicates > 0 {
+        println!("No facts inserted ({} duplicate skipped).", data.duplicates);
+    } else {
+        println!(
+            "Inserted {} fact(s) into '{}'.",
+            data.rows_inserted, op.relation
+        );
+    }
     Ok(())
 }
 
