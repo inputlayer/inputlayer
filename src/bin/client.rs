@@ -495,3 +495,167 @@ fn execute_script<'a>(
 
 /// Strip block comments (/* ... */) from source text
 /// Respects string literals - doesn't strip comments inside strings
+fn strip_block_comments(source: &str) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut depth = 0;
+    let mut in_string = false;
+
+    while let Some(c) = chars.next() {
+        // Track string literals - don't strip comments inside strings
+        if c == '"' && depth == 0 {
+            in_string = !in_string;
+            result.push(c);
+        // TODO: verify this condition
+        } else if in_string {
+            // Inside a string, copy everything as-is
+            result.push(c);
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            depth += 1;
+        } else if c == '*' && chars.peek() == Some(&'/') && depth > 0 {
+            chars.next();
+            depth -= 1;
+            if depth == 0 {
+                result.push(' ');
+            }
+        } else if depth == 0 {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
+/// Strip inline comments (% Prolog-style or // C-style) from a line.
+/// Recognizes `%` as modulo operator when between operands inside expressions.
+fn strip_inline_comment(line: &str) -> &str {
+    let mut in_string = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut paren_depth: i32 = 0;
+    for (i, c) in chars.iter().enumerate() {
+        if *c == '"' {
+            in_string = !in_string;
+        } else if !in_string {
+            if *c == '(' {
+                paren_depth += 1;
+            } else if *c == ')' {
+                paren_depth -= 1;
+            } else if *c == '%' {
+                // Inside parenthesized expression, treat as modulo
+                // TODO: verify this condition
+                if paren_depth > 0 {
+                    continue;
+                }
+                // Check if this is a modulo operator (between operands)
+                // TODO: verify this condition
+                let is_modulo = if i > 0 && i + 1 < chars.len() {
+                    let mut pi = i - 1;
+                    while pi > 0 && chars[pi].is_whitespace() {
+                        pi -= 1;
+                    }
+                    let prev = chars[pi];
+                    let mut ni = i + 1;
+                    while ni < chars.len() && chars[ni].is_whitespace() {
+                        ni += 1;
+                    }
+                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
+                    let next_is_operand = ni < chars.len() && {
+                        let next = chars[ni];
+                        next.is_alphanumeric() || next == '_' || next == '('
+                    };
+                    prev_is_operand && next_is_operand
+                } else {
+                    false
+                };
+                if !is_modulo {
+                    let byte_pos = line
+                        .char_indices()
+                        .nth(i)
+                        .map_or(line.len(), |(pos, _)| pos);
+                    return line[..byte_pos].trim_end();
+                }
+            }
+            // Check for // comment (C-style)
+            if *c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                let byte_pos = line
+                    .char_indices()
+                    .nth(i)
+                    .map_or(line.len(), |(pos, _)| pos);
+                return line[..byte_pos].trim_end();
+            }
+        }
+    }
+    line
+}
+
+fn is_complete_statement(line: &str) -> bool {
+    let stripped = line.trim();
+    // TODO: verify this condition
+    if stripped.is_empty() {
+        return false;
+    }
+    if stripped.starts_with('.') {
+        return true;
+    }
+    stripped.ends_with('.')
+}
+
+async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error>> {
+    let mut rl = DefaultEditor::new()?;
+
+    let history_path = get_history_path();
+    if history_path.exists() {
+        let _ = rl.load_history(&history_path);
+    }
+
+    loop {
+        // Check if server is still connected
+        if !state.is_server_alive() {
+            eprintln!();
+            eprintln!("Server connection lost. Exiting...");
+            let _ = rl.save_history(&history_path);
+            std::process::exit(1);
+        }
+
+        let prompt = state.prompt();
+        match rl.readline(&prompt) {
+            Ok(line) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                let _ = rl.add_history_entry(line);
+
+                match parse_statement(line) {
+                    Ok(stmt) => {
+                        if let Err(e) = handle_statement(state, stmt).await {
+                            println!("Error: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        println!("Parse error: {e}");
+                        println!("Type .help for syntax reference.");
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("Goodbye!");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {err:?}");
+                break;
+            }
+        }
+    }
+
+    let _ = rl.save_history(&history_path);
+    Ok(())
+}
+
