@@ -176,7 +176,6 @@ struct DeleteDataRequest {
     rows: Vec<Vec<serde_json::Value>>,
 }
 
-
 #[derive(Debug, Deserialize)]
 struct DeleteDataResponse {
     rows_deleted: usize,
@@ -207,7 +206,7 @@ struct StatsResponse {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Serialize.clone())]
+#[derive(Debug, Serialize)]
 struct CreateViewRequest {
     name: String,
     definition: String,
@@ -270,7 +269,6 @@ impl ReplState {
         }
     }
 
-
     /// Check if the server is still connected
     fn is_server_alive(&self) -> bool {
         !*self.disconnect_rx.borrow()
@@ -315,7 +313,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(format!("{}", arg));
+                result.script = Some(arg.to_string());
                 i += 1;
             }
             _ => {
@@ -417,7 +415,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    if let Some(script_path.clone()) = &args.script {
+    // TODO: verify this condition
+    if let Some(script_path) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
                 if !args.repl {
@@ -462,7 +461,6 @@ fn execute_script<'a>(
                 return Err("Server connection lost".to_string());
             }
 
-
             let line = line.trim();
             // Skip empty lines and line comments (% Prolog style, // C-style)
             if line.is_empty() || line.starts_with('%') || line.starts_with("//") {
@@ -506,6 +504,7 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
+        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -525,7 +524,6 @@ fn strip_block_comments(source: &str) -> String {
             result.push(c);
         }
     }
-
 
     result
 }
@@ -551,7 +549,6 @@ fn strip_inline_comment(line: &str) -> &str {
                 }
                 // Check if this is a modulo operator (between operands)
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
-                    // FIXME: extract to named variable
                     let mut pi = i - 1;
                     while pi > 0 && chars[pi].is_whitespace() {
                         pi -= 1;
@@ -593,6 +590,7 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
+    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -606,6 +604,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
+    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -627,7 +626,6 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
                     continue;
                 }
 
-                // FIXME: extract to named variable
                 let _ = rl.add_history_entry(line);
 
                 match parse_statement(line) {
@@ -713,8 +711,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            // FIXME: extract to named variable
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -899,7 +896,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             }
         }
 
-
         MetaCommand::RuleQuery(name) => {
             // Query the rule to show its data
             let query = format!("?- {name}(X, Y).");
@@ -910,7 +906,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                 let vals: Vec<String> = row.iter().map(format_json_value).collect();
                 println!("  ({})", vals.join(", "));
             }
-
         }
 
         MetaCommand::RuleDrop(name) => {
@@ -953,7 +948,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                     for (i, rule) in state.session_rules.iter().enumerate() {
                         println!("  {}. {}", i + 1, format_rule(rule));
                     }
-
                 }
             }
         }
@@ -970,7 +964,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             if index >= state.session_rules.len() {
                 return Err(format!("Rule index {} out of bounds.", index + 1));
             }
-
             let removed = state.session_rules.remove(index);
             println!("Removed rule {}: {}", index + 1, format_rule(&removed));
         }
@@ -1010,7 +1003,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("Server Status");
             println!("  Health: {}", health_data.status);
             println!("  Version: {}", health_data.version);
-            println!("  Uptime: {} seconds", health_data.uptime_secs.clone());
+            println!("  Uptime: {} seconds", health_data.uptime_secs);
             println!("  Total queries: {}", stats_data.query_count);
         }
 
@@ -1155,7 +1148,6 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
     Ok(query_response)
 }
 
-
 async fn handle_insert(
     state: &mut ReplState,
     op: inputlayer::statement::InsertOp,
@@ -1201,6 +1193,203 @@ async fn handle_insert(
             data.rows_inserted, op.relation
         );
     }
+    Ok(())
+}
+
+async fn handle_delete(
+    state: &mut ReplState,
+    op: inputlayer::statement::DeleteOp,
+) -> Result<(), String> {
+    use inputlayer::statement::DeletePattern;
+
+    match op.pattern {
+        DeletePattern::SingleTuple(terms) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state.http.api_url(&format!(
+                "/knowledge-graphs/{}/relations/{}/data",
+                db, op.relation
+            ));
+
+            let row: Vec<serde_json::Value> = terms.iter().map(term_to_json).collect();
+            let req = DeleteDataRequest { rows: vec![row] };
+
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                let error_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Delete failed: {error_text}"));
+            }
+
+            let result: ApiResponse<DeleteDataResponse> =
+                resp.json().await.map_err(|e| format!("{e}"))?;
+
+            let data = result.data.ok_or("No response data")?;
+            println!(
+                "Deleted {} facts from '{}'.",
+                data.rows_deleted, op.relation
+            );
+        }
+        DeletePattern::BulkTuples(tuples) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state.http.api_url(&format!(
+                "/knowledge-graphs/{}/relations/{}/data",
+                db, op.relation
+            ));
+
+            let rows: Vec<Vec<serde_json::Value>> = tuples
+                .iter()
+                .map(|t| t.iter().map(term_to_json).collect())
+                .collect();
+            let req = DeleteDataRequest { rows };
+
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if !resp.status().is_success() {
+                let error_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Delete failed: {error_text}"));
+            }
+
+            let result: ApiResponse<DeleteDataResponse> =
+                resp.json().await.map_err(|e| format!("{e}"))?;
+
+            let data = result.data.ok_or("No response data")?;
+            println!(
+                "Deleted {} facts from '{}'.",
+                data.rows_deleted, op.relation
+            );
+        }
+        DeletePattern::Conditional { head_args, body } => {
+            // Format head arguments
+            let head_str: String = head_args
+                .iter()
+                .map(format_term)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            // Format body predicates
+            let body_str: String = body
+                .iter()
+                .map(format_body_pred)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            // Build the conditional delete statement
+            let delete_stmt = format!("-{}({}) :- {}.", op.relation, head_str, body_str);
+
+            // Send through query API
+            let response = execute_query(state, delete_stmt).await?;
+
+            // Print the result messages (rows contain message strings)
+            for row in &response.rows {
+                if let Some(msg) = row.first() {
+                    if let Some(s) = msg.as_str() {
+                        println!("{s}");
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_query(
+    state: &mut ReplState,
+    goal: inputlayer::statement::QueryGoal,
+) -> Result<(), String> {
+    // Build query program with session facts and rules
+    let mut program = String::new();
+
+    // Add session facts (transient, not persisted)
+    for fact in &state.session_facts {
+        program.push_str(&format_rule(fact));
+        program.push('\n');
+    }
+
+    // Add session rules
+    for rule in &state.session_rules {
+        program.push_str(&format_rule(rule));
+        program.push('\n');
+    }
+
+    // Add the query
+    let query_args: Vec<String> = goal.goal.args.iter().map(format_term).collect();
+    let mut body_parts: Vec<String> =
+        vec![format!("{}({})", goal.goal.relation, query_args.join(", "))];
+
+    // Add additional body predicates (for complex queries like ?- foo(X), bar(Y).)
+    for pred in &goal.body {
+        body_parts.push(format_body_pred(pred));
+    }
+
+    program.push_str(&format!("?- {}.", body_parts.join(", ")));
+
+    let response = execute_query(state, program).await?;
+
+    if response.rows.is_empty() {
+        println!("No results.");
+    } else {
+        println!("{} rows:", response.rows.len());
+        for row in &response.rows {
+            let vals: Vec<String> = row.iter().map(format_json_value).collect();
+            println!("  ({})", vals.join(", "));
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_session_rule(
+    state: &mut ReplState,
+    rule: inputlayer::ast::Rule,
+) -> Result<(), String> {
+    let head_relation = rule.head.relation.clone();
+    let head_arity = rule.head.args.len();
+    state.session_rules.push(rule);
+
+    // Generate variables matching the rule's actual head arity
+    let var_names = ["X", "Y", "Z", "W", "V", "U", "T", "S", "R", "Q"];
+    let args: Vec<Term> = (0..head_arity)
+        .map(|i| {
+            let name = if i < var_names.len() {
+                var_names[i].to_string()
+            } else {
+                format!("V{i}")
+            };
+            Term::Variable(name)
+        })
+        .collect();
+
+    // Execute query to show results
+    let goal = inputlayer::statement::QueryGoal {
+        goal: inputlayer::ast::Atom {
+            relation: head_relation.clone(),
+            args,
+        },
+        body: vec![],
+    };
+
+    handle_query(state, goal).await?;
+    println!("(session: {} rule(s))", state.session_rules.len());
     Ok(())
 }
 
