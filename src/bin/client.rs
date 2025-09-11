@@ -313,7 +313,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(arg.to_string());
+                result.script = Some(format!("{}", arg));
                 i += 1;
             }
             _ => {
@@ -415,7 +415,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    // TODO: verify this condition
     if let Some(script_path) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
@@ -432,6 +431,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(1);
                 }
             }
+
         }
     } else {
         println!("Type .help for syntax reference.");
@@ -504,7 +504,6 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
-        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -524,6 +523,7 @@ fn strip_block_comments(source: &str) -> String {
             result.push(c);
         }
     }
+
 
     result
 }
@@ -549,6 +549,7 @@ fn strip_inline_comment(line: &str) -> &str {
                 }
                 // Check if this is a modulo operator (between operands)
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
+                    // FIXME: extract to named variable
                     let mut pi = i - 1;
                     while pi > 0 && chars[pi].is_whitespace() {
                         pi -= 1;
@@ -568,6 +569,7 @@ fn strip_inline_comment(line: &str) -> &str {
                     false
                 };
                 if !is_modulo {
+                    // FIXME: extract to named variable
                     let byte_pos = line
                         .char_indices()
                         .nth(i)
@@ -590,7 +592,6 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
-    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -604,7 +605,6 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
-    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -711,7 +711,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -896,6 +896,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             }
         }
 
+
         MetaCommand::RuleQuery(name) => {
             // Query the rule to show its data
             let query = format!("?- {name}(X, Y).");
@@ -948,6 +949,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                     for (i, rule) in state.session_rules.iter().enumerate() {
                         println!("  {}. {}", i + 1, format_rule(rule));
                     }
+
                 }
             }
         }
@@ -991,6 +993,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                 .map_err(|e| format!("{e}"))?;
             let stats: ApiResponse<StatsResponse> =
                 stats_resp.json().await.map_err(|e| format!("{e}"))?;
+            // FIXME: extract to named variable
             let stats_data = stats.data.unwrap_or(StatsResponse {
                 knowledge_graphs: 0,
                 relations: 0,
@@ -1148,6 +1151,7 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
     Ok(query_response)
 }
 
+
 async fn handle_insert(
     state: &mut ReplState,
     op: inputlayer::statement::InsertOp,
@@ -1182,6 +1186,7 @@ async fn handle_insert(
         return Err(extract_error_message(&error_text));
     }
 
+    // FIXME: extract to named variable
     let result: ApiResponse<InsertDataResponse> = resp.json().await.map_err(|e| format!("{e}"))?;
 
     let data = result.data.ok_or("No response data")?;
@@ -1216,6 +1221,7 @@ async fn handle_delete(
             let row: Vec<serde_json::Value> = terms.iter().map(term_to_json).collect();
             let req = DeleteDataRequest { rows: vec![row] };
 
+            // FIXME: extract to named variable
             let resp = state
                 .http
                 .client
@@ -1358,6 +1364,7 @@ async fn handle_query(
     Ok(())
 }
 
+
 async fn handle_session_rule(
     state: &mut ReplState,
     rule: inputlayer::ast::Rule,
@@ -1393,3 +1400,117 @@ async fn handle_session_rule(
     Ok(())
 }
 
+async fn handle_persistent_rule(
+    state: &mut ReplState,
+    rule: inputlayer::ast::Rule,
+) -> Result<(), String> {
+    // Send the rule as a query - the server will register it
+    let rule_text = format!("+{}", format_rule(&rule));
+    // FIXME: extract to named variable
+    let _ = execute_query(state, rule_text).await?;
+    println!("Rule '{}' registered.", rule.head.relation);
+    Ok(())
+}
+
+async fn handle_fact(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
+    // Session facts are NOT persisted - they are only available for queries during this session
+    // Use +relation(args). syntax to persist facts permanently
+
+    // Validate that all terms are ground values (constants, not variables)
+    validate_fact(&rule)?;
+
+    let relation = rule.head.relation.clone();
+    state.session_facts.push(rule);
+    println!("Session fact added for '{relation}'. (Use +{relation}(...) to persist)");
+    Ok(())
+}
+
+async fn handle_delete_relation(state: &mut ReplState, name: String) -> Result<(), String> {
+    let db = state
+        .current_kg
+        .as_ref()
+        .ok_or("No knowledge graph selected")?;
+
+    // Try dropping as a rule first
+    let url = state
+        .http
+        .api_url(&format!("/knowledge-graphs/{db}/rules/{name}"));
+    let resp = state
+        .http
+        .client
+        .delete(&url)
+        .send()
+        .await
+        .map_err(|e| format!("{e}"))?;
+
+    if resp.status().is_success() {
+        println!("Rule '{name}' deleted.");
+        return Ok(());
+    }
+
+    Err(format!(
+        "'{name}' is not a rule. Use conditional delete to remove facts."
+    ))
+}
+
+async fn handle_schema_decl(
+    state: &mut ReplState,
+    decl: inputlayer::statement::SchemaDecl,
+) -> Result<(), String> {
+    // Send schema declaration as a query
+    let prefix = if decl.persistent { "+" } else { "" };
+    let cols: Vec<String> = decl
+        .columns
+        .iter()
+        .map(|col| format!("{}: {}", col.name, col.col_type))
+        .collect();
+    let schema_text = format!("{}{}({}).", prefix, decl.name, cols.join(", "));
+
+    let _ = execute_query(state, schema_text).await?;
+
+    if decl.persistent {
+        println!("Schema '{}' declared (persistent).", decl.name);
+    } else {
+        println!("Schema '{}' declared (session).", decl.name);
+    }
+    Ok(())
+}
+
+async fn handle_update(
+    state: &mut ReplState,
+    update: inputlayer::statement::UpdateOp,
+) -> Result<(), String> {
+    // Build update as query text
+    let mut update_text = String::new();
+
+    for (i, target) in update.deletes.iter().enumerate() {
+        if i > 0 {
+            update_text.push_str(", ");
+        }
+        let args: Vec<String> = target.args.iter().map(format_term).collect();
+        update_text.push_str(&format!("-{}({})", target.relation, args.join(", ")));
+    }
+
+    for target in &update.inserts {
+        if !update_text.is_empty() {
+            update_text.push_str(", ");
+        }
+        let args: Vec<String> = target.args.iter().map(format_term).collect();
+        update_text.push_str(&format!("+{}({})", target.relation, args.join(", ")));
+    }
+
+    update_text.push_str(" :- ");
+
+    let mut condition_parts = Vec::new();
+    for pred in &update.body {
+        condition_parts.push(format_body_pred(pred));
+    }
+    update_text.push_str(&condition_parts.join(", "));
+    update_text.push('.');
+
+    let _ = execute_query(state, update_text).await?;
+    println!("Update executed.");
+    Ok(())
+}
+
+/// Extract error message from JSON API error response
