@@ -313,7 +313,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(format!("{}", arg));
+                result.script = Some(arg.to_string());
                 i += 1;
             }
             _ => {
@@ -431,7 +431,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(1);
                 }
             }
-
         }
     } else {
         println!("Type .help for syntax reference.");
@@ -524,7 +523,6 @@ fn strip_block_comments(source: &str) -> String {
         }
     }
 
-
     result
 }
 
@@ -549,7 +547,6 @@ fn strip_inline_comment(line: &str) -> &str {
                 }
                 // Check if this is a modulo operator (between operands)
                 let is_modulo = if i > 0 && i + 1 < chars.len() {
-                    // FIXME: extract to named variable
                     let mut pi = i - 1;
                     while pi > 0 && chars[pi].is_whitespace() {
                         pi -= 1;
@@ -569,7 +566,6 @@ fn strip_inline_comment(line: &str) -> &str {
                     false
                 };
                 if !is_modulo {
-                    // FIXME: extract to named variable
                     let byte_pos = line
                         .char_indices()
                         .nth(i)
@@ -896,7 +892,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             }
         }
 
-
         MetaCommand::RuleQuery(name) => {
             // Query the rule to show its data
             let query = format!("?- {name}(X, Y).");
@@ -949,7 +944,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                     for (i, rule) in state.session_rules.iter().enumerate() {
                         println!("  {}. {}", i + 1, format_rule(rule));
                     }
-
                 }
             }
         }
@@ -993,7 +987,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                 .map_err(|e| format!("{e}"))?;
             let stats: ApiResponse<StatsResponse> =
                 stats_resp.json().await.map_err(|e| format!("{e}"))?;
-            // FIXME: extract to named variable
             let stats_data = stats.data.unwrap_or(StatsResponse {
                 knowledge_graphs: 0,
                 relations: 0,
@@ -1151,7 +1144,6 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
     Ok(query_response)
 }
 
-
 async fn handle_insert(
     state: &mut ReplState,
     op: inputlayer::statement::InsertOp,
@@ -1186,7 +1178,6 @@ async fn handle_insert(
         return Err(extract_error_message(&error_text));
     }
 
-    // FIXME: extract to named variable
     let result: ApiResponse<InsertDataResponse> = resp.json().await.map_err(|e| format!("{e}"))?;
 
     let data = result.data.ok_or("No response data")?;
@@ -1221,7 +1212,6 @@ async fn handle_delete(
             let row: Vec<serde_json::Value> = terms.iter().map(term_to_json).collect();
             let req = DeleteDataRequest { rows: vec![row] };
 
-            // FIXME: extract to named variable
             let resp = state
                 .http
                 .client
@@ -1364,7 +1354,6 @@ async fn handle_query(
     Ok(())
 }
 
-
 async fn handle_session_rule(
     state: &mut ReplState,
     rule: inputlayer::ast::Rule,
@@ -1406,7 +1395,6 @@ async fn handle_persistent_rule(
 ) -> Result<(), String> {
     // Send the rule as a query - the server will register it
     let rule_text = format!("+{}", format_rule(&rule));
-    // FIXME: extract to named variable
     let _ = execute_query(state, rule_text).await?;
     println!("Rule '{}' registered.", rule.head.relation);
     Ok(())
@@ -1514,3 +1502,110 @@ async fn handle_update(
 }
 
 /// Extract error message from JSON API error response
+fn extract_error_message(body: &str) -> String {
+    // Try to parse as JSON error response
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(error) = json.get("error") {
+            if let Some(message) = error.get("message") {
+                if let Some(msg) = message.as_str() {
+                    return msg.to_string();
+                }
+            }
+        }
+    }
+    // Fall back to raw body
+    body.to_string()
+}
+
+/// Validate that a term is a ground value (suitable for facts).
+/// Returns an error message if the term is not a valid constant.
+fn validate_fact_term(term: &Term) -> Result<(), String> {
+    match term {
+        Term::Constant(_)
+        | Term::FloatConstant(_)
+        | Term::StringConstant(_)
+        | Term::VectorLiteral(_) => Ok(()),
+        Term::Variable(v) => Err(format!(
+            "Cannot use variable '{v}' in a fact - use constants only (wrap in quotes for strings)"
+        )),
+        Term::Placeholder => {
+            Err("Cannot use placeholder '_' in a fact - use constants only".to_string())
+        }
+        Term::Arithmetic(_) => {
+            Err("Cannot use arithmetic expression in a fact - use constants only".to_string())
+        }
+        Term::Aggregate(_, _) => {
+            Err("Cannot use aggregate in a fact - use constants only".to_string())
+        }
+        Term::FunctionCall(_, _) => {
+            Err("Cannot use function call in a fact - use constants only".to_string())
+        }
+        Term::FieldAccess(_, _) => {
+            Err("Cannot use field access in a fact - use constants only".to_string())
+        }
+        Term::RecordPattern(_) => {
+            Err("Cannot use record pattern in a fact - use constants only".to_string())
+        }
+    }
+}
+
+/// Validate that all terms in a fact (rule with empty body) are ground values.
+fn validate_fact(rule: &inputlayer::ast::Rule) -> Result<(), String> {
+    for (i, term) in rule.head.args.iter().enumerate() {
+        validate_fact_term(term).map_err(|e| format!("Argument {}: {}", i + 1, e))?;
+    }
+    Ok(())
+}
+
+fn term_to_json(term: &Term) -> serde_json::Value {
+    match term {
+        Term::Constant(n) => serde_json::Value::Number((*n).into()),
+        Term::FloatConstant(f) => serde_json::json!(*f),
+        Term::StringConstant(s) => serde_json::Value::String(s.clone()),
+        Term::VectorLiteral(v) => {
+            serde_json::Value::Array(v.iter().map(|x| serde_json::json!(*x)).collect())
+        }
+        Term::Variable(_) => serde_json::Value::Null,
+        Term::Placeholder => serde_json::Value::Null,
+        Term::Arithmetic(_) => serde_json::Value::Null,
+        Term::Aggregate(_, _) => serde_json::Value::Null,
+        Term::FunctionCall(_, _) => serde_json::Value::Null,
+        Term::FieldAccess(_, _) => serde_json::Value::Null,
+        Term::RecordPattern(_) => serde_json::Value::Null,
+    }
+}
+
+fn format_json_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Number(n) => {
+            // Normalize exponent format across platforms (e+20 -> e20)
+            let s = n.to_string();
+            s.replace("e+", "e")
+        }
+        serde_json::Value::String(s) => format!("\"{s}\""),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Array(arr) => format!("{arr:?}"),
+        serde_json::Value::Object(obj) => format!("{obj:?}"),
+    }
+}
+
+/// Format a rule as Datalog text (uses Rule's Display impl)
+fn format_rule(rule: &inputlayer::ast::Rule) -> String {
+    rule.to_string()
+}
+
+/// Format a body predicate as Datalog text (uses BodyPredicate's Display impl)
+#[allow(dead_code)]
+fn format_body_pred(pred: &inputlayer::ast::BodyPredicate) -> String {
+    pred.to_string()
+}
+
+/// Format a term as Datalog text (uses Term's Display impl)
+#[allow(dead_code)]
+fn format_term(term: &Term) -> String {
+    term.to_string()
+}
+
+/// Background heartbeat task that monitors server health
+/// Sends disconnect signal if server becomes unresponsive
