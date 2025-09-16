@@ -1609,3 +1609,114 @@ fn format_term(term: &Term) -> String {
 
 /// Background heartbeat task that monitors server health
 /// Sends disconnect signal if server becomes unresponsive
+async fn heartbeat_task(base_url: String, disconnect_tx: watch::Sender<bool>) {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(HEARTBEAT_TIMEOUT_SECS))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    let health_url = format!("{base_url}/api/v1/health");
+    let mut consecutive_failures: u32 = 0;
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
+
+        match client.get(&health_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                consecutive_failures = 0;
+            }
+            Ok(_) | Err(_) => {
+                consecutive_failures += 1;
+                if consecutive_failures >= HEARTBEAT_MAX_FAILURES {
+                    // Server is unresponsive, signal disconnect
+                    let _ = disconnect_tx.send(true);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn print_help() {
+    println!("InputLayer Client (HTTP)");
+    println!("================================");
+    println!();
+    println!("Meta Commands:");
+    println!("  .kg                  Show current knowledge graph");
+    println!("  .kg list             List all knowledge graphs");
+    println!("  .kg create <name>    Create knowledge graph");
+    println!("  .kg use <name>       Switch to knowledge graph");
+    println!("  .kg drop <name>      Drop knowledge graph");
+    println!("  .rel                 List relations");
+    println!("  .rel <name>          Describe relation");
+    println!("  .rule                List rules");
+    println!("  .rule <name>         Query rule");
+    println!("  .rule drop <name>    Drop all clauses of a rule");
+    println!("  .rule remove <name> <n>  Remove clause n from rule (1-based)");
+    println!("  .session             List session rules");
+    println!("  .session clear       Clear session rules");
+    println!("  .status              Server status");
+    println!("  .help                Show this help");
+    println!("  .quit                Exit");
+    println!();
+    println!("Data Manipulation:");
+    println!("  edge(1, 2).          Insert fact");
+    println!("  -edge(1, 2).         Delete fact");
+    println!();
+    println!("Rules:");
+    println!("  +path(X, Y) :- edge(X, Y).   Persistent rule");
+    println!("  foo(X, Y) :- bar(X, Y).      Session rule");
+    println!();
+    println!("Queries:");
+    println!("  ?- path(1, X).       Query");
+    println!();
+}
+
+// Unit Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use inputlayer::ast::{Atom, Rule, Term};
+
+    /// Helper to create a fact (rule with empty body)
+    fn make_fact(relation: &str, args: Vec<Term>) -> Rule {
+        Rule {
+            head: Atom {
+                relation: relation.to_string(),
+                args,
+            },
+            body: vec![],
+        }
+    }
+
+    // Happy Path Tests
+    #[test]
+    fn test_validate_fact_with_integer_constant() {
+        let fact = make_fact(
+            "person",
+            vec![
+                Term::StringConstant("alice".to_string()),
+                Term::Constant(30),
+            ],
+        );
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_fact_with_string_constant() {
+        let fact = make_fact("name", vec![Term::StringConstant("alice".to_string())]);
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_fact_with_float_constant() {
+        let fact = make_fact("price", vec![Term::FloatConstant(19.99)]);
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_fact_with_vector_literal() {
+        let fact = make_fact("embedding", vec![Term::VectorLiteral(vec![1.0, 2.0, 3.0])]);
+        assert!(validate_fact(&fact).is_ok());
+    }
+
