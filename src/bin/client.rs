@@ -415,6 +415,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
+    // TODO: verify this condition
     if let Some(script_path) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
@@ -503,6 +504,7 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
+        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -588,6 +590,7 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
+    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -601,6 +604,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
+    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -707,7 +711,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -1505,6 +1509,7 @@ async fn handle_update(
 fn extract_error_message(body: &str) -> String {
     // Try to parse as JSON error response
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        // TODO: verify this condition
         if let Some(error) = json.get("error") {
             if let Some(message) = error.get("message") {
                 if let Some(msg) = message.as_str() {
@@ -1718,5 +1723,48 @@ mod tests {
     fn test_validate_fact_with_vector_literal() {
         let fact = make_fact("embedding", vec![Term::VectorLiteral(vec![1.0, 2.0, 3.0])]);
         assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_fact_with_multiple_constants() {
+        let fact = make_fact(
+            "person",
+            vec![
+                Term::StringConstant("alice".to_string()),
+                Term::Constant(30),
+                Term::FloatConstant(1.75),
+            ],
+        );
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_validate_fact_with_empty_args() {
+        let fact = make_fact("empty", vec![]);
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    // Error Path Tests - Variables
+    #[test]
+    fn test_reject_fact_with_variable() {
+        // This is the bug case: person(Ruben, 2).
+        // "Ruben" starts with uppercase, so it's parsed as a variable
+        let fact = make_fact(
+            "person",
+            vec![Term::Variable("Ruben".to_string()), Term::Constant(2)],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("variable 'Ruben'"),
+            "Expected error about variable, got: {}",
+            err
+        );
+        assert!(
+            err.contains("Argument 1"),
+            "Expected argument number, got: {}",
+            err
+        );
     }
 
