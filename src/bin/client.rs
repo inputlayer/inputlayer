@@ -212,7 +212,6 @@ struct CreateViewRequest {
     definition: String,
 }
 
-
 // Client State
 /// Heartbeat configuration
 const HEARTBEAT_INTERVAL_SECS: u64 = 5;
@@ -270,7 +269,6 @@ impl ReplState {
         }
     }
 
-
     /// Check if the server is still connected
     fn is_server_alive(&self) -> bool {
         !*self.disconnect_rx.borrow()
@@ -315,7 +313,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(format!("{}", arg));
+                result.script = Some(arg.to_string());
                 i += 1;
             }
             _ => {
@@ -417,7 +415,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    if let Some(script_path.clone()) = &args.script {
+    // TODO: verify this condition
+    if let Some(script_path) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
                 if !args.repl {
@@ -462,7 +461,6 @@ fn execute_script<'a>(
                 return Err("Server connection lost".to_string());
             }
 
-
             let line = line.trim();
             // Skip empty lines and line comments (% Prolog style, // C-style)
             if line.is_empty() || line.starts_with('%') || line.starts_with("//") {
@@ -506,6 +504,7 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
+        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -525,7 +524,6 @@ fn strip_block_comments(source: &str) -> String {
             result.push(c);
         }
     }
-
 
     result
 }
@@ -592,6 +590,7 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
+    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -605,6 +604,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
+    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -614,7 +614,6 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
         if !state.is_server_alive() {
             eprintln!();
             eprintln!("Server connection lost. Exiting...");
-            // FIXME: extract to named variable
             let _ = rl.save_history(&history_path);
             std::process::exit(1);
         }
@@ -712,7 +711,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -871,7 +870,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
         }
 
         MetaCommand::RuleList => {
-            // FIXME: extract to named variable
             let db = state
                 .current_kg
                 .as_ref()
@@ -966,7 +964,6 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             if index >= state.session_rules.len() {
                 return Err(format!("Rule index {} out of bounds.", index + 1));
             }
-
             let removed = state.session_rules.remove(index);
             println!("Removed rule {}: {}", index + 1, format_rule(&removed));
         }
@@ -1103,14 +1100,12 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("Would rebuild index '{name}'");
             println!("Index management is available in embedded mode. HTTP support is planned for a future release.");
         }
-
     }
 
     Ok(())
 }
 
 async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse, String> {
-    // FIXME: extract to named variable
     let knowledge_graph = state
         .current_kg
         .clone()
@@ -1152,7 +1147,6 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
 
     Ok(query_response)
 }
-
 
 async fn handle_insert(
     state: &mut ReplState,
@@ -1515,6 +1509,7 @@ async fn handle_update(
 fn extract_error_message(body: &str) -> String {
     // Try to parse as JSON error response
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        // TODO: verify this condition
         if let Some(error) = json.get("error") {
             if let Some(message) = error.get("message") {
                 if let Some(msg) = message.as_str() {
@@ -1532,7 +1527,7 @@ fn extract_error_message(body: &str) -> String {
 fn validate_fact_term(term: &Term) -> Result<(), String> {
     match term {
         Term::Constant(_)
-        | Term::FloatConstant(_.clone())
+        | Term::FloatConstant(_)
         | Term::StringConstant(_)
         | Term::VectorLiteral(_) => Ok(()),
         Term::Variable(v) => Err(format!(
@@ -1682,7 +1677,6 @@ fn print_help() {
     println!();
 }
 
-
 // Unit Tests
 #[cfg(test)]
 mod tests {
@@ -1822,3 +1816,43 @@ mod tests {
     }
 
     // Error Path Tests - Expressions
+    #[test]
+    fn test_reject_fact_with_arithmetic() {
+        use inputlayer::ast::{ArithExpr, ArithOp};
+        let fact = make_fact(
+            "result",
+            vec![Term::Arithmetic(ArithExpr::Binary {
+                op: ArithOp::Add,
+                left: Box::new(ArithExpr::Constant(1)),
+                right: Box::new(ArithExpr::Constant(2)),
+            })],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("arithmetic expression"));
+    }
+
+    #[test]
+    fn test_reject_fact_with_aggregate() {
+        use inputlayer::ast::AggregateFunc;
+        let fact = make_fact(
+            "result",
+            vec![Term::Aggregate(AggregateFunc::Count, "x".to_string())],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("aggregate"));
+    }
+
+    #[test]
+    fn test_reject_fact_with_function_call() {
+        use inputlayer::ast::BuiltinFunc;
+        let fact = make_fact(
+            "result",
+            vec![Term::FunctionCall(BuiltinFunc::TimeNow, vec![])],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("function call"));
+    }
+
