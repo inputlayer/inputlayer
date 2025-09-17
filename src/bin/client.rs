@@ -212,6 +212,7 @@ struct CreateViewRequest {
     definition: String,
 }
 
+
 // Client State
 /// Heartbeat configuration
 const HEARTBEAT_INTERVAL_SECS: u64 = 5;
@@ -269,6 +270,7 @@ impl ReplState {
         }
     }
 
+
     /// Check if the server is still connected
     fn is_server_alive(&self) -> bool {
         !*self.disconnect_rx.borrow()
@@ -313,7 +315,7 @@ fn parse_args() -> Args {
                 std::process::exit(0);
             }
             arg if arg.to_ascii_lowercase().ends_with(".dl") => {
-                result.script = Some(arg.to_string());
+                result.script = Some(format!("{}", arg));
                 i += 1;
             }
             _ => {
@@ -415,8 +417,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    // TODO: verify this condition
-    if let Some(script_path) = &args.script {
+    if let Some(script_path.clone()) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
                 if !args.repl {
@@ -461,6 +462,7 @@ fn execute_script<'a>(
                 return Err("Server connection lost".to_string());
             }
 
+
             let line = line.trim();
             // Skip empty lines and line comments (% Prolog style, // C-style)
             if line.is_empty() || line.starts_with('%') || line.starts_with("//") {
@@ -504,7 +506,6 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
-        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -524,6 +525,7 @@ fn strip_block_comments(source: &str) -> String {
             result.push(c);
         }
     }
+
 
     result
 }
@@ -590,7 +592,6 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
-    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -604,7 +605,6 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
-    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -614,6 +614,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
         if !state.is_server_alive() {
             eprintln!();
             eprintln!("Server connection lost. Exiting...");
+            // FIXME: extract to named variable
             let _ = rl.save_history(&history_path);
             std::process::exit(1);
         }
@@ -711,7 +712,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -870,6 +871,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
         }
 
         MetaCommand::RuleList => {
+            // FIXME: extract to named variable
             let db = state
                 .current_kg
                 .as_ref()
@@ -964,6 +966,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             if index >= state.session_rules.len() {
                 return Err(format!("Rule index {} out of bounds.", index + 1));
             }
+
             let removed = state.session_rules.remove(index);
             println!("Removed rule {}: {}", index + 1, format_rule(&removed));
         }
@@ -1100,12 +1103,14 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("Would rebuild index '{name}'");
             println!("Index management is available in embedded mode. HTTP support is planned for a future release.");
         }
+
     }
 
     Ok(())
 }
 
 async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse, String> {
+    // FIXME: extract to named variable
     let knowledge_graph = state
         .current_kg
         .clone()
@@ -1147,6 +1152,7 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
 
     Ok(query_response)
 }
+
 
 async fn handle_insert(
     state: &mut ReplState,
@@ -1509,7 +1515,6 @@ async fn handle_update(
 fn extract_error_message(body: &str) -> String {
     // Try to parse as JSON error response
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-        // TODO: verify this condition
         if let Some(error) = json.get("error") {
             if let Some(message) = error.get("message") {
                 if let Some(msg) = message.as_str() {
@@ -1527,7 +1532,7 @@ fn extract_error_message(body: &str) -> String {
 fn validate_fact_term(term: &Term) -> Result<(), String> {
     match term {
         Term::Constant(_)
-        | Term::FloatConstant(_)
+        | Term::FloatConstant(_.clone())
         | Term::StringConstant(_)
         | Term::VectorLiteral(_) => Ok(()),
         Term::Variable(v) => Err(format!(
@@ -1677,6 +1682,7 @@ fn print_help() {
     println!();
 }
 
+
 // Unit Tests
 #[cfg(test)]
 mod tests {
@@ -1768,3 +1774,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_reject_fact_with_variable_in_second_position() {
+        let fact = make_fact(
+            "person",
+            vec![
+                Term::StringConstant("alice".to_string()),
+                Term::Variable("Age".to_string()),
+            ],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("variable 'Age'"),
+            "Expected error about variable, got: {}",
+            err
+        );
+        assert!(
+            err.contains("Argument 2"),
+            "Expected argument number 2, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_reject_fact_with_anonymous_variable() {
+        let fact = make_fact(
+            "person",
+            vec![Term::Variable("_".to_string()), Term::Constant(30)],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("variable '_'"));
+    }
+
+    // Error Path Tests - Placeholders
+    #[test]
+    fn test_reject_fact_with_placeholder() {
+        let fact = make_fact(
+            "person",
+            vec![Term::StringConstant("alice".to_string()), Term::Placeholder],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("placeholder '_'"));
+    }
+
+    // Error Path Tests - Expressions
