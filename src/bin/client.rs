@@ -1856,3 +1856,48 @@ mod tests {
         assert!(result.unwrap_err().contains("function call"));
     }
 
+    #[test]
+    fn test_reject_fact_with_field_access() {
+        let fact = make_fact(
+            "result",
+            vec![Term::FieldAccess(
+                Box::new(Term::Variable("X".to_string())),
+                "field".to_string(),
+            )],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("field access"));
+    }
+
+    #[test]
+    fn test_reject_fact_with_record_pattern() {
+        let fact = make_fact(
+            "result",
+            vec![Term::RecordPattern(vec![(
+                "id".to_string(),
+                Term::Variable("X".to_string()),
+            )])],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("record pattern"));
+    }
+
+    // Edge Cases
+    #[test]
+    fn test_reject_mixed_valid_and_invalid() {
+        // First arg valid, second arg invalid
+        let fact = make_fact(
+            "mixed",
+            vec![
+                Term::Constant(42),
+                Term::Variable("X".to_string()),
+                Term::StringConstant("valid".to_string()),
+            ],
+        );
+        let result = validate_fact(&fact);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Argument 2"));
+    }
+
