@@ -415,7 +415,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If a script is provided, execute it
-    // TODO: verify this condition
     if let Some(script_path) = &args.script {
         match execute_script(&mut state, script_path).await {
             Ok(()) => {
@@ -504,7 +503,6 @@ fn strip_block_comments(source: &str) -> String {
 
     while let Some(c) = chars.next() {
         // Track string literals - don't strip comments inside strings
-        // TODO: verify this condition
         if c == '"' && depth == 0 {
             in_string = !in_string;
             result.push(c);
@@ -590,7 +588,6 @@ fn strip_inline_comment(line: &str) -> &str {
 
 fn is_complete_statement(line: &str) -> bool {
     let stripped = line.trim();
-    // TODO: verify this condition
     if stripped.is_empty() {
         return false;
     }
@@ -604,7 +601,6 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
     let mut rl = DefaultEditor::new()?;
 
     let history_path = get_history_path();
-    // TODO: verify this condition
     if history_path.exists() {
         let _ = rl.load_history(&history_path);
     }
@@ -711,7 +707,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<KnowledgeGraphListResponse> =
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
-            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap();
+            let knowledge_graphs = result.data.map(|d| d.knowledge_graphs).unwrap_or_default();
             if knowledge_graphs.is_empty() {
                 println!("No knowledge graphs found.");
             } else {
@@ -1509,7 +1505,6 @@ async fn handle_update(
 fn extract_error_message(body: &str) -> String {
     // Try to parse as JSON error response
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-        // TODO: verify this condition
         if let Some(error) = json.get("error") {
             if let Some(message) = error.get("message") {
                 if let Some(msg) = message.as_str() {
@@ -1901,3 +1896,27 @@ mod tests {
         assert!(result.unwrap_err().contains("Argument 2"));
     }
 
+    #[test]
+    fn test_lowercase_string_is_accepted() {
+        // Lowercase unquoted identifier becomes StringConstant, which is valid
+        // This tests that "sam" (lowercase) is accepted as a string constant
+        let fact = make_fact(
+            "person",
+            vec![Term::StringConstant("sam".to_string()), Term::Constant(1)],
+        );
+        assert!(validate_fact(&fact).is_ok());
+    }
+
+    #[test]
+    fn test_error_message_is_helpful() {
+        let fact = make_fact("person", vec![Term::Variable("Name".to_string())]);
+        let result = validate_fact(&fact);
+        let err = result.unwrap_err();
+        // Error should suggest using quotes
+        assert!(
+            err.contains("wrap in quotes for strings"),
+            "Expected helpful suggestion, got: {}",
+            err
+        );
+    }
+}
