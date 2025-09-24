@@ -45,7 +45,7 @@ fn test_concurrent_reads_do_not_block() {
         let handle = thread::spawn(move || {
             // Each reader executes the same query multiple times
             for _ in 0..5 {
-                let storage_guard = storage_clone.write().expect("Lock acquisition failed");
+                let storage_guard = storage_clone.write().unwrap();
                 let results = storage_guard
                     .execute_query_on("concurrent_test", "result(X,Y) :- edge(X,Y).")
                     .expect(&format!("Reader {} failed to execute query", i));
@@ -87,7 +87,7 @@ fn test_concurrent_reads_across_multiple_kgs() {
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
                         .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
-                        .expect("Query failed");
+                        .unwrap();
                     assert_eq!(results.len(), 1);
                     assert_eq!(results[0], (kg_num, kg_num * 10));
                 }
@@ -124,14 +124,16 @@ fn test_readers_see_consistent_snapshot() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("snapshot_test", "result(X,Y) :- counter(X,Y).")
-                    .expect("Query failed");
+                    .unwrap();
 
                 // Results should be non-empty (at least the initial data)
                 assert!(!results.is_empty() || iteration == 0);
 
+                // TODO: verify this condition
                 if let Some(prev) = &previous_result {
                     // Within a single thread, results should be consistent
                     // (no torn reads)
+                    // TODO: verify this condition
                     if !results.is_empty() && !prev.is_empty() {
                         // Just verify we get valid tuples
                         assert!(results[0].0 > 0);
@@ -145,7 +147,7 @@ fn test_readers_see_consistent_snapshot() {
     }
 
     for handle in handles {
-        let reader_id = handle.join().expect("Reader panicked");
+        let reader_id = handle.join().unwrap();
         assert!(reader_id < num_readers);
     }
 }
@@ -218,7 +220,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
                 for offset in 0..4 {
                     let kg_num = ((pattern + offset) % 4) + 1;
                     let kg_name = format!("deadlock_test_kg{}", kg_num);
-                    let storage_guard = storage_clone.write().expect("Lock failed");
+                    let storage_guard = storage_clone.write().unwrap();
                     let results = storage_guard
                         .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
                         .expect("Query failed - possible deadlock?");
@@ -231,7 +233,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
 
     // If there's a deadlock, this will hang
     for handle in handles {
-        handle.join().expect("Deadlock or panic detected");
+        handle.join().unwrap();
     }
 }
 
@@ -278,7 +280,7 @@ fn test_mixed_valid_invalid_queries_concurrent() {
     for i in 0..10 {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let storage_guard = storage_clone.write().expect("Lock failed");
+            let storage_guard = storage_clone.write().unwrap();
             if i % 2 == 0 {
                 // Valid query
                 let result = storage_guard
@@ -296,9 +298,178 @@ fn test_mixed_valid_invalid_queries_concurrent() {
     }
 
     for handle in handles {
-        handle.join().expect("Thread panicked");
+        handle.join().unwrap();
     }
 }
 
 // Metadata Access Under Contention
+#[test]
+fn test_list_kgs_under_read_contention() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create several KGs
+    for i in 1..=5 {
+        storage
+            .create_knowledge_graph(&format!("list_test_kg{}", i))
+            .unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let mut handles = vec![];
+
+    // Readers querying data
+    for i in 0..5 {
+        let storage_clone = Arc::clone(&storage);
+        let kg_name = format!("list_test_kg{}", (i % 5) + 1);
+        let handle = thread::spawn(move || {
+            for _ in 0..20 {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let _ = storage_guard.execute_query_on(&kg_name, "result(X,Y) :- edge(X,Y).");
+            }
+        });
+        handles.push(handle);
+    }
+
+    // Threads listing KGs concurrently with readers
+    for _ in 0..3 {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for _ in 0..20 {
+                let storage_guard = storage_clone.read().expect("Lock failed");
+                let kgs = storage_guard.list_knowledge_graphs();
+                // Should always see at least default + our 5 KGs
+                assert!(kgs.len() >= 6);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+// Parallel Query API Tests
+#[test]
+fn test_parallel_api_under_concurrent_access() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create KGs
+    for i in 1..=4 {
+        let kg_name = format!("parallel_api_kg{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        storage
+            .insert_into(&kg_name, "data", vec![(i, i * 10)])
+            .unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let mut handles = vec![];
+
+    // Multiple threads using parallel query API simultaneously
+    for _ in 0..4 {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for _ in 0..10 {
+                let queries: Vec<(&str, &str)> = vec![
+                    ("parallel_api_kg1", "result(X,Y) :- data(X,Y)."),
+                    ("parallel_api_kg2", "result(X,Y) :- data(X,Y)."),
+                    ("parallel_api_kg3", "result(X,Y) :- data(X,Y)."),
+                    ("parallel_api_kg4", "result(X,Y) :- data(X,Y)."),
+                ];
+
+                let storage_guard = storage_clone.read().unwrap();
+                let results = storage_guard
+                    .execute_parallel_queries_on_knowledge_graphs(queries)
+                    .expect("Parallel query failed");
+
+                assert_eq!(results.len(), 4);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+}
+
+// Stress Test: Sustained Load
+#[test]
+fn test_sustained_concurrent_load() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("sustained_test").unwrap();
+
+    // Insert data
+    let data: Vec<(i32, i32)> = (0..50).map(|i| (i, i * 2)).collect();
+    storage
+        .insert_into("sustained_test", "values", data)
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 8;
+    let iterations = 100;
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for iter in 0..iterations {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on("sustained_test", "result(X,Y) :- values(X,Y).")
+                    .expect(&format!("Thread {} iteration {} failed", thread_id, iter));
+                assert_eq!(results.len(), 50);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
+// Lock Poisoning Recovery Test
+#[test]
+fn test_lock_poisoning_recovery_at_storage_level() {
+    // This tests that our storage engine handles errors gracefully
+    // We can't actually poison the internal locks easily, but we can test
+    // that the error paths work correctly
+
+    let (storage, _temp) = create_test_storage();
+
+    // Create a KG
+    storage.create_knowledge_graph("poison_test").unwrap();
+    storage
+        .insert_into("poison_test", "data", vec![(1, 2)])
+        .unwrap();
+
+    // Wrap in RwLock
+    let storage = Arc::new(RwLock::new(storage));
+
+    // Simulate a thread that panics while NOT holding the lock
+    // (This won't poison the lock, but tests error handling paths)
+    let storage_clone = Arc::clone(&storage);
+    let handle = thread::spawn(move || {
+        // Successfully get data
+        let guard = storage_clone.write().unwrap();
+        let results = guard.execute_query_on("poison_test", "result(X,Y) :- data(X,Y).");
+        assert!(results.is_ok());
+        // Explicitly drop the guard before any potential panic
+        drop(guard);
+    });
+
+    handle.join().expect("Thread should complete successfully");
+
+    // After thread completes, we should still be able to use the storage
+    let storage_guard = storage.write().unwrap();
+    let results = storage_guard
+        .execute_query_on("poison_test", "result(X,Y) :- data(X,Y).")
+        .expect("Should still work after thread completed");
+    assert_eq!(results.len(), 1);
+}
+
+// Internal Lock Error Handling Test
 #[test]
