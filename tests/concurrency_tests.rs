@@ -45,7 +45,7 @@ fn test_concurrent_reads_do_not_block() {
         let handle = thread::spawn(move || {
             // Each reader executes the same query multiple times
             for _ in 0..5 {
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock acquisition failed");
                 let results = storage_guard
                     .execute_query_on("concurrent_test", "result(X,Y) :- edge(X,Y).")
                     .expect(&format!("Reader {} failed to execute query", i));
@@ -87,7 +87,7 @@ fn test_concurrent_reads_across_multiple_kgs() {
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
                         .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
-                        .unwrap();
+                        .expect("Query failed");
                     assert_eq!(results.len(), 1);
                     assert_eq!(results[0], (kg_num, kg_num * 10));
                 }
@@ -124,16 +124,14 @@ fn test_readers_see_consistent_snapshot() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("snapshot_test", "result(X,Y) :- counter(X,Y).")
-                    .unwrap();
+                    .expect("Query failed");
 
                 // Results should be non-empty (at least the initial data)
                 assert!(!results.is_empty() || iteration == 0);
 
-                // TODO: verify this condition
                 if let Some(prev) = &previous_result {
                     // Within a single thread, results should be consistent
                     // (no torn reads)
-                    // TODO: verify this condition
                     if !results.is_empty() && !prev.is_empty() {
                         // Just verify we get valid tuples
                         assert!(results[0].0 > 0);
@@ -147,7 +145,7 @@ fn test_readers_see_consistent_snapshot() {
     }
 
     for handle in handles {
-        let reader_id = handle.join().unwrap();
+        let reader_id = handle.join().expect("Reader panicked");
         assert!(reader_id < num_readers);
     }
 }
@@ -220,7 +218,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
                 for offset in 0..4 {
                     let kg_num = ((pattern + offset) % 4) + 1;
                     let kg_name = format!("deadlock_test_kg{}", kg_num);
-                    let storage_guard = storage_clone.write().unwrap();
+                    let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
                         .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
                         .expect("Query failed - possible deadlock?");
@@ -233,7 +231,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
 
     // If there's a deadlock, this will hang
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Deadlock or panic detected");
     }
 }
 
@@ -280,7 +278,7 @@ fn test_mixed_valid_invalid_queries_concurrent() {
     for i in 0..10 {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let storage_guard = storage_clone.write().unwrap();
+            let storage_guard = storage_clone.write().expect("Lock failed");
             if i % 2 == 0 {
                 // Valid query
                 let result = storage_guard
@@ -298,7 +296,7 @@ fn test_mixed_valid_invalid_queries_concurrent() {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Thread panicked");
     }
 }
 
@@ -345,7 +343,7 @@ fn test_list_kgs_under_read_contention() {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Thread panicked");
     }
 }
 
@@ -378,7 +376,7 @@ fn test_parallel_api_under_concurrent_access() {
                     ("parallel_api_kg4", "result(X,Y) :- data(X,Y)."),
                 ];
 
-                let storage_guard = storage_clone.read().unwrap();
+                let storage_guard = storage_clone.read().expect("Lock failed");
                 let results = storage_guard
                     .execute_parallel_queries_on_knowledge_graphs(queries)
                     .expect("Parallel query failed");
@@ -427,7 +425,7 @@ fn test_sustained_concurrent_load() {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Thread failed under sustained load");
     }
 }
 
@@ -473,3 +471,34 @@ fn test_lock_poisoning_recovery_at_storage_level() {
 
 // Internal Lock Error Handling Test
 #[test]
+fn test_storage_engine_returns_errors_not_panics() {
+    let (mut storage, _temp) = create_test_storage();
+
+    // These operations should return errors, not panic
+
+    // Query non-existent KG
+    let result = storage.execute_query_on("nonexistent", "result(X,Y) :- edge(X,Y).");
+    assert!(result.is_err());
+
+    // Try to use non-existent KG
+    let result = storage.use_knowledge_graph("nonexistent");
+    assert!(result.is_err());
+
+    // Try to drop non-existent KG
+    let result = storage.drop_knowledge_graph("nonexistent");
+    assert!(result.is_err());
+
+    // Try to insert into non-existent KG
+    let result = storage.insert_into("nonexistent", "edge", vec![(1, 2)]);
+    assert!(result.is_err());
+
+    // After all these errors, storage should still work
+    storage.create_knowledge_graph("working").unwrap();
+    storage
+        .insert_into("working", "edge", vec![(1, 2)])
+        .unwrap();
+    let results = storage
+        .execute_query_on("working", "result(X,Y) :- edge(X,Y).")
+        .expect("Should work after errors");
+    assert_eq!(results.len(), 1);
+}
