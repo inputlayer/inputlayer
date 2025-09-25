@@ -72,7 +72,7 @@ fn test_100_concurrent_readers_during_write() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into("reader_stress", "new_data", vec![(tuple_id, tuple_id)])
-                    .unwrap();
+                    .expect("Insert failed");
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         });
@@ -112,7 +112,7 @@ fn test_lock_contention_no_starvation() {
         let running_clone = Arc::clone(&running);
         let handle = thread::spawn(move || {
             while running_clone.load(Ordering::Relaxed) {
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard.list_knowledge_graphs(); // Simple read operation
                 drop(storage_guard);
                 counter.fetch_add(1, Ordering::Relaxed);
@@ -252,7 +252,7 @@ fn test_concurrent_kg_create_delete() {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Thread panicked during KG operations");
     }
 
     // Storage should still be functional
@@ -393,7 +393,7 @@ fn test_concurrent_recursive_queries() {
                 // Simple query (not actually recursive, but exercises query path)
                 let results = storage_guard
                     .execute_query_on("recursive_stress", "result(X,Y) :- edge(X,Y).")
-                    .unwrap();
+                    .expect("Query failed");
                 assert_eq!(results.len(), 20);
                 counter.fetch_add(1, Ordering::Relaxed);
             }
@@ -439,7 +439,7 @@ fn test_parallel_queries_with_different_complexities() {
         let counter = Arc::clone(&successful_queries);
         let handle = thread::spawn(move || {
             for i in 0..30 {
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
 
                 // Alternate between different query types
                 // All queries should succeed (not panic)
@@ -541,7 +541,7 @@ fn test_burst_traffic_pattern() {
             let storage_clone = Arc::clone(&storage);
             let handle = thread::spawn(move || {
                 for _ in 0..ops_per_thread {
-                    let storage_guard = storage_clone.write().unwrap();
+                    let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
                         .execute_query_on("burst_test", "result(X,Y) :- data(X,Y).")
                         .expect("Query failed");
@@ -562,4 +562,116 @@ fn test_burst_traffic_pattern() {
 }
 
 // Data Integrity Under Concurrency
+#[test]
+fn test_data_integrity_under_heavy_concurrent_writes() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("integrity_test").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 20;
+    let writes_per_thread = 50;
+    let mut handles = vec![];
+
+    // Each thread writes unique tuples
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for i in 0..writes_per_thread {
+                let key = thread_id * 1000 + i;
+                let value = key * 2; // Deterministic value
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into("integrity_test", "data", vec![(key as i32, value as i32)])
+                    .expect("Insert failed");
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Verify data integrity
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("integrity_test", "result(X,Y) :- data(X,Y).")
+        .expect("Query failed");
+
+    assert_eq!(
+        results.len(),
+        num_threads * writes_per_thread,
+        "Missing tuples"
+    );
+
+    // Verify each tuple has correct value
+    for (key, value) in results {
+        assert_eq!(
+            value,
+            key * 2,
+            "Data corruption: key {} has value {}, expected {}",
+            key,
+            value,
+            key * 2
+        );
+    }
+}
+
+#[test]
+fn test_no_data_loss_during_concurrent_operations() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("no_loss_test").unwrap();
+
+    // Pre-populate with initial data
+    let initial_data: Vec<(i32, i32)> = (0..100).map(|i| (i, i * 10)).collect();
+    storage
+        .insert_into("no_loss_test", "initial", initial_data)
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 15;
+    let mut handles = vec![];
+
+    // Half threads read, half threads write to different relation
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for i in 0..30 {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if thread_id % 2 == 0 {
+                    // Reader - verify initial data is intact
+                    let results = storage_guard
+                        .execute_query_on("no_loss_test", "result(X,Y) :- initial(X,Y).")
+                        .expect("Query failed");
+                    assert_eq!(
+                        results.len(),
+                        100,
+                        "Data loss detected! Expected 100, got {}",
+                        results.len()
+                    );
+                } else {
+                    // Writer - add to different relation
+                    let tuple_id = (thread_id * 1000 + i) as i32;
+                    storage_guard
+                        .insert_into("no_loss_test", "new_data", vec![(tuple_id, tuple_id)])
+                        .expect("Insert failed");
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Final verification
+    let storage_guard = storage.write().expect("Lock failed");
+    let initial_results = storage_guard
+        .execute_query_on("no_loss_test", "result(X,Y) :- initial(X,Y).")
+        .expect("Query failed");
+    assert_eq!(initial_results.len(), 100, "Initial data was corrupted");
+}
+
+// Edge Cases
 #[test]
