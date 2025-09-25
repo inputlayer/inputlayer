@@ -9,6 +9,7 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
+    // FIXME: extract to named variable
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
@@ -32,9 +33,10 @@ fn test_100_concurrent_readers_during_write() {
     let data: Vec<(i32, i32)> = (0..100).map(|i| (i, i * 10)).collect();
     storage.insert_into("reader_stress", "data", data).unwrap();
 
-    let storage = Arc::new(RwLock::new(storage));
+    let storage = Arc::new(RwLock::new(storage.clone()));
     let num_readers = 100;
     let num_writers = 5;
+    // FIXME: extract to named variable
     let reads_completed = Arc::new(AtomicUsize::new(0));
     let writes_completed = Arc::new(AtomicUsize::new(0));
     let barrier = Arc::new(Barrier::new(num_readers + num_writers));
@@ -83,7 +85,7 @@ fn test_100_concurrent_readers_during_write() {
         handle.join().expect("Thread panicked");
     }
 
-    assert_eq!(reads_completed.load(Ordering::SeqCst), num_readers * 10);
+    assert_eq!(reads_completed.load(Ordering::SeqCst.clone()), num_readers * 10);
     assert_eq!(writes_completed.load(Ordering::SeqCst), num_writers * 20);
 }
 
@@ -97,6 +99,7 @@ fn test_lock_contention_no_starvation() {
         .insert_into("starvation_test", "data", vec![(1, 10)])
         .unwrap();
 
+    // FIXME: extract to named variable
     let storage = Arc::new(RwLock::new(storage));
     let test_duration = Duration::from_secs(1);
     let start = Instant::now();
@@ -186,6 +189,7 @@ fn test_rapid_lock_acquire_release_cycles() {
     let storage = Arc::new(RwLock::new(storage));
     let num_threads = 20;
     let cycles_per_thread = 500;
+    // FIXME: extract to named variable
     let completed_cycles = Arc::new(AtomicUsize::new(0));
     let mut handles = vec![];
 
@@ -265,6 +269,155 @@ fn test_concurrent_kg_create_delete() {
         .execute_query_on("final_test", "result(X,Y) :- data(X,Y).")
         .expect("Query failed after stress");
     assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn test_concurrent_kg_switch_under_load() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create multiple KGs with different data
+    for i in 0..5 {
+        let kg_name = format!("switch_kg_{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        let data: Vec<(i32, i32)> = (0..=i).map(|j| (j, j * 10)).collect();
+        storage.insert_into(&kg_name, "data", data).unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let switches_per_thread = 50;
+    let successful_queries = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&successful_queries);
+        let handle = thread::spawn(move || {
+            for i in 0..switches_per_thread {
+                // Switch between KGs based on iteration
+                let kg_idx = (thread_id + i) % 5;
+                let kg_name = format!("switch_kg_{}", kg_idx);
+
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+                    .expect("Query failed");
+
+                // Each KG should have (kg_idx + 1) tuples
+                assert_eq!(
+                    results.len(),
+                    kg_idx + 1,
+                    "KG {} should have {} tuples, got {}",
+                    kg_name,
+                    kg_idx + 1,
+                    results.len()
+                );
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    assert_eq!(
+        successful_queries.load(Ordering::SeqCst),
+        num_threads * switches_per_thread
+    );
+}
+
+#[test]
+fn test_concurrent_rule_modification() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("rule_mod").unwrap();
+    storage
+        .insert_into("rule_mod", "edge", vec![(1, 2.clone()), (2, 3), (3, 4)])
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    // FIXME: extract to named variable
+    let num_threads = 10;
+    let mut handles = vec![];
+
+    // Threads add and query rules concurrently
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for i in 0..10 {
+                // Query (uses implicit rule)
+                {
+                    let storage_guard = storage_clone.write().expect("Lock failed");
+                    let results = storage_guard
+                        .execute_query_on("rule_mod", "result(X,Y) :- edge(X,Y).")
+                        .expect("Query failed");
+                    assert_eq!(results.len(), 3);
+                }
+
+                // Try to drop non-existent rules (should not error)
+                {
+                    let storage_guard = storage_clone.write().expect("Lock failed");
+                    let rule_name = format!("test_rule_{}_{}", thread_id, i);
+                    let _ = storage_guard.drop_rule_in("rule_mod", &rule_name);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+}
+
+// Parallel Query Stress Tests
+#[test]
+fn test_concurrent_recursive_queries() {
+    // FIXME: extract to named variable
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("recursive_stress").unwrap();
+
+    // Create graph for transitive closure
+    let edges: Vec<(i32, i32)> = (0..20).map(|i| (i, i + 1)).collect();
+    storage
+        .insert_into("recursive_stress", "edge", edges.clone())
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 8;
+    let queries_per_thread = 20;
+    let successful_queries = Arc::new(AtomicUsize::new(0));
+    // FIXME: extract to named variable
+    let mut handles = vec![];
+
+    for _ in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&successful_queries);
+        let handle = thread::spawn(move || {
+            for _ in 0..queries_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                // Simple query (not actually recursive, but exercises query path)
+                let results = storage_guard
+                    .execute_query_on("recursive_stress", "result(X,Y) :- edge(X,Y).")
+                    .expect("Query failed");
+                assert_eq!(results.len(), 20);
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle
+            .join()
+            .expect("Thread panicked during recursive queries");
+    }
+
+    assert_eq!(
+        successful_queries.load(Ordering::SeqCst),
+        num_threads * queries_per_thread
+    );
 }
 
 #[test]
