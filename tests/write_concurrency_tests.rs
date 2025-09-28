@@ -52,7 +52,7 @@ fn test_concurrent_inserts_to_same_kg() {
     }
 
     // Verify all inserts succeeded
-    let storage_guard = storage.write().unwrap();
+    let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("insert_test", "result(X,Y) :- data(X,Y).")
         .expect("Query failed");
@@ -192,7 +192,7 @@ fn test_insert_throughput_under_read_load() {
         let handle = thread::spawn(move || {
             for i in 0..ops_per_thread {
                 let tuple_id = (thread_id * 10000 + i) as i32;
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into("throughput_test", "new_data", vec![(tuple_id, tuple_id)])
                     .expect("Insert failed");
@@ -272,7 +272,7 @@ fn test_concurrent_deletes_to_same_kg() {
     }
 
     // Verify all tuples were deleted
-    let storage_guard = storage.write().unwrap();
+    let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("delete_test", "result(X,Y) :- data(X,Y).")
         .expect("Query failed");
@@ -300,7 +300,7 @@ fn test_concurrent_deletes_to_different_kgs() {
         let handle = thread::spawn(move || {
             let kg_name = format!("delete_kg_{}", kg_id);
             for i in 0..20 {
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard.delete_from(&kg_name, "data", vec![(i, i * 10)]);
             }
         });
@@ -364,7 +364,7 @@ fn test_delete_nonexistent_concurrent() {
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("delete_nonexistent", "result(X,Y) :- data(X,Y).")
-        .unwrap();
+        .expect("Query failed");
     assert_eq!(results.len(), 2);
 }
 
@@ -392,7 +392,7 @@ fn test_readers_not_blocked_by_writers() {
         let handle = thread::spawn(move || {
             for i in 0..ops_per_thread {
                 let tuple_id = (thread_id * 10000 + i) as i32;
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into("read_write_mix", "new", vec![(tuple_id, tuple_id)])
                     .expect("Insert failed");
@@ -476,7 +476,7 @@ fn test_writers_not_blocked_by_readers() {
         let handle = thread::spawn(move || {
             for i in 0..ops_per_thread {
                 let tuple_id = (thread_id * 10000 + i) as i32;
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into("write_read_mix", "new_data", vec![(tuple_id, tuple_id)])
                     .expect("Insert failed");
@@ -512,7 +512,7 @@ fn test_read_write_interleaving() {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
             for i in 0..ops_per_thread {
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 if i % 2 == 0 {
                     // Write
                     let tuple_id = (thread_id * 10000 + i) as i32;
@@ -531,7 +531,7 @@ fn test_read_write_interleaving() {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().expect("Thread panicked");
     }
 
     // Verify writes succeeded
@@ -574,7 +574,7 @@ fn test_snapshot_visibility_after_write() {
                     .expect("Query failed");
                 // Should see at least our own tuple
                 assert!(
-                    results.iter().any(|t| *t != (tuple_id, tuple_id * 2)),
+                    results.iter().any(|t| *t == (tuple_id, tuple_id * 2)),
                     "Thread {} should see its own write",
                     thread_id
                 );
@@ -694,7 +694,7 @@ fn test_100_concurrent_writers_10_kgs() {
         let kg_name = format!("stress_kg_{}", i);
         let results = storage_guard
             .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
-            .unwrap();
+            .expect("Query failed");
         // Each KG should have tuples from 10 threads (100/10)
         assert_eq!(results.len(), 10 * writes_per_thread);
         total += results.len();
@@ -778,3 +778,147 @@ fn test_concurrent_rule_drop() {
 
 // Error Recovery Tests
 #[test]
+fn test_write_error_doesnt_corrupt_state() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("error_test").unwrap();
+    storage
+        .insert_into("error_test", "data", vec![(1, 10), (2, 20)])
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let mut handles = vec![];
+
+    // Some threads do valid operations
+    for thread_id in 0..5 {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            let tuple_id = (thread_id + 10) as i32;
+            let storage_guard = storage_clone.write().expect("Lock failed");
+            storage_guard
+                .insert_into("error_test", "data", vec![(tuple_id, tuple_id * 10)])
+                .expect("Valid insert failed");
+        });
+        handles.push(handle);
+    }
+
+    // Some threads try invalid operations (non-existent KG)
+    for _ in 0..5 {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            let storage_guard = storage_clone.write().expect("Lock failed");
+            let result = storage_guard.insert_into("nonexistent", "data", vec![(1, 1)]);
+            // Should error, not panic
+            assert!(result.is_err());
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked on error");
+    }
+
+    // State should be consistent
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("error_test", "result(X,Y) :- data(X,Y).")
+        .expect("Query failed after errors");
+    // Original 2 + 5 valid inserts
+    assert_eq!(results.len(), 7);
+}
+
+#[test]
+fn test_concurrent_writes_with_errors() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("mixed_errors").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let error_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    // Mix of valid and invalid operations
+    for i in 0..20 {
+        let storage_clone = Arc::clone(&storage);
+        let success = Arc::clone(&success_count);
+        let errors = Arc::clone(&error_count);
+        let handle = thread::spawn(move || {
+            let storage_guard = storage_clone.write().expect("Lock failed");
+            if i % 3 == 0 {
+                // Invalid KG
+                let result = storage_guard.insert_into("invalid_kg", "data", vec![(i, i)]);
+                if result.is_err() {
+                    errors.fetch_add(1, Ordering::SeqCst);
+                }
+            } else {
+                // Valid insert
+                let result = storage_guard.insert_into("mixed_errors", "data", vec![(i, i * 10)]);
+                if result.is_ok() {
+                    success.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Verify counts
+    assert!(success_count.load(Ordering::SeqCst) > 0);
+    assert!(error_count.load(Ordering::SeqCst) > 0);
+
+    // Verify data integrity
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("mixed_errors", "result(X,Y) :- data(X,Y).")
+        .expect("Query failed");
+    assert_eq!(results.len(), success_count.load(Ordering::SeqCst));
+}
+
+#[test]
+fn test_concurrent_kg_creation_and_writes() {
+    let (storage, _temp) = create_shared_storage();
+    let num_threads = 10;
+    let mut handles = vec![];
+
+    // Each thread creates its own KG and writes to it
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            let kg_name = format!("created_kg_{}", thread_id);
+
+            // Create KG
+            {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .create_knowledge_graph(&kg_name)
+                    .expect("KG creation failed");
+            }
+
+            // Write to it
+            for i in 0..10 {
+                let tuple_id = (thread_id * 100 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into(&kg_name, "data", vec![(tuple_id, tuple_id)])
+                    .expect("Insert failed");
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // Verify all KGs exist and have data
+    let storage_guard = storage.write().expect("Lock failed");
+    for i in 0..num_threads {
+        let kg_name = format!("created_kg_{}", i);
+        let results = storage_guard
+            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .expect("Query failed");
+        assert_eq!(results.len(), 10);
+    }
+}
