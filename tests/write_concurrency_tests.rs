@@ -161,7 +161,7 @@ fn test_high_volume_concurrent_inserts() {
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("high_volume", "result(X,Y) :- data(X,Y).")
-        .unwrap();
+        .expect("Query failed");
     assert_eq!(results.len(), num_threads * inserts_per_thread);
 }
 
@@ -255,7 +255,7 @@ fn test_concurrent_deletes_to_same_kg() {
             // Each thread deletes tuples where id % num_threads == thread_id
             for i in 0..10 {
                 let tuple_id = (thread_id * 10 + i) as i32;
-                let storage_guard = storage_clone.write().unwrap();
+                let storage_guard = storage_clone.write().expect("Lock failed");
                 // Use delete with specific tuple
                 let _ = storage_guard.delete_from(
                     "delete_test",
@@ -272,7 +272,7 @@ fn test_concurrent_deletes_to_same_kg() {
     }
 
     // Verify all tuples were deleted
-    let storage_guard = storage.write().expect("Lock failed");
+    let storage_guard = storage.write().unwrap();
     let results = storage_guard
         .execute_query_on("delete_test", "result(X,Y) :- data(X,Y).")
         .expect("Query failed");
@@ -364,7 +364,7 @@ fn test_delete_nonexistent_concurrent() {
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("delete_nonexistent", "result(X,Y) :- data(X,Y).")
-        .expect("Query failed");
+        .unwrap();
     assert_eq!(results.len(), 2);
 }
 
@@ -591,9 +591,190 @@ fn test_snapshot_visibility_after_write() {
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
         .execute_query_on("snapshot_vis", "result(X,Y) :- data(X,Y).")
-        .unwrap();
+        .expect("Query failed");
     assert_eq!(results.len(), num_threads);
 }
 
 // Stress Tests
+#[test]
+fn test_100_concurrent_writers_same_kg() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("stress_same").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 100;
+    let writes_per_thread = 5;
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&success_count);
+        let handle = thread::spawn(move || {
+            for i in 0..writes_per_thread {
+                let tuple_id = (thread_id * 1000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if storage_guard
+                    .insert_into("stress_same", "data", vec![(tuple_id, tuple_id)])
+                    .is_ok()
+                {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked under stress");
+    }
+
+    assert_eq!(
+        success_count.load(Ordering::SeqCst),
+        num_threads * writes_per_thread
+    );
+
+    // Verify data
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("stress_same", "result(X,Y) :- data(X,Y).")
+        .expect("Query failed");
+    assert_eq!(results.len(), num_threads * writes_per_thread);
+}
+
+#[test]
+fn test_100_concurrent_writers_10_kgs() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create 10 KGs
+    for i in 0..10 {
+        storage
+            .create_knowledge_graph(&format!("stress_kg_{}", i))
+            .unwrap();
+    }
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 100;
+    let writes_per_thread = 5;
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&success_count);
+        let handle = thread::spawn(move || {
+            let kg_name = format!("stress_kg_{}", thread_id % 10);
+            for i in 0..writes_per_thread {
+                let tuple_id = (thread_id * 1000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                if storage_guard
+                    .insert_into(&kg_name, "data", vec![(tuple_id, tuple_id)])
+                    .is_ok()
+                {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked under stress");
+    }
+
+    assert_eq!(
+        success_count.load(Ordering::SeqCst),
+        num_threads * writes_per_thread
+    );
+
+    // Verify each KG has correct data
+    let storage_guard = storage.write().expect("Lock failed");
+    let mut total = 0;
+    for i in 0..10 {
+        let kg_name = format!("stress_kg_{}", i);
+        let results = storage_guard
+            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .unwrap();
+        // Each KG should have tuples from 10 threads (100/10)
+        assert_eq!(results.len(), 10 * writes_per_thread);
+        total += results.len();
+    }
+    assert_eq!(total, num_threads * writes_per_thread);
+}
+
+#[test]
+fn test_sustained_write_load_1000_ops() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("sustained_write").unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let ops_per_thread = 100;
+    let total_ops = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&total_ops);
+        let handle = thread::spawn(move || {
+            for i in 0..ops_per_thread {
+                let tuple_id = (thread_id * 10000 + i) as i32;
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                storage_guard
+                    .insert_into("sustained_write", "data", vec![(tuple_id, tuple_id)])
+                    .expect("Insert failed");
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread failed under sustained load");
+    }
+
+    assert_eq!(
+        total_ops.load(Ordering::SeqCst),
+        num_threads * ops_per_thread
+    );
+
+    // Verify all data
+    let storage_guard = storage.write().expect("Lock failed");
+    let results = storage_guard
+        .execute_query_on("sustained_write", "result(X,Y) :- data(X,Y).")
+        .expect("Query failed");
+    assert_eq!(results.len(), num_threads * ops_per_thread);
+}
+
+// Rule Drop Concurrent Tests
+#[test]
+fn test_concurrent_rule_drop() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("rule_drop_test").unwrap();
+    storage
+        .insert_into("rule_drop_test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 10;
+    let mut handles = vec![];
+
+    // Each thread tries to drop rules (some may not exist, but that's fine)
+    for thread_id in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            let rule_name = format!("rule_{}", thread_id);
+            let storage_guard = storage_clone.write().expect("Lock failed");
+            // This should not panic, even if rule doesn't exist
+            let _ = storage_guard.drop_rule_in("rule_drop_test", &rule_name);
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+}
+
+// Error Recovery Tests
 #[test]
