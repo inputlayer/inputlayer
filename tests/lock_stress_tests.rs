@@ -675,3 +675,73 @@ fn test_no_data_loss_during_concurrent_operations() {
 
 // Edge Cases
 #[test]
+fn test_concurrent_empty_query_results() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("empty_results").unwrap();
+    // Don't insert any data
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 20;
+    let mut handles = vec![];
+
+    for _ in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let handle = thread::spawn(move || {
+            for _ in 0..50 {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on("empty_results", "result(X,Y) :- data(X,Y).")
+                    .expect("Query failed");
+                // Empty result is valid
+                assert!(results.is_empty());
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked on empty results");
+    }
+}
+
+#[test]
+fn test_concurrent_single_tuple_contention() {
+    let (storage, _temp) = create_test_storage();
+    storage.create_knowledge_graph("single_tuple").unwrap();
+    storage
+        .insert_into("single_tuple", "data", vec![(42, 84)])
+        .unwrap();
+
+    let storage = Arc::new(RwLock::new(storage));
+    let num_threads = 50;
+    let queries_per_thread = 100;
+    let correct_results = Arc::new(AtomicUsize::new(0));
+    let mut handles = vec![];
+
+    for _ in 0..num_threads {
+        let storage_clone = Arc::clone(&storage);
+        let counter = Arc::clone(&correct_results);
+        let handle = thread::spawn(move || {
+            for _ in 0..queries_per_thread {
+                let storage_guard = storage_clone.write().expect("Lock failed");
+                let results = storage_guard
+                    .execute_query_on("single_tuple", "result(X,Y) :- data(X,Y).")
+                    .expect("Query failed");
+                if results.len() == 1 && results[0] == (42, 84) {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().expect("Thread panicked");
+    }
+
+    // All queries should have returned the correct single tuple
+    assert_eq!(
+        correct_results.load(Ordering::SeqCst),
+        num_threads * queries_per_thread
+    );
+}
