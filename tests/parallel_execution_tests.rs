@@ -117,3 +117,148 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 
 #[test]
 #[ignore] // Constraint syntax (X > 5, etc.) no longer supported - Constraint type removed
+fn test_multiple_queries_on_same_knowledge_graph() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into(
+            "test",
+            "edge",
+            vec![
+                (1, 2),
+                (2, 3),
+                (3, 4),
+                (4, 5),
+                (5, 6),
+                (6, 7),
+                (7, 8),
+                (8, 9),
+                (9, 10),
+            ],
+        )
+        .unwrap();
+
+    // Execute multiple queries on the same knowledge_graph in parallel
+    let queries = vec![
+        "q1(X,Y) :- edge(X,Y).",               // All edges
+        "q2(X,Y) :- edge(X,Y), X > 5.",        // x > 5
+        "q3(X,Y) :- edge(X,Y), X < 5.",        // x < 5
+        "q4(X,Y) :- edge(X,Y), X > 3, X < 7.", // 3 < x < 7
+    ];
+
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
+
+    assert_eq!(results.len(), 4);
+    assert_eq!(results[0].len(), 9); // All edges
+    assert_eq!(results[1].len(), 4); // x > 5: 6,7,8,9
+    assert_eq!(results[2].len(), 4); // x < 5: 1,2,3,4
+    assert_eq!(results[3].len(), 3); // 3 < x < 7: 4,5,6
+}
+
+// KnowledgeGraph Isolation Tests (Concurrent Access)
+#[test]
+fn test_parallel_queries_maintain_knowledge_graph_isolation() {
+    let (storage, _temp) = create_test_storage();
+
+    // Create knowledge_graphs with different data
+    storage.create_knowledge_graph("db1").unwrap();
+    storage
+        .insert_into("db1", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+
+    storage.create_knowledge_graph("db2").unwrap();
+    storage
+        .insert_into("db2", "edge", vec![(10, 20), (20, 30)])
+        .unwrap();
+
+    // Execute queries in parallel
+    let queries = vec![
+        ("db1", "result(X,Y) :- edge(X,Y)."),
+        ("db2", "result(X,Y) :- edge(X,Y)."),
+    ];
+
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
+
+    // Verify each knowledge_graph only sees its own data
+    let db1_results = results.iter().find(|(db, _)| db == "db1").unwrap();
+    let db2_results = results.iter().find(|(db, _)| db == "db2").unwrap();
+
+    assert!(db1_results.1.contains(&(1, 2)));
+    assert!(db1_results.1.contains(&(2, 3)));
+    assert!(!db1_results.1.contains(&(10, 20))); // Should not see db2's data
+
+    assert!(db2_results.1.contains(&(10, 20)));
+    assert!(db2_results.1.contains(&(20, 30)));
+    assert!(!db2_results.1.contains(&(1, 2))); // Should not see db1's data
+}
+
+#[test]
+fn test_concurrent_queries_on_different_relations() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into("test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+    storage
+        .insert_into("test", "person", vec![(100, 200), (200, 300)])
+        .unwrap();
+
+    // Query different relations in parallel
+    let queries = vec!["q1(X,Y) :- edge(X,Y).", "q2(X,Y) :- person(X,Y)."];
+
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
+
+    assert_eq!(results.len(), 2);
+    // Both queries should return 2 results each
+    assert_eq!(results[0].len(), 2);
+    assert_eq!(results[1].len(), 2);
+
+    // Results may come back in any order due to parallel execution
+    // Find which result set contains edge data vs person data
+    // TODO: verify this condition
+    let (edge_results, person_results) = if results[0].contains(&(1, 2)) {
+        (&results[0], &results[1])
+    } else {
+        (&results[1], &results[0])
+    };
+
+    // Verify edge results
+    assert!(edge_results.contains(&(1, 2)));
+    assert!(edge_results.contains(&(2, 3)));
+    assert!(!edge_results.contains(&(100, 200))); // edge query shouldn't see person data
+
+    // Verify person results
+    assert!(person_results.contains(&(100, 200)));
+    assert!(person_results.contains(&(200, 300)));
+    assert!(!person_results.contains(&(1, 2))); // person query shouldn't see edge data
+}
+
+// Error Handling in Parallel Context
+#[test]
+fn test_parallel_queries_with_invalid_knowledge_graph() {
+    let (storage, _temp) = create_test_storage();
+
+    storage.create_knowledge_graph("db1").unwrap();
+    storage.insert_into("db1", "edge", vec![(1, 2)]).unwrap();
+
+    // Mix valid and invalid knowledge_graphs
+    let queries = vec![
+        ("db1", "result(X,Y) :- edge(X,Y)."),
+        ("nonexistent", "result(X,Y) :- edge(X,Y)."),
+    ];
+
+    let result = storage.execute_parallel_queries_on_knowledge_graphs(queries);
+
+    // Should return error because one knowledge_graph doesn't exist
+    assert!(result.is_err());
+}
+
+#[test]
