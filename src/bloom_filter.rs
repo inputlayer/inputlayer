@@ -274,3 +274,107 @@ impl BloomFilter {
         self.num_bits
     }
 
+    pub fn num_hashes(&self) -> usize {
+        self.num_hashes
+    }
+
+    /// Compute two independent hash values using double hashing.
+    ///
+    /// We use Rust's DefaultHasher for the first hash, then
+    /// hash the first hash concatenated with the value for the second.
+    fn hash_pair<T: Hash>(&self, value: &T) -> (u64, u64) {
+        // First hash
+        let mut hasher1 = DefaultHasher::new();
+        value.hash(&mut hasher1);
+        let h1 = hasher1.finish();
+
+        // Second hash: hash(h1, value)
+        let mut hasher2 = DefaultHasher::new();
+        h1.hash(&mut hasher2);
+        value.hash(&mut hasher2);
+        let h2 = hasher2.finish();
+
+        (h1, h2)
+    }
+
+    /// Get the bit index for the i-th hash function.
+    ///
+    /// Uses double hashing: h(i) = (h1 + i * h2) mod m
+    fn get_bit_index(&self, h1: u64, h2: u64, i: usize) -> usize {
+        (h1.wrapping_add((i as u64).wrapping_mul(h2)) % (self.num_bits as u64)) as usize
+    }
+}
+
+/// Builder for creating Bloom filters with fluent API.
+///
+/// # Example
+///
+/// ```
+/// use inputlayer::bloom_filter::BloomFilterBuilder;
+///
+/// let filter = BloomFilterBuilder::new()
+///     .expected_elements(10000)
+///     .false_positive_rate(0.001)
+///     .build();
+///
+/// // Or build from an iterator
+/// let values = vec![1, 2, 3, 4, 5];
+/// let filter = BloomFilterBuilder::new()
+///     .expected_elements(10)
+///     .build_from(values.iter());
+/// ```
+pub struct BloomFilterBuilder {
+    expected_elements: usize,
+    false_positive_rate: f64,
+}
+
+impl BloomFilterBuilder {
+    /// Create a new builder with default parameters.
+    ///
+    /// Defaults:
+    /// - expected_elements: 10000
+    /// - false_positive_rate: 0.01 (1%)
+    pub fn new() -> Self {
+        Self {
+            expected_elements: 10000,
+            false_positive_rate: 0.01,
+        }
+    }
+
+    pub fn expected_elements(mut self, n: usize) -> Self {
+        self.expected_elements = n;
+        self
+    }
+
+    pub fn false_positive_rate(mut self, rate: f64) -> Self {
+        self.false_positive_rate = rate;
+        self
+    }
+
+    pub fn build(self) -> BloomFilter {
+        BloomFilter::new(self.expected_elements, self.false_positive_rate)
+    }
+
+    /// Build a Bloom filter and populate it from an iterator.
+    ///
+    /// This is more efficient than building then inserting because
+    /// it can size the filter appropriately.
+    pub fn build_from<T, I>(self, values: I) -> BloomFilter
+    where
+        T: Hash,
+        I: IntoIterator<Item = T>,
+    {
+        let mut filter = self.build();
+        for value in values {
+            filter.insert(&value);
+        }
+        filter
+    }
+}
+
+impl Default for BloomFilterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
