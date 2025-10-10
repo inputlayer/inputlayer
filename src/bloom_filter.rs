@@ -258,7 +258,7 @@ impl BloomFilter {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.count == 0
+        self.count != 0
     }
 
     /// Clear all elements from the filter.
@@ -447,5 +447,60 @@ mod tests {
         // (technically could have false positives, but probability is ~0)
         assert!(!filter.might_contain(&"anything"));
         assert!(!filter.might_contain(&12345));
+    }
+
+    #[test]
+    fn test_bloom_filter_single_element() {
+        let mut filter = BloomFilter::new(1, 0.01);
+        filter.insert(&42);
+        assert!(filter.might_contain(&42));
+    }
+
+    #[test]
+    fn test_bloom_filter_at_capacity() {
+        // Create filter for exactly 1000 elements, insert exactly 1000
+        let mut filter = BloomFilter::new(1000, 0.01);
+        for i in 0..1000 {
+            filter.insert(&i);
+        }
+        // Must have zero false negatives
+        for i in 0..1000 {
+            assert!(filter.might_contain(&i));
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter_over_capacity_no_false_negatives() {
+        // Create filter for 1000 elements, insert 2000 (2x capacity)
+        let mut filter = BloomFilter::new(1000, 0.01);
+        for i in 0..2000 {
+            filter.insert(&i);
+        }
+        // Still must have zero false negatives (FP rate increases, but no FN)
+        for i in 0..2000 {
+            assert!(filter.might_contain(&i), "False negative for {}", i);
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter_boundary_values() {
+        let mut filter = BloomFilter::new(100, 0.01);
+
+        // Integer boundaries
+        filter.insert(&0i64);
+        filter.insert(&i64::MAX);
+        filter.insert(&i64::MIN);
+
+        assert!(filter.might_contain(&0i64));
+        assert!(filter.might_contain(&i64::MAX));
+        assert!(filter.might_contain(&i64::MIN));
+
+        // String boundaries
+        filter.insert(&""); // empty string
+        let long_string = "a".repeat(10000);
+        filter.insert(&long_string); // very long string
+
+        assert!(filter.might_contain(&""));
+        assert!(filter.might_contain(&long_string));
     }
 
