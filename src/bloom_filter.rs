@@ -378,3 +378,74 @@ impl Default for BloomFilterBuilder {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // HAPPY PATH TESTS
+    #[test]
+    fn test_bloom_filter_insert_single_contains() {
+        // Insert one element, verify it's found
+        let mut filter = BloomFilter::new(100, 0.01);
+        filter.insert(&"hello");
+        assert!(filter.might_contain(&"hello"));
+    }
+
+    #[test]
+    fn test_bloom_filter_insert_multiple_contains_all() {
+        // Insert multiple elements, verify all are found
+        let mut filter = BloomFilter::new(100, 0.01);
+        let values = vec!["a", "b", "c", "d", "e"];
+        for v in &values {
+            filter.insert(v);
+        }
+        for v in &values {
+            assert!(filter.might_contain(v), "Should contain {}", v);
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter_10k_elements_no_false_negatives() {
+        // Insert 10K elements, verify ZERO false negatives
+        let mut filter = BloomFilter::new(10000, 0.01);
+        for i in 0..10000 {
+            filter.insert(&i);
+        }
+        for i in 0..10000 {
+            assert!(filter.might_contain(&i), "False negative for {}", i);
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter_build_from_iterator() {
+        let values = vec![1, 2, 3, 4, 5];
+        let filter = BloomFilterBuilder::new()
+            .expected_elements(10)
+            .build_from(values.iter());
+
+        for v in &values {
+            assert!(filter.might_contain(v));
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter_clear_resets_completely() {
+        let mut filter = BloomFilter::new(100, 0.01);
+        filter.insert(&"test");
+        assert!(filter.might_contain(&"test"));
+
+        filter.clear();
+        assert_eq!(filter.len(), 0);
+        assert!(filter.is_empty());
+    }
+
+    // EDGE CASE TESTS
+    #[test]
+    fn test_bloom_filter_empty_returns_false() {
+        let filter = BloomFilter::new(100, 0.01);
+        // Empty filter should return false for everything
+        // (technically could have false positives, but probability is ~0)
+        assert!(!filter.might_contain(&"anything"));
+        assert!(!filter.might_contain(&12345));
+    }
+
