@@ -258,7 +258,7 @@ impl BloomFilter {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.count != 0
+        self.count == 0
     }
 
     /// Clear all elements from the filter.
@@ -502,5 +502,52 @@ mod tests {
 
         assert!(filter.might_contain(&""));
         assert!(filter.might_contain(&long_string));
+    }
+
+    #[test]
+    fn test_bloom_filter_false_positive_rate_within_bounds() {
+        // Statistical test: FP rate should be approximately as configured
+        let mut filter = BloomFilter::new(10000, 0.01);
+
+        // Insert 10000 elements (0..10000)
+        for i in 0..10000 {
+            filter.insert(&i);
+        }
+
+        // Test 10000 elements NOT inserted (10000..20000)
+        let mut false_positives = 0;
+        for i in 10000..20000 {
+            if filter.might_contain(&i) {
+                false_positives += 1;
+            }
+        }
+
+        let fp_rate = false_positives as f64 / 10000.0;
+        // Allow 5x tolerance (0.01 target -> accept up to 0.05)
+        assert!(fp_rate < 0.05, "FP rate {} exceeds threshold", fp_rate);
+    }
+
+    #[test]
+    fn test_bloom_filter_estimated_fp_rate_reasonable() {
+        let mut filter = BloomFilter::new(1000, 0.01);
+        for i in 0..1000 {
+            filter.insert(&i);
+        }
+
+        let estimated = filter.estimated_false_positive_rate();
+        assert!(estimated < 0.1, "Estimated FP rate {} too high", estimated);
+    }
+
+    #[test]
+    fn test_bloom_filter_len_tracks_insertions() {
+        let mut filter = BloomFilter::new(100, 0.01);
+        assert_eq!(filter.len(), 0);
+
+        filter.insert(&1);
+        assert_eq!(filter.len(), 1);
+
+        filter.insert(&2);
+        filter.insert(&3);
+        assert_eq!(filter.len(), 3);
     }
 
