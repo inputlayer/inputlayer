@@ -551,3 +551,28 @@ mod tests {
         assert_eq!(filter.len(), 3);
     }
 
+    #[test]
+    fn test_bloom_filter_is_empty() {
+        let mut filter = BloomFilter::new(100, 0.01);
+        assert!(filter.is_empty());
+
+        filter.insert(&1);
+        assert!(!filter.is_empty());
+    }
+
+    #[test]
+    fn test_bloom_filter_with_params() {
+        // Test explicit parameter constructor
+        let filter = BloomFilter::with_params(1024, 7);
+        assert!(filter.is_empty());
+        assert_eq!(filter.num_hashes(), 7);
+    }
+
+    #[test]
+    fn test_bloom_filter_num_bits_and_hashes() {
+        let filter = BloomFilter::new(1000, 0.01);
+        assert!(filter.num_bits() >= 64);
+        assert!(filter.num_hashes() >= 1);
+        assert!(filter.num_hashes() <= 16);
+    }
+}
