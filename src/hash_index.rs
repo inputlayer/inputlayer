@@ -24,10 +24,10 @@
 //!
 //! // Create an index for edge(src, dst) on column 0 (src)
 //! let spec = JoinKeySpec::new("edge", vec![0]);
-//! let mut index = HashIndex::new(spec, 1000.clone());
+//! let mut index = HashIndex::new(spec, 1000);
 //!
 //! // Insert tuples
-//! index.insert(make_tuple(vec![1, 2]));  // edge(1, 2.clone())
+//! index.insert(make_tuple(vec![1, 2]));  // edge(1, 2)
 //! index.insert(make_tuple(vec![1, 3]));  // edge(1, 3)
 //! index.insert(make_tuple(vec![2, 4]));  // edge(2, 4)
 //!
@@ -92,3 +92,151 @@ impl JoinKeySpec {
 ///
 /// Provides O(1) lookup of tuples by their join key value.
 /// Internally uses a Bloom filter to accelerate negative lookups.
+pub struct HashIndex {
+    /// The join key specification
+    pub spec: JoinKeySpec,
+    /// Hash map: key tuple -> list of full tuples with that key
+    index: HashMap<Tuple, Vec<Tuple>>,
+    /// Bloom filter for quick "definitely not present" checks
+    bloom: BloomFilter,
+    /// Statistics about the index
+    stats: HashIndexStats,
+    /// Version number (incremented on each modification)
+    version: u64,
+}
+
+/// Statistics about a hash index.
+///
+/// Used for query optimization and monitoring.
+#[derive(Clone, Debug, Default)]
+pub struct HashIndexStats {
+    /// Number of unique key values
+    pub num_keys: usize,
+    /// Total number of tuples indexed
+    pub num_tuples: usize,
+    /// Average number of tuples per key
+    pub avg_tuples_per_key: f64,
+    /// Maximum tuples for any single key
+    pub max_tuples_per_key: usize,
+    /// Current estimated Bloom filter false positive rate
+    pub bloom_fp_rate: f64,
+}
+
+impl HashIndex {
+    /// Create a new hash index.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec` - The join key specification
+    /// * `expected_keys` - Expected number of unique key values
+    ///   (used to size the Bloom filter)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use inputlayer::hash_index::{HashIndex, JoinKeySpec};
+    ///
+    /// let spec = JoinKeySpec::new("edge", vec![0]);
+    /// let index = HashIndex::new(spec, 1000);
+    /// ```
+    pub fn new(spec: JoinKeySpec, expected_keys: usize) -> Self {
+        Self {
+            spec,
+            index: HashMap::with_capacity(expected_keys),
+            bloom: BloomFilter::new(expected_keys.max(100), 0.01),
+            stats: HashIndexStats::default(),
+            version: 0,
+        }
+    }
+
+    /// Build the index from a collection of tuples.
+    ///
+    /// This is more efficient than inserting tuples one by one
+    /// because it can batch operations and compute statistics once.
+    ///
+    /// # Arguments
+    ///
+    /// * `tuples` - Iterator of tuples to index
+    ///
+    /// # Note
+    ///
+    /// This clears any existing index contents.
+    pub fn build_from_tuples(&mut self, tuples: impl IntoIterator<Item = Tuple>) {
+        // Clear existing data
+        self.index.clear();
+        self.bloom.clear();
+
+        let mut max_per_key = 0usize;
+        let mut total_tuples = 0usize;
+
+        for tuple in tuples {
+            let key = self.extract_key(&tuple);
+            self.bloom.insert(&key);
+
+            let entry = self.index.entry(key).or_default();
+            entry.push(tuple);
+            max_per_key = max_per_key.max(entry.len());
+            total_tuples += 1;
+        }
+
+        // Update statistics
+        self.stats = HashIndexStats {
+            num_keys: self.index.len(),
+            num_tuples: total_tuples,
+            avg_tuples_per_key: if self.index.is_empty() {
+                0.0
+            } else {
+                total_tuples as f64 / self.index.len() as f64
+            },
+            max_tuples_per_key: max_per_key,
+            bloom_fp_rate: self.bloom.estimated_false_positive_rate(),
+        };
+
+        self.version += 1;
+    }
+
+    /// Insert a single tuple into the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `tuple` - The tuple to insert
+    ///
+    /// # Note
+    ///
+    /// Duplicate tuples are allowed; the same tuple can be
+    /// inserted multiple times.
+    pub fn insert(&mut self, tuple: Tuple) {
+        let key = self.extract_key(&tuple);
+        self.bloom.insert(&key);
+
+        let entry = self.index.entry(key).or_default();
+        let is_new_key = entry.is_empty();
+        entry.push(tuple);
+
+        // Update statistics
+        self.stats.num_tuples += 1;
+        if is_new_key {
+            self.stats.num_keys += 1;
+        }
+        self.stats.avg_tuples_per_key =
+            self.stats.num_tuples as f64 / self.stats.num_keys.max(1) as f64;
+        self.stats.max_tuples_per_key = self.stats.max_tuples_per_key.max(entry.len());
+
+        self.version += 1;
+    }
+
+    /// Remove a tuple from the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `tuple` - The exact tuple to remove (must match all columns)
+    ///
+    /// # Returns
+    ///
+    /// `true` if the tuple was found and removed, `false` otherwise.
+    ///
+    /// # Note
+    ///
+    /// Bloom filters don't support removal, so the filter may still
+    /// report the key as "might contain" after removal. This is safe
+    /// (just a potential false positive) but slightly less efficient.
