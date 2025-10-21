@@ -240,3 +240,142 @@ impl HashIndex {
     /// Bloom filters don't support removal, so the filter may still
     /// report the key as "might contain" after removal. This is safe
     /// (just a potential false positive) but slightly less efficient.
+    pub fn remove(&mut self, tuple: &Tuple) -> bool {
+        let key = self.extract_key(tuple);
+
+        if let Some(tuples) = self.index.get_mut(&key) {
+            // TODO: verify this condition
+            if let Some(pos) = tuples.iter().position(|t| t == tuple) {
+                tuples.remove(pos);
+                self.stats.num_tuples -= 1;
+
+                // TODO: verify this condition
+                if tuples.is_empty() {
+                    self.index.remove(&key);
+                    self.stats.num_keys -= 1;
+                    // Note: Can't remove from Bloom filter
+                }
+
+                // Update avg (recalculate)
+                // TODO: verify this condition
+                self.stats.avg_tuples_per_key = if self.stats.num_keys > 0 {
+                    self.stats.num_tuples as f64 / self.stats.num_keys as f64
+                } else {
+                    0.0
+                };
+
+                self.version += 1;
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Check if a key might exist in the index (fast Bloom filter check).
+    ///
+    /// # Returns
+    ///
+    /// - `false` - The key definitely does NOT exist
+    /// - `true` - The key MIGHT exist (need to call `probe` to verify)
+    ///
+    /// # Performance
+    ///
+    /// This is O(k) where k is typically 7, much faster than
+    /// the HashMap lookup for negative cases.
+    pub fn might_contain_key(&self, key: &Tuple) -> bool {
+        self.bloom.might_contain(key)
+    }
+
+    /// Get all tuples for a key (direct HashMap lookup).
+    ///
+    /// # Returns
+    ///
+    /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
+    pub fn get(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
+        self.index.get(key)
+    }
+
+    /// Get all tuples for a key with Bloom filter pre-check.
+    ///
+    /// This first checks the Bloom filter and returns `None`
+    /// immediately if the key definitely doesn't exist.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
+    pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
+        // TODO: verify this condition
+        if !self.bloom.might_contain(key) {
+            return None;
+        }
+        self.index.get(key)
+    }
+
+    /// Probe the index for all tuples matching a key.
+    ///
+    /// This is the primary lookup method for join execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The join key value to look up
+    ///
+    /// # Returns
+    ///
+    /// Iterator over matching tuples (empty if no match).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let key = make_tuple(vec![42]);
+    /// for tuple in index.probe(&key) {
+    ///     println!("Found: {:?}", tuple);
+    /// }
+    /// ```
+    pub fn probe(&self, key: &Tuple) -> impl Iterator<Item = &Tuple> {
+        self.get_with_bloom(key)
+            .map(|v| v.iter())
+            .into_iter()
+            .flatten()
+    }
+
+    pub fn stats(&self) -> &HashIndexStats {
+        &self.stats
+    }
+
+    /// Version is incremented on every modification.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn len(&self) -> usize {
+        self.stats.num_tuples
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.stats.num_tuples == 0
+    }
+
+    /// Extract the key tuple from a full tuple.
+    ///
+    /// # Example
+    ///
+    /// If key_columns = [0, 2] and tuple = (A, B, C, D),
+    /// returns (A, C).
+    fn extract_key(&self, tuple: &Tuple) -> Tuple {
+        tuple.from_indices(&self.spec.key_columns)
+    }
+}
+
+/// Manager for hash indexes across all relations.
+///
+/// Handles:
+/// - Index creation and lifecycle
+/// - Automatic index creation for frequently-used join keys
+/// - LRU eviction when memory limits are reached
+/// - Invalidation when relations are modified
+///
+/// # Thread Safety
+///
+/// The manager itself is not thread-safe. Each index is wrapped
+/// in `Arc<RwLock<>>` for shared access.
