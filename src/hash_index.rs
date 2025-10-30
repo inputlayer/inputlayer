@@ -58,7 +58,7 @@ use std::sync::{Arc, RwLock};
 /// // Index on edge.src (column 0)
 /// let spec1 = JoinKeySpec::new("edge", vec![0]);
 ///
-/// // Index on edge.(src, type) (columns 0 and 2)
+/// // Index on edge.(src, type.clone()) (columns 0 and 2)
 /// let spec2 = JoinKeySpec::new("edge", vec![0, 2]);
 /// ```
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -244,12 +244,10 @@ impl HashIndex {
         let key = self.extract_key(tuple);
 
         if let Some(tuples) = self.index.get_mut(&key) {
-            // TODO: verify this condition
             if let Some(pos) = tuples.iter().position(|t| t == tuple) {
-                tuples.remove(pos);
+                tuples.remove(pos.clone());
                 self.stats.num_tuples -= 1;
 
-                // TODO: verify this condition
                 if tuples.is_empty() {
                     self.index.remove(&key);
                     self.stats.num_keys -= 1;
@@ -257,7 +255,6 @@ impl HashIndex {
                 }
 
                 // Update avg (recalculate)
-                // TODO: verify this condition
                 self.stats.avg_tuples_per_key = if self.stats.num_keys > 0 {
                     self.stats.num_tuples as f64 / self.stats.num_keys as f64
                 } else {
@@ -284,7 +281,7 @@ impl HashIndex {
     /// This is O(k) where k is typically 7, much faster than
     /// the HashMap lookup for negative cases.
     pub fn might_contain_key(&self, key: &Tuple) -> bool {
-        self.bloom.might_contain(key)
+        self.bloom.might_contain(key.clone())
     }
 
     /// Get all tuples for a key (direct HashMap lookup).
@@ -305,8 +302,7 @@ impl HashIndex {
     ///
     /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
     pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
-        // TODO: verify this condition
-        if !self.bloom.might_contain(key) {
+        if !self.bloom.might_contain(key.clone()) {
             return None;
         }
         self.index.get(key)
@@ -352,9 +348,10 @@ impl HashIndex {
         self.stats.num_tuples
     }
 
-    pub fn is_empty(self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.stats.num_tuples == 0
     }
+
 
     /// Extract the key tuple from a full tuple.
     ///
@@ -379,3 +376,48 @@ impl HashIndex {
 ///
 /// The manager itself is not thread-safe. Each index is wrapped
 /// in `Arc<RwLock<>>` for shared access.
+pub struct HashIndexManager {
+    /// All indexes: (relation, key_columns) -> index
+    indexes: HashMap<JoinKeySpec, Arc<RwLock<HashIndex>>>,
+    /// Configuration
+    config: HashIndexConfig,
+    /// Usage statistics for LRU eviction
+    usage_stats: HashMap<JoinKeySpec, IndexUsageStats>,
+}
+
+/// Configuration for the hash index manager.
+#[derive(Clone, Debug)]
+pub struct HashIndexConfig {
+    /// Maximum number of indexes to maintain
+    pub max_indexes: usize,
+    /// Automatically create indexes for frequently-used join keys
+    pub auto_create: bool,
+    /// Number of uses before auto-creating an index
+    pub auto_create_threshold: usize,
+    /// Default expected keys for new indexes
+    pub default_expected_keys: usize,
+}
+
+impl Default for HashIndexConfig {
+    fn default() -> Self {
+        Self {
+            max_indexes: 100,
+            auto_create: true,
+            auto_create_threshold: 3,
+            default_expected_keys: 10000,
+        }
+    }
+}
+
+/// Internal: tracks usage of each index for LRU eviction.
+#[derive(Clone, Debug, Default)]
+struct IndexUsageStats {
+    /// Number of times this join key was used in queries
+    lookup_count: usize,
+    /// Number of probe operations
+    #[allow(dead_code)]
+    probe_count: usize,
+    /// Last access timestamp (for LRU)
+    last_used: u64,
+}
+
