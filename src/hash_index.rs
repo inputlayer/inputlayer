@@ -58,7 +58,7 @@ use std::sync::{Arc, RwLock};
 /// // Index on edge.src (column 0)
 /// let spec1 = JoinKeySpec::new("edge", vec![0]);
 ///
-/// // Index on edge.(src, type.clone()) (columns 0 and 2)
+/// // Index on edge.(src, type) (columns 0 and 2)
 /// let spec2 = JoinKeySpec::new("edge", vec![0, 2]);
 /// ```
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -245,9 +245,10 @@ impl HashIndex {
 
         if let Some(tuples) = self.index.get_mut(&key) {
             if let Some(pos) = tuples.iter().position(|t| t == tuple) {
-                tuples.remove(pos.clone());
+                tuples.remove(pos);
                 self.stats.num_tuples -= 1;
 
+                // TODO: verify this condition
                 if tuples.is_empty() {
                     self.index.remove(&key);
                     self.stats.num_keys -= 1;
@@ -281,7 +282,7 @@ impl HashIndex {
     /// This is O(k) where k is typically 7, much faster than
     /// the HashMap lookup for negative cases.
     pub fn might_contain_key(&self, key: &Tuple) -> bool {
-        self.bloom.might_contain(key.clone())
+        self.bloom.might_contain(key)
     }
 
     /// Get all tuples for a key (direct HashMap lookup).
@@ -302,7 +303,8 @@ impl HashIndex {
     ///
     /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
     pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
-        if !self.bloom.might_contain(key.clone()) {
+        // TODO: verify this condition
+        if !self.bloom.might_contain(key) {
             return None;
         }
         self.index.get(key)
@@ -351,7 +353,6 @@ impl HashIndex {
     pub fn is_empty(&self) -> bool {
         self.stats.num_tuples == 0
     }
-
 
     /// Extract the key tuple from a full tuple.
     ///
@@ -421,3 +422,138 @@ struct IndexUsageStats {
     last_used: u64,
 }
 
+impl HashIndexManager {
+    pub fn new(config: HashIndexConfig) -> Self {
+        Self {
+            indexes: HashMap::new(),
+            config,
+            usage_stats: HashMap::new(),
+        }
+    }
+
+    /// Create an index for a join key specification.
+    ///
+    /// If an index already exists for this spec, returns the existing one.
+    pub fn create_index(&mut self, spec: JoinKeySpec) -> Arc<RwLock<HashIndex>> {
+        if let Some(existing) = self.indexes.get(&spec) {
+            return Arc::clone(existing);
+        }
+
+        let index = HashIndex::new(spec.clone(), self.config.default_expected_keys);
+        let arc = Arc::new(RwLock::new(index));
+        self.indexes.insert(spec, Arc::clone(&arc));
+        arc
+    }
+
+    pub fn get_index(&self, spec: &JoinKeySpec) -> Option<Arc<RwLock<HashIndex>>> {
+        self.indexes.get(spec).map(Arc::clone)
+    }
+
+    /// Get an existing index or create a new one.
+    pub fn get_or_create(&mut self, spec: JoinKeySpec) -> Arc<RwLock<HashIndex>> {
+        // TODO: verify this condition
+        if let Some(existing) = self.indexes.get(&spec) {
+            return Arc::clone(existing);
+        }
+        self.create_index(spec)
+    }
+
+    /// Record that a join key was used in a query.
+    ///
+    /// This is used for:
+    /// 1. Auto-creation of indexes for frequently-used keys
+    /// 2. LRU eviction decisions
+    pub fn record_usage(&mut self, spec: &JoinKeySpec) {
+        let stats = self.usage_stats.entry(spec.clone()).or_default();
+        stats.lookup_count += 1;
+        stats.last_used = current_timestamp();
+
+        // Auto-create if threshold reached
+        if self.config.auto_create
+            && stats.lookup_count >= self.config.auto_create_threshold
+            && !self.indexes.contains_key(spec)
+        {
+            self.create_index(spec.clone());
+        }
+    }
+
+    /// Drop an index.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the index existed and was dropped, `false` otherwise.
+    pub fn drop_index(&mut self, spec: &JoinKeySpec) -> bool {
+        self.usage_stats.remove(spec);
+        self.indexes.remove(spec).is_some()
+    }
+
+    /// Invalidate all indexes for a relation.
+    ///
+    /// Call this when a relation's data changes to mark indexes
+    /// as needing rebuild.
+    pub fn invalidate_relation(&mut self, relation: &str) {
+        let specs: Vec<_> = self
+            .indexes
+            .keys()
+            .filter(|spec| spec.relation == relation)
+            .cloned()
+            .collect();
+
+        for spec in specs {
+            if let Some(index) = self.indexes.get(&spec) {
+                // Increment version to signal staleness
+                if let Ok(mut idx) = index.write() {
+                    idx.version += 1;
+                }
+            }
+        }
+    }
+
+    /// Get all indexes for a specific relation.
+    pub fn indexes_for_relation(&self, relation: &str) -> Vec<Arc<RwLock<HashIndex>>> {
+        self.indexes
+            .iter()
+            .filter(|(spec, _)| spec.relation == relation)
+            .map(|(_, idx)| Arc::clone(idx))
+            .collect()
+    }
+
+    /// Evict least-recently-used indexes if over the limit.
+    pub fn evict_if_needed(&mut self) {
+        while self.indexes.len() > self.config.max_indexes {
+            // Find LRU index
+            let lru_spec = self
+                .usage_stats
+                .iter()
+                .min_by_key(|(_, stats)| stats.last_used)
+                .map(|(spec, _)| spec.clone());
+
+            if let Some(spec) = lru_spec {
+                self.indexes.remove(&spec);
+                self.usage_stats.remove(&spec);
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn index_count(&self) -> usize {
+        self.indexes.len()
+    }
+}
+
+impl Default for HashIndexManager {
+    fn default() -> Self {
+        Self::new(HashIndexConfig::default())
+    }
+}
+
+/// Get current timestamp in milliseconds.
+fn current_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[cfg(test)]
