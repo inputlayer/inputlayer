@@ -248,7 +248,6 @@ impl HashIndex {
                 tuples.remove(pos);
                 self.stats.num_tuples -= 1;
 
-                // TODO: verify this condition
                 if tuples.is_empty() {
                     self.index.remove(&key);
                     self.stats.num_keys -= 1;
@@ -451,7 +450,6 @@ impl HashIndexManager {
 
     /// Get an existing index or create a new one.
     pub fn get_or_create(&mut self, spec: JoinKeySpec) -> Arc<RwLock<HashIndex>> {
-        // TODO: verify this condition
         if let Some(existing) = self.indexes.get(&spec) {
             return Arc::clone(existing);
         }
@@ -502,6 +500,7 @@ impl HashIndexManager {
         for spec in specs {
             if let Some(index) = self.indexes.get(&spec) {
                 // Increment version to signal staleness
+                // TODO: verify this condition
                 if let Ok(mut idx) = index.write() {
                     idx.version += 1;
                 }
@@ -557,3 +556,84 @@ fn current_timestamp() -> u64 {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_tuple(values: Vec<i64>) -> Tuple {
+        Tuple::new(values.into_iter().map(Value::Int64).collect())
+    }
+
+    // HAPPY PATH TESTS
+    #[test]
+    fn test_hash_index_insert_single_lookup() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        let tuple = make_tuple(vec![1, 2, 3]);
+        index.insert(tuple.clone());
+
+        let key = make_tuple(vec![1]);
+        let results: Vec<_> = index.probe(&key).collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], &tuple);
+    }
+
+    #[test]
+    fn test_hash_index_multiple_tuples_same_key() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        // Insert 3 tuples with key=1
+        index.insert(make_tuple(vec![1, 10]));
+        index.insert(make_tuple(vec![1, 20]));
+        index.insert(make_tuple(vec![1, 30]));
+
+        let key = make_tuple(vec![1]);
+        let results: Vec<_> = index.probe(&key).collect();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_hash_index_different_keys_lookup_each() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        index.insert(make_tuple(vec![1, 100]));
+        index.insert(make_tuple(vec![2, 200]));
+        index.insert(make_tuple(vec![3, 300]));
+
+        assert_eq!(index.probe(&make_tuple(vec![1])).count(), 1);
+        assert_eq!(index.probe(&make_tuple(vec![2])).count(), 1);
+        assert_eq!(index.probe(&make_tuple(vec![3])).count(), 1);
+    }
+
+    #[test]
+    fn test_hash_index_remove_tuple() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        let tuple = make_tuple(vec![1, 2]);
+        index.insert(tuple.clone());
+        assert_eq!(index.probe(&make_tuple(vec![1])).count(), 1);
+
+        let removed = index.remove(&tuple);
+        assert!(removed);
+        assert_eq!(index.probe(&make_tuple(vec![1])).count(), 0);
+    }
+
+    #[test]
+    fn test_hash_index_build_from_tuples() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        let tuples = vec![
+            make_tuple(vec![1, 10]),
+            make_tuple(vec![2, 20]),
+            make_tuple(vec![1, 11]),
+        ];
+        index.build_from_tuples(tuples);
+
+        assert_eq!(index.stats().num_tuples, 3);
+        assert_eq!(index.stats().num_keys, 2);
+    }
+
