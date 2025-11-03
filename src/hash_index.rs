@@ -302,7 +302,6 @@ impl HashIndex {
     ///
     /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
     pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
-        // TODO: verify this condition
         if !self.bloom.might_contain(key) {
             return None;
         }
@@ -331,7 +330,7 @@ impl HashIndex {
     /// ```
     pub fn probe(&self, key: &Tuple) -> impl Iterator<Item = &Tuple> {
         self.get_with_bloom(key)
-            .map(|v| v.iter())
+            .map(|v| v.iter().cloned())
             .into_iter()
             .flatten()
     }
@@ -500,7 +499,6 @@ impl HashIndexManager {
         for spec in specs {
             if let Some(index) = self.indexes.get(&spec) {
                 // Increment version to signal staleness
-                // TODO: verify this condition
                 if let Ok(mut idx) = index.write() {
                     idx.version += 1;
                 }
@@ -635,5 +633,44 @@ mod tests {
 
         assert_eq!(index.stats().num_tuples, 3);
         assert_eq!(index.stats().num_keys, 2);
+    }
+
+    #[test]
+    fn test_hash_index_bloom_accelerates_negative() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 1000);
+
+        // Insert keys 0-999
+        for i in 0..1000 {
+            index.insert(make_tuple(vec![i, i * 10]));
+        }
+
+        // Key 9999 should fail Bloom check quickly
+        let key = make_tuple(vec![9999]);
+        assert!(!index.might_contain_key(&key));
+
+        // Probe should return empty
+        assert_eq!(index.probe(&key).count(), 0);
+    }
+
+    // EDGE CASE TESTS
+    #[test]
+    fn test_hash_index_empty_returns_empty() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let index = HashIndex::new(spec, 100);
+
+        let key = make_tuple(vec![1]);
+        assert_eq!(index.probe(&key).count(), 0);
+    }
+
+    #[test]
+    fn test_hash_index_single_tuple() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 1);
+
+        index.insert(make_tuple(vec![42, 100]));
+
+        assert_eq!(index.probe(&make_tuple(vec![42])).count(), 1);
+        assert_eq!(index.probe(&make_tuple(vec![43])).count(), 0);
     }
 
