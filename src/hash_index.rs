@@ -801,3 +801,50 @@ mod tests {
         assert_eq!(stats.max_tuples_per_key, 2);
     }
 
+    #[test]
+    fn test_hash_index_len_and_is_empty() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        assert!(index.is_empty());
+        assert_eq!(index.len(), 0);
+
+        index.insert(make_tuple(vec![1, 10]));
+        assert!(!index.is_empty());
+        assert_eq!(index.len(), 1);
+    }
+
+    // HASH INDEX MANAGER TESTS
+    #[test]
+    fn test_hash_index_manager_get_or_create() {
+        let mut manager = HashIndexManager::new(HashIndexConfig::default());
+
+        let spec = JoinKeySpec::new("edge", vec![0]);
+        let index1 = manager.get_or_create(spec.clone());
+        let index2 = manager.get_or_create(spec.clone());
+
+        // Should return same index (Arc pointer equality)
+        assert!(Arc::ptr_eq(&index1, &index2));
+    }
+
+    #[test]
+    fn test_hash_index_manager_auto_create_threshold() {
+        let config = HashIndexConfig {
+            auto_create: true,
+            auto_create_threshold: 3,
+            ..Default::default()
+        };
+        let mut manager = HashIndexManager::new(config);
+
+        let spec = JoinKeySpec::new("edge", vec![0]);
+
+        // Record usage below threshold
+        manager.record_usage(&spec);
+        manager.record_usage(&spec);
+        assert!(manager.get_index(&spec).is_none());
+
+        // Third usage triggers auto-creation
+        manager.record_usage(&spec);
+        assert!(manager.get_index(&spec).is_some());
+    }
+
