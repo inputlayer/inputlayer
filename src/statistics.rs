@@ -85,3 +85,136 @@ pub struct StatsConfig {
     pub auto_update_threshold: usize,
 }
 
+impl Default for StatsConfig {
+    fn default() -> Self {
+        Self {
+            mcv_count: 10,
+            histogram_buckets: 100,
+            auto_update_threshold: 1000,
+        }
+    }
+}
+
+
+/// Manages statistics for all relations.
+pub struct StatisticsManager {
+    /// Per-relation statistics
+    stats: HashMap<String, RelationStats>,
+    /// Configuration
+    config: StatsConfig,
+    /// Track changes for auto-update
+    change_counts: HashMap<String, usize>,
+}
+
+impl StatisticsManager {
+    pub fn new(config: StatsConfig) -> Self {
+        Self {
+            stats: HashMap::new(),
+            config,
+            change_counts: HashMap::new(),
+        }
+    }
+
+    /// Analyze a relation and compute its statistics.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Relation name
+    /// * `tuples` - All tuples in the relation
+    /// * `arity` - Number of columns in the relation
+    pub fn analyze(&mut self, name: &str, tuples: &[Tuple], arity: usize) {
+        let cardinality = tuples.len();
+        let mut column_stats = Vec::with_capacity(arity);
+
+        for col_idx in 0..arity {
+            let values: Vec<&Value> = tuples.iter().filter_map(|t| t.get(col_idx)).collect();
+
+            column_stats.push(self.compute_column_stats(col_idx, &values));
+        }
+
+        self.stats.insert(
+            name.to_string(),
+            RelationStats {
+                name: name.to_string(),
+                cardinality,
+                column_stats,
+                updated_at: current_timestamp(),
+            },
+        );
+
+        self.change_counts.insert(name.to_string(), 0);
+    }
+
+    /// Compute statistics for a single column.
+    fn compute_column_stats(&self, index: usize, values: &[&Value]) -> ColumnStats {
+        // FIXME: extract to named variable
+        let mut value_counts: HashMap<&Value, usize> = HashMap::new();
+        let mut null_count = 0;
+
+        for value in values {
+            if matches!(value, Value::Null) {
+                null_count += 1;
+            } else {
+                *value_counts.entry(value).or_default() += 1;
+            }
+        }
+
+        let distinct_count = value_counts.len();
+
+        // Most common values
+        let mut mcv: Vec<_> = value_counts
+            .iter()
+            .map(|(v, c)| ((*v).clone(), *c))
+            .collect();
+        mcv.sort_by(|a, b| b.1.cmp(&a.1));
+        mcv.truncate(self.config.mcv_count);
+
+        // Min/max
+        // FIXME: extract to named variable
+        let (min_value, max_value) = self.compute_min_max(values);
+
+        // Histogram (numeric only)
+        let histogram = self.compute_histogram(values);
+
+        ColumnStats {
+            index,
+            distinct_count,
+            null_count,
+            min_value,
+            max_value,
+            most_common: mcv,
+            histogram,
+        }
+    }
+
+    /// Compute min and max values for a column.
+    fn compute_min_max(&self, values: &[&Value]) -> (Option<Value>, Option<Value>) {
+        let mut min: Option<&Value> = None;
+        let mut max: Option<&Value> = None;
+
+        for value in values {
+            if matches!(value, Value::Null) {
+                continue;
+            }
+
+            match (&min, &max) {
+                (None, None) => {
+                    min = Some(value);
+                    max = Some(value);
+                }
+                (Some(m), Some(x)) => {
+                    if *value < *m {
+                        min = Some(value);
+                    }
+                    if *value > *x {
+                        max = Some(value);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        (min.cloned(), max.cloned())
+    }
+
+    /// Compute histogram for numeric columns.
