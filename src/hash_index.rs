@@ -302,7 +302,6 @@ impl HashIndex {
     ///
     /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
     pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
-        // TODO: verify this condition
         if !self.bloom.might_contain(key) {
             return None;
         }
@@ -500,7 +499,6 @@ impl HashIndexManager {
         for spec in specs {
             if let Some(index) = self.indexes.get(&spec) {
                 // Increment version to signal staleness
-                // TODO: verify this condition
                 if let Ok(mut idx) = index.write() {
                     idx.version += 1;
                 }
@@ -762,5 +760,44 @@ mod tests {
         let results: Vec<_> = index.probe(&key).collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].arity(), 100);
+    }
+
+    #[test]
+    fn test_hash_index_version_increments_on_modification() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        let v0 = index.version();
+
+        index.insert(make_tuple(vec![1, 10]));
+        let v1 = index.version();
+        assert!(v1 > v0);
+
+        index.insert(make_tuple(vec![2, 20]));
+        let v2 = index.version();
+        assert!(v2 > v1);
+
+        index.remove(&make_tuple(vec![1, 10]));
+        let v3 = index.version();
+        assert!(v3 > v2);
+    }
+
+    #[test]
+    fn test_hash_index_stats_accurate() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        // Insert 5 tuples with 3 distinct keys
+        index.insert(make_tuple(vec![1, 10]));
+        index.insert(make_tuple(vec![1, 11]));
+        index.insert(make_tuple(vec![2, 20]));
+        index.insert(make_tuple(vec![3, 30]));
+        index.insert(make_tuple(vec![3, 31]));
+
+        let stats = index.stats();
+        assert_eq!(stats.num_tuples, 5);
+        assert_eq!(stats.num_keys, 3);
+        assert!((stats.avg_tuples_per_key - 5.0 / 3.0).abs() < 0.01);
+        assert_eq!(stats.max_tuples_per_key, 2);
     }
 
