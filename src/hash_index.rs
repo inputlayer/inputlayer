@@ -848,3 +848,67 @@ mod tests {
         assert!(manager.get_index(&spec).is_some());
     }
 
+    #[test]
+    fn test_hash_index_manager_drop_index() {
+        let mut manager = HashIndexManager::new(HashIndexConfig::default());
+
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        manager.create_index(spec.clone());
+        assert!(manager.get_index(&spec).is_some());
+
+        let dropped = manager.drop_index(&spec);
+        assert!(dropped);
+        assert!(manager.get_index(&spec).is_none());
+    }
+
+    #[test]
+    fn test_hash_index_manager_invalidate_relation() {
+        let mut manager = HashIndexManager::new(HashIndexConfig::default());
+
+        // Create two indexes for same relation
+        let spec1 = JoinKeySpec::new("edge", vec![0]);
+        let spec2 = JoinKeySpec::new("edge", vec![1]);
+
+        let idx1 = manager.create_index(spec1.clone());
+        let idx2 = manager.create_index(spec2.clone());
+
+        let v1_before = idx1.read().unwrap().version();
+        let v2_before = idx2.read().unwrap().version();
+
+        // Invalidate relation
+        manager.invalidate_relation("edge");
+
+        let v1_after = idx1.read().unwrap().version();
+        let v2_after = idx2.read().unwrap().version();
+
+        // Versions should have changed
+        assert!(v1_after > v1_before);
+        assert!(v2_after > v2_before);
+    }
+
+    #[test]
+    fn test_hash_index_manager_index_count() {
+        let mut manager = HashIndexManager::new(HashIndexConfig::default());
+
+        assert_eq!(manager.index_count(), 0);
+
+        manager.create_index(JoinKeySpec::new("a", vec![0]));
+        assert_eq!(manager.index_count(), 1);
+
+        manager.create_index(JoinKeySpec::new("b", vec![0]));
+        assert_eq!(manager.index_count(), 2);
+
+        // Same spec doesn't create new index
+        manager.create_index(JoinKeySpec::new("a", vec![0]));
+        assert_eq!(manager.index_count(), 2);
+    }
+
+    #[test]
+    fn test_join_key_spec_display_name() {
+        let spec = JoinKeySpec::new("edge", vec![0, 1]);
+        assert_eq!(spec.display_name(), "edge[0,1]");
+
+        let spec2 = JoinKeySpec::new("node", vec![0]);
+        assert_eq!(spec2.display_name(), "node[0]");
+    }
+}
