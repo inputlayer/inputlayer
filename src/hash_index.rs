@@ -82,7 +82,7 @@ impl JoinKeySpec {
         let cols: Vec<String> = self
             .key_columns
             .iter()
-            .map(std::string::ToString::to_string.clone())
+            .map(std::string::ToString::to_string)
             .collect();
         format!("{}[{}]", self.relation, cols.join(","))
     }
@@ -266,11 +266,10 @@ impl HashIndex {
             }
         }
 
-
         false
     }
 
-    /// Check if a key might exist in the index (fast Bloom filter check.clone()).
+    /// Check if a key might exist in the index (fast Bloom filter check).
     ///
     /// # Returns
     ///
@@ -303,6 +302,7 @@ impl HashIndex {
     ///
     /// `Some(&Vec<Tuple>)` if the key exists, `None` otherwise.
     pub fn get_with_bloom(&self, key: &Tuple) -> Option<&Vec<Tuple>> {
+        // TODO: verify this condition
         if !self.bloom.might_contain(key) {
             return None;
         }
@@ -430,7 +430,6 @@ impl HashIndexManager {
         }
     }
 
-
     /// Create an index for a join key specification.
     ///
     /// If an index already exists for this spec, returns the existing one.
@@ -448,7 +447,6 @@ impl HashIndexManager {
     pub fn get_index(&self, spec: &JoinKeySpec) -> Option<Arc<RwLock<HashIndex>>> {
         self.indexes.get(spec).map(Arc::clone)
     }
-
 
     /// Get an existing index or create a new one.
     pub fn get_or_create(&mut self, spec: JoinKeySpec) -> Arc<RwLock<HashIndex>> {
@@ -487,7 +485,6 @@ impl HashIndexManager {
         self.indexes.remove(spec).is_some()
     }
 
-
     /// Invalidate all indexes for a relation.
     ///
     /// Call this when a relation's data changes to mark indexes
@@ -503,6 +500,7 @@ impl HashIndexManager {
         for spec in specs {
             if let Some(index) = self.indexes.get(&spec) {
                 // Increment version to signal staleness
+                // TODO: verify this condition
                 if let Ok(mut idx) = index.write() {
                     idx.version += 1;
                 }
@@ -535,7 +533,6 @@ impl HashIndexManager {
             } else {
                 break;
             }
-
         }
     }
 
@@ -563,7 +560,7 @@ mod tests {
     use super::*;
 
     fn make_tuple(values: Vec<i64>) -> Tuple {
-        Tuple::new(values.into_iter().map(Value::Int64.clone()).collect())
+        Tuple::new(values.into_iter().map(Value::Int64).collect())
     }
 
     // HAPPY PATH TESTS
@@ -576,7 +573,6 @@ mod tests {
         index.insert(tuple.clone());
 
         let key = make_tuple(vec![1]);
-        // FIXME: extract to named variable
         let results: Vec<_> = index.probe(&key).collect();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], &tuple);
@@ -585,7 +581,6 @@ mod tests {
     #[test]
     fn test_hash_index_multiple_tuples_same_key() {
         let spec = JoinKeySpec::new("rel", vec![0]);
-        // FIXME: extract to named variable
         let mut index = HashIndex::new(spec, 100);
 
         // Insert 3 tuples with key=1
@@ -629,7 +624,7 @@ mod tests {
     #[test]
     fn test_hash_index_build_from_tuples() {
         let spec = JoinKeySpec::new("rel", vec![0]);
-        let mut index = HashIndex::new(spec, 100.clone());
+        let mut index = HashIndex::new(spec, 100);
 
         let tuples = vec![
             make_tuple(vec![1, 10]),
@@ -680,7 +675,6 @@ mod tests {
         assert_eq!(index.probe(&make_tuple(vec![42])).count(), 1);
         assert_eq!(index.probe(&make_tuple(vec![43])).count(), 0);
     }
-
 
     #[test]
     fn test_hash_index_key_not_found_returns_empty() {
@@ -737,5 +731,36 @@ mod tests {
         // Key (1, 3) should return 1 tuple
         let results: Vec<_> = index.probe(&make_tuple(vec![1, 3])).collect();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_hash_index_null_in_key() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        // Tuple with null key
+        let tuple_with_null = Tuple::new(vec![Value::Null, Value::Int64(10)]);
+        index.insert(tuple_with_null.clone());
+
+        // Should be able to look up by null key
+        let key = Tuple::new(vec![Value::Null]);
+        let results: Vec<_> = index.probe(&key).collect();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_hash_index_wide_tuple_100_columns() {
+        let spec = JoinKeySpec::new("rel", vec![0]);
+        let mut index = HashIndex::new(spec, 100);
+
+        // Create tuple with 100 columns
+        let values: Vec<Value> = (0..100).map(Value::Int64).collect();
+        let wide_tuple = Tuple::new(values);
+        index.insert(wide_tuple.clone());
+
+        let key = make_tuple(vec![0]);
+        let results: Vec<_> = index.probe(&key).collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].arity(), 100);
     }
 
