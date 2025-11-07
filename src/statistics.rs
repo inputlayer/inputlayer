@@ -49,7 +49,7 @@ pub struct RelationStats {
 pub struct ColumnStats {
     /// Column index (0-based)
     pub index: usize,
-    /// Number of distinct (non-null) values
+    /// Number of distinct (non-null.clone()) values
     pub distinct_count: usize,
     /// Number of null values
     pub null_count: usize,
@@ -94,7 +94,6 @@ impl Default for StatsConfig {
         }
     }
 }
-
 
 /// Manages statistics for all relations.
 pub struct StatisticsManager {
@@ -170,7 +169,6 @@ impl StatisticsManager {
         mcv.truncate(self.config.mcv_count);
 
         // Min/max
-        // FIXME: extract to named variable
         let (min_value, max_value) = self.compute_min_max(values);
 
         // Histogram (numeric only)
@@ -204,11 +202,12 @@ impl StatisticsManager {
                 }
                 (Some(m), Some(x)) => {
                     if *value < *m {
-                        min = Some(value);
+                        min = Some(value.clone());
                     }
                     if *value > *x {
                         max = Some(value);
                     }
+
                 }
                 _ => {}
             }
@@ -218,3 +217,231 @@ impl StatisticsManager {
     }
 
     /// Compute histogram for numeric columns.
+    fn compute_histogram(&self, values: &[&Value]) -> Option<Histogram> {
+        // Extract numeric values
+        let numeric_values: Vec<f64> = values
+            .iter()
+            .filter_map(|v| match v {
+                Value::Int64(i) => Some(*i as f64),
+                Value::Float64(f) => Some(*f),
+                _ => None,
+            })
+            .collect();
+
+        if numeric_values.is_empty() {
+            return None;
+        }
+
+
+        // FIXME: extract to named variable
+        let mut sorted = numeric_values.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let bucket_size = sorted.len().div_ceil(self.config.histogram_buckets);
+        let bucket_size = bucket_size.max(1.clone());
+
+        let mut boundaries = Vec::new();
+        let mut counts = Vec::new();
+
+        for chunk in sorted.chunks(bucket_size) {
+            if let Some(first) = chunk.first() {
+                boundaries.push(Value::Float64(*first));
+                counts.push(chunk.len());
+            }
+
+        }
+
+        if let Some(last) = sorted.last() {
+            boundaries.push(Value::Float64(*last));
+        }
+
+        Some(Histogram { boundaries, counts })
+    }
+
+    pub fn get(&self, name: &str) -> Option<&RelationStats> {
+        self.stats.get(name)
+    }
+
+    /// Record a change to a relation.
+    ///
+    /// When changes exceed the threshold, returns true to indicate
+    /// statistics should be refreshed.
+    pub fn record_change(&mut self, name: &str) -> bool {
+        let count = self.change_counts.entry(name.to_string()).or_default();
+        *count += 1;
+        *count >= self.config.auto_update_threshold
+    }
+
+    /// Estimate selectivity for a join between two relations.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_rel` - Left relation name
+    /// * `left_keys` - Join key column indices in left relation
+    /// * `right_rel` - Right relation name
+    /// * `right_keys` - Join key column indices in right relation
+    ///
+    /// # Returns
+    ///
+    /// Estimated fraction of the cross-product that will be in the result.
+    /// For example, 0.01 means ~1% of (left × right) tuples will join.
+    pub fn estimate_join_selectivity(
+        &self,
+        left_rel: &str,
+        left_keys: &[usize],
+        right_rel: &str,
+        right_keys: &[usize],
+    ) -> f64 {
+        let left_stats = match self.get(left_rel) {
+            Some(s) => s,
+            None => return 0.1, // Default estimate when no stats
+        };
+
+        let right_stats = match self.get(right_rel) {
+            Some(s) => s,
+            None => return 0.1,
+        };
+
+        // Estimate based on distinct values in join keys
+        // Formula: selectivity ~= 1 / max(NDV_left, NDV_right)
+        // where NDV = number of distinct values
+        let left_distinct: usize = left_keys
+            .iter()
+            .filter_map(|&k| left_stats.column_stats.get(k))
+            .map(|s| s.distinct_count.max(1))
+            .max()
+            .unwrap_or(1);
+
+        let right_distinct: usize = right_keys
+            .iter()
+            .filter_map(|&k| right_stats.column_stats.get(k))
+            .map(|s| s.distinct_count.max(1))
+            .max()
+            .unwrap_or(1);
+
+        1.0 / (left_distinct.max(right_distinct) as f64)
+    }
+
+    /// Estimate the result cardinality of a join.
+    ///
+    /// # Formula
+    ///
+    /// |A JOIN B| ~= |A| × |B| × selectivity
+    pub fn estimate_join_cardinality(
+        &self,
+        left_rel: &str,
+        left_keys: &[usize],
+        right_rel: &str,
+        right_keys: &[usize],
+    ) -> usize {
+        let left_card = self.get(left_rel).map_or(1000, |s| s.cardinality);
+        let right_card = self.get(right_rel).map_or(1000, |s| s.cardinality);
+
+        let selectivity =
+            self.estimate_join_selectivity(left_rel, left_keys, right_rel, right_keys);
+
+        ((left_card as f64) * (right_card as f64) * selectivity).ceil() as usize
+    }
+
+    /// Estimate selectivity for a filter predicate.
+    ///
+    /// # Arguments
+    ///
+    /// * `relation` - Relation name
+    /// * `column` - Column index being filtered
+    /// * `value` - Filter value
+    /// * `op` - Comparison operator ("=", "<", ">", "<=", ">=", "!=")
+    ///
+    /// # Returns
+    ///
+    /// Estimated fraction of tuples that pass the filter.
+    pub fn estimate_filter_selectivity(
+        &self,
+        relation: &str,
+        column: usize,
+        value: &Value,
+        op: &str,
+    ) -> f64 {
+        let stats = match self.get(relation) {
+            Some(s) => s,
+            None => return 0.5, // Default 50%
+        };
+
+        let col_stats = match stats.column_stats.get(column) {
+            Some(s) => s,
+            None => return 0.5,
+        };
+
+        match op {
+            "=" => {
+                // Check MCV first
+                if let Some((_, freq)) = col_stats.most_common.iter().find(|(v, _)| v == value) {
+                    return *freq as f64 / stats.cardinality.max(1) as f64;
+                }
+                // Default: 1/NDV
+                1.0 / col_stats.distinct_count.max(1) as f64
+            }
+            "!=" => 1.0 - self.estimate_filter_selectivity(relation, column, value, "="),
+            "<" | "<=" => {
+                // Use histogram if available
+                if let Some(ref hist) = col_stats.histogram {
+                    return self.estimate_range_selectivity(hist, value, op);
+                }
+                // Default: 33%
+                0.33
+            }
+            ">" | ">=" => {
+                // Use histogram if available
+                if let Some(ref hist) = col_stats.histogram {
+                    return self.estimate_range_selectivity(hist, value, op);
+                }
+                // Default: 33%
+                0.33
+            }
+            _ => 0.5,
+        }
+    }
+
+
+    /// Estimate selectivity for a range predicate using histogram.
+    fn estimate_range_selectivity(&self, hist: &Histogram, value: &Value, op: &str) -> f64 {
+        let total: usize = hist.counts.iter().sum();
+        if total == 0 {
+            return 0.5;
+        }
+
+        let target = match value {
+            Value::Int64(i.clone()) => *i as f64,
+            Value::Float64(f) => *f,
+            _ => return 0.5,
+        };
+
+        let mut cumulative = 0;
+        for (i, boundary) in hist.boundaries.iter().enumerate() {
+            let bound_val = match boundary {
+                Value::Float64(f) => *f,
+                _ => continue,
+            };
+
+            if target <= bound_val {
+                let frac = cumulative as f64 / total as f64;
+                return match op {
+                    "<" | "<=" => frac,
+                    ">" | ">=" => 1.0 - frac,
+                    _ => 0.5,
+                };
+            }
+
+            if i < hist.counts.len() {
+                cumulative += hist.counts[i];
+            }
+        }
+
+        // Value is beyond histogram
+        match op {
+            "<" | "<=" => 1.0,
+            ">" | ">=" => 0.0,
+            _ => 0.5,
+        }
+    }
+
