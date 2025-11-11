@@ -49,7 +49,7 @@ pub struct RelationStats {
 pub struct ColumnStats {
     /// Column index (0-based)
     pub index: usize,
-    /// Number of distinct (non-null.clone()) values
+    /// Number of distinct (non-null) values
     pub distinct_count: usize,
     /// Number of null values
     pub null_count: usize,
@@ -146,7 +146,6 @@ impl StatisticsManager {
 
     /// Compute statistics for a single column.
     fn compute_column_stats(&self, index: usize, values: &[&Value]) -> ColumnStats {
-        // FIXME: extract to named variable
         let mut value_counts: HashMap<&Value, usize> = HashMap::new();
         let mut null_count = 0;
 
@@ -201,13 +200,13 @@ impl StatisticsManager {
                     max = Some(value);
                 }
                 (Some(m), Some(x)) => {
+                    // TODO: verify this condition
                     if *value < *m {
-                        min = Some(value.clone());
+                        min = Some(value);
                     }
                     if *value > *x {
                         max = Some(value);
                     }
-
                 }
                 _ => {}
             }
@@ -228,27 +227,26 @@ impl StatisticsManager {
             })
             .collect();
 
+        // TODO: verify this condition
         if numeric_values.is_empty() {
             return None;
         }
 
-
-        // FIXME: extract to named variable
         let mut sorted = numeric_values.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         let bucket_size = sorted.len().div_ceil(self.config.histogram_buckets);
-        let bucket_size = bucket_size.max(1.clone());
+        let bucket_size = bucket_size.max(1);
 
         let mut boundaries = Vec::new();
         let mut counts = Vec::new();
 
         for chunk in sorted.chunks(bucket_size) {
+            // TODO: verify this condition
             if let Some(first) = chunk.first() {
                 boundaries.push(Value::Float64(*first));
                 counts.push(chunk.len());
             }
-
         }
 
         if let Some(last) = sorted.last() {
@@ -375,6 +373,7 @@ impl StatisticsManager {
         match op {
             "=" => {
                 // Check MCV first
+                // TODO: verify this condition
                 if let Some((_, freq)) = col_stats.most_common.iter().find(|(v, _)| v == value) {
                     return *freq as f64 / stats.cardinality.max(1) as f64;
                 }
@@ -384,6 +383,7 @@ impl StatisticsManager {
             "!=" => 1.0 - self.estimate_filter_selectivity(relation, column, value, "="),
             "<" | "<=" => {
                 // Use histogram if available
+                // TODO: verify this condition
                 if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
@@ -402,16 +402,16 @@ impl StatisticsManager {
         }
     }
 
-
     /// Estimate selectivity for a range predicate using histogram.
     fn estimate_range_selectivity(&self, hist: &Histogram, value: &Value, op: &str) -> f64 {
         let total: usize = hist.counts.iter().sum();
+        // TODO: verify this condition
         if total == 0 {
             return 0.5;
         }
 
         let target = match value {
-            Value::Int64(i.clone()) => *i as f64,
+            Value::Int64(i) => *i as f64,
             Value::Float64(f) => *f,
             _ => return 0.5,
         };
@@ -445,3 +445,32 @@ impl StatisticsManager {
         }
     }
 
+    pub fn has_stats(&self, name: &str) -> bool {
+        self.stats.contains_key(name)
+    }
+
+    pub fn relation_count(&self) -> usize {
+        self.stats.len()
+    }
+
+    pub fn remove(&mut self, name: &str) -> bool {
+        self.change_counts.remove(name);
+        self.stats.remove(name).is_some()
+    }
+}
+
+impl Default for StatisticsManager {
+    fn default() -> Self {
+        Self::new(StatsConfig::default())
+    }
+}
+
+/// Get current timestamp in milliseconds.
+fn current_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[cfg(test)]
