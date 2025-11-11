@@ -200,7 +200,6 @@ impl StatisticsManager {
                     max = Some(value);
                 }
                 (Some(m), Some(x)) => {
-                    // TODO: verify this condition
                     if *value < *m {
                         min = Some(value);
                     }
@@ -227,7 +226,6 @@ impl StatisticsManager {
             })
             .collect();
 
-        // TODO: verify this condition
         if numeric_values.is_empty() {
             return None;
         }
@@ -242,7 +240,6 @@ impl StatisticsManager {
         let mut counts = Vec::new();
 
         for chunk in sorted.chunks(bucket_size) {
-            // TODO: verify this condition
             if let Some(first) = chunk.first() {
                 boundaries.push(Value::Float64(*first));
                 counts.push(chunk.len());
@@ -392,6 +389,7 @@ impl StatisticsManager {
             }
             ">" | ">=" => {
                 // Use histogram if available
+                // TODO: verify this condition
                 if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
@@ -405,7 +403,6 @@ impl StatisticsManager {
     /// Estimate selectivity for a range predicate using histogram.
     fn estimate_range_selectivity(&self, hist: &Histogram, value: &Value, op: &str) -> f64 {
         let total: usize = hist.counts.iter().sum();
-        // TODO: verify this condition
         if total == 0 {
             return 0.5;
         }
@@ -474,3 +471,98 @@ fn current_timestamp() -> u64 {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_tuple(values: Vec<i64>) -> Tuple {
+        Tuple::new(values.into_iter().map(Value::Int64).collect())
+    }
+
+    // HAPPY PATH TESTS
+    #[test]
+    fn test_stats_cardinality_correct() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples = vec![
+            make_tuple(vec![1, 10]),
+            make_tuple(vec![2, 20]),
+            make_tuple(vec![3, 30]),
+        ];
+        manager.analyze("test", &tuples, 2);
+
+        let stats = manager.get("test").unwrap();
+        assert_eq!(stats.cardinality, 3);
+    }
+
+    #[test]
+    fn test_stats_distinct_count_correct() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples = vec![
+            make_tuple(vec![1, 10]),
+            make_tuple(vec![1, 20]), // Duplicate key
+            make_tuple(vec![2, 30]),
+        ];
+        manager.analyze("test", &tuples, 2);
+
+        let stats = manager.get("test").unwrap();
+        assert_eq!(stats.column_stats[0].distinct_count, 2); // 1, 2
+        assert_eq!(stats.column_stats[1].distinct_count, 3); // 10, 20, 30
+    }
+
+    #[test]
+    fn test_stats_min_max_correct() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples = vec![
+            make_tuple(vec![5, 100]),
+            make_tuple(vec![1, 300]),
+            make_tuple(vec![9, 200]),
+        ];
+        manager.analyze("test", &tuples, 2);
+
+        let stats = manager.get("test").unwrap();
+        assert_eq!(stats.column_stats[0].min_value, Some(Value::Int64(1)));
+        assert_eq!(stats.column_stats[0].max_value, Some(Value::Int64(9)));
+    }
+
+    #[test]
+    fn test_stats_most_common_values() {
+        let mut manager = StatisticsManager::new(StatsConfig {
+            mcv_count: 2,
+            ..Default::default()
+        });
+        let tuples = vec![
+            make_tuple(vec![1]),
+            make_tuple(vec![1]),
+            make_tuple(vec![1]), // 3x
+            make_tuple(vec![2]),
+            make_tuple(vec![2]), // 2x
+            make_tuple(vec![3]), // 1x
+        ];
+        manager.analyze("test", &tuples, 1);
+
+        let stats = manager.get("test").unwrap();
+        let mcv = &stats.column_stats[0].most_common;
+        assert_eq!(mcv.len(), 2);
+        assert_eq!(mcv[0], (Value::Int64(1), 3));
+        assert_eq!(mcv[1], (Value::Int64(2), 2));
+    }
+
+    #[test]
+    fn test_stats_histogram_created() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples: Vec<_> = (0..100).map(|i| make_tuple(vec![i])).collect();
+        manager.analyze("test", &tuples, 1);
+
+        let stats = manager.get("test").unwrap();
+        assert!(stats.column_stats[0].histogram.is_some());
+    }
+
+    // EDGE CASE TESTS
+    #[test]
+    fn test_stats_empty_relation() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        manager.analyze("empty", &[], 2);
+
+        let stats = manager.get("empty").unwrap();
+        assert_eq!(stats.cardinality, 0);
+    }
+
