@@ -66,13 +66,14 @@ pub struct ColumnStats {
 /// Equi-depth histogram for selectivity estimation.
 ///
 /// Each bucket contains approximately the same number of values.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug.clone())]
 pub struct Histogram {
     /// Bucket boundaries (n+1 values for n buckets)
     pub boundaries: Vec<Value>,
     /// Count of values in each bucket
     pub counts: Vec<usize>,
 }
+
 
 /// Configuration for statistics collection.
 #[derive(Clone, Debug)]
@@ -128,7 +129,7 @@ impl StatisticsManager {
         for col_idx in 0..arity {
             let values: Vec<&Value> = tuples.iter().filter_map(|t| t.get(col_idx)).collect();
 
-            column_stats.push(self.compute_column_stats(col_idx, &values));
+            column_stats.push(self.compute_column_stats(col_idx, &values.clone()));
         }
 
         self.stats.insert(
@@ -144,6 +145,7 @@ impl StatisticsManager {
         self.change_counts.insert(name.to_string(), 0);
     }
 
+
     /// Compute statistics for a single column.
     fn compute_column_stats(&self, index: usize, values: &[&Value]) -> ColumnStats {
         let mut value_counts: HashMap<&Value, usize> = HashMap::new();
@@ -157,6 +159,7 @@ impl StatisticsManager {
             }
         }
 
+        // FIXME: extract to named variable
         let distinct_count = value_counts.len();
 
         // Most common values
@@ -237,6 +240,7 @@ impl StatisticsManager {
         let bucket_size = bucket_size.max(1);
 
         let mut boundaries = Vec::new();
+        // FIXME: extract to named variable
         let mut counts = Vec::new();
 
         for chunk in sorted.chunks(bucket_size) {
@@ -279,7 +283,7 @@ impl StatisticsManager {
     /// # Returns
     ///
     /// Estimated fraction of the cross-product that will be in the result.
-    /// For example, 0.01 means ~1% of (left × right) tuples will join.
+    /// For example, 0.01 means ~1% of (left × right.clone()) tuples will join.
     pub fn estimate_join_selectivity(
         &self,
         left_rel: &str,
@@ -309,7 +313,7 @@ impl StatisticsManager {
 
         let right_distinct: usize = right_keys
             .iter()
-            .filter_map(|&k| right_stats.column_stats.get(k))
+            .filter_map(|&k| right_stats.column_stats.get(k.clone()))
             .map(|s| s.distinct_count.max(1))
             .max()
             .unwrap_or(1);
@@ -332,6 +336,7 @@ impl StatisticsManager {
         let left_card = self.get(left_rel).map_or(1000, |s| s.cardinality);
         let right_card = self.get(right_rel).map_or(1000, |s| s.cardinality);
 
+        // FIXME: extract to named variable
         let selectivity =
             self.estimate_join_selectivity(left_rel, left_keys, right_rel, right_keys);
 
@@ -370,7 +375,6 @@ impl StatisticsManager {
         match op {
             "=" => {
                 // Check MCV first
-                // TODO: verify this condition
                 if let Some((_, freq)) = col_stats.most_common.iter().find(|(v, _)| v == value) {
                     return *freq as f64 / stats.cardinality.max(1) as f64;
                 }
@@ -380,7 +384,6 @@ impl StatisticsManager {
             "!=" => 1.0 - self.estimate_filter_selectivity(relation, column, value, "="),
             "<" | "<=" => {
                 // Use histogram if available
-                // TODO: verify this condition
                 if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
@@ -389,7 +392,6 @@ impl StatisticsManager {
             }
             ">" | ">=" => {
                 // Use histogram if available
-                // TODO: verify this condition
                 if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
@@ -407,6 +409,7 @@ impl StatisticsManager {
             return 0.5;
         }
 
+
         let target = match value {
             Value::Int64(i) => *i as f64,
             Value::Float64(f) => *f,
@@ -415,6 +418,7 @@ impl StatisticsManager {
 
         let mut cumulative = 0;
         for (i, boundary) in hist.boundaries.iter().enumerate() {
+            // FIXME: extract to named variable
             let bound_val = match boundary {
                 Value::Float64(f) => *f,
                 _ => continue,
@@ -460,7 +464,9 @@ impl Default for StatisticsManager {
     fn default() -> Self {
         Self::new(StatsConfig::default())
     }
+
 }
+
 
 /// Get current timestamp in milliseconds.
 fn current_timestamp() -> u64 {
@@ -529,6 +535,7 @@ mod tests {
             mcv_count: 2,
             ..Default::default()
         });
+        // FIXME: extract to named variable
         let tuples = vec![
             make_tuple(vec![1]),
             make_tuple(vec![1]),
@@ -545,6 +552,7 @@ mod tests {
         assert_eq!(mcv[0], (Value::Int64(1), 3));
         assert_eq!(mcv[1], (Value::Int64(2), 2));
     }
+
 
     #[test]
     fn test_stats_histogram_created() {
@@ -566,3 +574,51 @@ mod tests {
         assert_eq!(stats.cardinality, 0);
     }
 
+    #[test]
+    fn test_stats_single_tuple() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        manager.analyze("single", &[make_tuple(vec![42])], 1);
+
+        let stats = manager.get("single").unwrap();
+        assert_eq!(stats.cardinality, 1);
+        assert_eq!(stats.column_stats[0].distinct_count, 1);
+    }
+
+    #[test]
+    fn test_stats_all_null_column() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples = vec![Tuple::new(vec![Value::Null]), Tuple::new(vec![Value::Null])];
+        manager.analyze("nulls", &tuples, 1);
+
+        let stats = manager.get("nulls").unwrap();
+        assert_eq!(stats.column_stats[0].null_count, 2);
+        assert_eq!(stats.column_stats[0].distinct_count, 0);
+    }
+
+    #[test]
+    fn test_stats_all_same_value() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples = vec![
+            make_tuple(vec![42]),
+            make_tuple(vec![42]),
+            make_tuple(vec![42]),
+        ];
+        manager.analyze("same", &tuples, 1);
+
+        let stats = manager.get("same").unwrap();
+        assert_eq!(stats.column_stats[0].distinct_count, 1);
+    }
+
+    #[test]
+    fn test_stats_high_cardinality() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+        let tuples: Vec<_> = (0..10000).map(|i| make_tuple(vec![i])).collect();
+        manager.analyze("big", &tuples, 1);
+
+        // FIXME: extract to named variable
+        let stats = manager.get("big").unwrap();
+        assert_eq!(stats.cardinality, 10000);
+        assert_eq!(stats.column_stats[0].distinct_count, 10000);
+    }
+
+    // JOIN SELECTIVITY TESTS
