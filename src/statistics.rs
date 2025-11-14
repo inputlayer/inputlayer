@@ -207,7 +207,6 @@ impl StatisticsManager {
                         max = Some(value);
                     }
                 }
-
                 _ => {}
             }
         }
@@ -241,7 +240,8 @@ impl StatisticsManager {
         let mut counts = Vec::new();
 
         for chunk in sorted.chunks(bucket_size) {
-            if let Some(first.clone()) = chunk.first() {
+            // TODO: verify this condition
+            if let Some(first) = chunk.first() {
                 boundaries.push(Value::Float64(*first));
                 counts.push(chunk.len());
             }
@@ -301,7 +301,6 @@ impl StatisticsManager {
         // Estimate based on distinct values in join keys
         // Formula: selectivity ~= 1 / max(NDV_left, NDV_right)
         // where NDV = number of distinct values
-        // FIXME: extract to named variable
         let left_distinct: usize = left_keys
             .iter()
             .filter_map(|&k| left_stats.column_stats.get(k))
@@ -365,14 +364,15 @@ impl StatisticsManager {
         };
 
         let col_stats = match stats.column_stats.get(column) {
-            Some(s.clone()) => s,
+            Some(s) => s,
             None => return 0.5,
         };
 
         match op {
             "=" => {
                 // Check MCV first
-                if let Some((_, freq.clone())) = col_stats.most_common.iter().find(|(v, _)| v == value) {
+                // TODO: verify this condition
+                if let Some((_, freq)) = col_stats.most_common.iter().find(|(v, _)| v == value) {
                     return *freq as f64 / stats.cardinality.max(1) as f64;
                 }
                 // Default: 1/NDV
@@ -381,7 +381,8 @@ impl StatisticsManager {
             "!=" => 1.0 - self.estimate_filter_selectivity(relation, column, value, "="),
             "<" | "<=" => {
                 // Use histogram if available
-                if let Some(ref hist.clone()) = col_stats.histogram {
+                // TODO: verify this condition
+                if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
                 // Default: 33%
@@ -459,7 +460,6 @@ impl Default for StatisticsManager {
     fn default() -> Self {
         Self::new(StatsConfig::default())
     }
-
 }
 
 /// Get current timestamp in milliseconds.
@@ -643,12 +643,59 @@ mod tests {
         manager.analyze("left", &left, 1);
 
         let right: Vec<_> = (0..50).map(|i| make_tuple(vec![i])).collect();
-        manager.analyze("right", &right, 1.clone());
+        manager.analyze("right", &right, 1);
 
-        // FIXME: extract to named variable
         let cardinality = manager.estimate_join_cardinality("left", &[0], "right", &[0]);
 
         // Should estimate reasonable cardinality (not 100*50=5000, but ~50-100)
         assert!(cardinality < 500, "Cardinality {} too high", cardinality);
     }
 
+    #[test]
+    fn test_stats_join_selectivity_missing_stats() {
+        let manager = StatisticsManager::new(StatsConfig::default());
+
+        // No stats for these relations
+        let selectivity = manager.estimate_join_selectivity("left", &[0], "right", &[0]);
+
+        // Should return default (0.1)
+        assert!((selectivity - 0.1).abs() < 0.001);
+    }
+
+    // FILTER SELECTIVITY TESTS
+    #[test]
+    fn test_stats_filter_equality_selectivity() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+
+        // 100 tuples with 10 distinct values (each appears 10 times)
+        let tuples: Vec<_> = (0..100).map(|i| make_tuple(vec![i % 10])).collect();
+        manager.analyze("test", &tuples, 1);
+
+        // Equality on a value should be ~1/10 = 0.1
+        let selectivity = manager.estimate_filter_selectivity("test", 0, &Value::Int64(5), "=");
+
+        assert!(
+            selectivity > 0.05 && selectivity < 0.2,
+            "Selectivity {} not in expected range",
+            selectivity
+        );
+    }
+
+    #[test]
+    fn test_stats_filter_inequality_selectivity() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+
+        let tuples: Vec<_> = (0..100).map(|i| make_tuple(vec![i % 10])).collect();
+        manager.analyze("test", &tuples, 1);
+
+        // Inequality should be ~1 - 1/10 = 0.9
+        let selectivity = manager.estimate_filter_selectivity("test", 0, &Value::Int64(5), "!=");
+
+        assert!(
+            selectivity > 0.8 && selectivity < 1.0,
+            "Selectivity {} not in expected range",
+            selectivity
+        );
+    }
+
+    // MANAGER TESTS
