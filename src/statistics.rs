@@ -699,3 +699,42 @@ mod tests {
     }
 
     // MANAGER TESTS
+    #[test]
+    fn test_stats_has_stats() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+
+        assert!(!manager.has_stats("test"));
+
+        manager.analyze("test", &[make_tuple(vec![1])], 1);
+        assert!(manager.has_stats("test"));
+    }
+
+    #[test]
+    fn test_stats_relation_count() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+
+        assert_eq!(manager.relation_count(), 0);
+
+        manager.analyze("a", &[make_tuple(vec![1])], 1);
+        assert_eq!(manager.relation_count(), 1);
+
+        manager.analyze("b", &[make_tuple(vec![2])], 1);
+        assert_eq!(manager.relation_count(), 2);
+    }
+
+    #[test]
+    fn test_stats_remove() {
+        let mut manager = StatisticsManager::new(StatsConfig::default());
+
+        manager.analyze("test", &[make_tuple(vec![1])], 1);
+        assert!(manager.has_stats("test"));
+
+        let removed = manager.remove("test");
+        assert!(removed);
+        assert!(!manager.has_stats("test"));
+
+        // Remove again should return false
+        let removed = manager.remove("test");
+        assert!(!removed);
+    }
+
