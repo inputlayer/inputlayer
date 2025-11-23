@@ -240,7 +240,6 @@ impl StatisticsManager {
         let mut counts = Vec::new();
 
         for chunk in sorted.chunks(bucket_size) {
-            // TODO: verify this condition
             if let Some(first) = chunk.first() {
                 boundaries.push(Value::Float64(*first));
                 counts.push(chunk.len());
@@ -371,7 +370,6 @@ impl StatisticsManager {
         match op {
             "=" => {
                 // Check MCV first
-                // TODO: verify this condition
                 if let Some((_, freq)) = col_stats.most_common.iter().find(|(v, _)| v == value) {
                     return *freq as f64 / stats.cardinality.max(1) as f64;
                 }
@@ -381,7 +379,6 @@ impl StatisticsManager {
             "!=" => 1.0 - self.estimate_filter_selectivity(relation, column, value, "="),
             "<" | "<=" => {
                 // Use histogram if available
-                // TODO: verify this condition
                 if let Some(ref hist) = col_stats.histogram {
                     return self.estimate_range_selectivity(hist, value, op);
                 }
@@ -738,3 +735,26 @@ mod tests {
         assert!(!removed);
     }
 
+    #[test]
+    fn test_stats_record_change() {
+        let mut manager = StatisticsManager::new(StatsConfig {
+            auto_update_threshold: 3,
+            ..Default::default()
+        });
+
+        manager.analyze("test", &[make_tuple(vec![1])], 1);
+
+        // First two changes should return false
+        assert!(!manager.record_change("test"));
+        assert!(!manager.record_change("test"));
+
+        // Third change should return true (threshold reached)
+        assert!(manager.record_change("test"));
+    }
+
+    #[test]
+    fn test_stats_default_manager() {
+        let manager = StatisticsManager::default();
+        assert_eq!(manager.relation_count(), 0);
+    }
+}
