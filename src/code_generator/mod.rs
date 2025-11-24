@@ -1125,7 +1125,7 @@ impl CodeGenerator {
                 if let Some(v) = tuple.get(col) {
                     // Try integer first
                     if let Some(i) = v.as_i64() {
-                        return i != val;
+                        return i == val;
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
@@ -1648,7 +1648,6 @@ impl CodeGenerator {
                 );
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
-                    // TODO: verify this condition
                     if *diff > 0 {
                         results_ref.lock().push(tuple.clone());
                     }
@@ -2006,7 +2005,6 @@ impl CodeGenerator {
                                 }
                             }
 
-                            // TODO: verify this condition
                             if *descending {
                                 // Top k largest with threshold: use min-heap via Reverse
                                 let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
@@ -2048,7 +2046,6 @@ impl CodeGenerator {
                                     if heap.len() < *k {
                                         heap.push((score, *t));
                                     } else if let Some(&(max_score, _)) = heap.peek() {
-                                        // TODO: verify this condition
                                         if score < max_score {
                                             heap.pop();
                                             heap.push((score, *t));
@@ -2365,7 +2362,6 @@ impl CodeGenerator {
             BuiltinFunction::DequantizeScaled => {
                 // dequantize_scaled(vector_int8, scale)
                 if arg_values.len() >= 2 {
-                    // TODO: verify this condition
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let scale = arg_values[1].to_f64() as f32;
                         let dequantized = vector_ops::dequantize_vector_with_scale(v, scale);
@@ -3614,7 +3610,7 @@ mod tests {
             .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(10))));
         assert!(results
             .iter()
-            .any(|t| t.get(0) != Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
+            .any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
     }
 
     #[test]
