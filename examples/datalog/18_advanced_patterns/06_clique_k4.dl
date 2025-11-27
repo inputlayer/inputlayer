@@ -1,0 +1,24 @@
+% Test: K4 Clique Detection
+% Description: Find pairs that are part of some 4-clique in K5 graph
+
+.kg create test_clique_n18t06
+.kg use test_clique_n18t06
+
+% K5: Complete graph on 5 nodes (all pairs connected)
++edge[(1, 2), (1, 3), (1, 4), (1, 5), (2, 3), (2, 4), (2, 5), (3, 4), (3, 5), (4, 5)].
+
+% Undirected connectivity
++conn(X, Y) :- edge(X, Y).
++conn(X, Y) :- edge(Y, X).
+
+% Find pairs (A, B) that are part of some K4
+% A K4 exists if A, B, C, D are all pairwise connected
+% Use ordering A < B, B < C, C < D to avoid duplicates
++in_k4(A, B) :- conn(A, B), conn(A, C), conn(A, D), conn(B, C), conn(B, D), conn(C, D), A < B, B < C, C < D.
+
+% Query all pairs in some K4
+?- in_k4(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_clique_n18t06

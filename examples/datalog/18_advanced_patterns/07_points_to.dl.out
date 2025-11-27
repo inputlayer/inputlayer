@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_points_to_n18t07
+Knowledge graph 'test_points_to_n18t07' created.
+Switched to knowledge graph: test_points_to_n18t07
+> .kg use test_points_to_n18t07
+Switched to knowledge graph: test_points_to_n18t07
+> +alloc[(1, 101), (2, 102)].
+Inserted 2 fact(s) into 'alloc'.
+> +store[(1, 2)].
+Inserted 1 fact(s) into 'store'.
+> +load[(3, 1)].
+Inserted 1 fact(s) into 'load'.
+> +pt(X, H) :- alloc(X, H).
+Rule 'pt' registered.
+> +pt(H, Z) :- store(P, Q), pt(P, H), pt(Q, Z).
+Rule 'pt' registered.
+> +pt(X, Z) :- load(X, P), pt(P, H), pt(H, Z).
+Rule 'pt' registered.
+> ?- pt(X, Y).
+2 rows:
+  (1, 101)
+  (2, 102)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_points_to_n18t07
+Knowledge graph 'test_points_to_n18t07' dropped.

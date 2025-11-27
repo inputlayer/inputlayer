@@ -1,0 +1,25 @@
+% Test: Strongly Connected Components
+% Description: Nodes in same SCC can mutually reach each other
+
+.kg create test_scc_n18t03
+.kg use test_scc_n18t03
+
+% Graph structure:
+% SCC1: {2, 3, 4} form a cycle
+% SCC2: {5, 6} form a 2-cycle
+% Node 1: can reach SCC1 but not reachable from it
++edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 6), (6, 5)].
+
+% Transitive closure
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+% Same SCC: mutual reachability
++same_scc(X, Y) :- reachable(X, Y), reachable(Y, X).
+
+% Query all SCC pairs
+?- same_scc(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_scc_n18t03
