@@ -1,0 +1,14 @@
+% Test: Ratio calculation pattern
+
+.kg create test_ratio_n18t101
+.kg use test_ratio_n18t101
+
++parts[(1, "A", 30), (2, "A", 20), (3, "B", 50), (4, "B", 25), (5, "B", 25)].
+
+% Sum per category
+sum_per_cat(Cat, sum<Val>) :- parts(_, Cat, Val).
+
+?- sum_per_cat(Cat, Total).
+
+.kg use default
+.kg drop test_ratio_n18t101

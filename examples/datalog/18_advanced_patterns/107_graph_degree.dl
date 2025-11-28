@@ -1,0 +1,18 @@
+% Test: Graph node degree
+
+.kg create test_degree_n18t107
+.kg use test_degree_n18t107
+
++edge[("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")].
+
+% Out-degree per node
+out_degree(Node, count<Target>) :- edge(Node, Target).
+
+% In-degree per node
+in_degree(Node, count<Source>) :- edge(Source, Node).
+
+?- out_degree(Node, D).
+?- in_degree(Node, D).
+
+.kg use default
+.kg drop test_degree_n18t107

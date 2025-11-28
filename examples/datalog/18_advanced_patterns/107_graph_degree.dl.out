@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_degree_n18t107
+Knowledge graph 'test_degree_n18t107' created.
+Switched to knowledge graph: test_degree_n18t107
+> .kg use test_degree_n18t107
+Switched to knowledge graph: test_degree_n18t107
+> +edge[("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")].
+Inserted 4 fact(s) into 'edge'.
+> out_degree(Node, count<Target>) :- edge(Node, Target).
+3 rows:
+  ("a", 2)
+  ("b", 1)
+  ("c", 1)
+(session: 1 rule(s))
+> in_degree(Node, count<Source>) :- edge(Source, Node).
+3 rows:
+  ("b", 1)
+  ("c", 2)
+  ("d", 1)
+(session: 2 rule(s))
+> ?- out_degree(Node, D).
+3 rows:
+  ("a", 2)
+  ("b", 1)
+  ("c", 1)
+> ?- in_degree(Node, D).
+3 rows:
+  ("b", 1)
+  ("c", 2)
+  ("d", 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_degree_n18t107
+Knowledge graph 'test_degree_n18t107' dropped.

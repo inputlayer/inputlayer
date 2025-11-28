@@ -1,0 +1,14 @@
+% Test: Parent-child aggregation
+
+.kg create test_parent_child_n18t102
+.kg use test_parent_child_n18t102
+
++parent_child[("dept1", "emp1"), ("dept1", "emp2"), ("dept1", "emp3"), ("dept2", "emp4"), ("dept2", "emp5")].
+
+% Count employees per department
+emp_count(Dept, count<Emp>) :- parent_child(Dept, Emp).
+
+?- emp_count(Dept, N).
+
+.kg use default
+.kg drop test_parent_child_n18t102
