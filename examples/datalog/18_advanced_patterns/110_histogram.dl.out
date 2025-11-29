@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_histogram_n18t110
+Knowledge graph 'test_histogram_n18t110' created.
+Switched to knowledge graph: test_histogram_n18t110
+> .kg use test_histogram_n18t110
+Switched to knowledge graph: test_histogram_n18t110
+> +scores[(45,), (67,), (82,), (91,), (55,), (73,), (88,), (64,), (79,), (95,)].
+Inserted 10 fact(s) into 'scores'.
+> +grade_bucket(S, "A") :- scores(S), S >= 90.
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "B") :- scores(S), S >= 80, S < 90.
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "C") :- scores(S), S >= 70, S < 80.
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "D") :- scores(S), S >= 60, S < 70.
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "F") :- scores(S), S < 60.
+Rule 'grade_bucket' registered.
+> +histogram(Grade, count<S>) :- grade_bucket(S, Grade).
+Rule 'histogram' registered.
+> ?- histogram(Grade, Count).
+5 rows:
+  ("A", 2)
+  ("B", 2)
+  ("C", 2)
+  ("D", 2)
+  ("F", 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_histogram_n18t110
+Knowledge graph 'test_histogram_n18t110' dropped.

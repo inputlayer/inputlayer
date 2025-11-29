@@ -1,0 +1,17 @@
+% Test: Lookup table pattern
+
+.kg create test_lookup_n18t114
+.kg use test_lookup_n18t114
+
++status_codes[(1, "pending"), (2, "active"), (3, "completed"), (4, "cancelled")].
++orders[(101, 1), (102, 2), (103, 3), (104, 1)].
+
+% Lookup status name for each order
++order_status(OrderId, StatusName) :-
+    orders(OrderId, StatusCode),
+    status_codes(StatusCode, StatusName).
+
+?- order_status(O, S).
+
+.kg use default
+.kg drop test_lookup_n18t114

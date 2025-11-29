@@ -1,0 +1,25 @@
+% Test: Graph sink and source nodes
+
+.kg create test_sink_src_n18t108
+.kg use test_sink_src_n18t108
+
++edge[("a", "b"), ("b", "c"), ("c", "d")].
++nodes[("a",), ("b",), ("c",), ("d",)].
+
+% Nodes with outgoing edges
+has_outgoing(N) :- edge(N, _).
+
+% Nodes with incoming edges
+has_incoming(N) :- edge(_, N).
+
+% Source: no incoming edges
+source(N) :- nodes(N), !has_incoming(N).
+
+% Sink: no outgoing edges
+sink(N) :- nodes(N), !has_outgoing(N).
+
+?- source(N).
+?- sink(N).
+
+.kg use default
+.kg drop test_sink_src_n18t108

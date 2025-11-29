@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_rec_combined_n18t10
+Knowledge graph 'test_neg_rec_combined_n18t10' created.
+Switched to knowledge graph: test_neg_rec_combined_n18t10
+> .kg use test_neg_rec_combined_n18t10
+Switched to knowledge graph: test_neg_rec_combined_n18t10
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4)].
+Inserted 6 fact(s) into 'edge'.
+> +blocked[(2, 3), (4, 5)].
+Inserted 2 fact(s) into 'blocked'.
+> +safe_edge(X, Y) :- edge(X, Y), !blocked(X, Y).
+Rule 'safe_edge' registered.
+> ?- safe_edge(X, Y).
+4 rows:
+  (1, 2)
+  (1, 3)
+  (2, 4)
+  (3, 4)
+> +safe_path(X, Y) :- safe_edge(X, Y).
+Rule 'safe_path' registered.
+> +safe_path(X, Z) :- safe_edge(X, Y), safe_path(Y, Z).
+Rule 'safe_path' registered.
+> ?- safe_path(X, Y).
+5 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 4)
+  (3, 4)
+> +reachable_from_1(Y) :- safe_path(1, Y).
+Rule 'reachable_from_1' registered.
+> +reach_count(count<Y>) :- reachable_from_1(Y).
+Rule 'reach_count' registered.
+> ?- reach_count(C).
+1 rows:
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_rec_combined_n18t10
+Knowledge graph 'test_neg_rec_combined_n18t10' dropped.

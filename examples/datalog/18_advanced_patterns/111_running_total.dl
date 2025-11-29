@@ -1,0 +1,14 @@
+% Test: Running total pattern
+
+.kg create test_running_n18t111
+.kg use test_running_n18t111
+
++txns[(1, 100), (2, 50), (3, 75), (4, 25)].
+
+% Find total of all transactions
++total_sum(sum<Amt>) :- txns(_, Amt).
+
+?- total_sum(T).
+
+.kg use default
+.kg drop test_running_n18t111
