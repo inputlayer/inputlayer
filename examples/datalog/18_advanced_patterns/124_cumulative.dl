@@ -1,0 +1,14 @@
+% Test: Cumulative pattern
+
+.kg create test_cumulative_n18t124
+.kg use test_cumulative_n18t124
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% Sum of all values <= current id
++cumulative(Id, sum<Val>) :- data(Id, _), data(OtherId, Val), OtherId <= Id.
+
+?- cumulative(Id, Sum).
+
+.kg use default
+.kg drop test_cumulative_n18t124

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mat_view_n18t121
+Knowledge graph 'test_mat_view_n18t121' created.
+Switched to knowledge graph: test_mat_view_n18t121
+> .kg use test_mat_view_n18t121
+Switched to knowledge graph: test_mat_view_n18t121
+> +orders[(1, 100, "2024-01"), (2, 200, "2024-01"), (3, 150, "2024-02")].
+Inserted 3 fact(s) into 'orders'.
+> +monthly_total(Month, sum<Amount>) :- orders(_, Amount, Month).
+Rule 'monthly_total' registered.
+> ?- monthly_total(M, T).
+2 rows:
+  ("2024-01", 300)
+  ("2024-02", 150)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_mat_view_n18t121
+Knowledge graph 'test_mat_view_n18t121' dropped.

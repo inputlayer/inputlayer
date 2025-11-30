@@ -1,0 +1,14 @@
+% Test: Row number simulation
+
+.kg create test_rownum_n18t125
+.kg use test_rownum_n18t125
+
++data[(5, "E"), (3, "C"), (1, "A"), (4, "D"), (2, "B")].
+
+% Count rows with smaller id (gives position - 1)
++row_pos(Id, Name, count<OtherId>) :- data(Id, Name), data(OtherId, _), OtherId < Id.
+
+?- row_pos(Id, Name, Pos).
+
+.kg use default
+.kg drop test_rownum_n18t125
