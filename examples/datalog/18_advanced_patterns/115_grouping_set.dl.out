@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_grp_set_n18t115
+Knowledge graph 'test_grp_set_n18t115' created.
+Switched to knowledge graph: test_grp_set_n18t115
+> .kg use test_grp_set_n18t115
+Switched to knowledge graph: test_grp_set_n18t115
+> +sales[(1, "East", "Q1", 100), (2, "West", "Q1", 150), (3, "East", "Q2", 120), (4, "West", "Q2", 180)].
+Inserted 4 fact(s) into 'sales'.
+> +by_region(Region, sum<Amount>) :- sales(_, Region, _, Amount).
+Rule 'by_region' registered.
+> +by_quarter(Quarter, sum<Amount>) :- sales(_, _, Quarter, Amount).
+Rule 'by_quarter' registered.
+> +grand_total(sum<Amount>) :- sales(_, _, _, Amount).
+Rule 'grand_total' registered.
+> ?- by_region(R, S).
+2 rows:
+  ("East", 220)
+  ("West", 330)
+> ?- by_quarter(Q, S).
+2 rows:
+  ("Q1", 250)
+  ("Q2", 300)
+> ?- grand_total(T).
+1 rows:
+  (550)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_grp_set_n18t115
+Knowledge graph 'test_grp_set_n18t115' dropped.
