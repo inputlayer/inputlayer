@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_window_n18t117
+Knowledge graph 'test_window_n18t117' created.
+Switched to knowledge graph: test_window_n18t117
+> .kg use test_window_n18t117
+Switched to knowledge graph: test_window_n18t117
+> +sales[(1, "East", 100), (2, "East", 150), (3, "West", 200), (4, "West", 120)].
+Inserted 4 fact(s) into 'sales'.
+> +region_total(Region, sum<Amount>) :- sales(_, Region, Amount).
+Rule 'region_total' registered.
+> +sale_with_total(Id, Region, Amount, Total) :- sales(Id, Region, Amount), region_total(Region, Total).
+Rule 'sale_with_total' registered.
+> ?- sale_with_total(Id, R, A, T).
+4 rows:
+  (1, "East", 100, 250)
+  (2, "East", 150, 250)
+  (3, "West", 200, 320)
+  (4, "West", 120, 320)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_window_n18t117
+Knowledge graph 'test_window_n18t117' dropped.

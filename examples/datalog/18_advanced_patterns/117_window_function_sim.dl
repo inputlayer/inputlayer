@@ -1,0 +1,19 @@
+% Test: Window function simulation
+
+.kg create test_window_n18t117
+.kg use test_window_n18t117
+
++sales[(1, "East", 100), (2, "East", 150), (3, "West", 200), (4, "West", 120)].
+
+% Total per region (simulating window aggregate)
++region_total(Region, sum<Amount>) :- sales(_, Region, Amount).
+
+% Each sale with its region total
++sale_with_total(Id, Region, Amount, Total) :-
+    sales(Id, Region, Amount),
+    region_total(Region, Total).
+
+?- sale_with_total(Id, R, A, T).
+
+.kg use default
+.kg drop test_window_n18t117
