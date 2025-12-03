@@ -1,0 +1,14 @@
+% Test: Last value simulation
+
+.kg create test_last_n18t130
+.kg use test_last_n18t130
+
++data[(1, 100), (2, 200), (3, 150)].
+
+% Maximum id (last)
++max_id(max<Id>) :- data(Id, _).
+
+?- max_id(M).
+
+.kg use default
+.kg drop test_last_n18t130

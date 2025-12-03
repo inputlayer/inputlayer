@@ -1,0 +1,15 @@
+% Test: Percentage of total
+
+.kg create test_percent_n18t131
+.kg use test_percent_n18t131
+
++sales[(1, 100), (2, 200), (3, 300)].
+
+% Total sales
++total(sum<Amount>) :- sales(_, Amount).
+
+% Each sale's percentage requires total
+?- total(T).
+
+.kg use default
+.kg drop test_percent_n18t131

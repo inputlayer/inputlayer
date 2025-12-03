@@ -1,0 +1,112 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_features_n18t12
+Knowledge graph 'test_all_features_n18t12' created.
+Switched to knowledge graph: test_all_features_n18t12
+> .kg use test_all_features_n18t12
+Switched to knowledge graph: test_all_features_n18t12
+> +link[(1, 2, 10), (2, 3, 20), (3, 4, 15), (4, 5, 25), (1, 3, 35), (2, 4, 30), (3, 5, 40), (1, 5, 100)].
+Inserted 8 fact(s) into 'link'.
+> +blocked[(3, 5), (1, 5)].
+Inserted 2 fact(s) into 'blocked'.
+> +active_link(X, Y, C) :- link(X, Y, C), !blocked(X, Y).
+Rule 'active_link' registered.
+> ?- active_link(X, Y, C).
+6 rows:
+  (1, 2, 10)
+  (1, 3, 35)
+  (2, 3, 20)
+  (2, 4, 30)
+  (3, 4, 15)
+  (4, 5, 25)
+> +path_cost(X, Y, C) :- active_link(X, Y, C).
+Rule 'path_cost' registered.
+> +path_cost(X, Z, C1+C2) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
+Rule 'path_cost' registered.
+> ?- path_cost(X, Y, C).
+17 rows:
+  (1, 2, 10)
+  (1, 3, 30)
+  (1, 3, 35)
+  (1, 4, 40)
+  (1, 4, 45)
+  (1, 4, 50)
+  (1, 5, 65)
+  (1, 5, 70)
+  (1, 5, 75)
+  (2, 3, 20)
+  (2, 4, 30)
+  (2, 4, 35)
+  (2, 5, 55)
+  (2, 5, 60)
+  (3, 4, 15)
+  (3, 5, 40)
+  (4, 5, 25)
+> +min_cost(X, Y, min<C>) :- path_cost(X, Y, C).
+Rule 'min_cost' registered.
+> ?- min_cost(X, Y, C).
+10 rows:
+  (1, 2, 10)
+  (1, 3, 30)
+  (1, 4, 40)
+  (1, 5, 65)
+  (2, 3, 20)
+  (2, 4, 30)
+  (2, 5, 55)
+  (3, 4, 15)
+  (3, 5, 40)
+  (4, 5, 25)
+> +path_count(X, Y, count<C>) :- path_cost(X, Y, C).
+Rule 'path_count' registered.
+> ?- path_count(X, Y, N).
+10 rows:
+  (1, 2, 1)
+  (1, 3, 2)
+  (1, 4, 3)
+  (1, 5, 3)
+  (2, 3, 1)
+  (2, 4, 2)
+  (2, 5, 2)
+  (3, 4, 1)
+  (3, 5, 1)
+  (4, 5, 1)
+> +avg_cost_from_1(avg<C>) :- path_cost(1, _, C).
+Rule 'avg_cost_from_1' registered.
+> ?- avg_cost_from_1(A).
+1 rows:
+  (46.666666666666664)
+> +total_cost_from_1(sum<C>) :- path_cost(1, _, C).
+Rule 'total_cost_from_1' registered.
+> ?- total_cost_from_1(T).
+1 rows:
+  (420)
+> +reachable_cost(Y, min<C>) :- path_cost(1, Y, C).
+Rule 'reachable_cost' registered.
+> ?- reachable_cost(Y, C).
+4 rows:
+  (2, 10)
+  (3, 30)
+  (4, 40)
+  (5, 65)
+> +budget[(50)].
+Inserted 1 fact(s) into 'budget'.
+> +within_budget(Y) :- min_cost(1, Y, C), budget(B), C <= B.
+Rule 'within_budget' registered.
+> ?- within_budget(Y).
+3 rows:
+  (2)
+  (3)
+  (4)
+> +budget_count(count<Y>) :- within_budget(Y).
+Rule 'budget_count' registered.
+> ?- budget_count(C).
+1 rows:
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_features_n18t12
+Knowledge graph 'test_all_features_n18t12' dropped.
