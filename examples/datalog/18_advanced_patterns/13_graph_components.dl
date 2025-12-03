@@ -1,0 +1,21 @@
+% Test: Graph connected components
+
+.kg create test_components_n18t13
+.kg use test_components_n18t13
+
+% Graph edges (undirected - add both directions)
++edge[(1, 2), (2, 1), (2, 3), (3, 2), (4, 5), (5, 4), (6, 6)].
+
+% Reachability (transitive closure)
++reach(X, Y) :- edge(X, Y).
++reach(X, Z) :- reach(X, Y), edge(Y, Z).
+
+?- reach(X, Y).
+
+% Same component (symmetric reachability)
+same_comp(X, Y) :- reach(X, Y), reach(Y, X).
+
+?- same_comp(X, Y).
+
+.kg use default
+.kg drop test_components_n18t13
