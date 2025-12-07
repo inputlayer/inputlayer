@@ -1,0 +1,53 @@
+// Test: Recursion Termination Edge Cases
+// Category: Recursion
+// Verifies: Recursion correctly terminates in tricky scenarios
+
+.db create test_termination
+.db use test_termination
+
+// Test 1: Self-loop should not cause infinite loop
++loop_edge[(1, 1), (1, 2), (2, 3)].
+
+path_loop(X, Y) := loop_edge(X, Y).
+path_loop(X, Z) := loop_edge(X, Y), path_loop(Y, Z).
+
+?- path_loop(1, X).
+
+// Expected: Should terminate with 1, 2, 3 (self-loop doesn't cause infinite results)
+
+// Test 2: Cycle should not cause infinite loop
++cycle_edge[(1, 2), (2, 3), (3, 1)].
+
+path_cycle(X, Y) := cycle_edge(X, Y).
+path_cycle(X, Z) := cycle_edge(X, Y), path_cycle(Y, Z).
+
+?- path_cycle(1, X).
+
+// Expected: Should terminate with 1, 2, 3 (reaches all nodes in cycle)
+
+// Test 3: Already computed paths should not be recomputed
++diamond_edge[(1, 2), (1, 3), (2, 4), (3, 4)].
+
+path_diamond(X, Y) := diamond_edge(X, Y).
+path_diamond(X, Z) := diamond_edge(X, Y), path_diamond(Y, Z).
+
+// Count unique paths from 1 to 4 (should be counted once, not duplicated)
+to_four(X) := path_diamond(1, X), X = 4.
+?- to_four(X).
+
+// Expected: Just (4) once, not duplicated
+
+// Test 4: Empty base case
++empty_edge[].
++empty_start[(1)].
+
+path_empty(X, Y) := empty_edge(X, Y).
+path_empty(X, Z) := empty_edge(X, Y), path_empty(Y, Z).
+
+reachable_empty(Y) := empty_start(X), path_empty(X, Y).
+?- reachable_empty(X).
+
+// Expected: No results (empty edge relation means no paths)
+
+.db use default
+.db drop test_termination

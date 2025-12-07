@@ -1,0 +1,31 @@
+
+> .db create test_view
+Database 'test_view' created.
+Switched to database: test_view
+> .db use test_view
+Switched to database: test_view
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> reverse(X, Y) := edge(Y, X).
+View 'reverse' registered.
+> .view
+Views:
+  reverse
+> ?- reverse(X, Y).
+3 rows:
+  (2, 1)
+  (3, 2)
+  (4, 3)
+> .view reverse
+View: reverse
+Rules:
+  1. reverse(X, Y) :- edge(Y, X).
+
+Results: 3 rows
+  (2, 1)
+  (3, 2)
+  (4, 3)
+> .db use default
+Switched to database: default
+> .db drop test_view
+Database 'test_view' dropped.

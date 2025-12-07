@@ -1,0 +1,22 @@
+// Test: Single Fact Insert
+// Category: 02_relations
+// Description: Tests inserting individual facts
+
+.db create test_insert
+.db use test_insert
+
+// Insert single facts
++edge(1, 2).
++edge(3, 4).
++edge(5, 6).
+
+// Verify all were inserted
+?- edge(X, Y).
+
+// Check relation info
+.rel
+.rel edge
+
+// Cleanup
+.db use default
+.db drop test_insert

@@ -1,0 +1,24 @@
+
+> .db create test_multi_rule_neg
+Database 'test_multi_rule_neg' created.
+Switched to database: test_multi_rule_neg
+> .db use test_multi_rule_neg
+Switched to database: test_multi_rule_neg
+> +set_a[(1, 0), (2, 0), (3, 0), (4, 0)].
+Inserted 4 facts into 'set_a'.
+> +set_b[(3, 0), (4, 0), (5, 0), (6, 0)].
+Inserted 4 facts into 'set_b'.
+> sym_diff(X, Y) := set_a(X, Y), !set_b(X, _).
+View 'sym_diff' registered.
+> sym_diff(X, Y) := set_b(X, Y), !set_a(X, _).
+Rule added to view 'sym_diff' (2 rules total).
+> ?- sym_diff(X, Y).
+4 rows:
+  (1, 0)
+  (2, 0)
+  (5, 0)
+  (6, 0)
+> .db use default
+Switched to database: default
+> .db drop test_multi_rule_neg
+Database 'test_multi_rule_neg' dropped.

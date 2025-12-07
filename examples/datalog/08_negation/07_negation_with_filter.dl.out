@@ -1,0 +1,31 @@
+
+> .db create test_neg_filter
+Database 'test_neg_filter' created.
+Switched to database: test_neg_filter
+> .db use test_neg_filter
+Switched to database: test_neg_filter
+> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+Inserted 5 facts into 'data'.
+> +excluded[(2, 0), (4, 0)].
+Inserted 2 facts into 'excluded'.
+> filtered(Id, Val) := data(Id, Val), Id > 1, Val > 15, !excluded(Id, _).
+View 'filtered' registered.
+> ?- filtered(X, Y).
+2 rows:
+  (3, 30)
+  (5, 50)
+> small_allowed(Id, Val) := data(Id, Val), Val < 35, !excluded(Id, _).
+View 'small_allowed' registered.
+> ?- small_allowed(X, Y).
+2 rows:
+  (1, 10)
+  (3, 30)
+> specific(Id, Val) := data(Id, Val), Val = 30, !excluded(Id, _).
+View 'specific' registered.
+> ?- specific(X, Y).
+1 rows:
+  (3, 30)
+> .db use default
+Switched to database: default
+> .db drop test_neg_filter
+Database 'test_neg_filter' dropped.

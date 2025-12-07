@@ -1,0 +1,19 @@
+// Test: Sum Aggregation
+// Category: 14_aggregations
+// Description: Tests sum aggregation to total values per group
+
+.db create test_agg_sum
+.db use test_agg_sum
+
+// Insert sales data: sales(region_id, amount)
++sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)].
+
+// Sum sales per region
+region_total(Region, sum<Amount>) := sales(Region, Amount).
+
+// Query the sum result
+?- region_total(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_agg_sum

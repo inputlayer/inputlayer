@@ -1,0 +1,18 @@
+
+> .db create test_neq
+Database 'test_neq' created.
+Switched to database: test_neq
+> .db use test_neq
+Switched to database: test_neq
+> +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
+Inserted 5 facts into 'edge'.
+> non_loop(X, Y) := edge(X, Y), X != Y.
+View 'non_loop' registered.
+> ?- non_loop(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> .db use default
+Switched to database: default
+> .db drop test_neq
+Database 'test_neq' dropped.

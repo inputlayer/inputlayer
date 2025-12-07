@@ -1,0 +1,39 @@
+// Test: Multiple Base Cases in Recursion
+// Category: Recursion
+// Verifies: Recursive rule with multiple independent starting points
+
+.db create test_multi_base
+.db use test_multi_base
+
+// Graph with multiple disconnected components and starting points
+// Component 1: 1 -> 2 -> 3
+// Component 2: 10 -> 11 -> 12
+// Component 3: 20 -> 21 -> 22 -> 23
+
++edge[(1, 2), (2, 3),
+      (10, 11), (11, 12),
+      (20, 21), (21, 22), (22, 23)].
+
+// Multiple base cases - start from nodes 1, 10, and 20
++start[(1), (10), (20)].
+
+// Reachability from any start node
+reachable(X) := start(X).
+reachable(Y) := reachable(X), edge(X, Y).
+
+// Query all reachable nodes
+?- reachable(X).
+
+// Expected: 1, 2, 3, 10, 11, 12, 20, 21, 22, 23 (10 nodes)
+
+// Count reachable per start
+reachable_from(S, X) := start(S), S = X.
+reachable_from(S, Y) := reachable_from(S, X), edge(X, Y).
+
+count_from_start(S, count<X>) := reachable_from(S, X).
+?- count_from_start(S, C).
+
+// Expected: (1, 3), (10, 3), (20, 4)
+
+.db use default
+.db drop test_multi_base

@@ -1,0 +1,10 @@
+> .db create test_vec_manhattan
+Database 'test_vec_manhattan' created.
+Switched to database: test_vec_manhattan
+> .db use test_vec_manhattan
+Switched to database: test_vec_manhattan
+> +vectors[(1, [0.0, 0.0]), (2, [1.0, 1.0]), (3, [2.0, 2.0]), (4, [3.0, 0.0])].
+Inserted 4 facts into 'vectors'.
+> +query[([0.0, 0.0])].
+Inserted 1 fact into 'query'.
+> l1_dist(Id, Dist) :- vectors(Id, V), query(Q), Dist = manhattan(V, Q).

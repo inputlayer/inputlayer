@@ -1,0 +1,41 @@
+Executing script: examples/datalog/18_advanced_patterns/10_negation_recursion_combined.dl
+
+> .db create test_neg_rec_combined
+Database 'test_neg_rec_combined' created.
+Switched to database: test_neg_rec_combined
+> .db use test_neg_rec_combined
+Switched to database: test_neg_rec_combined
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4)].
+Inserted 6 facts into 'edge'.
+> +blocked[(2, 3), (4, 5)].
+Inserted 2 facts into 'blocked'.
+> safe_edge(X, Y) := edge(X, Y), !blocked(X, Y).
+View 'safe_edge' registered.
+> ?- safe_edge(X, Y).
+4 rows:
+  (1, 2)
+  (1, 3)
+  (2, 4)
+  (3, 4)
+> safe_path(X, Y) := safe_edge(X, Y).
+View 'safe_path' registered.
+> safe_path(X, Z) := safe_edge(X, Y), safe_path(Y, Z).
+Rule added to view 'safe_path' (2 rules total).
+> ?- safe_path(X, Y).
+5 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 4)
+  (3, 4)
+> reachable_from_1(Y) := safe_path(1, Y).
+View 'reachable_from_1' registered.
+> reach_count(count<Y>) := reachable_from_1(Y).
+View 'reach_count' registered.
+> ?- reach_count(C).
+1 rows:
+  (3)
+> .db use default
+Switched to database: default
+> .db drop test_neg_rec_combined
+Database 'test_neg_rec_combined' dropped.

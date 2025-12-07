@@ -1,0 +1,22 @@
+
+> .db create test_view_def
+Database 'test_view_def' created.
+Switched to database: test_view_def
+> .db use test_view_def
+Switched to database: test_view_def
+> +edge[(1,2), (2,3)].
+Inserted 2 facts into 'edge'.
+> reach(X, Y) := edge(X, Y).
+View 'reach' registered.
+> reach(X, Z) := reach(X, Y), edge(Y, Z).
+Rule added to view 'reach' (2 rules total).
+> .view def reach
+View: reach
+Rules:
+  1. reach(X, Y) :- edge(X, Y).
+  2. reach(X, Z) :- reach(X, Y), edge(Y, Z).
+
+> .db use default
+Switched to database: default
+> .db drop test_view_def
+Database 'test_view_def' dropped.

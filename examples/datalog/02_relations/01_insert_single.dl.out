@@ -1,0 +1,28 @@
+
+> .db create test_insert
+Database 'test_insert' created.
+Switched to database: test_insert
+> .db use test_insert
+Switched to database: test_insert
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> +edge(3, 4).
+Inserted 1 fact into 'edge'.
+> +edge(5, 6).
+Inserted 1 fact into 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (3, 4)
+  (5, 6)
+> .rel
+Relations:
+  edge
+> .rel edge
+Relation: edge
+Schema: ["col0", "col1"]
+Tuple count: 3
+> .db use default
+Switched to database: default
+> .db drop test_insert
+Database 'test_insert' dropped.

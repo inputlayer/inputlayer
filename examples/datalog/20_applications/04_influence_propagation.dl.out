@@ -1,0 +1,41 @@
+Executing script: examples/datalog/20_applications/04_influence_propagation.dl
+
+> .db create test_influence
+Database 'test_influence' created.
+Switched to database: test_influence
+> .db use test_influence
+Switched to database: test_influence
+> +follows[(1, 2), (1, 3), (2, 4), (3, 4), (4, 5), (5, 6), (6, 7), (3, 7)].
+Inserted 8 facts into 'follows'.
+> +influencer[(1)].
+Inserted 1 fact into 'influencer'.
+> influenced(X) := influencer(X).
+View 'influenced' registered.
+> influenced(Y) := influenced(X), follows(Y, X).
+Rule added to view 'influenced' (2 rules total).
+> ?- influenced(U).
+1 rows:
+  (1)
+> influence_reach(count<U>) := influenced(U).
+View 'influence_reach' registered.
+> ?- influence_reach(C).
+1 rows:
+  (1)
+> influence_dist(X, 0) := influencer(X).
+View 'influence_dist' registered.
+> influence_dist(Y, D+1) := influence_dist(X, D), follows(Y, X), D < 10.
+Rule added to view 'influence_dist' (2 rules total).
+> min_dist(User, min<D>) := influence_dist(User, D).
+View 'min_dist' registered.
+> ?- min_dist(U, D).
+1 rows:
+  (1, 0)
+> at_distance(D, count<U>) := min_dist(U, D).
+View 'at_distance' registered.
+> ?- at_distance(D, C).
+1 rows:
+  (0, 1)
+> .db use default
+Switched to database: default
+> .db drop test_influence
+Database 'test_influence' dropped.

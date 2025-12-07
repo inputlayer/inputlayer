@@ -1,0 +1,8 @@
+Executing script: examples/datalog/13_performance/09_sparse_tree.dl
+
+> .db create test_sparse_tree
+Database 'test_sparse_tree' created.
+Switched to database: test_sparse_tree
+> .db use test_sparse_tree
+Switched to database: test_sparse_tree
+> +parent[(2, 1), (3, 1),

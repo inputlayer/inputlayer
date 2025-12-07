@@ -1,0 +1,46 @@
+Executing script: examples/datalog/22_set_operations/04_set_difference.dl
+
+> .db create test_diff
+Database 'test_diff' created.
+Switched to database: test_diff
+> .db use test_diff
+Switched to database: test_diff
+> +set_a[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'set_a'.
+> +set_b[(2), (4)].
+Inserted 2 facts into 'set_b'.
+> diff_a_minus_b(X) := set_a(X), !set_b(X).
+View 'diff_a_minus_b' registered.
+> ?- diff_a_minus_b(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> diff_b_minus_a(X) := set_b(X), !set_a(X).
+View 'diff_b_minus_a' registered.
+> ?- diff_b_minus_a(X).
+No results.
+> +set_c[(3), (4), (5), (6), (7)].
+Inserted 5 facts into 'set_c'.
+> diff_a_minus_c(X) := set_a(X), !set_c(X).
+View 'diff_a_minus_c' registered.
+> ?- diff_a_minus_c(X).
+2 rows:
+  (1)
+  (2)
+> +set_p[(1), (2), (3)].
+Inserted 3 facts into 'set_p'.
+> +set_q[(2), (3), (4)].
+Inserted 3 facts into 'set_q'.
+> sym_diff(X) := set_p(X), !set_q(X).
+View 'sym_diff' registered.
+> sym_diff(X) := set_q(X), !set_p(X).
+Rule added to view 'sym_diff' (2 rules total).
+> ?- sym_diff(X).
+2 rows:
+  (1)
+  (4)
+> .db use default
+Switched to database: default
+> .db drop test_diff
+Database 'test_diff' dropped.

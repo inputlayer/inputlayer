@@ -1,0 +1,38 @@
+
+> .db create test_overlap
+Database 'test_overlap' created.
+Switched to database: test_overlap
+> .db use test_overlap
+Switched to database: test_overlap
+> +rel_a[(1, 2), (2, 3), (3, 4), (4, 5)].
+Inserted 4 facts into 'rel_a'.
+> +rel_b[(2, 3), (3, 4), (5, 6), (6, 7)].
+Inserted 4 facts into 'rel_b'.
+> combined(X, Y) := rel_a(X, Y).
+View 'combined' registered.
+> combined(X, Y) := rel_b(X, Y).
+Rule added to view 'combined' (2 rules total).
+> ?- combined(X, Y).
+6 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
+  (5, 6)
+  (6, 7)
+> intersection(X, Y) := rel_a(X, Y), rel_b(X, Y).
+View 'intersection' registered.
+> ?- intersection(X, Y).
+2 rows:
+  (2, 3)
+  (3, 4)
+> only_in_a(X, Y) := rel_a(X, Y), !rel_b(X, Y).
+View 'only_in_a' registered.
+> ?- only_in_a(X, Y).
+2 rows:
+  (1, 2)
+  (4, 5)
+> .db use default
+Switched to database: default
+> .db drop test_overlap
+Database 'test_overlap' dropped.

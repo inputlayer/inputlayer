@@ -1,0 +1,50 @@
+// Test: Aggregation on Empty Results
+// Category: Aggregation
+// Verifies: Correct handling of empty groups and empty input
+
+.db create test_empty_agg
+.db use test_empty_agg
+
+// Non-empty relation
++data[(1, 10), (2, 20), (3, 30)].
+
+// Empty relation
++empty[].
+
+// Test 1: Normal aggregation (should work)
+normal_count(count<X>) := data(X, _).
+?- normal_count(C).
+
+normal_sum(sum<V>) := data(_, V).
+?- normal_sum(S).
+
+// Test 2: Aggregation over empty relation
+empty_count(count<X>) := empty(X, _).
+?- empty_count(C).
+
+// Test 3: Aggregation with no matching filter
+filtered(X, V) := data(X, V), V > 100.
+filtered_count(count<X>) := filtered(X, _).
+?- filtered(X, V).
+?- filtered_count(C).
+
+// Test 4: Group by on empty result
+group_empty(K, count<V>) := empty(K, V).
+?- group_empty(K, C).
+
+// Test 5: Min/Max on empty (edge case)
+empty_min(min<X>) := empty(X, _).
+empty_max(max<X>) := empty(X, _).
+?- empty_min(M).
+?- empty_max(M).
+
+// Test 6: Partial groups - some empty, some not
++mixed[(1, 10), (1, 20), (3, 30)].
+mixed_count(K, count<V>) := mixed(K, V).
+?- mixed_count(K, C).
+
+// Expected: (1, 2), (3, 1) - no group for 2 since no data
+
+// Cleanup
+.db use default
+.db drop test_empty_agg

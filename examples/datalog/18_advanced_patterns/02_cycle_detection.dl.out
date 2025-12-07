@@ -1,0 +1,27 @@
+
+> .db create test_cycle
+Database 'test_cycle' created.
+Switched to database: test_cycle
+> .db use test_cycle
+Switched to database: test_cycle
+> +edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 5)].
+Inserted 5 facts into 'edge'.
+> +node[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)].
+Inserted 6 facts into 'node'.
+> reachable(X, Y) := edge(X, Y).
+View 'reachable' registered.
+> reachable(X, Z) := reachable(X, Y), edge(Y, Z).
+Rule added to view 'reachable' (2 rules total).
+> in_cycle(X, X) := reachable(X, X).
+View 'in_cycle' registered.
+> ?- in_cycle(X, Y).
+5 rows:
+  (1, 1)
+  (2, 2)
+  (3, 3)
+  (4, 4)
+  (5, 5)
+> .db use default
+Switched to database: default
+> .db drop test_cycle
+Database 'test_cycle' dropped.

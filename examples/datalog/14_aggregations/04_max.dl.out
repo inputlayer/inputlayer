@@ -1,0 +1,19 @@
+
+> .db create test_agg_max
+Database 'test_agg_max' created.
+Switched to database: test_agg_max
+> .db use test_agg_max
+Switched to database: test_agg_max
+> +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
+Inserted 6 facts into 'reading'.
+> max_temp(Sensor, max<Temp>) := reading(Sensor, Temp).
+View 'max_temp' registered.
+> ?- max_temp(X, Y).
+3 rows:
+  (1, 28)
+  (2, 35)
+  (3, 18)
+> .db use default
+Switched to database: default
+> .db drop test_agg_max
+Database 'test_agg_max' dropped.

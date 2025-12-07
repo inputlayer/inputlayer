@@ -1,0 +1,75 @@
+Executing script: examples/datalog/15_arithmetic/07_increment_edge_cases.dl
+
+> .db create test_inc_edge
+Database 'test_inc_edge' created.
+Switched to database: test_inc_edge
+> .db use test_inc_edge
+Switched to database: test_inc_edge
+> +zero_base[(1, 0)].
+Inserted 1 fact into 'zero_base'.
+> +link1[(1, 2)].
+Inserted 1 fact into 'link1'.
+> from_zero(Y, D+1) :- zero_base(X, D), link1(X, Y).
+1 rows:
+  (2, 1)
+(session: 1 rule(s))
+> ?- from_zero(A, B).
+1 rows:
+  (2, 1)
+> +neg_base[(1, -5), (2, -1)].
+Inserted 2 facts into 'neg_base'.
+> +link2[(1, 10), (2, 20)].
+Inserted 2 facts into 'link2'.
+> from_neg(Y, D+1) :- neg_base(X, D), link2(X, Y).
+2 rows:
+  (10, -4)
+  (20, 0)
+(session: 2 rule(s))
+> ?- from_neg(A, B).
+2 rows:
+  (10, -4)
+  (20, 0)
+> +dec_base[(1, 10), (2, 5)].
+Inserted 2 facts into 'dec_base'.
+> +link3[(1, 100), (2, 200)].
+Inserted 2 facts into 'link3'.
+> decremented(Y, D-1) :- dec_base(X, D), link3(X, Y).
+2 rows:
+  (100, 9)
+  (200, 4)
+(session: 3 rule(s))
+> ?- decremented(A, B).
+2 rows:
+  (100, 9)
+  (200, 4)
+> +large_base[(1, 1000000)].
+Inserted 1 fact into 'large_base'.
+> +link4[(1, 2)].
+Inserted 1 fact into 'link4'.
+> large_inc(Y, D+1) :- large_base(X, D), link4(X, Y).
+1 rows:
+  (2, 1000001)
+(session: 4 rule(s))
+> ?- large_inc(A, B).
+1 rows:
+  (2, 1000001)
+> +multi_base[(1, 0), (2, 0), (3, 0)].
+Inserted 3 facts into 'multi_base'.
+> +link5[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'link5'.
+> multi_inc(Y, D+1) :- multi_base(X, D), link5(X, Y).
+3 rows:
+  (10, 1)
+  (20, 1)
+  (30, 1)
+(session: 5 rule(s))
+> ?- multi_inc(A, B).
+3 rows:
+  (10, 1)
+  (20, 1)
+  (30, 1)
+> .db use default
+Switched to database: default
+(Cleared 5 session rule(s))
+> .db drop test_inc_edge
+Database 'test_inc_edge' dropped.

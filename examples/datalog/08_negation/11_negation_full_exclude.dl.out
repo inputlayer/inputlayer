@@ -1,0 +1,18 @@
+
+> .db create test_neg_full_excl
+Database 'test_neg_full_excl' created.
+Switched to database: test_neg_full_excl
+> .db use test_neg_full_excl
+Switched to database: test_neg_full_excl
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'data'.
+> +exclude_all[(1, 0), (2, 0), (3, 0)].
+Inserted 3 facts into 'exclude_all'.
+> result(X, Y) := data(X, Y), !exclude_all(X, _).
+View 'result' registered.
+> ?- result(X, Y).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_neg_full_excl
+Database 'test_neg_full_excl' dropped.

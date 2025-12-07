@@ -1,0 +1,31 @@
+Executing script: examples/datalog/09_recursion/08_mutual_recursion.dl
+
+> .db create test_mutual_recursion
+Database 'test_mutual_recursion' created.
+Switched to database: test_mutual_recursion
+> .db use test_mutual_recursion
+Switched to database: test_mutual_recursion
+> +number[(0), (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)].
+Inserted 11 facts into 'number'.
+> +base_even[(0)].
+Inserted 1 fact into 'base_even'.
+> +base_odd[(1)].
+Inserted 1 fact into 'base_odd'.
+> +succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10)].
+Inserted 10 facts into 'succ'.
+> is_even(N) := base_even(N).
+View 'is_even' registered.
+> is_even(N) := succ(M, N), is_odd(M).
+Rule added to view 'is_even' (2 rules total).
+> is_odd(N) := base_odd(N).
+View 'is_odd' registered.
+> is_odd(N) := succ(M, N), is_even(M).
+Rule added to view 'is_odd' (2 rules total).
+> ?- is_even(X).
+No results.
+> ?- is_odd(X).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_mutual_recursion
+Database 'test_mutual_recursion' dropped.

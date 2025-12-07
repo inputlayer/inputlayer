@@ -1,0 +1,22 @@
+
+> .db create test_view_list
+Database 'test_view_list' created.
+Switched to database: test_view_list
+> .db use test_view_list
+Switched to database: test_view_list
+> +edge[(1,2), (2,3)].
+Inserted 2 facts into 'edge'.
+> reverse(X, Y) := edge(Y, X).
+View 'reverse' registered.
+> paths(X, Y) := edge(X, Y).
+View 'paths' registered.
+> paths(X, Z) := paths(X, Y), edge(Y, Z).
+Rule added to view 'paths' (2 rules total).
+> .view
+Views:
+  paths
+  reverse
+> .db use default
+Switched to database: default
+> .db drop test_view_list
+Database 'test_view_list' dropped.

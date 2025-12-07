@@ -1,0 +1,44 @@
+Executing script: examples/datalog/22_set_operations/03_intersection.dl
+
+> .db create test_intersect
+Database 'test_intersect' created.
+Switched to database: test_intersect
+> .db use test_intersect
+Switched to database: test_intersect
+> +set_a[(1), (2), (3), (4)].
+Inserted 4 facts into 'set_a'.
+> +set_b[(3), (4), (5), (6)].
+Inserted 4 facts into 'set_b'.
+> intersection(X) := set_a(X), set_b(X).
+View 'intersection' registered.
+> ?- intersection(X).
+2 rows:
+  (3)
+  (4)
+> intersect_count(count<X>) := intersection(X).
+View 'intersect_count' registered.
+> ?- intersect_count(C).
+1 rows:
+  (2)
+> +pairs_a[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'pairs_a'.
+> +pairs_b[(2, 20), (3, 30), (4, 40)].
+Inserted 3 facts into 'pairs_b'.
+> common_pairs(X, Y) := pairs_a(X, Y), pairs_b(X, Y).
+View 'common_pairs' registered.
+> ?- common_pairs(X, Y).
+2 rows:
+  (2, 20)
+  (3, 30)
+> +set_x[(1), (2)].
+Inserted 2 facts into 'set_x'.
+> +set_y[(3), (4)].
+Inserted 2 facts into 'set_y'.
+> empty_intersect(X) := set_x(X), set_y(X).
+View 'empty_intersect' registered.
+> ?- empty_intersect(X).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_intersect
+Database 'test_intersect' dropped.

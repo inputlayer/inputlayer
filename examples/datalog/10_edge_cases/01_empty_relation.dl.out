@@ -1,0 +1,18 @@
+
+> .db create test_empty
+Database 'test_empty' created.
+Switched to database: test_empty
+> .db use test_empty
+Switched to database: test_empty
+> empty_view(X, Y) := nonexistent(X, Y).
+View 'empty_view' registered.
+> ?- empty_view(X, Y).
+No results.
+> +edge[(1,2)].
+Inserted 1 fact into 'edge'.
+> ?- nonexistent(X, Y).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_empty
+Database 'test_empty' dropped.

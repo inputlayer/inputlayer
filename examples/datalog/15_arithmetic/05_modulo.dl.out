@@ -1,0 +1,27 @@
+Executing script: examples/datalog/15_arithmetic/05_modulo.dl
+
+> .db create test_arith_mod
+Database 'test_arith_mod' created.
+Switched to database: test_arith_mod
+> .db use test_arith_mod
+Switched to database: test_arith_mod
+> +num[(1, 17), (2, 24), (3, 35), (4, 12)].
+Inserted 4 facts into 'num'.
+> remainder(Id, Value%5) :- num(Id, Value).
+4 rows:
+  (1, 2)
+  (2, 4)
+  (3, 0)
+  (4, 2)
+(session: 1 rule(s))
+> ?- remainder(X, Y).
+4 rows:
+  (1, 2)
+  (2, 4)
+  (3, 0)
+  (4, 2)
+> .db use default
+Switched to database: default
+(Cleared 1 session rule(s))
+> .db drop test_arith_mod
+Database 'test_arith_mod' dropped.

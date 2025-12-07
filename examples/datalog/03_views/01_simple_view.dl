@@ -1,0 +1,25 @@
+// Test: Simple View Definition
+// Category: 03_views
+// Description: Tests defining and querying a simple non-recursive view
+
+.db create test_view
+.db use test_view
+
+// Insert base data
++edge[(1,2), (2,3), (3,4)].
+
+// Define a simple view (reverse edges)
+reverse(X, Y) := edge(Y, X).
+
+// List views
+.view
+
+// Query the view
+?- reverse(X, Y).
+
+// Show view definition
+.view reverse
+
+// Cleanup
+.db use default
+.db drop test_view

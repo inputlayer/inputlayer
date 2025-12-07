@@ -1,0 +1,8 @@
+Executing script: examples/datalog/20_applications/09_org_chart_levels.dl
+
+> .db create test_org
+Database 'test_org' created.
+Switched to database: test_org
+> .db use test_org
+Switched to database: test_org
+> +reports_to[(2, 1), (3, 1), (4, 1),      // CEO (1) has 3 direct reports

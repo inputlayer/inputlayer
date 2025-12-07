@@ -1,0 +1,8 @@
+Executing script: examples/datalog/20_applications/01_rbac_permissions.dl
+
+> .db create test_rbac
+Database 'test_rbac' created.
+Switched to database: test_rbac
+> .db use test_rbac
+Switched to database: test_rbac
+> +role_inherits[(1, 2), (2, 3), (3, 4)].  // admin(1) < manager(2) < employee(3) < guest(4)

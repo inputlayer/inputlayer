@@ -1,0 +1,19 @@
+
+> .db create test_bulk
+Database 'test_bulk' created.
+Switched to database: test_bulk
+> .db use test_bulk
+Switched to database: test_bulk
+> +edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+Inserted 5 facts into 'edge'.
+> ?- edge(X, Y).
+5 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
+  (5, 6)
+> .db use default
+Switched to database: default
+> .db drop test_bulk
+Database 'test_bulk' dropped.

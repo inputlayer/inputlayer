@@ -1,0 +1,28 @@
+// Test: Delete Operations
+// Category: 02_relations
+// Description: Tests single and conditional delete
+
+.db create test_del
+.db use test_del
+
+// Insert initial data
++edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+
+// Show initial state
+?- edge(X, Y).
+
+// Delete single fact
+-edge(3, 4).
+
+// Show after single delete
+?- edge(X, Y).
+
+// Conditional delete: remove edges where X > 3
+-edge(X, Y) :- edge(X, Y), X > 3.
+
+// Show final state
+?- edge(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_del

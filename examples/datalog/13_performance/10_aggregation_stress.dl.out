@@ -1,0 +1,8 @@
+Executing script: examples/datalog/13_performance/10_aggregation_stress.dl
+
+> .db create test_agg_stress
+Database 'test_agg_stress' created.
+Switched to database: test_agg_stress
+> .db use test_agg_stress
+Switched to database: test_agg_stress
+> +sales[(1, 100, 10), (1, 101, 20), (1, 102, 15), (1, 103, 25), (1, 104, 30),

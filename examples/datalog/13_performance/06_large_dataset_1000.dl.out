@@ -1,0 +1,8 @@
+Executing script: examples/datalog/13_performance/06_large_dataset_1000.dl
+
+> .db create test_large_1000
+Database 'test_large_1000' created.
+Switched to database: test_large_1000
+> .db use test_large_1000
+Switched to database: test_large_1000
+> +edges[(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),(1,8),(1,9),(1,10),(1,11),

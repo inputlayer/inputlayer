@@ -1,0 +1,8 @@
+Executing script: examples/datalog/20_applications/10_common_ancestor.dl
+
+> .db create test_ancestor
+Database 'test_ancestor' created.
+Switched to database: test_ancestor
+> .db use test_ancestor
+Switched to database: test_ancestor
+> +parent[(2, 1), (3, 1),

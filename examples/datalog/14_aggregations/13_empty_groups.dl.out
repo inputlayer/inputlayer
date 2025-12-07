@@ -1,0 +1,10 @@
+Executing script: examples/datalog/14_aggregations/13_empty_groups.dl
+
+> .db create test_empty_agg
+Database 'test_empty_agg' created.
+Switched to database: test_empty_agg
+> .db use test_empty_agg
+Switched to database: test_empty_agg
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'data'.
+> +empty[].

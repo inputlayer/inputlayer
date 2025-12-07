@@ -1,0 +1,28 @@
+// Test: Cycle Detection in Directed Graph
+// Category: 18_advanced_patterns
+// Description: Detect nodes that are part of cycles using self-reachability
+
+.db create test_cycle
+.db use test_cycle
+
+// Graph structure:
+// 1 -> 2 -> 3 -> 4 (cycle)
+//      ^--------|
+// 5 ⟲ (self-loop)
+// 6 (isolated)
++edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 5)].
++node[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)].
+
+// Transitive closure for reachability
+reachable(X, Y) := edge(X, Y).
+reachable(X, Z) := reachable(X, Y), edge(Y, Z).
+
+// A node is in a cycle if it can reach itself
+in_cycle(X, X) := reachable(X, X).
+
+// Query nodes in cycles
+?- in_cycle(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_cycle

@@ -1,0 +1,30 @@
+// Test: Division by Zero Handling
+// Category: Errors
+// Verifies: How the system handles division by zero
+
+.db create test_div_zero
+.db use test_div_zero
+
+// Simple data
++numbers[(10), (20), (0), (5)].
+
+// Division that would produce divide by zero
+// This tests what happens when we divide by a zero value
++pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
+
+// Safe division (no zero divisors)
+safe_div(X, Y, X/Y) := pairs(X, Y), Y != 0.
+?- safe_div(A, B, C).
+
+// Attempt division including zero (may error or return special value)
+// Uncomment to test actual behavior:
+// all_div(X, Y, X/Y) := pairs(X, Y).
+// ?- all_div(A, B, C).
+
+// Modulo by zero test
+safe_mod(X, Y, X%Y) := pairs(X, Y), Y != 0.
+?- safe_mod(A, B, C).
+
+// Cleanup
+.db use default
+.db drop test_div_zero

@@ -1,0 +1,22 @@
+Executing script: examples/datalog/15_arithmetic/04_divide.dl
+
+> .db create test_arith_div
+Database 'test_arith_div' created.
+Switched to database: test_arith_div
+> .db use test_arith_div
+Switched to database: test_arith_div
+> +total[(1, 100), (2, 200), (3, 150)].
+Inserted 3 facts into 'total'.
+> half(Id, Amount/2) :- total(Id, Amount).
+No results for 'half'.
+(session: 1 rule(s))
+> ?- half(X, Y).
+3 rows:
+  (1, 50)
+  (2, 100)
+  (3, 75)
+> .db use default
+Switched to database: default
+(Cleared 1 session rule(s))
+> .db drop test_arith_div
+Database 'test_arith_div' dropped.

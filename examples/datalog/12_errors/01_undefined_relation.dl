@@ -1,0 +1,13 @@
+// Test: Query Undefined Relation
+// Category: 12_errors
+// Description: Tests error handling when querying a non-existent relation
+
+.db create test_err
+.db use test_err
+
+// Query a relation that doesn't exist
+?- nonexistent(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_err

@@ -1,0 +1,8 @@
+Executing script: examples/datalog/20_applications/05_bom_explosion.dl
+
+> .db create test_bom
+Database 'test_bom' created.
+Switched to database: test_bom
+> .db use test_bom
+Switched to database: test_bom
+> +part_of[(100, 1, 1),    // engine in car

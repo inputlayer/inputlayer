@@ -1,0 +1,22 @@
+// Test: Cosine Distance
+// Category: 16_vectors
+// Description: Tests cosine distance (1 - similarity) between vectors
+
+.db create test_vec_cosine
+.db use test_vec_cosine
+
+// Insert vectors: vectors(id, vector)
++vectors[(1, [1.0, 0.0]), (2, [0.0, 1.0]), (3, [1.0, 1.0])].
+
+// Insert query vector pointing in same direction as vector 1
++query[([1.0, 0.0])].
+
+// Calculate cosine distance from query to all vectors
+similarity(Id, Dist) :- vectors(Id, V), query(Q), Dist = cosine(V, Q).
+
+// Query distances
+?- similarity(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_vec_cosine

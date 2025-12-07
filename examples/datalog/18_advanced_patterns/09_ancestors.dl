@@ -1,0 +1,26 @@
+// Test: Ancestor Queries (Transitive Closure)
+// Category: 18_advanced_patterns
+// Description: Transitive closure of parent relation to find all ancestors
+
+.db create test_ancestors
+.db use test_ancestors
+
+// Family tree:
+//       Alice(1)
+//       /    \
+//    Bob(2)  Carol(3)
+//     |
+//   Dave(4)
+// Parent relation: parent(child, parent)
++parent[(2, 1), (3, 1), (4, 2)].
+
+// Compute ancestors: ancestor(person, ancestor)
+ancestor(X, Y) := parent(X, Y).
+ancestor(X, Z) := parent(X, Y), ancestor(Y, Z).
+
+// Query all ancestor relationships
+?- ancestor(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_ancestors

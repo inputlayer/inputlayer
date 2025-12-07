@@ -1,0 +1,37 @@
+
+> .db create test_int
+Database 'test_int' created.
+Switched to database: test_int
+> .db use test_int
+Switched to database: test_int
+> +positive[(1, 100), (2, 200), (3, 300)].
+Inserted 3 facts into 'positive'.
+> +negative[(-1, -100), (-2, -200), (-3, -300)].
+Inserted 3 facts into 'negative'.
+> +zeros[(0, 0), (0, 1), (1, 0)].
+Inserted 3 facts into 'zeros'.
+> ?- positive(X, Y).
+3 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
+> ?- negative(X, Y).
+3 rows:
+  (-3, -300)
+  (-2, -200)
+  (-1, -100)
+> ?- zeros(X, Y).
+3 rows:
+  (0, 0)
+  (0, 1)
+  (1, 0)
+> neg_large(X, Y) := negative(X, Y), Y < -150.
+View 'neg_large' registered.
+> ?- neg_large(X, Y).
+2 rows:
+  (-3, -300)
+  (-2, -200)
+> .db use default
+Switched to database: default
+> .db drop test_int
+Database 'test_int' dropped.

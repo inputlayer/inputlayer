@@ -1,0 +1,11 @@
+
+> .db create test_top_k
+Database 'test_top_k' created.
+Switched to database: test_top_k
+> .db use test_top_k
+Switched to database: test_top_k
+> +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
+Inserted 6 facts into 'score'.
+> top_players(Player, top_k<3, Points, desc>) := score(Player, Points).
+View 'top_players' registered.
+> ?- top_players(X, Y).

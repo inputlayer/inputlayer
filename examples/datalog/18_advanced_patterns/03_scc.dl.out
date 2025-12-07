@@ -1,0 +1,33 @@
+
+> .db create test_scc
+Database 'test_scc' created.
+Switched to database: test_scc
+> .db use test_scc
+Switched to database: test_scc
+> +edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 6), (6, 5)].
+Inserted 6 facts into 'edge'.
+> reachable(X, Y) := edge(X, Y).
+View 'reachable' registered.
+> reachable(X, Z) := reachable(X, Y), edge(Y, Z).
+Rule added to view 'reachable' (2 rules total).
+> same_scc(X, Y) := reachable(X, Y), reachable(Y, X).
+View 'same_scc' registered.
+> ?- same_scc(X, Y).
+13 rows:
+  (2, 2)
+  (2, 3)
+  (2, 4)
+  (3, 2)
+  (3, 3)
+  (3, 4)
+  (4, 2)
+  (4, 3)
+  (4, 4)
+  (5, 5)
+  (5, 6)
+  (6, 5)
+  (6, 6)
+> .db use default
+Switched to database: default
+> .db drop test_scc
+Database 'test_scc' dropped.

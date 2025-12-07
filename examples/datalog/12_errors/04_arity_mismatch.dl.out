@@ -1,0 +1,13 @@
+Executing script: examples/datalog/12_errors/04_arity_mismatch.dl
+
+> .db create test_arity_err
+Database 'test_arity_err' created.
+Switched to database: test_arity_err
+> .db use test_arity_err
+Switched to database: test_arity_err
+> +single[(1), (2), (3)].
+Inserted 3 facts into 'single'.
+> .db use default
+Switched to database: default
+> .db drop test_arity_err
+Database 'test_arity_err' dropped.

@@ -1,0 +1,23 @@
+
+> .db create test_str
+Database 'test_str' created.
+Switched to database: test_str
+> .db use test_str
+Switched to database: test_str
+> +person[(1, 25), (2, 30), (3, 35)].
+Inserted 3 facts into 'person'.
+> ?- person(Id, Age).
+3 rows:
+  (1, 25)
+  (2, 30)
+  (3, 35)
+> older(Id, Age) := person(Id, Age), Age > 28.
+View 'older' registered.
+> ?- older(X, Y).
+2 rows:
+  (2, 30)
+  (3, 35)
+> .db use default
+Switched to database: default
+> .db drop test_str
+Database 'test_str' dropped.

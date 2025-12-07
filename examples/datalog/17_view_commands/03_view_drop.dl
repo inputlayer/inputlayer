@@ -1,0 +1,26 @@
+// Test: View Drop Command
+// Category: 17_view_commands
+// Description: Tests .view drop <name> to remove a view
+
+.db create test_view_drop
+.db use test_view_drop
+
+// Insert base data
++edge[(1,2), (2,3)].
+
+// Define views
+reverse(X, Y) := edge(Y, X).
+paths(X, Y) := edge(X, Y).
+
+// List views before drop
+.view
+
+// Drop one view
+.view drop reverse
+
+// List views after drop
+.view
+
+// Cleanup
+.db use default
+.db drop test_view_drop

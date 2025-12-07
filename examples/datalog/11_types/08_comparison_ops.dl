@@ -1,0 +1,42 @@
+// Test: Comparison Operations
+// Category: 11_types
+// Description: Tests all comparison operators
+
+.db create test_compare
+.db use test_compare
+
+// Test data
++vals[(1, 10), (2, 20), (3, 30), (4, 20), (5, 40)].
+
+// Less than
+less_than_25(Id, V) := vals(Id, V), V < 25.
+?- less_than_25(X, Y).
+
+// Less than or equal
+less_eq_20(Id, V) := vals(Id, V), V <= 20.
+?- less_eq_20(X, Y).
+
+// Greater than
+greater_than_25(Id, V) := vals(Id, V), V > 25.
+?- greater_than_25(X, Y).
+
+// Greater than or equal
+greater_eq_20(Id, V) := vals(Id, V), V >= 20.
+?- greater_eq_20(X, Y).
+
+// Equal (via join)
++targets[(20)].
+equals_target(Id, V) := vals(Id, V), targets(V).
+?- equals_target(X, Y).
+
+// Not equal via negation
+not_twenty(Id, V) := vals(Id, V), !targets(V).
+?- not_twenty(X, Y).
+
+// Chained comparisons: 15 < V < 35
+in_range(Id, V) := vals(Id, V), V > 15, V < 35.
+?- in_range(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_compare

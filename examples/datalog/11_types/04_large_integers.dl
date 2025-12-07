@@ -1,0 +1,28 @@
+// Test: Large Integer Values
+// Category: 11_types
+// Description: Tests handling of large integer values (i32 range)
+
+.db create test_large_int
+.db use test_large_int
+
+// Large positive values (within i32 range)
++large_pos[(1000000, 2000000), (999999, 1000001)].
+
+// Large negative values
++large_neg[(-1000000, -2000000), (-999999, -1000001)].
+
+// Mixed large values
++mixed[(1000000, -1000000), (-999999, 999999)].
+
+// Query all
+?- large_pos(X, Y).
+?- large_neg(X, Y).
+?- mixed(X, Y).
+
+// Arithmetic with large values
+sum_large(X, Y) := large_pos(X, Y), X + Y > 2500000.
+?- sum_large(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_large_int

@@ -1,0 +1,19 @@
+// Test: Self Join (Path of Length 2)
+// Category: 06_joins
+// Description: Tests joining a relation with itself
+
+.db create test_self
+.db use test_self
+
+// Graph: 1->2->3->4
++edge[(1,2), (2,3), (3,4)].
+
+// Find paths of length 2
+path2(X, Z) := edge(X, Y), edge(Y, Z).
+
+// Query
+?- path2(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_self

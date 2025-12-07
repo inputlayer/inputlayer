@@ -1,0 +1,42 @@
+Executing script: examples/datalog/21_query_features/02_projection.dl
+
+> .db create test_projection
+Database 'test_projection' created.
+Switched to database: test_projection
+> .db use test_projection
+Switched to database: test_projection
+> +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)].
+Inserted 4 facts into 'employees'.
+> departments(D) := employees(_, _, D).
+View 'departments' registered.
+> ?- departments(D).
+3 rows:
+  (10)
+  (20)
+  (30)
+> id_salary(Id, Sal) := employees(Id, Sal, _).
+View 'id_salary' registered.
+> ?- id_salary(X, Y).
+4 rows:
+  (1, 50000)
+  (2, 60000)
+  (3, 55000)
+  (4, 70000)
+> id_dept(Id, D) := employees(Id, _, D).
+View 'id_dept' registered.
+> ?- id_dept(X, Y).
+4 rows:
+  (1, 10)
+  (2, 20)
+  (3, 10)
+  (4, 30)
+> high_earners(Emp, Pay) := employees(Emp, Pay, _), Pay > 55000.
+View 'high_earners' registered.
+> ?- high_earners(X, Y).
+2 rows:
+  (2, 60000)
+  (4, 70000)
+> .db use default
+Switched to database: default
+> .db drop test_projection
+Database 'test_projection' dropped.

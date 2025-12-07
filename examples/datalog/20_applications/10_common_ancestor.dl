@@ -1,0 +1,59 @@
+// Test: Lowest Common Ancestor
+// Category: Applications
+// Verifies: Finding common ancestors in family tree
+
+.db create test_ancestor
+.db use test_ancestor
+
+// Parent relationship: parent(child, parent)
+//         1
+//        / \
+//       2   3
+//      /|   |\
+//     4 5  6 7
+//    /|    |
+//   8 9   10
+
++parent[(2, 1), (3, 1),
+        (4, 2), (5, 2), (6, 3), (7, 3),
+        (8, 4), (9, 4), (10, 6)].
+
+// Ancestor relation (transitive parent)
+ancestor(X, A) := parent(X, A).
+ancestor(X, A) := parent(X, P), ancestor(P, A).
+
+// Query all ancestors of node 8
+ancestors_of_8(A) := ancestor(8, A).
+?- ancestors_of_8(A).
+
+// Query all ancestors of node 10
+ancestors_of_10(A) := ancestor(10, A).
+?- ancestors_of_10(A).
+
+// Common ancestors of 8 and 10
+common_ancestor(A) := ancestor(8, A), ancestor(10, A).
+?- common_ancestor(A).
+
+// Ancestor with distance
+ancestor_dist(X, A, 1) := parent(X, A).
+ancestor_dist(X, A, D+1) := parent(X, P), ancestor_dist(P, A, D).
+
+// Distance from 8 to each ancestor
+dist_from_8(A, min<D>) := ancestor_dist(8, A, D).
+?- dist_from_8(A, D).
+
+// Distance from 10 to each ancestor
+dist_from_10(A, min<D>) := ancestor_dist(10, A, D).
+?- dist_from_10(A, D).
+
+// Find LCA: common ancestor with minimum total distance
+common_dist(A, D1+D2) := dist_from_8(A, D1), dist_from_10(A, D2).
+?- common_dist(A, D).
+
+// LCA is common ancestor with minimum total distance
+min_common_dist(min<D>) := common_dist(_, D).
+?- min_common_dist(D).
+
+// Cleanup
+.db use default
+.db drop test_ancestor

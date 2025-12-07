@@ -1,0 +1,8 @@
+Executing script: examples/datalog/13_performance/07_wide_tuples_10col.dl
+
+> .db create test_wide_10
+Database 'test_wide_10' created.
+Switched to database: test_wide_10
+> .db use test_wide_10
+Switched to database: test_wide_10
+> +wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000),

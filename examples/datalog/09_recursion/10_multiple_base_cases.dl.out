@@ -1,0 +1,8 @@
+Executing script: examples/datalog/09_recursion/10_multiple_base_cases.dl
+
+> .db create test_multi_base
+Database 'test_multi_base' created.
+Switched to database: test_multi_base
+> .db use test_multi_base
+Switched to database: test_multi_base
+> +edge[(1, 2), (2, 3),

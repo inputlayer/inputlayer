@@ -1,0 +1,34 @@
+// Test: Wide Tuples (10 columns)
+// Category: Performance
+// Verifies: System handles wide tuples
+
+.db create test_wide_10
+.db use test_wide_10
+
+// 10-column tuples
++wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000),
+           (2, 20, 200, 2000, 20000, 3, 30, 300, 3000, 30000),
+           (3, 30, 300, 3000, 30000, 4, 40, 400, 4000, 40000),
+           (4, 40, 400, 4000, 40000, 5, 50, 500, 5000, 50000),
+           (5, 50, 500, 5000, 50000, 6, 60, 600, 6000, 60000)].
+
+// Select specific columns
+select_cols(A, E, J) := wide_data(A, _, _, _, E, _, _, _, _, J).
+?- select_cols(A, E, J).
+
+// Sum across columns
+col_sum(A, B+C+D+E) := wide_data(A, B, C, D, E, _, _, _, _, _).
+?- col_sum(A, S).
+
+// Filter on multiple columns
+filtered(A) := wide_data(A, B, C, _, _, _, _, _, _, _), B > 15, C > 150.
+?- filtered(A).
+
+// Join wide tuples on first column
++wide_data2[(1, 111), (2, 222), (3, 333), (4, 444), (5, 555)].
+joined(A, B, C, V) := wide_data(A, B, C, _, _, _, _, _, _, _), wide_data2(A, V).
+?- joined(A, B, C, V).
+
+// Cleanup
+.db use default
+.db drop test_wide_10

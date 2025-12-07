@@ -1,0 +1,27 @@
+// Test: Distinct Results (Implicit Deduplication)
+// Category: 21_query_features
+// Description: Datalog naturally produces distinct results
+
+.db create test_distinct
+.db use test_distinct
+
+// Data with potential duplicates in derived results
++edge[(1, 2), (2, 3), (1, 3), (3, 2)].
+
+// Multiple paths to same node - results should be distinct
+reachable(X, Y) := edge(X, Y).
+reachable(X, Z) := edge(X, Y), reachable(Y, Z).
+
+// Query reachability from node 1
+?- reachable(1, Y).
+// Should show each destination once, not multiple times
+
+// Another deduplication test
++data[(1, 10), (2, 10), (3, 10), (4, 20)].
+distinct_vals(V) := data(_, V).
+?- distinct_vals(V).
+// Should show 10 once, 20 once
+
+// Cleanup
+.db use default
+.db drop test_distinct

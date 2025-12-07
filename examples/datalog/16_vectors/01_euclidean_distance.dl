@@ -1,0 +1,22 @@
+// Test: Euclidean Distance
+// Category: 16_vectors
+// Description: Tests euclidean distance calculation between vectors
+
+.db create test_vec_euclidean
+.db use test_vec_euclidean
+
+// Insert vectors: vectors(id, vector)
++vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
+
+// Insert query vector
++query[([0.0, 0.0, 0.0])].
+
+// Calculate euclidean distance from query to all vectors
+nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).
+
+// Query distances
+?- nearest(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_vec_euclidean

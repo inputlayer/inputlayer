@@ -1,0 +1,6 @@
+# Ignore generated certificates (regenerate with ./generate.sh)
+*.pem
+*.key
+
+# Keep the generation script
+!generate.sh

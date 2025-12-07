@@ -1,0 +1,20 @@
+
+> .db create test_neg
+Database 'test_neg' created.
+Switched to database: test_neg
+> .db use test_neg
+Switched to database: test_neg
+> +edge[(1,2), (2,3), (3,4), (4,5)].
+Inserted 4 facts into 'edge'.
+> +skip[(2,3), (4,5)].
+Inserted 2 facts into 'skip'.
+> filtered(X, Y) := edge(X, Y), !skip(X, Y).
+View 'filtered' registered.
+> ?- filtered(X, Y).
+2 rows:
+  (1, 2)
+  (3, 4)
+> .db use default
+Switched to database: default
+> .db drop test_neg
+Database 'test_neg' dropped.

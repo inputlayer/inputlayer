@@ -1,0 +1,29 @@
+Executing script: examples/datalog/09_recursion/05_left_recursion.dl
+
+> .db create test_left_recursion
+Database 'test_left_recursion' created.
+Switched to database: test_left_recursion
+> .db use test_left_recursion
+Switched to database: test_left_recursion
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+Inserted 4 facts into 'edge'.
+> path(X, Y) := edge(X, Y).
+View 'path' registered.
+> path(X, Y) := path(X, Z), edge(Z, Y).
+Rule added to view 'path' (2 rules total).
+> ?- path(A, B).
+10 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+  (2, 3)
+  (2, 4)
+  (2, 5)
+  (3, 4)
+  (3, 5)
+  (4, 5)
+> .db use default
+Switched to database: default
+> .db drop test_left_recursion
+Database 'test_left_recursion' dropped.

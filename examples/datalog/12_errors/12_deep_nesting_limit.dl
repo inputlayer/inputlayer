@@ -1,0 +1,30 @@
+// Test: Deeply Nested Expression Handling
+// Category: Errors
+// Verifies: System handles deeply nested arithmetic expressions
+
+.db create test_deep_nest
+.db use test_deep_nest
+
+// Base data
++base[(1), (2), (3)].
+
+// Moderately nested expression (5 levels)
+nest5(X, ((((X+1)+1)+1)+1)+1) := base(X).
+?- nest5(A, B).
+
+// More deeply nested (10 levels of addition)
+nest10(X, ((((((((((X+1)+1)+1)+1)+1)+1)+1)+1)+1)+1) := base(X).
+?- nest10(A, B).
+
+// Mixed operations nested
+mixed_nest(X, (((X*2)+3)*2)+1) := base(X).
+?- mixed_nest(A, B).
+
+// Expected:
+// nest5: (1,6), (2,7), (3,8)
+// nest10: (1,11), (2,12), (3,13)
+// mixed_nest: (1,11), (2,15), (3,19)  -- ((1*2+3)*2+1) = ((2+3)*2+1) = (5*2+1) = 11
+
+// Cleanup
+.db use default
+.db drop test_deep_nest

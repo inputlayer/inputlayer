@@ -1,0 +1,23 @@
+// Test: Negation with Constants
+// Category: 08_negation
+// Description: Tests negation with constant values in the negated atom
+
+.db create test_neg_const
+.db use test_neg_const
+
+// Data
++data[(1, 100), (2, 200), (3, 100), (4, 300), (5, 200)].
+
+// Blacklist specific values
++blacklist[(100, 0), (300, 0)].
+
+// Find data where the value is not blacklisted
+// Using constant 0 in second position of blacklist
+not_blacklisted(Id, Val) := data(Id, Val), !blacklist(Val, 0).
+?- not_blacklisted(X, Y).
+
+// Should return: (2, 200), (5, 200)
+
+// Cleanup
+.db use default
+.db drop test_neg_const

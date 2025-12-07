@@ -1,0 +1,10 @@
+Executing script: examples/datalog/20_applications/02_rbac_deny.dl
+
+> .db create test_rbac_deny
+Database 'test_rbac_deny' created.
+Switched to database: test_rbac_deny
+> .db use test_rbac_deny
+Switched to database: test_rbac_deny
+> +user_role[(1, 100), (2, 100), (3, 101), (4, 102)].
+Inserted 4 facts into 'user_role'.
+> +role_allow[(100, 1), (100, 2), (100, 3),   // role 100: perms 1,2,3

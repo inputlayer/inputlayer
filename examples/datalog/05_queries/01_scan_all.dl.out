@@ -1,0 +1,24 @@
+
+> .db create test_scan
+Database 'test_scan' created.
+Switched to database: test_scan
+> .db use test_scan
+Switched to database: test_scan
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> +node[(1,10), (2,20), (3,30)].
+Inserted 3 facts into 'node'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> ?- node(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> .db use default
+Switched to database: default
+> .db drop test_scan
+Database 'test_scan' dropped.

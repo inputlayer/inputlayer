@@ -1,0 +1,29 @@
+// Test: Negation Combined with Filters
+// Category: 08_negation
+// Description: Tests negation combined with comparison filters
+
+.db create test_neg_filter
+.db use test_neg_filter
+
+// Data: (id, value)
++data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+
+// Exclusion set
++excluded[(2, 0), (4, 0)].
+
+// Combine negation with greater-than filter
+// Find data where id > 1, value > 15, and id not in excluded
+filtered(Id, Val) := data(Id, Val), Id > 1, Val > 15, !excluded(Id, _).
+?- filtered(X, Y).
+
+// Combine negation with less-than filter
+small_allowed(Id, Val) := data(Id, Val), Val < 35, !excluded(Id, _).
+?- small_allowed(X, Y).
+
+// Combine negation with equality filter
+specific(Id, Val) := data(Id, Val), Val = 30, !excluded(Id, _).
+?- specific(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_neg_filter

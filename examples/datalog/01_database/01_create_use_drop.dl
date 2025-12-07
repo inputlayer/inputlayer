@@ -1,0 +1,26 @@
+// Test: Database Create, Use, Drop
+// Category: 01_database
+// Description: Tests basic database lifecycle operations
+
+// Create and use a database
+.db create test_db
+.db use test_db
+
+// Show current database
+.db
+
+// List databases (should show default and test_db)
+.db list
+
+// Insert some data to verify db is usable
++edge(1, 2).
+
+// Query to verify
+?- edge(X, Y).
+
+// Switch away and drop
+.db use default
+.db drop test_db
+
+// Verify it's gone
+.db list

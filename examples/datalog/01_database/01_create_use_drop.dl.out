@@ -1,0 +1,24 @@
+
+> .db create test_db
+Database 'test_db' created.
+Switched to database: test_db
+> .db use test_db
+Switched to database: test_db
+> .db
+Current database: test_db
+> .db list
+Databases:
+  default
+  test_db *
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> ?- edge(X, Y).
+1 rows:
+  (1, 2)
+> .db use default
+Switched to database: default
+> .db drop test_db
+Database 'test_db' dropped.
+> .db list
+Databases:
+  default *

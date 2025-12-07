@@ -1,0 +1,23 @@
+
+> .db create test_neg_empty_excl
+Database 'test_neg_empty_excl' created.
+Switched to database: test_neg_empty_excl
+> .db use test_neg_empty_excl
+Switched to database: test_neg_empty_excl
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'data'.
+> +empty_exclude[(999, 999)].
+Inserted 1 fact into 'empty_exclude'.
+> -empty_exclude(999, 999).
+Deleted fact from 'empty_exclude'.
+> result(X, Y) := data(X, Y), !empty_exclude(X, _).
+View 'result' registered.
+> ?- result(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+> .db use default
+Switched to database: default
+> .db drop test_neg_empty_excl
+Database 'test_neg_empty_excl' dropped.

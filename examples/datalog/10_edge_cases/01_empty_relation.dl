@@ -1,0 +1,23 @@
+// Test: Empty Relation Query
+// Category: 10_edge_cases
+// Description: Tests querying relations with no data
+
+.db create test_empty
+.db use test_empty
+
+// Create a relation but insert nothing
+// Actually, just query a non-existent relation
+
+// Define a view over empty base relation
+empty_view(X, Y) := nonexistent(X, Y).
+
+// Query the view (should be empty)
+?- empty_view(X, Y).
+
+// Insert some data to edge, then query empty relation
++edge[(1,2)].
+?- nonexistent(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_empty

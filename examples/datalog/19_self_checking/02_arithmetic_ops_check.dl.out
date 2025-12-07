@@ -1,0 +1,87 @@
+Executing script: examples/datalog/19_self_checking/02_arithmetic_ops_check.dl
+
+> .db create test_self_check_ops
+Database 'test_self_check_ops' created.
+Switched to database: test_self_check_ops
+> .db use test_self_check_ops
+Switched to database: test_self_check_ops
+> +add_left[(1, 10), (2, 25), (3, 0), (4, -5)].
+Inserted 4 facts into 'add_left'.
+> +add_right[(1, 5), (2, 15), (3, 0), (4, 10)].
+Inserted 4 facts into 'add_right'.
+> +expected_sum[(1, 15), (2, 40), (3, 0), (4, 5)].
+Inserted 4 facts into 'expected_sum'.
+> computed_sum(X, A+B) :- add_left(X, A), add_right(X, B).
+4 rows:
+  (1, 15)
+  (2, 40)
+  (3, 0)
+  (4, 5)
+(session: 1 rule(s))
+> ?- computed_sum(X, Y).
+4 rows:
+  (1, 15)
+  (2, 40)
+  (3, 0)
+  (4, 5)
+> ?- expected_sum(X, Y).
+4 rows:
+  (1, 15)
+  (2, 40)
+  (3, 0)
+  (4, 5)
+> +sub_left[(1, 100), (2, 50), (3, 10), (4, 0)].
+Inserted 4 facts into 'sub_left'.
+> +sub_right[(1, 30), (2, 25), (3, 10), (4, 5)].
+Inserted 4 facts into 'sub_right'.
+> +expected_diff[(1, 70), (2, 25), (3, 0), (4, -5)].
+Inserted 4 facts into 'expected_diff'.
+> computed_diff(X, A-B) :- sub_left(X, A), sub_right(X, B).
+4 rows:
+  (1, 70)
+  (2, 25)
+  (3, 0)
+  (4, -5)
+(session: 2 rule(s))
+> ?- computed_diff(X, Y).
+4 rows:
+  (1, 70)
+  (2, 25)
+  (3, 0)
+  (4, -5)
+> ?- expected_diff(X, Y).
+4 rows:
+  (1, 70)
+  (2, 25)
+  (3, 0)
+  (4, -5)
+> +mul_input[(1, 5), (2, 10), (3, 0), (4, -3)].
+Inserted 4 facts into 'mul_input'.
+> +mul_link[(1, 100), (2, 200), (3, 300), (4, 400)].
+Inserted 4 facts into 'mul_link'.
+> +expected_mul[(1, 10), (2, 20), (3, 0), (4, -6)].
+Inserted 4 facts into 'expected_mul'.
+> computed_mul(Y, A*2) :- mul_input(X, A), mul_link(X, Y).
+4 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+  (400, -6)
+(session: 3 rule(s))
+> ?- computed_mul(X, Y).
+4 rows:
+  (100, 10)
+  (200, 20)
+  (300, 0)
+  (400, -6)
+> ?- expected_mul(X, Y).
+4 rows:
+  (1, 10)
+  (2, 20)
+  (3, 0)
+  (4, -6)
+> .db use default
+Switched to database: default
+(Cleared 3 session rule(s))
+> .db drop test_self_check_ops
+Database 'test_self_check_ops' dropped.

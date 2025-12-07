@@ -1,0 +1,8 @@
+Executing script: examples/datalog/14_aggregations/15_agg_with_negation.dl
+
+> .db create test_agg_negation
+Database 'test_agg_negation' created.
+Switched to database: test_agg_negation
+> .db use test_agg_negation
+Switched to database: test_agg_negation
+> +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 45000),

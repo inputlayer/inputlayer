@@ -1,0 +1,19 @@
+// Test: Divide Computed Column
+// Category: 15_arithmetic
+// Description: Tests division in rule head
+
+.db create test_arith_div
+.db use test_arith_div
+
+// Insert amounts: total(id, amount)
++total[(1, 100), (2, 200), (3, 150)].
+
+// Compute half value
+half(Id, Amount/2) :- total(Id, Amount).
+
+// Query halved values
+?- half(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_arith_div

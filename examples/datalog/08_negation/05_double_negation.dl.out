@@ -1,0 +1,22 @@
+
+> .db create test_double_neg
+Database 'test_double_neg' created.
+Switched to database: test_double_neg
+> .db use test_double_neg
+Switched to database: test_double_neg
+> +candidate[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
+Inserted 5 facts into 'candidate'.
+> +blacklist[(2, 0), (4, 0)].
+Inserted 2 facts into 'blacklist'.
+> +already_hired[(3, 0)].
+Inserted 1 fact into 'already_hired'.
+> eligible(X, Y) := candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
+View 'eligible' registered.
+> ?- eligible(X, Y).
+2 rows:
+  (1, 0)
+  (5, 0)
+> .db use default
+Switched to database: default
+> .db drop test_double_neg
+Database 'test_double_neg' dropped.

@@ -1,0 +1,32 @@
+
+> .db create test_conn
+Database 'test_conn' created.
+Switched to database: test_conn
+> .db use test_conn
+Switched to database: test_conn
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> connected(X, Y) := edge(X, Y).
+View 'connected' registered.
+> connected(X, Y) := edge(X, Z), connected(Z, Y).
+Rule added to view 'connected' (2 rules total).
+> .view connected
+View: connected
+Rules:
+  1. connected(X, Y) :- edge(X, Y).
+  2. connected(X, Y) :- edge(X, Z), connected(Z, Y).
+
+Results: 6 rows
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 3)
+  (2, 4)
+  (3, 4)
+> ?- connected(1, 3).
+1 rows:
+  (1, 3)
+> .db use default
+Switched to database: default
+> .db drop test_conn
+Database 'test_conn' dropped.

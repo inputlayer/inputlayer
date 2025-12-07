@@ -1,0 +1,44 @@
+Executing script: examples/datalog/15_arithmetic/09_increment_reversed_join.dl
+
+> .db create test_inc_rev
+Database 'test_inc_rev' created.
+Switched to database: test_inc_rev
+> .db use test_inc_rev
+Switched to database: test_inc_rev
+> +edge[(1, 2), (2, 3)].
+Inserted 2 facts into 'edge'.
+> +dist[(1, 0)].
+Inserted 1 fact into 'dist'.
+> normal_order(Y, D+1) :- dist(X, D), edge(X, Y).
+1 rows:
+  (2, 1)
+(session: 1 rule(s))
+> ?- normal_order(A, B).
+1 rows:
+  (2, 1)
+> reversed_order(Y, D+1) :- edge(X, Y), dist(X, D).
+1 rows:
+  (2, 1)
+(session: 2 rule(s))
+> ?- reversed_order(A, B).
+1 rows:
+  (2, 1)
+> +weight[(1, 100), (2, 200)].
+Inserted 2 facts into 'weight'.
+> order_a(Y, W, D+1) :- dist(X, D), edge(X, Y), weight(Y, W).
+No results for 'order_a'.
+(session: 3 rule(s))
+> ?- order_a(A, B, C).
+1 rows:
+  (2, 200, 1)
+> order_b(Y, W, D+1) :- edge(X, Y), dist(X, D), weight(Y, W).
+No results for 'order_b'.
+(session: 4 rule(s))
+> ?- order_b(A, B, C).
+1 rows:
+  (2, 200, 1)
+> .db use default
+Switched to database: default
+(Cleared 4 session rule(s))
+> .db drop test_inc_rev
+Database 'test_inc_rev' dropped.

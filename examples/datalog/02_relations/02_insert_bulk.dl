@@ -1,0 +1,16 @@
+// Test: Bulk Insert
+// Category: 02_relations
+// Description: Tests bulk insert syntax with multiple tuples
+
+.db create test_bulk
+.db use test_bulk
+
+// Bulk insert
++edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+
+// Verify count
+?- edge(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_bulk

@@ -1,0 +1,14 @@
+Executing script: examples/datalog/21_query_features/05_complex_queries.dl
+
+> .db create test_complex_query
+Database 'test_complex_query' created.
+Switched to database: test_complex_query
+> .db use test_complex_query
+Switched to database: test_complex_query
+> +orders[(1, 100, 10), (2, 100, 20), (3, 200, 15), (4, 200, 5)].
+Inserted 4 facts into 'orders'.
+> +customers[(100, 1000), (200, 2000)].
+Inserted 2 facts into 'customers'.
+> large_orders(OrderId, CustCredit) := orders(OrderId, CustId, Qty),
+View 'large_orders' registered.
+> customers(CustId, CustCredit),

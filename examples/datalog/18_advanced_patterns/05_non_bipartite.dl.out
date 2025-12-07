@@ -1,0 +1,31 @@
+
+> .db create test_non_bipartite
+Database 'test_non_bipartite' created.
+Switched to database: test_non_bipartite
+> .db use test_non_bipartite
+Switched to database: test_non_bipartite
+> +edge[(1, 2), (2, 3), (3, 1)].
+Inserted 3 facts into 'edge'.
+> +start[(1, 0)].
+Inserted 1 fact into 'start'.
+> color(X, C) := start(X, C).
+View 'color' registered.
+> color(Y, 1) := color(X, 0), edge(X, Y).
+Rule added to view 'color' (2 rules total).
+> color(Y, 1) := color(X, 0), edge(Y, X).
+Rule added to view 'color' (3 rules total).
+> color(Y, 0) := color(X, 1), edge(X, Y).
+Rule added to view 'color' (4 rules total).
+> color(Y, 0) := color(X, 1), edge(Y, X).
+Rule added to view 'color' (5 rules total).
+> conflict(X, X) := color(X, 0), color(X, 1).
+View 'conflict' registered.
+> ?- conflict(X, Y).
+3 rows:
+  (1, 1)
+  (2, 2)
+  (3, 3)
+> .db use default
+Switched to database: default
+> .db drop test_non_bipartite
+Database 'test_non_bipartite' dropped.

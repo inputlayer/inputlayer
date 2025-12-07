@@ -1,0 +1,43 @@
+// Test: Stratification and Negation Cycles
+// Category: Errors
+// Verifies: Detection of non-stratifiable programs
+
+.db create test_stratification
+.db use test_stratification
+
+// Simple stratifiable negation (should work)
++all_items[(1), (2), (3), (4), (5)].
++selected[(1), (3), (5)].
+
+not_selected(X) := all_items(X), !selected(X).
+?- not_selected(X).
+
+// Expected: 2, 4
+
+// Double negation (stratifiable)
++base_set[(1), (2), (3)].
++exclude1[(1)].
++exclude2[(2)].
+
+remaining(X) := base_set(X), !exclude1(X), !exclude2(X).
+?- remaining(X).
+
+// Expected: 3
+
+// Layered negation (each layer depends on previous)
++universe[(1), (2), (3), (4), (5), (6)].
++layer1_exclude[(1), (2)].
+
+layer1_result(X) := universe(X), !layer1_exclude(X).
+layer2_exclude(X) := layer1_result(X), X < 5.
+layer2_result(X) := layer1_result(X), !layer2_exclude(X).
+
+?- layer1_result(X).
+?- layer2_result(X).
+
+// Expected layer1: 3, 4, 5, 6
+// Expected layer2: 5, 6
+
+// Cleanup
+.db use default
+.db drop test_stratification

@@ -1,0 +1,50 @@
+// Arity Variation Tests - 5-column source relations
+// Additional coverage for very high arity relations
+
+.db create test_arity_5col
+.db use test_arity_5col
+
+// 5-column source relation: (id, a, b, c, d)
++src5[(1, 10, 20, 30, 40), (2, 100, 200, 300, 400)].
++link[(1, 1000), (2, 2000)].
+
+// Test 1: Arithmetic on each column position with rest as wildcards
+inc_a(Y, A+1) :- src5(X, A, _, _, _), link(X, Y).
+?- inc_a(R, V).
+
+inc_b(Y, B+1) :- src5(X, _, B, _, _), link(X, Y).
+?- inc_b(R, V).
+
+inc_c(Y, C+1) :- src5(X, _, _, C, _), link(X, Y).
+?- inc_c(R, V).
+
+inc_d(Y, D+1) :- src5(X, _, _, _, D), link(X, Y).
+?- inc_d(R, V).
+
+// Test 2: Mixed bound and wildcard patterns
+// Only bind first two columns
+partial1(Y, A+B) :- src5(X, A, B, _, _), link(X, Y).
+?- partial1(R, V).
+
+// Only bind last two columns
+partial2(Y, C+D) :- src5(X, _, _, C, D), link(X, Y).
+?- partial2(R, V).
+
+// Bind alternating columns
+partial3(Y, A+C) :- src5(X, A, _, C, _), link(X, Y).
+?- partial3(R, V).
+
+// Test 3: All bound - full projection with arithmetic
+all_bound(Y, A+1, B, C, D) :- src5(X, A, B, C, D), link(X, Y).
+?- all_bound(R, V1, V2, V3, V4).
+
+// Test 4: Multiple arithmetic operations
+multi_ops(Y, A+1, B*2, C-10, D/2) :- src5(X, A, B, C, D), link(X, Y).
+?- multi_ops(R, V1, V2, V3, V4).
+
+// Test 5: Sum all columns
+sum_all(X, A+B+C+D) :- src5(X, A, B, C, D).
+?- sum_all(K, V).
+
+.db use default
+.db drop test_arity_5col

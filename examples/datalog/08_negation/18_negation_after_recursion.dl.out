@@ -1,0 +1,25 @@
+
+> .db create test_neg_rec
+Database 'test_neg_rec' created.
+Switched to database: test_neg_rec
+> .db use test_neg_rec
+Switched to database: test_neg_rec
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+Inserted 4 facts into 'edge'.
+> +forbidden_edge[(2, 3), (4, 5)].
+Inserted 2 facts into 'forbidden_edge'.
+> path(X, Y) := edge(X, Y), !forbidden_edge(X, Y).
+View 'path' registered.
+> path(X, Z) := path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
+Rule added to view 'path' (2 rules total).
+> ?- path(1, X).
+1 rows:
+  (1, 2)
+> ?- path(X, Y).
+2 rows:
+  (1, 2)
+  (3, 4)
+> .db use default
+Switched to database: default
+> .db drop test_neg_rec
+Database 'test_neg_rec' dropped.

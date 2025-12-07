@@ -1,0 +1,51 @@
+Executing script: examples/datalog/15_arithmetic/16_division_edge_cases.dl
+
+> .db create test_division
+Database 'test_division' created.
+Switched to database: test_division
+> .db use test_division
+Switched to database: test_division
+> +div_data[(10, 2), (20, 4), (15, 3), (100, 0), (50, 0)].
+Inserted 5 facts into 'div_data'.
+> safe_div(X, Y, X/Y) := div_data(X, Y), Y != 0.
+View 'safe_div' registered.
+> ?- safe_div(A, B, C).
+3 rows:
+  (10, 2, 5)
+  (15, 3, 5)
+  (20, 4, 5)
+> +numerators[(100), (200), (300)].
+Inserted 3 facts into 'numerators'.
+> +denominators[(10), (20), (0)].
+Inserted 3 facts into 'denominators'.
+> cross_div(N, D, N/D) := numerators(N), denominators(D), D != 0.
+View 'cross_div' registered.
+> ?- cross_div(N, D, R).
+6 rows:
+  (100, 10, 10)
+  (100, 20, 5)
+  (200, 10, 20)
+  (200, 20, 10)
+  (300, 10, 30)
+  (300, 20, 15)
+> safe_mod(X, Y, X%Y) := div_data(X, Y), Y != 0.
+View 'safe_mod' registered.
+> ?- safe_mod(A, B, C).
+3 rows:
+  (10, 2, 0)
+  (15, 3, 0)
+  (20, 4, 0)
+> +int_div_data[(7, 2), (10, 3), (15, 4), (100, 7)].
+Inserted 4 facts into 'int_div_data'.
+> int_div_result(X, Y, X/Y) := int_div_data(X, Y).
+View 'int_div_result' registered.
+> ?- int_div_result(A, B, C).
+4 rows:
+  (7, 2, 3.5)
+  (10, 3, 3.3333333333333335)
+  (15, 4, 3.75)
+  (100, 7, 14.285714285714286)
+> .db use default
+Switched to database: default
+> .db drop test_division
+Database 'test_division' dropped.

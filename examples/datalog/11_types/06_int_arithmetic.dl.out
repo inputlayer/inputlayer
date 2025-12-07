@@ -1,0 +1,59 @@
+Executing script: examples/datalog/11_types/06_int_arithmetic.dl
+
+> .db create test_int_arith
+Database 'test_int_arith' created.
+Switched to database: test_int_arith
+> .db use test_int_arith
+Switched to database: test_int_arith
+> +nums[(1, 10), (2, 20), (3, 30), (4, 0), (5, -10)].
+Inserted 5 facts into 'nums'.
+> added(Id, V+5) := nums(Id, V).
+View 'added' registered.
+> ?- added(X, Y).
+5 rows:
+  (1, 15)
+  (2, 25)
+  (3, 35)
+  (4, 5)
+  (5, -5)
+> subtracted(Id, V-5) := nums(Id, V).
+View 'subtracted' registered.
+> ?- subtracted(X, Y).
+5 rows:
+  (1, 5)
+  (2, 15)
+  (3, 25)
+  (4, -5)
+  (5, -15)
+> multiplied(Id, V*2) := nums(Id, V).
+View 'multiplied' registered.
+> ?- multiplied(X, Y).
+5 rows:
+  (1, 20)
+  (2, 40)
+  (3, 60)
+  (4, 0)
+  (5, -20)
+> +divisible[(10, 2), (20, 4), (30, 5), (100, 10)].
+Inserted 4 facts into 'divisible'.
+> divided(N, D, N/D) := divisible(N, D).
+View 'divided' registered.
+> ?- divided(X, Y, Z).
+4 rows:
+  (10, 2, 5)
+  (20, 4, 5)
+  (30, 5, 6)
+  (100, 10, 10)
+> +mods[(10, 3), (20, 7), (15, 4)].
+Inserted 3 facts into 'mods'.
+> modded(N, D, N%D) := mods(N, D).
+View 'modded' registered.
+> ?- modded(X, Y, Z).
+3 rows:
+  (10, 3, 1)
+  (15, 4, 3)
+  (20, 7, 6)
+> .db use default
+Switched to database: default
+> .db drop test_int_arith
+Database 'test_int_arith' dropped.

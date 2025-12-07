@@ -1,0 +1,56 @@
+Executing script: examples/datalog/14_aggregations/16_empty_agg_edge_cases.dl
+
+> .db create test_empty_agg
+Database 'test_empty_agg' created.
+Switched to database: test_empty_agg
+> .db use test_empty_agg
+Switched to database: test_empty_agg
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'data'.
+> filtered(X, V) := data(X, V), V > 1000.
+View 'filtered' registered.
+> empty_sum(sum<V>) := filtered(_, V).
+View 'empty_sum' registered.
+> ?- empty_sum(S).
+No results.
+> empty_avg(avg<V>) := filtered(_, V).
+View 'empty_avg' registered.
+> ?- empty_avg(A).
+No results.
+> empty_min(min<V>) := filtered(_, V).
+View 'empty_min' registered.
+> empty_max(max<V>) := filtered(_, V).
+View 'empty_max' registered.
+> ?- empty_min(M).
+No results.
+> ?- empty_max(M).
+No results.
+> normal_count(count<X>) := data(X, _).
+View 'normal_count' registered.
+> normal_sum(sum<V>) := data(_, V).
+View 'normal_sum' registered.
+> normal_avg(avg<V>) := data(_, V).
+View 'normal_avg' registered.
+> ?- normal_count(C).
+1 rows:
+  (3)
+> ?- normal_sum(S).
+1 rows:
+  (60)
+> ?- normal_avg(A).
+1 rows:
+  (20)
+> +groups[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'groups'.
+> +group_data[(1, 100), (1, 200), (3, 300)].
+Inserted 3 facts into 'group_data'.
+> group_count(G, count<V>) := groups(G), group_data(G, V).
+View 'group_count' registered.
+> ?- group_count(G, C).
+2 rows:
+  (1, 2)
+  (3, 1)
+> .db use default
+Switched to database: default
+> .db drop test_empty_agg
+Database 'test_empty_agg' dropped.

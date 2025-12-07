@@ -1,0 +1,39 @@
+
+> .db create test_sc2
+Database 'test_sc2' created.
+Switched to database: test_sc2
+> .db use test_sc2
+Switched to database: test_sc2
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> same_component(X, Y) := edge(X, Y).
+View 'same_component' registered.
+> same_component(X, Y) := edge(Y, X).
+Rule added to view 'same_component' (2 rules total).
+> same_component(X, Z) := same_component(X, Y), same_component(Y, Z), X != Z.
+Rule added to view 'same_component' (3 rules total).
+> .view same_component
+View: same_component
+Rules:
+  1. same_component(X, Y) :- edge(X, Y).
+  2. same_component(X, Y) :- edge(Y, X).
+  3. same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
+
+Results: 12 rows (showing first 10)
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 1)
+  (2, 3)
+  (2, 4)
+  (3, 1)
+  (3, 2)
+  (3, 4)
+  (4, 1)
+> ?- same_component(1, 4).
+1 rows:
+  (1, 4)
+> .db use default
+Switched to database: default
+> .db drop test_sc2
+Database 'test_sc2' dropped.

@@ -1,0 +1,63 @@
+Executing script: examples/datalog/11_types/08_comparison_ops.dl
+
+> .db create test_compare
+Database 'test_compare' created.
+Switched to database: test_compare
+> .db use test_compare
+Switched to database: test_compare
+> +vals[(1, 10), (2, 20), (3, 30), (4, 20), (5, 40)].
+Inserted 5 facts into 'vals'.
+> less_than_25(Id, V) := vals(Id, V), V < 25.
+View 'less_than_25' registered.
+> ?- less_than_25(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (4, 20)
+> less_eq_20(Id, V) := vals(Id, V), V <= 20.
+View 'less_eq_20' registered.
+> ?- less_eq_20(X, Y).
+3 rows:
+  (1, 10)
+  (2, 20)
+  (4, 20)
+> greater_than_25(Id, V) := vals(Id, V), V > 25.
+View 'greater_than_25' registered.
+> ?- greater_than_25(X, Y).
+2 rows:
+  (3, 30)
+  (5, 40)
+> greater_eq_20(Id, V) := vals(Id, V), V >= 20.
+View 'greater_eq_20' registered.
+> ?- greater_eq_20(X, Y).
+4 rows:
+  (2, 20)
+  (3, 30)
+  (4, 20)
+  (5, 40)
+> +targets[(20)].
+Inserted 1 fact into 'targets'.
+> equals_target(Id, V) := vals(Id, V), targets(V).
+View 'equals_target' registered.
+> ?- equals_target(X, Y).
+2 rows:
+  (20, 2)
+  (20, 4)
+> not_twenty(Id, V) := vals(Id, V), !targets(V).
+View 'not_twenty' registered.
+> ?- not_twenty(X, Y).
+3 rows:
+  (1, 10)
+  (3, 30)
+  (5, 40)
+> in_range(Id, V) := vals(Id, V), V > 15, V < 35.
+View 'in_range' registered.
+> ?- in_range(X, Y).
+3 rows:
+  (2, 20)
+  (3, 30)
+  (4, 20)
+> .db use default
+Switched to database: default
+> .db drop test_compare
+Database 'test_compare' dropped.

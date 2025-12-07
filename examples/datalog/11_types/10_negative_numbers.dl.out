@@ -1,0 +1,56 @@
+Executing script: examples/datalog/11_types/10_negative_numbers.dl
+
+> .db create test_negative
+Database 'test_negative' created.
+Switched to database: test_negative
+> .db use test_negative
+Switched to database: test_negative
+> +temps[(1, -10), (2, 5), (3, -20), (4, 15), (5, 0)].
+Inserted 5 facts into 'temps'.
+> negatives(Id, T) := temps(Id, T), T < 0.
+View 'negatives' registered.
+> ?- negatives(X, Y).
+2 rows:
+  (1, -10)
+  (3, -20)
+> non_neg(Id, T) := temps(Id, T), T >= 0.
+View 'non_neg' registered.
+> ?- non_neg(X, Y).
+3 rows:
+  (2, 5)
+  (4, 15)
+  (5, 0)
+> minus_ten(Id, T-10) := temps(Id, T).
+View 'minus_ten' registered.
+> ?- minus_ten(X, Y).
+5 rows:
+  (1, -20)
+  (2, -5)
+  (3, -30)
+  (4, 5)
+  (5, -10)
+> colder_than_neg5(Id, T) := temps(Id, T), T < -5.
+View 'colder_than_neg5' registered.
+> ?- colder_than_neg5(X, Y).
+2 rows:
+  (1, -10)
+  (3, -20)
+> total_temp(sum<T>) := temps(_, T).
+View 'total_temp' registered.
+> ?- total_temp(S).
+1 rows:
+  (-10)
+> min_temp(min<T>) := temps(_, T).
+View 'min_temp' registered.
+> max_temp(max<T>) := temps(_, T).
+View 'max_temp' registered.
+> ?- min_temp(M).
+1 rows:
+  (-20)
+> ?- max_temp(M).
+1 rows:
+  (15)
+> .db use default
+Switched to database: default
+> .db drop test_negative
+Database 'test_negative' dropped.

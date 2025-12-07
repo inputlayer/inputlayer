@@ -1,0 +1,7 @@
+
+> .db create test_empty
+Database 'test_empty' created.
+Switched to database: test_empty
+> .db use test_empty
+Switched to database: test_empty
+> +empty[].

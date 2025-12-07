@@ -1,0 +1,7 @@
+
+> .db create test_perf_multi
+Database 'test_perf_multi' created.
+Switched to database: test_perf_multi
+> .db use test_perf_multi
+Switched to database: test_perf_multi
+> +employee[(1, 10), (2, 10), (3, 20), (4, 20), (5, 30),

@@ -1,0 +1,19 @@
+
+> .db create test_agg_min
+Database 'test_agg_min' created.
+Switched to database: test_agg_min
+> .db use test_agg_min
+Switched to database: test_agg_min
+> +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
+Inserted 6 facts into 'reading'.
+> min_temp(Sensor, min<Temp>) := reading(Sensor, Temp).
+View 'min_temp' registered.
+> ?- min_temp(X, Y).
+3 rows:
+  (1, 22)
+  (2, 30)
+  (3, 18)
+> .db use default
+Switched to database: default
+> .db drop test_agg_min
+Database 'test_agg_min' dropped.

@@ -1,0 +1,22 @@
+// Test: Negation with No Matches to Filter
+// Category: 08_negation
+// Description: Tests negation where negated relation has no matching tuples
+
+.db create test_neg_nomatch
+.db use test_neg_nomatch
+
+// Edges
++edge[(1,2), (2,3), (3,4)].
+
+// Blocked edges that don't overlap with edge
++blocked[(10,20), (30,40)].
+
+// Filter - should return all edges since none are blocked
+allowed(X, Y) := edge(X, Y), !blocked(X, Y).
+
+// Expected: all 3 edges (none filtered)
+?- allowed(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_neg_nomatch

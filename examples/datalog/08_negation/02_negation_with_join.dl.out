@@ -1,0 +1,21 @@
+
+> .db create test_neg_join
+Database 'test_neg_join' created.
+Switched to database: test_neg_join
+> .db use test_neg_join
+Switched to database: test_neg_join
+> +employee[(1, 100), (2, 100), (3, 200), (4, 200), (5, 300)].
+Inserted 5 facts into 'employee'.
+> +excluded_dept[(200, 0)].
+Inserted 1 fact into 'excluded_dept'.
+> active_employee(EmpId, DeptId) := employee(EmpId, DeptId), !excluded_dept(DeptId, _).
+View 'active_employee' registered.
+> ?- active_employee(X, Y).
+3 rows:
+  (1, 100)
+  (2, 100)
+  (5, 300)
+> .db use default
+Switched to database: default
+> .db drop test_neg_join
+Database 'test_neg_join' dropped.

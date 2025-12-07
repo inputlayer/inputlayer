@@ -1,0 +1,17 @@
+
+> .db create test_global_count
+Database 'test_global_count' created.
+Switched to database: test_global_count
+> .db use test_global_count
+Switched to database: test_global_count
+> +event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
+Inserted 5 facts into 'event'.
+> total_events(count<Id>) := event(Id, _).
+View 'total_events' registered.
+> ?- total_events(X).
+1 rows:
+  (5)
+> .db use default
+Switched to database: default
+> .db drop test_global_count
+Database 'test_global_count' dropped.

@@ -1,0 +1,33 @@
+
+> .db create test_del
+Database 'test_del' created.
+Switched to database: test_del
+> .db use test_del
+Switched to database: test_del
+> +edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
+Inserted 5 facts into 'edge'.
+> ?- edge(X, Y).
+5 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
+  (5, 6)
+> -edge(3, 4).
+Deleted fact from 'edge'.
+> ?- edge(X, Y).
+4 rows:
+  (1, 2)
+  (2, 3)
+  (4, 5)
+  (5, 6)
+> -edge(X, Y) :- edge(X, Y), X > 3.
+Deleted 2 facts from 'edge'.
+> ?- edge(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> .db use default
+Switched to database: default
+> .db drop test_del
+Database 'test_del' dropped.

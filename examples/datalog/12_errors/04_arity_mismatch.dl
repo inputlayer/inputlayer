@@ -1,0 +1,13 @@
+// Test: Arity Mismatch
+// Category: 12_errors
+// Description: Tests error when tuple arity doesn't match (must be binary)
+
+.db create test_arity_err
+.db use test_arity_err
+
+// Attempt to insert unary tuple - should fail
++single[(1), (2), (3)].
+
+// Cleanup
+.db use default
+.db drop test_arity_err

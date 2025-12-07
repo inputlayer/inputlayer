@@ -1,0 +1,10 @@
+> .db create test_vec_dot
+Database 'test_vec_dot' created.
+Switched to database: test_vec_dot
+> .db use test_vec_dot
+Switched to database: test_vec_dot
+> +vectors[(1, [1.0, 2.0, 3.0]), (2, [2.0, 0.0, 1.0]), (3, [1.0, 1.0, 1.0])].
+Inserted 3 facts into 'vectors'.
+> +query[([1.0, 1.0, 1.0])].
+Inserted 1 fact into 'query'.
+> dot_result(Id, Score) :- vectors(Id, V), query(Q), Score = dot(V, Q).

@@ -1,0 +1,37 @@
+Executing script: examples/datalog/09_recursion/09_three_way_mutual.dl
+
+> .db create test_three_way_mutual
+Database 'test_three_way_mutual' created.
+Switched to database: test_three_way_mutual
+> .db use test_three_way_mutual
+Switched to database: test_three_way_mutual
+> +succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12)].
+Inserted 12 facts into 'succ'.
+> +base_zero[(0)].
+Inserted 1 fact into 'base_zero'.
+> +base_one[(1)].
+Inserted 1 fact into 'base_one'.
+> +base_two[(2)].
+Inserted 1 fact into 'base_two'.
+> zero_mod(N) := base_zero(N).
+View 'zero_mod' registered.
+> zero_mod(N) := succ(M, N), two_mod(M).
+Rule added to view 'zero_mod' (2 rules total).
+> one_mod(N) := base_one(N).
+View 'one_mod' registered.
+> one_mod(N) := succ(M, N), zero_mod(M).
+Rule added to view 'one_mod' (2 rules total).
+> two_mod(N) := base_two(N).
+View 'two_mod' registered.
+> two_mod(N) := succ(M, N), one_mod(M).
+Rule added to view 'two_mod' (2 rules total).
+> ?- zero_mod(X).
+No results.
+> ?- one_mod(X).
+No results.
+> ?- two_mod(X).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_three_way_mutual
+Database 'test_three_way_mutual' dropped.

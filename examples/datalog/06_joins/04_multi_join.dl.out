@@ -1,0 +1,24 @@
+
+> .db create test_multi
+Database 'test_multi' created.
+Switched to database: test_multi
+> .db use test_multi
+Switched to database: test_multi
+> +a[(1, 2), (10, 20)].
+Inserted 2 facts into 'a'.
+> +b[(2, 3), (20, 30)].
+Inserted 2 facts into 'b'.
+> +c[(3, 4), (30, 40)].
+Inserted 2 facts into 'c'.
+> +d[(4, 5), (40, 50)].
+Inserted 2 facts into 'd'.
+> chain(W, Z) := a(W, X), b(X, Y), c(Y, Z).
+View 'chain' registered.
+> ?- chain(X, Y).
+2 rows:
+  (1, 4)
+  (10, 40)
+> .db use default
+Switched to database: default
+> .db drop test_multi
+Database 'test_multi' dropped.

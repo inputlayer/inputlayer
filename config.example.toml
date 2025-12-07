@@ -1,0 +1,85 @@
+# InputLayer Configuration Template
+#
+# Copy this file to config.toml or config.local.toml and customize.
+#
+# Environment variable overrides:
+#   INPUTLAYER_STORAGE__DATA_DIR=/custom/path
+#   INPUTLAYER_STORAGE__DEFAULT_DATABASE=mydb
+#   INPUTLAYER_STORAGE__PERSISTENCE__FORMAT=csv
+
+[storage]
+# Base directory for all database storage
+# Production example: "/var/lib/inputlayer/data"
+# Development example: "./data"
+data_dir = "./data"
+
+# Default database (created on startup if missing)
+default_database = "default"
+
+# Automatically create databases if they don't exist
+# Set to true for development, false for production
+auto_create_databases = false
+
+[storage.persistence]
+# Storage format options:
+# - "parquet": Columnar format, excellent compression (10x smaller than CSV)
+#              Fast reads, schema-aware, recommended for production
+# - "csv":     Human-readable, uncompressed, good for debugging
+# - "bincode": Binary format, Rust-specific, fast but not portable
+format = "parquet"
+
+# Compression options:
+# - "snappy": Fast compression with good ratio (recommended)
+# - "gzip":   Slower but better compression
+# - "none":   No compression (useful for debugging)
+compression = "snappy"
+
+# Auto-save interval in seconds
+# 0 = manual save only (call save_database() or save_all())
+# 300 = auto-save every 5 minutes
+auto_save_interval = 0
+
+# Enable write-ahead logging (WAL) for crash recovery
+# Note: Not yet implemented
+enable_wal = false
+
+[storage.performance]
+# Initial capacity for in-memory hash maps
+# Higher values reduce reallocations but use more memory
+initial_capacity = 10000
+
+# Batch size for bulk insert/update operations
+batch_size = 1000
+
+# Enable async I/O for storage operations
+# Note: Not yet implemented
+async_io = true
+
+[optimization]
+# Enable join spanning tree planning (Module 07)
+# Optimizes join order for better performance
+enable_join_planning = true
+
+# Enable Semi-naive Incremental Plan (SIP) rewriting (Module 08)
+# Optimizes recursive query evaluation
+enable_sip_rewriting = true
+
+# Enable subplan sharing across rules (Module 09)
+# Reuses common subexpressions to reduce computation
+enable_subplan_sharing = true
+
+# Enable boolean specialization (Module 10)
+# Optimizes queries with boolean constants
+# Note: Requires specific Differential Dataflow version features
+enable_boolean_specialization = false
+
+[logging]
+# Log level: "trace" | "debug" | "info" | "warn" | "error"
+# "debug" is useful during development
+# "info" is recommended for production
+level = "info"
+
+# Log format: "text" | "json"
+# "text" is human-readable
+# "json" is machine-parseable (useful for log aggregation)
+format = "text"

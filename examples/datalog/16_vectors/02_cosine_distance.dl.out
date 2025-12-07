@@ -1,0 +1,10 @@
+> .db create test_vec_cosine
+Database 'test_vec_cosine' created.
+Switched to database: test_vec_cosine
+> .db use test_vec_cosine
+Switched to database: test_vec_cosine
+> +vectors[(1, [1.0, 0.0]), (2, [0.0, 1.0]), (3, [1.0, 1.0])].
+Inserted 3 facts into 'vectors'.
+> +query[([1.0, 0.0])].
+Inserted 1 fact into 'query'.
+> similarity(Id, Dist) :- vectors(Id, V), query(Q), Dist = cosine(V, Q).

@@ -1,0 +1,45 @@
+Executing script: examples/datalog/22_set_operations/01_implicit_union.dl
+
+> .db create test_union
+Database 'test_union' created.
+Switched to database: test_union
+> .db use test_union
+Switched to database: test_union
+> +source_a[(1, 100), (2, 200)].
+Inserted 2 facts into 'source_a'.
+> +source_b[(3, 300), (4, 400)].
+Inserted 2 facts into 'source_b'.
+> combined(X, Y) := source_a(X, Y).
+View 'combined' registered.
+> combined(X, Y) := source_b(X, Y).
+Rule added to view 'combined' (2 rules total).
+> ?- combined(X, Y).
+4 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
+  (4, 400)
+> +source_c[(5, 500)].
+Inserted 1 fact into 'source_c'.
+> all_sources(X, Y) := source_a(X, Y).
+View 'all_sources' registered.
+> all_sources(X, Y) := source_b(X, Y).
+Rule added to view 'all_sources' (2 rules total).
+> all_sources(X, Y) := source_c(X, Y).
+Rule added to view 'all_sources' (3 rules total).
+> ?- all_sources(X, Y).
+5 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
+  (4, 400)
+  (5, 500)
+> union_count(count<X>) := all_sources(X, _).
+View 'union_count' registered.
+> ?- union_count(C).
+1 rows:
+  (5)
+> .db use default
+Switched to database: default
+> .db drop test_union
+Database 'test_union' dropped.

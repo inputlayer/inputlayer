@@ -1,0 +1,8 @@
+Executing script: examples/datalog/20_applications/06_bom_cost_rollup.dl
+
+> .db create test_bom_cost
+Database 'test_bom_cost' created.
+Switched to database: test_bom_cost
+> .db use test_bom_cost
+Switched to database: test_bom_cost
+> +part_of[(10, 1, 2),   // 2 of part 10 in assembly 1

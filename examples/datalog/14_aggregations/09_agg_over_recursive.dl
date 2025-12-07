@@ -1,0 +1,35 @@
+// Test: Aggregation Over Recursive Results
+// Category: Aggregation
+// Verifies: COUNT/SUM over transitive closure results
+
+.db create test_agg_recursive
+.db use test_agg_recursive
+
+// Graph: 1 -> 2 -> 3 -> 4
+//        \-> 5 -> 6
++edge[(1, 2), (2, 3), (3, 4), (1, 5), (5, 6)].
+
+// Transitive closure (all reachable pairs)
+path(X, Y) := edge(X, Y).
+path(X, Z) := edge(X, Y), path(Y, Z).
+
+// Query all paths
+?- path(A, B).
+
+// Count how many nodes each node can reach
+reach_count(X, count<Y>) := path(X, Y).
+?- reach_count(X, C).
+
+// Expected reach_count:
+// 1 can reach: 2, 3, 4, 5, 6 = 5
+// 2 can reach: 3, 4 = 2
+// 3 can reach: 4 = 1
+// 5 can reach: 6 = 1
+
+// Sum of all destination node IDs reachable from each node
+reach_sum(X, sum<Y>) := path(X, Y).
+?- reach_sum(X, S).
+
+// Cleanup
+.db use default
+.db drop test_agg_recursive

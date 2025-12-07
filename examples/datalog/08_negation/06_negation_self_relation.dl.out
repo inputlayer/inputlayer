@@ -1,0 +1,22 @@
+
+> .db create test_neg_self
+Database 'test_neg_self' created.
+Switched to database: test_neg_self
+> .db use test_neg_self
+Switched to database: test_neg_self
+> +edge[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)].
+Inserted 5 facts into 'edge'.
+> source_node(X, Y) := edge(X, Y).
+View 'source_node' registered.
+> target_node(Y, X) := edge(X, Y).
+View 'target_node' registered.
+> pure_source(X, Y) := source_node(X, Y), !target_node(X, _).
+View 'pure_source' registered.
+> ?- pure_source(X, Y).
+2 rows:
+  (1, 2)
+  (1, 3)
+> .db use default
+Switched to database: default
+> .db drop test_neg_self
+Database 'test_neg_self' dropped.

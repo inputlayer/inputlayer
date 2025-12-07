@@ -1,0 +1,18 @@
+
+> .db create test_neg_empty
+Database 'test_neg_empty' created.
+Switched to database: test_neg_empty
+> .db use test_neg_empty
+Switched to database: test_neg_empty
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> +blocked[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'blocked'.
+> allowed(X, Y) := edge(X, Y), !blocked(X, Y).
+View 'allowed' registered.
+> ?- allowed(X, Y).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_neg_empty
+Database 'test_neg_empty' dropped.

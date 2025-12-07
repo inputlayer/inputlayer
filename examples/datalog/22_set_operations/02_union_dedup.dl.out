@@ -1,0 +1,44 @@
+Executing script: examples/datalog/22_set_operations/02_union_dedup.dl
+
+> .db create test_union_dedup
+Database 'test_union_dedup' created.
+Switched to database: test_union_dedup
+> .db use test_union_dedup
+Switched to database: test_union_dedup
+> +set_a[(1), (2), (3)].
+Inserted 3 facts into 'set_a'.
+> +set_b[(2), (3), (4)].
+Inserted 3 facts into 'set_b'.
+> union_ab(X) := set_a(X).
+View 'union_ab' registered.
+> union_ab(X) := set_b(X).
+Rule added to view 'union_ab' (2 rules total).
+> ?- union_ab(X).
+4 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+> union_count(count<X>) := union_ab(X).
+View 'union_count' registered.
+> ?- union_count(C).
+1 rows:
+  (4)
+> +pairs_a[(1, 10), (2, 20), (3, 30)].
+Inserted 3 facts into 'pairs_a'.
+> +pairs_b[(2, 20), (3, 30), (4, 40)].
+Inserted 3 facts into 'pairs_b'.
+> pair_union(X, Y) := pairs_a(X, Y).
+View 'pair_union' registered.
+> pair_union(X, Y) := pairs_b(X, Y).
+Rule added to view 'pair_union' (2 rules total).
+> ?- pair_union(X, Y).
+4 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+  (4, 40)
+> .db use default
+Switched to database: default
+> .db drop test_union_dedup
+Database 'test_union_dedup' dropped.

@@ -1,0 +1,22 @@
+// Test: Two-Way Join
+// Category: 06_joins
+// Description: Tests joining two different relations
+
+.db create test_join
+.db use test_join
+
+// Insert base data
+// employee(id, dept_id)
++employee[(1, 100), (2, 100), (3, 200), (4, 200)].
+// department(dept_id, name_code) - using numbers for name
++department[(100, 10), (200, 20)].
+
+// Define a view joining employee to department
+emp_dept(EmpId, DeptName) := employee(EmpId, DeptId), department(DeptId, DeptName).
+
+// Query the join result
+?- emp_dept(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_join

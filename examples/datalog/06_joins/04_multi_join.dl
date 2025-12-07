@@ -1,0 +1,23 @@
+// Test: Multi-way Join (4 relations)
+// Category: 06_joins
+// Description: Tests joining across 4 relations in a chain
+
+.db create test_multi
+.db use test_multi
+
+// Chain of edges: a -> b -> c -> d
++a[(1, 2), (10, 20)].
++b[(2, 3), (20, 30)].
++c[(3, 4), (30, 40)].
++d[(4, 5), (40, 50)].
+
+// 4-way chain join: find paths through all relations
+chain(W, Z) := a(W, X), b(X, Y), c(Y, Z).
+
+// Query the chain - finds 3-hop paths
+// Expected: (1, 4) from 1->2->3->4, (10, 40) from 10->20->30->40
+?- chain(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_multi

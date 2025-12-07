@@ -1,0 +1,25 @@
+
+> .db create test_dup
+Database 'test_dup' created.
+Switched to database: test_dup
+> .db use test_dup
+Switched to database: test_dup
+> +edge[(1,2)].
+Inserted 1 fact into 'edge'.
+> +edge[(1,2)].
+No facts inserted (1 duplicate skipped).
+> +edge[(1,2), (2,3), (2,3)].
+Inserted 1 new fact(s) into 'edge' (2 duplicate(s) skipped).
+> ?- edge(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> path(X, Z) := edge(X, Y), edge(Y, Z).
+View 'path' registered.
+> ?- path(X, Y).
+1 rows:
+  (1, 3)
+> .db use default
+Switched to database: default
+> .db drop test_dup
+Database 'test_dup' dropped.

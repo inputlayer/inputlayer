@@ -1,0 +1,31 @@
+
+> .db create test_tc
+Database 'test_tc' created.
+Switched to database: test_tc
+> .db use test_tc
+Switched to database: test_tc
+> +edge[(1,2), (2,3), (3,4), (4,5)].
+Inserted 4 facts into 'edge'.
+> connected(X, Y) := edge(X, Y).
+View 'connected' registered.
+> connected(X, Z) := edge(X, Y), connected(Y, Z).
+Rule added to view 'connected' (2 rules total).
+> ?- connected(X, Y).
+10 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+  (2, 3)
+  (2, 4)
+  (2, 5)
+  (3, 4)
+  (3, 5)
+  (4, 5)
+> ?- connected(1, 5).
+1 rows:
+  (1, 5)
+> .db use default
+Switched to database: default
+> .db drop test_tc
+Database 'test_tc' dropped.

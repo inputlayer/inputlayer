@@ -1,0 +1,7 @@
+
+> .db create test_perf_dense
+Database 'test_perf_dense' created.
+Switched to database: test_perf_dense
+> .db use test_perf_dense
+Switched to database: test_perf_dense
+> +edge[(1,2), (1,3), (1,4), (1,5),

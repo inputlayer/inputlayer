@@ -1,0 +1,20 @@
+// Test: Scan All Query
+// Category: 05_queries
+// Description: Tests querying all tuples from a relation
+
+.db create test_scan
+.db use test_scan
+
+// Insert test data
++edge[(1,2), (2,3), (3,4)].
++node[(1,10), (2,20), (3,30)].
+
+// Query all from edge
+?- edge(X, Y).
+
+// Query all from node
+?- node(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_scan

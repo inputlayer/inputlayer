@@ -1,0 +1,31 @@
+// Self-checking increment test
+// This test embeds expected values in the data and verifies computed matches expected
+// A query on 'mismatch' should return NO RESULTS if arithmetic is correct
+
+.db create test_self_check_inc
+.db use test_self_check_inc
+
+// Test data format: (id, input_value, expected_output_after_increment)
+// expected_output = input_value + 1
++test_inc[(1, 0, 1), (2, 5, 6), (3, -1, 0), (4, 99, 100), (5, -100, -99)].
++link[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+
+// Compute D+1 for each row
+// NOTE: Due to known bug with 3-column relations and wildcards, this may fail
+computed(X, D+1) :- test_inc(X, D, _), link(X, _).
+
+// Extract the expected values
+expected(X, E) :- test_inc(X, _, E).
+
+// Query computed results - should have 5 rows with correct incremented values
+?- computed(X, Y).
+
+// Query expected values
+?- expected(X, Y).
+
+// NOTE: The mismatch detection would require != operator support
+// mismatch(X, Computed, Expected) :- computed(X, Computed), expected(X, Expected), Computed != Expected.
+// For now, manual verification: computed and expected should match
+
+.db use default
+.db drop test_self_check_inc

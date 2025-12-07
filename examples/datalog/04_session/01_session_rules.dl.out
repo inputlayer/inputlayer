@@ -1,0 +1,43 @@
+
+> .db create test_sess
+Database 'test_sess' created.
+Switched to database: test_sess
+> .db use test_sess
+Switched to database: test_sess
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> path(X, Y) :- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+(session: 1 rule(s))
+> path(X, Z) :- path(X, Y), edge(Y, Z).
+6 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 3)
+  (2, 4)
+  (3, 4)
+(session: 2 rule(s))
+> .session
+Session rules (2):
+  1. path(X, Y) :- edge(X, Y).
+  2. path(X, Z) :- path(X, Y), edge(Y, Z).
+
+Use .session clear to clear all, .session drop <n> to remove one.
+> ?- path(1, X).
+3 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+> .session clear
+Cleared 2 session rule(s).
+> .session
+No session rules defined.
+Use :- to define transient rules (e.g., foo(X, Y) :- bar(X, Y).)
+> .db use default
+Switched to database: default
+> .db drop test_sess
+Database 'test_sess' dropped.

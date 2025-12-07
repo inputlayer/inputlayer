@@ -1,0 +1,19 @@
+// Test: Double Negation
+// Category: 08_negation
+// Description: Tests using negation on two different relations
+
+.db create test_double_neg
+.db use test_double_neg
+
+// Base relations
++candidate[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
++blacklist[(2, 0), (4, 0)].
++already_hired[(3, 0)].
+
+// Find candidates not blacklisted and not already hired
+eligible(X, Y) := candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
+?- eligible(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_double_neg

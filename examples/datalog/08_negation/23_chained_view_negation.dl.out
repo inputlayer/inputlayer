@@ -1,0 +1,30 @@
+
+> .db create test_chain_neg
+Database 'test_chain_neg' created.
+Switched to database: test_chain_neg
+> .db use test_chain_neg
+Switched to database: test_chain_neg
+> +all_users[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
+Inserted 5 facts into 'all_users'.
+> +banned[(2, 0)].
+Inserted 1 fact into 'banned'.
+> +premium[(1, 0), (3, 0)].
+Inserted 2 facts into 'premium'.
+> active_user(X, Y) := all_users(X, Y), !banned(X, _).
+View 'active_user' registered.
+> ?- active_user(X, Y).
+4 rows:
+  (1, 0)
+  (3, 0)
+  (4, 0)
+  (5, 0)
+> basic_user(X, Y) := active_user(X, Y), !premium(X, _).
+View 'basic_user' registered.
+> ?- basic_user(X, Y).
+2 rows:
+  (4, 0)
+  (5, 0)
+> .db use default
+Switched to database: default
+> .db drop test_chain_neg
+Database 'test_chain_neg' dropped.

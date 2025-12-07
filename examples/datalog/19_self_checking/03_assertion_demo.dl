@@ -1,0 +1,50 @@
+// Assertion Demo Test
+// Demonstrates the assertion syntax for the test runner
+// This file uses assertions to verify expected results
+//
+// Note: Assertions apply to the ENTIRE output file, not per-query.
+// Use ASSERT_CONTAINS for verifying specific expected tuples.
+
+.db create test_assertion_demo
+.db use test_assertion_demo
+
+// Simple 2-column source (known to work correctly)
++data[(1, 5), (2, 10), (3, 15)].
++link[(1, 100), (2, 200), (3, 300)].
+
+// Test 1: Basic increment - WORKING
+result1(Y, D+1) :- data(X, D), link(X, Y).
+
+// @ASSERT_CONTAINS: (100, 6)
+// @ASSERT_CONTAINS: (200, 11)
+// @ASSERT_CONTAINS: (300, 16)
+?- result1(A, B).
+
+// Test 2: Self-join with variable binding (2-col) - WORKING
+result2(X, D+10) :- data(X, D).
+
+// @ASSERT_CONTAINS: (1, 15)
+// @ASSERT_CONTAINS: (2, 20)
+// @ASSERT_CONTAINS: (3, 25)
+?- result2(A, B).
+
+// Test 3: Empty result check
+empty_result(X) :- data(X, Y), Y > 100.
+
+// @ASSERT_EMPTY
+?- empty_result(X).
+
+// Test 4: 3-column source with wildcard - KNOWN BUG
+// This documents the bug - output is missing the computed column
+// The tuples show only (100) and (200) instead of (100, 6) and (200, 11)
+// Note: We can't use assertions here because the 2-column working results
+// above contain overlapping tuple values. See 04_bug_verification.dl for
+// isolated bug testing with assertions.
++src3[(1, 5, 999), (2, 10, 888)].
+
+result3(Y, D+1) :- src3(X, D, _), link(X, Y).
+
+?- result3(A, B).
+
+.db use default
+.db drop test_assertion_demo

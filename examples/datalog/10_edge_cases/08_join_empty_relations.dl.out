@@ -1,0 +1,10 @@
+Executing script: examples/datalog/10_edge_cases/08_join_empty_relations.dl
+
+> .db create test_empty_join
+Database 'test_empty_join' created.
+Switched to database: test_empty_join
+> .db use test_empty_join
+Switched to database: test_empty_join
+> +data[(1, 100), (2, 200), (3, 300)].
+Inserted 3 facts into 'data'.
+> +empty[].

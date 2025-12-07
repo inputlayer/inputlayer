@@ -1,0 +1,32 @@
+Executing script: examples/datalog/15_arithmetic/06_increment_multi_join.dl
+
+> .db create test_inc_multi
+Database 'test_inc_multi' created.
+Switched to database: test_inc_multi
+> .db use test_inc_multi
+Switched to database: test_inc_multi
+> +node[(1, 10), (2, 20), (3, 30), (4, 40)].
+Inserted 4 facts into 'node'.
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 facts into 'edge'.
+> +dist[(1, 0)].
+Inserted 1 fact into 'dist'.
+> result(Y, T, D+1) :- dist(X, D), edge(X, Y), node(Y, T).
+No results for 'result'.
+(session: 1 rule(s))
+> ?- result(A, B, C).
+1 rows:
+  (2, 20, 1)
+> +attr[(1, 100), (2, 200), (3, 300), (4, 400)].
+Inserted 4 facts into 'attr'.
+> combined(Y, T, V, D+1) :- dist(X, D), edge(X, Y), node(Y, T), attr(Y, V).
+No results for 'combined'.
+(session: 2 rule(s))
+> ?- combined(A, B, C, D).
+1 rows:
+  (2, 20, 200, 1)
+> .db use default
+Switched to database: default
+(Cleared 2 session rule(s))
+> .db drop test_inc_multi
+Database 'test_inc_multi' dropped.

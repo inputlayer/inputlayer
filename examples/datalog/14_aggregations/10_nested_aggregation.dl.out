@@ -1,0 +1,8 @@
+Executing script: examples/datalog/14_aggregations/10_nested_aggregation.dl
+
+> .db create test_nested_agg
+Database 'test_nested_agg' created.
+Switched to database: test_nested_agg
+> .db use test_nested_agg
+Switched to database: test_nested_agg
+> +scores[(1, 101, 85), (1, 102, 90), (1, 103, 95),

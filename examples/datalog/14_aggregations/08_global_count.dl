@@ -1,0 +1,19 @@
+// Test: Global Count (no grouping)
+// Category: 14_aggregations
+// Description: Tests count without group-by columns (total count)
+
+.db create test_global_count
+.db use test_global_count
+
+// Insert events: event(id, type)
++event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
+
+// Count all events
+total_events(count<Id>) := event(Id, _).
+
+// Query the result
+?- total_events(X).
+
+// Cleanup
+.db use default
+.db drop test_global_count

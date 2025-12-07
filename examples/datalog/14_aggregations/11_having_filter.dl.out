@@ -1,0 +1,8 @@
+Executing script: examples/datalog/14_aggregations/11_having_filter.dl
+
+> .db create test_having
+Database 'test_having' created.
+Switched to database: test_having
+> .db use test_having
+Switched to database: test_having
+> +orders[(1, 100), (1, 200), (1, 50),

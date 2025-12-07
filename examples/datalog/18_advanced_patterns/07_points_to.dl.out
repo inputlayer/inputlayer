@@ -1,0 +1,26 @@
+
+> .db create test_points_to
+Database 'test_points_to' created.
+Switched to database: test_points_to
+> .db use test_points_to
+Switched to database: test_points_to
+> +alloc[(1, 101), (2, 102)].
+Inserted 2 facts into 'alloc'.
+> +store[(1, 2)].
+Inserted 1 fact into 'store'.
+> +load[(3, 1)].
+Inserted 1 fact into 'load'.
+> pt(X, H) := alloc(X, H).
+View 'pt' registered.
+> pt(H, Z) := store(P, Q), pt(P, H), pt(Q, Z).
+Rule added to view 'pt' (2 rules total).
+> pt(X, Z) := load(X, P), pt(P, H), pt(H, Z).
+Rule added to view 'pt' (3 rules total).
+> ?- pt(X, Y).
+2 rows:
+  (1, 101)
+  (2, 102)
+> .db use default
+Switched to database: default
+> .db drop test_points_to
+Database 'test_points_to' dropped.

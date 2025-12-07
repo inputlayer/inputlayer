@@ -1,0 +1,22 @@
+// Test: Duplicate Handling
+// Category: 10_edge_cases
+// Description: Tests that duplicate insertions are handled correctly
+
+.db create test_dup
+.db use test_dup
+
+// Insert same facts multiple times
++edge[(1,2)].
++edge[(1,2)].
++edge[(1,2), (2,3), (2,3)].
+
+// Should only show unique facts
+?- edge(X, Y).
+
+// Join that could produce duplicates
+path(X, Z) := edge(X, Y), edge(Y, Z).
+?- path(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_dup

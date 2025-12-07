@@ -1,0 +1,8 @@
+Executing script: examples/datalog/14_aggregations/14_multiple_aggregates.dl
+
+> .db create test_multi_agg
+Database 'test_multi_agg' created.
+Switched to database: test_multi_agg
+> .db use test_multi_agg
+Switched to database: test_multi_agg
+> +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000),

@@ -1,0 +1,9 @@
+
+> .db create test_syntax_err
+Database 'test_syntax_err' created.
+Switched to database: test_syntax_err
+> .db use test_syntax_err
+Switched to database: test_syntax_err
+> +edge[(1, 2), (2, 3)].
+Inserted 2 facts into 'edge'.
+> +broken[(1, 2.

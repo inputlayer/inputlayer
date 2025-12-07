@@ -1,0 +1,41 @@
+Executing script: examples/datalog/09_recursion/12_recursion_termination.dl
+
+> .db create test_termination
+Database 'test_termination' created.
+Switched to database: test_termination
+> .db use test_termination
+Switched to database: test_termination
+> +loop_edge[(1, 1), (1, 2), (2, 3)].
+Inserted 3 facts into 'loop_edge'.
+> path_loop(X, Y) := loop_edge(X, Y).
+View 'path_loop' registered.
+> path_loop(X, Z) := loop_edge(X, Y), path_loop(Y, Z).
+Rule added to view 'path_loop' (2 rules total).
+> ?- path_loop(1, X).
+3 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+> +cycle_edge[(1, 2), (2, 3), (3, 1)].
+Inserted 3 facts into 'cycle_edge'.
+> path_cycle(X, Y) := cycle_edge(X, Y).
+View 'path_cycle' registered.
+> path_cycle(X, Z) := cycle_edge(X, Y), path_cycle(Y, Z).
+Rule added to view 'path_cycle' (2 rules total).
+> ?- path_cycle(1, X).
+3 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+> +diamond_edge[(1, 2), (1, 3), (2, 4), (3, 4)].
+Inserted 4 facts into 'diamond_edge'.
+> path_diamond(X, Y) := diamond_edge(X, Y).
+View 'path_diamond' registered.
+> path_diamond(X, Z) := diamond_edge(X, Y), path_diamond(Y, Z).
+Rule added to view 'path_diamond' (2 rules total).
+> to_four(X) := path_diamond(1, X), X = 4.
+View 'to_four' registered.
+> ?- to_four(X).
+1 rows:
+  (4)
+> +empty_edge[].

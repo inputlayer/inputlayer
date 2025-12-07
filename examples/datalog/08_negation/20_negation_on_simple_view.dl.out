@@ -1,0 +1,30 @@
+
+> .db create test_neg_view
+Database 'test_neg_view' created.
+Switched to database: test_neg_view
+> .db use test_neg_view
+Switched to database: test_neg_view
+> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+Inserted 5 facts into 'data'.
+> +exclude_ids[(2, 0), (4, 0)].
+Inserted 2 facts into 'exclude_ids'.
+> data_view(X, Y) := data(X, Y).
+View 'data_view' registered.
+> ?- data_view(X, Y).
+5 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+  (4, 40)
+  (5, 50)
+> result(X, Y) := data_view(X, Y), !exclude_ids(X, _).
+View 'result' registered.
+> ?- result(X, Y).
+3 rows:
+  (1, 10)
+  (3, 30)
+  (5, 50)
+> .db use default
+Switched to database: default
+> .db drop test_neg_view
+Database 'test_neg_view' dropped.

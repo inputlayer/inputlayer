@@ -1,0 +1,34 @@
+// Test: Increment with Multiple Joins
+// Category: 15_arithmetic
+// Description: Tests arithmetic with 3+ relations joined together
+// Verifies schema alignment works correctly with complex join trees
+
+.db create test_inc_multi
+.db use test_inc_multi
+
+// Graph: nodes connected via weighted edges
+// node(id, type)
++node[(1, 10), (2, 20), (3, 30), (4, 40)].
+
+// edge(from, to)
++edge[(1, 2), (2, 3), (3, 4)].
+
+// distance from source
++dist[(1, 0)].
+
+// Test 1: Three-way join with increment
+// result(to_node, to_type, distance+1)
+result(Y, T, D+1) :- dist(X, D), edge(X, Y), node(Y, T).
+?- result(A, B, C).
+
+// Test 2: Four-way join pattern
+// attr(id, value)
++attr[(1, 100), (2, 200), (3, 300), (4, 400)].
+
+// combined(to_node, type, attr_value, distance+1)
+combined(Y, T, V, D+1) :- dist(X, D), edge(X, Y), node(Y, T), attr(Y, V).
+?- combined(A, B, C, D).
+
+// Cleanup
+.db use default
+.db drop test_inc_multi

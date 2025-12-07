@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock for libraries (keep for binaries)
+Cargo.lock
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local configuration (git-ignored overrides)
+config.local.toml
+
+# Data directory (storage engine data)
+/data/
+
+# Test temporary files
+tmp/
+*.tmp

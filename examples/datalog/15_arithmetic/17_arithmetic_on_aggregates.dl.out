@@ -1,0 +1,8 @@
+Executing script: examples/datalog/15_arithmetic/17_arithmetic_on_aggregates.dl
+
+> .db create test_arith_agg
+Database 'test_arith_agg' created.
+Switched to database: test_arith_agg
+> .db use test_arith_agg
+Switched to database: test_arith_agg
+> +sales[(1, 100, 500), (1, 101, 300), (1, 102, 200),

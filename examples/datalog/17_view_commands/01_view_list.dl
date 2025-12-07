@@ -1,0 +1,21 @@
+// Test: View List Command
+// Category: 17_view_commands
+// Description: Tests .view command to list all defined views
+
+.db create test_view_list
+.db use test_view_list
+
+// Insert base data
++edge[(1,2), (2,3)].
+
+// Define multiple views
+reverse(X, Y) := edge(Y, X).
+paths(X, Y) := edge(X, Y).
+paths(X, Z) := paths(X, Y), edge(Y, Z).
+
+// List all views
+.view
+
+// Cleanup
+.db use default
+.db drop test_view_list

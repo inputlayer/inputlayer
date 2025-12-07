@@ -1,0 +1,19 @@
+// Test: Min Aggregation
+// Category: 14_aggregations
+// Description: Tests min aggregation to find minimum value per group
+
+.db create test_agg_min
+.db use test_agg_min
+
+// Insert temperature readings: reading(sensor_id, temperature)
++reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
+
+// Find minimum temperature per sensor
+min_temp(Sensor, min<Temp>) := reading(Sensor, Temp).
+
+// Query the min result
+?- min_temp(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_agg_min

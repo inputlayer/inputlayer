@@ -1,0 +1,30 @@
+// Test: Non-Bipartite Graph Detection
+// Category: 18_advanced_patterns
+// Description: 3-cycle is NOT bipartite - demonstrates 2-coloring conflict
+
+.db create test_non_bipartite
+.db use test_non_bipartite
+
+// 3-cycle graph (NOT bipartite - odd cycle):
+// 1 - 2
+//  \ /
+//   3
++edge[(1, 2), (2, 3), (3, 1)].
++start[(1, 0)].
+
+// 2-coloring propagation (undirected - check both directions)
+color(X, C) := start(X, C).
+color(Y, 1) := color(X, 0), edge(X, Y).
+color(Y, 1) := color(X, 0), edge(Y, X).
+color(Y, 0) := color(X, 1), edge(X, Y).
+color(Y, 0) := color(X, 1), edge(Y, X).
+
+// Conflict if a node has both colors
+conflict(X, X) := color(X, 0), color(X, 1).
+
+// Query conflicts (should detect conflict in odd cycle)
+?- conflict(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_non_bipartite

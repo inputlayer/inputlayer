@@ -1,0 +1,25 @@
+Executing script: examples/datalog/15_arithmetic/02_multiply.dl
+
+> .db create test_arith_mul
+Database 'test_arith_mul' created.
+Switched to database: test_arith_mul
+> .db use test_arith_mul
+Switched to database: test_arith_mul
+> +item[(1, 10), (2, 25), (3, 15)].
+Inserted 3 facts into 'item'.
+> double_price(Id, Price*2) :- item(Id, Price).
+3 rows:
+  (1, 20)
+  (2, 50)
+  (3, 30)
+(session: 1 rule(s))
+> ?- double_price(X, Y).
+3 rows:
+  (1, 20)
+  (2, 50)
+  (3, 30)
+> .db use default
+Switched to database: default
+(Cleared 1 session rule(s))
+> .db drop test_arith_mul
+Database 'test_arith_mul' dropped.

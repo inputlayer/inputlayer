@@ -1,0 +1,7 @@
+
+> .db create test_combined_filters
+Database 'test_combined_filters' created.
+Switched to database: test_combined_filters
+> .db use test_combined_filters
+Switched to database: test_combined_filters
+> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50),

@@ -1,0 +1,22 @@
+
+> .db create test_join
+Database 'test_join' created.
+Switched to database: test_join
+> .db use test_join
+Switched to database: test_join
+> +employee[(1, 100), (2, 100), (3, 200), (4, 200)].
+Inserted 4 facts into 'employee'.
+> +department[(100, 10), (200, 20)].
+Inserted 2 facts into 'department'.
+> emp_dept(EmpId, DeptName) := employee(EmpId, DeptId), department(DeptId, DeptName).
+View 'emp_dept' registered.
+> ?- emp_dept(X, Y).
+4 rows:
+  (1, 10)
+  (2, 10)
+  (3, 20)
+  (4, 20)
+> .db use default
+Switched to database: default
+> .db drop test_join
+Database 'test_join' dropped.

@@ -1,0 +1,46 @@
+Executing script: examples/datalog/12_errors/09_arithmetic_overflow.dl
+
+> .db create test_overflow
+Database 'test_overflow' created.
+Switched to database: test_overflow
+> .db use test_overflow
+Switched to database: test_overflow
+> +large_nums[(1000000000), (2000000000), (3000000000)].
+Inserted 3 facts into 'large_nums'.
+> mult_result(X, Y, X*Y) := large_nums(X), large_nums(Y), X != Y.
+View 'mult_result' registered.
+> ?- mult_result(A, B, C).
+6 rows:
+  (1000000000, 2000000000, 2000000000000000000)
+  (1000000000, 3000000000, 3000000000000000000)
+  (2000000000, 1000000000, 2000000000000000000)
+  (2000000000, 3000000000, 6000000000000000000)
+  (3000000000, 1000000000, 3000000000000000000)
+  (3000000000, 2000000000, 6000000000000000000)
+> +big_add[(1000000000000, 2000000000000), (500000000000, 500000000000)].
+Inserted 2 facts into 'big_add'.
+> add_result(X, Y, X+Y) := big_add(X, Y).
+View 'add_result' registered.
+> ?- add_result(A, B, C).
+2 rows:
+  (-727379968, -1454759936, -2182139904)
+  (1783793664, 1783793664, 3567587328)
+> +exp_base[(2, 10), (2, 20), (2, 30)].
+Inserted 3 facts into 'exp_base'.
+> power_of_two(X, 1024) := exp_base(X, 10), X = 2.
+View 'power_of_two' registered.
+> ?- power_of_two(B, R).
+1 rows:
+  (2, 1024)
+> +sub_pairs[(100, 200), (50, 100)].
+Inserted 2 facts into 'sub_pairs'.
+> sub_result(X, Y, X-Y) := sub_pairs(X, Y).
+View 'sub_result' registered.
+> ?- sub_result(A, B, C).
+2 rows:
+  (50, 100, -50)
+  (100, 200, -100)
+> .db use default
+Switched to database: default
+> .db drop test_overflow
+Database 'test_overflow' dropped.

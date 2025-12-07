@@ -1,0 +1,29 @@
+Executing script: examples/datalog/12_errors/08_division_by_zero.dl
+
+> .db create test_div_zero
+Database 'test_div_zero' created.
+Switched to database: test_div_zero
+> .db use test_div_zero
+Switched to database: test_div_zero
+> +numbers[(10), (20), (0), (5)].
+Inserted 4 facts into 'numbers'.
+> +pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
+Inserted 4 facts into 'pairs'.
+> safe_div(X, Y, X/Y) := pairs(X, Y), Y != 0.
+View 'safe_div' registered.
+> ?- safe_div(A, B, C).
+3 rows:
+  (8, 2, 4)
+  (10, 2, 5)
+  (20, 4, 5)
+> safe_mod(X, Y, X%Y) := pairs(X, Y), Y != 0.
+View 'safe_mod' registered.
+> ?- safe_mod(A, B, C).
+3 rows:
+  (8, 2, 0)
+  (10, 2, 0)
+  (20, 4, 0)
+> .db use default
+Switched to database: default
+> .db drop test_div_zero
+Database 'test_div_zero' dropped.
