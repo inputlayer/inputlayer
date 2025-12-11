@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_hierarchy_n18t15
+Knowledge graph 'test_hierarchy_n18t15' created.
+Switched to knowledge graph: test_hierarchy_n18t15
+> .kg use test_hierarchy_n18t15
+Switched to knowledge graph: test_hierarchy_n18t15
+> +employees[(1, "CEO", 0), (2, "VP Sales", 1), (3, "VP Eng", 1), (4, "Sales Rep", 2), (5, "Engineer", 3), (6, "Sr Engineer", 3)].
+Inserted 6 fact(s) into 'employees'.
+> direct_reports(Manager, Employee) :- employees(Employee, _, Manager), Manager != 0.
+5 rows:
+  (1, 2)
+  (1, 3)
+  (2, 4)
+  (3, 5)
+  (3, 6)
+(session: 1 rule(s))
+> ?- direct_reports(Manager, Employee).
+5 rows:
+  (1, 2)
+  (1, 3)
+  (2, 4)
+  (3, 5)
+  (3, 6)
+> +subordinate(Manager, Employee) :- direct_reports(Manager, Employee).
+Rule 'subordinate' registered.
+> +subordinate(Manager, Employee) :- subordinate(Manager, Mid), direct_reports(Mid, Employee).
+Rule 'subordinate' registered.
+> ?- subordinate(Manager, Employee).
+8 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+  (1, 6)
+  (2, 4)
+  (3, 5)
+  (3, 6)
+> report_count(Manager, count<Emp>) :- direct_reports(Manager, Emp).
+3 rows:
+  (1, 2)
+  (2, 1)
+  (3, 2)
+(session: 2 rule(s))
+> ?- report_count(Manager, Count).
+3 rows:
+  (1, 2)
+  (2, 1)
+  (3, 2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_hierarchy_n18t15
+Knowledge graph 'test_hierarchy_n18t15' dropped.
