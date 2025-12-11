@@ -1,0 +1,22 @@
+% Test: Grouping sets simulation
+
+.kg create test_grouping_n18t19
+.kg use test_grouping_n18t19
+
++sales[("East", "Widget", 100), ("East", "Gadget", 200), ("West", "Widget", 150), ("West", "Gadget", 250)].
+
+% Group by region
++region_total(Region, sum<Amt>) :- sales(Region, _, Amt).
+
+% Group by product
++product_total(Product, sum<Amt>) :- sales(_, Product, Amt).
+
+% Group by both
++both_total(Region, Product, sum<Amt>) :- sales(Region, Product, Amt).
+
+?- region_total(R, T).
+?- product_total(P, T).
+?- both_total(R, P, T).
+
+.kg use default
+.kg drop test_grouping_n18t19

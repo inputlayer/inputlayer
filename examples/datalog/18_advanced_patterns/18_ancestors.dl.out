@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestors_n18t18
+Knowledge graph 'test_ancestors_n18t18' created.
+Switched to knowledge graph: test_ancestors_n18t18
+> .kg use test_ancestors_n18t18
+Switched to knowledge graph: test_ancestors_n18t18
+> +parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Bob", "Eve"), ("Carol", "Frank")].
+Inserted 5 fact(s) into 'parent'.
+> +ancestor(Child, Anc) :- parent(Anc, Child).
+Rule 'ancestor' registered.
+> +ancestor(Child, Anc) :- parent(Mid, Child), ancestor(Mid, Anc).
+Rule 'ancestor' registered.
+> ?- ancestor(Child, Anc).
+8 rows:
+  ("Bob", "Alice")
+  ("Carol", "Alice")
+  ("Dave", "Alice")
+  ("Dave", "Bob")
+  ("Eve", "Alice")
+  ("Eve", "Bob")
+  ("Frank", "Alice")
+  ("Frank", "Carol")
+> alice_descendants(D) :- ancestor(D, "Alice").
+5 rows:
+  ("Bob")
+  ("Carol")
+  ("Dave")
+  ("Eve")
+  ("Frank")
+(session: 1 rule(s))
+> ?- alice_descendants(D).
+5 rows:
+  ("Bob")
+  ("Carol")
+  ("Dave")
+  ("Eve")
+  ("Frank")
+> desc_count(Person, count<D>) :- ancestor(D, Person).
+3 rows:
+  ("Alice", 5)
+  ("Bob", 2)
+  ("Carol", 1)
+(session: 2 rule(s))
+> ?- desc_count(Person, Count).
+3 rows:
+  ("Alice", 5)
+  ("Bob", 2)
+  ("Carol", 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_ancestors_n18t18
+Knowledge graph 'test_ancestors_n18t18' dropped.

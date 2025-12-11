@@ -1,0 +1,28 @@
+% Test: Ancestor/descendant pattern
+
+.kg create test_ancestors_n18t18
+.kg use test_ancestors_n18t18
+
+% Parent relationship
++parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Bob", "Eve"), ("Carol", "Frank")].
+
+% Direct parent
++ancestor(Child, Anc) :- parent(Anc, Child).
+
+% Transitive ancestors
++ancestor(Child, Anc) :- parent(Mid, Child), ancestor(Mid, Anc).
+
+?- ancestor(Child, Anc).
+
+% Find all descendants of Alice
+alice_descendants(D) :- ancestor(D, "Alice").
+
+?- alice_descendants(D).
+
+% Count descendants
+desc_count(Person, count<D>) :- ancestor(D, Person).
+
+?- desc_count(Person, Count).
+
+.kg use default
+.kg drop test_ancestors_n18t18
