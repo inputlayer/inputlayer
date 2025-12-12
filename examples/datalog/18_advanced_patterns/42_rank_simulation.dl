@@ -1,0 +1,14 @@
+% Test: Rank simulation pattern
+
+.kg create test_rank_n18t42
+.kg use test_rank_n18t42
+
++scores[("Alice", 90), ("Bob", 85), ("Carol", 95), ("Dave", 85)].
+
+% Count how many have higher score = rank - 1
++rank(Name, Score, count<Other>) :- scores(Name, Score), scores(Other, OtherScore), OtherScore > Score.
+
+?- rank(Name, Score, Rank).
+
+.kg use default
+.kg drop test_rank_n18t42

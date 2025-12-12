@@ -1,0 +1,43 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_percentile_n18t47
+Knowledge graph 'test_percentile_n18t47' created.
+Switched to knowledge graph: test_percentile_n18t47
+> .kg use test_percentile_n18t47
+Switched to knowledge graph: test_percentile_n18t47
+> +scores[(1, 50), (2, 75), (3, 85), (4, 95), (5, 60)].
+Inserted 5 fact(s) into 'scores'.
+> low(Id, Score) :- scores(Id, Score), Score < 60.
+1 rows:
+  (1, 50)
+(session: 1 rule(s))
+> medium(Id, Score) :- scores(Id, Score), Score >= 60, Score < 80.
+2 rows:
+  (2, 75)
+  (5, 60)
+(session: 2 rule(s))
+> high(Id, Score) :- scores(Id, Score), Score >= 80.
+2 rows:
+  (3, 85)
+  (4, 95)
+(session: 3 rule(s))
+> ?- low(Id, Score).
+1 rows:
+  (1, 50)
+> ?- medium(Id, Score).
+2 rows:
+  (2, 75)
+  (5, 60)
+> ?- high(Id, Score).
+2 rows:
+  (3, 85)
+  (4, 95)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_percentile_n18t47
+Knowledge graph 'test_percentile_n18t47' dropped.

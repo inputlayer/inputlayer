@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank_n18t42
+Knowledge graph 'test_rank_n18t42' created.
+Switched to knowledge graph: test_rank_n18t42
+> .kg use test_rank_n18t42
+Switched to knowledge graph: test_rank_n18t42
+> +scores[("Alice", 90), ("Bob", 85), ("Carol", 95), ("Dave", 85)].
+Inserted 4 fact(s) into 'scores'.
+> +rank(Name, Score, count<Other>) :- scores(Name, Score), scores(Other, OtherScore), OtherScore > Score.
+Rule 'rank' registered.
+> ?- rank(Name, Score, Rank).
+3 rows:
+  ("Alice", 90, 1)
+  ("Bob", 85, 2)
+  ("Dave", 85, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rank_n18t42
+Knowledge graph 'test_rank_n18t42' dropped.

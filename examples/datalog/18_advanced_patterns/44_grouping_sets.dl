@@ -1,0 +1,22 @@
+% Test: Grouping sets simulation
+
+.kg create test_grouping_n18t44
+.kg use test_grouping_n18t44
+
++orders[(1, "Alice", "Widget", 100), (2, "Bob", "Gadget", 200), (3, "Alice", "Widget", 150)].
+
+% By customer
++by_customer(Customer, sum<Amount>) :- orders(_, Customer, _, Amount).
+
+% By product
++by_product(Product, sum<Amount>) :- orders(_, _, Product, Amount).
+
+% By customer and product
++by_both(Customer, Product, sum<Amount>) :- orders(_, Customer, Product, Amount).
+
+?- by_customer(C, Sum).
+?- by_product(P, Sum).
+?- by_both(C, P, Sum).
+
+.kg use default
+.kg drop test_grouping_n18t44
