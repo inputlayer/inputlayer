@@ -1,0 +1,43 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cube_n18t22
+Knowledge graph 'test_cube_n18t22' created.
+Switched to knowledge graph: test_cube_n18t22
+> .kg use test_cube_n18t22
+Switched to knowledge graph: test_cube_n18t22
+> +sales[("2024", "Q1", "Widget", 100), ("2024", "Q1", "Gadget", 200), ("2024", "Q2", "Widget", 150), ("2024", "Q2", "Gadget", 250)].
+Inserted 4 fact(s) into 'sales'.
+> +cube_yqp(Year, Quarter, Product, sum<Amt>) :- sales(Year, Quarter, Product, Amt).
+Rule 'cube_yqp' registered.
+> +cube_yq(Year, Quarter, sum<Amt>) :- sales(Year, Quarter, _, Amt).
+Rule 'cube_yq' registered.
+> +cube_yp(Year, Product, sum<Amt>) :- sales(Year, _, Product, Amt).
+Rule 'cube_yp' registered.
+> +cube_p(Product, sum<Amt>) :- sales(_, _, Product, Amt).
+Rule 'cube_p' registered.
+> ?- cube_yqp(Y, Q, P, S).
+4 rows:
+  ("2024", "Q1", "Gadget", 200)
+  ("2024", "Q1", "Widget", 100)
+  ("2024", "Q2", "Gadget", 250)
+  ("2024", "Q2", "Widget", 150)
+> ?- cube_yq(Y, Q, S).
+2 rows:
+  ("2024", "Q1", 300)
+  ("2024", "Q2", 400)
+> ?- cube_yp(Y, P, S).
+2 rows:
+  ("2024", "Gadget", 450)
+  ("2024", "Widget", 250)
+> ?- cube_p(P, S).
+2 rows:
+  ("Gadget", 450)
+  ("Widget", 250)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cube_n18t22
+Knowledge graph 'test_cube_n18t22' dropped.
