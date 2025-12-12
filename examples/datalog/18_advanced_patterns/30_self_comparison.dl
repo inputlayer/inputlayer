@@ -1,0 +1,25 @@
+% Test: Self-comparison pattern
+
+.kg create test_self_cmp_n18t30
+.kg use test_self_cmp_n18t30
+
++scores[(1, "Alice", 85), (2, "Bob", 92), (3, "Carol", 78), (4, "Dave", 92)].
+
+% Find pairs where first has higher score
+higher_than(Name1, Name2, Score1, Score2) :-
+    scores(_, Name1, Score1),
+    scores(_, Name2, Score2),
+    Score1 > Score2.
+
+?- higher_than(N1, N2, S1, S2).
+
+% Find ties (same score, different people)
+ties(Name1, Name2, Score) :-
+    scores(Id1, Name1, Score),
+    scores(Id2, Name2, Score),
+    Id1 < Id2.
+
+?- ties(N1, N2, S).
+
+.kg use default
+.kg drop test_self_cmp_n18t30
