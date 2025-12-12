@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank_n18t21
+Knowledge graph 'test_rank_n18t21' created.
+Switched to knowledge graph: test_rank_n18t21
+> .kg use test_rank_n18t21
+Switched to knowledge graph: test_rank_n18t21
+> +scores[(1, 95), (2, 87), (3, 95), (4, 72), (5, 87)].
+Inserted 5 fact(s) into 'scores'.
+> rank(Id, Score, count<OtherScore>) :- scores(Id, Score), scores(_, OtherScore), OtherScore > Score.
+3 rows:
+  (2, 87, 2)
+  (4, 72, 4)
+  (5, 87, 2)
+(session: 1 rule(s))
+> ?- rank(Id, Score, Rank).
+3 rows:
+  (2, 87, 2)
+  (4, 72, 4)
+  (5, 87, 2)
+> dense_rank(Id, Score, count<OtherScore>) :- scores(Id, Score), scores(_, OtherScore), OtherScore >= Score.
+5 rows:
+  (1, 95, 2)
+  (2, 87, 4)
+  (3, 95, 2)
+  (4, 72, 5)
+  (5, 87, 4)
+(session: 2 rule(s))
+> ?- dense_rank(Id, Score, Rank).
+5 rows:
+  (1, 95, 2)
+  (2, 87, 4)
+  (3, 95, 2)
+  (4, 72, 5)
+  (5, 87, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_rank_n18t21
+Knowledge graph 'test_rank_n18t21' dropped.

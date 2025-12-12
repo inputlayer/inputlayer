@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mode_n18t23
+Knowledge graph 'test_mode_n18t23' created.
+Switched to knowledge graph: test_mode_n18t23
+> .kg use test_mode_n18t23
+Switched to knowledge graph: test_mode_n18t23
+> +values[("a",), ("b",), ("a",), ("c",), ("a",), ("b",)].
+Inserted 3 fact(s) into 'values'.
+> +freq(Val, count<Val>) :- values(Val).
+Rule 'freq' registered.
+> ?- freq(Val, Count).
+3 rows:
+  ("a", 1)
+  ("b", 1)
+  ("c", 1)
+> +max_freq(max<C>) :- freq(_, C).
+Rule 'max_freq' registered.
+> ?- max_freq(M).
+1 rows:
+  (1)
+> most_common(Val) :- freq(Val, C), max_freq(C).
+3 rows:
+  ("a")
+  ("b")
+  ("c")
+(session: 1 rule(s))
+> ?- most_common(Val).
+3 rows:
+  ("a")
+  ("b")
+  ("c")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mode_n18t23
+Knowledge graph 'test_mode_n18t23' dropped.

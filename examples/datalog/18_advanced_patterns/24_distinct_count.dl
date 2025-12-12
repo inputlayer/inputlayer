@@ -1,0 +1,29 @@
+% Test: Count distinct pattern
+
+.kg create test_distinct_n18t24
+.kg use test_distinct_n18t24
+
++orders[(1, "Alice", "Widget"),
+        (2, "Bob", "Widget"),
+        (3, "Alice", "Gadget"),
+        (4, "Carol", "Widget"),
+        (5, "Alice", "Widget")].
+
+% Distinct customers
+distinct_cust(Cust) :- orders(_, Cust, _).
+
+% Count distinct customers
++cust_count(count<C>) :- distinct_cust(C).
+
+?- cust_count(Count).
+
+% Distinct products
+distinct_prod(Prod) :- orders(_, _, Prod).
+
+% Count distinct products
++prod_count(count<P>) :- distinct_prod(P).
+
+?- prod_count(Count).
+
+.kg use default
+.kg drop test_distinct_n18t24
