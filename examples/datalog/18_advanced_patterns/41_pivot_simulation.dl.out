@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_pivot_n18t41
+Knowledge graph 'test_pivot_n18t41' created.
+Switched to knowledge graph: test_pivot_n18t41
+> .kg use test_pivot_n18t41
+Switched to knowledge graph: test_pivot_n18t41
+> +sales[("Q1", 100), ("Q2", 200), ("Q3", 150), ("Q4", 300)].
+Inserted 4 fact(s) into 'sales'.
+> q1_sales(Val) :- sales("Q1", Val).
+1 rows:
+  (100)
+(session: 1 rule(s))
+> q2_sales(Val) :- sales("Q2", Val).
+1 rows:
+  (200)
+(session: 2 rule(s))
+> ?- q1_sales(V).
+1 rows:
+  (100)
+> ?- q2_sales(V).
+1 rows:
+  (200)
+> +total(sum<Val>) :- sales(_, Val).
+Rule 'total' registered.
+> ?- total(T).
+1 rows:
+  (750)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_pivot_n18t41
+Knowledge graph 'test_pivot_n18t41' dropped.

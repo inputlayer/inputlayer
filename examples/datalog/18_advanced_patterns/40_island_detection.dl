@@ -1,0 +1,15 @@
+% Test: Island detection pattern
+
+.kg create test_islands_n18t40
+.kg use test_islands_n18t40
+
++events[(1, "A"), (2, "A"), (3, "B"), (4, "B"), (5, "B"), (6, "A")].
+
+% Island starts: where value differs from previous
+island_start(T, Val) :- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal.
+island_start(T, Val) :- events(T, Val), T = 1.
+
+?- island_start(T, Val).
+
+.kg use default
+.kg drop test_islands_n18t40

@@ -1,0 +1,19 @@
+% Test: Most common value pattern
+
+.kg create test_most_common_n18t37
+.kg use test_most_common_n18t37
+
++events[("click",), ("view",), ("click",), ("purchase",), ("click",), ("view",)].
+
+% Count by event type
++event_counts(Event, count<Event>) :- events(Event).
+
+?- event_counts(Event, Count).
+
+% Get max count
++max_count(max<Count>) :- event_counts(_, Count).
+
+?- max_count(M).
+
+.kg use default
+.kg drop test_most_common_n18t37
