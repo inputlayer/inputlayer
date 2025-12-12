@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_hist_n18t71
+Knowledge graph 'test_hist_n18t71' created.
+Switched to knowledge graph: test_hist_n18t71
+> .kg use test_hist_n18t71
+Switched to knowledge graph: test_hist_n18t71
+> +values[(5,), (15,), (25,), (35,), (45,), (55,), (8,), (22,), (48,)].
+Inserted 9 fact(s) into 'values'.
+> bucket(V, B) :- values(V), B = (V / 20) * 20.
+9 rows:
+  (5, 5.0)
+  (8, 8.0)
+  (15, 15.0)
+  (22, 22.0)
+  (25, 25.0)
+  (35, 35.0)
+  (45, 45.0)
+  (48, 48.0)
+  (55, 55.0)
+(session: 1 rule(s))
+> bucket_count(B, count<V>) :- bucket(V, B).
+9 rows:
+  (5.0, 1)
+  (8.0, 1)
+  (15.0, 1)
+  (22.0, 1)
+  (25.0, 1)
+  (35.0, 1)
+  (45.0, 1)
+  (48.0, 1)
+  (55.0, 1)
+(session: 2 rule(s))
+> ?- bucket_count(B, N).
+9 rows:
+  (5.0, 1)
+  (8.0, 1)
+  (15.0, 1)
+  (22.0, 1)
+  (25.0, 1)
+  (35.0, 1)
+  (45.0, 1)
+  (48.0, 1)
+  (55.0, 1)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_hist_n18t71
+Knowledge graph 'test_hist_n18t71' dropped.

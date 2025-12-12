@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_running_total_n18t61
+Knowledge graph 'test_running_total_n18t61' created.
+Switched to knowledge graph: test_running_total_n18t61
+> .kg use test_running_total_n18t61
+Switched to knowledge graph: test_running_total_n18t61
+> +transactions[(1, 100), (2, 50), (3, 75), (4, 25)].
+Inserted 4 fact(s) into 'transactions'.
+> running_total(Id, Val, sum<V2>) :- transactions(Id, Val), transactions(Id2, V2), Id2 <= Id.
+4 rows:
+  (1, 100, 100)
+  (2, 50, 150)
+  (3, 75, 225)
+  (4, 25, 250)
+(session: 1 rule(s))
+> ?- running_total(Id, Val, Total).
+4 rows:
+  (1, 100, 100)
+  (2, 50, 150)
+  (3, 75, 225)
+  (4, 25, 250)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_running_total_n18t61
+Knowledge graph 'test_running_total_n18t61' dropped.

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_correlation_n18t64
+Knowledge graph 'test_correlation_n18t64' created.
+Switched to knowledge graph: test_correlation_n18t64
+> .kg use test_correlation_n18t64
+Switched to knowledge graph: test_correlation_n18t64
+> +sales[(1, "A", 100), (2, "A", 150), (3, "A", 200), (4, "B", 300), (5, "B", 250)].
+Inserted 5 fact(s) into 'sales'.
+> avg_per_cat(Cat, avg<Val>) :- sales(_, Cat, Val).
+2 rows:
+  ("A", 150.0)
+  ("B", 275.0)
+(session: 1 rule(s))
+> ?- avg_per_cat(Cat, Avg).
+2 rows:
+  ("A", 150.0)
+  ("B", 275.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_correlation_n18t64
+Knowledge graph 'test_correlation_n18t64' dropped.
