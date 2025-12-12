@@ -1,0 +1,18 @@
+% Test: First and last per group
+
+.kg create test_first_last_n18t62
+.kg use test_first_last_n18t62
+
++events[(1, "A", "start"), (2, "A", "middle"), (3, "A", "end"), (1, "B", "only")].
+
+% First event per group (min ID)
+first_per_group(Group, min<Id>) :- events(Id, Group, _).
+
+% Last event per group (max ID)
+last_per_group(Group, max<Id>) :- events(Id, Group, _).
+
+?- first_per_group(Group, FirstId).
+?- last_per_group(Group, LastId).
+
+.kg use default
+.kg drop test_first_last_n18t62

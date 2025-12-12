@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_exists_n18t63
+Knowledge graph 'test_exists_n18t63' created.
+Switched to knowledge graph: test_exists_n18t63
+> .kg use test_exists_n18t63
+Switched to knowledge graph: test_exists_n18t63
+> +orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)].
+Inserted 3 fact(s) into 'orders'.
+> +customers[("Alice",), ("Bob",), ("Carol",)].
+Inserted 3 fact(s) into 'customers'.
+> has_orders(Name) :- customers(Name), orders(_, Name, _).
+2 rows:
+  ("Alice")
+  ("Bob")
+(session: 1 rule(s))
+> no_orders(Name) :- customers(Name), !has_orders(Name).
+1 rows:
+  ("Carol")
+(session: 2 rule(s))
+> ?- has_orders(Name).
+2 rows:
+  ("Alice")
+  ("Bob")
+> ?- no_orders(Name).
+1 rows:
+  ("Carol")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_exists_n18t63
+Knowledge graph 'test_exists_n18t63' dropped.

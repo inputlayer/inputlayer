@@ -1,0 +1,14 @@
+% Test: Correlated subquery pattern
+
+.kg create test_correlation_n18t64
+.kg use test_correlation_n18t64
+
++sales[(1, "A", 100), (2, "A", 150), (3, "A", 200), (4, "B", 300), (5, "B", 250)].
+
+% Average per category
+avg_per_cat(Cat, avg<Val>) :- sales(_, Cat, Val).
+
+?- avg_per_cat(Cat, Avg).
+
+.kg use default
+.kg drop test_correlation_n18t64
