@@ -1,0 +1,14 @@
+% Test: Deduplication pattern
+
+.kg create test_dedup_n18t74
+.kg use test_dedup_n18t74
+
++events[(1, "click"), (2, "click"), (3, "view"), (4, "click"), (5, "view")].
+
+% Get unique event types
+unique_types(T) :- events(_, T).
+
+?- unique_types(T).
+
+.kg use default
+.kg drop test_dedup_n18t74

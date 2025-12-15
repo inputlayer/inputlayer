@@ -1,0 +1,18 @@
+% Test: Connected components pattern
+
+.kg create test_components_n18t85
+.kg use test_components_n18t85
+
++edge[("a", "b"), ("b", "c"), ("d", "e"), ("f", "f")].
+
+% Symmetric closure
++connected(X, Y) :- edge(X, Y).
++connected(X, Y) :- edge(Y, X).
+
+% Transitive closure
++connected(X, Z) :- connected(X, Y), connected(Y, Z).
+
+?- connected(X, Y).
+
+.kg use default
+.kg drop test_components_n18t85

@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_outlier_n18t73
+Knowledge graph 'test_outlier_n18t73' created.
+Switched to knowledge graph: test_outlier_n18t73
+> .kg use test_outlier_n18t73
+Switched to knowledge graph: test_outlier_n18t73
+> +measurements[(10,), (12,), (11,), (100,), (9,), (13,)].
+Inserted 6 fact(s) into 'measurements'.
+> min_val(min<V>) :- measurements(V).
+1 rows:
+  (9)
+(session: 1 rule(s))
+> max_val(max<V>) :- measurements(V).
+1 rows:
+  (100)
+(session: 2 rule(s))
+> ?- min_val(M).
+1 rows:
+  (9)
+> ?- max_val(M).
+1 rows:
+  (100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_outlier_n18t73
+Knowledge graph 'test_outlier_n18t73' dropped.
