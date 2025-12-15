@@ -1,0 +1,15 @@
+% Test: Cross product of two relations
+
+.kg create test_cross_n18t90
+.kg use test_cross_n18t90
+
++colors[("red",), ("blue",)].
++sizes[("S",), ("M",), ("L",)].
+
+% Cross product
+combinations(Color, Size) :- colors(Color), sizes(Size).
+
+?- combinations(Color, Size).
+
+.kg use default
+.kg drop test_cross_n18t90

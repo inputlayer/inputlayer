@@ -1,0 +1,14 @@
+% Test: Filter based on aggregate
+
+.kg create test_filter_agg_n18t92
+.kg use test_filter_agg_n18t92
+
++orders[("A", 100), ("A", 200), ("B", 50), ("B", 60), ("B", 70), ("C", 500)].
+
+% Total per customer
+total_per_cust(Cust, sum<Amount>) :- orders(Cust, Amount).
+
+?- total_per_cust(Cust, Total).
+
+.kg use default
+.kg drop test_filter_agg_n18t92
