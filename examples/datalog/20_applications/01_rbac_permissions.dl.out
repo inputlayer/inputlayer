@@ -1,0 +1,57 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rbac_n20t01
+Knowledge graph 'test_rbac_n20t01' created.
+Switched to knowledge graph: test_rbac_n20t01
+> .kg use test_rbac_n20t01
+Switched to knowledge graph: test_rbac_n20t01
+> +role_inherits[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'role_inherits'.
+> +user_role[(100, 1), (101, 2), (102, 3), (103, 4)].
+Inserted 4 fact(s) into 'user_role'.
+> +role_permission[(1, 1000), (1, 1001), (2, 1002), (2, 1003), (3, 1004), (3, 1005), (4, 1006)].
+Inserted 7 fact(s) into 'role_permission'.
+> +has_role(User, Role) :- user_role(User, Role).
+Rule 'has_role' registered.
+> +has_role(User, ParentRole) :- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
+Rule 'has_role' registered.
+> +has_permission(User, Perm) :- has_role(User, Role), role_permission(Role, Perm).
+Rule 'has_permission' registered.
+> ?- has_role(User, Role).
+10 rows:
+  (100, 1)
+  (100, 2)
+  (100, 3)
+  (100, 4)
+  (101, 2)
+  (101, 3)
+  (101, 4)
+  (102, 3)
+  (102, 4)
+  (103, 4)
+> +admin_perms(Perm) :- has_permission(100, Perm).
+Rule 'admin_perms' registered.
+> ?- admin_perms(P).
+7 rows:
+  (1000)
+  (1001)
+  (1002)
+  (1003)
+  (1004)
+  (1005)
+  (1006)
+> +employee_perms(Perm) :- has_permission(102, Perm).
+Rule 'employee_perms' registered.
+> ?- employee_perms(P).
+3 rows:
+  (1004)
+  (1005)
+  (1006)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rbac_n20t01
+Knowledge graph 'test_rbac_n20t01' dropped.

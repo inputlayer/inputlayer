@@ -1,0 +1,59 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bom_n20t05
+Knowledge graph 'test_bom_n20t05' created.
+Switched to knowledge graph: test_bom_n20t05
+> .kg use test_bom_n20t05
+Switched to knowledge graph: test_bom_n20t05
+> +part_of[(100, 1, 1), (200, 1, 1), (300, 1, 4), (101, 100, 4), (102, 100, 1), (103, 100, 1), (201, 200, 1), (202, 200, 2)].
+Inserted 8 fact(s) into 'part_of'.
+> +part_name[(1, 1000), (100, 1001), (200, 1002), (300, 1003), (101, 1004), (102, 1005), (103, 1006), (201, 1007), (202, 1008)].
+Inserted 9 fact(s) into 'part_name'.
+> +direct_component(Assembly, Component, Qty) :- part_of(Component, Assembly, Qty).
+Rule 'direct_component' registered.
+> +all_components(Assembly, Component) :- direct_component(Assembly, Component, _).
+Rule 'all_components' registered.
+> +all_components(Assembly, SubComponent) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
+Rule 'all_components' registered.
+> +car_components(C) :- all_components(1, C).
+Rule 'car_components' registered.
+> ?- car_components(C).
+8 rows:
+  (100)
+  (101)
+  (102)
+  (103)
+  (200)
+  (201)
+  (202)
+  (300)
+> +part_count(count<P>) :- car_components(P).
+Rule 'part_count' registered.
+> ?- part_count(C).
+1 rows:
+  (8)
+> ?- direct_component(1, Component, Qty).
+3 rows:
+  (1, 100, 1)
+  (1, 200, 1)
+  (1, 300, 4)
+> +has_children(P) :- part_of(_, P, _).
+Rule 'has_children' registered.
+> +leaf_part(P) :- car_components(P), !has_children(P).
+Rule 'leaf_part' registered.
+> ?- leaf_part(P).
+6 rows:
+  (101)
+  (102)
+  (103)
+  (201)
+  (202)
+  (300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bom_n20t05
+Knowledge graph 'test_bom_n20t05' dropped.

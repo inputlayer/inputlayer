@@ -1,0 +1,49 @@
+% Test: Bill of Materials (BOM) Explosion
+% Verifies: Manufacturing parts tree traversal
+
+.kg create test_bom_n20t05
+.kg use test_bom_n20t05
+
+% Bill of Materials: part_of(component, assembly, quantity)
+% A car is made of: engine, chassis, wheels(4)
+% Engine is made of: pistons(4), crankshaft, fuel_system
+% Chassis is made of: frame, suspension
+
++part_of[(100, 1, 1),    // engine in car
+         (200, 1, 1),    // chassis in car
+         (300, 1, 4),    // 4 wheels in car
+         (101, 100, 4),  // 4 pistons in engine
+         (102, 100, 1),  // crankshaft in engine
+         (103, 100, 1),  // fuel_system in engine
+         (201, 200, 1),  // frame in chassis
+         (202, 200, 2)]. // 2 suspension units in chassis
+
+% Part names for readability
++part_name[(1, 1000), (100, 1001), (200, 1002), (300, 1003), (101, 1004), (102, 1005), (103, 1006), (201, 1007), (202, 1008)].
+
+% Direct components
++direct_component(Assembly, Component, Qty) :- part_of(Component, Assembly, Qty).
+
+% All components (transitive) - BOM explosion
++all_components(Assembly, Component) :- direct_component(Assembly, Component, _).
++all_components(Assembly, SubComponent) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
+
+% Query: All components of car (id=1)
++car_components(C) :- all_components(1, C).
+?- car_components(C).
+
+% Count total unique parts in car
++part_count(count<P>) :- car_components(P).
+?- part_count(C).
+
+% Direct children of car
+?- direct_component(1, Component, Qty).
+
+% Leaf components (parts with no sub-parts)
++has_children(P) :- part_of(_, P, _).
++leaf_part(P) :- car_components(P), !has_children(P).
+?- leaf_part(P).
+
+% Cleanup
+.kg use default
+.kg drop test_bom_n20t05
