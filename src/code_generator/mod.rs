@@ -85,7 +85,7 @@
 
 pub mod rel;
 
-use datalog_ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
+use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use differential_dataflow::operators::iterate::SemigroupVariable;
 use differential_dataflow::operators::join::Join;
 use differential_dataflow::operators::{Consolidate, Count, Iterate, Reduce, Threshold};

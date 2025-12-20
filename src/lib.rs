@@ -98,12 +98,16 @@
 //! | `recursion` | M11 | Recursion detection & stratification |
 //! | `storage_engine` | - | Multi-database persistence |
 
-// Re-export types from shared libraries
-pub use datalog_ast::{
+// AST and IR modules (consolidated from crates/)
+pub mod ast;
+pub mod ir;
+
+// Re-export types from internal modules
+pub use crate::ast::{
     Atom, BodyPredicate, Constraint, Program, Rule, Term,
     AggregateFunc, BuiltinFunc, ArithExpr, ArithOp,
 };
-pub use datalog_ir::{IRNode, Predicate};
+pub use crate::ir::{IRNode, Predicate};
 
 // Internal modules - Course Modules (M04, M05, M06-M10, M11)
 pub mod parser;           // Module 04: Parsing & AST Construction
@@ -471,7 +475,7 @@ impl DatalogEngine {
                     let ir = builder.build_ir(r)?;
                     sub_irs.push(ir);
                 }
-                let union_ir = datalog_ir::IRNode::Union { inputs: sub_irs };
+                let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
                 ir_nodes.push(union_ir);
             }
         }

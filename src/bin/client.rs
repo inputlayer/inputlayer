@@ -52,9 +52,9 @@
 use inputlayer::{
     statement::{parse_statement, DeletePattern, MetaCommand, Statement},
     value::{Tuple, Value},
+    ast::{Rule, Term},
     Config, StorageEngine,
 };
-use datalog_ast::{Rule, Term};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
@@ -75,7 +75,7 @@ struct Args {
 struct ReplState {
     storage: StorageEngine,
     /// Session-scoped transient rules (cleared on exit or database switch)
-    session_rules: Vec<datalog_ast::Rule>,
+    session_rules: Vec<inputlayer::ast::Rule>,
 }
 
 impl ReplState {
@@ -463,12 +463,12 @@ fn handle_view_decl(state: &mut ReplState, decl: inputlayer::statement::ViewDecl
     handle_view(state, view_def)
 }
 
-fn handle_session_rule(state: &mut ReplState, rule: datalog_ast::Rule) -> Result<(), String> {
+fn handle_session_rule(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
     // Session rules are added as transient rules (not materialized)
     handle_transient_rule(state, rule)
 }
 
-fn handle_fact(state: &mut ReplState, rule: datalog_ast::Rule) -> Result<(), String> {
+fn handle_fact(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
     // Facts are rules with empty body
     // Convert to insert operation
     let head = &rule.head;
@@ -956,7 +956,7 @@ fn handle_view(
 
 fn handle_transient_rule(
     state: &mut ReplState,
-    rule: datalog_ast::Rule,
+    rule: inputlayer::ast::Rule,
 ) -> Result<(), String> {
     // Get head relation name before moving rule
     let head_relation = rule.head.relation.clone();
@@ -1152,7 +1152,7 @@ fn substitute_term_i32(
     }
 }
 
-fn format_rule(rule: &datalog_ast::Rule) -> String {
+fn format_rule(rule: &inputlayer::ast::Rule) -> String {
     let head = format_atom(&rule.head);
 
     if rule.body.is_empty() && rule.constraints.is_empty() {
@@ -1170,7 +1170,7 @@ fn format_rule(rule: &datalog_ast::Rule) -> String {
     format!("{} :- {}.", head, body_parts.join(", "))
 }
 
-fn format_atom(atom: &datalog_ast::Atom) -> String {
+fn format_atom(atom: &inputlayer::ast::Atom) -> String {
     let args: Vec<String> = atom.args.iter().map(format_term).collect();
     format!("{}({})", atom.relation, args.join(", "))
 }
@@ -1206,63 +1206,63 @@ fn format_term(term: &Term) -> String {
 }
 
 /// Format an ArithExpr as a Datalog string
-fn format_arith_expr(expr: &datalog_ast::ArithExpr) -> String {
+fn format_arith_expr(expr: &inputlayer::ast::ArithExpr) -> String {
     match expr {
-        datalog_ast::ArithExpr::Variable(name) => name.clone(),
-        datalog_ast::ArithExpr::Constant(val) => val.to_string(),
-        datalog_ast::ArithExpr::Binary { op, left, right } => {
+        inputlayer::ast::ArithExpr::Variable(name) => name.clone(),
+        inputlayer::ast::ArithExpr::Constant(val) => val.to_string(),
+        inputlayer::ast::ArithExpr::Binary { op, left, right } => {
             format!("{}{}{}", format_arith_expr(left), op.as_str(), format_arith_expr(right))
         }
     }
 }
 
 /// Format an AggregateFunc as a Datalog string
-fn format_aggregate(func: &datalog_ast::AggregateFunc, var: &str) -> String {
+fn format_aggregate(func: &inputlayer::ast::AggregateFunc, var: &str) -> String {
     match func {
-        datalog_ast::AggregateFunc::Count => format!("count<{}>", var),
-        datalog_ast::AggregateFunc::Sum => format!("sum<{}>", var),
-        datalog_ast::AggregateFunc::Min => format!("min<{}>", var),
-        datalog_ast::AggregateFunc::Max => format!("max<{}>", var),
-        datalog_ast::AggregateFunc::Avg => format!("avg<{}>", var),
-        datalog_ast::AggregateFunc::TopK { k, order_var, descending } => {
+        inputlayer::ast::AggregateFunc::Count => format!("count<{}>", var),
+        inputlayer::ast::AggregateFunc::Sum => format!("sum<{}>", var),
+        inputlayer::ast::AggregateFunc::Min => format!("min<{}>", var),
+        inputlayer::ast::AggregateFunc::Max => format!("max<{}>", var),
+        inputlayer::ast::AggregateFunc::Avg => format!("avg<{}>", var),
+        inputlayer::ast::AggregateFunc::TopK { k, order_var, descending } => {
             if *descending {
                 format!("top_k<{}, {}, desc>", k, order_var)
             } else {
                 format!("top_k<{}, {}>", k, order_var)
             }
         }
-        datalog_ast::AggregateFunc::TopKThreshold { k, order_var, threshold, descending } => {
+        inputlayer::ast::AggregateFunc::TopKThreshold { k, order_var, threshold, descending } => {
             if *descending {
                 format!("top_k_threshold<{}, {}, {}, desc>", k, order_var, threshold)
             } else {
                 format!("top_k_threshold<{}, {}, {}>", k, order_var, threshold)
             }
         }
-        datalog_ast::AggregateFunc::WithinRadius { distance_var, max_distance } => {
+        inputlayer::ast::AggregateFunc::WithinRadius { distance_var, max_distance } => {
             format!("within_radius<{}, {}>", distance_var, max_distance)
         }
     }
 }
 
-fn format_body_pred(pred: &datalog_ast::BodyPredicate) -> String {
+fn format_body_pred(pred: &inputlayer::ast::BodyPredicate) -> String {
     match pred {
-        datalog_ast::BodyPredicate::Positive(atom) => format_atom(atom),
-        datalog_ast::BodyPredicate::Negated(atom) => format!("!{}", format_atom(atom)),
+        inputlayer::ast::BodyPredicate::Positive(atom) => format_atom(atom),
+        inputlayer::ast::BodyPredicate::Negated(atom) => format!("!{}", format_atom(atom)),
     }
 }
 
-fn format_constraint(constraint: &datalog_ast::Constraint) -> String {
+fn format_constraint(constraint: &inputlayer::ast::Constraint) -> String {
     match constraint {
-        datalog_ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
+        inputlayer::ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
     }
 }
 
-fn format_body(body: &[datalog_ast::BodyPredicate], constraints: &[datalog_ast::Constraint]) -> String {
+fn format_body(body: &[inputlayer::ast::BodyPredicate], constraints: &[inputlayer::ast::Constraint]) -> String {
     let mut parts = Vec::new();
     for pred in body {
         parts.push(format_body_pred(pred));

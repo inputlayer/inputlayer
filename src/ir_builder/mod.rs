@@ -40,8 +40,8 @@
 //! Takes Datalog rules (AST) and converts them to intermediate representation (IR)
 //! suitable for optimization and code generation.
 
-use datalog_ast::{Atom, BodyPredicate, BuiltinFunc, Constraint, Rule, Term};
-use datalog_ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
+use crate::ast::{Atom, BodyPredicate, BuiltinFunc, Constraint, Rule, Term};
+use crate::ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
 use std::collections::HashSet;
 
 use crate::catalog::Catalog;
@@ -569,11 +569,11 @@ impl IRBuilder {
 
     /// Convert an AST ArithExpr to an IR IRExpression
     fn arith_expr_to_ir_expression(
-        expr: &datalog_ast::ArithExpr,
+        expr: &crate::ast::ArithExpr,
         schema: &[String],
-    ) -> Result<datalog_ir::IRExpression, String> {
-        use datalog_ast::ArithExpr;
-        use datalog_ir::IRExpression;
+    ) -> Result<crate::ir::IRExpression, String> {
+        use crate::ast::ArithExpr;
+        use crate::ir::IRExpression;
 
         match expr {
             ArithExpr::Variable(name) => {
@@ -600,9 +600,9 @@ impl IRBuilder {
     }
 
     /// Convert AST ArithOp to IR ArithOp
-    fn convert_arith_op(op: &datalog_ast::ArithOp) -> datalog_ir::ArithOp {
-        use datalog_ast::ArithOp as AstOp;
-        use datalog_ir::ArithOp as IrOp;
+    fn convert_arith_op(op: &crate::ast::ArithOp) -> crate::ir::ArithOp {
+        use crate::ast::ArithOp as AstOp;
+        use crate::ir::ArithOp as IrOp;
         match op {
             AstOp::Add => IrOp::Add,
             AstOp::Sub => IrOp::Sub,
@@ -706,7 +706,7 @@ impl IRBuilder {
     /// Build projection with computed expressions (arithmetic or constants) in the head
     /// Creates a Compute node to evaluate expressions, then a Map to project
     fn build_projection_with_computed(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
-        use datalog_ir::IRExpression;
+        use crate::ir::IRExpression;
 
         let input_schema = input.output_schema();
         let head = &rule.head;
@@ -822,8 +822,8 @@ impl IRBuilder {
 
     /// Build an Aggregate IR node for rules with aggregates in the head
     fn build_aggregation(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
-        use datalog_ast::AggregateFunc;
-        use datalog_ir::AggregateFunction;
+        use crate::ast::AggregateFunc;
+        use crate::ir::AggregateFunction;
 
         let input_schema = input.output_schema();
         let head = &rule.head;
@@ -912,8 +912,8 @@ impl IRBuilder {
 }
 
 /// Helper function to convert aggregate function to string
-fn func_to_str(func: &datalog_ast::AggregateFunc) -> &'static str {
-    use datalog_ast::AggregateFunc;
+fn func_to_str(func: &crate::ast::AggregateFunc) -> &'static str {
+    use crate::ast::AggregateFunc;
     match func {
         AggregateFunc::Count => "count",
         AggregateFunc::Sum => "sum",
@@ -929,7 +929,7 @@ fn func_to_str(func: &datalog_ast::AggregateFunc) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datalog_ast::Atom;
+    use crate::ast::Atom;
 
     fn make_catalog() -> Catalog {
         let mut catalog = Catalog::new();

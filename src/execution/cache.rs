@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use datalog_ir::IRNode;
+use crate::ir::IRNode;
 
 /// Cache entry for compiled queries
 #[derive(Clone)]

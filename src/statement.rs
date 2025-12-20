@@ -8,7 +8,7 @@
 //! - Rules: `:-` operator (persistent if rel exists, query-only otherwise)
 //! - Queries: `?-` operator
 
-use datalog_ast::{Atom, BodyPredicate, Constraint, Rule, Term};
+use crate::ast::{Atom, BodyPredicate, Constraint, Rule, Term};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -326,9 +326,9 @@ pub enum SerializableAggregateFunc {
 }
 
 impl SerializableAggregateFunc {
-    /// Convert from datalog_ast::AggregateFunc
-    pub fn from_aggregate_func(func: &datalog_ast::AggregateFunc) -> Self {
-        use datalog_ast::AggregateFunc;
+    /// Convert from crate::ast::AggregateFunc
+    pub fn from_aggregate_func(func: &crate::ast::AggregateFunc) -> Self {
+        use crate::ast::AggregateFunc;
         match func {
             AggregateFunc::Count => SerializableAggregateFunc::Count,
             AggregateFunc::Sum => SerializableAggregateFunc::Sum,
@@ -344,9 +344,9 @@ impl SerializableAggregateFunc {
         }
     }
 
-    /// Convert to datalog_ast::AggregateFunc
-    pub fn to_aggregate_func(&self) -> datalog_ast::AggregateFunc {
-        use datalog_ast::AggregateFunc;
+    /// Convert to crate::ast::AggregateFunc
+    pub fn to_aggregate_func(&self) -> crate::ast::AggregateFunc {
+        use crate::ast::AggregateFunc;
         match self {
             SerializableAggregateFunc::Count => AggregateFunc::Count,
             SerializableAggregateFunc::Sum => AggregateFunc::Sum,
@@ -379,7 +379,7 @@ pub struct QueryGoal {
 // ============================================================================
 
 impl SerializableRule {
-    /// Convert from datalog_ast::Rule
+    /// Convert from crate::ast::Rule
     pub fn from_rule(rule: &Rule) -> Self {
         SerializableRule {
             head_relation: rule.head.relation.clone(),
@@ -389,7 +389,7 @@ impl SerializableRule {
         }
     }
 
-    /// Convert to datalog_ast::Rule
+    /// Convert to crate::ast::Rule
     pub fn to_rule(&self) -> Rule {
         let head = Atom::new(
             self.head_relation.clone(),
@@ -443,9 +443,9 @@ impl SerializableTerm {
 }
 
 impl SerializableArithExpr {
-    /// Convert from datalog_ast::ArithExpr
-    pub fn from_arith_expr(expr: &datalog_ast::ArithExpr) -> Self {
-        use datalog_ast::ArithExpr;
+    /// Convert from crate::ast::ArithExpr
+    pub fn from_arith_expr(expr: &crate::ast::ArithExpr) -> Self {
+        use crate::ast::ArithExpr;
         match expr {
             ArithExpr::Variable(name) => SerializableArithExpr::Variable(name.clone()),
             ArithExpr::Constant(val) => SerializableArithExpr::Constant(*val),
@@ -457,9 +457,9 @@ impl SerializableArithExpr {
         }
     }
 
-    /// Convert to datalog_ast::ArithExpr
-    pub fn to_arith_expr(&self) -> datalog_ast::ArithExpr {
-        use datalog_ast::ArithExpr;
+    /// Convert to crate::ast::ArithExpr
+    pub fn to_arith_expr(&self) -> crate::ast::ArithExpr {
+        use crate::ast::ArithExpr;
         match self {
             SerializableArithExpr::Variable(name) => ArithExpr::Variable(name.clone()),
             SerializableArithExpr::Constant(val) => ArithExpr::Constant(*val),
@@ -473,9 +473,9 @@ impl SerializableArithExpr {
 }
 
 impl SerializableArithOp {
-    /// Convert from datalog_ast::ArithOp
-    pub fn from_arith_op(op: &datalog_ast::ArithOp) -> Self {
-        use datalog_ast::ArithOp;
+    /// Convert from crate::ast::ArithOp
+    pub fn from_arith_op(op: &crate::ast::ArithOp) -> Self {
+        use crate::ast::ArithOp;
         match op {
             ArithOp::Add => SerializableArithOp::Add,
             ArithOp::Sub => SerializableArithOp::Sub,
@@ -485,9 +485,9 @@ impl SerializableArithOp {
         }
     }
 
-    /// Convert to datalog_ast::ArithOp
-    pub fn to_arith_op(&self) -> datalog_ast::ArithOp {
-        use datalog_ast::ArithOp;
+    /// Convert to crate::ast::ArithOp
+    pub fn to_arith_op(&self) -> crate::ast::ArithOp {
+        use crate::ast::ArithOp;
         match self {
             SerializableArithOp::Add => ArithOp::Add,
             SerializableArithOp::Sub => ArithOp::Sub,

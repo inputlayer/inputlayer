@@ -1124,7 +1124,7 @@ impl Database {
 }
 
 /// Format a Rule as a Datalog string
-fn format_rule(rule: &datalog_ast::Rule) -> String {
+fn format_rule(rule: &crate::ast::Rule) -> String {
     let head = format_atom(&rule.head);
 
     if rule.body.is_empty() && rule.constraints.is_empty() {
@@ -1135,10 +1135,10 @@ fn format_rule(rule: &datalog_ast::Rule) -> String {
 
     for pred in &rule.body {
         match pred {
-            datalog_ast::BodyPredicate::Positive(atom) => {
+            crate::ast::BodyPredicate::Positive(atom) => {
                 body_parts.push(format_atom(atom));
             }
-            datalog_ast::BodyPredicate::Negated(atom) => {
+            crate::ast::BodyPredicate::Negated(atom) => {
                 body_parts.push(format!("!{}", format_atom(atom)));
             }
         }
@@ -1152,33 +1152,33 @@ fn format_rule(rule: &datalog_ast::Rule) -> String {
 }
 
 /// Format an Atom as a Datalog string
-fn format_atom(atom: &datalog_ast::Atom) -> String {
+fn format_atom(atom: &crate::ast::Atom) -> String {
     let args: Vec<String> = atom.args.iter().map(format_term).collect();
     format!("{}({})", atom.relation, args.join(", "))
 }
 
 /// Format a Term as a Datalog string
-fn format_term(term: &datalog_ast::Term) -> String {
+fn format_term(term: &crate::ast::Term) -> String {
     match term {
-        datalog_ast::Term::Variable(name) => name.clone(),
-        datalog_ast::Term::Constant(val) => val.to_string(),
-        datalog_ast::Term::StringConstant(s) => format!("\"{}\"", s),
-        datalog_ast::Term::FloatConstant(f) => f.to_string(),
-        datalog_ast::Term::Placeholder => "_".to_string(),
-        datalog_ast::Term::Arithmetic(expr) => format_arith_expr(expr),
-        datalog_ast::Term::Aggregate(func, var) => format_aggregate(func, var),
-        datalog_ast::Term::FunctionCall(func, args) => {
+        crate::ast::Term::Variable(name) => name.clone(),
+        crate::ast::Term::Constant(val) => val.to_string(),
+        crate::ast::Term::StringConstant(s) => format!("\"{}\"", s),
+        crate::ast::Term::FloatConstant(f) => f.to_string(),
+        crate::ast::Term::Placeholder => "_".to_string(),
+        crate::ast::Term::Arithmetic(expr) => format_arith_expr(expr),
+        crate::ast::Term::Aggregate(func, var) => format_aggregate(func, var),
+        crate::ast::Term::FunctionCall(func, args) => {
             let formatted_args: Vec<String> = args.iter().map(format_term).collect();
             format!("{}({})", func.as_str(), formatted_args.join(", "))
         }
-        datalog_ast::Term::VectorLiteral(vals) => {
+        crate::ast::Term::VectorLiteral(vals) => {
             let formatted: Vec<String> = vals.iter().map(|v| v.to_string()).collect();
             format!("[{}]", formatted.join(", "))
         }
-        datalog_ast::Term::FieldAccess(base, field) => {
+        crate::ast::Term::FieldAccess(base, field) => {
             format!("{}.{}", format_term(base), field)
         }
-        datalog_ast::Term::RecordPattern(fields) => {
+        crate::ast::Term::RecordPattern(fields) => {
             let formatted: Vec<String> = fields
                 .iter()
                 .map(|(name, term)| format!("{}: {}", name, format_term(term)))
@@ -1189,53 +1189,53 @@ fn format_term(term: &datalog_ast::Term) -> String {
 }
 
 /// Format an ArithExpr as a Datalog string
-fn format_arith_expr(expr: &datalog_ast::ArithExpr) -> String {
+fn format_arith_expr(expr: &crate::ast::ArithExpr) -> String {
     match expr {
-        datalog_ast::ArithExpr::Variable(name) => name.clone(),
-        datalog_ast::ArithExpr::Constant(val) => val.to_string(),
-        datalog_ast::ArithExpr::Binary { op, left, right } => {
+        crate::ast::ArithExpr::Variable(name) => name.clone(),
+        crate::ast::ArithExpr::Constant(val) => val.to_string(),
+        crate::ast::ArithExpr::Binary { op, left, right } => {
             format!("{}{}{}", format_arith_expr(left), op.as_str(), format_arith_expr(right))
         }
     }
 }
 
 /// Format an AggregateFunc as a Datalog string
-fn format_aggregate(func: &datalog_ast::AggregateFunc, var: &str) -> String {
+fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
     match func {
-        datalog_ast::AggregateFunc::Count => format!("count<{}>", var),
-        datalog_ast::AggregateFunc::Sum => format!("sum<{}>", var),
-        datalog_ast::AggregateFunc::Min => format!("min<{}>", var),
-        datalog_ast::AggregateFunc::Max => format!("max<{}>", var),
-        datalog_ast::AggregateFunc::Avg => format!("avg<{}>", var),
-        datalog_ast::AggregateFunc::TopK { k, order_var, descending } => {
+        crate::ast::AggregateFunc::Count => format!("count<{}>", var),
+        crate::ast::AggregateFunc::Sum => format!("sum<{}>", var),
+        crate::ast::AggregateFunc::Min => format!("min<{}>", var),
+        crate::ast::AggregateFunc::Max => format!("max<{}>", var),
+        crate::ast::AggregateFunc::Avg => format!("avg<{}>", var),
+        crate::ast::AggregateFunc::TopK { k, order_var, descending } => {
             if *descending {
                 format!("top_k<{}, {}, desc>", k, order_var)
             } else {
                 format!("top_k<{}, {}>", k, order_var)
             }
         }
-        datalog_ast::AggregateFunc::TopKThreshold { k, order_var, threshold, descending } => {
+        crate::ast::AggregateFunc::TopKThreshold { k, order_var, threshold, descending } => {
             if *descending {
                 format!("top_k_threshold<{}, {}, {}, desc>", k, order_var, threshold)
             } else {
                 format!("top_k_threshold<{}, {}, {}>", k, order_var, threshold)
             }
         }
-        datalog_ast::AggregateFunc::WithinRadius { distance_var, max_distance } => {
+        crate::ast::AggregateFunc::WithinRadius { distance_var, max_distance } => {
             format!("within_radius<{}, {}>", distance_var, max_distance)
         }
     }
 }
 
 /// Format a Constraint as a Datalog string
-fn format_constraint(constraint: &datalog_ast::Constraint) -> String {
+fn format_constraint(constraint: &crate::ast::Constraint) -> String {
     match constraint {
-        datalog_ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
     }
 }
 
@@ -1364,7 +1364,7 @@ mod tests {
     #[test]
     fn test_recursive_view_transitive_closure() {
         use crate::statement::ViewDef;
-        use datalog_ast::{Atom, BodyPredicate, Rule, Term};
+        use crate::ast::{Atom, BodyPredicate, Rule, Term};
 
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());

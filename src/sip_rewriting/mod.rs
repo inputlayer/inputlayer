@@ -49,7 +49,7 @@
 //! IRNode with Joins → [SIP Rewriting] → IRNode with Existence Filters → Code Gen
 //! ```
 
-use datalog_ir::{IRNode, Predicate};
+use crate::ir::{IRNode, Predicate};
 use std::collections::{HashMap, HashSet};
 
 /// Variable binding status

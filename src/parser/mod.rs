@@ -33,7 +33,7 @@
 //! A minimal but complete parser for Datalog programs.
 //! Supports: rules, atoms, variables, constants, basic constraints.
 
-use datalog_ast::{AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule, Term};
+use crate::ast::{AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule, Term};
 
 /// Parse a Datalog program from source text
 pub fn parse_program(source: &str) -> Result<Program, String> {

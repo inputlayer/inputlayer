@@ -50,7 +50,7 @@
 //! IRNode with Joins → [Join Planning] → Reordered IRNode → Later optimizations
 //! ```
 
-use datalog_ir::IRNode;
+use crate::ir::IRNode;
 use std::collections::{HashMap, HashSet, BinaryHeap};
 use std::cmp::Ordering;
 
@@ -639,7 +639,7 @@ impl JoinPlanner {
                 // Remap expression column indices based on schema change
                 let old_input_schema = input.output_schema();
                 let new_input_schema = inner.output_schema();
-                let remapped_expressions: Vec<(String, datalog_ir::IRExpression)> = expressions
+                let remapped_expressions: Vec<(String, crate::ir::IRExpression)> = expressions
                     .iter()
                     .map(|(name, expr)| {
                         (name.clone(), Self::remap_expression(expr, &old_input_schema, &new_input_schema))
@@ -660,11 +660,11 @@ impl JoinPlanner {
 
     /// Remap column indices in a predicate when schema has been reordered
     fn remap_predicate(
-        predicate: &datalog_ir::Predicate,
+        predicate: &crate::ir::Predicate,
         old_schema: &[String],
         new_schema: &[String],
-    ) -> datalog_ir::Predicate {
-        use datalog_ir::Predicate;
+    ) -> crate::ir::Predicate {
+        use crate::ir::Predicate;
 
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
@@ -716,11 +716,11 @@ impl JoinPlanner {
 
     /// Remap column indices in an IRExpression when schema has been reordered
     fn remap_expression(
-        expr: &datalog_ir::IRExpression,
+        expr: &crate::ir::IRExpression,
         old_schema: &[String],
         new_schema: &[String],
-    ) -> datalog_ir::IRExpression {
-        use datalog_ir::IRExpression;
+    ) -> crate::ir::IRExpression {
+        use crate::ir::IRExpression;
 
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {

@@ -48,7 +48,7 @@
 //! IRNode → [Boolean Spec] → Annotated IRNode → Code Gen (with semiring info)
 //! ```
 
-use datalog_ir::{IRNode, Predicate};
+use crate::ir::{IRNode, Predicate};
 use std::collections::{HashMap, HashSet};
 
 /// Semiring type for query execution

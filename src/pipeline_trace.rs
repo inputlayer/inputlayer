@@ -5,8 +5,8 @@
 //!
 //! This helps students understand how data flows through the system.
 
-use datalog_ast::Program;
-use datalog_ir::IRNode;
+use crate::ast::Program;
+use crate::ir::IRNode;
 use std::fmt;
 
 /// Trace of pipeline execution stages
@@ -145,11 +145,11 @@ impl PipelineTrace {
 
                 let body_str: Vec<_> = rule.body.iter()
                     .map(|p| match p {
-                        datalog_ast::BodyPredicate::Positive(a) => format!("{}({})",
+                        crate::ast::BodyPredicate::Positive(a) => format!("{}({})",
                             a.relation,
                             a.args.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(", ")
                         ),
-                        datalog_ast::BodyPredicate::Negated(a) => format!("!{}({})",
+                        crate::ast::BodyPredicate::Negated(a) => format!("!{}({})",
                             a.relation,
                             a.args.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(", ")
                         ),
@@ -337,7 +337,7 @@ mod tests {
                 relation: "edge".to_string(),
                 schema: vec!["x".to_string(), "y".to_string()],
             }),
-            predicate: datalog_ir::Predicate::True,
+            predicate: crate::ir::Predicate::True,
         };
 
         assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);

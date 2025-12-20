@@ -42,7 +42,7 @@
 //!
 //! Full implementation of basic IR optimizations with fixpoint iteration.
 
-use datalog_ir::{IRNode, Predicate};
+use crate::ir::{IRNode, Predicate};
 
 /// IR Optimizer with fixpoint iteration
 pub struct Optimizer {

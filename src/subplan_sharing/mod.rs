@@ -46,7 +46,7 @@
 //! Multiple IRNodes → [Subplan Sharing] → IRNodes + Shared Views → Code Gen
 //! ```
 
-use datalog_ir::IRNode;
+use crate::ir::IRNode;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
@@ -688,7 +688,7 @@ impl Default for SubplanSharer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datalog_ir::Predicate;
+    use crate::ir::Predicate;
 
     fn make_scan(relation: &str) -> IRNode {
         IRNode::Scan {

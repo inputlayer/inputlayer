@@ -3,7 +3,7 @@
 //! Tests for Module 06: IR Optimization
 
 use inputlayer::Optimizer;
-use datalog_ir::{IRNode, Predicate};
+use inputlayer::ir::{IRNode, Predicate};
 
 #[test]
 fn test_identity_map_single() {

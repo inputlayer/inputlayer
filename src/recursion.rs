@@ -71,7 +71,7 @@
 //! - Module 11: Test with recursive queries (transitive closure, etc.)
 //! - Module 08: Extend with semi-naive evaluation (delta rules)
 
-use datalog_ast::{BodyPredicate, Program, Rule};
+use crate::ast::{BodyPredicate, Program, Rule};
 use std::collections::{HashMap, HashSet};
 
 // ============================================================================
@@ -640,7 +640,7 @@ fn basic_stratify(program: &Program) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datalog_ast::{Atom, Term};
+    use crate::ast::{Atom, Term};
 
     #[test]
     fn test_is_recursive_rule() {

@@ -23,7 +23,7 @@
 //! ```
 
 use crate::statement::{ViewDef, SerializableRule};
-use datalog_ast::Rule;
+use crate::ast::Rule;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -76,7 +76,7 @@ impl ViewDefinition {
         self.rules.push(rule);
     }
 
-    /// Convert all rules to datalog_ast::Rule
+    /// Convert all rules to crate::ast::Rule
     pub fn to_rules(&self) -> Vec<Rule> {
         self.rules.iter().map(|r| r.to_rule()).collect()
     }
@@ -109,10 +109,10 @@ fn format_rule(rule: &Rule) -> String {
 
     for pred in &rule.body {
         match pred {
-            datalog_ast::BodyPredicate::Positive(atom) => {
+            crate::ast::BodyPredicate::Positive(atom) => {
                 body_parts.push(format_atom(atom));
             }
-            datalog_ast::BodyPredicate::Negated(atom) => {
+            crate::ast::BodyPredicate::Negated(atom) => {
                 body_parts.push(format!("!{}", format_atom(atom)));
             }
         }
@@ -126,27 +126,27 @@ fn format_rule(rule: &Rule) -> String {
 }
 
 /// Format an Atom as a Datalog string
-fn format_atom(atom: &datalog_ast::Atom) -> String {
+fn format_atom(atom: &crate::ast::Atom) -> String {
     let args: Vec<String> = atom.args.iter().map(format_term).collect();
     format!("{}({})", atom.relation, args.join(", "))
 }
 
 /// Format a Term as a Datalog string
-fn format_term(term: &datalog_ast::Term) -> String {
+fn format_term(term: &crate::ast::Term) -> String {
     match term {
-        datalog_ast::Term::Variable(name) => name.clone(),
-        datalog_ast::Term::Constant(val) => val.to_string(),
-        datalog_ast::Term::StringConstant(s) => format!("\"{}\"", s),
-        datalog_ast::Term::FloatConstant(f) => f.to_string(),
-        datalog_ast::Term::Placeholder => "_".to_string(),
-        datalog_ast::Term::Aggregate(func, var) => format_aggregate(func, var),
+        crate::ast::Term::Variable(name) => name.clone(),
+        crate::ast::Term::Constant(val) => val.to_string(),
+        crate::ast::Term::StringConstant(s) => format!("\"{}\"", s),
+        crate::ast::Term::FloatConstant(f) => f.to_string(),
+        crate::ast::Term::Placeholder => "_".to_string(),
+        crate::ast::Term::Aggregate(func, var) => format_aggregate(func, var),
         _ => "_".to_string(),
     }
 }
 
 /// Format an AggregateFunc as a Datalog string (e.g., count<X>, sum<Amount>)
-fn format_aggregate(func: &datalog_ast::AggregateFunc, var: &str) -> String {
-    use datalog_ast::AggregateFunc;
+fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
+    use crate::ast::AggregateFunc;
     match func {
         AggregateFunc::Count => format!("count<{}>", var),
         AggregateFunc::Sum => format!("sum<{}>", var),
@@ -174,14 +174,14 @@ fn format_aggregate(func: &datalog_ast::AggregateFunc, var: &str) -> String {
 }
 
 /// Format a Constraint as a Datalog string
-fn format_constraint(constraint: &datalog_ast::Constraint) -> String {
+fn format_constraint(constraint: &crate::ast::Constraint) -> String {
     match constraint {
-        datalog_ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
-        datalog_ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
     }
 }
 
@@ -510,7 +510,7 @@ impl ViewCatalog {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use datalog_ast::{Atom, Term, BodyPredicate};
+    use crate::ast::{Atom, Term, BodyPredicate};
 
     fn make_test_rule(head_rel: &str, body_rel: &str) -> Rule {
         let head = Atom::new(

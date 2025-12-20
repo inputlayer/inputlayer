@@ -537,7 +537,7 @@ fn test_multiple_atoms_in_body() {
 fn test_aggregation_count() {
     use inputlayer::code_generator::CodeGenerator;
     use inputlayer::value::{Tuple, Value};
-    use datalog_ir::{AggregateFunction, IRNode};
+    use inputlayer::ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
 
@@ -585,7 +585,7 @@ fn test_aggregation_count() {
 fn test_aggregation_sum() {
     use inputlayer::code_generator::CodeGenerator;
     use inputlayer::value::{Tuple, Value};
-    use datalog_ir::{AggregateFunction, IRNode};
+    use inputlayer::ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
 
@@ -630,7 +630,7 @@ fn test_aggregation_sum() {
 fn test_aggregation_min_max() {
     use inputlayer::code_generator::CodeGenerator;
     use inputlayer::value::{Tuple, Value};
-    use datalog_ir::{AggregateFunction, IRNode};
+    use inputlayer::ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
 
