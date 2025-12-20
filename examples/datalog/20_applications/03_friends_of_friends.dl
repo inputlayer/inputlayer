@@ -10,32 +10,31 @@
 +friend[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6), (4, 7), (5, 6), (6, 8)].
 
 // Make friendship symmetric
-symmetric_friend(A, B) := friend(A, B).
-symmetric_friend(A, B) := friend(B, A).
+view symmetric_friend(A: int, B: int) :- friend(A, B).
+view symmetric_friend(A: int, B: int) :- friend(B, A).
 
 // Direct friends of user 1
-direct_friends_of_1(F) := symmetric_friend(1, F).
+view direct_friends_of_1(F: int) :- symmetric_friend(1, F).
 ?- direct_friends_of_1(F).
 
 // Friends of friends (2 hops)
 // Exclude self and direct friends
-fof(User, Fof) := symmetric_friend(User, F), symmetric_friend(F, Fof),
-                  User != Fof, !symmetric_friend(User, Fof).
+view fof(User: int, Fof: int) :- symmetric_friend(User, F), symmetric_friend(F, Fof), User != Fof, !symmetric_friend(User, Fof).
 
 // Friends of friends for user 1
-fof_of_1(Fof) := fof(1, Fof).
+view fof_of_1(Fof: int) :- fof(1, Fof).
 ?- fof_of_1(F).
 
 // Count friends per user
-friend_count(User, count<Friend>) := symmetric_friend(User, Friend).
+view friend_count(User: int, count<Friend>: int) :- symmetric_friend(User, Friend).
 ?- friend_count(U, C).
 
 // Find users with most friends
-max_friends(max<C>) := friend_count(_, C).
+view max_friends(max<C>: int) :- friend_count(_, C).
 ?- max_friends(M).
 
 // Popular users (3+ friends)
-popular(User) := friend_count(User, C), C >= 3.
+view popular(User: int) :- friend_count(User, C), C >= 3.
 ?- popular(U).
 
 // Cleanup

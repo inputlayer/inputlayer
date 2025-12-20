@@ -1,4 +1,5 @@
-Executing script: examples/datalog/21_query_features/03_selection.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/21_query_features/03_selection.dl
 
 > .db create test_selection
 Database 'test_selection' created.
@@ -7,26 +8,26 @@ Switched to database: test_selection
 Switched to database: test_selection
 > +products[(1, 100, 10), (2, 200, 5), (3, 150, 15), (4, 300, 8), (5, 50, 20)].
 Inserted 5 facts into 'products'.
-> expensive(Id, P, Q) := products(Id, P, Q), P > 100.
+> view expensive(Id: int, P: int, Q: int) :- products(Id, P, Q), P > 100.
 View 'expensive' registered.
 > ?- expensive(X, Y, Z).
 3 rows:
   (2, 200, 5)
   (3, 150, 15)
   (4, 300, 8)
-> low_stock(Id, P, Q) := products(Id, P, Q), Q < 10.
+> view low_stock(Id: int, P: int, Q: int) :- products(Id, P, Q), Q < 10.
 View 'low_stock' registered.
 > ?- low_stock(X, Y, Z).
 2 rows:
   (2, 200, 5)
   (4, 300, 8)
-> expensive_low_stock(Id) := products(Id, P, Q), P > 100, Q < 10.
+> view expensive_low_stock(Id: int) :- products(Id, P, Q), P > 100, Q < 10.
 View 'expensive_low_stock' registered.
 > ?- expensive_low_stock(X).
 2 rows:
   (2)
   (4)
-> mid_price(Id, P) := products(Id, P, _), P >= 100, P <= 200.
+> view mid_price(Id: int, P: int) :- products(Id, P, _), P >= 100, P <= 200.
 View 'mid_price' registered.
 > ?- mid_price(X, Y).
 3 rows:
@@ -35,7 +36,7 @@ View 'mid_price' registered.
   (3, 150)
 > +categories[(1, 100), (2, 200), (3, 100)].
 Inserted 3 facts into 'categories'.
-> category_100(Id) := categories(Id, 100).
+> view category_100(Id: int) :- categories(Id, 100).
 View 'category_100' registered.
 > ?- category_100(X).
 2 rows:
@@ -45,3 +46,4 @@ View 'category_100' registered.
 Switched to database: default
 > .db drop test_selection
 Database 'test_selection' dropped.
+

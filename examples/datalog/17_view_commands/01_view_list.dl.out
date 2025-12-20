@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/17_view_commands/01_view_list.dl
+
 > .db create test_view_list
 Database 'test_view_list' created.
 Switched to database: test_view_list
@@ -6,11 +8,11 @@ Switched to database: test_view_list
 Switched to database: test_view_list
 > +edge[(1,2), (2,3)].
 Inserted 2 facts into 'edge'.
-> reverse(X, Y) := edge(Y, X).
+> view reverse(X: int, Y: int) :- edge(Y, X).
 View 'reverse' registered.
-> paths(X, Y) := edge(X, Y).
+> view paths(X: int, Y: int) :- edge(X, Y).
 View 'paths' registered.
-> paths(X, Z) := paths(X, Y), edge(Y, Z).
+> view paths(X: int, Z: int) :- paths(X, Y), edge(Y, Z).
 Rule added to view 'paths' (2 rules total).
 > .view
 Views:
@@ -20,3 +22,4 @@ Views:
 Switched to database: default
 > .db drop test_view_list
 Database 'test_view_list' dropped.
+

@@ -13,26 +13,26 @@
 
 // Influence spreads through follow edges
 // If you follow an influenced person, you become influenced
-influenced(X) := influencer(X).
-influenced(Y) := influenced(X), follows(Y, X).
+view influenced(X: int) :- influencer(X).
+view influenced(Y: int) :- influenced(X), follows(Y, X).
 
 // Query all influenced users
 ?- influenced(U).
 
 // Count influence reach
-influence_reach(count<U>) := influenced(U).
+view influence_reach(count<U>: int) :- influenced(U).
 ?- influence_reach(C).
 
 // Distance from influencer (hop count)
-influence_dist(X, 0) := influencer(X).
-influence_dist(Y, D+1) := influence_dist(X, D), follows(Y, X), D < 10.
+view influence_dist(X: int, 0: int) :- influencer(X).
+view influence_dist(Y: int, D+1: int) :- influence_dist(X, D), follows(Y, X), D < 10.
 
 // Minimum distance to influencer for each user
-min_dist(User, min<D>) := influence_dist(User, D).
+view min_dist(User: int, min<D>: int) :- influence_dist(User, D).
 ?- min_dist(U, D).
 
 // Users at each distance level
-at_distance(D, count<U>) := min_dist(U, D).
+view at_distance(D: int, count<U>: int) :- min_dist(U, D).
 ?- at_distance(D, C).
 
 // Cleanup

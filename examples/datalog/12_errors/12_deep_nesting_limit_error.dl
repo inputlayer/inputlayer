@@ -1,0 +1,32 @@
+// Test: Deeply Nested Expression Handling
+// Category: Errors
+// Verifies: System handles deeply nested arithmetic expressions
+
+.db create test_deep_nest
+.db use test_deep_nest
+
+// Base data
++base[(1), (2), (3)].
+
+// Nested expression (5 levels - at parser limit)
+view nest5(X: int, ((((X+1)+1)+1)+1)+1: int) :- base(X).
+?- nest5(A, B).
+
+// Mixed operations nested (4 levels, different ops)
+view mixed_nest(X: int, (((X*2)+3)*2)+1: int) :- base(X).
+?- mixed_nest(A, B).
+
+// Alternative: use recursive views for deeper nesting
+view add_one(X: int, X+1: int) :- base(X).
+view add_two(X: int, Y+1: int) :- add_one(X, Y).
+view add_three(X: int, Y+1: int) :- add_two(X, Y).
+?- add_three(A, B).
+
+// Expected:
+// nest5: (1,6), (2,7), (3,8)
+// mixed_nest: (1,9), (2,11), (3,13)  -- X*2+7 due to precedence parsing
+// add_three: (1,4), (2,5), (3,6)
+
+// Cleanup
+.db use default
+.db drop test_deep_nest

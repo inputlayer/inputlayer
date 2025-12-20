@@ -15,7 +15,7 @@
 ?- person(Id, Age).
 
 // Find older persons (age > 28)
-older(Id, Age) := person(Id, Age), Age > 28.
+view older(Id: int, Age: int) :- person(Id, Age), Age > 28.
 ?- older(X, Y).
 
 // Cleanup

@@ -8,7 +8,7 @@
 //! - Error handling in parallel contexts
 //! - Performance characteristics
 
-use datalog_engine::{Config, StorageEngine};
+use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
 
 // ============================================================================

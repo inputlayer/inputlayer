@@ -6,7 +6,7 @@
 use proptest::prelude::*;
 use std::collections::HashMap;
 
-use datalog_engine::{
+use inputlayer::{
     IRBuilder,
     CodeGenerator,
     parser::parse_rule,

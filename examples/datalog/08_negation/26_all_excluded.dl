@@ -1,0 +1,32 @@
+// Test: All Items Excluded
+// Category: Negation
+// Description: Tests when negation excludes all results
+
+.db create test_all_excluded
+.db use test_all_excluded
+
+// Insert base facts
++items[(1), (2), (3)].
+
+// Exclude all items
++excluded[(1), (2), (3)].
+
+// Query: items not excluded (should be empty)
+view not_excluded(X: int) :- items(X), !excluded(X).
+?- not_excluded(X).
+
+// Add an item that's not excluded
++items(4).
+
+// Now we should get one result
+?- not_excluded(X).
+
+// Exclude that too
++excluded(4).
+
+// Back to empty
+?- not_excluded(X).
+
+// Cleanup
+.db use default
+.db drop test_all_excluded

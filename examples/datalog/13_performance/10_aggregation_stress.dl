@@ -13,11 +13,11 @@
        (5, 100, 11), (5, 101, 21), (5, 102, 16), (5, 103, 26), (5, 104, 32)].
 
 // Multiple aggregations per group
-store_count(Store, count<Product>) := sales(Store, Product, _).
-store_sum(Store, sum<Amount>) := sales(Store, _, Amount).
-store_avg(Store, avg<Amount>) := sales(Store, _, Amount).
-store_min(Store, min<Amount>) := sales(Store, _, Amount).
-store_max(Store, max<Amount>) := sales(Store, _, Amount).
+view store_count(Store: int, count<Product>: int) :- sales(Store, Product, _).
+view store_sum(Store: int, sum<Amount>: int) :- sales(Store, _, Amount).
+view store_avg(Store: int, avg<Amount>: int) :- sales(Store, _, Amount).
+view store_min(Store: int, min<Amount>: int) :- sales(Store, _, Amount).
+view store_max(Store: int, max<Amount>: int) :- sales(Store, _, Amount).
 
 ?- store_count(S, C).
 ?- store_sum(S, T).
@@ -26,17 +26,17 @@ store_max(Store, max<Amount>) := sales(Store, _, Amount).
 ?- store_max(S, M).
 
 // Product aggregations
-product_total(Product, sum<Amount>) := sales(_, Product, Amount).
+view product_total(Product: int, sum<Amount>: int) :- sales(_, Product, Amount).
 ?- product_total(P, T).
 
 // Global aggregations
-total_sales(sum<A>) := sales(_, _, A).
-avg_sale(avg<A>) := sales(_, _, A).
+view total_sales(sum<A>: int) :- sales(_, _, A).
+view avg_sale(avg<A>: int) :- sales(_, _, A).
 ?- total_sales(T).
 ?- avg_sale(A).
 
 // Nested aggregation: max of sums
-max_store_total(max<T>) := store_sum(_, T).
+view max_store_total(max<T>: int) :- store_sum(_, T).
 ?- max_store_total(M).
 
 // Cleanup

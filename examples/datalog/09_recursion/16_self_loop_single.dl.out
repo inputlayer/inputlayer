@@ -1,0 +1,40 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/16_self_loop_single.dl
+
+> .db create test_self_loop
+Database 'test_self_loop' created.
+Switched to database: test_self_loop
+> .db use test_self_loop
+Switched to database: test_self_loop
+> +edge(1, 1).
+Inserted 1 fact into 'edge'.
+> path(X, Y) :- edge(X, Y).
+1 rows:
+  (1, 1)
+(session: 1 rule(s))
+> path(X, Z) :- path(X, Y), edge(Y, Z).
+1 rows:
+  (1, 1)
+(session: 2 rule(s))
+> ?- path(X, Y).
+1 rows:
+  (1, 1)
+> +edge(2, 2).
+Inserted 1 fact into 'edge'.
+> ?- path(X, Y).
+2 rows:
+  (1, 1)
+  (2, 2)
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> ?- path(X, Y).
+3 rows:
+  (1, 1)
+  (1, 2)
+  (2, 2)
+> .db use default
+Switched to database: default
+(Cleared 2 session rule(s))
+> .db drop test_self_loop
+Database 'test_self_loop' dropped.
+

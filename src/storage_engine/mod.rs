@@ -1175,6 +1175,16 @@ fn format_term(term: &datalog_ast::Term) -> String {
             let formatted: Vec<String> = vals.iter().map(|v| v.to_string()).collect();
             format!("[{}]", formatted.join(", "))
         }
+        datalog_ast::Term::FieldAccess(base, field) => {
+            format!("{}.{}", format_term(base), field)
+        }
+        datalog_ast::Term::RecordPattern(fields) => {
+            let formatted: Vec<String> = fields
+                .iter()
+                .map(|(name, term)| format!("{}: {}", name, format_term(term)))
+                .collect();
+            format!("{{ {} }}", formatted.join(", "))
+        }
     }
 }
 

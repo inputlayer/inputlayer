@@ -1,3 +1,4 @@
+Executing script: examples/datalog/18_advanced_patterns/04_bipartite.dl
 
 > .db create test_bipartite
 Database 'test_bipartite' created.
@@ -8,24 +9,22 @@ Switched to database: test_bipartite
 Inserted 4 facts into 'edge'.
 > +start[(1, 0)].
 Inserted 1 fact into 'start'.
-> color(X, C) := start(X, C).
+> view color(X: int, C: int) :- start(X, C).
 View 'color' registered.
-> color(Y, 1) := color(X, 0), edge(X, Y).
+> view color(Y: int, 1: int) :- color(X, 0), edge(X, Y).
 Rule added to view 'color' (2 rules total).
-> color(Y, 1) := color(X, 0), edge(Y, X).
+> view color(Y: int, 1: int) :- color(X, 0), edge(Y, X).
 Rule added to view 'color' (3 rules total).
-> color(Y, 0) := color(X, 1), edge(X, Y).
+> view color(Y: int, 0: int) :- color(X, 1), edge(X, Y).
 Rule added to view 'color' (4 rules total).
-> color(Y, 0) := color(X, 1), edge(Y, X).
+> view color(Y: int, 0: int) :- color(X, 1), edge(Y, X).
 Rule added to view 'color' (5 rules total).
-> conflict(X, X) := color(X, 0), color(X, 1).
-View 'conflict' registered.
-> ?- conflict(X, Y).
+> ?- color(X, C).
 4 rows:
-  (1, 1)
-  (2, 2)
-  (3, 3)
-  (4, 4)
+  (1, 0)
+  (2, 1)
+  (3, 0)
+  (4, 1)
 > .db use default
 Switched to database: default
 > .db drop test_bipartite

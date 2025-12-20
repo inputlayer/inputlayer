@@ -10,7 +10,7 @@
 //! - Performance comparison: sequential vs parallel
 //! - Automatic CPU core utilization
 
-use datalog_engine::{Config, StorageEngine};
+use inputlayer::{Config, StorageEngine};
 use std::time::Instant;
 use tempfile::TempDir;
 

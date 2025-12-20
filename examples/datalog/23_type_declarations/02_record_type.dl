@@ -1,0 +1,22 @@
+// Test: Record Type Declaration
+// Category: Type Declarations
+// Description: Tests record type definitions
+
+.db create test_record_type
+.db use test_record_type
+
+// Declare a record type
+type User: { id: int, name: string }.
+
+// Use record type in rel schema
+rel user: User.
+
+// Insert data
++user[(1, "Alice"), (2, "Bob"), (3, "Charlie")].
+
+// Query all users
+?- user(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_record_type

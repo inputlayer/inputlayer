@@ -1,0 +1,37 @@
+Executing script: examples/datalog/23_type_declarations/03_multiple_types.dl
+
+> .db create test_multi_types
+Database 'test_multi_types' created.
+Switched to database: test_multi_types
+> .db use test_multi_types
+Switched to database: test_multi_types
+> type ProductId: int.
+Type 'ProductId' declared.
+> type Price: int.
+Type 'Price' declared.
+> type Quantity: int.
+Type 'Quantity' declared.
+> type ProductName: string.
+Type 'ProductName' declared.
+> rel products(id: ProductId, name: ProductName, price: Price).
+Relation 'products' schema declared: (id: TypeRef("ProductId"), name: TypeRef("ProductName"), price: TypeRef("Price"))
+> rel inventory(product_id: ProductId, qty: Quantity).
+Relation 'inventory' schema declared: (product_id: TypeRef("ProductId"), qty: TypeRef("Quantity"))
+> +products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].
+Inserted 3 facts into 'products'.
+> +inventory[(1, 50), (2, 30), (3, 75)].
+Inserted 3 facts into 'inventory'.
+> ?- products(Id, Name, Price).
+3 rows:
+  (1, "Widget", 100)
+  (2, "Gadget", 200)
+  (3, "Gizmo", 150)
+> ?- inventory(Pid, Qty).
+3 rows:
+  (1, 50)
+  (2, 30)
+  (3, 75)
+> .db use default
+Switched to database: default
+> .db drop test_multi_types
+Database 'test_multi_types' dropped.

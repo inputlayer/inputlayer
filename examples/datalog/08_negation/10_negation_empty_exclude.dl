@@ -13,7 +13,7 @@
 -empty_exclude(999, 999).
 
 // All data should pass through since nothing to exclude
-result(X, Y) := data(X, Y), !empty_exclude(X, _).
+view result(X: int, Y: int) :- data(X, Y), !empty_exclude(X, _).
 ?- result(X, Y).
 
 // Should return all 3 tuples

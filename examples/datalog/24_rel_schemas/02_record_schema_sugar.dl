@@ -1,0 +1,35 @@
+// Test: Record Type Schema Sugar
+// Category: Rel Schemas
+// Description: Tests rel schema using record type sugar (rel r: T)
+
+.db create test_record_sugar
+.db use test_record_sugar
+
+// Define record types
+type Person: { id: int, name: string, age: int }.
+type Address: { person_id: int, city: string }.
+
+// Use record sugar for schema
+rel person: Person.
+rel address: Address.
+
+// Insert data
++person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].
++address[(1, "New York"), (2, "Boston"), (3, "Chicago")].
+
+// Query people
+?- person(Id, Name, Age).
+
+// Query addresses
+?- address(Pid, City).
+
+// Join people with addresses
+view person_location(Name: string, City: string) :-
+    person(Id, Name, _),
+    address(Id, City).
+
+?- person_location(N, C).
+
+// Cleanup
+.db use default
+.db drop test_record_sugar

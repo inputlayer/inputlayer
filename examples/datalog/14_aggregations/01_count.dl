@@ -9,7 +9,7 @@
 +sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)].
 
 // Count sales per region
-sales_count(Region, count<Amount>) := sales(Region, Amount).
+view sales_count(Region: int, count<Amount>: int) :- sales(Region, Amount).
 
 // Query the count result
 ?- sales_count(X, Y).

@@ -9,7 +9,7 @@
 +score[(1, 80), (1, 90), (1, 85), (2, 70), (2, 75), (3, 100)].
 
 // Calculate average score per student
-avg_score(Student, avg<Points>) := score(Student, Points).
+view avg_score(Student: int, avg<Points>: int) :- score(Student, Points).
 
 // Query the avg result
 ?- avg_score(X, Y).

@@ -3,7 +3,7 @@
 //! These tests verify that all modules work together correctly:
 //! Parser → IR Builder → Optimizer → Code Generator
 
-use datalog_engine::{DatalogEngine, Tuple2};
+use inputlayer::{DatalogEngine, Tuple2};
 
 #[test]
 fn test_engine_initialization() {
@@ -398,7 +398,7 @@ fn test_parse_simple_rule() {
 
 #[test]
 fn test_shared_types_compatibility() {
-    use datalog_engine::{Atom, IRNode, Predicate, Rule, Term};
+    use inputlayer::{Atom, IRNode, Predicate, Rule, Term};
 
     // Create an AST rule
     let rule = Rule {
@@ -496,7 +496,7 @@ fn test_pipeline_stages() {
 
 #[test]
 fn test_optimization_config() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     let config = OptimizationConfig {
         enable_join_planning: true,

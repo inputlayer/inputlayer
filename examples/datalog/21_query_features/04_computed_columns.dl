@@ -9,20 +9,20 @@
 +items[(1, 100, 2), (2, 50, 5), (3, 200, 1)].
 
 // Compute total value (price * quantity) - arithmetic in head
-item_value(Id, P*Q) := items(Id, P, Q).
+view item_value(Id: int, P*Q: int) :- items(Id, P, Q).
 ?- item_value(X, Y).
 
 // Compute with discount (10% off) - P - P/10
-discounted(Id, P-P/10) := items(Id, P, _).
+view discounted(Id: int, P-P/10: int) :- items(Id, P, _).
 ?- discounted(X, Y).
 
 // Compute percentage
 +scores[(1, 80, 100), (2, 45, 50), (3, 90, 100)].
-percentage(Id, Got*100/Max) := scores(Id, Got, Max).
+view percentage(Id: int, Got*100/Max: int) :- scores(Id, Got, Max).
 ?- percentage(X, Y).
 
 // Multiple computed columns
-summary(Id, P*2, P/2) := items(Id, P, _).
+view summary(Id: int, P*2: int, P/2: int) :- items(Id, P, _).
 ?- summary(X, Y, Z).
 
 // Cleanup

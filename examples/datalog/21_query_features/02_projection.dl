@@ -9,19 +9,19 @@
 +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)].
 
 // Project to single column (dept)
-departments(D) := employees(_, _, D).
+view departments(D: int) :- employees(_, _, D).
 ?- departments(D).
 
 // Project to two columns (id, salary)
-id_salary(Id, Sal) := employees(Id, Sal, _).
+view id_salary(Id: int, Sal: int) :- employees(Id, Sal, _).
 ?- id_salary(X, Y).
 
 // Project to first and last column
-id_dept(Id, D) := employees(Id, _, D).
+view id_dept(Id: int, D: int) :- employees(Id, _, D).
 ?- id_dept(X, Y).
 
 // Project with rename (via view)
-high_earners(Emp, Pay) := employees(Emp, Pay, _), Pay > 55000.
+view high_earners(Emp: int, Pay: int) :- employees(Emp, Pay, _), Pay > 55000.
 ?- high_earners(X, Y).
 
 // Cleanup

@@ -1,8 +1,37 @@
-Executing script: examples/datalog/09_recursion/10_multiple_base_cases.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/10_multiple_base_cases.dl
 
 > .db create test_multi_base
 Database 'test_multi_base' created.
 Switched to database: test_multi_base
 > .db use test_multi_base
 Switched to database: test_multi_base
-> +edge[(1, 2), (2, 3),
+> +edge[(1, 2), (2, 3), (10, 11), (11, 12), (20, 21), (21, 22), (22, 23)].
+Inserted 7 facts into 'edge'.
+> +start[(1), (10), (20)].
+Inserted 3 facts into 'start'.
+> view reachable(X: int) :- start(X).
+View 'reachable' registered.
+> view reachable(Y: int) :- reachable(X), edge(X, Y).
+Rule added to view 'reachable' (2 rules total).
+> ?- reachable(X).
+10 rows:
+  (1)
+  (2)
+  (3)
+  (10)
+  (11)
+  (12)
+  (20)
+  (21)
+  (22)
+  (23)
+> view reachable_from(S: int, X: int) :- start(S), S = X.
+View 'reachable_from' registered.
+> view reachable_from(S: int, Y: int) :- reachable_from(S, X), edge(X, Y).
+Rule added to view 'reachable_from' (2 rules total).
+> view count_from_start(S: int, count<X>: int) :- reachable_from(S, X).
+View 'count_from_start' registered.
+> ?- count_from_start(S, C).
+Script error: Line 34: Query execution failed: Unsafe rule: Atom { relation: "reachable_from", args: [Variable("S"), Variable("X")] }. Variables ["X"] in head do not appear in positive body atoms.
+

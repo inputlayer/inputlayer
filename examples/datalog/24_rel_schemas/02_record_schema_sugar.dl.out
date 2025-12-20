@@ -1,0 +1,40 @@
+Executing script: examples/datalog/24_rel_schemas/02_record_schema_sugar.dl
+
+> .db create test_record_sugar
+Database 'test_record_sugar' created.
+Switched to database: test_record_sugar
+> .db use test_record_sugar
+Switched to database: test_record_sugar
+> type Person: { id: int, name: string, age: int }.
+Type 'Person' declared.
+> type Address: { person_id: int, city: string }.
+Type 'Address' declared.
+> rel person: Person.
+Relation 'person' schema declared: ()
+> rel address: Address.
+Relation 'address' schema declared: ()
+> +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].
+Inserted 3 facts into 'person'.
+> +address[(1, "New York"), (2, "Boston"), (3, "Chicago")].
+Inserted 3 facts into 'address'.
+> ?- person(Id, Name, Age).
+3 rows:
+  (1, "Alice", 30)
+  (2, "Bob", 25)
+  (3, "Charlie", 35)
+> ?- address(Pid, City).
+3 rows:
+  (1, "New York")
+  (2, "Boston")
+  (3, "Chicago")
+> view person_location(Name: string, City: string) :- person(Id, Name, _), address(Id, City).
+View 'person_location' registered.
+> ?- person_location(N, C).
+3 rows:
+  ("Alice", "New York")
+  ("Bob", "Boston")
+  ("Charlie", "Chicago")
+> .db use default
+Switched to database: default
+> .db drop test_record_sugar
+Database 'test_record_sugar' dropped.

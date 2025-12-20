@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/05_queries/01_scan_all.dl
+
 > .db create test_scan
 Database 'test_scan' created.
 Switched to database: test_scan
@@ -22,3 +24,4 @@ Inserted 3 facts into 'node'.
 Switched to database: default
 > .db drop test_scan
 Database 'test_scan' dropped.
+

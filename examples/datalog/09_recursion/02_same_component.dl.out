@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/02_same_component.dl
+
 > .db create test_sc
 Database 'test_sc' created.
 Switched to database: test_sc
@@ -6,11 +8,11 @@ Switched to database: test_sc
 Switched to database: test_sc
 > +edge[(1,2), (2,3), (3,4)].
 Inserted 3 facts into 'edge'.
-> same_component(X, Y) := edge(X, Y).
+> view same_component(X: int, Y: int) :- edge(X, Y).
 View 'same_component' registered.
-> same_component(X, Y) := edge(Y, X).
+> view same_component(X: int, Y: int) :- edge(Y, X).
 Rule added to view 'same_component' (2 rules total).
-> same_component(X, Z) := same_component(X, Y), same_component(Y, Z), X != Z.
+> view same_component(X: int, Z: int) :- same_component(X, Y), same_component(Y, Z), X != Z.
 Rule added to view 'same_component' (3 rules total).
 > ?- same_component(X, Y).
 12 rows:
@@ -36,3 +38,4 @@ Rule added to view 'same_component' (3 rules total).
 Switched to database: default
 > .db drop test_sc
 Database 'test_sc' dropped.
+

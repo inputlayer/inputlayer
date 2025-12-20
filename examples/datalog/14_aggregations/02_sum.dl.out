@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/02_sum.dl
+
 > .db create test_agg_sum
 Database 'test_agg_sum' created.
 Switched to database: test_agg_sum
@@ -6,7 +8,7 @@ Switched to database: test_agg_sum
 Switched to database: test_agg_sum
 > +sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)].
 Inserted 6 facts into 'sales'.
-> region_total(Region, sum<Amount>) := sales(Region, Amount).
+> view region_total(Region: int, sum<Amount>: int) :- sales(Region, Amount).
 View 'region_total' registered.
 > ?- region_total(X, Y).
 3 rows:
@@ -17,3 +19,4 @@ View 'region_total' registered.
 Switched to database: default
 > .db drop test_agg_sum
 Database 'test_agg_sum' dropped.
+

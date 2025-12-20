@@ -12,7 +12,7 @@
 +blocked[(1,2), (2,3), (3,4)].
 
 // Filter - should return empty since all edges are blocked
-allowed(X, Y) := edge(X, Y), !blocked(X, Y).
+view allowed(X: int, Y: int) :- edge(X, Y), !blocked(X, Y).
 
 // Expected: No results (all filtered)
 ?- allowed(X, Y).

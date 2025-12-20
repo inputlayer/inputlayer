@@ -1,0 +1,13 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/09_empty_aggregation.dl
+
+> .db create test_empty_agg
+Database 'test_empty_agg' created.
+Switched to database: test_empty_agg
+> .db use test_empty_agg
+Switched to database: test_empty_agg
+> view total(count<x>: int) :- sales(X, _).
+View 'total' registered.
+> ?- total(N).
+Script error: Line 13: Query execution failed: Unsafe rule: Atom { relation: "total", args: [Aggregate(Count, "x")] }. Variables ["x"] in head do not appear in positive body atoms.
+

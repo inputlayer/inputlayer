@@ -9,7 +9,7 @@
 +edge[(1,2), (2,3), (3,4)].
 
 // Find paths of length 2
-path2(X, Z) := edge(X, Y), edge(Y, Z).
+view path2(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
 
 // Query
 ?- path2(X, Y).

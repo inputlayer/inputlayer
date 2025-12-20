@@ -9,25 +9,25 @@
 +nums[(1, 10), (2, 20), (3, 30), (4, 0), (5, -10)].
 
 // Addition - arithmetic in head
-added(Id, V+5) := nums(Id, V).
+view added(Id: int, V+5: int) :- nums(Id, V).
 ?- added(X, Y).
 
 // Subtraction
-subtracted(Id, V-5) := nums(Id, V).
+view subtracted(Id: int, V-5: int) :- nums(Id, V).
 ?- subtracted(X, Y).
 
 // Multiplication
-multiplied(Id, V*2) := nums(Id, V).
+view multiplied(Id: int, V*2: int) :- nums(Id, V).
 ?- multiplied(X, Y).
 
 // Division (integer division)
 +divisible[(10, 2), (20, 4), (30, 5), (100, 10)].
-divided(N, D, N/D) := divisible(N, D).
+view divided(N: int, D: int, N/D: int) :- divisible(N, D).
 ?- divided(X, Y, Z).
 
 // Modulo
 +mods[(10, 3), (20, 7), (15, 4)].
-modded(N, D, N%D) := mods(N, D).
+view modded(N: int, D: int, N%D: int) :- mods(N, D).
 ?- modded(X, Y, Z).
 
 // Cleanup

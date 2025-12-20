@@ -13,7 +13,7 @@
 //! - `.query <datalog>` - Execute a query
 //! - `.quit` - Exit
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 use std::io::{self, Write};
 
 fn main() {

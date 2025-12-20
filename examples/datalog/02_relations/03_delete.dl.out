@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/03_delete.dl
+
 > .db create test_del
 Database 'test_del' created.
 Switched to database: test_del
@@ -31,3 +33,4 @@ Deleted 2 facts from 'edge'.
 Switched to database: default
 > .db drop test_del
 Database 'test_del' dropped.
+

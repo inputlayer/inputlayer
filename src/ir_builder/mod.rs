@@ -40,8 +40,8 @@
 //! Takes Datalog rules (AST) and converts them to intermediate representation (IR)
 //! suitable for optimization and code generation.
 
-use datalog_ast::{Atom, BodyPredicate, Constraint, Rule, Term};
-use datalog_ir::{IRNode, Predicate};
+use datalog_ast::{Atom, BodyPredicate, BuiltinFunc, Constraint, Rule, Term};
+use datalog_ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
 use std::collections::HashSet;
 
 use crate::catalog::Catalog;
@@ -81,13 +81,16 @@ impl IRBuilder {
             }
         }
 
-        // 3. Apply filters (constraints)
+        // 3. Apply filters (constraints) - skips function call assignments
         current = self.build_filters(current, rule)?;
 
         // 4. Apply antijoins for negated predicates
         current = self.build_antijoins(current, rule)?;
 
-        // 5. Apply projection to match head schema
+        // 5. Apply computed columns (function call constraints like Dist = euclidean(V, Q))
+        current = self.build_computed_columns(current, rule)?;
+
+        // 6. Apply projection to match head schema
         current = self.build_projection(current, rule)?;
 
         Ok(current)
@@ -146,6 +149,10 @@ impl IRBuilder {
                 Term::FloatConstant(_) => format!("float{}", i),
                 // String constants - generate a name
                 Term::StringConstant(_) => format!("str{}", i),
+                // Field access - use the field name
+                Term::FieldAccess(_, field) => field.clone(),
+                // Record pattern - generate a name
+                Term::RecordPattern(_) => format!("rec{}", i),
             })
             .collect();
 
@@ -192,8 +199,16 @@ impl IRBuilder {
     }
 
     /// Build filter nodes for constraints
+    ///
+    /// Skips function call assignment constraints (e.g., Dist = euclidean(V, Q))
+    /// which are handled by build_computed_columns instead.
     fn build_filters(&self, mut input: IRNode, rule: &Rule) -> Result<IRNode, String> {
         for constraint in &rule.constraints {
+            // Skip function call assignments - they're handled in build_computed_columns
+            if self.is_function_call_constraint(constraint) {
+                continue;
+            }
+
             let predicate = self.constraint_to_predicate(constraint, &input.output_schema())?;
             input = IRNode::Filter {
                 input: Box::new(input),
@@ -202,6 +217,15 @@ impl IRBuilder {
         }
 
         Ok(input)
+    }
+
+    /// Check if a constraint is a function call assignment (e.g., Dist = euclidean(V, Q))
+    fn is_function_call_constraint(&self, constraint: &Constraint) -> bool {
+        matches!(
+            constraint,
+            Constraint::Equal(Term::Variable(_), Term::FunctionCall(_, _))
+                | Constraint::Equal(Term::FunctionCall(_, _), Term::Variable(_))
+        )
     }
 
     /// Build antijoin nodes for negated predicates
@@ -284,6 +308,108 @@ impl IRBuilder {
         }
 
         Ok((left_keys, right_keys))
+    }
+
+    /// Build computed columns for function call constraints
+    ///
+    /// Handles constraints like `Dist = euclidean(V, Q)` by creating a Compute node
+    /// that adds the computed column to the schema.
+    fn build_computed_columns(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+        let mut expressions = Vec::new();
+        let schema = input.output_schema();
+
+        for constraint in &rule.constraints {
+            // Only process function call assignments
+            let (var_name, func, args) = match constraint {
+                Constraint::Equal(Term::Variable(v), Term::FunctionCall(f, a)) => (v, f, a),
+                Constraint::Equal(Term::FunctionCall(f, a), Term::Variable(v)) => (v, f, a),
+                _ => continue,
+            };
+
+            // Convert AST function to IR function
+            let ir_func = self.ast_func_to_ir_func(func)?;
+
+            // Convert AST arguments to IR expressions
+            let ir_args: Vec<IRExpression> = args
+                .iter()
+                .map(|term| self.term_to_ir_expr(term, &schema))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            expressions.push((var_name.clone(), IRExpression::FunctionCall(ir_func, ir_args)));
+        }
+
+        if expressions.is_empty() {
+            // No function call constraints, return input unchanged
+            Ok(input)
+        } else {
+            Ok(IRNode::Compute {
+                input: Box::new(input),
+                expressions,
+            })
+        }
+    }
+
+    /// Convert AST BuiltinFunc to IR BuiltinFunction
+    fn ast_func_to_ir_func(&self, func: &BuiltinFunc) -> Result<BuiltinFunction, String> {
+        match func {
+            BuiltinFunc::Euclidean => Ok(BuiltinFunction::Euclidean),
+            BuiltinFunc::Cosine => Ok(BuiltinFunction::Cosine),
+            BuiltinFunc::DotProduct => Ok(BuiltinFunction::DotProduct),
+            BuiltinFunc::Manhattan => Ok(BuiltinFunction::Manhattan),
+            BuiltinFunc::LshBucket => Ok(BuiltinFunction::LshBucket),
+            BuiltinFunc::VecNormalize => Ok(BuiltinFunction::VecNormalize),
+            BuiltinFunc::VecDim => Ok(BuiltinFunction::VecDim),
+            BuiltinFunc::VecAdd => Ok(BuiltinFunction::VecAdd),
+            BuiltinFunc::VecScale => Ok(BuiltinFunction::VecScale),
+            BuiltinFunc::TimeNow => Err("TimeNow function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeDiff => Err("TimeDiff function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeAdd => Err("TimeAdd function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeSub => Err("TimeSub function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeDecay => Err("TimeDecay function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeDecayLinear => Err("TimeDecayLinear function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeBefore => Err("TimeBefore function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeAfter => Err("TimeAfter function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeBetween => Err("TimeBetween function not yet supported in IR".to_string()),
+            BuiltinFunc::WithinLast => Err("WithinLast function not yet supported in IR".to_string()),
+            BuiltinFunc::IntervalsOverlap => Err("IntervalsOverlap function not yet supported in IR".to_string()),
+            BuiltinFunc::IntervalContains => Err("IntervalContains function not yet supported in IR".to_string()),
+            BuiltinFunc::IntervalDuration => Err("IntervalDuration function not yet supported in IR".to_string()),
+            BuiltinFunc::PointInInterval => Err("PointInInterval function not yet supported in IR".to_string()),
+        }
+    }
+
+    /// Convert AST Term to IR Expression
+    fn term_to_ir_expr(&self, term: &Term, schema: &[String]) -> Result<IRExpression, String> {
+        match term {
+            Term::Variable(name) => {
+                // Find column index in schema
+                let idx = schema.iter().position(|s| s == name).ok_or_else(|| {
+                    format!("Variable '{}' not found in schema {:?}", name, schema)
+                })?;
+                Ok(IRExpression::Column(idx))
+            }
+            Term::Constant(val) => Ok(IRExpression::IntConstant(*val)),
+            Term::FloatConstant(val) => Ok(IRExpression::FloatConstant(*val)),
+            Term::VectorLiteral(vals) => {
+                // Convert f64 to f32 (AST uses f64, IR uses f32)
+                let f32_vals: Vec<f32> = vals.iter().map(|&v| v as f32).collect();
+                Ok(IRExpression::VectorLiteral(f32_vals))
+            }
+            Term::FunctionCall(func, args) => {
+                let ir_func = self.ast_func_to_ir_func(func)?;
+                let ir_args: Vec<IRExpression> = args
+                    .iter()
+                    .map(|t| self.term_to_ir_expr(t, schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(IRExpression::FunctionCall(ir_func, ir_args))
+            }
+            Term::StringConstant(_) => Err("String constants not supported in expressions".to_string()),
+            Term::Placeholder => Err("Placeholders not supported in expressions".to_string()),
+            Term::Arithmetic(_) => Err("Arithmetic expressions should use build_projection_with_computed".to_string()),
+            Term::Aggregate(_, _) => Err("Aggregates should use build_aggregation".to_string()),
+            Term::FieldAccess(_, _) => Err("Field access not yet supported in expressions".to_string()),
+            Term::RecordPattern(_) => Err("Record patterns not yet supported in expressions".to_string()),
+        }
     }
 
     /// Convert AST constraint to IR predicate
@@ -552,6 +678,12 @@ impl IRBuilder {
                 Term::StringConstant(_) => {
                     return Err("String constants in rule head not yet supported.".to_string());
                 }
+                Term::FieldAccess(_, _) => {
+                    return Err("Field access in rule head not yet supported.".to_string());
+                }
+                Term::RecordPattern(_) => {
+                    return Err("Record patterns in rule head not yet supported.".to_string());
+                }
             }
         }
 
@@ -760,6 +892,12 @@ impl IRBuilder {
                 }
                 Term::StringConstant(_) => {
                     return Err("String constants in aggregation head not supported".to_string());
+                }
+                Term::FieldAccess(_, _) => {
+                    return Err("Field access in aggregation head not supported".to_string());
+                }
+                Term::RecordPattern(_) => {
+                    return Err("Record patterns in aggregation head not supported".to_string());
                 }
             }
         }

@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/05_avg.dl
+
 > .db create test_agg_avg
 Database 'test_agg_avg' created.
 Switched to database: test_agg_avg
@@ -6,7 +8,7 @@ Switched to database: test_agg_avg
 Switched to database: test_agg_avg
 > +score[(1, 80), (1, 90), (1, 85), (2, 70), (2, 75), (3, 100)].
 Inserted 6 facts into 'score'.
-> avg_score(Student, avg<Points>) := score(Student, Points).
+> view avg_score(Student: int, avg<Points>: int) :- score(Student, Points).
 View 'avg_score' registered.
 > ?- avg_score(X, Y).
 3 rows:
@@ -17,3 +19,4 @@ View 'avg_score' registered.
 Switched to database: default
 > .db drop test_agg_avg
 Database 'test_agg_avg' dropped.
+

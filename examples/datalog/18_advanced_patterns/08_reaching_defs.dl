@@ -14,17 +14,17 @@
 +def[(1, 1), (2, 2), (3, 1)].
 
 // A definition reaches itself
-reaches(D, D) := def(D, _).
+view reaches(D: int, D: int) :- def(D, _).
 
 // Definition D reaches Q if it reaches predecessor P and there's an edge P->Q
-reaches(D, Q) := reaches(D, P), cfg(P, Q).
+view reaches(D: int, Q: int) :- reaches(D, P), cfg(P, Q).
 
 // Query which definitions reach which points
 // All definitions flow forward: def 1 reaches {1,2,3,4}, def 2 reaches {2,3,4}, def 3 reaches {3,4}
 ?- reaches(X, Y).
 
 // Also query the kills relation for verification
-kills(S, D) := def(S, V), def(D, V), S != D.
+view kills(S: int, D: int) :- def(S, V), def(D, V), S != D.
 ?- kills(X, Y).
 
 // Cleanup

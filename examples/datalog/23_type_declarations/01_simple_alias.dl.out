@@ -1,0 +1,25 @@
+Executing script: examples/datalog/23_type_declarations/01_simple_alias.dl
+
+> .db create test_type_alias
+Database 'test_type_alias' created.
+Switched to database: test_type_alias
+> .db use test_type_alias
+Switched to database: test_type_alias
+> type Email: string.
+Type 'Email' declared.
+> type UserId: int.
+Type 'UserId' declared.
+> type Score: int.
+Type 'Score' declared.
+> rel users(id: UserId, email: Email, score: Score).
+Relation 'users' schema declared: (id: TypeRef("UserId"), email: TypeRef("Email"), score: TypeRef("Score"))
+> +users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)].
+Inserted 2 facts into 'users'.
+> ?- users(X, Y, Z).
+2 rows:
+  (1, "alice@example.com", 100)
+  (2, "bob@example.com", 85)
+> .db use default
+Switched to database: default
+> .db drop test_type_alias
+Database 'test_type_alias' dropped.

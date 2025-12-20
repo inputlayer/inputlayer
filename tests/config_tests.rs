@@ -22,7 +22,7 @@
 //! cargo test --test config_tests -- --include-ignored --test-threads=1
 //! ```
 
-use datalog_engine::Config;
+use inputlayer::Config;
 use std::env;
 use std::fs;
 use std::path::PathBuf;

@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/02_insert_bulk.dl
+
 > .db create test_bulk
 Database 'test_bulk' created.
 Switched to database: test_bulk
@@ -17,3 +19,4 @@ Inserted 5 facts into 'edge'.
 Switched to database: default
 > .db drop test_bulk
 Database 'test_bulk' dropped.
+

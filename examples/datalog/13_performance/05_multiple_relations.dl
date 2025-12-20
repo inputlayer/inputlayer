@@ -20,11 +20,11 @@
 +project[(1000, 50000), (1001, 75000), (1002, 100000)].
 
 // Find employees with their department manager
-emp_manager(EmpId, MgrId) := employee(EmpId, DeptId), department(DeptId, MgrId).
+view emp_manager(EmpId: int, MgrId: int) :- employee(EmpId, DeptId), department(DeptId, MgrId).
 ?- emp_manager(X, Y).
 
 // Find employees on high-budget projects (budget > 60000)
-high_budget_emp(EmpId, Budget) := assignment(EmpId, ProjId), project(ProjId, Budget), Budget > 60000.
+view high_budget_emp(EmpId: int, Budget: int) :- assignment(EmpId, ProjId), project(ProjId, Budget), Budget > 60000.
 ?- high_budget_emp(X, Y).
 
 // Cleanup

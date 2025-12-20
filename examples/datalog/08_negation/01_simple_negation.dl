@@ -10,7 +10,7 @@
 +skip[(2,3), (4,5)].
 
 // Edges not in skip (set difference using negation)
-filtered(X, Y) := edge(X, Y), !skip(X, Y).
+view filtered(X: int, Y: int) :- edge(X, Y), !skip(X, Y).
 
 // Query filtered edges - returns edges NOT in skip
 // Expected: (1,2), (3,4)

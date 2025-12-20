@@ -11,14 +11,14 @@
 +exclude_ids[(2, 0), (4, 0)].
 
 // Simple view that just wraps data
-data_view(X, Y) := data(X, Y).
+view data_view(X: int, Y: int) :- data(X, Y).
 
 // Query the view directly - should work
 ?- data_view(X, Y).
 
 // Now use negation on the view
 // This should exclude IDs 2 and 4 from data_view
-result(X, Y) := data_view(X, Y), !exclude_ids(X, _).
+view result(X: int, Y: int) :- data_view(X, Y), !exclude_ids(X, _).
 ?- result(X, Y).
 
 // Expected: (1, 10), (3, 30), (5, 50)

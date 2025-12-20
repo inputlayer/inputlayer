@@ -1,4 +1,5 @@
-Executing script: examples/datalog/21_query_features/04_computed_columns.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/21_query_features/04_computed_columns.dl
 
 > .db create test_computed
 Database 'test_computed' created.
@@ -7,14 +8,14 @@ Switched to database: test_computed
 Switched to database: test_computed
 > +items[(1, 100, 2), (2, 50, 5), (3, 200, 1)].
 Inserted 3 facts into 'items'.
-> item_value(Id, P*Q) := items(Id, P, Q).
+> view item_value(Id: int, P*Q: int) :- items(Id, P, Q).
 View 'item_value' registered.
 > ?- item_value(X, Y).
 3 rows:
   (1, 200)
   (2, 250)
   (3, 200)
-> discounted(Id, P-P/10) := items(Id, P, _).
+> view discounted(Id: int, P-P/10: int) :- items(Id, P, _).
 View 'discounted' registered.
 > ?- discounted(X, Y).
 3 rows:
@@ -23,14 +24,14 @@ View 'discounted' registered.
   (3, 180)
 > +scores[(1, 80, 100), (2, 45, 50), (3, 90, 100)].
 Inserted 3 facts into 'scores'.
-> percentage(Id, Got*100/Max) := scores(Id, Got, Max).
+> view percentage(Id: int, Got*100/Max: int) :- scores(Id, Got, Max).
 View 'percentage' registered.
 > ?- percentage(X, Y).
 3 rows:
   (1, 80)
   (2, 90)
   (3, 90)
-> summary(Id, P*2, P/2) := items(Id, P, _).
+> view summary(Id: int, P*2: int, P/2: int) :- items(Id, P, _).
 View 'summary' registered.
 > ?- summary(X, Y, Z).
 3 rows:
@@ -41,3 +42,4 @@ View 'summary' registered.
 Switched to database: default
 > .db drop test_computed
 Database 'test_computed' dropped.
+

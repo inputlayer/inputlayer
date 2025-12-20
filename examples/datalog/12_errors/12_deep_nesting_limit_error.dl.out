@@ -1,0 +1,40 @@
+
+Executing script: examples/datalog/12_errors/12_deep_nesting_limit.dl
+
+> .db create test_deep_nest
+Database 'test_deep_nest' created.
+Switched to database: test_deep_nest
+> .db use test_deep_nest
+Switched to database: test_deep_nest
+> +base[(1), (2), (3)].
+Inserted 3 facts into 'base'.
+> view nest5(X: int, ((((X+1)+1)+1)+1)+1: int) :- base(X).
+View 'nest5' registered.
+> ?- nest5(A, B).
+3 rows:
+  (1, 6)
+  (2, 7)
+  (3, 8)
+> view mixed_nest(X: int, (((X*2)+3)*2)+1: int) :- base(X).
+View 'mixed_nest' registered.
+> ?- mixed_nest(A, B).
+3 rows:
+  (1, 9)
+  (2, 11)
+  (3, 13)
+> view add_one(X: int, X+1: int) :- base(X).
+View 'add_one' registered.
+> view add_two(X: int, Y+1: int) :- add_one(X, Y).
+View 'add_two' registered.
+> view add_three(X: int, Y+1: int) :- add_two(X, Y).
+View 'add_three' registered.
+> ?- add_three(A, B).
+3 rows:
+  (1, 4)
+  (2, 5)
+  (3, 6)
+> .db use default
+Switched to database: default
+> .db drop test_deep_nest
+Database 'test_deep_nest' dropped.
+

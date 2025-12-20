@@ -13,24 +13,24 @@
 //! cargo run --bin inputlayer-server -- --addr 0.0.0.0:5433 --cert certs/server.pem --key certs/server.key
 //! ```
 
-use datalog_engine::protocol::generated::databaseservice::server::DatabaseServiceHandler;
-use datalog_engine::protocol::generated::databaseservice::types::*;
-use datalog_engine::protocol::generated::dataservice::server::DataServiceHandler;
-use datalog_engine::protocol::generated::dataservice::types::{
+use inputlayer::protocol::generated::databaseservice::server::DatabaseServiceHandler;
+use inputlayer::protocol::generated::databaseservice::types::*;
+use inputlayer::protocol::generated::dataservice::server::DataServiceHandler;
+use inputlayer::protocol::generated::dataservice::types::{
     BulkInsertResponse, DataError, DeleteRequest, DeleteResponse, GetSchemaRequest,
     GetSchemaResponse, InsertBatch, InsertRequest, InsertResponse,
 };
-use datalog_engine::protocol::generated::queryservice::server::QueryServiceHandler;
-use datalog_engine::protocol::generated::queryservice::types::{
+use inputlayer::protocol::generated::queryservice::server::QueryServiceHandler;
+use inputlayer::protocol::generated::queryservice::types::{
     ExplainRequest, ExplainResponse, QueryError, QueryRequest, QueryResponse, QueryResultBatch,
 };
-use datalog_engine::protocol::generated::adminservice::server::AdminServiceHandler;
-use datalog_engine::protocol::generated::adminservice::types::{
+use inputlayer::protocol::generated::adminservice::server::AdminServiceHandler;
+use inputlayer::protocol::generated::adminservice::types::{
     AdminError, BackupRequest, BackupResponse, ClearCachesRequest, ClearCachesResponse,
     HealthRequest, HealthResponse, ShutdownRequest, ShutdownResponse, StatsRequest, StatsResponse,
 };
-use datalog_engine::protocol::UnifiedHandler;
-use datalog_engine::Config;
+use inputlayer::protocol::UnifiedHandler;
+use inputlayer::Config;
 
 use async_trait::async_trait;
 use rpcnet::{RpcConfig, RpcError, RpcServer};

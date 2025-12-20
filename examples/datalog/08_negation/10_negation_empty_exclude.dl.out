@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/10_negation_empty_exclude.dl
+
 > .db create test_neg_empty_excl
 Database 'test_neg_empty_excl' created.
 Switched to database: test_neg_empty_excl
@@ -10,7 +12,7 @@ Inserted 3 facts into 'data'.
 Inserted 1 fact into 'empty_exclude'.
 > -empty_exclude(999, 999).
 Deleted fact from 'empty_exclude'.
-> result(X, Y) := data(X, Y), !empty_exclude(X, _).
+> view result(X: int, Y: int) :- data(X, Y), !empty_exclude(X, _).
 View 'result' registered.
 > ?- result(X, Y).
 3 rows:
@@ -21,3 +23,4 @@ View 'result' registered.
 Switched to database: default
 > .db drop test_neg_empty_excl
 Database 'test_neg_empty_excl' dropped.
+

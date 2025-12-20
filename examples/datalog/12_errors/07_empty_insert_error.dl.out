@@ -1,0 +1,15 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/07_empty_insert.dl
+
+> .db create test_empty
+Database 'test_empty' created.
+Switched to database: test_empty
+> .db use test_empty
+Switched to database: test_empty
+> ?- empty(X, Y).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_empty
+Database 'test_empty' dropped.
+

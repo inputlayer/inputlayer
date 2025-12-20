@@ -1,0 +1,36 @@
+// Test: Empty After Delete
+// Category: Edge Cases
+// Description: Tests behavior after deleting all data from a relation
+
+.db create test_empty_del
+.db use test_empty_del
+
+// Insert initial data
++items[(1), (2), (3), (4), (5)].
+
+// Verify data exists
+?- items(X).
+
+// Create a derived view
+view big_items(X: int) :- items(X), X > 3.
+?- big_items(X).
+
+// Delete all items
+-items(X) :- items(X).
+
+// Query empty base relation
+?- items(X).
+
+// Query derived view (should also be empty)
+?- big_items(X).
+
+// Re-insert some data
++items[(10), (20)].
+
+// Verify recovery
+?- items(X).
+?- big_items(X).
+
+// Cleanup
+.db use default
+.db drop test_empty_del

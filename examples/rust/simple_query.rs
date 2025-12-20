@@ -3,7 +3,7 @@
 //! Demonstrates basic scanning and filtering with the Datalog engine.
 //! Shows the full pipeline: Parser → IR Builder → Optimizer → Code Generator
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 use std::collections::HashSet;
 
 fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {

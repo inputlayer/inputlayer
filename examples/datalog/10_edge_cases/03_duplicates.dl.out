@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/03_duplicates.dl
+
 > .db create test_dup
 Database 'test_dup' created.
 Switched to database: test_dup
@@ -14,7 +16,7 @@ Inserted 1 new fact(s) into 'edge' (2 duplicate(s) skipped).
 2 rows:
   (1, 2)
   (2, 3)
-> path(X, Z) := edge(X, Y), edge(Y, Z).
+> view path(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
 View 'path' registered.
 > ?- path(X, Y).
 1 rows:
@@ -23,3 +25,4 @@ View 'path' registered.
 Switched to database: default
 > .db drop test_dup
 Database 'test_dup' dropped.
+

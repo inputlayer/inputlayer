@@ -14,11 +14,11 @@
 +node[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)].
 
 // Transitive closure for reachability
-reachable(X, Y) := edge(X, Y).
-reachable(X, Z) := reachable(X, Y), edge(Y, Z).
+view reachable(X: int, Y: int) :- edge(X, Y).
+view reachable(X: int, Z: int) :- reachable(X, Y), edge(Y, Z).
 
 // A node is in a cycle if it can reach itself
-in_cycle(X, X) := reachable(X, X).
+view in_cycle(X: int, X: int) :- reachable(X, X).
 
 // Query nodes in cycles
 ?- in_cycle(X, Y).

@@ -1,0 +1,30 @@
+// Test: Multiple Type Declarations
+// Category: Type Declarations
+// Description: Tests multiple type declarations in sequence
+
+.db create test_multi_types
+.db use test_multi_types
+
+// Declare multiple types
+type ProductId: int.
+type Price: int.
+type Quantity: int.
+type ProductName: string.
+
+// Use types in schema
+rel products(id: ProductId, name: ProductName, price: Price).
+rel inventory(product_id: ProductId, qty: Quantity).
+
+// Insert data
++products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].
++inventory[(1, 50), (2, 30), (3, 75)].
+
+// Query products
+?- products(Id, Name, Price).
+
+// Query inventory
+?- inventory(Pid, Qty).
+
+// Cleanup
+.db use default
+.db drop test_multi_types

@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/15_negation_swapped_vars.dl
+
 > .db create test_neg_swap
 Database 'test_neg_swap' created.
 Switched to database: test_neg_swap
@@ -6,7 +8,7 @@ Switched to database: test_neg_swap
 Switched to database: test_neg_swap
 > +edge[(1, 2), (2, 3), (3, 1), (1, 3)].
 Inserted 4 facts into 'edge'.
-> one_way(X, Y) := edge(X, Y), !edge(Y, X).
+> view one_way(X: int, Y: int) :- edge(X, Y), !edge(Y, X).
 View 'one_way' registered.
 > ?- one_way(X, Y).
 2 rows:
@@ -16,3 +18,4 @@ View 'one_way' registered.
 Switched to database: default
 > .db drop test_neg_swap
 Database 'test_neg_swap' dropped.
+

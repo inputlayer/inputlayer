@@ -10,15 +10,15 @@
       (6, 15), (7, 25), (8, 35), (9, 45), (10, 55)].
 
 // Filter with X > 3 AND Y < 50
-filtered1(X, Y) := data(X, Y), X > 3, Y < 50.
+view filtered1(X: int, Y: int) :- data(X, Y), X > 3, Y < 50.
 ?- filtered1(X, Y).
 
 // Filter with range: 20 <= Y <= 40
-filtered2(X, Y) := data(X, Y), Y >= 20, Y <= 40.
+view filtered2(X: int, Y: int) :- data(X, Y), Y >= 20, Y <= 40.
 ?- filtered2(X, Y).
 
 // Filter with X != Y relationship
-different(X, Y) := data(X, Y), X != Y.
+view different(X: int, Y: int) :- data(X, Y), X != Y.
 ?- different(X, Y).
 
 // Cleanup

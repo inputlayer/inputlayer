@@ -1,0 +1,37 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/14_no_new_tuples_first_iter.dl
+
+> .db create test_no_new
+Database 'test_no_new' created.
+Switched to database: test_no_new
+> .db use test_no_new
+Switched to database: test_no_new
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> +node[(1), (2), (3)].
+Inserted 3 facts into 'node'.
+> reachable(X, Y) :- edge(X, Y), X = 3.
+No results for 'reachable'.
+(session: 1 rule(s))
+> reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+No results for 'reachable'.
+(session: 2 rule(s))
+> ?- reachable(X, Y).
+No results.
+> reachable2(X, Y) :- edge(X, Y), X = 1.
+1 rows:
+  (1, 2)
+(session: 3 rule(s))
+> reachable2(X, Z) :- reachable2(X, Y), edge(Y, Z).
+1 rows:
+  (1, 2)
+(session: 4 rule(s))
+> ?- reachable2(X, Y).
+1 rows:
+  (1, 2)
+> .db use default
+Switched to database: default
+(Cleared 4 session rule(s))
+> .db drop test_no_new
+Database 'test_no_new' dropped.
+

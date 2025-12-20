@@ -5,4 +5,64 @@ Database 'test_ancestor' created.
 Switched to database: test_ancestor
 > .db use test_ancestor
 Switched to database: test_ancestor
-> +parent[(2, 1), (3, 1),
+> +parent[(2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (7, 3), (8, 4), (9, 4), (10, 6)].
+Inserted 9 facts into 'parent'.
+> view ancestor(X: int, A: int) :- parent(X, A).
+View 'ancestor' registered.
+> view ancestor(X: int, A: int) :- parent(X, P), ancestor(P, A).
+Rule added to view 'ancestor' (2 rules total).
+> view ancestors_of_8(A: int) :- ancestor(8, A).
+View 'ancestors_of_8' registered.
+> ?- ancestors_of_8(A).
+3 rows:
+  (1)
+  (2)
+  (4)
+> view ancestors_of_10(A: int) :- ancestor(10, A).
+View 'ancestors_of_10' registered.
+> ?- ancestors_of_10(A).
+3 rows:
+  (1)
+  (3)
+  (6)
+> view common_ancestor(A: int) :- ancestor(8, A), ancestor(10, A).
+View 'common_ancestor' registered.
+> ?- common_ancestor(A).
+5 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (6)
+> view ancestor_dist(X: int, A: int, 1: int) :- parent(X, A).
+View 'ancestor_dist' registered.
+> view ancestor_dist(X: int, A: int, D+1: int) :- parent(X, P), ancestor_dist(P, A, D).
+Rule added to view 'ancestor_dist' (2 rules total).
+> view dist_from_8(A: int, min<D>: int) :- ancestor_dist(8, A, D).
+View 'dist_from_8' registered.
+> ?- dist_from_8(A, D).
+3 rows:
+  (1, 3)
+  (2, 2)
+  (4, 1)
+> view dist_from_10(A: int, min<D>: int) :- ancestor_dist(10, A, D).
+View 'dist_from_10' registered.
+> ?- dist_from_10(A, D).
+3 rows:
+  (1, 3)
+  (3, 2)
+  (6, 1)
+> view common_dist(A: int, D1+D2: int) :- dist_from_8(A, D1), dist_from_10(A, D2).
+View 'common_dist' registered.
+> ?- common_dist(A, D).
+1 rows:
+  (1, 6)
+> view min_common_dist(min<D>: int) :- common_dist(_, D).
+View 'min_common_dist' registered.
+> ?- min_common_dist(D).
+1 rows:
+  (6)
+> .db use default
+Switched to database: default
+> .db drop test_ancestor
+Database 'test_ancestor' dropped.

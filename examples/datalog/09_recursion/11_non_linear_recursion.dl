@@ -17,7 +17,7 @@
 +parent[(2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (7, 3)].
 
 // Sibling relation (non-linear: two recursive-like calls to parent)
-sibling(X, Y) := parent(X, P), parent(Y, P), X != Y.
+view sibling(X: int, Y: int) :- parent(X, P), parent(Y, P), X != Y.
 
 // Query siblings
 ?- sibling(A, B).
@@ -25,15 +25,15 @@ sibling(X, Y) := parent(X, P), parent(Y, P), X != Y.
 // Expected: (2,3), (3,2), (4,5), (5,4), (6,7), (7,6)
 
 // Cousin relation (parents are siblings)
-cousin(X, Y) := parent(X, PX), parent(Y, PY), sibling(PX, PY).
+view cousin(X: int, Y: int) :- parent(X, PX), parent(Y, PY), sibling(PX, PY).
 
 ?- cousin(A, B).
 
 // Expected: (4,6), (4,7), (5,6), (5,7), (6,4), (6,5), (7,4), (7,5)
 
 // All ancestors (transitive)
-ancestor(X, A) := parent(X, A).
-ancestor(X, A) := parent(X, P), ancestor(P, A).
+view ancestor(X: int, A: int) :- parent(X, A).
+view ancestor(X: int, A: int) :- parent(X, P), ancestor(P, A).
 
 ?- ancestor(X, A).
 

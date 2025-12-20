@@ -12,11 +12,11 @@
 +edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 6), (6, 5)].
 
 // Transitive closure
-reachable(X, Y) := edge(X, Y).
-reachable(X, Z) := reachable(X, Y), edge(Y, Z).
+view reachable(X: int, Y: int) :- edge(X, Y).
+view reachable(X: int, Z: int) :- reachable(X, Y), edge(Y, Z).
 
 // Same SCC: mutual reachability
-same_scc(X, Y) := reachable(X, Y), reachable(Y, X).
+view same_scc(X: int, Y: int) :- reachable(X, Y), reachable(Y, X).
 
 // Query all SCC pairs
 ?- same_scc(X, Y).

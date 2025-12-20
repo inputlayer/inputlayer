@@ -9,7 +9,7 @@
 +sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)].
 
 // Sum sales per region
-region_total(Region, sum<Amount>) := sales(Region, Amount).
+view region_total(Region: int, sum<Amount>: int) :- sales(Region, Amount).
 
 // Query the sum result
 ?- region_total(X, Y).

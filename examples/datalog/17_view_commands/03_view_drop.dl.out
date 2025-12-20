@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/17_view_commands/03_view_drop.dl
+
 > .db create test_view_drop
 Database 'test_view_drop' created.
 Switched to database: test_view_drop
@@ -6,9 +8,9 @@ Switched to database: test_view_drop
 Switched to database: test_view_drop
 > +edge[(1,2), (2,3)].
 Inserted 2 facts into 'edge'.
-> reverse(X, Y) := edge(Y, X).
+> view reverse(X: int, Y: int) :- edge(Y, X).
 View 'reverse' registered.
-> paths(X, Y) := edge(X, Y).
+> view paths(X: int, Y: int) :- edge(X, Y).
 View 'paths' registered.
 > .view
 Views:
@@ -23,3 +25,4 @@ Views:
 Switched to database: default
 > .db drop test_view_drop
 Database 'test_view_drop' dropped.
+

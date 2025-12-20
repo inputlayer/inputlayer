@@ -11,7 +11,7 @@
 +already_hired[(3, 0)].
 
 // Find candidates not blacklisted and not already hired
-eligible(X, Y) := candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
+view eligible(X: int, Y: int) :- candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
 ?- eligible(X, Y).
 
 // Cleanup

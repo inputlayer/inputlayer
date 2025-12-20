@@ -1,7 +1,45 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/05_multiple_relations.dl
+
 > .db create test_perf_multi
 Database 'test_perf_multi' created.
 Switched to database: test_perf_multi
 > .db use test_perf_multi
 Switched to database: test_perf_multi
-> +employee[(1, 10), (2, 10), (3, 20), (4, 20), (5, 30),
+> +employee[(1, 10), (2, 10), (3, 20), (4, 20), (5, 30), (6, 10), (7, 20), (8, 30), (9, 10), (10, 20)].
+Inserted 10 facts into 'employee'.
+> +department[(10, 100), (20, 200), (30, 300)].
+Inserted 3 facts into 'department'.
+> +assignment[(1, 1000), (2, 1000), (3, 1001), (4, 1001), (5, 1002), (1, 1001), (6, 1000), (7, 1002), (8, 1000), (9, 1001)].
+Inserted 10 facts into 'assignment'.
+> +project[(1000, 50000), (1001, 75000), (1002, 100000)].
+Inserted 3 facts into 'project'.
+> view emp_manager(EmpId: int, MgrId: int) :- employee(EmpId, DeptId), department(DeptId, MgrId).
+View 'emp_manager' registered.
+> ?- emp_manager(X, Y).
+10 rows:
+  (1, 100)
+  (2, 100)
+  (3, 200)
+  (4, 200)
+  (5, 300)
+  (6, 100)
+  (7, 200)
+  (8, 300)
+  (9, 100)
+  (10, 200)
+> view high_budget_emp(EmpId: int, Budget: int) :- assignment(EmpId, ProjId), project(ProjId, Budget), Budget > 60000.
+View 'high_budget_emp' registered.
+> ?- high_budget_emp(X, Y).
+6 rows:
+  (1, 75000)
+  (3, 75000)
+  (4, 75000)
+  (5, 100000)
+  (7, 100000)
+  (9, 75000)
+> .db use default
+Switched to database: default
+> .db drop test_perf_multi
+Database 'test_perf_multi' dropped.
+

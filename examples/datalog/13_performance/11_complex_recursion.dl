@@ -10,31 +10,31 @@
 +indirect[(1, 3), (2, 4), (3, 5), (1, 4), (2, 5)].
 
 // Reachability through either edge type
-reach(X, Y) := direct(X, Y).
-reach(X, Y) := indirect(X, Y).
-reach(X, Z) := reach(X, Y), direct(Y, Z).
-reach(X, Z) := reach(X, Y), indirect(Y, Z).
+view reach(X: int, Y: int) :- direct(X, Y).
+view reach(X: int, Y: int) :- indirect(X, Y).
+view reach(X: int, Z: int) :- reach(X, Y), direct(Y, Z).
+view reach(X: int, Z: int) :- reach(X, Y), indirect(Y, Z).
 
 ?- reach(X, Y).
 
 // Count reachability
-reach_count(X, count<Y>) := reach(X, Y).
+view reach_count(X: int, count<Y>: int) :- reach(X, Y).
 ?- reach_count(X, C).
 
 // Bidirectional reachability
 +bidir[(1, 2), (2, 3), (3, 4)].
-bi_reach(X, Y) := bidir(X, Y).
-bi_reach(X, Y) := bidir(Y, X).
-bi_reach(X, Z) := bi_reach(X, Y), bidir(Y, Z), X != Z.
-bi_reach(X, Z) := bi_reach(X, Y), bidir(Z, Y), X != Z.
+view bi_reach(X: int, Y: int) :- bidir(X, Y).
+view bi_reach(X: int, Y: int) :- bidir(Y, X).
+view bi_reach(X: int, Z: int) :- bi_reach(X, Y), bidir(Y, Z), X != Z.
+view bi_reach(X: int, Z: int) :- bi_reach(X, Y), bidir(Z, Y), X != Z.
 
 ?- bi_reach(X, Y).
 
 // Path with distance
-dist(X, Y, 1) := direct(X, Y).
-dist(X, Z, D+1) := dist(X, Y, D), direct(Y, Z), D < 5.
+view dist(X: int, Y: int, 1: int) :- direct(X, Y).
+view dist(X: int, Z: int, D+1: int) :- dist(X, Y, D), direct(Y, Z), D < 5.
 
-min_dist(X, Y, min<D>) := dist(X, Y, D).
+view min_dist(X: int, Y: int, min<D>: int) :- dist(X, Y, D).
 ?- min_dist(X, Y, D).
 
 // Cleanup

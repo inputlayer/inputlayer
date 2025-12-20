@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/16_negation_with_constants.dl
+
 > .db create test_neg_const
 Database 'test_neg_const' created.
 Switched to database: test_neg_const
@@ -8,7 +10,7 @@ Switched to database: test_neg_const
 Inserted 5 facts into 'data'.
 > +blacklist[(100, 0), (300, 0)].
 Inserted 2 facts into 'blacklist'.
-> not_blacklisted(Id, Val) := data(Id, Val), !blacklist(Val, 0).
+> view not_blacklisted(Id: int, Val: int) :- data(Id, Val), !blacklist(Val, 0).
 View 'not_blacklisted' registered.
 > ?- not_blacklisted(X, Y).
 2 rows:
@@ -18,3 +20,4 @@ View 'not_blacklisted' registered.
 Switched to database: default
 > .db drop test_neg_const
 Database 'test_neg_const' dropped.
+

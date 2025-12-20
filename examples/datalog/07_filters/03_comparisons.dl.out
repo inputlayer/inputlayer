@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/07_filters/03_comparisons.dl
+
 > .db create test_cmp
 Database 'test_cmp' created.
 Switched to database: test_cmp
@@ -6,26 +8,26 @@ Switched to database: test_cmp
 Switched to database: test_cmp
 > +data[(1, 100), (3, 101), (5, 102), (7, 103), (9, 104)].
 Inserted 5 facts into 'data'.
-> lt_five(X, Y) := data(X, Y), X < 5.
+> view lt_five(X: int, Y: int) :- data(X, Y), X < 5.
 View 'lt_five' registered.
 > ?- lt_five(X, Y).
 2 rows:
   (1, 100)
   (3, 101)
-> gt_five(X, Y) := data(X, Y), X > 5.
+> view gt_five(X: int, Y: int) :- data(X, Y), X > 5.
 View 'gt_five' registered.
 > ?- gt_five(X, Y).
 2 rows:
   (7, 103)
   (9, 104)
-> le_five(X, Y) := data(X, Y), X <= 5.
+> view le_five(X: int, Y: int) :- data(X, Y), X <= 5.
 View 'le_five' registered.
 > ?- le_five(X, Y).
 3 rows:
   (1, 100)
   (3, 101)
   (5, 102)
-> ge_five(X, Y) := data(X, Y), X >= 5.
+> view ge_five(X: int, Y: int) :- data(X, Y), X >= 5.
 View 'ge_five' registered.
 > ?- ge_five(X, Y).
 3 rows:
@@ -36,3 +38,4 @@ View 'ge_five' registered.
 Switched to database: default
 > .db drop test_cmp
 Database 'test_cmp' dropped.
+

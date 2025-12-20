@@ -21,21 +21,21 @@
                  (4, 1006)].             // guest: public_read
 
 // Inherited role membership (transitive)
-has_role(User, Role) := user_role(User, Role).
-has_role(User, ParentRole) := has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
+view has_role(User: int, Role: int) :- user_role(User, Role).
+view has_role(User: int, ParentRole: int) :- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
 
 // Effective permissions (direct + inherited)
-has_permission(User, Perm) := has_role(User, Role), role_permission(Role, Perm).
+view has_permission(User: int, Perm: int) :- has_role(User, Role), role_permission(Role, Perm).
 
 // Query: What roles does each user have?
 ?- has_role(User, Role).
 
 // Query: What permissions does user 100 (admin) have?
-admin_perms(Perm) := has_permission(100, Perm).
+view admin_perms(Perm: int) :- has_permission(100, Perm).
 ?- admin_perms(P).
 
 // Query: What permissions does user 102 (employee) have?
-employee_perms(Perm) := has_permission(102, Perm).
+view employee_perms(Perm: int) :- has_permission(102, Perm).
 ?- employee_perms(P).
 
 // Cleanup

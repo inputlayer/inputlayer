@@ -796,11 +796,26 @@ Here’s a clean extra section you can tack onto the spec.
 
 ---
 
-# 11. Persistent views, removal of `:=`, and “rule-only” queries
+# 11. Views, removal of `:=`, and separation of concerns
 
-This section replaces the legacy `:=` operator and clarifies when a relation is **persisted/materialized** vs. just a **query**.
+This section introduces the explicit `view` keyword for materialized views and clarifies the separation between `rel` (typing) and `view` (DD materialization).
 
-## 11.1. Removal of the `:=` operator
+## 11.1. Design Principles
+
+We introduce a clear separation of concerns:
+
+* **`type`** — Defines **value types** (aliases, refinements, records)
+* **`rel`** — Defines **relation schemas** for type enforcement only (no materialization)
+* **`view`** — **Explicitly** creates DD materialized views with incremental maintenance
+* **Rules `:-`** — Define derived data; type-checked against schemas
+* **Facts** — Base data inserted into relations
+
+This design makes the intent **explicit**:
+- If you want type checking, use `rel`
+- If you want DD materialization, use `view`
+- Both can be combined when you want both typing AND materialization
+
+## 11.2. Removal of the `:=` operator
 
 The legacy syntax for persistent views:
 
@@ -814,7 +829,7 @@ is **no longer part of the language**.
 
 * `:=` does not appear in the grammar.
 * Any program using `:=` is **rejected** by the parser/typechecker.
-* All shipped examples (e.g. in `examples/datalog`) MUST be updated to the new `rel` + `:-` style and MUST NOT use `:=`.
+* All shipped examples (e.g. in `examples/datalog`) MUST be updated to use the `view` keyword and MUST NOT use `:=`.
 
 Migration:
 
@@ -826,172 +841,201 @@ Migration:
       department(DeptId, DeptName).
   ```
 
-* New (persistent/materialized):
+* New (using explicit `view` keyword):
 
   ```datalog
-  rel emp_dept(emp_id: Id, dept_name: string).
-
-  emp_dept(emp_id: Id, dept_name: string) :-
+  view emp_dept(emp_id: int, dept_name: string) :-
       employee(emp_id, dept_id),
       department(dept_id, dept_name).
   ```
 
-The new form has the **same logical meaning** and **same materialized behavior** as the old `:=`.
+* New (with typing + materialization):
 
-## 11.2. When a relation is a persistent/materialized view
+  ```datalog
+  rel emp_dept(emp_id: Id, dept_name: string).
 
-We distinguish:
+  view emp_dept :-
+      employee(emp_id, dept_id),
+      department(dept_id, dept_name).
+  ```
 
-* **Base relations**: `rel` + facts only.
-* **Derived relations**: `rel` + rules (persistent/materialed view implemented with differential dataflow).
-* **Rule-only queries**: rules without a preceding `rel`.
+## 11.3. The `rel` keyword — Typing Enforcement Only
 
-### 11.2.1. Base relations
+The `rel` keyword declares a relation schema for **type checking purposes only**. It does NOT create a DD materialized view.
+
+```ebnf
+RelDecl    ::= "rel" RelName "(" ParamList? ")" "."
+             | "rel" RelName ":" TypeName "."
+```
+
+### 11.3.1. Purpose of `rel`
+
+* Declares the **arity and types** of a relation's columns
+* Enables **type checking** for facts and rules that reference this relation
+* Does NOT trigger DD materialization — it's purely declarative typing
+
+### 11.3.2. Base relations with `rel`
 
 ```datalog
 rel employee(emp_id: Id, dept_id: Id).
 
-employee(1, 10).
-employee(2, 20).
++employee[(1, 10), (2, 20)].
 ```
 
-*Extension is exactly the set of facts provided.*
+* `rel` declares the schema
+* Facts are inserted using `+` operator
+* Type checking ensures inserted facts match the schema
+* This is a **base relation** (EDB), not a materialized view
 
-### 11.2.2. Persistent (materialized) views
-
-**Definition (persistent view):**
-
-Let there be a declaration:
+### 11.3.3. Rules type-checked against `rel`
 
 ```datalog
-rel r(p1: τ1, ..., pn: τn).
+rel employee(emp_id: int, dept_id: int).
+rel high_earner(emp_id: int).
+
+// Type-checked rule (session/query rule, not materialized)
+high_earner(E) :- employee(E, _), salary(E, S), S > 100000.
 ```
 
-and at least one rule with `r` in the head:
+* Both relations have schemas declared via `rel`
+* Rules referencing them are type-checked
+* But the rule itself is NOT materialized (it's a session rule)
 
-```datalog
-r(t1₁, ..., t1ₙ) :- Body1.
-...
-r(tm₁, ..., tmₙ) :- Bodym.
-```
+## 11.4. The `view` keyword — Explicit DD Materialization
 
-Then:
-
-1. The **logical extension** of `r` is the least fixed point of these rules over the database, as in standard Datalog.
-2. The implementation MUST treat `r` as a **persistent/materialized view**:
-
-   * The tuples of `r` are stored as a materialized relation.
-   * Changes to underlying base relations are propagated so that `r`’s stored contents always match the least fixed point.
-
-This is the **direct replacement** for the old `r(...) := Body` semantics.
-
-Example:
-
-```datalog
-rel emp_dept(emp_id: Id, dept_name: string).
-
-emp_dept(emp_id: Id, dept_name: string) :-
-    employee(emp_id, dept_id),
-    department(dept_id, dept_name).
-```
-
-* `emp_dept` is declared via `rel`.
-* It has a rule head.
-* Therefore it is a **persistent/materialized view**.
-
-(If you also add facts for `emp_dept`, the extension is `facts ∪ derived-tuples`, still maintained persistently.)
-
-## 11.3. Rule-only definitions: queries that are *not* persisted
-
-Rules do **not** require a prior `rel` declaration in the grammar:
+The `view` keyword explicitly creates a DD (Differential Dataflow) materialized view.
 
 ```ebnf
-RuleDecl ::= HeadAtom ":-" Body "."
+ViewDecl   ::= "view" ViewName "(" ParamList? ")" ":-" Body "."
+             | "view" ViewName ":-" Body "."       // uses schema from prior `rel`
 ```
 
-So you can still write things like:
+### 11.4.1. Standalone view (with inline schema)
 
 ```datalog
-emp_dept(emp_id: Id, dept_name: string) :-
+view emp_dept(emp_id: int, dept_name: string) :-
     employee(emp_id, dept_id),
     department(dept_id, dept_name).
 ```
 
-even if there is **no** preceding:
+* Creates a DD materialized view named `emp_dept`
+* Schema is specified inline: `(emp_id: int, dept_name: string)`
+* Incremental maintenance: when `employee` or `department` changes, `emp_dept` updates
 
-```datalog
-rel emp_dept(...).
-```
-
-### 11.3.1. Semantics of rule-only heads
-
-If a predicate `p` appears in rule heads but has **no** `rel` declaration:
-
-```datalog
-p(... ) :- Body.
-```
-
-then:
-
-1. `p` is treated as a **query-only derived relation**:
-
-   * It exists only for the duration/scope of evaluation.
-   * The engine may compute its extension on demand.
-2. The system MUST **not** treat `p` as a persistent/materialized view:
-
-   * No stored table is created for `p`.
-   * No incremental maintenance is performed as other relations change.
-3. Types for the head arguments are inferred from the body and local annotations (e.g., `x: τ`), but there is no global schema for `p`.
-
-This is the “rule as query” mode:
-
-* You can quickly define ad-hoc views in code or at the REPL.
-* But if you want the result to be **persisted/materialized** (like the old `:=`), you **must** add a `rel` declaration first.
-
-### 11.3.2. Example: query vs persistent view
-
-**Query-only (not persisted):**
-
-```datalog
--- No 'rel emp_dept(...)' here
-
-emp_dept(emp_id: Id, dept_name: string) :-
-    employee(emp_id, dept_id),
-    department(dept_id, dept_name).
-```
-
-* `emp_dept` is just a query-defined predicate.
-* Engine can compute `emp_dept` results and return them.
-* No table for `emp_dept` is stored in the database; it’s not maintained incrementally.
-
-**Persistent/materialized:**
+### 11.4.2. View with prior `rel` schema
 
 ```datalog
 rel emp_dept(emp_id: Id, dept_name: string).
 
-emp_dept(emp_id: Id, dept_name: string) :-
+view emp_dept :-
     employee(emp_id, dept_id),
     department(dept_id, dept_name).
 ```
 
-* Same rule body.
-* But now `emp_dept` is declared via `rel`, so:
+* `rel` declares the typed schema
+* `view` references the same name, using the `rel` schema
+* Both type checking AND DD materialization are enabled
 
-  * It is a **named relation** with a fixed schema.
-  * It is **materialized and kept up to date**, exactly as the old `emp_dept(...) := ...` used to be.
+### 11.4.3. Multiple rules for one view
+
+```datalog
+view reachable(x: int, y: int) :-
+    edge(x, y).
+
+view reachable(x: int, y: int) :-
+    edge(x, z),
+    reachable(z, y).
+```
+
+* Multiple `view` declarations with the same name define multiple rules
+* All rules contribute to the same materialized view
+* Supports recursion (transitive closure, etc.)
+
+## 11.5. Session Rules — Query-Only (No Persistence)
+
+Rules without a `view` declaration are **session rules**:
+
+```datalog
+// Just a rule, no 'view' keyword
+temp_result(X, Y) :- source(X, Y), X > 10.
+```
+
+* Computed on-demand during evaluation
+* NOT persisted or incrementally maintained
+* Useful for ad-hoc queries in the REPL or scripts
+
+### 11.5.1. Session rules with `rel` typing
+
+```datalog
+rel temp_result(x: int, y: int).
+
+temp_result(X, Y) :- source(X, Y), X > 10.
+```
+
+* `rel` provides type checking
+* But without `view`, it's still a session rule (not materialized)
+
+## 11.6. Summary: Keywords and Their Purposes
+
+| Keyword | Purpose | DD Materialization | Type Checking |
+|---------|---------|-------------------|---------------|
+| `type`  | Value type definitions | No | N/A |
+| `rel`   | Relation schema declaration | **No** | **Yes** |
+| `view`  | DD materialized view creation | **Yes** | Only if `rel` exists |
+| `:-` (rule) | Derived data definition | Only if `view` | Only if `rel` exists |
+| `+`/`-` (facts) | Base data manipulation | No | Only if `rel` exists |
+
+## 11.7. Full Example
+
+```datalog
+// Type definitions
+type Id: int(range(1, 1000000)).
+type Email: string(pattern("^[^@]+@[^@]+$")).
+
+type User: {
+    id: Id,
+    name: string,
+    email: Email
+}.
+
+// Relation schemas (typing only)
+rel user: User.
+rel purchase(user_id: Id, amount: int).
+
+// Base data
++user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
++purchase[(1, 1500), (1, 200), (2, 300)].
+
+// Materialized view (explicit DD)
+view high_spender(user_id: Id) :-
+    user(U),
+    purchase(U.id, Amount),
+    Amount > 1000.
+
+// Session rule (not materialized, just computed on query)
+rel temp(id: Id).
+temp(U.id) :- user(U), high_spender(U.id).
+
+// Query
+?- high_spender(X).
+```
+
+## 11.8. Migration Guide
+
+| Old Syntax | New Syntax |
+|------------|------------|
+| `r(X, Y) := body.` | `view r(x: type, y: type) :- body.` |
+| Multiple `:=` rules | Multiple `view r(...) :- ...` declarations |
+| No typing | Add `rel` declaration for type checking |
 
 ---
 
-**Summary of this section**
+**Key Takeaways:**
 
-* `:=` is removed from the language; examples must be rewritten to `rel + rule`.
-* A predicate in rule heads **without** a prior `rel` declaration is allowed, but:
-
-  * It defines a **query-only** derived relation.
-  * It is **not persisted/materialized**.
-* A predicate with a `rel` declaration **and** at least one rule head:
-
-  * Is a **persistent/materialized view**.
-  * Has semantics equivalent to the legacy `r(...) := Body`.
+* `:=` is **removed** from the language
+* `rel` = typing enforcement (schema declaration)
+* `view` = explicit DD materialization (replaces `:=`)
+* Rules `:-` without `view` = session rules (not persisted)
+* Combine `rel` + `view` for both typing and materialization
 
 

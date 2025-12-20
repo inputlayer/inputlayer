@@ -1,3 +1,5 @@
+Executing script: examples/datalog/16_vectors/04_manhattan_distance.dl
+
 > .db create test_vec_manhattan
 Database 'test_vec_manhattan' created.
 Switched to database: test_vec_manhattan
@@ -8,3 +10,16 @@ Inserted 4 facts into 'vectors'.
 > +query[([0.0, 0.0])].
 Inserted 1 fact into 'query'.
 > l1_dist(Id, Dist) :- vectors(Id, V), query(Q), Dist = manhattan(V, Q).
+No results for 'l1_dist'.
+(session: 1 rule(s))
+> ?- l1_dist(X, Y).
+4 rows:
+  (1, 0)
+  (2, 2)
+  (3, 4)
+  (4, 3)
+> .db use default
+Switched to database: default
+(Cleared 1 session rule(s))
+> .db drop test_vec_manhattan
+Database 'test_vec_manhattan' dropped.

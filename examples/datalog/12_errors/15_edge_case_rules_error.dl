@@ -1,0 +1,49 @@
+// Test: Edge Case Rule Patterns
+// Category: Errors
+// Verifies: Unusual but valid rule patterns
+
+.db create test_edge_rules
+.db use test_edge_rules
+
+// Rule with constant in head (ground fact via rule)
++trigger[(1)].
+view constant_fact(0: int, 1: int) :- trigger(_).
+?- constant_fact(X, Y).
+
+// Rule that produces duplicate results (should be deduplicated)
++source[(1, 100), (2, 100), (3, 100)].
+view extract_second(Y: int) :- source(_, Y).
+?- extract_second(X).
+
+// Expected: just (100) once, not three times
+
+// Rule with all variables bound by constants
++any_data[(1), (2), (3)].
+view always_true(0: int, 1: int) :- any_data(_).
+?- always_true(X, Y).
+
+// Rule with same variable appearing multiple times
++pairs[(1, 1), (2, 2), (3, 4), (5, 5)].
+view diagonal(X: int) :- pairs(X, X).
+?- diagonal(X).
+
+// Expected: 1, 2, 5 (where both columns are equal)
+
+// Rule with arithmetic producing same result
++nums[(1), (2), (3), (4)].
+view doubled(X: int, X*2: int) :- nums(X).
+view same_double(X: int, Y: int) :- doubled(X, D), doubled(Y, D), X != Y.
+?- same_double(X, Y).
+
+// Expected: empty (no two different numbers have same double)
+
+// Self-join pattern
++edges[(1, 2), (2, 3), (1, 3)].
+view triangle(A: int, B: int, C: int) :- edges(A, B), edges(B, C), edges(A, C), A < B, B < C.
+?- triangle(A, B, C).
+
+// Expected: (1, 2, 3) - a triangle exists
+
+// Cleanup
+.db use default
+.db drop test_edge_rules

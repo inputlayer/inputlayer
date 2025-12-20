@@ -9,9 +9,9 @@
 +edge[(1,2), (2,3)].
 
 // Define multiple views
-reverse(X, Y) := edge(Y, X).
-paths(X, Y) := edge(X, Y).
-paths(X, Z) := paths(X, Y), edge(Y, Z).
+view reverse(X: int, Y: int) :- edge(Y, X).
+view paths(X: int, Y: int) :- edge(X, Y).
+view paths(X: int, Z: int) :- paths(X, Y), edge(Y, Z).
 
 // List all views
 .view

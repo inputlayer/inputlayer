@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/07_filters/01_equality.dl
+
 > .db create test_eq
 Database 'test_eq' created.
 Switched to database: test_eq
@@ -6,7 +8,7 @@ Switched to database: test_eq
 Switched to database: test_eq
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
 Inserted 5 facts into 'edge'.
-> self_loop(X, Y) := edge(X, Y), X = Y.
+> view self_loop(X: int, Y: int) :- edge(X, Y), X = Y.
 View 'self_loop' registered.
 > ?- self_loop(X, Y).
 3 rows:
@@ -17,3 +19,4 @@ View 'self_loop' registered.
 Switched to database: default
 > .db drop test_eq
 Database 'test_eq' dropped.
+

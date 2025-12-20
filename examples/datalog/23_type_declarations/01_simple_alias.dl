@@ -1,0 +1,24 @@
+// Test: Simple Type Alias
+// Category: Type Declarations
+// Description: Tests basic type alias declarations
+
+.db create test_type_alias
+.db use test_type_alias
+
+// Declare simple type aliases
+type Email: string.
+type UserId: int.
+type Score: int.
+
+// Use types in a rel schema
+rel users(id: UserId, email: Email, score: Score).
+
+// Insert data
++users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)].
+
+// Query
+?- users(X, Y, Z).
+
+// Cleanup
+.db use default
+.db drop test_type_alias

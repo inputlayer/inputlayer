@@ -10,11 +10,11 @@
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 
 // Base case: direct edges are paths
-path(X, Y) := edge(X, Y).
+view path(X: int, Y: int) :- edge(X, Y).
 
 // Left recursion: recursive call appears FIRST in the body
 // This tests if the engine handles left recursion correctly
-path(X, Y) := path(X, Z), edge(Z, Y).
+view path(X: int, Y: int) :- path(X, Z), edge(Z, Y).
 
 // Query all paths
 ?- path(A, B).

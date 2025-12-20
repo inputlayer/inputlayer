@@ -1,0 +1,41 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/27_double_negation_equivalence.dl
+
+> .db create test_double_neg
+Database 'test_double_neg' created.
+Switched to database: test_double_neg
+> .db use test_double_neg
+Switched to database: test_double_neg
+> +items[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'items'.
+> +special[(2), (4)].
+Inserted 2 facts into 'special'.
+> view not_special(X: int) :- items(X), !special(X).
+View 'not_special' registered.
+> ?- not_special(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> view double_neg(X: int) :- items(X), !not_special(X).
+View 'double_neg' registered.
+> ?- double_neg(X).
+2 rows:
+  (2)
+  (4)
+> ?- special(X).
+2 rows:
+  (2)
+  (4)
+> view triple_neg(X: int) :- items(X), !double_neg(X).
+View 'triple_neg' registered.
+> ?- triple_neg(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> .db use default
+Switched to database: default
+> .db drop test_double_neg
+Database 'test_double_neg' dropped.
+

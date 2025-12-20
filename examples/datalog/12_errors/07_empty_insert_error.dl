@@ -1,0 +1,17 @@
+// Test: Empty Insert
+// Category: 12_errors
+// Description: Tests handling of empty insert statements
+
+.db create test_empty
+.db use test_empty
+
+// Empty bulk insert (invalid syntax - should error)
+// Note: The correct behavior is to reject empty bulk inserts
+// +empty[].  -- This is invalid syntax
+
+// Query the relation (should report undefined relation)
+?- empty(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_empty

@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/06_joins/05_chain_join.dl
+
 > .db create test_chain_join
 Database 'test_chain_join' created.
 Switched to database: test_chain_join
@@ -10,14 +12,14 @@ Inserted 3 facts into 'a_to_b'.
 Inserted 3 facts into 'b_to_c'.
 > +c_to_d[(100, 1000), (200, 2000), (300, 3000)].
 Inserted 3 facts into 'c_to_d'.
-> chain2(A, C) := a_to_b(A, B), b_to_c(B, C).
+> view chain2(A: int, C: int) :- a_to_b(A, B), b_to_c(B, C).
 View 'chain2' registered.
 > ?- chain2(X, Y).
 3 rows:
   (1, 100)
   (2, 200)
   (3, 300)
-> chain3(A, D) := a_to_b(A, B), b_to_c(B, C), c_to_d(C, D).
+> view chain3(A: int, D: int) :- a_to_b(A, B), b_to_c(B, C), c_to_d(C, D).
 View 'chain3' registered.
 > ?- chain3(X, Y).
 3 rows:
@@ -28,3 +30,4 @@ View 'chain3' registered.
 Switched to database: default
 > .db drop test_chain_join
 Database 'test_chain_join' dropped.
+

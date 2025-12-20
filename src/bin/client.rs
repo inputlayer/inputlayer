@@ -49,7 +49,7 @@
 //! - `result(X, Y) :- edge(X, Y), X < Y.` - Transient rule
 //! - `?- path(1, X).` - Query
 
-use datalog_engine::{
+use inputlayer::{
     statement::{parse_statement, DeletePattern, MetaCommand, Statement},
     value::{Tuple, Value},
     Config, StorageEngine,
@@ -188,7 +188,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If a script is provided, execute it
     if let Some(script_path) = &args.script {
-        println!("Executing script: {}", script_path);
+        // Always use portable relative path for reproducible CI/CD output
+        // Extract "examples/datalog/..." portion if present, otherwise show basename
+        let display_path = if let Some(pos) = script_path.find("examples/datalog/") {
+            script_path[pos..].to_string()
+        } else if let Some(pos) = script_path.find("examples/") {
+            script_path[pos..].to_string()
+        } else {
+            // Fallback to just the filename
+            std::path::Path::new(script_path)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| script_path.clone())
+        };
+        println!("Executing script: {}", display_path);
         println!();
 
         match execute_script(&mut state, script_path) {
@@ -202,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!();
             }
             Err(e) => {
-                eprintln!("Script error: {}", e);
+                println!("Script error: {}", e);
                 if !args.repl {
                     std::process::exit(1);
                 }
@@ -228,33 +241,107 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_repl(&mut state)
 }
 
+/// Strip inline comments (// ...) from a line, respecting string literals
+fn strip_inline_comment(line: &str) -> &str {
+    let mut in_string = false;
+    let mut escape_next = false;
+    let bytes = line.as_bytes();
+
+    for i in 0..bytes.len() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        let c = bytes[i] as char;
+
+        if c == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+
+        if c == '"' {
+            in_string = !in_string;
+            continue;
+        }
+
+        // Check for // outside of string
+        if !in_string && c == '/' && i + 1 < bytes.len() && bytes[i + 1] as char == '/' {
+            return line[..i].trim_end();
+        }
+    }
+
+    line
+}
+
+/// Check if a line looks like a complete statement (ends with . or is a meta command)
+fn is_complete_statement(line: &str) -> bool {
+    let stripped = strip_inline_comment(line).trim();
+    if stripped.is_empty() {
+        return false;
+    }
+    // Meta commands are complete on one line
+    if stripped.starts_with('.') {
+        return true;
+    }
+    // Regular statements end with .
+    stripped.ends_with('.')
+}
+
 /// Execute a Datalog script file
 fn execute_script(state: &mut ReplState, path: &str) -> Result<(), String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read script '{}': {}", path, e))?;
 
+    let mut accumulated_line = String::new();
+    let mut start_line_num = 0;
+
     for (line_num, line) in content.lines().enumerate() {
         let line = line.trim();
 
-        // Skip empty lines and comments
+        // Skip empty lines and full-line comments
         if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
             continue;
         }
 
-        // Echo the line being executed
-        println!("> {}", line);
+        // Strip inline comment for processing
+        let stripped = strip_inline_comment(line);
 
-        // Parse and execute
-        match parse_statement(line) {
-            Ok(stmt) => {
-                if let Err(e) = handle_statement(state, stmt) {
-                    return Err(format!("Line {}: {}", line_num + 1, e));
+        // If we're starting a new statement, record the line number
+        if accumulated_line.is_empty() {
+            start_line_num = line_num + 1;
+            accumulated_line = stripped.to_string();
+        } else {
+            // Continuation of a multi-line statement
+            accumulated_line.push(' ');
+            accumulated_line.push_str(stripped.trim());
+        }
+
+        // Check if statement is complete
+        if is_complete_statement(&accumulated_line) {
+            // Echo the accumulated statement
+            println!("> {}", accumulated_line);
+
+            // Parse and execute
+            match parse_statement(&accumulated_line) {
+                Ok(stmt) => {
+                    if let Err(e) = handle_statement(state, stmt) {
+                        return Err(format!("Line {}: {}", start_line_num, e));
+                    }
+                }
+                Err(e) => {
+                    return Err(format!("Line {}: Parse error: {}", start_line_num, e));
                 }
             }
-            Err(e) => {
-                return Err(format!("Line {}: Parse error: {}", line_num + 1, e));
-            }
+
+            // Reset for next statement
+            accumulated_line.clear();
         }
+    }
+
+    // Handle any remaining incomplete statement
+    if !accumulated_line.is_empty() {
+        return Err(format!("Line {}: Incomplete statement (missing '.')", start_line_num));
     }
 
     Ok(())
@@ -342,25 +429,51 @@ fn handle_statement(state: &mut ReplState, stmt: Statement) -> Result<(), String
         Statement::Insert(op) => handle_insert(state, op),
         Statement::Delete(op) => handle_delete(state, op),
         Statement::Update(op) => handle_update(state, op),
-        Statement::View(def) => handle_view(state, def),
-        Statement::TransientRule(rule) => handle_transient_rule(state, rule),
+        Statement::TypeDecl(decl) => handle_type_decl(state, decl),
+        Statement::RelDecl(decl) => handle_rel_decl(state, decl),
+        Statement::ViewDecl(decl) => handle_view_decl(state, decl),
+        Statement::SessionRule(rule) => handle_session_rule(state, rule),
+        Statement::Fact(rule) => handle_fact(state, rule),
         Statement::Query(goal) => handle_query(state, goal),
-        Statement::SchemaDef(schema) => handle_schema_def(state, schema),
-        Statement::TypeAliasDef(alias) => handle_type_alias_def(state, alias),
     }
 }
 
-fn handle_schema_def(state: &mut ReplState, schema: datalog_engine::RelationSchema) -> Result<(), String> {
-    // TODO: Register schema in catalog once storage engine integration is complete
-    println!("Schema registered: {}", schema.name);
-    println!("{}", schema);
+fn handle_type_decl(_state: &mut ReplState, decl: inputlayer::statement::TypeDecl) -> Result<(), String> {
+    // TODO: Register type in catalog/type registry
+    println!("Type '{}' declared.", decl.name);
     Ok(())
 }
 
-fn handle_type_alias_def(_state: &mut ReplState, alias: datalog_engine::TypeAlias) -> Result<(), String> {
-    // TODO: Register type alias in catalog once storage engine integration is complete
-    println!("Type alias registered: {}", alias);
+fn handle_rel_decl(_state: &mut ReplState, decl: inputlayer::statement::RelationDecl) -> Result<(), String> {
+    // TODO: Register relation schema in catalog
+    let col_str = decl.columns.iter()
+        .map(|c| format!("{}: {:?}", c.name, c.col_type))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("Relation '{}' schema declared: ({})", decl.name, col_str);
     Ok(())
+}
+
+fn handle_view_decl(state: &mut ReplState, decl: inputlayer::statement::ViewDecl) -> Result<(), String> {
+    // Convert ViewDecl to legacy ViewDef for existing handling
+    let view_def = inputlayer::statement::ViewDef {
+        name: decl.name.clone(),
+        rule: decl.rule.clone(),
+    };
+    handle_view(state, view_def)
+}
+
+fn handle_session_rule(state: &mut ReplState, rule: datalog_ast::Rule) -> Result<(), String> {
+    // Session rules are added as transient rules (not materialized)
+    handle_transient_rule(state, rule)
+}
+
+fn handle_fact(state: &mut ReplState, rule: datalog_ast::Rule) -> Result<(), String> {
+    // Facts are rules with empty body
+    // Convert to insert operation
+    let head = &rule.head;
+    // TODO: For now, treat facts as transient rules
+    handle_transient_rule(state, rule)
 }
 
 fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), String> {
@@ -504,21 +617,21 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
         }
 
         MetaCommand::ViewEdit { name, index, rule_text } => {
-            // Parse the rule text as a view definition
-            // The rule_text should be like: connected(X, Z) := edge(X, Y), connected(Y, Z).
-            use datalog_engine::statement::{parse_statement, Statement, SerializableRule};
+            // Parse the rule text as a view declaration
+            // The rule_text should be like: view connected(x: int, y: int) :- edge(x, y), connected(y, z).
+            use inputlayer::statement::{parse_statement, Statement};
 
             match parse_statement(&rule_text) {
-                Ok(Statement::View(view_def)) => {
+                Ok(Statement::ViewDecl(view_decl)) => {
                     // Verify the view name matches
-                    if view_def.name != name {
+                    if view_decl.name != name {
                         return Err(format!(
-                            "Rule head '{}' doesn't match view name '{}'. Use: {} := ...",
-                            view_def.name, name, name
+                            "Rule head '{}' doesn't match view name '{}'. Use: view {} :- ...",
+                            view_decl.name, name, name
                         ));
                     }
 
-                    state.storage.replace_view_rule(&name, index, view_def.rule)
+                    state.storage.replace_view_rule(&name, index, view_decl.rule)
                         .map_err(|e| format!("{}", e))?;
                     println!("Rule {} of view '{}' replaced.", index + 1, name);
 
@@ -529,7 +642,7 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
                     }
                 }
                 Ok(_) => {
-                    return Err("Invalid rule syntax. Use: viewname(X, Y) := body.".to_string());
+                    return Err("Invalid rule syntax. Use: view name(col: type) :- body.".to_string());
                 }
                 Err(e) => {
                     return Err(format!("Failed to parse rule: {}", e));
@@ -609,7 +722,7 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
 
 fn handle_insert(
     state: &mut ReplState,
-    op: datalog_engine::statement::InsertOp,
+    op: inputlayer::statement::InsertOp,
 ) -> Result<(), String> {
     // Check if any tuple needs the production API (vectors, strings, floats)
     let needs_production_api = op.tuples.iter().any(|t| tuple_needs_production_api(t));
@@ -692,7 +805,7 @@ fn print_insert_result(new_count: usize, dup_count: usize, relation: &str) {
 
 fn handle_delete(
     state: &mut ReplState,
-    op: datalog_engine::statement::DeleteOp,
+    op: inputlayer::statement::DeleteOp,
 ) -> Result<(), String> {
     match op.pattern {
         DeletePattern::SingleTuple(terms) => {
@@ -738,7 +851,7 @@ fn handle_delete(
 
 fn handle_update(
     state: &mut ReplState,
-    op: datalog_engine::statement::UpdateOp,
+    op: inputlayer::statement::UpdateOp,
 ) -> Result<(), String> {
     // Build query to find matching tuples
     let body_str = format_body(&op.body, &op.constraints);
@@ -823,9 +936,9 @@ fn handle_update(
 
 fn handle_view(
     state: &mut ReplState,
-    def: datalog_engine::statement::ViewDef,
+    def: inputlayer::statement::ViewDef,
 ) -> Result<(), String> {
-    use datalog_engine::view_catalog::ViewRegisterResult;
+    use inputlayer::view_catalog::ViewRegisterResult;
 
     let result = state.storage.register_view(&def)
         .map_err(|e| format!("{}", e))?;
@@ -894,7 +1007,7 @@ fn build_session_program(session_rules: &[Rule], query_relation: &str) -> String
 
 fn handle_query(
     state: &mut ReplState,
-    goal: datalog_engine::statement::QueryGoal,
+    goal: inputlayer::statement::QueryGoal,
 ) -> Result<(), String> {
     // Transform query: replace constants with temp variables, add equality constraints
     // This avoids "Constants in rule head not yet supported" error
@@ -1078,6 +1191,16 @@ fn format_term(term: &Term) -> String {
         Term::VectorLiteral(vals) => {
             let formatted: Vec<String> = vals.iter().map(|v| v.to_string()).collect();
             format!("[{}]", formatted.join(", "))
+        }
+        Term::FieldAccess(base, field) => {
+            format!("{}.{}", format_term(base), field)
+        }
+        Term::RecordPattern(fields) => {
+            let formatted: Vec<String> = fields
+                .iter()
+                .map(|(name, term)| format!("{}: {}", name, format_term(term)))
+                .collect();
+            format!("{{ {} }}", formatted.join(", "))
         }
     }
 }

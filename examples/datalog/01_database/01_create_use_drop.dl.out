@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/01_database/01_create_use_drop.dl
+
 > .db create test_db
 Database 'test_db' created.
 Switched to database: test_db
@@ -22,3 +24,4 @@ Database 'test_db' dropped.
 > .db list
 Databases:
   default *
+

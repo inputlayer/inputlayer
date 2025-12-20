@@ -19,14 +19,14 @@
 // N is one_mod if N-1 is zero_mod (1,4,7,10)
 // N is two_mod if N-1 is one_mod (2,5,8,11)
 
-zero_mod(N) := base_zero(N).
-zero_mod(N) := succ(M, N), two_mod(M).
+view zero_mod(N: int) :- base_zero(N).
+view zero_mod(N: int) :- succ(M, N), two_mod(M).
 
-one_mod(N) := base_one(N).
-one_mod(N) := succ(M, N), zero_mod(M).
+view one_mod(N: int) :- base_one(N).
+view one_mod(N: int) :- succ(M, N), zero_mod(M).
 
-two_mod(N) := base_two(N).
-two_mod(N) := succ(M, N), one_mod(M).
+view two_mod(N: int) :- base_two(N).
+view two_mod(N: int) :- succ(M, N), one_mod(M).
 
 // Query each class
 ?- zero_mod(X).

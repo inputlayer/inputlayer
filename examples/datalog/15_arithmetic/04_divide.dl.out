@@ -1,4 +1,5 @@
-Executing script: examples/datalog/15_arithmetic/04_divide.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/04_divide.dl
 
 > .db create test_arith_div
 Database 'test_arith_div' created.
@@ -20,3 +21,4 @@ Switched to database: default
 (Cleared 1 session rule(s))
 > .db drop test_arith_div
 Database 'test_arith_div' dropped.
+

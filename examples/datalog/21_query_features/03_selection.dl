@@ -9,24 +9,24 @@
 +products[(1, 100, 10), (2, 200, 5), (3, 150, 15), (4, 300, 8), (5, 50, 20)].
 
 // Select by price threshold
-expensive(Id, P, Q) := products(Id, P, Q), P > 100.
+view expensive(Id: int, P: int, Q: int) :- products(Id, P, Q), P > 100.
 ?- expensive(X, Y, Z).
 
 // Select by quantity threshold
-low_stock(Id, P, Q) := products(Id, P, Q), Q < 10.
+view low_stock(Id: int, P: int, Q: int) :- products(Id, P, Q), Q < 10.
 ?- low_stock(X, Y, Z).
 
 // Combined conditions (AND)
-expensive_low_stock(Id) := products(Id, P, Q), P > 100, Q < 10.
+view expensive_low_stock(Id: int) :- products(Id, P, Q), P > 100, Q < 10.
 ?- expensive_low_stock(X).
 
 // Multiple price ranges
-mid_price(Id, P) := products(Id, P, _), P >= 100, P <= 200.
+view mid_price(Id: int, P: int) :- products(Id, P, _), P >= 100, P <= 200.
 ?- mid_price(X, Y).
 
 // Exact match via constant
 +categories[(1, 100), (2, 200), (3, 100)].
-category_100(Id) := categories(Id, 100).
+view category_100(Id: int) :- categories(Id, 100).
 ?- category_100(X).
 
 // Cleanup

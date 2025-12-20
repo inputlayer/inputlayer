@@ -9,28 +9,28 @@ Switched to database: test_influence
 Inserted 8 facts into 'follows'.
 > +influencer[(1)].
 Inserted 1 fact into 'influencer'.
-> influenced(X) := influencer(X).
+> view influenced(X: int) :- influencer(X).
 View 'influenced' registered.
-> influenced(Y) := influenced(X), follows(Y, X).
+> view influenced(Y: int) :- influenced(X), follows(Y, X).
 Rule added to view 'influenced' (2 rules total).
 > ?- influenced(U).
 1 rows:
   (1)
-> influence_reach(count<U>) := influenced(U).
+> view influence_reach(count<U>: int) :- influenced(U).
 View 'influence_reach' registered.
 > ?- influence_reach(C).
 1 rows:
   (1)
-> influence_dist(X, 0) := influencer(X).
+> view influence_dist(X: int, 0: int) :- influencer(X).
 View 'influence_dist' registered.
-> influence_dist(Y, D+1) := influence_dist(X, D), follows(Y, X), D < 10.
+> view influence_dist(Y: int, D+1: int) :- influence_dist(X, D), follows(Y, X), D < 10.
 Rule added to view 'influence_dist' (2 rules total).
-> min_dist(User, min<D>) := influence_dist(User, D).
+> view min_dist(User: int, min<D>: int) :- influence_dist(User, D).
 View 'min_dist' registered.
 > ?- min_dist(U, D).
 1 rows:
   (1, 0)
-> at_distance(D, count<U>) := min_dist(U, D).
+> view at_distance(D: int, count<U>: int) :- min_dist(U, D).
 View 'at_distance' registered.
 > ?- at_distance(D, C).
 1 rows:

@@ -1,0 +1,50 @@
+
+Executing script: examples/datalog/12_errors/13_very_long_rules.dl
+
+> .db create test_long_rules
+Database 'test_long_rules' created.
+Switched to database: test_long_rules
+> .db use test_long_rules
+Switched to database: test_long_rules
+> +r1[(1, 2), (2, 3)].
+Inserted 2 facts into 'r1'.
+> +r2[(2, 20), (3, 30)].
+Inserted 2 facts into 'r2'.
+> +r3[(20, 200), (30, 300)].
+Inserted 2 facts into 'r3'.
+> +r4[(200, 2000), (300, 3000)].
+Inserted 2 facts into 'r4'.
+> +r5[(2000, "a"), (3000, "b")].
+Inserted 2 facts into 'r5'.
+> view join5(A: int, E: int) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E).
+View 'join5' registered.
+> ?- join5(A, E).
+2 rows:
+  (1, 2000)
+  (2, 3000)
+> +data[(1, 10, 100), (2, 20, 200), (3, 30, 300), (1, 11, 110)].
+Inserted 4 facts into 'data'.
+> view multi_cond(X: int) :- data(X, Y, Z), Y > 5, Z > 50, Y < 25, Z < 250.
+View 'multi_cond' registered.
+> ?- multi_cond(X).
+2 rows:
+  (1)
+  (2)
+> view complex_rule(A: int, E: int) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E), A > 0, B > 1, C > 10, D > 100, E > 1000.
+View 'complex_rule' registered.
+> ?- complex_rule(A, E).
+2 rows:
+  (1, 2000)
+  (2, 3000)
+> +chain[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)].
+Inserted 7 facts into 'chain'.
+> view path8(A: int, H: int) :- chain(A, B), chain(B, C), chain(C, D), chain(D, E), chain(E, F), chain(F, G), chain(G, H).
+View 'path8' registered.
+> ?- path8(A, H).
+1 rows:
+  (1, 8)
+> .db use default
+Switched to database: default
+> .db drop test_long_rules
+Database 'test_long_rules' dropped.
+

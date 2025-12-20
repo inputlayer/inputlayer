@@ -1,0 +1,37 @@
+
+Executing script: examples/datalog/10_edge_cases/12_view_evaluates_empty.dl
+
+> .db create test_view_empty
+Database 'test_view_empty' created.
+Switched to database: test_view_empty
+> .db use test_view_empty
+Switched to database: test_view_empty
+> +numbers[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'numbers'.
+> view impossible(X: int) :- numbers(X), X > 100.
+View 'impossible' registered.
+> ?- impossible(X).
+No results.
+> view uses_impossible(X: int) :- impossible(X).
+View 'uses_impossible' registered.
+> ?- uses_impossible(X).
+No results.
+> view contradictory(X: int) :- numbers(X), X > 3, X < 2.
+View 'contradictory' registered.
+> ?- contradictory(X).
+No results.
+> view threshold(X: int) :- numbers(X), X > 10.
+View 'threshold' registered.
+> ?- threshold(X).
+No results.
+> +numbers[(15), (20)].
+Inserted 2 facts into 'numbers'.
+> ?- threshold(X).
+2 rows:
+  (15)
+  (20)
+> .db use default
+Switched to database: default
+> .db drop test_view_empty
+Database 'test_view_empty' dropped.
+

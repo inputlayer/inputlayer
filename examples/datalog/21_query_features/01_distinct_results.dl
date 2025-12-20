@@ -9,8 +9,8 @@
 +edge[(1, 2), (2, 3), (1, 3), (3, 2)].
 
 // Multiple paths to same node - results should be distinct
-reachable(X, Y) := edge(X, Y).
-reachable(X, Z) := edge(X, Y), reachable(Y, Z).
+view reachable(X: int, Y: int) :- edge(X, Y).
+view reachable(X: int, Z: int) :- edge(X, Y), reachable(Y, Z).
 
 // Query reachability from node 1
 ?- reachable(1, Y).
@@ -18,7 +18,7 @@ reachable(X, Z) := edge(X, Y), reachable(Y, Z).
 
 // Another deduplication test
 +data[(1, 10), (2, 10), (3, 10), (4, 20)].
-distinct_vals(V) := data(_, V).
+view distinct_vals(V: int) :- data(_, V).
 ?- distinct_vals(V).
 // Should show 10 once, 20 once
 

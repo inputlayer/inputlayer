@@ -1,4 +1,5 @@
-Executing script: examples/datalog/11_types/09_zero_handling.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/09_zero_handling.dl
 
 > .db create test_zero
 Database 'test_zero' created.
@@ -7,19 +8,19 @@ Switched to database: test_zero
 Switched to database: test_zero
 > +data[(1, 0), (2, 10), (3, 0), (4, 20)].
 Inserted 4 facts into 'data'.
-> zeros(Id) := data(Id, 0).
+> view zeros(Id: int) :- data(Id, 0).
 View 'zeros' registered.
 > ?- zeros(X).
 2 rows:
   (1)
   (3)
-> nonzeros(Id, V) := data(Id, V), V > 0.
+> view nonzeros(Id: int, V: int) :- data(Id, V), V > 0.
 View 'nonzeros' registered.
 > ?- nonzeros(X, Y).
 2 rows:
   (2, 10)
   (4, 20)
-> plus_zero(Id, V+0) := data(Id, V).
+> view plus_zero(Id: int, V+0: int) :- data(Id, V).
 View 'plus_zero' registered.
 > ?- plus_zero(X, Y).
 4 rows:
@@ -27,7 +28,7 @@ View 'plus_zero' registered.
   (2, 10)
   (3, 0)
   (4, 20)
-> times_zero(Id, V*0) := data(Id, V).
+> view times_zero(Id: int, V*0: int) :- data(Id, V).
 View 'times_zero' registered.
 > ?- times_zero(X, Y).
 4 rows:
@@ -35,19 +36,19 @@ View 'times_zero' registered.
   (2, 0)
   (3, 0)
   (4, 0)
-> sum_with_zeros(sum<V>) := data(_, V).
+> view sum_with_zeros(sum<V>: int) :- data(_, V).
 View 'sum_with_zeros' registered.
 > ?- sum_with_zeros(S).
 1 rows:
   (30)
-> count_with_zeros(count<Id>) := data(Id, _).
+> view count_with_zeros(count<Id>: int) :- data(Id, _).
 View 'count_with_zeros' registered.
 > ?- count_with_zeros(C).
 1 rows:
   (4)
 > +safe_div[(10, 2), (20, 5), (0, 1)].
 Inserted 3 facts into 'safe_div'.
-> div_result(N, D, N/D) := safe_div(N, D).
+> view div_result(N: int, D: int, N/D: int) :- safe_div(N, D).
 View 'div_result' registered.
 > ?- div_result(X, Y, Z).
 3 rows:
@@ -58,3 +59,4 @@ View 'div_result' registered.
 Switched to database: default
 > .db drop test_zero
 Database 'test_zero' dropped.
+

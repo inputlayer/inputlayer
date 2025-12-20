@@ -5,4 +5,49 @@ Database 'test_rbac' created.
 Switched to database: test_rbac
 > .db use test_rbac
 Switched to database: test_rbac
-> +role_inherits[(1, 2), (2, 3), (3, 4)].  // admin(1) < manager(2) < employee(3) < guest(4)
+> +role_inherits[(1, 2), (2, 3), (3, 4)].
+Inserted 3 facts into 'role_inherits'.
+> +user_role[(100, 1), (101, 2), (102, 3), (103, 4)].
+Inserted 4 facts into 'user_role'.
+> +role_permission[(1, 1000), (1, 1001), (2, 1002), (2, 1003), (3, 1004), (3, 1005), (4, 1006)].
+Inserted 7 facts into 'role_permission'.
+> view has_role(User: int, Role: int) :- user_role(User, Role).
+View 'has_role' registered.
+> view has_role(User: int, ParentRole: int) :- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
+Rule added to view 'has_role' (2 rules total).
+> view has_permission(User: int, Perm: int) :- has_role(User, Role), role_permission(Role, Perm).
+View 'has_permission' registered.
+> ?- has_role(User, Role).
+10 rows:
+  (100, 1)
+  (100, 2)
+  (100, 3)
+  (100, 4)
+  (101, 2)
+  (101, 3)
+  (101, 4)
+  (102, 3)
+  (102, 4)
+  (103, 4)
+> view admin_perms(Perm: int) :- has_permission(100, Perm).
+View 'admin_perms' registered.
+> ?- admin_perms(P).
+7 rows:
+  (1000)
+  (1001)
+  (1002)
+  (1003)
+  (1004)
+  (1005)
+  (1006)
+> view employee_perms(Perm: int) :- has_permission(102, Perm).
+View 'employee_perms' registered.
+> ?- employee_perms(P).
+3 rows:
+  (1004)
+  (1005)
+  (1006)
+> .db use default
+Switched to database: default
+> .db drop test_rbac
+Database 'test_rbac' dropped.

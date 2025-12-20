@@ -12,14 +12,14 @@
 +premium[(1, 0), (3, 0)].
 
 // View A: active users (not banned)
-active_user(X, Y) := all_users(X, Y), !banned(X, _).
+view active_user(X: int, Y: int) :- all_users(X, Y), !banned(X, _).
 
 // Query active users
 ?- active_user(X, Y).
 // Expected: (1, 0), (3, 0), (4, 0), (5, 0)
 
 // View B: active non-premium users (depends on View A)
-basic_user(X, Y) := active_user(X, Y), !premium(X, _).
+view basic_user(X: int, Y: int) :- active_user(X, Y), !premium(X, _).
 
 // Query basic users
 ?- basic_user(X, Y).

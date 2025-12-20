@@ -9,7 +9,7 @@
 +edge[(1,2), (2,3), (3,4)].
 
 // Define a simple view (reverse edges)
-reverse(X, Y) := edge(Y, X).
+view reverse(X: int, Y: int) :- edge(Y, X).
 
 // List views
 .view

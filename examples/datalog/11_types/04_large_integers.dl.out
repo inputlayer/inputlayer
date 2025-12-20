@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/04_large_integers.dl
+
 > .db create test_large_int
 Database 'test_large_int' created.
 Switched to database: test_large_int
@@ -22,6 +24,8 @@ Inserted 2 facts into 'mixed'.
 2 rows:
   (-999999, 999999)
   (1000000, -1000000)
-> sum_large(X, Y) := large_pos(X, Y), X + Y > 2500000.
+> view sum_large(X: int, Y: int) :- large_pos(X, Y), X + Y > 2500000.
 View 'sum_large' registered.
 > ?- sum_large(X, Y).
+Script error: Line 24: Query execution failed: Unsupported ordering constraint pattern
+

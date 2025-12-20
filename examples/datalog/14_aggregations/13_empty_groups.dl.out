@@ -1,4 +1,5 @@
-Executing script: examples/datalog/14_aggregations/13_empty_groups.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/13_empty_groups.dl
 
 > .db create test_empty_agg
 Database 'test_empty_agg' created.
@@ -7,4 +8,50 @@ Switched to database: test_empty_agg
 Switched to database: test_empty_agg
 > +data[(1, 10), (2, 20), (3, 30)].
 Inserted 3 facts into 'data'.
-> +empty[].
+> view normal_count(count<X>: int) :- data(X, _).
+View 'normal_count' registered.
+> ?- normal_count(C).
+1 rows:
+  (3)
+> view normal_sum(sum<V>: int) :- data(_, V).
+View 'normal_sum' registered.
+> ?- normal_sum(S).
+1 rows:
+  (60)
+> view empty_count(count<X>: int) :- empty(X, _).
+View 'empty_count' registered.
+> ?- empty_count(C).
+No results.
+> view filtered(X: int, V: int) :- data(X, V), V > 100.
+View 'filtered' registered.
+> view filtered_count(count<X>: int) :- filtered(X, _).
+View 'filtered_count' registered.
+> ?- filtered(X, V).
+No results.
+> ?- filtered_count(C).
+No results.
+> view group_empty(K: int, count<V>: int) :- empty(K, V).
+View 'group_empty' registered.
+> ?- group_empty(K, C).
+No results.
+> view empty_min(min<X>: int) :- empty(X, _).
+View 'empty_min' registered.
+> view empty_max(max<X>: int) :- empty(X, _).
+View 'empty_max' registered.
+> ?- empty_min(M).
+No results.
+> ?- empty_max(M).
+No results.
+> +mixed[(1, 10), (1, 20), (3, 30)].
+Inserted 3 facts into 'mixed'.
+> view mixed_count(K: int, count<V>: int) :- mixed(K, V).
+View 'mixed_count' registered.
+> ?- mixed_count(K, C).
+2 rows:
+  (1, 2)
+  (3, 1)
+> .db use default
+Switched to database: default
+> .db drop test_empty_agg
+Database 'test_empty_agg' dropped.
+

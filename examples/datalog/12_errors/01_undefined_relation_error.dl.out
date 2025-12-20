@@ -1,0 +1,15 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/01_undefined_relation.dl
+
+> .db create test_err
+Database 'test_err' created.
+Switched to database: test_err
+> .db use test_err
+Switched to database: test_err
+> ?- nonexistent(X, Y).
+No results.
+> .db use default
+Switched to database: default
+> .db drop test_err
+Database 'test_err' dropped.
+

@@ -3,7 +3,7 @@
 //! Integration tests that verify the core functionality demonstrated in the examples.
 //! These tests ensure the examples work correctly as part of the test suite.
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 use std::collections::HashSet;
 
 fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {

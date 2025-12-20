@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/06_joins/03_triangle.dl
+
 > .db create test_tri
 Database 'test_tri' created.
 Switched to database: test_tri
@@ -8,7 +10,7 @@ Switched to database: test_tri
 Inserted 3 facts into 'edge'.
 > +edge[(4,5), (5,6)].
 Inserted 2 facts into 'edge'.
-> triangle(A, B, C) := edge(A, B), edge(B, C), edge(C, A).
+> view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A).
 View 'triangle' registered.
 > ?- triangle(X, Y, Z).
 3 rows:
@@ -19,3 +21,4 @@ View 'triangle' registered.
 Switched to database: default
 > .db drop test_tri
 Database 'test_tri' dropped.
+

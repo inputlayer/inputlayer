@@ -7,4 +7,41 @@ Switched to database: test_rbac_deny
 Switched to database: test_rbac_deny
 > +user_role[(1, 100), (2, 100), (3, 101), (4, 102)].
 Inserted 4 facts into 'user_role'.
-> +role_allow[(100, 1), (100, 2), (100, 3),   // role 100: perms 1,2,3
+> +role_allow[(100, 1), (100, 2), (100, 3), (101, 1), (101, 2), (102, 1)].
+Inserted 6 facts into 'role_allow'.
+> +user_deny[(2, 3), (3, 2)].
+Inserted 2 facts into 'user_deny'.
+> view base_permission(User: int, Perm: int) :- user_role(User, Role), role_allow(Role, Perm).
+View 'base_permission' registered.
+> view effective_permission(User: int, Perm: int) :- base_permission(User, Perm), !user_deny(User, Perm).
+View 'effective_permission' registered.
+> ?- base_permission(U, P).
+9 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+  (2, 1)
+  (2, 2)
+  (2, 3)
+  (3, 1)
+  (3, 2)
+  (4, 1)
+> ?- effective_permission(U, P).
+7 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+  (2, 1)
+  (2, 2)
+  (3, 1)
+  (4, 1)
+> view denied(User: int, Perm: int) :- base_permission(User, Perm), user_deny(User, Perm).
+View 'denied' registered.
+> ?- denied(U, P).
+2 rows:
+  (2, 3)
+  (3, 2)
+> .db use default
+Switched to database: default
+> .db drop test_rbac_deny
+Database 'test_rbac_deny' dropped.

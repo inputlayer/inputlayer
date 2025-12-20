@@ -1,3 +1,5 @@
+Executing script: examples/datalog/16_vectors/03_dot_product.dl
+
 > .db create test_vec_dot
 Database 'test_vec_dot' created.
 Switched to database: test_vec_dot
@@ -8,3 +10,15 @@ Inserted 3 facts into 'vectors'.
 > +query[([1.0, 1.0, 1.0])].
 Inserted 1 fact into 'query'.
 > dot_result(Id, Score) :- vectors(Id, V), query(Q), Score = dot(V, Q).
+No results for 'dot_result'.
+(session: 1 rule(s))
+> ?- dot_result(X, Y).
+3 rows:
+  (1, 6)
+  (2, 3)
+  (3, 3)
+> .db use default
+Switched to database: default
+(Cleared 1 session rule(s))
+> .db drop test_vec_dot
+Database 'test_vec_dot' dropped.

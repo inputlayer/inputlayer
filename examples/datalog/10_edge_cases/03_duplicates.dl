@@ -14,7 +14,7 @@
 ?- edge(X, Y).
 
 // Join that could produce duplicates
-path(X, Z) := edge(X, Y), edge(Y, Z).
+view path(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
 ?- path(X, Y).
 
 // Cleanup

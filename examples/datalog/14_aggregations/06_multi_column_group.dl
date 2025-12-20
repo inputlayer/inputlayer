@@ -9,7 +9,7 @@
 +order[(1, 10, 5), (1, 10, 3), (1, 20, 7), (2, 10, 2), (2, 20, 4), (2, 20, 6)].
 
 // Sum quantity per region and product
-order_total(Region, Product, sum<Qty>) := order(Region, Product, Qty).
+view order_total(Region: int, Product: int, sum<Qty>: int) :- order(Region, Product, Qty).
 
 // Query the result
 ?- order_total(X, Y, Z).

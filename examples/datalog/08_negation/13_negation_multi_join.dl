@@ -12,7 +12,7 @@
 
 // Join employee with department, excluding those on leave
 // emp_id -> dept_id -> manager_id, filtered by leave status
-active_emp_manager(EmpId, MgrId) := employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
+view active_emp_manager(EmpId: int, MgrId: int) :- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
 ?- active_emp_manager(X, Y).
 
 // Should return: (1, 100), (3, 200), (5, 300)

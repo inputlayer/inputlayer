@@ -16,7 +16,7 @@
 ?- negfloat(X, Y).
 
 // Filter on truncated values
-large(X, Y) := values(X, Y), X > 2.
+view large(X: int, Y: int) :- values(X, Y), X > 2.
 ?- large(X, Y).
 
 // Cleanup

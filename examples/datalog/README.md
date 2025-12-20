@@ -1,8 +1,199 @@
-# Datalog Examples - Organized by Dataset
+# Datalog Examples and Snapshot Tests
 
 **Location**: `course/final-project/examples/datalog/`
+**Last Updated**: 2025-12-19
+
+---
+
+## Snapshot Tests
+
+This directory contains 186 snapshot tests for the InputLayer Datalog engine. Each `.dl` file is a test script, and each `.dl.out` file contains the expected output.
+
+### Running Tests
+
+```bash
+# Run all tests
+./scripts/run_snapshot_tests.sh
+
+# Run with verbose output (shows diffs on failures)
+./scripts/run_snapshot_tests.sh -v
+
+# Filter tests by pattern
+./scripts/run_snapshot_tests.sh -f recursion
+./scripts/run_snapshot_tests.sh -f "20_applications"
+
+# Regenerate snapshots (use after verifying output is correct)
+./scripts/run_snapshot_tests.sh --update
+./scripts/run_snapshot_tests.sh --update -f "specific_test"
+```
+
+### Test Categories
+
+| Directory | Description | Tests |
+|-----------|-------------|-------|
+| `01_database/` | Database create, use, drop commands | 1 |
+| `02_relations/` | Insert and delete operations | 6 |
+| `03_views/` | Basic view definitions | 1 |
+| `04_session/` | Session-scoped rules | 1 |
+| `05_queries/` | Query execution | 1 |
+| `06_joins/` | Two-way, self, and multi-way joins | 5 |
+| `07_filters/` | Equality, inequality, comparisons | 4 |
+| `08_negation/` | Negation patterns | 27 |
+| `09_recursion/` | Transitive closure, mutual recursion | 16 |
+| `10_edge_cases/` | Empty relations, duplicates, self-loops | 12 |
+| `11_types/` | Strings, integers, floats, mixed types | 10 |
+| `12_errors/` | Error handling and edge cases | 15 |
+| `13_performance/` | Stress tests with larger datasets | 11 |
+| `14_aggregations/` | count, sum, min, max, avg | 16 |
+| `15_arithmetic/` | Arithmetic in rule heads | 17 |
+| `16_vectors/` | Vector distance functions | 5 |
+| `17_view_commands/` | View list, describe, drop, def | 4 |
+| `18_advanced_patterns/` | Graph algorithms, complex patterns | 12 |
+| `19_self_checking/` | Tests with embedded assertions | 4 |
+| `20_applications/` | Real-world use cases (RBAC, graphs) | 10 |
+| `21_query_features/` | Distinct, projection, selection | 5 |
+| `22_set_operations/` | Union, intersection, difference | 4 |
+| `23_type_declarations/` | Type aliases and record types | 3 |
+| `24_rel_schemas/` | Relation schema declarations | 3 |
+
+### Syntax Reference
+
+#### View Definitions (Required Typed Syntax)
+
+```datalog
+// Basic view with typed columns
+view reachable(X: int, Y: int) :- edge(X, Y).
+
+// Recursive view
+view reachable(X: int, Y: int) :- edge(X, Z), reachable(Z, Y).
+
+// Multi-rule view (adds to existing view)
+view symmetric_edge(A: int, B: int) :- edge(A, B).
+view symmetric_edge(A: int, B: int) :- edge(B, A).
+
+// Aggregation view
+view total_sales(Dept: int, sum<Amount>: int) :- sales(Dept, Amount).
+
+// Arithmetic in head
+view doubled(X: int, X*2: int) :- nums(X).
+
+// Constants in head
+view constant_fact(0: int, 1: int) :- trigger(_).
+```
+
+#### Type Declarations
+
+```datalog
+// Simple type alias
+type Email: string.
+type UserId: int.
+
+// Record type
+type User: { id: int, name: string, email: string }.
+```
+
+#### Relation Schemas (rel)
+
+```datalog
+// Explicit column schema
+rel employee(id: int, name: string, dept_id: int).
+
+// Using record type sugar
+rel user: User.
+```
+
+#### Fact Operations
+
+```datalog
+// Insert facts
++relation[(1, 2), (3, 4)].
+
+// Delete facts
+-relation[(1, 2)].
+```
+
+#### Queries
+
+```datalog
+// Query all results
+?- view_name(X, Y).
+
+// Query with constants
+?- view_name(1, Y).
+```
+
+#### Filters and Negation
+
+```datalog
+// Comparison filters
+view filtered(X: int) :- nums(X), X > 10.
+view range(X: int) :- nums(X), X >= 5, X <= 15.
+
+// Negation (stratified)
+view not_in_b(X: int) :- a(X), !b(X).
+```
+
+### Embedded Assertions
+
+Tests can include assertions to verify specific properties:
+
+```datalog
+// @ASSERT_ROWS: 5
+?- my_view(X).
+
+// @ASSERT_CONTAINS: (1, 2)
+?- pairs(A, B).
+
+// @ASSERT_NOT_CONTAINS: (0, 0)
+?- diagonal(X, Y).
+
+// @ASSERT_EMPTY
+?- impossible_result(X).
+
+// @ASSERT_COLUMNS: 3
+?- triple(A, B, C).
+```
+
+### Adding New Tests
+
+1. Create a `.dl` file in the appropriate category directory
+2. Add header comment describing the test:
+   ```datalog
+   // Test: Descriptive Name
+   // Category: category_name
+   // Description: What this test verifies
+   ```
+3. Run the test to verify output:
+   ```bash
+   cargo run --bin inputlayer-client --release --quiet -- --script your_test.dl
+   ```
+4. Verify the output is semantically correct
+5. Generate the snapshot:
+   ```bash
+   ./scripts/run_snapshot_tests.sh --update -f "your_test"
+   ```
+6. Verify the test passes:
+   ```bash
+   ./scripts/run_snapshot_tests.sh -f "your_test"
+   ```
+
+### Known Limitations
+
+- **Vector functions**: Vector operations in rule heads produce "Unsafe rule" errors (see `16_vectors/`)
+- **Ordering constraints**: Some ordering patterns like `A < B, B < C` in certain contexts may produce errors
+- **Deep recursion**: Tested up to 500 levels; deeper recursion is possible but may hit stack limits
+
+### CI/CD Notes
+
+- The test runner normalizes output to strip timestamps and `Executing script:` lines
+- Paths are relative (`examples/datalog/...`) for portability across machines
+- Build failures are detected and abort the test run with clear error messages
+
+---
+
+## External Datasets
+
 **Organization**: One folder per dataset, containing both data and .dl files
-**Last Updated**: 2025-11-24
 
 ---
 

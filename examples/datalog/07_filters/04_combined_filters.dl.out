@@ -1,7 +1,47 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/07_filters/04_combined_filters.dl
+
 > .db create test_combined_filters
 Database 'test_combined_filters' created.
 Switched to database: test_combined_filters
 > .db use test_combined_filters
 Switched to database: test_combined_filters
-> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
+> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 15), (7, 25), (8, 35), (9, 45), (10, 55)].
+Inserted 10 facts into 'data'.
+> view filtered1(X: int, Y: int) :- data(X, Y), X > 3, Y < 50.
+View 'filtered1' registered.
+> ?- filtered1(X, Y).
+5 rows:
+  (4, 40)
+  (6, 15)
+  (7, 25)
+  (8, 35)
+  (9, 45)
+> view filtered2(X: int, Y: int) :- data(X, Y), Y >= 20, Y <= 40.
+View 'filtered2' registered.
+> ?- filtered2(X, Y).
+5 rows:
+  (2, 20)
+  (3, 30)
+  (4, 40)
+  (7, 25)
+  (8, 35)
+> view different(X: int, Y: int) :- data(X, Y), X != Y.
+View 'different' registered.
+> ?- different(X, Y).
+10 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+  (4, 40)
+  (5, 50)
+  (6, 15)
+  (7, 25)
+  (8, 35)
+  (9, 45)
+  (10, 55)
+> .db use default
+Switched to database: default
+> .db drop test_combined_filters
+Database 'test_combined_filters' dropped.
+

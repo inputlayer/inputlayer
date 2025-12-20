@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/04_ternary.dl
+
 > .db create test_ternary
 Database 'test_ternary' created.
 Switched to database: test_ternary
@@ -6,7 +8,7 @@ Switched to database: test_ternary
 Switched to database: test_ternary
 > +edge[(1,2), (2,3), (3,1)].
 Inserted 3 facts into 'edge'.
-> path2(A, B, C) := edge(A, B), edge(B, C).
+> view path2(A: int, B: int, C: int) :- edge(A, B), edge(B, C).
 View 'path2' registered.
 > ?- path2(X, Y, Z).
 3 rows:
@@ -20,3 +22,4 @@ View 'path2' registered.
 Switched to database: default
 > .db drop test_ternary
 Database 'test_ternary' dropped.
+

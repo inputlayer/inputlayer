@@ -1,0 +1,34 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/04_delete_nonexistent.dl
+
+> .db create test_del_nonexist
+Database 'test_del_nonexist' created.
+Switched to database: test_del_nonexist
+> .db use test_del_nonexist
+Switched to database: test_del_nonexist
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> -edge(99, 100).
+Deleted fact from 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> -edge(X, Y) :- edge(X, Y), X > 100.
+No matching tuples to delete.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> .db use default
+Switched to database: default
+> .db drop test_del_nonexist
+Database 'test_del_nonexist' dropped.
+

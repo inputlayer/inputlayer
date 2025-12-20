@@ -3,8 +3,9 @@
 //! This module implements the unified Datalog-native syntax for InputLayer:
 //! - Meta Commands: `.db`, `.rel`, `.view`, `.save`, `.status`, `.help`, `.quit`
 //! - Data Manipulation: `+`/`-` operators (DD-native diff model)
-//! - Persistent Views: `:=` operator
-//! - Transient Rules: `:-` operator
+//! - Type Declarations: `type Name: TypeExpr.`
+//! - Relation Declarations: `rel name(col: type, ...).`
+//! - Rules: `:-` operator (persistent if rel exists, query-only otherwise)
 //! - Queries: `?-` operator
 
 use datalog_ast::{Atom, BodyPredicate, Constraint, Rule, Term};
@@ -25,16 +26,18 @@ pub enum Statement {
     Delete(DeleteOp),
     /// Update operation: -old, +new :- condition. (atomic)
     Update(UpdateOp),
-    /// View definition: head := body. (persistent)
-    View(ViewDef),
-    /// Transient rule: head :- body. (not persistent)
-    TransientRule(Rule),
+    /// Type declaration: type Name: TypeExpr.
+    TypeDecl(TypeDecl),
+    /// Relation declaration: rel name(col: type, ...). (typing only, no DD)
+    RelDecl(RelationDecl),
+    /// View declaration: view name(...) :- body. (explicit DD materialization)
+    ViewDecl(ViewDecl),
+    /// Session rule: head :- body. (query-only, not materialized)
+    SessionRule(Rule),
+    /// Fact: relation(args). (base data)
+    Fact(Rule),
     /// Query: ?- goal.
     Query(QueryGoal),
-    /// Schema definition: Name = schema(col: type constraints, ...)
-    SchemaDef(crate::schema::RelationSchema),
-    /// Type alias definition: type Name = base_type constraints
-    TypeAliasDef(crate::schema::TypeAlias),
 }
 
 /// Meta commands for database/relation/view management
@@ -136,7 +139,107 @@ pub struct InsertTarget {
     pub args: Vec<Term>,
 }
 
-/// View definition: head := body. (persistent rule)
+// ============================================================================
+// Type System Declarations
+// ============================================================================
+
+/// Type declaration: type Name: TypeExpr.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeDecl {
+    /// Type name (must be uppercase, e.g., Email, User)
+    pub name: String,
+    /// The type expression
+    pub type_expr: TypeExpr,
+}
+
+/// Type expression (right-hand side of type declaration)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TypeExpr {
+    /// Base type: int, string, bool
+    Base(BaseType),
+    /// Reference to another type by name
+    TypeRef(String),
+    /// List type: list[T]
+    List(Box<TypeExpr>),
+    /// Record type: { field: type, ... }
+    Record(Vec<RecordField>),
+    /// Refined type: base_type(constraint1, constraint2, ...)
+    Refined {
+        base: Box<TypeExpr>,
+        refinements: Vec<Refinement>,
+    },
+}
+
+/// Base types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum BaseType {
+    Int,
+    String,
+    Bool,
+    Float,
+}
+
+/// A field in a record type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordField {
+    pub name: String,
+    pub field_type: TypeExpr,
+}
+
+/// A refinement constraint on a type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Refinement {
+    /// Refinement name (e.g., "range", "pattern", "not_empty")
+    pub name: String,
+    /// Arguments to the refinement
+    pub args: Vec<RefinementArg>,
+}
+
+/// Argument to a refinement
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RefinementArg {
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+}
+
+/// Relation declaration: rel name(col: type, ...). or rel name: RecordType.
+/// NOTE: This is for typing enforcement ONLY. Does not create DD materialized view.
+/// Use `view` declaration for DD materialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationDecl {
+    /// Relation name (must be lowercase, e.g., user, high_spender)
+    pub name: String,
+    /// Column definitions (with types)
+    pub columns: Vec<ColumnDef>,
+    /// Whether this was declared using record sugar (rel name: RecordType.)
+    pub from_record_type: Option<String>,
+}
+
+/// A column definition in a relation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnDef {
+    /// Column name
+    pub name: String,
+    /// Column type
+    pub col_type: TypeExpr,
+}
+
+/// View declaration: view name(...) :- body.
+/// Explicitly creates a DD (Differential Dataflow) materialized view.
+/// This is the replacement for the legacy `:=` operator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewDecl {
+    /// View name
+    pub name: String,
+    /// Optional inline schema (if not using prior `rel` declaration)
+    pub columns: Option<Vec<ColumnDef>>,
+    /// The rule defining this view (serializable for persistence)
+    pub rule: SerializableRule,
+}
+
+/// Legacy view definition (DEPRECATED - kept only for migration tooling)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewDef {
     /// View name (head relation)
@@ -469,9 +572,46 @@ impl SerializableConstraint {
 
 use crate::parser::parse_rule;
 
+/// Strip inline comments from input.
+/// Handles // comments while respecting string literals.
+fn strip_inline_comment(input: &str) -> &str {
+    let mut in_string = false;
+    let mut escape_next = false;
+    let bytes = input.as_bytes();
+
+    for i in 0..bytes.len() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        let c = bytes[i] as char;
+
+        if c == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+
+        if c == '"' {
+            in_string = !in_string;
+            continue;
+        }
+
+        // Check for // outside of string
+        if !in_string && c == '/' && i + 1 < bytes.len() && bytes[i + 1] as char == '/' {
+            return input[..i].trim_end();
+        }
+    }
+
+    input
+}
+
 /// Parse a statement from user input
 pub fn parse_statement(input: &str) -> Result<Statement, String> {
     let input = input.trim();
+
+    // Strip inline comments (// ...) while respecting strings
+    let input = strip_inline_comment(input);
 
     if input.is_empty() {
         return Err("Empty input".to_string());
@@ -482,14 +622,39 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         return parse_meta_command(input).map(Statement::Meta);
     }
 
-    // Type alias: type Name = base_type constraints
+    // REJECTED: The := operator is no longer part of the language
+    // Use explicit 'view' keyword for DD materialization
+    if input.contains(":=") {
+        return Err(
+            "The ':=' operator has been removed from the language.\n\
+             Use the 'view' keyword for DD materialized views:\n\n\
+             OLD (removed):\n\
+               emp_dept(X, Y) := employee(X, D), department(D, Y).\n\n\
+             NEW (correct):\n\
+               view emp_dept(x: int, y: string) :- employee(x, d), department(d, y).\n\n\
+             The 'view' keyword explicitly creates a DD materialized view.\n\
+             Use 'rel' for typing-only schemas (no materialization).".to_string()
+        );
+    }
+
+    // Type declaration: type Name: TypeExpr.
     if input.starts_with("type ") {
-        return parse_type_alias(input).map(Statement::TypeAliasDef);
+        return parse_type_decl(input).map(Statement::TypeDecl);
+    }
+
+    // Relation declaration: rel name(col: type, ...). (typing only, no DD)
+    if input.starts_with("rel ") {
+        return parse_rel_decl(input).map(Statement::RelDecl);
+    }
+
+    // View declaration: view name(...) :- body. (explicit DD materialization)
+    if input.starts_with("view ") {
+        return parse_view_decl(input).map(Statement::ViewDecl);
     }
 
     // Check for update pattern: -rel(...), +rel(...) :- body.
     // This must be checked before simple +/- to handle atomic updates
-    if (input.starts_with('-') || input.starts_with('+')) && input.contains(":=").not() {
+    if input.starts_with('-') || input.starts_with('+') {
         // Check if this is an update pattern (has both - and + before :-)
         if let Some(update) = try_parse_update(input)? {
             return Ok(Statement::Update(update));
@@ -511,20 +676,14 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         return parse_query(&input[2..]).map(Statement::Query);
     }
 
-    // View definition: head := body.
-    if input.contains(":=") {
-        return parse_view_definition(input).map(Statement::View);
-    }
-
-    // Schema definition: Name = schema(col: type, ...)
-    // Must be checked before transient rule since both use identifiers
-    if let Some(schema_result) = try_parse_schema_definition(input)? {
-        return Ok(Statement::SchemaDef(schema_result));
-    }
-
-    // Transient rule: head :- body.
+    // Session rule: head :- body. (query-only, not materialized)
     if input.contains(":-") {
-        return parse_transient_rule(input).map(Statement::TransientRule);
+        return parse_transient_rule(input).map(Statement::SessionRule);
+    }
+
+    // Fact: just an atom ending with period (e.g., edge(1, 2).)
+    if input.ends_with('.') && input.contains('(') {
+        return parse_fact(input).map(Statement::Fact);
     }
 
     Err(format!("Unrecognized statement: {}", input))
@@ -596,7 +755,7 @@ fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
             } else if parts[1].to_lowercase() == "edit" {
                 // .view edit <name> <index> <rule>
                 if parts.len() < 5 {
-                    Err("Usage: .view edit <name> <index> <rule>\nExample: .view edit connected 2 connected(X, Z) := edge(X, Y), connected(Y, Z).".to_string())
+                    Err("Usage: .view edit <name> <index> <rule>\nExample: .view edit connected 2 view connected(x: int, z: int) :- edge(x, y), connected(y, z).".to_string())
                 } else {
                     let name = parts[2].to_string();
                     let index: usize = parts[3].parse()
@@ -1018,6 +1177,608 @@ pub fn parse_view_definition(input: &str) -> Result<ViewDef, String> {
 /// Parse a transient rule: head :- body.
 fn parse_transient_rule(input: &str) -> Result<Rule, String> {
     parse_rule(input.trim())
+}
+
+/// Parse a fact: atom. (rule with empty body)
+fn parse_fact(input: &str) -> Result<Rule, String> {
+    let input = input.trim().trim_end_matches('.');
+
+    // Parse as an atom and create a rule with empty body
+    let head = parse_atom_for_fact(input)?;
+    Ok(Rule::new(head, vec![], vec![]))
+}
+
+/// Parse an atom for a fact (similar to parse_head_atom but returns Atom)
+fn parse_atom_for_fact(input: &str) -> Result<Atom, String> {
+    let input = input.trim();
+    if let Some(paren_pos) = input.find('(') {
+        let relation = input[..paren_pos].trim().to_string();
+        let args = parse_atom_args(&input[paren_pos..])?;
+        Ok(Atom::new(relation, args))
+    } else {
+        Err(format!("Invalid fact syntax: {}", input))
+    }
+}
+
+// ============================================================================
+// Type and Relation Declaration Parsing
+// ============================================================================
+
+/// Parse a type declaration: `type Name: TypeExpr.`
+///
+/// Examples:
+/// - `type Email: string.`
+/// - `type Id: int(range(1, 1000000)).`
+/// - `type User: { id: Id, name: string, email: Email }.`
+fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
+    // Remove "type " prefix and trailing period
+    let input = input.trim_start_matches("type ").trim().trim_end_matches('.');
+
+    // Split on first ':' to get name and type expression
+    let colon_pos = input.find(':')
+        .ok_or("Type declaration must contain ':' (e.g., 'type Email: string.')")?;
+
+    let name = input[..colon_pos].trim().to_string();
+    let type_expr_str = input[colon_pos + 1..].trim();
+
+    // Validate name (must start with uppercase)
+    if name.is_empty() {
+        return Err("Type name cannot be empty".to_string());
+    }
+    if !name.chars().next().unwrap().is_uppercase() {
+        return Err(format!("Type name '{}' must start with uppercase letter", name));
+    }
+
+    // Parse the type expression
+    let type_expr = parse_type_expr(type_expr_str)?;
+
+    Ok(TypeDecl { name, type_expr })
+}
+
+/// Parse a relation declaration: `rel name(col: type, ...).` or `rel name: RecordType.`
+///
+/// Examples:
+/// - `rel user(id: int, name: string).`
+/// - `rel user: User.` (expands record type to columns)
+/// - `rel user: { id: int, name: string }.` (inline record type)
+fn parse_rel_decl(input: &str) -> Result<RelationDecl, String> {
+    // Remove "rel " prefix and trailing period
+    let input = input.trim_start_matches("rel ").trim().trim_end_matches('.');
+
+    // Check if it's the record sugar form: `rel name: RecordType.`
+    if let Some(colon_pos) = input.find(':') {
+        // But make sure it's not inside parentheses (could be column type)
+        let before_colon = &input[..colon_pos];
+        if !before_colon.contains('(') {
+            // This is the record sugar form
+            let name = before_colon.trim().to_string();
+            let type_ref = input[colon_pos + 1..].trim();
+
+            // Validate relation name (must start with lowercase)
+            validate_relation_name(&name)?;
+
+            // Parse the type expression (should be a record type or type reference)
+            let type_expr = parse_type_expr(type_ref)?;
+
+            // If it's a record type, extract columns directly
+            // If it's a type reference, we'll resolve it later
+            let (columns, from_record_type) = match &type_expr {
+                TypeExpr::Record(fields) => {
+                    let cols = fields.iter().map(|f| ColumnDef {
+                        name: f.name.clone(),
+                        col_type: f.field_type.clone(),
+                    }).collect();
+                    (cols, None)
+                }
+                TypeExpr::TypeRef(ref_name) => {
+                    // Will be expanded later when type registry is consulted
+                    (vec![], Some(ref_name.clone()))
+                }
+                _ => {
+                    return Err(format!(
+                        "rel {}: T syntax requires T to be a record type.\n\
+                         For simple types, use: rel {}(value: {}).",
+                        name, name, type_ref
+                    ));
+                }
+            };
+
+            return Ok(RelationDecl {
+                name,
+                columns,
+                from_record_type,
+            });
+        }
+    }
+
+    // Standard form: `rel name(col: type, ...)`
+    let paren_pos = input.find('(')
+        .ok_or("Relation declaration must have columns: rel name(col: type, ...)")?;
+
+    let name = input[..paren_pos].trim().to_string();
+    validate_relation_name(&name)?;
+
+    // Extract content between parentheses
+    let content = input[paren_pos + 1..]
+        .trim()
+        .strip_suffix(')')
+        .ok_or("Missing closing parenthesis in relation declaration")?;
+
+    let columns = parse_rel_columns(content)?;
+
+    Ok(RelationDecl {
+        name,
+        columns,
+        from_record_type: None,
+    })
+}
+
+/// Parse a view declaration: `view name(...) :- body.` or `view name :- body.`
+///
+/// The head uses the column names as variable names, matching them to body variables.
+///
+/// Examples:
+/// - `view emp_dept(emp_id: int, dept_name: string) :- employee(emp_id, d), department(d, dept_name).`
+/// - `view emp_dept :- employee(emp_id, d), department(d, dept_name).` (uses prior `rel` schema)
+fn parse_view_decl(input: &str) -> Result<ViewDecl, String> {
+    // Remove "view " prefix
+    let input = input.trim_start_matches("view ").trim();
+
+    // Must contain `:-`
+    if !input.contains(":-") {
+        return Err("View declaration must contain ':-' (e.g., 'view name(...) :- body.')".to_string());
+    }
+
+    // Split on `:-`
+    let parts: Vec<&str> = input.splitn(2, ":-").collect();
+    if parts.len() != 2 {
+        return Err("Invalid view syntax".to_string());
+    }
+
+    let head_str = parts[0].trim();
+    let body_str = parts[1].trim().trim_end_matches('.');
+
+    // Parse the head: either `name(col: type, ...)` or just `name`
+    let (name, columns) = if head_str.contains('(') {
+        // Inline schema form: view name(col: type, ...) :- body.
+        let paren_pos = head_str.find('(')
+            .ok_or("Invalid view head syntax")?;
+
+        let name = head_str[..paren_pos].trim().to_string();
+        validate_relation_name(&name)?;
+
+        let schema_str = head_str[paren_pos + 1..]
+            .trim()
+            .strip_suffix(')')
+            .ok_or("Missing closing parenthesis in view declaration")?;
+
+        let columns = parse_rel_columns(schema_str)?;
+        (name, Some(columns))
+    } else {
+        // Reference form: view name :- body. (uses prior `rel` schema)
+        let name = head_str.to_string();
+        validate_relation_name(&name)?;
+        (name, None)
+    };
+
+    // Parse the body as a rule
+    // The head uses the column names - keep aggregation syntax like count<X> intact
+    // so the rule parser can properly detect aggregations
+    let head_vars = if let Some(ref cols) = columns {
+        cols.iter()
+            .map(|c| c.name.clone())  // Keep full column name including aggregation syntax
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        // For reference form, we need to infer variables from the body
+        // For now, use a placeholder that will be validated later
+        "X".to_string()
+    };
+
+    let rule_str = format!("{}({}) :- {}.", name, head_vars, body_str);
+
+    let rule = parse_rule(&rule_str)?;
+
+    Ok(ViewDecl {
+        name,
+        columns,
+        rule: SerializableRule::from_rule(&rule),
+    })
+}
+
+/// Validate a relation name (must be lowercase identifier)
+fn validate_relation_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Relation name cannot be empty".to_string());
+    }
+    if !name.chars().next().unwrap().is_lowercase() {
+        return Err(format!(
+            "Relation name '{}' must start with lowercase letter.\n\
+             (Uppercase names are for type declarations.)",
+            name
+        ));
+    }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(format!("Invalid relation name: '{}'", name));
+    }
+    Ok(())
+}
+
+/// Check if a column name is an aggregation pattern like `count<Var>`, `sum<Var>`, etc.
+/// Returns the variable name if it's an aggregation, or the original name otherwise.
+fn extract_head_var_from_column(col_name: &str) -> String {
+    // Aggregation patterns: count<X>, sum<X>, min<X>, max<X>, avg<X>, top_k<X>
+    if let Some(open) = col_name.find('<') {
+        if let Some(close) = col_name.find('>') {
+            if close > open + 1 {
+                return col_name[open + 1..close].trim().to_string();
+            }
+        }
+    }
+    // Not an aggregation - return the column name as-is
+    col_name.to_string()
+}
+
+/// Validate a column name - may include aggregation syntax like count<X>
+/// or arithmetic expressions like P*Q
+fn validate_column_name(col_name: &str) -> Result<(), String> {
+    if col_name.is_empty() {
+        return Err("Column name cannot be empty".to_string());
+    }
+
+    // Check for aggregation syntax: agg<Var>
+    if let (Some(open), Some(close)) = (col_name.find('<'), col_name.find('>')) {
+        if close > open + 1 {
+            // Extract the aggregation function name and variable
+            let agg_func = col_name[..open].trim();
+            let agg_var = col_name[open + 1..close].trim();
+
+            // Validate aggregation function
+            let valid_aggs = ["count", "sum", "min", "max", "avg", "top_k"];
+            if !valid_aggs.contains(&agg_func) {
+                return Err(format!("Unknown aggregation function: '{}'", agg_func));
+            }
+
+            // Validate variable name
+            if agg_var.is_empty() {
+                return Err("Aggregation variable cannot be empty".to_string());
+            }
+            if !agg_var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return Err(format!("Invalid aggregation variable: '{}'", agg_var));
+            }
+
+            return Ok(());
+        }
+    }
+
+    // Check for arithmetic expression (contains +, -, *, /)
+    // These are computed columns like P*Q, P+1, etc.
+    let arith_ops = ['+', '-', '*', '/'];
+    if col_name.chars().any(|c| arith_ops.contains(&c)) {
+        // Arithmetic expression - validate each token is alphanumeric/numeric or operator
+        let valid_chars = col_name.chars().all(|c| {
+            c.is_alphanumeric() || c == '_' || arith_ops.contains(&c) || c == '(' || c == ')'
+        });
+        if !valid_chars {
+            return Err(format!("Invalid computed column expression: '{}'", col_name));
+        }
+        return Ok(());
+    }
+
+    // Regular column name - must be alphanumeric with underscores
+    if !col_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return Err(format!("Invalid column name: '{}'", col_name));
+    }
+
+    Ok(())
+}
+
+/// Parse relation columns from the inside of rel name(...)
+fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
+    let mut columns = Vec::new();
+    let parts = split_respecting_braces(content);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Split on first ':' to get name and type
+        let colon_pos = part.find(':')
+            .ok_or_else(|| format!("Column definition '{}' must have type: 'name: type'", part))?;
+
+        let col_name = part[..colon_pos].trim().to_string();
+        let type_str = part[colon_pos + 1..].trim();
+
+        // Validate column name (may include aggregation syntax)
+        validate_column_name(&col_name)?;
+
+        let col_type = parse_type_expr(type_str)?;
+        columns.push(ColumnDef { name: col_name, col_type });
+    }
+
+    if columns.is_empty() {
+        return Err("Relation must have at least one column".to_string());
+    }
+
+    Ok(columns)
+}
+
+/// Parse a type expression
+fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Err("Type expression cannot be empty".to_string());
+    }
+
+    // Record type: { field: type, ... }
+    if input.starts_with('{') && input.ends_with('}') {
+        return parse_record_type(input);
+    }
+
+    // List type: list[T]
+    if input.starts_with("list[") && input.ends_with(']') {
+        let inner = &input[5..input.len() - 1];
+        let inner_type = parse_type_expr(inner)?;
+        return Ok(TypeExpr::List(Box::new(inner_type)));
+    }
+
+    // Check for refinements: base_type(constraint1, constraint2, ...)
+    if let Some(paren_pos) = input.find('(') {
+        if input.ends_with(')') {
+            let base_str = &input[..paren_pos];
+            let refinements_str = &input[paren_pos + 1..input.len() - 1];
+
+            let base = parse_type_expr(base_str)?;
+            let refinements = parse_refinements(refinements_str)?;
+
+            return Ok(TypeExpr::Refined {
+                base: Box::new(base),
+                refinements,
+            });
+        }
+    }
+
+    // Base type or type reference
+    match input.to_lowercase().as_str() {
+        "int" => Ok(TypeExpr::Base(BaseType::Int)),
+        "string" => Ok(TypeExpr::Base(BaseType::String)),
+        "bool" => Ok(TypeExpr::Base(BaseType::Bool)),
+        "float" => Ok(TypeExpr::Base(BaseType::Float)),
+        _ => {
+            // Must be a type reference (uppercase name)
+            if input.chars().next().unwrap().is_uppercase() {
+                Ok(TypeExpr::TypeRef(input.to_string()))
+            } else {
+                Err(format!("Unknown base type: '{}'. Use int, string, bool, float, or a type name.", input))
+            }
+        }
+    }
+}
+
+/// Parse a record type: { field: type, ... }
+fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
+    let content = input.strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or("Invalid record type syntax")?
+        .trim();
+
+    if content.is_empty() {
+        return Err("Record type cannot be empty".to_string());
+    }
+
+    let mut fields = Vec::new();
+    let parts = split_respecting_braces(content);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let colon_pos = part.find(':')
+            .ok_or_else(|| format!("Record field '{}' must have type: 'name: type'", part))?;
+
+        let field_name = part[..colon_pos].trim().to_string();
+        let type_str = part[colon_pos + 1..].trim();
+
+        if field_name.is_empty() {
+            return Err("Field name cannot be empty".to_string());
+        }
+
+        let field_type = parse_type_expr(type_str)?;
+        fields.push(RecordField { name: field_name, field_type });
+    }
+
+    Ok(TypeExpr::Record(fields))
+}
+
+/// Parse refinement constraints
+fn parse_refinements(input: &str) -> Result<Vec<Refinement>, String> {
+    let mut refinements = Vec::new();
+    let parts = split_respecting_parens(input);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        let refinement = parse_single_refinement(part)?;
+        refinements.push(refinement);
+    }
+
+    Ok(refinements)
+}
+
+/// Parse a single refinement: name or name(args)
+fn parse_single_refinement(input: &str) -> Result<Refinement, String> {
+    let input = input.trim();
+
+    if let Some(paren_pos) = input.find('(') {
+        if input.ends_with(')') {
+            let name = input[..paren_pos].trim().to_string();
+            let args_str = &input[paren_pos + 1..input.len() - 1];
+            let args = parse_refinement_args(args_str)?;
+            return Ok(Refinement { name, args });
+        }
+    }
+
+    // Simple refinement without arguments
+    Ok(Refinement {
+        name: input.to_string(),
+        args: vec![],
+    })
+}
+
+/// Parse refinement arguments
+fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
+    let mut args = Vec::new();
+    let parts = split_respecting_strings(input);
+
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // String argument
+        if part.starts_with('"') && part.ends_with('"') && part.len() >= 2 {
+            args.push(RefinementArg::String(part[1..part.len()-1].to_string()));
+            continue;
+        }
+
+        // Integer argument
+        if let Ok(n) = part.parse::<i64>() {
+            args.push(RefinementArg::Int(n));
+            continue;
+        }
+
+        // Float argument
+        if let Ok(f) = part.parse::<f64>() {
+            args.push(RefinementArg::Float(f));
+            continue;
+        }
+
+        // Boolean
+        match part.to_lowercase().as_str() {
+            "true" => args.push(RefinementArg::Bool(true)),
+            "false" => args.push(RefinementArg::Bool(false)),
+            _ => return Err(format!("Invalid refinement argument: '{}'", part)),
+        }
+    }
+
+    Ok(args)
+}
+
+/// Split by comma, respecting braces and parentheses
+fn split_respecting_braces(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut brace_depth = 0;
+    let mut paren_depth = 0;
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '{' if !in_string => {
+                brace_depth += 1;
+                current.push(ch);
+            }
+            '}' if !in_string => {
+                brace_depth -= 1;
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                paren_depth -= 1;
+                current.push(ch);
+            }
+            ',' if brace_depth == 0 && paren_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Split by comma, respecting parentheses only
+fn split_respecting_parens(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0;
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                paren_depth -= 1;
+                current.push(ch);
+            }
+            ',' if paren_depth == 0 && !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
+}
+
+/// Split by comma, respecting strings
+fn split_respecting_strings(input: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            ',' if !in_string => {
+                result.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        result.push(current);
+    }
+
+    result
 }
 
 /// Parse a query: ?- goal.
@@ -1590,22 +2351,22 @@ mod tests {
     // View tests
     #[test]
     fn test_parse_view_definition() {
-        let stmt = parse_statement("path(X, Y) := edge(X, Y).").unwrap();
-        if let Statement::View(def) = stmt {
+        let stmt = parse_statement("view path(x: int, y: int) :- edge(x, y).").unwrap();
+        if let Statement::ViewDecl(def) = stmt {
             assert_eq!(def.name, "path");
         } else {
-            panic!("Expected View");
+            panic!("Expected ViewDecl");
         }
     }
 
     #[test]
     fn test_parse_recursive_view() {
-        let stmt = parse_statement("path(X, Z) := edge(X, Y), path(Y, Z).").unwrap();
-        if let Statement::View(def) = stmt {
+        let stmt = parse_statement("view path(x: int, z: int) :- edge(x, y), path(y, z).").unwrap();
+        if let Statement::ViewDecl(def) = stmt {
             assert_eq!(def.name, "path");
             assert_eq!(def.rule.body.len(), 2);
         } else {
-            panic!("Expected View");
+            panic!("Expected ViewDecl");
         }
     }
 
@@ -1620,14 +2381,14 @@ mod tests {
         }
     }
 
-    // Transient rule tests
+    // Session rule tests
     #[test]
-    fn test_parse_transient_rule() {
+    fn test_parse_session_rule() {
         let stmt = parse_statement("result(X, Y) :- edge(X, Y), X < Y.").unwrap();
-        if let Statement::TransientRule(rule) = stmt {
+        if let Statement::SessionRule(rule) = stmt {
             assert_eq!(rule.head.relation, "result");
         } else {
-            panic!("Expected TransientRule");
+            panic!("Expected SessionRule");
         }
     }
 
@@ -1702,7 +2463,7 @@ mod tests {
     fn test_underscore_prefix_is_variable() {
         // Underscore-prefixed identifiers are variables
         let stmt = parse_statement("result(X) :- edge(_from, X).").unwrap();
-        if let Statement::TransientRule(rule) = stmt {
+        if let Statement::SessionRule(rule) = stmt {
             let body_atom = match &rule.body[0] {
                 BodyPredicate::Positive(atom) => atom,
                 _ => panic!("Expected positive atom"),
@@ -1710,7 +2471,7 @@ mod tests {
             assert!(matches!(&body_atom.args[0], Term::Variable(v) if v == "_from"));
             assert!(matches!(&body_atom.args[1], Term::Variable(v) if v == "X"));
         } else {
-            panic!("Expected TransientRule");
+            panic!("Expected SessionRule");
         }
     }
 
@@ -1730,11 +2491,11 @@ mod tests {
     fn test_multichar_variables() {
         // Multi-character uppercase-starting identifiers are variables
         let stmt = parse_statement("result(Foo, BarBaz) :- data(Foo, BarBaz).").unwrap();
-        if let Statement::TransientRule(rule) = stmt {
+        if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "Foo"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "BarBaz"));
         } else {
-            panic!("Expected TransientRule");
+            panic!("Expected SessionRule");
         }
     }
 
@@ -1766,11 +2527,11 @@ mod tests {
     fn test_variables_with_underscores() {
         // Variables can contain underscores
         let stmt = parse_statement("result(X_val, Y_val) :- data(X_val, Y_val).").unwrap();
-        if let Statement::TransientRule(rule) = stmt {
+        if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "X_val"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "Y_val"));
         } else {
-            panic!("Expected TransientRule");
+            panic!("Expected SessionRule");
         }
     }
 
@@ -1789,8 +2550,8 @@ mod tests {
     #[test]
     fn test_view_with_atoms() {
         // Views can reference atoms in body
-        let stmt = parse_statement("child(X) := parent(mary, X).").unwrap();
-        if let Statement::View(def) = stmt {
+        let stmt = parse_statement("view child(x: string) :- parent(mary, x).").unwrap();
+        if let Statement::ViewDecl(def) = stmt {
             assert_eq!(def.name, "child");
             // The body should have 'mary' as an atom
             let rule = def.rule.to_rule();
@@ -1800,7 +2561,7 @@ mod tests {
             };
             assert!(matches!(&body_atom.args[0], Term::StringConstant(s) if s == "mary"));
         } else {
-            panic!("Expected View");
+            panic!("Expected ViewDecl");
         }
     }
 

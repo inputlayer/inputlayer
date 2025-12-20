@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/03_recursive_depth.dl
+
 > .db create test_perf_rec
 Database 'test_perf_rec' created.
 Switched to database: test_perf_rec
@@ -6,9 +8,9 @@ Switched to database: test_perf_rec
 Switched to database: test_perf_rec
 > +edge[(1,2), (2,3), (3,4), (4,5), (5,6), (6,7), (7,8), (8,9), (9,10), (10,11), (11,12), (12,13), (13,14), (14,15), (15,16), (16,17), (17,18), (18,19), (19,20)].
 Inserted 19 facts into 'edge'.
-> path(X, Y) := edge(X, Y).
+> view path(X: int, Y: int) :- edge(X, Y).
 View 'path' registered.
-> path(X, Z) := path(X, Y), edge(Y, Z).
+> view path(X: int, Z: int) :- path(X, Y), edge(Y, Z).
 Rule added to view 'path' (2 rules total).
 > ?- path(1, X).
 19 rows:
@@ -248,3 +250,4 @@ Rule added to view 'path' (2 rules total).
 Switched to database: default
 > .db drop test_perf_rec
 Database 'test_perf_rec' dropped.
+

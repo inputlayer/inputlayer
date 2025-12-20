@@ -2,7 +2,7 @@
 //!
 //! More complex scenarios testing the full pipeline
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 use std::collections::HashSet;
 
 /// Helper to convert results to set for easy comparison
@@ -441,7 +441,7 @@ fn test_whitespace_handling() {
 
 #[test]
 fn test_config_creation() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     let config = OptimizationConfig::default();
     // Most optimizations enabled; SIP disabled by default due to known issues
@@ -535,8 +535,8 @@ fn test_multiple_atoms_in_body() {
 /// This tests count, sum, min, max aggregations
 #[test]
 fn test_aggregation_count() {
-    use datalog_engine::code_generator::CodeGenerator;
-    use datalog_engine::value::{Tuple, Value};
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::value::{Tuple, Value};
     use datalog_ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
@@ -583,8 +583,8 @@ fn test_aggregation_count() {
 
 #[test]
 fn test_aggregation_sum() {
-    use datalog_engine::code_generator::CodeGenerator;
-    use datalog_engine::value::{Tuple, Value};
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::value::{Tuple, Value};
     use datalog_ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
@@ -628,8 +628,8 @@ fn test_aggregation_sum() {
 
 #[test]
 fn test_aggregation_min_max() {
-    use datalog_engine::code_generator::CodeGenerator;
-    use datalog_engine::value::{Tuple, Value};
+    use inputlayer::code_generator::CodeGenerator;
+    use inputlayer::value::{Tuple, Value};
     use datalog_ir::{AggregateFunction, IRNode};
 
     let mut generator = CodeGenerator::new();
@@ -692,7 +692,7 @@ fn test_aggregation_min_max() {
 
 #[test]
 fn test_sip_chain_join_correctness() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     // Create engine with SIP enabled to verify it produces correct results
     let config = OptimizationConfig {
@@ -722,7 +722,7 @@ fn test_sip_chain_join_correctness() {
 
 #[test]
 fn test_sip_two_way_join_correctness() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     let config = OptimizationConfig {
         enable_join_planning: true,
@@ -747,7 +747,7 @@ fn test_sip_two_way_join_correctness() {
 
 #[test]
 fn test_sip_with_dangling_tuples() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     // This tests the core value of SIP: filtering out tuples that won't
     // contribute to the final result

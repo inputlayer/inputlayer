@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/07_filters/02_inequality.dl
+
 > .db create test_neq
 Database 'test_neq' created.
 Switched to database: test_neq
@@ -6,7 +8,7 @@ Switched to database: test_neq
 Switched to database: test_neq
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
 Inserted 5 facts into 'edge'.
-> non_loop(X, Y) := edge(X, Y), X != Y.
+> view non_loop(X: int, Y: int) :- edge(X, Y), X != Y.
 View 'non_loop' registered.
 > ?- non_loop(X, Y).
 2 rows:
@@ -16,3 +18,4 @@ View 'non_loop' registered.
 Switched to database: default
 > .db drop test_neq
 Database 'test_neq' dropped.
+

@@ -6,7 +6,7 @@
 //! - REPL statement handling
 //! - RPC view operations
 
-use datalog_engine::{
+use inputlayer::{
     statement::{
         parse_statement, parse_view_definition, DeletePattern, MetaCommand, Statement,
     },
@@ -129,16 +129,16 @@ fn test_parse_delete_operations() {
 #[test]
 fn test_parse_view_definition() {
     // Simple view
-    let stmt = parse_statement("path(X, Y) := edge(X, Y).").unwrap();
-    if let Statement::View(def) = stmt {
+    let stmt = parse_statement("view path(x: int, y: int) :- edge(x, y).").unwrap();
+    if let Statement::ViewDecl(def) = stmt {
         assert_eq!(def.name, "path");
     } else {
         panic!("Expected View statement");
     }
 
     // View with filter
-    let stmt = parse_statement("adult(N, A) := person(N, A), A >= 18.").unwrap();
-    if let Statement::View(def) = stmt {
+    let stmt = parse_statement("view adult(n: string, a: int) :- person(n, a), a >= 18.").unwrap();
+    if let Statement::ViewDecl(def) = stmt {
         assert_eq!(def.name, "adult");
     } else {
         panic!("Expected View statement");
@@ -148,7 +148,7 @@ fn test_parse_view_definition() {
 #[test]
 fn test_parse_transient_rule() {
     let stmt = parse_statement("result(X, Y) :- edge(X, Y), X < Y.").unwrap();
-    if let Statement::TransientRule(rule) = stmt {
+    if let Statement::SessionRule(rule) = stmt {
         assert_eq!(rule.head.relation, "result");
     } else {
         panic!("Expected TransientRule statement");
@@ -391,8 +391,8 @@ fn test_view_operations_on_default_database() {
 
 #[test]
 fn test_serializable_rule_roundtrip() {
-    use datalog_engine::statement::SerializableRule;
-    use datalog_engine::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
+    use inputlayer::parser::parse_rule;
 
     let rule_str = "path(X, Y) :- edge(X, Y), X < Y.";
     let rule = parse_rule(rule_str).unwrap();
@@ -410,8 +410,8 @@ fn test_serializable_rule_roundtrip() {
 
 #[test]
 fn test_serializable_rule_json() {
-    use datalog_engine::statement::SerializableRule;
-    use datalog_engine::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
+    use inputlayer::parser::parse_rule;
 
     let rule_str = "result(X, Y) :- edge(X, Y).";
     let rule = parse_rule(rule_str).unwrap();

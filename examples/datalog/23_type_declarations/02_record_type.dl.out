@@ -1,0 +1,22 @@
+Executing script: examples/datalog/23_type_declarations/02_record_type.dl
+
+> .db create test_record_type
+Database 'test_record_type' created.
+Switched to database: test_record_type
+> .db use test_record_type
+Switched to database: test_record_type
+> type User: { id: int, name: string }.
+Type 'User' declared.
+> rel user: User.
+Relation 'user' schema declared: ()
+> +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")].
+Inserted 3 facts into 'user'.
+> ?- user(X, Y).
+3 rows:
+  (1, "Alice")
+  (2, "Bob")
+  (3, "Charlie")
+> .db use default
+Switched to database: default
+> .db drop test_record_type
+Database 'test_record_type' dropped.

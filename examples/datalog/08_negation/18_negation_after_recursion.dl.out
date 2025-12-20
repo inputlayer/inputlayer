@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/18_negation_after_recursion.dl
+
 > .db create test_neg_rec
 Database 'test_neg_rec' created.
 Switched to database: test_neg_rec
@@ -8,9 +10,9 @@ Switched to database: test_neg_rec
 Inserted 4 facts into 'edge'.
 > +forbidden_edge[(2, 3), (4, 5)].
 Inserted 2 facts into 'forbidden_edge'.
-> path(X, Y) := edge(X, Y), !forbidden_edge(X, Y).
+> view path(X: int, Y: int) :- edge(X, Y), !forbidden_edge(X, Y).
 View 'path' registered.
-> path(X, Z) := path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
+> view path(X: int, Z: int) :- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
 Rule added to view 'path' (2 rules total).
 > ?- path(1, X).
 1 rows:
@@ -23,3 +25,4 @@ Rule added to view 'path' (2 rules total).
 Switched to database: default
 > .db drop test_neg_rec
 Database 'test_neg_rec' dropped.
+

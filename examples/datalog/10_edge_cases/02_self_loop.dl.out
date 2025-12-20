@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/02_self_loop.dl
+
 > .db create test_loop
 Database 'test_loop' created.
 Switched to database: test_loop
@@ -13,16 +15,16 @@ Inserted 5 facts into 'edge'.
   (2, 2)
   (2, 3)
   (3, 3)
-> loop(X, Y) := edge(X, Y), X = Y.
+> view loop(X: int, Y: int) :- edge(X, Y), X = Y.
 View 'loop' registered.
 > ?- loop(X, Y).
 3 rows:
   (1, 1)
   (2, 2)
   (3, 3)
-> tc(X, Y) := edge(X, Y).
+> view tc(X: int, Y: int) :- edge(X, Y).
 View 'tc' registered.
-> tc(X, Z) := tc(X, Y), edge(Y, Z).
+> view tc(X: int, Z: int) :- tc(X, Y), edge(Y, Z).
 Rule added to view 'tc' (2 rules total).
 > ?- tc(1, X).
 3 rows:
@@ -33,3 +35,4 @@ Rule added to view 'tc' (2 rules total).
 Switched to database: default
 > .db drop test_loop
 Database 'test_loop' dropped.
+

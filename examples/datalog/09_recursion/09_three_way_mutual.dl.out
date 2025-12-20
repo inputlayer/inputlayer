@@ -1,4 +1,5 @@
-Executing script: examples/datalog/09_recursion/09_three_way_mutual.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/09_three_way_mutual.dl
 
 > .db create test_three_way_mutual
 Database 'test_three_way_mutual' created.
@@ -13,17 +14,17 @@ Inserted 1 fact into 'base_zero'.
 Inserted 1 fact into 'base_one'.
 > +base_two[(2)].
 Inserted 1 fact into 'base_two'.
-> zero_mod(N) := base_zero(N).
+> view zero_mod(N: int) :- base_zero(N).
 View 'zero_mod' registered.
-> zero_mod(N) := succ(M, N), two_mod(M).
+> view zero_mod(N: int) :- succ(M, N), two_mod(M).
 Rule added to view 'zero_mod' (2 rules total).
-> one_mod(N) := base_one(N).
+> view one_mod(N: int) :- base_one(N).
 View 'one_mod' registered.
-> one_mod(N) := succ(M, N), zero_mod(M).
+> view one_mod(N: int) :- succ(M, N), zero_mod(M).
 Rule added to view 'one_mod' (2 rules total).
-> two_mod(N) := base_two(N).
+> view two_mod(N: int) :- base_two(N).
 View 'two_mod' registered.
-> two_mod(N) := succ(M, N), one_mod(M).
+> view two_mod(N: int) :- succ(M, N), one_mod(M).
 Rule added to view 'two_mod' (2 rules total).
 > ?- zero_mod(X).
 No results.
@@ -35,3 +36,4 @@ No results.
 Switched to database: default
 > .db drop test_three_way_mutual
 Database 'test_three_way_mutual' dropped.
+

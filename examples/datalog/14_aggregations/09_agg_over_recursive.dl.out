@@ -1,4 +1,5 @@
-Executing script: examples/datalog/14_aggregations/09_agg_over_recursive.dl
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/09_agg_over_recursive.dl
 
 > .db create test_agg_recursive
 Database 'test_agg_recursive' created.
@@ -7,9 +8,9 @@ Switched to database: test_agg_recursive
 Switched to database: test_agg_recursive
 > +edge[(1, 2), (2, 3), (3, 4), (1, 5), (5, 6)].
 Inserted 5 facts into 'edge'.
-> path(X, Y) := edge(X, Y).
+> view path(X: int, Y: int) :- edge(X, Y).
 View 'path' registered.
-> path(X, Z) := edge(X, Y), path(Y, Z).
+> view path(X: int, Z: int) :- edge(X, Y), path(Y, Z).
 Rule added to view 'path' (2 rules total).
 > ?- path(A, B).
 9 rows:
@@ -22,7 +23,7 @@ Rule added to view 'path' (2 rules total).
   (2, 4)
   (3, 4)
   (5, 6)
-> reach_count(X, count<Y>) := path(X, Y).
+> view reach_count(X: int, count<Y>: int) :- path(X, Y).
 View 'reach_count' registered.
 > ?- reach_count(X, C).
 4 rows:
@@ -30,7 +31,7 @@ View 'reach_count' registered.
   (2, 2)
   (3, 1)
   (5, 1)
-> reach_sum(X, sum<Y>) := path(X, Y).
+> view reach_sum(X: int, sum<Y>: int) :- path(X, Y).
 View 'reach_sum' registered.
 > ?- reach_sum(X, S).
 4 rows:
@@ -42,3 +43,4 @@ View 'reach_sum' registered.
 Switched to database: default
 > .db drop test_agg_recursive
 Database 'test_agg_recursive' dropped.
+

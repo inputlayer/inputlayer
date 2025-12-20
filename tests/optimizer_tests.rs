@@ -2,7 +2,7 @@
 //!
 //! Tests for Module 06: IR Optimization
 
-use datalog_engine::Optimizer;
+use inputlayer::Optimizer;
 use datalog_ir::{IRNode, Predicate};
 
 #[test]
@@ -390,7 +390,7 @@ fn test_multiple_real_filters_preserved() {
 
 #[test]
 fn test_subplan_sharing_detects_common_subexpressions() {
-    use datalog_engine::SubplanSharer;
+    use inputlayer::SubplanSharer;
 
     let sharer = SubplanSharer::new();
 
@@ -414,7 +414,7 @@ fn test_subplan_sharing_detects_common_subexpressions() {
 
 #[test]
 fn test_boolean_specializer_analyzes_semiring() {
-    use datalog_engine::BooleanSpecializer;
+    use inputlayer::BooleanSpecializer;
 
     let mut specializer = BooleanSpecializer::new();
 
@@ -438,7 +438,7 @@ fn test_boolean_specializer_analyzes_semiring() {
 
 #[test]
 fn test_join_planner_analyzes_structure() {
-    use datalog_engine::JoinPlanner;
+    use inputlayer::JoinPlanner;
 
     let planner = JoinPlanner::new();
 
@@ -465,7 +465,7 @@ fn test_join_planner_analyzes_structure() {
 
 #[test]
 fn test_sip_rewriter_analyzes_joins() {
-    use datalog_engine::SipRewriter;
+    use inputlayer::SipRewriter;
 
     let mut rewriter = SipRewriter::new();
 
@@ -492,7 +492,7 @@ fn test_sip_rewriter_analyzes_joins() {
 
 #[test]
 fn test_default_config_optimizations() {
-    use datalog_engine::OptimizationConfig;
+    use inputlayer::OptimizationConfig;
 
     let config = OptimizationConfig::default();
 

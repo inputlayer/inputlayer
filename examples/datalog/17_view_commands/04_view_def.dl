@@ -9,8 +9,8 @@
 +edge[(1,2), (2,3)].
 
 // Define a view
-reach(X, Y) := edge(X, Y).
-reach(X, Z) := reach(X, Y), edge(Y, Z).
+view reach(X: int, Y: int) :- edge(X, Y).
+view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
 
 // Show definition only
 .view def reach

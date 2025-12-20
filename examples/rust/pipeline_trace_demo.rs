@@ -5,7 +5,7 @@
 //!
 //! This is extremely valuable for students to understand how the engine works!
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 
 fn main() {
     println!("\n🔍 InputLayer Pipeline Trace Demo\n");

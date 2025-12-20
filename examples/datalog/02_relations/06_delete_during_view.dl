@@ -1,0 +1,32 @@
+// Test: Delete During View Evaluation
+// Category: 02_relations
+// Description: Tests behavior when base facts are deleted while views depend on them
+
+.db create test_del_view
+.db use test_del_view
+
+// Insert initial data
++edge[(1,2), (2,3), (3,4), (4,5)].
+
+// Define a view
+path(X, Y) :- edge(X, Y).
+path(X, Z) :- edge(X, Y), path(Y, Z).
+
+// Query the view
+?- path(X, Y).
+
+// Delete some base facts
+-edge(2, 3).
+
+// Query the view again - should reflect deletion
+?- path(X, Y).
+
+// Delete more facts
+-edge(3, 4).
+
+// Query again
+?- path(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_del_view

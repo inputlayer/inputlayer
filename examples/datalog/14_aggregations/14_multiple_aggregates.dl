@@ -11,11 +11,11 @@
            (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)].
 
 // Multiple aggregates per department
-dept_count(Dept, count<Emp>) := employees(Dept, Emp, _).
-dept_sum(Dept, sum<Sal>) := employees(Dept, _, Sal).
-dept_avg(Dept, avg<Sal>) := employees(Dept, _, Sal).
-dept_min(Dept, min<Sal>) := employees(Dept, _, Sal).
-dept_max(Dept, max<Sal>) := employees(Dept, _, Sal).
+view dept_count(Dept: int, count<Emp>: int) :- employees(Dept, Emp, _).
+view dept_sum(Dept: int, sum<Sal>: int) :- employees(Dept, _, Sal).
+view dept_avg(Dept: int, avg<Sal>: int) :- employees(Dept, _, Sal).
+view dept_min(Dept: int, min<Sal>: int) :- employees(Dept, _, Sal).
+view dept_max(Dept: int, max<Sal>: int) :- employees(Dept, _, Sal).
 
 // Query all aggregates
 ?- dept_count(D, C).
@@ -30,11 +30,11 @@ dept_max(Dept, max<Sal>) := employees(Dept, _, Sal).
 // Expected dept_max: (1,60000), (2,80000), (3,52000)
 
 // Global aggregates (no grouping)
-total_employees(count<E>) := employees(_, E, _).
-total_payroll(sum<S>) := employees(_, _, S).
-avg_salary(avg<S>) := employees(_, _, S).
-min_salary(min<S>) := employees(_, _, S).
-max_salary(max<S>) := employees(_, _, S).
+view total_employees(count<E>: int) :- employees(_, E, _).
+view total_payroll(sum<S>: int) :- employees(_, _, S).
+view avg_salary(avg<S>: int) :- employees(_, _, S).
+view min_salary(min<S>: int) :- employees(_, _, S).
+view max_salary(max<S>: int) :- employees(_, _, S).
 
 ?- total_employees(N).
 ?- total_payroll(T).

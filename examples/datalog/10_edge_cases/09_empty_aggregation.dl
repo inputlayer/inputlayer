@@ -1,0 +1,30 @@
+// Test: Empty Aggregation
+// Category: Edge Cases
+// Description: Tests aggregation behavior on empty relations
+
+.db create test_empty_agg
+.db use test_empty_agg
+
+// Empty relation - no data
+// Don't insert anything into 'sales'
+
+// Try count on empty
+view total(count<x>: int) :- sales(X, _).
+?- total(N).
+
+// Try sum on empty
+view total_sum(sum<v>: int) :- sales(_, V).
+?- total_sum(S).
+
+// Now add some data
++sales[(1, 100), (2, 200), (3, 150)].
+
+// Count should work now
+?- total(N).
+
+// Sum should work now
+?- total_sum(S).
+
+// Cleanup
+.db use default
+.db drop test_empty_agg

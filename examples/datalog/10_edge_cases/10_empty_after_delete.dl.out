@@ -1,0 +1,58 @@
+
+Executing script: examples/datalog/10_edge_cases/10_empty_after_delete.dl
+
+> .db create test_empty_del
+Database 'test_empty_del' created.
+Switched to database: test_empty_del
+> .db use test_empty_del
+Switched to database: test_empty_del
+> +items[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'items'.
+> ?- items(X).
+5 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (5)
+> view big_items(X: int) :- items(X), X > 3.
+View 'big_items' registered.
+> ?- big_items(X).
+2 rows:
+  (4)
+  (5)
+> -items(X) :- items(X).
+No matching tuples to delete.
+> ?- items(X).
+5 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (5)
+> ?- big_items(X).
+2 rows:
+  (4)
+  (5)
+> +items[(10), (20)].
+Inserted 2 facts into 'items'.
+> ?- items(X).
+7 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (5)
+  (10)
+  (20)
+> ?- big_items(X).
+4 rows:
+  (4)
+  (5)
+  (10)
+  (20)
+> .db use default
+Switched to database: default
+> .db drop test_empty_del
+Database 'test_empty_del' dropped.
+

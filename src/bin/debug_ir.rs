@@ -1,4 +1,4 @@
-use datalog_engine::{DatalogEngine, OptimizationConfig};
+use inputlayer::{DatalogEngine, OptimizationConfig};
 
 fn main() {
     let query = "path2(x, z) :- edge(x, y), edge(y, z).";

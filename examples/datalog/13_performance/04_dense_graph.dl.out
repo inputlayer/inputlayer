@@ -1,7 +1,64 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/04_dense_graph.dl
+
 > .db create test_perf_dense
 Database 'test_perf_dense' created.
 Switched to database: test_perf_dense
 > .db use test_perf_dense
 Switched to database: test_perf_dense
-> +edge[(1,2), (1,3), (1,4), (1,5),
+> +edge[(1,2), (1,3), (1,4), (1,5), (2,1), (2,3), (2,4), (2,5), (3,1), (3,2), (3,4), (3,5), (4,1), (4,2), (4,3), (4,5), (5,1), (5,2), (5,3), (5,4)].
+Inserted 20 facts into 'edge'.
+> ?- edge(X, Y).
+20 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+  (2, 1)
+  (2, 3)
+  (2, 4)
+  (2, 5)
+  (3, 1)
+  (3, 2)
+  (3, 4)
+  (3, 5)
+  (4, 1)
+  (4, 2)
+  (4, 3)
+  (4, 5)
+  (5, 1)
+  (5, 2)
+  (5, 3)
+  (5, 4)
+> view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A).
+View 'triangle' registered.
+> ?- triangle(1, B, C).
+12 rows:
+  (1, 2, 3)
+  (1, 2, 4)
+  (1, 2, 5)
+  (1, 3, 2)
+  (1, 3, 4)
+  (1, 3, 5)
+  (1, 4, 2)
+  (1, 4, 3)
+  (1, 4, 5)
+  (1, 5, 2)
+  (1, 5, 3)
+  (1, 5, 4)
+> view reach(X: int, Y: int) :- edge(X, Y).
+View 'reach' registered.
+> view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
+Rule added to view 'reach' (2 rules total).
+> ?- reach(1, Y).
+5 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+> .db use default
+Switched to database: default
+> .db drop test_perf_dense
+Database 'test_perf_dense' dropped.
+

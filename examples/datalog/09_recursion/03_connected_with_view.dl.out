@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/03_connected_with_view.dl
+
 > .db create test_conn
 Database 'test_conn' created.
 Switched to database: test_conn
@@ -6,9 +8,9 @@ Switched to database: test_conn
 Switched to database: test_conn
 > +edge[(1,2), (2,3), (3,4)].
 Inserted 3 facts into 'edge'.
-> connected(X, Y) := edge(X, Y).
+> view connected(X: int, Y: int) :- edge(X, Y).
 View 'connected' registered.
-> connected(X, Y) := edge(X, Z), connected(Z, Y).
+> view connected(X: int, Y: int) :- edge(X, Z), connected(Z, Y).
 Rule added to view 'connected' (2 rules total).
 > .view connected
 View: connected
@@ -30,3 +32,4 @@ Results: 6 rows
 Switched to database: default
 > .db drop test_conn
 Database 'test_conn' dropped.
+

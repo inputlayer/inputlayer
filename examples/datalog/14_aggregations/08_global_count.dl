@@ -9,7 +9,7 @@
 +event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
 
 // Count all events
-total_events(count<Id>) := event(Id, _).
+view total_events(count<Id>: int) :- event(Id, _).
 
 // Query the result
 ?- total_events(X).

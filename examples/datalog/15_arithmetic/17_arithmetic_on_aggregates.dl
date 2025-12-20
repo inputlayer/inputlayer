@@ -12,28 +12,28 @@
        (3, 100, 700), (3, 101, 100), (3, 102, 200), (3, 103, 300)].
 
 // Basic aggregations
-store_total(Store, sum<Amount>) := sales(Store, _, Amount).
-store_count(Store, count<Product>) := sales(Store, Product, _).
+view store_total(Store: int, sum<Amount>: int) :- sales(Store, _, Amount).
+view store_count(Store: int, count<Product>: int) :- sales(Store, Product, _).
 
 ?- store_total(S, T).
 ?- store_count(S, C).
 
 // Arithmetic on aggregation results: double the total
-doubled_total(Store, Total*2) := store_total(Store, Total).
+view doubled_total(Store: int, Total*2: int) :- store_total(Store, Total).
 ?- doubled_total(S, D).
 
 // Expected: Store 1: 2000, Store 2: 2000, Store 3: 2600
 
 // Calculate average from sum and count (manual avg)
-manual_avg(Store, Total/Count) := store_total(Store, Total), store_count(Store, Count).
+view manual_avg(Store: int, Total/Count: int) :- store_total(Store, Total), store_count(Store, Count).
 ?- manual_avg(S, A).
 
 // Compare with built-in avg
-builtin_avg(Store, avg<Amount>) := sales(Store, _, Amount).
+view builtin_avg(Store: int, avg<Amount>: int) :- sales(Store, _, Amount).
 ?- builtin_avg(S, A).
 
 // Percentage of grand total
-grand_total(sum<A>) := sales(_, _, A).
+view grand_total(sum<A>: int) :- sales(_, _, A).
 ?- grand_total(G).
 
 // Store percentage (requires join with grand total)
@@ -41,7 +41,7 @@ grand_total(sum<A>) := sales(_, _, A).
 // Note: This pattern may not work - depends on how global aggregates are handled
 
 // Derived metrics: total + 10% bonus
-with_bonus(Store, Total + Total/10) := store_total(Store, Total).
+view with_bonus(Store: int, Total + Total/10: int) :- store_total(Store, Total).
 ?- with_bonus(S, B).
 
 // Cleanup

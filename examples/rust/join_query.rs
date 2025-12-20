@@ -3,7 +3,7 @@
 //! Demonstrates join operations in the Datalog engine.
 //! Shows how multiple relations can be joined together.
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 use std::collections::HashSet;
 
 fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {

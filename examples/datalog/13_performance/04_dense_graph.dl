@@ -17,12 +17,12 @@
 ?- edge(X, Y).
 
 // Triangle query (should find 60 triangles: 5*4*3 = 60)
-triangle(A, B, C) := edge(A, B), edge(B, C), edge(C, A).
+view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A).
 ?- triangle(1, B, C).
 
 // Transitive closure on complete graph (converges in 1 iteration)
-reach(X, Y) := edge(X, Y).
-reach(X, Z) := reach(X, Y), edge(Y, Z).
+view reach(X: int, Y: int) :- edge(X, Y).
+view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
 ?- reach(1, Y).
 
 // Cleanup

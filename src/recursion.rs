@@ -566,6 +566,12 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
 /// ```
 ///
 /// Note: For programs with negation, use `stratify_with_negation` instead.
+/// Result type for stratification that can indicate non-stratifiable programs
+pub enum StratifyResult {
+    Success(Vec<Vec<usize>>),
+    NotStratifiable { relation: String, reason: String },
+}
+
 pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
     // Delegate to the negation-aware version
     match stratify_with_negation(program) {
@@ -575,6 +581,16 @@ pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
             // This maintains backward compatibility
             eprintln!("Warning: Program not stratifiable: {} - {}", relation, reason);
             basic_stratify(program)
+        }
+    }
+}
+
+/// Stratify with explicit error handling for non-stratifiable programs
+pub fn stratify_strict(program: &Program) -> StratifyResult {
+    match stratify_with_negation(program) {
+        StratificationResult::Success(strata) => StratifyResult::Success(strata),
+        StratificationResult::NotStratifiable { relation, reason } => {
+            StratifyResult::NotStratifiable { relation, reason }
         }
     }
 }

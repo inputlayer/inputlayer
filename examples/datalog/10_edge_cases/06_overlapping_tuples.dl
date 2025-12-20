@@ -10,16 +10,16 @@
 +rel_b[(2, 3), (3, 4), (5, 6), (6, 7)].
 
 // Union-like behavior via separate rules
-combined(X, Y) := rel_a(X, Y).
-combined(X, Y) := rel_b(X, Y).
+view combined(X: int, Y: int) :- rel_a(X, Y).
+view combined(X: int, Y: int) :- rel_b(X, Y).
 ?- combined(X, Y).
 
 // Intersection via join on same variables
-intersection(X, Y) := rel_a(X, Y), rel_b(X, Y).
+view intersection(X: int, Y: int) :- rel_a(X, Y), rel_b(X, Y).
 ?- intersection(X, Y).
 
 // Difference via negation
-only_in_a(X, Y) := rel_a(X, Y), !rel_b(X, Y).
+view only_in_a(X: int, Y: int) :- rel_a(X, Y), !rel_b(X, Y).
 ?- only_in_a(X, Y).
 
 // Cleanup

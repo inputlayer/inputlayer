@@ -13,12 +13,12 @@
 +blocked[(2, 3), (4, 5)].
 
 // Base case: direct unblocked edges
-safe_edge(X, Y) := edge(X, Y), !blocked(X, Y).
+view safe_edge(X: int, Y: int) :- edge(X, Y), !blocked(X, Y).
 ?- safe_edge(X, Y).
 
 // Recursive safe path (using only unblocked edges)
-safe_path(X, Y) := safe_edge(X, Y).
-safe_path(X, Z) := safe_edge(X, Y), safe_path(Y, Z).
+view safe_path(X: int, Y: int) :- safe_edge(X, Y).
+view safe_path(X: int, Z: int) :- safe_edge(X, Y), safe_path(Y, Z).
 
 ?- safe_path(X, Y).
 
@@ -26,8 +26,8 @@ safe_path(X, Z) := safe_edge(X, Y), safe_path(Y, Z).
 // Expected safe_path from 1: can reach 2, 3, 4 but NOT 5 (blocked)
 
 // Count reachable from node 1
-reachable_from_1(Y) := safe_path(1, Y).
-reach_count(count<Y>) := reachable_from_1(Y).
+view reachable_from_1(Y: int) :- safe_path(1, Y).
+view reach_count(count<Y>: int) :- reachable_from_1(Y).
 ?- reach_count(C).
 
 // Cleanup

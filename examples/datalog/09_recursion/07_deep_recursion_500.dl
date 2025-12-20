@@ -68,16 +68,16 @@
       (490, 491), (491, 492), (492, 493), (493, 494), (494, 495), (495, 496), (496, 497), (497, 498), (498, 499), (499, 500)].
 
 // Transitive closure
-path(X, Y) := edge(X, Y).
-path(X, Z) := edge(X, Y), path(Y, Z).
+view path(X: int, Y: int) :- edge(X, Y).
+view path(X: int, Z: int) :- edge(X, Y), path(Y, Z).
 
 // Query: can we reach from node 1 to node 500?
-reachable_500(X) := path(1, X), X = 500.
+view reachable_500(X: int) :- path(1, X), X = 500.
 ?- reachable_500(X).
 
 // Count how many nodes are reachable from node 1
-from_one(Y) := path(1, Y).
-count_from_one(count<Y>) := from_one(Y).
+view from_one(Y: int) :- path(1, Y).
+view count_from_one(count<Y>: int) :- from_one(Y).
 ?- count_from_one(C).
 
 // Expected:

@@ -9,8 +9,8 @@
 +edge[(1,2), (2,3)].
 
 // Define views
-reverse(X, Y) := edge(Y, X).
-paths(X, Y) := edge(X, Y).
+view reverse(X: int, Y: int) :- edge(Y, X).
+view paths(X: int, Y: int) :- edge(X, Y).
 
 // List views before drop
 .view

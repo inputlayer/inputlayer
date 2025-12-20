@@ -1,0 +1,54 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/14_stratification_check.dl
+
+> .db create test_stratification
+Database 'test_stratification' created.
+Switched to database: test_stratification
+> .db use test_stratification
+Switched to database: test_stratification
+> +all_items[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'all_items'.
+> +selected[(1), (3), (5)].
+Inserted 3 facts into 'selected'.
+> view not_selected(X: int) :- all_items(X), !selected(X).
+View 'not_selected' registered.
+> ?- not_selected(X).
+2 rows:
+  (2)
+  (4)
+> +base_set[(1), (2), (3)].
+Inserted 3 facts into 'base_set'.
+> +exclude1[(1)].
+Inserted 1 fact into 'exclude1'.
+> +exclude2[(2)].
+Inserted 1 fact into 'exclude2'.
+> view remaining(X: int) :- base_set(X), !exclude1(X), !exclude2(X).
+View 'remaining' registered.
+> ?- remaining(X).
+1 rows:
+  (3)
+> +universe[(1), (2), (3), (4), (5), (6)].
+Inserted 6 facts into 'universe'.
+> +layer1_exclude[(1), (2)].
+Inserted 2 facts into 'layer1_exclude'.
+> view layer1_result(X: int) :- universe(X), !layer1_exclude(X).
+View 'layer1_result' registered.
+> view layer2_exclude(X: int) :- layer1_result(X), X < 5.
+View 'layer2_exclude' registered.
+> view layer2_result(X: int) :- layer1_result(X), !layer2_exclude(X).
+View 'layer2_result' registered.
+> ?- layer1_result(X).
+4 rows:
+  (3)
+  (4)
+  (5)
+  (6)
+> ?- layer2_result(X).
+2 rows:
+  (5)
+  (6)
+> .db use default
+Switched to database: default
+> .db drop test_stratification
+Database 'test_stratification' dropped.
+

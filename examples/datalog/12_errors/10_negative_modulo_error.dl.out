@@ -1,0 +1,13 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/10_negative_modulo.dl
+
+> .db create test_neg_mod
+Database 'test_neg_mod' created.
+Switched to database: test_neg_mod
+> .db use test_neg_mod
+Switched to database: test_neg_mod
+> +mod_cases[(10, 3), (11, 3), (12, 3), (-10, 3), (-11, 3), (-12, 3), (10, -3), (11, -3), (12, -3), (-10, -3), (-11, -3), (-12, -3)].
+Inserted 12 facts into 'mod_cases'.
+> view mod_result(X: int, Y: int, X%Y: int) :- mod_cases(X, Y).
+Script error: Line 19: Parse error: Invalid column name: 'X%Y'
+

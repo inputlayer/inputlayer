@@ -1,0 +1,35 @@
+Executing script: examples/datalog/24_rel_schemas/01_explicit_schema.dl
+
+> .db create test_rel_schema
+Database 'test_rel_schema' created.
+Switched to database: test_rel_schema
+> .db use test_rel_schema
+Switched to database: test_rel_schema
+> rel employee(emp_id: int, name: string, dept_id: int).
+Relation 'employee' schema declared: (emp_id: Base(Int), name: Base(String), dept_id: Base(Int))
+> rel department(dept_id: int, dept_name: string).
+Relation 'department' schema declared: (dept_id: Base(Int), dept_name: Base(String))
+> +employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)].
+Inserted 3 facts into 'employee'.
+> +department[(10, "Engineering"), (20, "Sales")].
+Inserted 2 facts into 'department'.
+> ?- employee(Id, Name, Dept).
+3 rows:
+  (1, "Alice", 10)
+  (2, "Bob", 10)
+  (3, "Charlie", 20)
+> ?- department(Id, Name).
+2 rows:
+  (10, "Engineering")
+  (20, "Sales")
+> view emp_dept(EmpName: string, DeptName: string) :- employee(_, EmpName, DeptId), department(DeptId, DeptName).
+View 'emp_dept' registered.
+> ?- emp_dept(E, D).
+3 rows:
+  ("Alice", "Engineering")
+  ("Bob", "Engineering")
+  ("Charlie", "Sales")
+> .db use default
+Switched to database: default
+> .db drop test_rel_schema
+Database 'test_rel_schema' dropped.

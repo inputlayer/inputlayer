@@ -14,7 +14,7 @@
 +damaged[(4, 0), (7, 0)].
 
 // Available items: not sold, not reserved, not damaged
-available(X, Y) := item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
+view available(X: int, Y: int) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
 ?- available(X, Y).
 
 // Should return: (6, 0), (8, 0)

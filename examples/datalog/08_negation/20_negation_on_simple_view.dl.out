@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/20_negation_on_simple_view.dl
+
 > .db create test_neg_view
 Database 'test_neg_view' created.
 Switched to database: test_neg_view
@@ -8,7 +10,7 @@ Switched to database: test_neg_view
 Inserted 5 facts into 'data'.
 > +exclude_ids[(2, 0), (4, 0)].
 Inserted 2 facts into 'exclude_ids'.
-> data_view(X, Y) := data(X, Y).
+> view data_view(X: int, Y: int) :- data(X, Y).
 View 'data_view' registered.
 > ?- data_view(X, Y).
 5 rows:
@@ -17,7 +19,7 @@ View 'data_view' registered.
   (3, 30)
   (4, 40)
   (5, 50)
-> result(X, Y) := data_view(X, Y), !exclude_ids(X, _).
+> view result(X: int, Y: int) :- data_view(X, Y), !exclude_ids(X, _).
 View 'result' registered.
 > ?- result(X, Y).
 3 rows:
@@ -28,3 +30,4 @@ View 'result' registered.
 Switched to database: default
 > .db drop test_neg_view
 Database 'test_neg_view' dropped.
+

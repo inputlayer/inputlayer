@@ -15,43 +15,43 @@
 +blocked[(3, 5), (1, 5)].
 
 // Step 1: Filter out blocked links (NEGATION)
-active_link(X, Y, C) := link(X, Y, C), !blocked(X, Y).
+view active_link(X: int, Y: int, C: int) :- link(X, Y, C), !blocked(X, Y).
 ?- active_link(X, Y, C).
 
 // Step 2: Compute all path costs (RECURSION + ARITHMETIC)
-path_cost(X, Y, C) := active_link(X, Y, C).
-path_cost(X, Z, C1+C2) := path_cost(X, Y, C1), active_link(Y, Z, C2).
+view path_cost(X: int, Y: int, C: int) :- active_link(X, Y, C).
+view path_cost(X: int, Z: int, C1+C2: int) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
 
 ?- path_cost(X, Y, C).
 
 // Step 3: Find minimum cost path (AGGREGATION)
-min_cost(X, Y, min<C>) := path_cost(X, Y, C).
+view min_cost(X: int, Y: int, min<C>: int) :- path_cost(X, Y, C).
 ?- min_cost(X, Y, C).
 
 // Step 4: More complex aggregations on paths
 // Count paths between each pair
-path_count(X, Y, count<C>) := path_cost(X, Y, C).
+view path_count(X: int, Y: int, count<C>: int) :- path_cost(X, Y, C).
 ?- path_count(X, Y, N).
 
 // Average path cost from node 1
-avg_cost_from_1(avg<C>) := path_cost(1, _, C).
+view avg_cost_from_1(avg<C>: int) :- path_cost(1, _, C).
 ?- avg_cost_from_1(A).
 
 // Total cost of all paths from node 1
-total_cost_from_1(sum<C>) := path_cost(1, _, C).
+view total_cost_from_1(sum<C>: int) :- path_cost(1, _, C).
 ?- total_cost_from_1(T).
 
 // Step 5: Find cheapest destination from node 1
-reachable_cost(Y, min<C>) := path_cost(1, Y, C).
+view reachable_cost(Y: int, min<C>: int) :- path_cost(1, Y, C).
 ?- reachable_cost(Y, C).
 
 // Step 6: Nodes reachable within budget (ARITHMETIC + FILTER)
 +budget[(50)].
-within_budget(Y) := min_cost(1, Y, C), budget(B), C <= B.
+view within_budget(Y: int) :- min_cost(1, Y, C), budget(B), C <= B.
 ?- within_budget(Y).
 
 // Step 7: Count nodes within budget (AGGREGATION on filtered result)
-budget_count(count<Y>) := within_budget(Y).
+view budget_count(count<Y>: int) :- within_budget(Y).
 ?- budget_count(C).
 
 // Cleanup

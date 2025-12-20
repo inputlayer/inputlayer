@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/06_negation_self_relation.dl
+
 > .db create test_neg_self
 Database 'test_neg_self' created.
 Switched to database: test_neg_self
@@ -6,11 +8,11 @@ Switched to database: test_neg_self
 Switched to database: test_neg_self
 > +edge[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)].
 Inserted 5 facts into 'edge'.
-> source_node(X, Y) := edge(X, Y).
+> view source_node(X: int, Y: int) :- edge(X, Y).
 View 'source_node' registered.
-> target_node(Y, X) := edge(X, Y).
+> view target_node(Y: int, X: int) :- edge(X, Y).
 View 'target_node' registered.
-> pure_source(X, Y) := source_node(X, Y), !target_node(X, _).
+> view pure_source(X: int, Y: int) :- source_node(X, Y), !target_node(X, _).
 View 'pure_source' registered.
 > ?- pure_source(X, Y).
 2 rows:
@@ -20,3 +22,4 @@ View 'pure_source' registered.
 Switched to database: default
 > .db drop test_neg_self
 Database 'test_neg_self' dropped.
+

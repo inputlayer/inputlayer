@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/03_negation_empty_result.dl
+
 > .db create test_neg_empty
 Database 'test_neg_empty' created.
 Switched to database: test_neg_empty
@@ -8,7 +10,7 @@ Switched to database: test_neg_empty
 Inserted 3 facts into 'edge'.
 > +blocked[(1,2), (2,3), (3,4)].
 Inserted 3 facts into 'blocked'.
-> allowed(X, Y) := edge(X, Y), !blocked(X, Y).
+> view allowed(X: int, Y: int) :- edge(X, Y), !blocked(X, Y).
 View 'allowed' registered.
 > ?- allowed(X, Y).
 No results.
@@ -16,3 +18,4 @@ No results.
 Switched to database: default
 > .db drop test_neg_empty
 Database 'test_neg_empty' dropped.
+

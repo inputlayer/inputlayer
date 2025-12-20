@@ -229,14 +229,14 @@ fn test_recursion_tests() {
 // Syntax Validation Tests
 // ============================================================================
 
-/// Extract rule statements from our test format
+/// Extract view statements from our test format (new syntax uses "view ... :- ...")
 fn extract_rules_from_test(content: &str) -> Vec<String> {
     content
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            // Keep lines that look like rules (contain :=)
-            if trimmed.contains(":=") {
+            // Keep lines that look like view declarations (start with "view" and contain ":-")
+            if trimmed.starts_with("view ") && trimmed.contains(":-") {
                 Some(trimmed.to_string())
             } else {
                 None
@@ -255,10 +255,10 @@ fn test_negation_syntax_valid() {
     let has_negation = rules.iter().any(|r| r.contains("!skip"));
     assert!(has_negation, "Test should contain negation syntax (!skip)");
 
-    // Verify the rule format is correct
+    // Verify the rule format is correct (new view syntax)
     let negation_rule = rules.iter().find(|r| r.contains("!skip")).unwrap();
     assert!(
-        negation_rule.contains("filtered(X, Y) := edge(X, Y), !skip(X, Y)"),
+        negation_rule.contains("view filtered") && negation_rule.contains("!skip(X, Y)"),
         "Negation rule should have correct format"
     );
 }
@@ -278,14 +278,12 @@ fn test_recursion_syntax_valid() {
 
     // Verify recursive structure (relation used in both head and body)
     let has_recursive = rules.iter().any(|r| {
-        let head = r.split(":=").next().unwrap_or("");
-        let body = r.split(":=").nth(1).unwrap_or("");
+        // Extract name after "view " and before "("
+        let after_view = r.strip_prefix("view ").unwrap_or("");
+        let head_name = after_view.split('(').next().unwrap_or("").trim();
+        let body = r.split(":-").nth(1).unwrap_or("");
         // Check if the relation in head appears in body
-        if let Some(rel_name) = head.split('(').next() {
-            body.contains(rel_name.trim())
-        } else {
-            false
-        }
+        !head_name.is_empty() && body.contains(head_name)
     });
     assert!(has_recursive, "Should have recursive rule structure");
 }

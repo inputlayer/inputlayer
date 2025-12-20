@@ -8,7 +8,7 @@
 //! - Error handling
 //! - Thread safety
 
-use datalog_engine::{Config, StorageEngine};
+use inputlayer::{Config, StorageEngine};
 use std::fs;
 use tempfile::TempDir;
 

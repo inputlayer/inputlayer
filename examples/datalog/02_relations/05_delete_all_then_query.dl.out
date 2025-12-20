@@ -1,0 +1,30 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/05_delete_all_then_query.dl
+
+> .db create test_del_all
+Database 'test_del_all' created.
+Switched to database: test_del_all
+> .db use test_del_all
+Switched to database: test_del_all
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> -edge(X, Y) :- edge(X, Y).
+Deleted 3 facts from 'edge'.
+> ?- edge(X, Y).
+No results.
+> +edge[(10,20), (20,30)].
+Inserted 2 facts into 'edge'.
+> ?- edge(X, Y).
+2 rows:
+  (10, 20)
+  (20, 30)
+> .db use default
+Switched to database: default
+> .db drop test_del_all
+Database 'test_del_all' dropped.
+

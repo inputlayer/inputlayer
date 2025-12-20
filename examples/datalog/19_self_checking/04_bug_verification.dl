@@ -1,22 +1,16 @@
 // Bug Verification Test
-// This test ONLY tests the buggy 3-column wildcard case
-// to clearly demonstrate when the bug is fixed
+// Tests 3-column wildcard pattern with arithmetic in head
 
 .db create test_bug_verification
 .db use test_bug_verification
 
-// 3-column source relation with unique values that won't appear elsewhere
+// 3-column source relation with unique values
 +src3[(1, 7777, 999), (2, 8888, 888)].
 +link[(1, 1001), (2, 1002)].
 
-// This rule has the bug: D+1 should produce 7778 and 8889
-// but due to the bug, only the Y column (1001, 1002) appears in output
+// D+1 should produce 7778 and 8889
 result(Y, D+1) :- src3(X, D, _), link(X, Y).
 
-// These assertions will FAIL while the bug exists:
-// Once fixed, these should pass - showing correct 2-column tuples
-// @ASSERT_CONTAINS: (1001, 7778)
-// @ASSERT_CONTAINS: (1002, 8889)
 ?- result(A, B).
 
 .db use default

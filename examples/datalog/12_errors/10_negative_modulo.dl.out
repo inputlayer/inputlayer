@@ -1,8 +1,0 @@
-Executing script: examples/datalog/12_errors/10_negative_modulo.dl
-
-> .db create test_neg_mod
-Database 'test_neg_mod' created.
-Switched to database: test_neg_mod
-> .db use test_neg_mod
-Switched to database: test_neg_mod
-> +mod_cases[(10, 3), (11, 3), (12, 3),

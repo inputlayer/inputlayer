@@ -9,8 +9,8 @@
 +edge[(1,2), (2,3), (3,4)].
 
 // Define connected as transitive closure of edge
-connected(X, Y) := edge(X, Y).
-connected(X, Y) := edge(X, Z), connected(Z, Y).
+view connected(X: int, Y: int) :- edge(X, Y).
+view connected(X: int, Y: int) :- edge(X, Z), connected(Z, Y).
 
 // Inspect the view (shows rules and computed results)
 .view connected

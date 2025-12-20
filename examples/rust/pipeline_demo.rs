@@ -6,7 +6,7 @@
 //! 3. Optimization (IR → optimized IR)
 //! 4. Code Generation & Execution (IR → Differential Dataflow → results)
 
-use datalog_engine::{DatalogEngine, IRNode};
+use inputlayer::{DatalogEngine, IRNode};
 
 fn main() {
     println!("=== Datalog Pipeline Demonstration ===\n");

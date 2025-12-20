@@ -2,7 +2,7 @@
 //!
 //! Tests the 3-rule recursive same_component query
 
-use datalog_engine::DatalogEngine;
+use inputlayer::DatalogEngine;
 
 fn main() {
     println!("=== Debug Recursive Union ===\n");

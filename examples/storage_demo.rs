@@ -9,7 +9,7 @@
 //! - Persisting data to disk
 //! - Loading data from disk
 
-use datalog_engine::{Config, StorageEngine};
+use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

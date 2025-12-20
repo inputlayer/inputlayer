@@ -12,7 +12,7 @@
 ?- edge(X, Y).
 
 // Join: find all 2-hop paths
-two_hop(X, Z) := edge(X, Y), edge(Y, Z).
+view two_hop(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
 ?- two_hop(1, Z).
 
 // Cleanup

@@ -1,4 +1,6 @@
 
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/04_session/01_session_rules.dl
+
 > .db create test_sess
 Database 'test_sess' created.
 Switched to database: test_sess
@@ -41,3 +43,4 @@ Use :- to define transient rules (e.g., foo(X, Y) :- bar(X, Y).)
 Switched to database: default
 > .db drop test_sess
 Database 'test_sess' dropped.
+

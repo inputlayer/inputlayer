@@ -1,11 +1,16 @@
 //! Unified Handler for InputLayer RPC Services
 //!
 //! Implements all generated handler traits using the StorageEngine backend.
+//!
+//! Performance: Uses parking_lot::RwLock for faster lock acquisition (no poisoning)
+//! and AtomicU64 for lock-free statistics counters.
 
 use crate::storage_engine::StorageEngine;
 use crate::Config;
 use async_trait::async_trait;
-use std::sync::{Arc, RwLock};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 // Import generated types and handler traits
@@ -26,11 +31,15 @@ use super::generated::queryservice::types as query;
 ///
 /// This struct wraps a StorageEngine and provides thread-safe access
 /// for concurrent RPC calls across all services.
+///
+/// Performance optimizations:
+/// - Uses parking_lot::RwLock instead of std::sync::RwLock (no poisoning, faster)
+/// - Uses AtomicU64 for counters (lock-free statistics)
 pub struct UnifiedHandler {
     storage: Arc<RwLock<StorageEngine>>,
     start_time: Instant,
-    query_count: Arc<RwLock<u64>>,
-    insert_count: Arc<RwLock<u64>>,
+    query_count: AtomicU64,
+    insert_count: AtomicU64,
 }
 
 impl UnifiedHandler {
@@ -39,8 +48,8 @@ impl UnifiedHandler {
         Self {
             storage: Arc::new(RwLock::new(storage)),
             start_time: Instant::now(),
-            query_count: Arc::new(RwLock::new(0)),
-            insert_count: Arc::new(RwLock::new(0)),
+            query_count: AtomicU64::new(0),
+            insert_count: AtomicU64::new(0),
         }
     }
 
@@ -57,23 +66,19 @@ impl UnifiedHandler {
     }
 
     fn inc_query_count(&self) {
-        if let Ok(mut count) = self.query_count.write() {
-            *count += 1;
-        }
+        self.query_count.fetch_add(1, Ordering::Relaxed);
     }
 
     fn inc_insert_count(&self) {
-        if let Ok(mut count) = self.insert_count.write() {
-            *count += 1;
-        }
+        self.insert_count.fetch_add(1, Ordering::Relaxed);
     }
 
     fn total_queries(&self) -> u64 {
-        self.query_count.read().map(|c| *c).unwrap_or(0)
+        self.query_count.load(Ordering::Relaxed)
     }
 
     fn total_inserts(&self) -> u64 {
-        self.insert_count.read().map(|c| *c).unwrap_or(0)
+        self.insert_count.load(Ordering::Relaxed)
     }
 }
 
@@ -87,9 +92,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         request: db::CreateDatabaseRequest,
     ) -> Result<db::CreateDatabaseResponse, db::DatabaseError> {
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         storage
             .create_database(&request.name)
@@ -114,9 +117,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
             });
         }
 
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         storage
             .drop_database(&request.name)
@@ -134,9 +135,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         _request: db::ListDatabasesRequest,
     ) -> Result<db::ListDatabasesResponse, db::DatabaseError> {
-        let storage = self.storage.read().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let storage = self.storage.read();
 
         let databases = storage
             .list_databases()
@@ -156,9 +155,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         request: db::DatabaseInfoRequest,
     ) -> Result<db::DatabaseInfoResponse, db::DatabaseError> {
-        let storage = self.storage.read().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let storage = self.storage.read();
 
         let db_names = storage.list_databases();
         if !db_names.contains(&request.name) {
@@ -186,9 +183,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
                 message: format!("Failed to parse view definition: {}", e),
             })?;
 
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db_name) = request.database {
@@ -211,9 +206,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         request: db::DropViewRequest,
     ) -> Result<db::DropViewResponse, db::DatabaseError> {
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db_name) = request.database {
@@ -236,9 +229,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         request: db::ListViewsRequest,
     ) -> Result<db::ListViewsResponse, db::DatabaseError> {
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db_name) = request.database {
@@ -268,9 +259,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
         &self,
         request: db::DescribeViewRequest,
     ) -> Result<db::DescribeViewResponse, db::DatabaseError> {
-        let mut storage = self.storage.write().map_err(|_| db::DatabaseError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db_name) = request.database {
@@ -303,9 +292,7 @@ impl QueryServiceHandler for UnifiedHandler {
         self.inc_query_count();
         let start = Instant::now();
 
-        let mut storage = self.storage.write().map_err(|_| query::QueryError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db) = request.database {
@@ -396,9 +383,7 @@ impl DataServiceHandler for UnifiedHandler {
     ) -> Result<data::InsertResponse, data::DataError> {
         self.inc_insert_count();
 
-        let mut storage = self.storage.write().map_err(|_| data::DataError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db) = request.database {
@@ -440,9 +425,7 @@ impl DataServiceHandler for UnifiedHandler {
         &self,
         request: data::DeleteRequest,
     ) -> Result<data::DeleteResponse, data::DataError> {
-        let mut storage = self.storage.write().map_err(|_| data::DataError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let mut storage = self.storage.write();
 
         // Switch to target database if specified
         if let Some(ref db) = request.database {
@@ -520,9 +503,7 @@ impl AdminServiceHandler for UnifiedHandler {
         &self,
         _request: admin::HealthRequest,
     ) -> Result<admin::HealthResponse, admin::AdminError> {
-        let storage = self.storage.read().map_err(|_| admin::AdminError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let storage = self.storage.read();
 
         let databases_loaded = storage.list_databases();
 
@@ -552,9 +533,7 @@ impl AdminServiceHandler for UnifiedHandler {
         request: admin::ShutdownRequest,
     ) -> Result<admin::ShutdownResponse, admin::AdminError> {
         if request.graceful {
-            let storage = self.storage.read().map_err(|_| admin::AdminError::Internal {
-                message: "Lock poisoned".to_string(),
-            })?;
+            let storage = self.storage.read();
 
             storage.save_all().map_err(|e| admin::AdminError::ShutdownFailed {
                 reason: format!("Failed to save databases: {}", e),
@@ -568,9 +547,7 @@ impl AdminServiceHandler for UnifiedHandler {
         &self,
         request: admin::BackupRequest,
     ) -> Result<admin::BackupResponse, admin::AdminError> {
-        let storage = self.storage.read().map_err(|_| admin::AdminError::Internal {
-            message: "Lock poisoned".to_string(),
-        })?;
+        let storage = self.storage.read();
 
         storage
             .save_database(&request.database)

@@ -1,0 +1,46 @@
+
+Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/15_mutual_one_branch_empty.dl
+
+> .db create test_mutual_empty
+Database 'test_mutual_empty' created.
+Switched to database: test_mutual_empty
+> .db use test_mutual_empty
+Switched to database: test_mutual_empty
+> +a_base[(1), (2), (3)].
+Inserted 3 facts into 'a_base'.
+> a_derived(X) :- a_base(X).
+No results for 'a_derived'.
+(session: 1 rule(s))
+> a_derived(X) :- b_derived(X).
+No results for 'a_derived'.
+(session: 2 rule(s))
+> b_derived(X) :- b_base(X).
+No results for 'b_derived'.
+(session: 3 rule(s))
+> b_derived(X) :- a_derived(X), X > 10.
+No results for 'b_derived'.
+(session: 4 rule(s))
+> ?- a_derived(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> ?- b_derived(X).
+No results.
+> +b_base[(10), (20)].
+Inserted 2 facts into 'b_base'.
+> ?- a_derived(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> ?- b_derived(X).
+2 rows:
+  (10)
+  (20)
+> .db use default
+Switched to database: default
+(Cleared 4 session rule(s))
+> .db drop test_mutual_empty
+Database 'test_mutual_empty' dropped.
+
