@@ -1,0 +1,16 @@
+% Test: Union preserving duplicates
+
+.kg create test_union_all_n22t15
+.kg use test_union_all_n22t15
+
++set1[(1,), (2,), (3,)].
++set2[(2,), (3,), (4,)].
+
+% Union (Datalog naturally deduplicates)
+combined(X) :- set1(X).
+combined(X) :- set2(X).
+
+?- combined(X).
+
+.kg use default
+.kg drop test_union_all_n22t15

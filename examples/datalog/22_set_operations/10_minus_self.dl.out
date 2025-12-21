@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minus_self_n22t10
+Knowledge graph 'test_minus_self_n22t10' created.
+Switched to knowledge graph: test_minus_self_n22t10
+> .kg use test_minus_self_n22t10
+Switched to knowledge graph: test_minus_self_n22t10
+> +data[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'data'.
+> minus_self(X) :- data(X), !data(X).
+No results.
+(session: 1 rule(s))
+> ?- minus_self(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_minus_self_n22t10
+Knowledge graph 'test_minus_self_n22t10' dropped.
