@@ -1,0 +1,20 @@
+% Test: Proper subset check
+
+.kg create test_proper_sub_n22t13
+.kg use test_proper_sub_n22t13
+
++small[(1,), (2,)].
++large[(1,), (2,), (3,)].
+
+% Check if small is subset of large (all elements in large)
+not_in_large(X) :- small(X), !large(X).
+
+?- not_in_large(X).
+
+% Check if there's something in large not in small (proper subset)
+extra_in_large(X) :- large(X), !small(X).
+
+?- extra_in_large(X).
+
+.kg use default
+.kg drop test_proper_sub_n22t13
