@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::error::{StorageError, StorageResult};
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use crate::value::{Tuple, TupleSchema};
 use crate::value::arrow_convert::{tuples_to_record_batch, record_batch_to_tuples, ArrowConvertError};
 

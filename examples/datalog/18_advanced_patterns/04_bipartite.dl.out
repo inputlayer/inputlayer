@@ -9,16 +9,16 @@ Switched to database: test_bipartite
 Inserted 4 facts into 'edge'.
 > +start[(1, 0)].
 Inserted 1 fact into 'start'.
-> view color(X: int, C: int) :- start(X, C).
-View 'color' registered.
-> view color(Y: int, 1: int) :- color(X, 0), edge(X, Y).
-Rule added to view 'color' (2 rules total).
-> view color(Y: int, 1: int) :- color(X, 0), edge(Y, X).
-Rule added to view 'color' (3 rules total).
-> view color(Y: int, 0: int) :- color(X, 1), edge(X, Y).
-Rule added to view 'color' (4 rules total).
-> view color(Y: int, 0: int) :- color(X, 1), edge(Y, X).
-Rule added to view 'color' (5 rules total).
+> +color(X, C) :- start(X, C).
+Rule 'color' registered.
+> +color(Y, 1) :- color(X, 0), edge(X, Y).
+Rule added to 'color' (2 rules total).
+> +color(Y, 1) :- color(X, 0), edge(Y, X).
+Rule added to 'color' (3 rules total).
+> +color(Y, 0) :- color(X, 1), edge(X, Y).
+Rule added to 'color' (4 rules total).
+> +color(Y, 0) :- color(X, 1), edge(Y, X).
+Rule added to 'color' (5 rules total).
 > ?- color(X, C).
 4 rows:
   (1, 0)

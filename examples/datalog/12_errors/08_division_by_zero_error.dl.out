@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/08_division_by_zero.dl
+Executing script: examples/datalog/12_errors/08_division_by_zero_error.dl
 
 > .db create test_div_zero
 Database 'test_div_zero' created.
@@ -10,13 +9,5 @@ Switched to database: test_div_zero
 Inserted 4 facts into 'numbers'.
 > +pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
 Inserted 4 facts into 'pairs'.
-> view safe_div(X: int, Y: int, X/Y: int) :- pairs(X, Y), Y != 0.
-View 'safe_div' registered.
-> ?- safe_div(A, B, C).
-3 rows:
-  (8, 2, 4)
-  (10, 2, 5)
-  (20, 4, 5)
-> view safe_mod(X: int, Y: int, X%Y: int) :- pairs(X, Y), Y != 0.
-Script error: Line 25: Parse error: Invalid column name: 'X%Y'
-
+> +safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
+Script error: Line 16: Parse error: Invalid term: 'X/Y'

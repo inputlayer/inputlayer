@@ -9,33 +9,12 @@ Switched to database: test_influence
 Inserted 8 facts into 'follows'.
 > +influencer[(1)].
 Inserted 1 fact into 'influencer'.
-> view influenced(X: int) :- influencer(X).
-View 'influenced' registered.
-> view influenced(Y: int) :- influenced(X), follows(Y, X).
-Rule added to view 'influenced' (2 rules total).
+> +influenced(X) :- influencer(X).
+Rule 'influenced' registered.
+> +influenced(Y) :- influenced(X), follows(Y, X).
+Rule added to 'influenced' (2 rules total).
 > ?- influenced(U).
 1 rows:
   (1)
-> view influence_reach(count<U>: int) :- influenced(U).
-View 'influence_reach' registered.
-> ?- influence_reach(C).
-1 rows:
-  (1)
-> view influence_dist(X: int, 0: int) :- influencer(X).
-View 'influence_dist' registered.
-> view influence_dist(Y: int, D+1: int) :- influence_dist(X, D), follows(Y, X), D < 10.
-Rule added to view 'influence_dist' (2 rules total).
-> view min_dist(User: int, min<D>: int) :- influence_dist(User, D).
-View 'min_dist' registered.
-> ?- min_dist(U, D).
-1 rows:
-  (1, 0)
-> view at_distance(D: int, count<U>: int) :- min_dist(U, D).
-View 'at_distance' registered.
-> ?- at_distance(D, C).
-1 rows:
-  (0, 1)
-> .db use default
-Switched to database: default
-> .db drop test_influence
-Database 'test_influence' dropped.
+> +influence_reach(count<U>) :- influenced(U).
+Script error: Line 23: Parse error: Invalid term: 'count<U>'

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/06_joins/02_self_join.dl
+Executing script: examples/datalog/06_joins/02_self_join.dl
 
 > .db create test_self
 Database 'test_self' created.
@@ -8,8 +7,8 @@ Switched to database: test_self
 Switched to database: test_self
 > +edge[(1,2), (2,3), (3,4)].
 Inserted 3 facts into 'edge'.
-> view path2(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
-View 'path2' registered.
+> +path2(X, Z) :- edge(X, Y), edge(Y, Z).
+Rule 'path2' registered.
 > ?- path2(X, Y).
 2 rows:
   (1, 3)
@@ -18,4 +17,3 @@ View 'path2' registered.
 Switched to database: default
 > .db drop test_self
 Database 'test_self' dropped.
-

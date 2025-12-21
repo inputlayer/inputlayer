@@ -4,7 +4,7 @@
 //! updates into the current state. It sums up the diffs for identical data points
 //! and removes entries with zero multiplicity.
 
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use crate::value::Tuple;
 use super::batch::Update;
 

@@ -1,0 +1,27 @@
+Executing script: examples/datalog/25_unified_prefix/04_schema_with_constraints.dl
+
+> .db create test_schema_constraints
+Database 'test_schema_constraints' created.
+Switched to database: test_schema_constraints
+> .db use test_schema_constraints
+Switched to database: test_schema_constraints
+> +user(id: int @key, name: string, email: string @unique).
+Persistent schema 'user' declared: (id: Base(Int) @primary, name: Base(String), email: Base(String) @unique)
+> +product(sku: string @key, name: string @not_empty, price: int).
+Persistent schema 'product' declared: (sku: Base(String) @primary, name: Base(String) @not_empty, price: Base(Int))
+> +user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
+Inserted 2 facts into 'user'.
+> +product[("SKU001", "Widget", 100), ("SKU002", "Gadget", 200)].
+Inserted 2 facts into 'product'.
+> ?- user(Id, Name, Email).
+2 rows:
+  (1, "Alice", "alice@example.com")
+  (2, "Bob", "bob@example.com")
+> ?- product(Sku, Name, Price).
+2 rows:
+  ("SKU001", "Widget", 100)
+  ("SKU002", "Gadget", 200)
+> .db use default
+Switched to database: default
+> .db drop test_schema_constraints
+Database 'test_schema_constraints' dropped.

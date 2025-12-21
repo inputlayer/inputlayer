@@ -9,11 +9,11 @@
 // Don't insert anything into 'sales'
 
 // Try count on empty
-view total(count<x>: int) :- sales(X, _).
++total(count<x>) :- sales(X, _).
 ?- total(N).
 
 // Try sum on empty
-view total_sum(sum<v>: int) :- sales(_, V).
++total_sum(sum<v>) :- sales(_, V).
 ?- total_sum(S).
 
 // Now add some data

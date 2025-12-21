@@ -1,0 +1,28 @@
+Executing script: examples/datalog/26_constraints/02_unique_constraint.dl
+
+> .db create constraint_unique_test
+Database 'constraint_unique_test' created.
+Switched to database: constraint_unique_test
+> .db use constraint_unique_test
+Switched to database: constraint_unique_test
+> +account(id: int @key, email: string @unique, username: string).
+Persistent schema 'account' declared: (id: Base(Int) @primary, email: Base(String) @unique, username: Base(String))
+> +account(1, "alice@example.com", "alice").
+Inserted 1 fact into 'account'.
+> +account(2, "bob@example.com", "bob").
+Inserted 1 fact into 'account'.
+> +account(3, "carol@example.com", "carol").
+Inserted 1 fact into 'account'.
+> ?- account(Id, Email, Username).
+3 rows:
+  (1, "alice@example.com", "alice")
+  (2, "bob@example.com", "bob")
+  (3, "carol@example.com", "carol")
+> .rel account
+Relation: account
+Schema: ["col0", "col1", "col2"]
+Tuple count: 3
+> .db use default
+Switched to database: default
+> .db drop constraint_unique_test
+Database 'constraint_unique_test' dropped.

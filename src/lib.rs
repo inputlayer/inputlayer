@@ -107,12 +107,13 @@ pub use crate::ast::{
     Atom, BodyPredicate, Constraint, Program, Rule, Term,
     AggregateFunc, BuiltinFunc, ArithExpr, ArithOp,
 };
+pub use crate::ast::builders::{AtomBuilder, RuleBuilder, fact, simple_rule};
 pub use crate::ir::{IRNode, Predicate};
 
 // Internal modules - Course Modules (M04, M05, M06-M10, M11)
 pub mod parser;           // Module 04: Parsing & AST Construction
 pub mod statement;        // Datalog-native statement parser
-pub mod view_catalog;     // View catalog for persistent views
+pub mod rule_catalog;     // Rule catalog for persistent rules (policies)
 mod ir_builder;       // Module 05: IR Construction
 mod optimizer;        // Module 06: Basic Optimizations
 mod join_planning;    // Module 07: Join Planning (identity transform)
@@ -184,7 +185,8 @@ mod test_arithmetic;
 
 // Re-export public types
 pub use catalog::Catalog;
-pub use code_generator::{CodeGenerator, Tuple2};
+pub use code_generator::CodeGenerator;
+pub use value::Tuple2;  // Legacy format, use Tuple for new code
 pub use config::Config;
 pub use ir_builder::IRBuilder;
 pub use optimizer::Optimizer;
@@ -215,16 +217,19 @@ pub use boolean_specialization::BooleanSpecializer;
 // Re-export statement parser types
 pub use statement::{
     Statement, MetaCommand, InsertOp, DeleteOp, DeletePattern, UpdateOp,
-    ViewDef, QueryGoal, DeleteTarget, InsertTarget,
+    RuleDef, QueryGoal, DeleteTarget, InsertTarget, LoadMode,
     SerializableRule, SerializableTerm, SerializableBodyPred, SerializableConstraint,
-    parse_statement, parse_view_definition,
+    SerializableArithExpr, SerializableArithOp,
+    TypeDecl, TypeExpr, BaseType, RecordField, Refinement, RefinementArg,
+    SchemaDecl, ColumnDef,
+    parse_statement, parse_rule_definition,
 };
 
 // Re-export parser functions
 pub use parser::{parse_program, parse_rule};
 
-// Re-export view catalog
-pub use view_catalog::{ViewCatalog, ViewDefinition};
+// Re-export rule catalog
+pub use rule_catalog::{RuleCatalog, RuleDefinition};
 
 // Re-export recursion utilities
 pub use recursion::{
@@ -596,21 +601,11 @@ impl DatalogEngine {
     /// Takes an IR node and executes it using Differential Dataflow,
     /// returning the computed results as binary tuples.
     pub fn execute_ir(&self, ir: &IRNode) -> Result<Vec<Tuple2>, String> {
-        // Create code generator
-        let mut codegen = CodeGenerator::new();
-
-        // Load input data (legacy format)
-        for (relation, data) in &self.input_data {
-            codegen.add_input_data(relation.clone(), data.clone());
-        }
-
-        // Load input tuples (production format - takes precedence)
-        for (relation, data) in &self.input_tuples {
-            codegen.add_input_tuples(relation.clone(), data.clone());
-        }
-
-        // Generate and execute
-        codegen.generate_and_execute(ir)
+        // Execute as Tuples and convert to Tuple2
+        let tuples = self.execute_ir_tuples(ir)?;
+        Ok(tuples.iter()
+            .filter_map(|t| t.to_pair())
+            .collect())
     }
 
     /// Generate and execute Differential Dataflow code (arbitrary arity)
@@ -621,18 +616,21 @@ impl DatalogEngine {
         // Create code generator
         let mut codegen = CodeGenerator::new();
 
-        // Load input data (legacy format)
+        // Load input data (legacy format - convert to Tuple)
         for (relation, data) in &self.input_data {
-            codegen.add_input_data(relation.clone(), data.clone());
+            let tuples: Vec<Tuple> = data.iter()
+                .map(|&(a, b)| Tuple::from_pair(a, b))
+                .collect();
+            codegen.add_input(relation.clone(), tuples);
         }
 
         // Load input tuples (production format - takes precedence)
         for (relation, data) in &self.input_tuples {
-            codegen.add_input_tuples(relation.clone(), data.clone());
+            codegen.add_input(relation.clone(), data.clone());
         }
 
-        // Generate and execute (returns full Tuple, not just pairs)
-        codegen.generate_and_execute_tuples(ir)
+        // Execute and return Tuples
+        codegen.execute(ir)
     }
 
     /// Execute the full pipeline: parse → build IR → optimize → execute
@@ -642,16 +640,27 @@ impl DatalogEngine {
     /// all intermediate rules (views) and making them available as input data.
     ///
     /// For programs with multiple rules, use execute_all_rules().
+    ///
+    /// Note: This method returns binary tuples (Tuple2) for legacy compatibility.
+    /// For arbitrary arity results, use execute_tuples() instead.
     pub fn execute(&mut self, source: &str) -> Result<Vec<Tuple2>, String> {
-        // Step 1: Parse
-        self.parse(source)?;
+        // Delegate to execute_tuples and convert results to legacy format
+        let tuples = self.execute_tuples(source)?;
+        Ok(tuples.iter().filter_map(|t| t.to_pair()).collect())
+    }
 
-        // Step 2: Build IR (BEFORE optimization to preserve Union structure for recursion detection)
-        self.build_ir()?;
+    // ========================================================================
+    // Execution Helper Methods
+    // ========================================================================
 
-        // Step 3: Get rule head names for each IR node (needed for recursion detection)
-        let program = self.program.as_ref().ok_or("No program")?;
-        let mut rule_heads: Vec<String> = Vec::new();
+    /// Get unique rule head names in order of appearance
+    fn get_rule_heads(&self) -> Vec<String> {
+        let program = match &self.program {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+
+        let mut rule_heads = Vec::new();
         let mut seen_heads = std::collections::HashSet::new();
 
         for rule in &program.rules {
@@ -661,121 +670,98 @@ impl DatalogEngine {
                 seen_heads.insert(head.clone());
             }
         }
+        rule_heads
+    }
 
-        // Step 4: Detect recursive unions BEFORE optimization destroys them
-        // Store which IR nodes need recursive execution
-        // A union is recursive if one of its inputs scans the same relation as the head
-        let mut recursive_info: Vec<Option<String>> = Vec::new();
-        for (i, ir) in self.ir_nodes.iter().enumerate() {
+    /// Detect which IR nodes require recursive execution
+    ///
+    /// Returns a vector where each element is Some(head_name) if the IR node
+    /// at that index is recursive, or None if non-recursive.
+    fn detect_recursion_info(&self, rule_heads: &[String]) -> Vec<Option<String>> {
+        let debug = std::env::var("DATALOG_DEBUG").is_ok();
+
+        self.ir_nodes.iter().enumerate().map(|(i, ir)| {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
             if let IRNode::Union { inputs } = ir {
-                // Check if any input scans the head relation (self-reference = recursion)
-                if CodeGenerator::references_relation(ir, &head_name) {
-                    recursive_info.push(Some(head_name));
+                let is_recursive = CodeGenerator::references_relation(ir, &head_name);
+                if debug {
+                    eprintln!(
+                        "DEBUG: IR[{}] head='{}' is Union with {} inputs, recursive={}",
+                        i, head_name, inputs.len(), is_recursive
+                    );
+                }
+                if is_recursive {
+                    Some(head_name)
                 } else {
-                    recursive_info.push(None);
+                    None
                 }
             } else {
-                recursive_info.push(None);
+                if debug {
+                    eprintln!("DEBUG: IR[{}] head='{}' is not Union", i, head_name);
+                }
+                None
             }
+        }).collect()
+    }
+
+    /// Load all input data into a CodeGenerator
+    fn load_inputs_into_codegen(&self, codegen: &mut CodeGenerator, accumulated: &HashMap<String, Vec<Tuple>>) {
+        let debug = std::env::var("DATALOG_DEBUG").is_ok();
+
+        // Load legacy Tuple2 format (convert to Tuple)
+        for (relation, data) in &self.input_data {
+            if debug {
+                eprintln!("DEBUG: loading input_data['{}'] = {} tuples (legacy)", relation, data.len());
+            }
+            let tuples: Vec<Tuple> = data.iter()
+                .map(|&(a, b)| Tuple::from_pair(a, b))
+                .collect();
+            codegen.add_input(relation.clone(), tuples);
         }
 
-        // Keep a copy of unoptimized IR nodes for recursive execution
-        let unoptimized_ir_nodes = self.ir_nodes.clone();
-
-        // Step 5: Optimize (for non-recursive nodes)
-        self.optimize_ir()?;
-
-        // Step 6: Execute all rules in dependency order
-        if self.ir_nodes.is_empty() {
-            return Err("No IR nodes to execute".to_string());
+        // Load production format (arbitrary arity tuples)
+        for (relation, data) in &self.input_tuples {
+            if debug {
+                eprintln!("DEBUG: loading input_tuples['{}'] = {} tuples", relation, data.len());
+                for t in data.iter().take(3) {
+                    eprintln!("  - {:?}", t);
+                }
+            }
+            codegen.add_input(relation.clone(), data.clone());
         }
 
-        // Execute each IR node and accumulate results as input data
-        let mut last_result = Vec::new();
+        // Load accumulated results from previously executed rules
+        for (rel_name, rel_data) in accumulated {
+            if debug {
+                eprintln!("DEBUG: loading accumulated['{}'] = {} tuples", rel_name, rel_data.len());
+            }
+            codegen.add_input(rel_name.clone(), rel_data.clone());
+        }
+    }
 
-        // Accumulate computed results from prior rules
-        let mut accumulated_results: HashMap<String, Vec<Tuple>> = HashMap::new();
+    /// Execute shared views and return their results
+    fn execute_shared_views(&self) -> Result<HashMap<String, Vec<Tuple>>, String> {
+        let debug = std::env::var("DATALOG_DEBUG").is_ok();
+        let mut results = HashMap::new();
 
-        // Step 6a: Execute shared views FIRST (from subplan sharing optimization)
-        // Shared views must be materialized before main rules can reference them
         for (view_name, view_ir) in &self.shared_views {
-            if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG execute(): executing shared view '{}'", view_name);
+            if debug {
+                eprintln!("DEBUG: executing shared view '{}'", view_name);
             }
 
             let mut codegen = CodeGenerator::new();
+            self.load_inputs_into_codegen(&mut codegen, &HashMap::new());
 
-            // Load base input data
-            for (relation, data) in &self.input_data {
-                codegen.add_input_data(relation.clone(), data.clone());
-            }
-            for (relation, data) in &self.input_tuples {
-                codegen.add_input_tuples(relation.clone(), data.clone());
-            }
+            let view_results = codegen.execute(view_ir)?;
 
-            // Execute the shared view
-            let view_results = codegen.generate_and_execute_tuples(view_ir)?;
-
-            if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG execute(): shared view '{}' produced {} tuples", view_name, view_results.len());
+            if debug {
+                eprintln!("DEBUG: shared view '{}' produced {} tuples", view_name, view_results.len());
             }
 
-            // Store results for main rules to use
-            accumulated_results.insert(view_name.clone(), view_results);
+            results.insert(view_name.clone(), view_results);
         }
 
-        for (i, _ir) in self.ir_nodes.iter().enumerate() {
-            let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-
-            // Create a FRESH CodeGenerator for each rule to avoid timely state issues
-            let mut codegen = CodeGenerator::new();
-
-            // Load base input data (legacy Tuple2 format)
-            for (relation, data) in &self.input_data {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute(): loading input_data['{}'] = {} tuples (legacy)", relation, data.len());
-                }
-                codegen.add_input_data(relation.clone(), data.clone());
-            }
-            // Also load production format (arbitrary arity tuples)
-            for (relation, data) in &self.input_tuples {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute(): loading input_tuples['{}'] = {} tuples (production)", relation, data.len());
-                    for t in data.iter().take(3) {
-                        eprintln!("  - {:?}", t);
-                    }
-                }
-                codegen.add_input_tuples(relation.clone(), data.clone());
-            }
-
-            // Load results from previously executed rules
-            for (rel_name, rel_data) in &accumulated_results {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute(): loading accumulated['{}'] = {} tuples", rel_name, rel_data.len());
-                }
-                codegen.add_input_tuples(rel_name.clone(), rel_data.clone());
-            }
-
-            // Use unoptimized IR for recursive nodes, optimized for others
-            let result = if let Some(Some(recursive_rel)) = recursive_info.get(i) {
-                // Recursive node - use unoptimized IR with fixpoint iteration
-                codegen.generate_and_execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)?
-            } else {
-                // Non-recursive - use optimized IR
-                codegen.generate_and_execute(&self.ir_nodes[i])?
-            };
-
-            last_result = result.clone();
-
-            // Add results for subsequent rules to use
-            if !head_name.is_empty() {
-                let tuples: Vec<Tuple> = result.iter().map(|(a, b)| Tuple::from_pair(*a, *b)).collect();
-                accumulated_results.insert(head_name, tuples);
-            }
-        }
-
-        Ok(last_result)
+        Ok(results)
     }
 
     /// Execute the full pipeline returning tuples of arbitrary arity
@@ -784,145 +770,54 @@ impl DatalogEngine {
     /// Returns results from the LAST rule (typically the query), while computing
     /// all intermediate rules (views) and making them available as input data.
     pub fn execute_tuples(&mut self, source: &str) -> Result<Vec<Tuple>, String> {
-        if std::env::var("DATALOG_DEBUG").is_ok() {
+        let debug = std::env::var("DATALOG_DEBUG").is_ok();
+        if debug {
             eprintln!("DEBUG execute_tuples: starting");
         }
 
-        // Step 1: Parse
+        // Step 1: Parse and build IR
         self.parse(source)?;
-
-        // Step 2: Build IR (BEFORE optimization to preserve Union structure for recursion detection)
         self.build_ir()?;
 
-        if std::env::var("DATALOG_DEBUG").is_ok() {
+        if debug {
             eprintln!("DEBUG execute_tuples: built {} IR nodes", self.ir_nodes.len());
         }
 
-        // Step 3: Get rule head names for each IR node (needed for recursion detection)
-        let program = self.program.as_ref().ok_or("No program")?;
-        let mut rule_heads: Vec<String> = Vec::new();
-        let mut seen_heads = std::collections::HashSet::new();
-
-        for rule in &program.rules {
-            let head = &rule.head.relation;
-            if !seen_heads.contains(head) {
-                rule_heads.push(head.clone());
-                seen_heads.insert(head.clone());
-            }
-        }
-
-        // Step 4: Detect recursive unions BEFORE optimization destroys them
-        let mut recursive_info: Vec<Option<String>> = Vec::new();
-        for (i, ir) in self.ir_nodes.iter().enumerate() {
-            let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-            if let IRNode::Union { inputs } = ir {
-                let is_recursive = CodeGenerator::references_relation(ir, &head_name);
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute_tuples: IR[{}] head='{}' is Union with {} inputs, references_self={}",
-                              i, head_name, inputs.len(), is_recursive);
-                }
-                if is_recursive {
-                    recursive_info.push(Some(head_name));
-                } else {
-                    recursive_info.push(None);
-                }
-            } else {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute_tuples: IR[{}] head='{}' is not Union", i, head_name);
-                }
-                recursive_info.push(None);
-            }
-        }
-
-        // Keep a copy of unoptimized IR nodes for recursive execution
+        // Step 2: Detect recursion BEFORE optimization (optimization destroys Union structure)
+        let rule_heads = self.get_rule_heads();
+        let recursive_info = self.detect_recursion_info(&rule_heads);
         let unoptimized_ir_nodes = self.ir_nodes.clone();
 
-        // Step 5: Optimize (for non-recursive nodes)
+        // Step 3: Optimize (for non-recursive nodes)
         self.optimize_ir()?;
 
-        // Step 6: Execute all rules in dependency order
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
         }
 
-        // Execute each IR node and accumulate results as input data
+        // Step 4: Execute shared views first (from subplan sharing optimization)
+        let mut accumulated_results = self.execute_shared_views()?;
+
+        // Step 5: Execute main rules in dependency order
         let mut last_result: Vec<Tuple> = Vec::new();
-
-        // Accumulate computed results from prior rules
-        let mut accumulated_results: HashMap<String, Vec<Tuple>> = HashMap::new();
-
-        // Step 6a: Execute shared views FIRST (from subplan sharing optimization)
-        // Shared views must be materialized before main rules can reference them
-        for (view_name, view_ir) in &self.shared_views {
-            if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG execute_tuples(): executing shared view '{}'", view_name);
-            }
-
-            let mut codegen = CodeGenerator::new();
-
-            // Load base input data
-            for (relation, data) in &self.input_data {
-                codegen.add_input_data(relation.clone(), data.clone());
-            }
-            for (relation, data) in &self.input_tuples {
-                codegen.add_input_tuples(relation.clone(), data.clone());
-            }
-
-            // Execute the shared view
-            let view_results = codegen.generate_and_execute_tuples(view_ir)?;
-
-            if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG execute_tuples(): shared view '{}' produced {} tuples", view_name, view_results.len());
-            }
-
-            // Store results for main rules to use
-            accumulated_results.insert(view_name.clone(), view_results);
-        }
 
         for (i, _ir) in self.ir_nodes.iter().enumerate() {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
 
-            // Create a FRESH CodeGenerator for each rule to avoid timely state issues
+            // Create fresh CodeGenerator for each rule (avoids timely state issues)
             let mut codegen = CodeGenerator::new();
-
-            // Load base input data (legacy Tuple2 format)
-            for (relation, data) in &self.input_data {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute_tuples(): loading input_data['{}'] = {} tuples (legacy)", relation, data.len());
-                }
-                codegen.add_input_data(relation.clone(), data.clone());
-            }
-            // Also load production format (arbitrary arity tuples)
-            for (relation, data) in &self.input_tuples {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute_tuples(): loading input_tuples['{}'] = {} tuples (production)", relation, data.len());
-                    for t in data.iter().take(3) {
-                        eprintln!("  - {:?}", t);
-                    }
-                }
-                codegen.add_input_tuples(relation.clone(), data.clone());
-            }
-
-            // Load results from previously executed rules (including shared views)
-            for (rel_name, rel_data) in &accumulated_results {
-                if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG execute_tuples(): loading accumulated['{}'] = {} tuples", rel_name, rel_data.len());
-                }
-                codegen.add_input_tuples(rel_name.clone(), rel_data.clone());
-            }
+            self.load_inputs_into_codegen(&mut codegen, &accumulated_results);
 
             // Use unoptimized IR for recursive nodes, optimized for others
             let result = if let Some(Some(recursive_rel)) = recursive_info.get(i) {
-                // Recursive node - use unoptimized IR with fixpoint iteration
-                codegen.execute_recursive_fixpoint_tuples(&unoptimized_ir_nodes[i], recursive_rel)?
+                codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)?
             } else {
-                // Non-recursive - use optimized IR
-                codegen.generate_and_execute_tuples(&self.ir_nodes[i])?
+                codegen.execute(&self.ir_nodes[i])?
             };
 
             last_result = result.clone();
 
-            // Add results for subsequent rules to use
+            // Store results for subsequent rules
             if !head_name.is_empty() {
                 accumulated_results.insert(head_name, result);
             }
@@ -1051,10 +946,17 @@ impl DatalogEngine {
         // Execute
         let mut codegen = CodeGenerator::new();
         if let Some(data) = self.input_data.get(relation) {
-            codegen.add_input_data(relation.to_string(), data.clone());
+            let tuples: Vec<Tuple> = data.iter()
+                .map(|&(a, b)| Tuple::from_pair(a, b))
+                .collect();
+            codegen.add_input(relation.to_string(), tuples);
         }
 
-        let results = codegen.generate_and_execute(&optimized_ir)?;
+        let result_tuples = codegen.execute(&optimized_ir)?;
+        // Convert to Tuple2 for legacy return type
+        let results: Vec<Tuple2> = result_tuples.iter()
+            .filter_map(|t| t.to_pair())
+            .collect();
         Ok(results)
     }
 

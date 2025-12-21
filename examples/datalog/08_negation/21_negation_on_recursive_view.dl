@@ -13,8 +13,8 @@
 +node[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
 
 // Recursive transitive closure
-view reach(X: int, Y: int) :- edge(X, Y).
-view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
++reach(X, Y) :- edge(X, Y).
++reach(X, Z) :- reach(X, Y), edge(Y, Z).
 
 // Query reachability - should compute full transitive closure
 ?- reach(1, X).
@@ -22,7 +22,7 @@ view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
 // Nodes NOT reachable from node 1
 // From node 1, we can reach: 2, 3, 4
 // So unreachable from 1: 1, 5 (1 can't reach itself in this graph, 5 is isolated)
-view unreachable(X: int, Y: int) :- node(X, Y), !reach(1, X).
++unreachable(X, Y) :- node(X, Y), !reach(1, X).
 ?- unreachable(X, Y).
 
 // Expected: (1, 0), (5, 0)

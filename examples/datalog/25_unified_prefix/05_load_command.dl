@@ -1,0 +1,18 @@
+// Test: Load Command
+// Category: Unified Prefix Syntax
+// Description: Tests the .load command for loading files
+
+.db create test_load
+.db use test_load
+
+// First, create a file to load
++edge(1, 2).
++edge(2, 3).
++edge(3, 4).
+
+// Query to verify initial data
+?- edge(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_load

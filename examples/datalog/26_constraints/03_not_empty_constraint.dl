@@ -1,0 +1,24 @@
+// Test: Not Empty Constraint Declaration
+// Category: constraints
+// Description: Tests @not_empty constraint parsing and schema declaration
+
+.db create constraint_not_empty_test
+.db use constraint_not_empty_test
+
+// Schema with @not_empty constraint
++person(id: int @key, name: string @not_empty, bio: string).
+
+// Insert data with non-empty names
++person(1, "Alice Smith", "Software engineer").
++person(2, "Bob Jones", "").
++person(3, "Carol White", "Designer").
+
+// Query all persons
+?- person(Id, Name, Bio).
+
+// Show schema
+.rel person
+
+// Cleanup
+.db use default
+.db drop constraint_not_empty_test

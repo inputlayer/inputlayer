@@ -13,12 +13,12 @@
 ?- edge(X, Y).
 
 // Find self-loops using X = Y constraint (binary output)
-view loop(X: int, Y: int) :- edge(X, Y), X = Y.
++loop(X, Y) :- edge(X, Y), X = Y.
 ?- loop(X, Y).
 
 // Transitive closure with self-loops
-view tc(X: int, Y: int) :- edge(X, Y).
-view tc(X: int, Z: int) :- tc(X, Y), edge(Y, Z).
++tc(X, Y) :- edge(X, Y).
++tc(X, Z) :- tc(X, Y), edge(Y, Z).
 
 // All reachable from 1
 ?- tc(1, X).

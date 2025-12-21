@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/18_advanced_patterns/03_scc.dl
+Executing script: examples/datalog/18_advanced_patterns/03_scc.dl
 
 > .db create test_scc
 Database 'test_scc' created.
@@ -8,12 +7,12 @@ Switched to database: test_scc
 Switched to database: test_scc
 > +edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 6), (6, 5)].
 Inserted 6 facts into 'edge'.
-> view reachable(X: int, Y: int) :- edge(X, Y).
-View 'reachable' registered.
-> view reachable(X: int, Z: int) :- reachable(X, Y), edge(Y, Z).
-Rule added to view 'reachable' (2 rules total).
-> view same_scc(X: int, Y: int) :- reachable(X, Y), reachable(Y, X).
-View 'same_scc' registered.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule added to 'reachable' (2 rules total).
+> +same_scc(X, Y) :- reachable(X, Y), reachable(Y, X).
+Rule 'same_scc' registered.
 > ?- same_scc(X, Y).
 13 rows:
   (2, 2)
@@ -33,4 +32,3 @@ View 'same_scc' registered.
 Switched to database: default
 > .db drop test_scc
 Database 'test_scc' dropped.
-

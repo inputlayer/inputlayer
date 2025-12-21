@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/22_set_operations/03_intersection.dl
+Executing script: examples/datalog/22_set_operations/03_intersection.dl
 
 > .db create test_intersect
 Database 'test_intersect' created.
@@ -10,37 +9,11 @@ Switched to database: test_intersect
 Inserted 4 facts into 'set_a'.
 > +set_b[(3), (4), (5), (6)].
 Inserted 4 facts into 'set_b'.
-> view intersection(X: int) :- set_a(X), set_b(X).
-View 'intersection' registered.
+> +intersection(X) :- set_a(X), set_b(X).
+Rule 'intersection' registered.
 > ?- intersection(X).
 2 rows:
   (3)
   (4)
-> view intersect_count(count<X>: int) :- intersection(X).
-View 'intersect_count' registered.
-> ?- intersect_count(C).
-1 rows:
-  (2)
-> +pairs_a[(1, 10), (2, 20), (3, 30)].
-Inserted 3 facts into 'pairs_a'.
-> +pairs_b[(2, 20), (3, 30), (4, 40)].
-Inserted 3 facts into 'pairs_b'.
-> view common_pairs(X: int, Y: int) :- pairs_a(X, Y), pairs_b(X, Y).
-View 'common_pairs' registered.
-> ?- common_pairs(X, Y).
-2 rows:
-  (2, 20)
-  (3, 30)
-> +set_x[(1), (2)].
-Inserted 2 facts into 'set_x'.
-> +set_y[(3), (4)].
-Inserted 2 facts into 'set_y'.
-> view empty_intersect(X: int) :- set_x(X), set_y(X).
-View 'empty_intersect' registered.
-> ?- empty_intersect(X).
-No results.
-> .db use default
-Switched to database: default
-> .db drop test_intersect
-Database 'test_intersect' dropped.
-
+> +intersect_count(count<X>) :- intersection(X).
+Script error: Line 18: Parse error: Invalid term: 'count<X>'

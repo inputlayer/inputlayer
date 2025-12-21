@@ -9,40 +9,5 @@ Switched to database: test_bom_cost
 Inserted 5 facts into 'part_of'.
 > +base_cost[(30, 5), (40, 20), (50, 15)].
 Inserted 3 facts into 'base_cost'.
-> view leaf_contribution(Assembly: int, Part: int, Cost*Qty: int) :- part_of(Part, Assembly, Qty), base_cost(Part, Cost).
-View 'leaf_contribution' registered.
-> ?- leaf_contribution(A, P, C).
-3 rows:
-  (10, 30, 20)
-  (10, 40, 20)
-  (20, 50, 30)
-> view assembly_direct_cost(Assembly: int, sum<C>: int) :- leaf_contribution(Assembly, _, C).
-View 'assembly_direct_cost' registered.
-> ?- assembly_direct_cost(A, C).
-2 rows:
-  (10, 40)
-  (20, 30)
-> view has_children(P: int) :- part_of(_, P, _).
-View 'has_children' registered.
-> view is_leaf(P: int) :- base_cost(P, _), !has_children(P).
-View 'is_leaf' registered.
-> ?- is_leaf(P).
-3 rows:
-  (30)
-  (40)
-  (50)
-> view descendant(1: int, Child: int) :- part_of(Child, 1, _).
-View 'descendant' registered.
-> view descendant(1: int, Desc: int) :- descendant(1, Mid), part_of(Desc, Mid, _).
-Rule added to view 'descendant' (2 rules total).
-> ?- descendant(1, D).
-5 rows:
-  (1, 10)
-  (1, 20)
-  (1, 30)
-  (1, 40)
-  (1, 50)
-> .db use default
-Switched to database: default
-> .db drop test_bom_cost
-Database 'test_bom_cost' dropped.
+> +leaf_contribution(Assembly, Part, Cost*Qty) :- part_of(Part, Assembly, Qty), base_cost(Part, Cost).
+Script error: Line 20: Parse error: Invalid term: 'Cost*Qty'

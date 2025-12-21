@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/07_deep_recursion_500.dl
+Executing script: examples/datalog/09_recursion/07_deep_recursion_500.dl
 
 > .db create test_deep_500
 Database 'test_deep_500' created.
@@ -26,23 +25,16 @@ Inserted 50 facts into 'edge'.
 Inserted 50 facts into 'edge'.
 > +edge[(450, 451), (451, 452), (452, 453), (453, 454), (454, 455), (455, 456), (456, 457), (457, 458), (458, 459), (459, 460), (460, 461), (461, 462), (462, 463), (463, 464), (464, 465), (465, 466), (466, 467), (467, 468), (468, 469), (469, 470), (470, 471), (471, 472), (472, 473), (473, 474), (474, 475), (475, 476), (476, 477), (477, 478), (478, 479), (479, 480), (480, 481), (481, 482), (482, 483), (483, 484), (484, 485), (485, 486), (486, 487), (487, 488), (488, 489), (489, 490), (490, 491), (491, 492), (492, 493), (493, 494), (494, 495), (495, 496), (496, 497), (497, 498), (498, 499), (499, 500)].
 Inserted 50 facts into 'edge'.
-> view path(X: int, Y: int) :- edge(X, Y).
-View 'path' registered.
-> view path(X: int, Z: int) :- edge(X, Y), path(Y, Z).
-Rule added to view 'path' (2 rules total).
-> view reachable_500(X: int) :- path(1, X), X = 500.
-View 'reachable_500' registered.
+> +path(X, Y) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z) :- edge(X, Y), path(Y, Z).
+Rule added to 'path' (2 rules total).
+> +reachable_500(X) :- path(1, X), X = 500.
+Rule 'reachable_500' registered.
 > ?- reachable_500(X).
 1 rows:
   (500)
-> view from_one(Y: int) :- path(1, Y).
-View 'from_one' registered.
-> view count_from_one(count<Y>: int) :- from_one(Y).
-View 'count_from_one' registered.
-> ?- count_from_one(C).
-No results.
-> .db use default
-Switched to database: default
-> .db drop test_deep_500
-Database 'test_deep_500' dropped.
-
+> +from_one(Y) :- path(1, Y).
+Rule 'from_one' registered.
+> +count_from_one(count<Y>) :- from_one(Y).
+Script error: Line 80: Parse error: Invalid term: 'count<Y>'

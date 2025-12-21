@@ -11,11 +11,11 @@
        (3, 100, 7), (3, 100, 8), (3, 100, 9)].
 
 // Get unique (store, product) pairs
-view unique_products(Store: int, Product: int) :- sales(Store, Product, _).
++unique_products(Store, Product) :- sales(Store, Product, _).
 ?- unique_products(S, P).
 
 // Count distinct products per store
-view products_per_store(Store: int, count<Product>: int) :- unique_products(Store, Product).
++products_per_store(Store, count<Product>) :- unique_products(Store, Product).
 ?- products_per_store(S, C).
 
 // Expected:
@@ -24,14 +24,14 @@ view products_per_store(Store: int, count<Product>: int) :- unique_products(Stor
 // Store 3: 1 product (100)
 
 // Get unique products across all stores
-view all_products(Product: int) :- sales(_, Product, _).
-view total_unique_products(count<P>: int) :- all_products(P).
++all_products(Product) :- sales(_, Product, _).
++total_unique_products(count<P>) :- all_products(P).
 ?- total_unique_products(C).
 
 // Expected: 4 unique products (100, 101, 102, 103)
 
 // Count stores that sell each product
-view stores_per_product(Product: int, count<Store>: int) :- unique_products(Store, Product).
++stores_per_product(Product, count<Store>) :- unique_products(Store, Product).
 ?- stores_per_product(P, C).
 
 // Expected:

@@ -35,10 +35,10 @@ use crate::storage::parquet::{load_from_parquet, save_to_parquet};
 use crate::storage::persist::{
     consolidate_to_current, to_tuples, to_tuple2s, FilePersist, PersistBackend, PersistConfig, Update,
 };
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use crate::value::Tuple;
-use crate::view_catalog::ViewCatalog;
-use crate::statement::ViewDef;
+use crate::rule_catalog::RuleCatalog;
+use crate::statement::RuleDef;
 use crate::DatalogEngine;
 use chrono::Utc;
 use rayon::prelude::*;
@@ -65,8 +65,8 @@ pub struct Database {
     engine: DatalogEngine,
     metadata: DatabaseMetadata,
     data_dir: PathBuf,
-    /// View catalog for persistent views
-    view_catalog: ViewCatalog,
+    /// Rule catalog for persistent derived relations
+    rule_catalog: RuleCatalog,
 }
 
 impl StorageEngine {
@@ -410,172 +410,172 @@ impl StorageEngine {
     }
 
     // ========================================================================
-    // View Management
+    // Rule Management (Persistent Derived Relations)
     // ========================================================================
 
-    /// Register a persistent view in the current database
-    pub fn register_view(&mut self, view_def: &ViewDef) -> StorageResult<crate::view_catalog::ViewRegisterResult> {
+    /// Register a persistent rule in the current database
+    pub fn register_rule(&mut self, rule_def: &RuleDef) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.register_view_in(&db_name, view_def)
+        self.register_rule_in(&db_name, rule_def)
     }
 
-    /// Register a persistent view in a specific database
-    pub fn register_view_in(&mut self, database: &str, view_def: &ViewDef) -> StorageResult<crate::view_catalog::ViewRegisterResult> {
+    /// Register a persistent rule in a specific database
+    pub fn register_rule_in(&mut self, database: &str, rule_def: &RuleDef) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.register_view(view_def)
-            .map_err(|e| StorageError::Other(format!("Failed to register view: {}", e)))
+        db.register_rule(rule_def)
+            .map_err(|e| StorageError::Other(format!("Failed to register rule: {}", e)))
     }
 
-    /// Drop a view from the current database
-    pub fn drop_view(&mut self, name: &str) -> StorageResult<()> {
+    /// Drop a rule from the current database
+    pub fn drop_rule(&mut self, name: &str) -> StorageResult<()> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.drop_view_in(&db_name, name)
+        self.drop_rule_in(&db_name, name)
     }
 
-    /// Drop a view from a specific database
-    pub fn drop_view_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
+    /// Drop a rule from a specific database
+    pub fn drop_rule_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.drop_view(name)
-            .map_err(|e| StorageError::Other(format!("Failed to drop view: {}", e)))
+        db.drop_rule(name)
+            .map_err(|e| StorageError::Other(format!("Failed to drop rule: {}", e)))
     }
 
-    /// List all views in the current database
-    pub fn list_views(&self) -> StorageResult<Vec<String>> {
+    /// List all rules in the current database
+    pub fn list_rules(&self) -> StorageResult<Vec<String>> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?;
 
-        self.list_views_in(db_name)
+        self.list_rules_in(db_name)
     }
 
-    /// List all views in a specific database
-    pub fn list_views_in(&self, database: &str) -> StorageResult<Vec<String>> {
+    /// List all rules in a specific database
+    pub fn list_rules_in(&self, database: &str) -> StorageResult<Vec<String>> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let db = db.read().unwrap();
-        Ok(db.list_views())
+        Ok(db.list_rules())
     }
 
-    /// Describe a view in the current database
-    pub fn describe_view(&self, name: &str) -> StorageResult<Option<String>> {
+    /// Describe a rule in the current database
+    pub fn describe_rule(&self, name: &str) -> StorageResult<Option<String>> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?;
 
-        self.describe_view_in(db_name, name)
+        self.describe_rule_in(db_name, name)
     }
 
-    /// Describe a view in a specific database
-    pub fn describe_view_in(&self, database: &str, name: &str) -> StorageResult<Option<String>> {
+    /// Describe a rule in a specific database
+    pub fn describe_rule_in(&self, database: &str, name: &str) -> StorageResult<Option<String>> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let db = db.read().unwrap();
-        Ok(db.describe_view(name))
+        Ok(db.describe_rule(name))
     }
 
-    /// Clear all rules from a view for editing/redefining (current database)
-    /// The view remains registered but with no rules, ready for new rule registration
-    pub fn clear_view(&mut self, name: &str) -> StorageResult<()> {
+    /// Clear all clauses from a rule for editing/redefining (current database)
+    /// The rule remains registered but with no clauses, ready for new clause registration
+    pub fn clear_rule(&mut self, name: &str) -> StorageResult<()> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.clear_view_in(&db_name, name)
+        self.clear_rule_in(&db_name, name)
     }
 
-    /// Clear all rules from a view for editing/redefining (specific database)
-    pub fn clear_view_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
+    /// Clear all clauses from a rule for editing/redefining (specific database)
+    pub fn clear_rule_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.clear_view(name)
-            .map_err(|e| StorageError::Other(format!("Failed to clear view: {}", e)))
+        db.clear_rule(name)
+            .map_err(|e| StorageError::Other(format!("Failed to clear rule: {}", e)))
     }
 
-    /// Replace a specific rule in a view (current database)
-    pub fn replace_view_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
+    /// Replace a specific clause in a rule (current database)
+    pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.replace_view_rule_in(&db_name, name, index, new_rule)
+        self.replace_rule_in(&db_name, name, index, new_rule)
     }
 
-    /// Replace a specific rule in a view (specific database)
-    pub fn replace_view_rule_in(&mut self, database: &str, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
+    /// Replace a specific clause in a rule (specific database)
+    pub fn replace_rule_in(&mut self, database: &str, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.replace_view_rule(name, index, new_rule)
-            .map_err(|e| StorageError::Other(format!("Failed to replace view rule: {}", e)))
+        db.replace_rule(name, index, new_rule)
+            .map_err(|e| StorageError::Other(format!("Failed to replace rule clause: {}", e)))
     }
 
-    /// Get the number of rules in a view (current database)
-    pub fn view_rule_count(&self, name: &str) -> StorageResult<Option<usize>> {
+    /// Get the number of clauses in a rule (current database)
+    pub fn rule_count(&self, name: &str) -> StorageResult<Option<usize>> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?;
 
-        self.view_rule_count_in(db_name, name)
+        self.rule_count_in(db_name, name)
     }
 
-    /// Get the number of rules in a view (specific database)
-    pub fn view_rule_count_in(&self, database: &str, name: &str) -> StorageResult<Option<usize>> {
+    /// Get the number of clauses in a rule (specific database)
+    pub fn rule_count_in(&self, database: &str, name: &str) -> StorageResult<Option<usize>> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let db = db.read().unwrap();
-        Ok(db.view_rule_count(name))
+        Ok(db.rule_count(name))
     }
 
-    /// Execute a query with views prepended (current database)
-    pub fn execute_query_with_views(&mut self, program: &str) -> StorageResult<Vec<Tuple2>> {
+    /// Execute a query with rules prepended (current database)
+    pub fn execute_query_with_rules(&mut self, program: &str) -> StorageResult<Vec<Tuple2>> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.execute_query_with_views_on(&db_name, program)
+        self.execute_query_with_rules_on(&db_name, program)
     }
 
-    /// Execute a query with views prepended (specific database)
-    pub fn execute_query_with_views_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
+    /// Execute a query with rules prepended (specific database)
+    pub fn execute_query_with_rules_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.execute_with_views(program)
+        db.execute_with_rules(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
-    /// Execute a query with views prepended, returning tuples of arbitrary arity (current database)
-    pub fn execute_query_with_views_tuples(&mut self, program: &str) -> StorageResult<Vec<Tuple>> {
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (current database)
+    pub fn execute_query_with_rules_tuples(&mut self, program: &str) -> StorageResult<Vec<Tuple>> {
         let db_name = self.current_db.as_ref()
             .ok_or(StorageError::NoCurrentDatabase)?
             .to_string();
 
-        self.execute_query_with_views_tuples_on(&db_name, program)
+        self.execute_query_with_rules_tuples_on(&db_name, program)
     }
 
-    /// Execute a query with views prepended, returning tuples of arbitrary arity (specific database)
-    pub fn execute_query_with_views_tuples_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple>> {
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific database)
+    pub fn execute_query_with_rules_tuples_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple>> {
         let db = self.databases.get(database)
             .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
 
         let mut db = db.write().unwrap();
-        db.execute_with_views_tuples(program)
+        db.execute_with_rules_tuples(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
@@ -698,7 +698,7 @@ impl StorageEngine {
         let metadata = DatabaseMetadata::new(name.to_string());
 
         // Load view catalog (will load existing views if present)
-        let view_catalog = ViewCatalog::new(data_dir.clone())
+        let rule_catalog = RuleCatalog::new(data_dir.clone())
             .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {}", e)))?;
 
         Ok(Database {
@@ -706,7 +706,7 @@ impl StorageEngine {
             engine,
             metadata,
             data_dir,
-            view_catalog,
+            rule_catalog,
         })
     }
 
@@ -883,10 +883,10 @@ impl Database {
     /// Create a new empty database
     fn new(name: String, data_dir: PathBuf) -> Self {
         // Create view catalog (will load existing views if present)
-        let view_catalog = ViewCatalog::new(data_dir.clone())
+        let rule_catalog = RuleCatalog::new(data_dir.clone())
             .unwrap_or_else(|_| {
                 // If loading fails, create empty catalog
-                ViewCatalog::new(data_dir.clone()).unwrap()
+                RuleCatalog::new(data_dir.clone()).unwrap()
             });
 
         Database {
@@ -894,7 +894,7 @@ impl Database {
             engine: DatalogEngine::new(),
             metadata: DatabaseMetadata::new(name),
             data_dir,
-            view_catalog,
+            rule_catalog,
         }
     }
 
@@ -1010,55 +1010,55 @@ impl Database {
 
     /// Register a persistent view
     /// Returns whether view was created or rule was added
-    pub fn register_view(&mut self, view_def: &ViewDef) -> Result<crate::view_catalog::ViewRegisterResult, String> {
-        self.view_catalog.register_view(view_def)
+    pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
+        self.rule_catalog.register_rule(rule_def)
     }
 
     /// Drop a view
-    pub fn drop_view(&mut self, name: &str) -> Result<(), String> {
-        self.view_catalog.drop(name)
+    pub fn drop_rule(&mut self, name: &str) -> Result<(), String> {
+        self.rule_catalog.drop(name)
     }
 
     /// List all views
-    pub fn list_views(&self) -> Vec<String> {
-        self.view_catalog.list()
+    pub fn list_rules(&self) -> Vec<String> {
+        self.rule_catalog.list()
     }
 
     /// Describe a view
-    pub fn describe_view(&self, name: &str) -> Option<String> {
-        self.view_catalog.describe(name)
+    pub fn describe_rule(&self, name: &str) -> Option<String> {
+        self.rule_catalog.describe(name)
     }
 
     /// Check if a view exists
-    pub fn view_exists(&self, name: &str) -> bool {
-        self.view_catalog.exists(name)
+    pub fn rule_exists(&self, name: &str) -> bool {
+        self.rule_catalog.exists(name)
     }
 
     /// Clear all rules from a view for editing/redefining
     /// The view remains registered but with no rules, ready for new rule registration
-    pub fn clear_view(&mut self, name: &str) -> Result<(), String> {
-        self.view_catalog.clear_rules(name)
+    pub fn clear_rule(&mut self, name: &str) -> Result<(), String> {
+        self.rule_catalog.clear_rules(name)
     }
 
     /// Replace a specific rule in a view by index (0-based)
-    pub fn replace_view_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> Result<(), String> {
-        self.view_catalog.replace_rule(name, index, new_rule)
+    pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> Result<(), String> {
+        self.rule_catalog.replace_rule(name, index, new_rule)
     }
 
     /// Get the number of rules in a view
-    pub fn view_rule_count(&self, name: &str) -> Option<usize> {
-        self.view_catalog.rule_count(name)
+    pub fn rule_count(&self, name: &str) -> Option<usize> {
+        self.rule_catalog.rule_count(name)
     }
 
     /// Execute a query with views prepended
     ///
     /// This prepends all view rules to the query, allowing DD to incrementally
     /// compute view results based on base facts.
-    pub fn execute_with_views(&mut self, program: &str) -> Result<Vec<Tuple2>, String> {
+    pub fn execute_with_rules(&mut self, program: &str) -> Result<Vec<Tuple2>, String> {
         // Get all view rules
-        let view_rules = self.view_catalog.all_rules();
+        let rule_defs = self.rule_catalog.all_rules();
 
-        if view_rules.is_empty() {
+        if rule_defs.is_empty() {
             // No views, just execute normally
             return self.engine.execute(program);
         }
@@ -1067,7 +1067,7 @@ impl Database {
         let mut combined = String::new();
 
         // Add view rules
-        for rule in &view_rules {
+        for rule in &rule_defs {
             combined.push_str(&format_rule(rule));
             combined.push('\n');
         }
@@ -1083,11 +1083,11 @@ impl Database {
     ///
     /// This prepends all view rules to the query, allowing DD to incrementally
     /// compute view results based on base facts.
-    pub fn execute_with_views_tuples(&mut self, program: &str) -> Result<Vec<Tuple>, String> {
+    pub fn execute_with_rules_tuples(&mut self, program: &str) -> Result<Vec<Tuple>, String> {
         // Get all view rules
-        let view_rules = self.view_catalog.all_rules();
+        let rule_defs = self.rule_catalog.all_rules();
 
-        if view_rules.is_empty() {
+        if rule_defs.is_empty() {
             // No views, just execute normally
             return self.engine.execute_tuples(program);
         }
@@ -1096,7 +1096,7 @@ impl Database {
         let mut combined = String::new();
 
         // Add view rules
-        for rule in &view_rules {
+        for rule in &rule_defs {
             combined.push_str(&format_rule(rule));
             combined.push('\n');
         }
@@ -1105,7 +1105,7 @@ impl Database {
         combined.push_str(program);
 
         if std::env::var("DATALOG_DEBUG").is_ok() {
-            eprintln!("DEBUG execute_with_views_tuples: {} view rules, program = {}", view_rules.len(), combined.replace('\n', " | "));
+            eprintln!("DEBUG execute_with_rules_tuples: {} view rules, program = {}", rule_defs.len(), combined.replace('\n', " | "));
         }
 
         // Execute combined program
@@ -1113,13 +1113,13 @@ impl Database {
     }
 
     /// Get reference to view catalog
-    pub fn view_catalog(&self) -> &ViewCatalog {
-        &self.view_catalog
+    pub fn rule_catalog(&self) -> &RuleCatalog {
+        &self.rule_catalog
     }
 
     /// Get mutable reference to view catalog
-    pub fn view_catalog_mut(&mut self) -> &mut ViewCatalog {
-        &mut self.view_catalog
+    pub fn rule_catalog_mut(&mut self) -> &mut RuleCatalog {
+        &mut self.rule_catalog
     }
 }
 
@@ -1363,7 +1363,7 @@ mod tests {
 
     #[test]
     fn test_recursive_view_transitive_closure() {
-        use crate::statement::ViewDef;
+        use crate::statement::RuleDef;
         use crate::ast::{Atom, BodyPredicate, Rule, Term};
 
         let temp = TempDir::new().unwrap();
@@ -1375,7 +1375,7 @@ mod tests {
         // Insert edge data: 1->2->3->4
         storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
 
-        // Define first rule: connected(X, Y) := edge(X, Y).
+        // Define first rule: connected(X, Y) :- edge(X, Y).
         let rule1 = Rule::new(
             Atom::new(
                 "connected".to_string(),
@@ -1387,13 +1387,13 @@ mod tests {
             ))],
             vec![],
         );
-        let view_def1 = ViewDef {
+        let rule_def1 = RuleDef {
             name: "connected".to_string(),
             rule: crate::statement::SerializableRule::from_rule(&rule1),
         };
-        storage.register_view(&view_def1).unwrap();
+        storage.register_rule(&rule_def1).unwrap();
 
-        // Define second rule: connected(X, Z) := edge(X, Y), connected(Y, Z).
+        // Define second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
         let rule2 = Rule::new(
             Atom::new(
                 "connected".to_string(),
@@ -1411,35 +1411,35 @@ mod tests {
             ],
             vec![],
         );
-        let view_def2 = ViewDef {
+        let rule_def2 = RuleDef {
             name: "connected".to_string(),
             rule: crate::statement::SerializableRule::from_rule(&rule2),
         };
-        storage.register_view(&view_def2).unwrap();
+        storage.register_rule(&rule_def2).unwrap();
 
         // Check views are registered
-        let views = storage.list_views().unwrap();
+        let views = storage.list_rules().unwrap();
         println!("Views: {:?}", views);
         assert!(views.contains(&"connected".to_string()), "View 'connected' should exist");
 
-        // Check describe_view shows both rules
-        let desc = storage.describe_view("connected").unwrap();
+        // Check describe_rule shows both rules
+        let desc = storage.describe_rule("connected").unwrap();
         println!("View description:\n{}", desc.as_ref().unwrap());
 
         // Debug: print the combined program
         {
             let db = storage.databases.get("default").unwrap();
             let db = db.read().unwrap();
-            let view_rules = db.view_catalog.all_rules();
-            println!("Number of view rules: {}", view_rules.len());
-            for (i, rule) in view_rules.iter().enumerate() {
+            let rule_defs = db.rule_catalog.all_rules();
+            println!("Number of view rules: {}", rule_defs.len());
+            for (i, rule) in rule_defs.iter().enumerate() {
                 println!("Rule {}: {}", i, format_rule(rule));
             }
         }
 
         // Query all connected pairs
         eprintln!("\n=== Executing query with views ===");
-        let result = storage.execute_query_with_views("result(X,Y) :- connected(X,Y).").unwrap();
+        let result = storage.execute_query_with_rules("result(X,Y) :- connected(X,Y).").unwrap();
         println!("All connected pairs: {:?}", result);
 
         // Expected transitive closure: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
@@ -1452,7 +1452,7 @@ mod tests {
         assert!(result.contains(&(1, 4)), "Should contain (1, 4) - transitive");
 
         // Query specific: connected(1, 3) - should return 1 row
-        let specific_result = storage.execute_query_with_views(
+        let specific_result = storage.execute_query_with_rules(
             "result(X,Y) :- connected(X,Y), X = 1, Y = 3."
         ).unwrap();
         println!("connected(1, 3): {:?}", specific_result);

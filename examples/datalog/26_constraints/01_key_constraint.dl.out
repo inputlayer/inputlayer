@@ -1,0 +1,28 @@
+Executing script: examples/datalog/26_constraints/01_key_constraint.dl
+
+> .db create constraint_key_test
+Database 'constraint_key_test' created.
+Switched to database: constraint_key_test
+> .db use constraint_key_test
+Switched to database: constraint_key_test
+> +user(id: int @key, name: string, email: string).
+Persistent schema 'user' declared: (id: Base(Int) @primary, name: Base(String), email: Base(String))
+> +user(1, "alice", "alice@example.com").
+Inserted 1 fact into 'user'.
+> +user(2, "bob", "bob@example.com").
+Inserted 1 fact into 'user'.
+> +user(3, "carol", "carol@example.com").
+Inserted 1 fact into 'user'.
+> ?- user(Id, Name, Email).
+3 rows:
+  (1, "alice", "alice@example.com")
+  (2, "bob", "bob@example.com")
+  (3, "carol", "carol@example.com")
+> .rel user
+Relation: user
+Schema: ["col0", "col1", "col2"]
+Tuple count: 3
+> .db use default
+Switched to database: default
+> .db drop constraint_key_test
+Database 'constraint_key_test' dropped.

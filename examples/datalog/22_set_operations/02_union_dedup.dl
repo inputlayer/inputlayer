@@ -10,14 +10,14 @@
 +set_b[(2), (3), (4)].
 
 // Union should deduplicate (2, 3 appear in both)
-view union_ab(X: int) :- set_a(X).
-view union_ab(X: int) :- set_b(X).
++union_ab(X) :- set_a(X).
++union_ab(X) :- set_b(X).
 
 ?- union_ab(X).
 // Should show: 1, 2, 3, 4 (each once)
 
 // Count to verify deduplication
-view union_count(count<X>: int) :- union_ab(X).
++union_count(count<X>) :- union_ab(X).
 ?- union_count(C).
 // Should be 4, not 6
 
@@ -25,8 +25,8 @@ view union_count(count<X>: int) :- union_ab(X).
 +pairs_a[(1, 10), (2, 20), (3, 30)].
 +pairs_b[(2, 20), (3, 30), (4, 40)].
 
-view pair_union(X: int, Y: int) :- pairs_a(X, Y).
-view pair_union(X: int, Y: int) :- pairs_b(X, Y).
++pair_union(X, Y) :- pairs_a(X, Y).
++pair_union(X, Y) :- pairs_b(X, Y).
 
 ?- pair_union(X, Y).
 // Should show 4 unique pairs

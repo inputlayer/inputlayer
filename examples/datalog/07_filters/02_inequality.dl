@@ -9,7 +9,7 @@
 +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
 
 // Find non-self-loops (X != Y)
-view non_loop(X: int, Y: int) :- edge(X, Y), X != Y.
++non_loop(X, Y) :- edge(X, Y), X != Y.
 
 ?- non_loop(X, Y).
 

@@ -12,7 +12,7 @@
 +excluded[(1), (2), (3)].
 
 // Query: items not excluded (should be empty)
-view not_excluded(X: int) :- items(X), !excluded(X).
++not_excluded(X) :- items(X), !excluded(X).
 ?- not_excluded(X).
 
 // Add an item that's not excluded

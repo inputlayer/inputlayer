@@ -13,7 +13,7 @@
 
 // All filters in one rule (not chained through views)
 // Users who are not banned AND not premium
-view basic_user(X: int, Y: int) :- all_users(X, Y), !banned(X, _), !premium(X, _).
++basic_user(X, Y) :- all_users(X, Y), !banned(X, _), !premium(X, _).
 
 // Query
 ?- basic_user(X, Y).

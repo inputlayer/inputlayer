@@ -12,7 +12,7 @@
 +exclude[(2, 0), (4, 0), (6, 0), (8, 0), (10, 0), (12, 0), (14, 0), (16, 0), (18, 0), (20, 0)].
 
 // Filter to odd numbers only
-view odd_data(X: int, Y: int) :- data(X, Y), !exclude(X, _).
++odd_data(X, Y) :- data(X, Y), !exclude(X, _).
 ?- odd_data(X, Y).
 
 // Should return 10 rows: all odd numbers 1-19

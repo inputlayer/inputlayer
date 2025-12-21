@@ -10,36 +10,36 @@
 +edge[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (4, 1)].
 
 // Self-join: 2-hop paths (same relation twice)
-view two_hop(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
++two_hop(X, Z) :- edge(X, Y), edge(Y, Z).
 ?- two_hop(X, Z).
 
 // Self-join with same variable: find self-loops
 // Note: edge(X, X) would find self-loops if any existed
-view self_loop(X: int) :- edge(X, X).
++self_loop(X) :- edge(X, X).
 ?- self_loop(X).
 // Expected: empty (no self-loops in data)
 
 // Add a self-loop to test
 +self_edge[(5, 5), (1, 2)].
-view actual_self_loop(X: int) :- self_edge(X, X).
++actual_self_loop(X) :- self_edge(X, X).
 ?- actual_self_loop(X).
 // Expected: (5)
 
 // Triangle detection: three-way self-join
 // A triangle exists if A->B, B->C, C->A
-view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
++triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
 ?- triangle(A, B, C).
 
 // Symmetric pairs: find (A,B) where both A->B and B->A exist
-view symmetric(A: int, B: int) :- edge(A, B), edge(B, A), A < B.
++symmetric(A, B) :- edge(A, B), edge(B, A), A < B.
 ?- symmetric(A, B).
 
 // 3-hop paths (triple self-join)
-view three_hop(X: int, W: int) :- edge(X, Y), edge(Y, Z), edge(Z, W).
++three_hop(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
 ?- three_hop(X, W).
 
 // Count 2-hop paths per source
-view hop_count(X: int, count<Z>: int) :- two_hop(X, Z).
++hop_count(X, count<Z>) :- two_hop(X, Z).
 ?- hop_count(X, C).
 
 // Cleanup

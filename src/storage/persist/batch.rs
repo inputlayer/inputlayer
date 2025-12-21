@@ -3,7 +3,7 @@
 //! This module defines the core data structures for persisting
 //! Differential Dataflow-style (data, time, diff) updates.
 
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use crate::value::Tuple;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

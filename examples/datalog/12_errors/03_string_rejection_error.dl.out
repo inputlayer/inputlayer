@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/03_string_rejection.dl
+Executing script: examples/datalog/12_errors/03_string_rejection_error.dl
 
 > .db create test_str_err
 Database 'test_str_err' created.
@@ -12,4 +11,3 @@ Inserted 2 facts into 'person'.
 Switched to database: default
 > .db drop test_str_err
 Database 'test_str_err' dropped.
-

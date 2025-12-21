@@ -16,13 +16,13 @@ rel customers(customer_id: int, name: string).
 +customers[(100, "Acme Corp"), (200, "Widgets Inc")].
 
 // Materialized view: customer order totals
-view customer_total(CustId: int, sum<Amount>: int) :-
++customer_total(CustId, sum<Amount>) :-
     orders(_, CustId, Amount).
 
 ?- customer_total(C, T).
 
 // View: high value customers (total > 500)
-view high_value(CustId: int, Name: string, Total: int) :-
++high_value(CustId, Name, Total) :-
     customer_total(CustId, Total),
     customers(CustId, Name),
     Total > 500.

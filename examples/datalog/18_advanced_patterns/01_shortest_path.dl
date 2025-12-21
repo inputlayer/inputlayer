@@ -14,11 +14,11 @@
 +source[(1, 0)].
 
 // Compute all distances (may include non-shortest)
-view dist(X: int, D: int) :- source(X, D).
-view dist(Y: int, D+1: int) :- dist(X, D), edge(X, Y).
++dist(X, D) :- source(X, D).
++dist(Y, D+1) :- dist(X, D), edge(X, Y).
 
 // Aggregate to get shortest distance per node
-view shortest(Y: int, min<D>: int) :- dist(Y, D).
++shortest(Y, min<D>) :- dist(Y, D).
 
 // Query shortest paths
 ?- shortest(X, Y).

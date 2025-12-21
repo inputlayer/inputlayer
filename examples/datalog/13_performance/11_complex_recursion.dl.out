@@ -9,14 +9,14 @@ Switched to database: test_complex_rec
 Inserted 4 facts into 'direct'.
 > +indirect[(1, 3), (2, 4), (3, 5), (1, 4), (2, 5)].
 Inserted 5 facts into 'indirect'.
-> view reach(X: int, Y: int) :- direct(X, Y).
-View 'reach' registered.
-> view reach(X: int, Y: int) :- indirect(X, Y).
-Rule added to view 'reach' (2 rules total).
-> view reach(X: int, Z: int) :- reach(X, Y), direct(Y, Z).
-Rule added to view 'reach' (3 rules total).
-> view reach(X: int, Z: int) :- reach(X, Y), indirect(Y, Z).
-Rule added to view 'reach' (4 rules total).
+> +reach(X, Y) :- direct(X, Y).
+Rule 'reach' registered.
+> +reach(X, Y) :- indirect(X, Y).
+Rule added to 'reach' (2 rules total).
+> +reach(X, Z) :- reach(X, Y), direct(Y, Z).
+Rule added to 'reach' (3 rules total).
+> +reach(X, Z) :- reach(X, Y), indirect(Y, Z).
+Rule added to 'reach' (4 rules total).
 > ?- reach(X, Y).
 10 rows:
   (1, 2)
@@ -29,57 +29,5 @@ Rule added to view 'reach' (4 rules total).
   (3, 4)
   (3, 5)
   (4, 5)
-> view reach_count(X: int, count<Y>: int) :- reach(X, Y).
-View 'reach_count' registered.
-> ?- reach_count(X, C).
-4 rows:
-  (1, 4)
-  (2, 3)
-  (3, 2)
-  (4, 1)
-> +bidir[(1, 2), (2, 3), (3, 4)].
-Inserted 3 facts into 'bidir'.
-> view bi_reach(X: int, Y: int) :- bidir(X, Y).
-View 'bi_reach' registered.
-> view bi_reach(X: int, Y: int) :- bidir(Y, X).
-Rule added to view 'bi_reach' (2 rules total).
-> view bi_reach(X: int, Z: int) :- bi_reach(X, Y), bidir(Y, Z), X != Z.
-Rule added to view 'bi_reach' (3 rules total).
-> view bi_reach(X: int, Z: int) :- bi_reach(X, Y), bidir(Z, Y), X != Z.
-Rule added to view 'bi_reach' (4 rules total).
-> ?- bi_reach(X, Y).
-12 rows:
-  (1, 2)
-  (1, 3)
-  (1, 4)
-  (2, 1)
-  (2, 3)
-  (2, 4)
-  (3, 1)
-  (3, 2)
-  (3, 4)
-  (4, 1)
-  (4, 2)
-  (4, 3)
-> view dist(X: int, Y: int, 1: int) :- direct(X, Y).
-View 'dist' registered.
-> view dist(X: int, Z: int, D+1: int) :- dist(X, Y, D), direct(Y, Z), D < 5.
-Rule added to view 'dist' (2 rules total).
-> view min_dist(X: int, Y: int, min<D>: int) :- dist(X, Y, D).
-View 'min_dist' registered.
-> ?- min_dist(X, Y, D).
-10 rows:
-  (1, 2, 1)
-  (1, 3, 2)
-  (1, 4, 3)
-  (1, 5, 4)
-  (2, 3, 1)
-  (2, 4, 2)
-  (2, 5, 3)
-  (3, 4, 1)
-  (3, 5, 2)
-  (4, 5, 1)
-> .db use default
-Switched to database: default
-> .db drop test_complex_rec
-Database 'test_complex_rec' dropped.
+> +reach_count(X, count<Y>) :- reach(X, Y).
+Script error: Line 21: Parse error: Invalid term: 'count<Y>'

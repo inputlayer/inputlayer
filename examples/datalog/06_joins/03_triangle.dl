@@ -11,7 +11,7 @@
 
 // Find triangles: three nodes A->B->C->A where all edges exist
 // Returns all three nodes of each triangle
-view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A).
++triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A).
 
 // Query triangles - should find the cycle 1->2->3->1
 // Each triangle appears 3 times (once for each starting node)

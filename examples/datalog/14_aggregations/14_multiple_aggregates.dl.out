@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/14_multiple_aggregates.dl
+Executing script: examples/datalog/14_aggregations/14_multiple_aggregates.dl
 
 > .db create test_multi_agg
 Database 'test_multi_agg' created.
@@ -8,68 +7,5 @@ Switched to database: test_multi_agg
 Switched to database: test_multi_agg
 > +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000), (2, 201, 70000), (2, 202, 80000), (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)].
 Inserted 9 facts into 'employees'.
-> view dept_count(Dept: int, count<Emp>: int) :- employees(Dept, Emp, _).
-View 'dept_count' registered.
-> view dept_sum(Dept: int, sum<Sal>: int) :- employees(Dept, _, Sal).
-View 'dept_sum' registered.
-> view dept_avg(Dept: int, avg<Sal>: int) :- employees(Dept, _, Sal).
-View 'dept_avg' registered.
-> view dept_min(Dept: int, min<Sal>: int) :- employees(Dept, _, Sal).
-View 'dept_min' registered.
-> view dept_max(Dept: int, max<Sal>: int) :- employees(Dept, _, Sal).
-View 'dept_max' registered.
-> ?- dept_count(D, C).
-3 rows:
-  (1, 3)
-  (2, 2)
-  (3, 4)
-> ?- dept_sum(D, S).
-3 rows:
-  (1, 165000)
-  (2, 150000)
-  (3, 192000)
-> ?- dept_avg(D, A).
-3 rows:
-  (1, 55000)
-  (2, 75000)
-  (3, 48000)
-> ?- dept_min(D, M).
-3 rows:
-  (1, 50000)
-  (2, 70000)
-  (3, 45000)
-> ?- dept_max(D, M).
-3 rows:
-  (1, 60000)
-  (2, 80000)
-  (3, 52000)
-> view total_employees(count<E>: int) :- employees(_, E, _).
-View 'total_employees' registered.
-> view total_payroll(sum<S>: int) :- employees(_, _, S).
-View 'total_payroll' registered.
-> view avg_salary(avg<S>: int) :- employees(_, _, S).
-View 'avg_salary' registered.
-> view min_salary(min<S>: int) :- employees(_, _, S).
-View 'min_salary' registered.
-> view max_salary(max<S>: int) :- employees(_, _, S).
-View 'max_salary' registered.
-> ?- total_employees(N).
-1 rows:
-  (9)
-> ?- total_payroll(T).
-1 rows:
-  (507000)
-> ?- avg_salary(A).
-1 rows:
-  (56333.333333333336)
-> ?- min_salary(M).
-1 rows:
-  (45000)
-> ?- max_salary(M).
-1 rows:
-  (80000)
-> .db use default
-Switched to database: default
-> .db drop test_multi_agg
-Database 'test_multi_agg' dropped.
-
+> +dept_count(Dept, count<Emp>) :- employees(Dept, Emp, _).
+Script error: Line 14: Parse error: Invalid term: 'count<Emp>'

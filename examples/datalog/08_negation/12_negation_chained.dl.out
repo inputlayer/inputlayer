@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/12_negation_chained.dl
+Executing script: examples/datalog/08_negation/12_negation_chained.dl
 
 > .db create test_neg_chain
 Database 'test_neg_chain' created.
@@ -12,8 +11,8 @@ Inserted 5 facts into 'all_users'.
 Inserted 1 fact into 'banned'.
 > +premium[(1, 0), (3, 0)].
 Inserted 2 facts into 'premium'.
-> view basic_user(X: int, Y: int) :- all_users(X, Y), !banned(X, _), !premium(X, _).
-View 'basic_user' registered.
+> +basic_user(X, Y) :- all_users(X, Y), !banned(X, _), !premium(X, _).
+Rule 'basic_user' registered.
 > ?- basic_user(X, Y).
 2 rows:
   (4, 0)
@@ -22,4 +21,3 @@ View 'basic_user' registered.
 Switched to database: default
 > .db drop test_neg_chain
 Database 'test_neg_chain' dropped.
-

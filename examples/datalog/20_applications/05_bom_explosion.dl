@@ -23,26 +23,26 @@
 +part_name[(1, 1000), (100, 1001), (200, 1002), (300, 1003), (101, 1004), (102, 1005), (103, 1006), (201, 1007), (202, 1008)].
 
 // Direct components
-view direct_component(Assembly: int, Component: int, Qty: int) :- part_of(Component, Assembly, Qty).
++direct_component(Assembly, Component, Qty) :- part_of(Component, Assembly, Qty).
 
 // All components (transitive) - BOM explosion
-view all_components(Assembly: int, Component: int) :- direct_component(Assembly, Component, _).
-view all_components(Assembly: int, SubComponent: int) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
++all_components(Assembly, Component) :- direct_component(Assembly, Component, _).
++all_components(Assembly, SubComponent) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
 
 // Query: All components of car (id=1)
-view car_components(C: int) :- all_components(1, C).
++car_components(C) :- all_components(1, C).
 ?- car_components(C).
 
 // Count total unique parts in car
-view part_count(count<P>: int) :- car_components(P).
++part_count(count<P>) :- car_components(P).
 ?- part_count(C).
 
 // Direct children of car
 ?- direct_component(1, Component, Qty).
 
 // Leaf components (parts with no sub-parts)
-view has_children(P: int) :- part_of(_, P, _).
-view leaf_part(P: int) :- car_components(P), !has_children(P).
++has_children(P) :- part_of(_, P, _).
++leaf_part(P) :- car_components(P), !has_children(P).
 ?- leaf_part(P).
 
 // Cleanup

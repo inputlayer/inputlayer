@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/16_division_edge_cases.dl
+Executing script: examples/datalog/15_arithmetic/16_division_edge_cases.dl
 
 > .db create test_division
 Database 'test_division' created.
@@ -8,27 +7,5 @@ Switched to database: test_division
 Switched to database: test_division
 > +div_data[(10, 2), (20, 4), (15, 3), (100, 0), (50, 0)].
 Inserted 5 facts into 'div_data'.
-> view safe_div(X: int, Y: int, X/Y: int) :- div_data(X, Y), Y != 0.
-View 'safe_div' registered.
-> ?- safe_div(A, B, C).
-3 rows:
-  (10, 2, 5)
-  (15, 3, 5)
-  (20, 4, 5)
-> +numerators[(100), (200), (300)].
-Inserted 3 facts into 'numerators'.
-> +denominators[(10), (20), (0)].
-Inserted 3 facts into 'denominators'.
-> view cross_div(N: int, D: int, N/D: int) :- numerators(N), denominators(D), D != 0.
-View 'cross_div' registered.
-> ?- cross_div(N, D, R).
-6 rows:
-  (100, 10, 10)
-  (100, 20, 5)
-  (200, 10, 20)
-  (200, 20, 10)
-  (300, 10, 30)
-  (300, 20, 15)
-> view safe_mod(X: int, Y: int, X%Y: int) :- div_data(X, Y), Y != 0.
-Script error: Line 33: Parse error: Invalid column name: 'X%Y'
-
+> +safe_div(X, Y, X/Y) :- div_data(X, Y), Y != 0.
+Script error: Line 13: Parse error: Invalid term: 'X/Y'

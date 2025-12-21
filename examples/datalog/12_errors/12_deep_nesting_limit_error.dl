@@ -9,17 +9,17 @@
 +base[(1), (2), (3)].
 
 // Nested expression (5 levels - at parser limit)
-view nest5(X: int, ((((X+1)+1)+1)+1)+1: int) :- base(X).
++nest5(X, ((((X+1)+1)+1)+1)+1) :- base(X).
 ?- nest5(A, B).
 
 // Mixed operations nested (4 levels, different ops)
-view mixed_nest(X: int, (((X*2)+3)*2)+1: int) :- base(X).
++mixed_nest(X, (((X*2)+3)*2)+1) :- base(X).
 ?- mixed_nest(A, B).
 
 // Alternative: use recursive views for deeper nesting
-view add_one(X: int, X+1: int) :- base(X).
-view add_two(X: int, Y+1: int) :- add_one(X, Y).
-view add_three(X: int, Y+1: int) :- add_two(X, Y).
++add_one(X, X+1) :- base(X).
++add_two(X, Y+1) :- add_one(X, Y).
++add_three(X, Y+1) :- add_two(X, Y).
 ?- add_three(A, B).
 
 // Expected:

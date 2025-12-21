@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/17_view_commands/04_view_def.dl
+Executing script: examples/datalog/17_view_commands/04_view_def.dl
 
 > .db create test_view_def
 Database 'test_view_def' created.
@@ -8,13 +7,13 @@ Switched to database: test_view_def
 Switched to database: test_view_def
 > +edge[(1,2), (2,3)].
 Inserted 2 facts into 'edge'.
-> view reach(X: int, Y: int) :- edge(X, Y).
-View 'reach' registered.
-> view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
-Rule added to view 'reach' (2 rules total).
+> +reach(X, Y) :- edge(X, Y).
+Rule 'reach' registered.
+> +reach(X, Z) :- reach(X, Y), edge(Y, Z).
+Rule added to 'reach' (2 rules total).
 > .view def reach
-View: reach
-Rules:
+Rule: reach
+Clauses:
   1. reach(X, Y) :- edge(X, Y).
   2. reach(X, Z) :- reach(X, Y), edge(Y, Z).
 
@@ -22,4 +21,3 @@ Rules:
 Switched to database: default
 > .db drop test_view_def
 Database 'test_view_def' dropped.
-

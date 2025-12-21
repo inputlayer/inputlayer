@@ -1,0 +1,31 @@
+// Test: Atomic Update Operation
+// Category: atomic_ops
+// Description: Tests atomic delete-then-insert update pattern
+
+.db create atomic_update_test
+.db use atomic_update_test
+
+// Initial data
++counter(1, 0).
++counter(2, 10).
++counter(3, 20).
+
+// Query initial state
+?- counter(Id, Value).
+
+// Atomic update: increment counter 1 by 5
+// The pattern: -old, +new :- condition
+-counter(1, OldVal), +counter(1, NewVal) :- counter(1, OldVal), NewVal = OldVal + 5.
+
+// Query after update
+?- counter(Id, Value).
+
+// Atomic update: double counter 2
+-counter(2, OldVal), +counter(2, NewVal) :- counter(2, OldVal), NewVal = OldVal * 2.
+
+// Query final state
+?- counter(Id, Value).
+
+// Cleanup
+.db use default
+.db drop atomic_update_test

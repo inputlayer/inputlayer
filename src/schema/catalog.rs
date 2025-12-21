@@ -7,38 +7,21 @@ use serde::{Deserialize, Serialize};
 use super::{RelationSchema, ColumnSchema, SchemaType, ColumnAnnotation, ValidationConfig};
 
 /// Error types for schema operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SchemaError {
     /// Schema already exists for this relation
+    #[error("Schema already exists for relation '{0}'")]
     AlreadyExists(String),
     /// Schema not found for relation
+    #[error("No schema found for relation '{0}'")]
     NotFound(String),
     /// Invalid schema definition
+    #[error("Invalid schema: {0}")]
     InvalidSchema(String),
     /// Duplicate column name
+    #[error("Duplicate column name: '{0}'")]
     DuplicateColumn(String),
 }
-
-impl std::fmt::Display for SchemaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SchemaError::AlreadyExists(name) => {
-                write!(f, "Schema already exists for relation '{}'", name)
-            }
-            SchemaError::NotFound(name) => {
-                write!(f, "No schema found for relation '{}'", name)
-            }
-            SchemaError::InvalidSchema(msg) => {
-                write!(f, "Invalid schema: {}", msg)
-            }
-            SchemaError::DuplicateColumn(name) => {
-                write!(f, "Duplicate column name: '{}'", name)
-            }
-        }
-    }
-}
-
-impl std::error::Error for SchemaError {}
 
 /// Catalog for storing and looking up relation schemas
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

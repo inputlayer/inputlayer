@@ -10,8 +10,8 @@
 +source_b[(3, 300), (4, 400)].
 
 // Union via multiple rules (Datalog's natural union)
-view combined(X: int, Y: int) :- source_a(X, Y).
-view combined(X: int, Y: int) :- source_b(X, Y).
++combined(X, Y) :- source_a(X, Y).
++combined(X, Y) :- source_b(X, Y).
 
 // Query the union
 ?- combined(X, Y).
@@ -19,15 +19,15 @@ view combined(X: int, Y: int) :- source_b(X, Y).
 
 // Three-way union
 +source_c[(5, 500)].
-view all_sources(X: int, Y: int) :- source_a(X, Y).
-view all_sources(X: int, Y: int) :- source_b(X, Y).
-view all_sources(X: int, Y: int) :- source_c(X, Y).
++all_sources(X, Y) :- source_a(X, Y).
++all_sources(X, Y) :- source_b(X, Y).
++all_sources(X, Y) :- source_c(X, Y).
 
 ?- all_sources(X, Y).
 // Should contain 5 tuples
 
 // Count union results
-view union_count(count<X>: int) :- all_sources(X, _).
++union_count(count<X>) :- all_sources(X, _).
 ?- union_count(C).
 
 // Cleanup

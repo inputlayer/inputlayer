@@ -17,10 +17,10 @@
 +user_deny[(2, 3), (3, 2)].  // user 2 denied perm 3, user 3 denied perm 2
 
 // Base permissions from role
-view base_permission(User: int, Perm: int) :- user_role(User, Role), role_allow(Role, Perm).
++base_permission(User, Perm) :- user_role(User, Role), role_allow(Role, Perm).
 
 // Effective permission = base permission AND NOT denied
-view effective_permission(User: int, Perm: int) :- base_permission(User, Perm), !user_deny(User, Perm).
++effective_permission(User, Perm) :- base_permission(User, Perm), !user_deny(User, Perm).
 
 // Query base permissions
 ?- base_permission(U, P).
@@ -29,7 +29,7 @@ view effective_permission(User: int, Perm: int) :- base_permission(User, Perm), 
 ?- effective_permission(U, P).
 
 // Find denied permissions
-view denied(User: int, Perm: int) :- base_permission(User, Perm), user_deny(User, Perm).
++denied(User, Perm) :- base_permission(User, Perm), user_deny(User, Perm).
 ?- denied(U, P).
 
 // Cleanup

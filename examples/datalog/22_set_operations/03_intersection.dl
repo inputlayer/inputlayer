@@ -10,26 +10,26 @@
 +set_b[(3), (4), (5), (6)].
 
 // Intersection via join (common elements)
-view intersection(X: int) :- set_a(X), set_b(X).
++intersection(X) :- set_a(X), set_b(X).
 ?- intersection(X).
 // Should show: 3, 4
 
 // Intersection count
-view intersect_count(count<X>: int) :- intersection(X).
++intersect_count(count<X>) :- intersection(X).
 ?- intersect_count(C).
 
 // Intersection of pairs
 +pairs_a[(1, 10), (2, 20), (3, 30)].
 +pairs_b[(2, 20), (3, 30), (4, 40)].
 
-view common_pairs(X: int, Y: int) :- pairs_a(X, Y), pairs_b(X, Y).
++common_pairs(X, Y) :- pairs_a(X, Y), pairs_b(X, Y).
 ?- common_pairs(X, Y).
 // Should show: (2, 20), (3, 30)
 
 // Empty intersection
 +set_x[(1), (2)].
 +set_y[(3), (4)].
-view empty_intersect(X: int) :- set_x(X), set_y(X).
++empty_intersect(X) :- set_x(X), set_y(X).
 ?- empty_intersect(X).
 // Should be empty
 

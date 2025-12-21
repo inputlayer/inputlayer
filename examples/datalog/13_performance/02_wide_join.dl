@@ -12,7 +12,7 @@
 +rel2[(1,100), (2,200), (3,300), (4,400), (5,500), (6,600), (7,700), (8,800), (9,900), (10,1000)].
 
 // Join produces 50 results (each of 50 rel1 tuples joins with one rel2 tuple)
-view joined(A: int, B: int, C: int) :- rel1(A, B), rel2(B, C).
++joined(A, B, C) :- rel1(A, B), rel2(B, C).
 
 // Query subset
 ?- joined(1, B, C).

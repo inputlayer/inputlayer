@@ -13,7 +13,7 @@
 
 // Find employees who have at least one non-restricted project
 // Using partial key match on project_id
-view has_open_project(Emp: int, Proj: int) :- assignment(Emp, Proj), !restricted(Proj, _).
++has_open_project(Emp, Proj) :- assignment(Emp, Proj), !restricted(Proj, _).
 ?- has_open_project(X, Y).
 
 // Find all assignments to non-restricted projects

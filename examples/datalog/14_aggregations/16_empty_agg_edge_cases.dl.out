@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/16_empty_agg_edge_cases.dl
+Executing script: examples/datalog/14_aggregations/16_empty_agg_edge_cases.dl
 
 > .db create test_empty_agg
 Database 'test_empty_agg' created.
@@ -8,51 +7,7 @@ Switched to database: test_empty_agg
 Switched to database: test_empty_agg
 > +data[(1, 10), (2, 20), (3, 30)].
 Inserted 3 facts into 'data'.
-> view filtered(X: int, V: int) :- data(X, V), V > 1000.
-View 'filtered' registered.
-> view empty_sum(sum<V>: int) :- filtered(_, V).
-View 'empty_sum' registered.
-> ?- empty_sum(S).
-No results.
-> view empty_avg(avg<V>: int) :- filtered(_, V).
-View 'empty_avg' registered.
-> ?- empty_avg(A).
-No results.
-> view empty_min(min<V>: int) :- filtered(_, V).
-View 'empty_min' registered.
-> view empty_max(max<V>: int) :- filtered(_, V).
-View 'empty_max' registered.
-> ?- empty_min(M).
-No results.
-> ?- empty_max(M).
-No results.
-> view normal_count(count<X>: int) :- data(X, _).
-View 'normal_count' registered.
-> view normal_sum(sum<V>: int) :- data(_, V).
-View 'normal_sum' registered.
-> view normal_avg(avg<V>: int) :- data(_, V).
-View 'normal_avg' registered.
-> ?- normal_count(C).
-1 rows:
-  (3)
-> ?- normal_sum(S).
-1 rows:
-  (60)
-> ?- normal_avg(A).
-1 rows:
-  (20)
-> +groups[(1), (2), (3), (4), (5)].
-Inserted 5 facts into 'groups'.
-> +group_data[(1, 100), (1, 200), (3, 300)].
-Inserted 3 facts into 'group_data'.
-> view group_count(G: int, count<V>: int) :- groups(G), group_data(G, V).
-View 'group_count' registered.
-> ?- group_count(G, C).
-2 rows:
-  (1, 2)
-  (3, 1)
-> .db use default
-Switched to database: default
-> .db drop test_empty_agg
-Database 'test_empty_agg' dropped.
-
+> +filtered(X, V) :- data(X, V), V > 1000.
+Rule 'filtered' registered.
+> +empty_sum(sum<V>) :- filtered(_, V).
+Script error: Line 16: Parse error: Invalid term: 'sum<V>'

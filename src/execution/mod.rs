@@ -114,44 +114,23 @@ impl ExecutionConfig {
 }
 
 /// Execution error types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ExecutionError {
     /// Query timed out
-    Timeout(TimeoutError),
+    #[error("Query timeout: {0}")]
+    Timeout(#[from] TimeoutError),
 
     /// Resource limit exceeded
-    ResourceLimit(ResourceError),
+    #[error("Resource limit exceeded: {0}")]
+    ResourceLimit(#[from] ResourceError),
 
     /// Query execution error
+    #[error("Query error: {0}")]
     QueryError(String),
 
     /// Parse error
+    #[error("Parse error: {0}")]
     ParseError(String),
-}
-
-impl std::fmt::Display for ExecutionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExecutionError::Timeout(e) => write!(f, "Query timeout: {}", e),
-            ExecutionError::ResourceLimit(e) => write!(f, "Resource limit exceeded: {}", e),
-            ExecutionError::QueryError(e) => write!(f, "Query error: {}", e),
-            ExecutionError::ParseError(e) => write!(f, "Parse error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ExecutionError {}
-
-impl From<TimeoutError> for ExecutionError {
-    fn from(e: TimeoutError) -> Self {
-        ExecutionError::Timeout(e)
-    }
-}
-
-impl From<ResourceError> for ExecutionError {
-    fn from(e: ResourceError) -> Self {
-        ExecutionError::ResourceLimit(e)
-    }
 }
 
 /// Result type for execution operations

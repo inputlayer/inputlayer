@@ -1,4 +1,4 @@
-Executing script: examples/datalog/12_errors/15_edge_case_rules.dl
+Executing script: examples/datalog/12_errors/15_edge_case_rules_error.dl
 
 > .db create test_edge_rules
 Database 'test_edge_rules' created.
@@ -7,29 +7,29 @@ Switched to database: test_edge_rules
 Switched to database: test_edge_rules
 > +trigger[(1)].
 Inserted 1 fact into 'trigger'.
-> view constant_fact(0: int, 1: int) :- trigger(_).
-View 'constant_fact' registered.
+> +constant_fact(0, 1) :- trigger(_).
+Rule 'constant_fact' registered.
 > ?- constant_fact(X, Y).
 1 rows:
   (0, 1)
 > +source[(1, 100), (2, 100), (3, 100)].
 Inserted 3 facts into 'source'.
-> view extract_second(Y: int) :- source(_, Y).
-View 'extract_second' registered.
+> +extract_second(Y) :- source(_, Y).
+Rule 'extract_second' registered.
 > ?- extract_second(X).
 1 rows:
   (100)
 > +any_data[(1), (2), (3)].
 Inserted 3 facts into 'any_data'.
-> view always_true(0: int, 1: int) :- any_data(_).
-View 'always_true' registered.
+> +always_true(0, 1) :- any_data(_).
+Rule 'always_true' registered.
 > ?- always_true(X, Y).
 1 rows:
   (0, 1)
 > +pairs[(1, 1), (2, 2), (3, 4), (5, 5)].
 Inserted 4 facts into 'pairs'.
-> view diagonal(X: int) :- pairs(X, X).
-View 'diagonal' registered.
+> +diagonal(X) :- pairs(X, X).
+Rule 'diagonal' registered.
 > ?- diagonal(X).
 4 rows:
   (1)
@@ -38,15 +38,5 @@ View 'diagonal' registered.
   (5)
 > +nums[(1), (2), (3), (4)].
 Inserted 4 facts into 'nums'.
-> view doubled(X: int, X*2: int) :- nums(X).
-View 'doubled' registered.
-> view same_double(X: int, Y: int) :- doubled(X, D), doubled(Y, D), X != Y.
-View 'same_double' registered.
-> ?- same_double(X, Y).
-No results.
-> +edges[(1, 2), (2, 3), (1, 3)].
-Inserted 3 facts into 'edges'.
-> view triangle(A: int, B: int, C: int) :- edges(A, B), edges(B, C), edges(A, C), A < B, B < C.
-View 'triangle' registered.
-> ?- triangle(A, B, C).
-Script error: Line 43: Query execution failed: Unsupported ordering constraint pattern
+> +doubled(X, X*2) :- nums(X).
+Script error: Line 34: Parse error: Invalid term: 'X*2'

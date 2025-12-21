@@ -10,7 +10,7 @@
 +div_data[(10, 2), (20, 4), (15, 3), (100, 0), (50, 0)].
 
 // Safe division (exclude zero divisors)
-view safe_div(X: int, Y: int, X/Y: int) :- div_data(X, Y), Y != 0.
++safe_div(X, Y, X/Y) :- div_data(X, Y), Y != 0.
 ?- safe_div(A, B, C).
 
 // Expected: (10,2,5), (20,4,5), (15,3,5)
@@ -20,22 +20,22 @@ view safe_div(X: int, Y: int, X/Y: int) :- div_data(X, Y), Y != 0.
 +denominators[(10), (20), (0)].
 
 // Cross product division - some will be div by zero
-view cross_div(N: int, D: int, N/D: int) :- numerators(N), denominators(D), D != 0.
++cross_div(N, D, N/D) :- numerators(N), denominators(D), D != 0.
 ?- cross_div(N, D, R).
 
 // Test: What happens if we DON'T filter zero?
 // Uncomment to test actual div-by-zero behavior:
-// unsafe_div(N, D, N/D) := numerators(N), denominators(D).
+// +unsafe_div(N, D, N/D) :- numerators(N), denominators(D).
 // ?- unsafe_div(N, D, R).
 // Expected: Should return NULL for div-by-zero cases, not crash
 
 // Modulo by zero test
-view safe_mod(X: int, Y: int, X%Y: int) :- div_data(X, Y), Y != 0.
++safe_mod(X, Y, X%Y) :- div_data(X, Y), Y != 0.
 ?- safe_mod(A, B, C).
 
 // Integer division results
 +int_div_data[(7, 2), (10, 3), (15, 4), (100, 7)].
-view int_div_result(X: int, Y: int, X/Y: int) :- int_div_data(X, Y).
++int_div_result(X, Y, X/Y) :- int_div_data(X, Y).
 ?- int_div_result(A, B, C).
 
 // Expected: (7,2,3), (10,3,3), (15,4,3), (100,7,14) - integer division

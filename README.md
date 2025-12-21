@@ -1,338 +1,316 @@
-# InputLayer.AI
+# InputLayer
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
-[![Core License](https://img.shields.io/badge/Core%20License-Apache%202.0-blue.svg)](LICENSE)
-[![Enterprise](https://img.shields.io/badge/Enterprise-Commercial-lightgrey.svg)](#enterprise--commercial)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**Policy-first, incremental and explainable retrieval engine for AI systems.**
+**The knowledge and reasoning layer for AI systems.**
 
-InputLayer is a high-performance **incremental Datalog engine** built on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), designed to be the **retrieval + policy layer** for RAG and agentic applications.
+InputLayer is an incremental engine purpose-built for AI applications — combining vector similarity, graph traversal, and rule-based reasoning in one fast, lightweight service. It's the layer between your data and your AI where retrieval logic, policies, and context assembly live.
 
-It includes:
-- **Rules & recursion** (Datalog) for *governance, entitlements, and business logic*
-- **Native vector similarity** for *semantic retrieval*
-- **Incremental computation** for *real-time updates at low latency*
-- **Persistent storage** for *durability and reproducibility*
-- **Data connectors** for easy integration into existing stacks.
+## AI Retrieval is a Reasoning Problem
 
----
+Vector search finds similar content. But similarity isn't relevance.
 
-## Why InputLayer (for AI/RAG)
+Real retrieval requires reasoning:
+- **"What can this user access?"** → traverse group memberships, check policies
+- **"What's relevant to this conversation?"** → combine semantic similarity with recency, preferences, context
+- **"Who are the experts on this topic?"** → follow authorship, co-authorship, citation graphs
+- **"What tools can this agent use?"** → evaluate capabilities, permissions, current state
 
-Most RAG stacks glue together: vector DB + filters + ACL checks + “business logic” scattered across services.
+This isn't filtering. It's inference.
 
-InputLayer collapses the stack bloat and lets you express retrieval as **one auditable program**:
-
-- **Policy-first retrieval:** encode “who can see what” and “what should be returned” as rules
-- **Explainable by construction:** retrieval logic is explicit, reviewable, testable, and versionable
-- **Real-time:** updates flow through incrementally—no full reindex/recompute cycles
-- **Hybrid-ready:** combine structured facts, relationships, and vector similarity in the same query plan
-
-Typical uses:
-- **Entitlements-aware RAG** (“retrieval firewall” before the LLM sees anything)
-- **Knowledge graph + vector retrieval**
-- **Context assembly for agents** (tools, memory, constraints, recency, and access rules)
-- **Personalization & recommendations** with deterministic constraints
-- **Data ingestions and transform pipelines** with validation and incremental join support
-
----
-
-## Features
-
-- **Incremental Computation** — Differential Dataflow for efficient incremental updates
-- **Recursive Queries** — full support for recursive Datalog with automatic fixpoint iteration
-- **Stratified Negation** — negation with automatic dependency analysis
-- **Aggregations** — count, sum, min, max, avg with grouping support
-- **Vector Operations** — native euclidean, cosine, dot product, and manhattan distance
-- **Persistent Storage** — Parquet-based storage with WAL for durability
-- **Type System** — optional typed relations with schema validation
-- **Client–Server** — QUIC-based RPC for distributed deployment
-
----
-
-## Quick Start
-
-### Installation
-
-```bash
-cargo install inputlayer
-````
-
-Or build from source:
-
-```bash
-git clone https://github.com/InputLayer/inputlayer.git
-cd inputlayer
-cargo build --release
-```
-
-### Run the REPL
-
-```bash
-inputlayer
-```
-
----
-
-## A “policy-first RAG” example
-
-This example shows the core idea: **retrieve candidates semantically, then enforce policy via rules**.
+Take "who are the experts on topic X?" There's no experts table to query. Instead: Alice authored a paper, that paper's embedding is similar to topic X, so Alice is an expert. Bob co-authored with Alice, so Bob inherits partial expertise. These facts—`expert(Alice, X, 0.9)` and `expert(Bob, X, 0.6)`—were never stored. They were derived by combining authorship, embeddings, and co-author relationships. And when Alice publishes a new paper or Bob joins a new collaboration, the derived expertise scores update automatically.
 
 ```datalog
-// Create and use a database
-.db create ragdb
-.db use ragdb
++expert(Person, Topic, Score) :-
+    authored(Person, Paper),
+    similar(Paper, Topic, Score),
+    Score > 0.8.
 
-// --- Facts: users, groups, documents, ACLs ---
-+member[("alice", "engineering"), ("bob", "sales")].
-+doc[(101, "Design Doc"), (102, "Sales Pitch"), (103, "Runbook")].
-+acl[("engineering", 101), ("engineering", 103), ("sales", 102)].
-
-// --- Facts: embeddings (toy vectors) ---
-+emb[(101, [1.0, 0.0, 0.0]),
-     (102, [0.0, 1.0, 0.0]),
-     (103, [1.0, 1.0, 0.0])].
-
-// Query embedding
-+q[([0.9, 0.1, 0.0])].
-
-// --- Policy: user can access doc if user is in a group allowed by ACL ---
-view can_access(User: string, DocId: int) :-
-  member(User, Group),
-  acl(Group, DocId).
-
-// --- Retrieval: semantic candidates + distance score ---
-view candidate(DocId: int, Dist: float) :-
-  emb(DocId, V),
-  q(Q),
-  Dist = cosine(V, Q).
-
-// --- Final retrieval: enforce policy + rank ---
-view retrieve(User: string, DocId: int, Dist: float) :-
-  can_access(User, DocId),
-  candidate(DocId, Dist).
-
-// Ask: what can alice retrieve?
-?- retrieve("alice", DocId, Dist).
++expert(Person, Topic, Score) :-
+    co_author(Person, DirectExpert),
+    expert(DirectExpert, Topic, DirectScore),
+    Score = DirectScore * 0.7.
 ```
 
-**What you get:** one place to define *both* “what’s relevant” and “what’s allowed”.
+That's inference: new facts derived from rules over existing facts, kept current as the underlying data changes.
+
+**Vector databases** give you similarity. **SQL databases** give you joins and filters. **InputLayer** gives you reasoning: vectors + graphs + rules, evaluated incrementally as your data changes.
 
 ---
 
-## Vector Similarity Search (standalone)
+## What Makes InputLayer AI-Native
+
+### Vector Operations as Primitives
+
+Similarity search isn't an afterthought - it's built into the core:
 
 ```datalog
-.db create vectors_db
-.db use vectors_db
-
-// Insert vectors
-+vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
-+query[([0.0, 0.0, 0.0])].
-
-// Compute distances
-view nearest(Id: int, Dist: float) :-
-  vectors(Id, V),
-  query(Q),
-  Dist = euclidean(V, Q).
-
-?- nearest(X, Y).
++relevant(DocId, Score) :-
+    embeddings(DocId, Vec),
+    query_embedding(Q),
+    Score = cosine(Vec, Q),
+    Score > 0.7.
 ```
+
+Combine similarity with any other logic—filtering, ranking, access control—in the same query.
+
+### Natural Graph Recursion
+
+AI systems need to traverse relationships: org charts, knowledge graphs, dependency chains, reasoning paths. Recursion is natural, not awkward CTEs:
+
+```datalog
+// Transitive closure - who can Alice reach through her network?
++reachable(A, B) :- knows(A, B).
++reachable(A, C) :- reachable(A, B), knows(B, C).
+
+// Combine with similarity
++relevant_in_network(User, Doc, Score) :-
+    reachable(User, Author),
+    authored(Author, Doc),
+    similar(Doc, Score).
+```
+
+### Rule-Based Reasoning
+
+Express policies and constraints as logical rules. The system infers what follows:
+
+```datalog
+// Policy: users can access docs if they're in an allowed group
++can_access(User, Doc) :-
+    user_group(User, Group),
+    doc_group(Doc, Group).
+
+// Policy: premium users also get early access content
++can_access(User, Doc) :-
+    premium_user(User),
+    early_access(Doc).
+
+// The engine figures out what each user can access
+```
+
+This isn't SQL transforms—it's logic programming with incremental maintenance.
+
+### Lightweight and Fast
+
+Single binary, starts in seconds, no cluster required. Deploy as a sidecar next to your inference service or as a shared service. Get started locally, scale when you need to.
+
+---
+
+## Use Cases
+
+### RAG with Complex Retrieval Logic
+
+When retrieval is more than "find similar vectors":
+
+```datalog
+// Combine: similarity + access control + recency + user preferences
++retrieve(User, Doc, FinalScore) :-
+    similar_to_query(Doc, SimScore),
+    can_access(User, Doc),
+    recency_boost(Doc, RecencyScore),
+    user_preference_boost(User, Doc, PrefScore),
+    FinalScore = SimScore * 0.5 + RecencyScore * 0.3 + PrefScore * 0.2.
+```
+
+All incrementally maintained. When permissions change, when preferences update, when new documents arrive—results stay fresh.
+
+### Agent Context Assembly
+
+Agents need the right context: available tools, relevant memory, applicable constraints. InputLayer assembles this in real-time:
+
+```datalog
+// What tools can this agent use right now?
++available_tool(Agent, Tool) :-
+    agent_capability(Agent, Cap),
+    tool_requires(Tool, Cap),
+    tool_enabled(Tool).
+
+// What's relevant from memory?
++relevant_memory(Agent, Memory, Score) :-
+    agent_memory(Agent, Memory, Embedding),
+    current_context(CtxEmbedding),
+    Score = cosine(Embedding, CtxEmbedding),
+    Score > 0.6.
+
+// What constraints apply?
++active_constraint(Agent, Constraint) :-
+    agent_role(Agent, Role),
+    role_constraint(Role, Constraint).
+```
+
+### Knowledge Graph + Vector Hybrid
+
+Traverse structured relationships AND rank by semantic similarity:
+
+```datalog
+// Find experts: people connected to the topic through papers they authored
++expert(Person, Topic, Score) :-
+    authored(Person, Paper),
+    paper_embedding(Paper, Vec),
+    topic_embedding(Topic, TopicVec),
+    Score = cosine(Vec, TopicVec),
+    Score > 0.8.
+
+// Expand through co-authorship network
++extended_expert(Person, Topic, Score) :-
+    co_author(Person, Expert),
+    expert(Expert, Topic, ExpertScore),
+    Score = ExpertScore * 0.7.
+```
+
+### Explainable Retrieval
+
+Every derived fact can be traced back through the rules that produced it. When you need to answer "why did the AI see this document?", the rules ARE the explanation.
+
+---
+
+## How It Works
+
+### 1. Ingest Your Data
+
+```datalog
+// Facts from your systems
++users[("alice", "engineering"), ("bob", "sales")].
++documents[(101, "Design Doc", "2024-01-15")].
++embeddings[(101, [0.9, 0.1, 0.0, ...])].
++access_rules[("engineering", 101)].
+```
+
+### 2. Define Your Logic
+
+```datalog
+// Derived views - incrementally maintained
++can_access(User, DocId) :-
+    users(User, Group),
+    access_rules(Group, DocId).
+
++search_results(User, DocId, Score) :-
+    can_access(User, DocId),
+    query_similarity(DocId, Score),
+    Score > 0.7.
+```
+
+### 3. Query in Real-Time
+
+```datalog
+?- search_results("alice", DocId, Score).
+```
+
+When source data changes, derived views update in milliseconds.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                        InputLayer                        │
-├─────────────────────────────────────────────────────────┤
-│   Parser → IR Builder → Optimizer → Code Generator       │
-├─────────────────────────────────────────────────────────┤
-│              Differential Dataflow Runtime               │
-├─────────────────────────────────────────────────────────┤
-│                Storage (Parquet + WAL)                   │
-└─────────────────────────────────────────────────────────┘
-
+┌─────────────────────────────────────────────────┐
+│                   InputLayer                     │
+├─────────────────────────────────────────────────┤
+│  Facts     │   Rules     │  Vectors  │  Queries │
+│  (data)    │   (logic)   │  (embed)  │  (API)   │
+├─────────────────────────────────────────────────┤
+│       Incremental Computation Engine             │
+│          (Differential Dataflow)                 │
+├─────────────────────────────────────────────────┤
+│       Persistent Storage (Parquet + WAL)         │
+└─────────────────────────────────────────────────┘
 ```
+
+**Deployment options:**
+- Sidecar alongside your inference service
+- Shared service for multiple applications
+- Local development with the same binary
 
 ---
 
-## Syntax Reference
+## Key Capabilities
 
-### Database Commands
-
-```datalog
-.db create <name>     // Create database
-.db use <name>        // Switch to database
-.db drop <name>       // Drop database
-.db list              // List databases
-```
-
-### Facts
-
-```datalog
-+relation[(1, 2), (3, 4)].     // Insert
--relation[(1, 2)].             // Delete
-```
-
-### Views
-
-```datalog
-// Basic view
-view connected(X: int, Y: int) :- edge(X, Y).
-
-// Recursive view
-view reach(X: int, Y: int) :- edge(X, Y).
-view reach(X: int, Y: int) :- edge(X, Z), reach(Z, Y).
-
-// With negation
-view not_connected(X: int, Y: int) :- node(X), node(Y), !edge(X, Y).
-
-// With aggregation
-view dept_count(D: int, count<E>: int) :- employee(E, D).
-```
-
-### Queries
-
-```datalog
-?- relation(X, Y).            // Query all
-?- relation(1, X).            // With constant
-?- view(X, Y), X > 10.        // With filter
-```
-
-### Types
-
-* `int` — 64-bit signed integer
-* `string` — UTF-8 string
-* `float` — 64-bit floating point
-
-### Built-in Functions
-
-| Function            | Description             |
-| ------------------- | ----------------------- |
-| `euclidean(v1, v2)` | Euclidean (L2) distance |
-| `cosine(v1, v2)`    | Cosine distance         |
-| `dot(v1, v2)`       | Dot product             |
-| `manhattan(v1, v2)` | Manhattan (L1) distance |
-| `normalize(v)`      | Unit vector             |
-
-### Aggregations
-
-| Function   | Description  |
-| ---------- | ------------ |
-| `count<X>` | Count values |
-| `sum<X>`   | Sum values   |
-| `min<X>`   | Minimum      |
-| `max<X>`   | Maximum      |
-| `avg<X>`   | Average      |
+| Capability | Description |
+|------------|-------------|
+| **Vector Similarity** | Native cosine, euclidean, dot product, manhattan |
+| **Recursive Queries** | Natural graph traversal with automatic fixpoint |
+| **Incremental Updates** | Changes propagate in milliseconds |
+| **Rule-Based Logic** | Policies and constraints as declarative rules |
+| **Persistent Storage** | Durable state with write-ahead logging |
+| **Lightweight** | Single binary, no cluster required |
 
 ---
 
-## Client–Server Mode
+## Roadmap
 
-Start the server:
+Building toward a complete AI knowledge layer:
+
+- [ ] **Provenance API** - Trace any result back through the rules that derived it
+- [ ] **Temporal operators** - Recency decay, time windows, versioned facts
+- [ ] **Confidence propagation** - Uncertainty through rule chains
+- [ ] **Context budgets** - Token-aware context assembly
+- [ ] **Embedding pipeline integration** - Automatic embedding generation
+- [ ] **Multi-modal support** - Text, image, audio embeddings together
+
+---
+
+## When to Use InputLayer
+
+**Good fit:**
+- RAG with complex retrieval logic (not just similarity search)
+- Agent context assembly (tools, memory, constraints)
+- Knowledge graphs with vector similarity
+- Policy-filtered data access
+- Any AI system where retrieval logic is getting complicated
+
+**Use something else for:**
+- Primary transactional database → Postgres, MySQL
+- Simple vector search → Pinecone, pgvector
+- Stream processing / analytics → Materialize, Flink
+- Authentication → Auth0, Okta
+
+InputLayer complements your existing stack—it's the reasoning layer, not the storage layer.
+
+---
+
+## Getting Started
+
+### Install
+
+```bash
+cargo install inputlayer
+```
+
+### Run the REPL
+
+```bash
+inputlayer-client
+```
+
+### As a Server
 
 ```bash
 inputlayer-server --host 0.0.0.0 --port 9090
 ```
 
-Connect with client:
+---
 
-```bash
-inputlayer-client --host 127.0.0.1 --port 9090
-```
+## Documentation
 
-## Configuration
-
-Create `inputlayer.toml`:
-
-```toml
-[storage]
-data_dir = "./data"
-wal_enabled = true
-
-[execution]
-workers = 4
-```
+- [Getting Started](docs/getting-started/)
+- [Syntax Reference](docs/reference/syntax.md)
+- [Commands Reference](docs/reference/commands.md)
+- [Data Modeling Guide](docs/guide/data-modeling.md)
 
 ---
 
-## Performance Notes
+## License
 
-* **Incremental:** only recomputes affected results on updates
-* **Parallel:** multi-threaded via Timely Dataflow
-* **Efficient Storage:** columnar Parquet with compression
-* **Optimized Joins:** join spanning tree planning
-
----
-
-## Enterprise & Commercial
-
-InputLayer is built to be **open-source first**, with optional paid offerings for production environments.
-
-### Core (Open Source)
-
-* Licensed under **Apache 2.0** (see [LICENSE](LICENSE))
-* Ideal for embedding in prototypes, internal tools, and custom RAG stacks
-
-### Enterprise (Commercial)
-
-For organizations that need production-grade operations and governance, we offer an **Enterprise Edition** and **support contracts** (commercial license).
-
-Typical Enterprise needs:
-
-* SSO/SAML/OIDC and SCIM
-* Audit logs, governance workflows, policy management UX
-* HA clustering, backups/restore, upgrade tooling
-* Observability, SLOs, query replay, cost attribution
-* Long-term support, security reviews, and SLA-backed support
-
-> If you need a commercial license or support, open a GitHub Discussion (or contact us via the channel listed in this repo).
-
----
-
-## Roadmap (near-term)
-
-* “Explain” output for retrieval (rule traces / provenance)
-* Connector ecosystem (docs/warehouses/streams) as plugins
-* Stronger operational tooling for Kubernetes and multi-node deployments
-* Reference architectures for RAG + agents (with eval harness)
+- **Core**: Apache 2.0 ([LICENSE](LICENSE))
+- **Enterprise**: Commercial license for SSO, HA, audit logging, SLA support
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-We aim for:
-
-* Small, reviewable PRs
-* Strong test coverage (unit + snapshot tests)
-* Clear examples and docs for common RAG/policy patterns
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
-## Running Tests
-
-```bash
-# Unit tests
-cargo test
-
-# Snapshot tests (192 test cases)
-./scripts/run_snapshot_tests.sh
-
-# Specific category
-./scripts/run_snapshot_tests.sh -f recursion
-
-# Verbose output
-./scripts/run_snapshot_tests.sh -v
-```
-
----
-
-## Benchmarks
-
-```bash
-cargo bench
-```
+**Questions?** [GitHub Discussions](https://github.com/anthropics/inputlayer/discussions) · [Documentation](docs/)

@@ -1,71 +1,344 @@
 # Contributing to InputLayer
 
-Thank you for your interest in contributing to InputLayer! This document provides guidelines for contributing to the project.
+Welcome to InputLayer! This guide will help you get started contributing to the project.
+
+> **Project Status: Pre-Alpha**
+>
+> We're in active development with no external users yet. This means:
+> - **No backwards compatibility requirements** - APIs can change freely
+> - **Breaking changes are encouraged** if they improve the codebase
+> - **Delete deprecated code immediately** - don't maintain legacy paths
+>
+> If you see something that could be better, change it!
+
+---
+
+## Essential Reading
+
+Before writing code, please read these documents:
+
+| Document | Purpose |
+|----------|---------|
+| **[CODING_STANDARDS.md](docs/CODING_STANDARDS.md)** | Our principles, style guide, and anti-patterns |
+| **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** | Step-by-step refactoring instructions |
+| **[REFACTORING_PLAN.md](REFACTORING_PLAN.md)** | High-level improvement roadmap |
+
+---
 
 ## Getting Started
 
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/inputlayer.git
-   cd inputlayer
-   ```
-3. **Build the project**:
-   ```bash
-   cargo build
-   ```
-4. **Run the tests**:
-   ```bash
-   cargo test
-   ./scripts/run_snapshot_tests.sh
-   ```
-
-## Development Workflow
-
-### Branching
-
-- Create a feature branch from `main`:
-  ```bash
-  git checkout -b feature/your-feature-name
-  ```
-- Keep branches focused on a single feature or fix
-
-### Code Style
-
-- Follow Rust standard formatting: `cargo fmt`
-- Run clippy for lints: `cargo clippy`
-- Write clear, descriptive commit messages
-
-### Testing
-
-- Add unit tests for new functionality
-- Add snapshot tests for new Datalog features in `examples/datalog/`
-- Ensure all existing tests pass before submitting
-
-### Snapshot Tests
-
-Snapshot tests compare actual output against expected `.out` files:
+### Setup
 
 ```bash
-# Run all snapshot tests
+# Clone and build
+git clone https://github.com/YOUR_USERNAME/inputlayer.git
+cd inputlayer
+cargo build
+
+# Run tests (do this frequently!)
+cargo test
 ./scripts/run_snapshot_tests.sh
 
-# Run specific category
+# Check code quality
+cargo clippy -- -D warnings
+cargo fmt --check
+```
+
+### Pre-commit Checks
+
+Before every commit:
+
+```bash
+cargo fmt                           # Format code
+cargo clippy -- -D warnings         # Lint check
+cargo test                          # Unit tests
+./scripts/run_snapshot_tests.sh     # Snapshot tests
+```
+
+---
+
+## Key Principles (Must Read)
+
+These principles exist to prevent the issues we're currently fixing. Please follow them:
+
+### 1. Single Source of Truth
+
+**One definition per concept. Re-export, don't duplicate.**
+
+```rust
+// WRONG: Defining same type in multiple places
+// ast/mod.rs:  enum AggregateFunc { ... }
+// ir/mod.rs:   enum AggregateFunction { ... }  // Different name!
+// statement.rs: enum SerializableAggregateFunc { ... }  // Third copy!
+
+// RIGHT: Single definition, re-exported
+// types/aggregates.rs:
+pub enum Aggregate { ... }
+
+// Other modules re-export:
+pub use crate::types::Aggregate;
+```
+
+### 2. No Legacy Compatibility Code
+
+**We have no users. Delete old code, don't maintain it.**
+
+```rust
+// WRONG: Keeping legacy code paths
+type Tuple2 = (i32, i32);           // Old format
+fn execute_old() -> Vec<Tuple2>     // "Just in case"
+fn execute_new() -> Vec<Tuple>      // The real one
+
+// RIGHT: One way to do things
+fn execute() -> Vec<Tuple>
+```
+
+### 3. Types Flow Through the Pipeline
+
+**Type information should be available at every stage.**
+
+```rust
+// WRONG: Losing type info in IR
+Scan { relation: String, schema: Vec<String> }  // Only names!
+
+// RIGHT: Preserve types
+Scan { relation: String, schema: TupleSchema }  // Full type info
+```
+
+### 4. Small, Focused Modules
+
+**Max 500 lines per file. Single responsibility.**
+
+```rust
+// WRONG: 2,860-line monolith
+// statement.rs handles: parsing, serialization, conversion, meta commands...
+
+// RIGHT: Focused modules
+// statement/parser.rs   - Core parsing
+// statement/meta.rs     - Meta commands
+// statement/serialize.rs - JSON serialization
+```
+
+### 5. Helpful Error Messages
+
+**Tell users what went wrong AND how to fix it.**
+
+```rust
+// WRONG
+Err("parse error")
+
+// RIGHT
+Err(format!(
+    "Unknown relation '{}' at line {}. \
+     Available relations: {}",
+    name, line, available.join(", ")
+))
+```
+
+---
+
+## Project Structure
+
+```
+src/
+├── types/           # Canonical type definitions (START HERE for new types)
+├── ast/             # Abstract Syntax Tree
+├── ir/              # Intermediate Representation
+├── statement/       # Statement parsing
+├── optimizer/       # Query optimization
+├── code_generator/  # Differential Dataflow execution
+├── schema/          # Schema management
+├── storage/         # Persistence (Parquet, WAL)
+└── value/           # Value types and tuples
+```
+
+### Dependency Rules
+
+Dependencies flow downward only:
+
+```
+lib.rs (public API)
+    ↓
+statement, optimizer, code_generator
+    ↓
+ir, ast
+    ↓
+types
+    ↓
+value
+```
+
+**Forbidden**: `types/` depending on `ast/`, circular dependencies
+
+---
+
+## Common Tasks
+
+### Adding a New Built-in Function
+
+1. Add variant to `src/types/functions.rs`
+2. Implement in `src/vector_ops.rs` or `src/temporal_ops.rs`
+3. Add parsing in `src/statement/parser.rs`
+4. Add code generation in `src/code_generator/mod.rs`
+5. Add tests and snapshot test
+
+### Adding a New Aggregate Function
+
+1. Add variant to `src/types/aggregates.rs`
+2. Add parsing in `src/statement/parser.rs`
+3. Add code generation in `src/code_generator/mod.rs`
+4. Add tests and snapshot test
+
+### Adding a New Statement Type
+
+1. Add variant to `Statement` enum in `src/statement/mod.rs`
+2. Add parsing in appropriate `src/statement/*.rs` file
+3. Add handling in `src/bin/client.rs`
+4. Add snapshot tests in `examples/datalog/`
+
+### Fixing a Bug
+
+1. Write a failing test first
+2. Fix the bug
+3. Verify ALL tests pass (not just the new one)
+
+---
+
+## Testing
+
+### Test Types
+
+| Type | Location | Purpose |
+|------|----------|---------|
+| Unit tests | Inline in `src/*.rs` | Individual functions |
+| Integration tests | `tests/` | Full pipeline |
+| Snapshot tests | `examples/datalog/` | Golden file comparison |
+
+### Running Tests
+
+```bash
+# All unit tests
+cargo test
+
+# All snapshot tests
+./scripts/run_snapshot_tests.sh
+
+# Specific category
 ./scripts/run_snapshot_tests.sh -f recursion
+
+# With verbose diff output
+./scripts/run_snapshot_tests.sh -v
 
 # Update snapshots after intentional changes
 ./scripts/run_snapshot_tests.sh --update
 ```
 
-## Pull Request Process
+### Test Requirements
 
-1. **Ensure tests pass**: Run `cargo test` and `./scripts/run_snapshot_tests.sh`
-2. **Update documentation** if you've changed public APIs
-3. **Write a clear PR description** explaining:
-   - What the change does
-   - Why it's needed
-   - How to test it
-4. **Request review** from maintainers
+- All public functions must have at least one test
+- All error paths should be tested
+- Add snapshot tests for new Datalog features
+
+---
+
+## Code Style
+
+### Formatting
+
+```bash
+cargo fmt       # Apply formatting
+cargo fmt --check  # Check without modifying
+```
+
+### Linting
+
+```bash
+cargo clippy -- -D warnings
+```
+
+All warnings are treated as errors. Fix them, don't suppress them.
+
+### Documentation
+
+All public items need doc comments:
+
+```rust
+/// Parse a Datalog statement from source text.
+///
+/// # Arguments
+/// * `input` - The source text to parse
+///
+/// # Returns
+/// The parsed statement, or an error if parsing fails.
+///
+/// # Examples
+/// ```
+/// let stmt = parse_statement("+edge(1, 2).")?;
+/// ```
+pub fn parse_statement(input: &str) -> Result<Statement> {
+```
+
+---
+
+## Git Workflow
+
+### Branch Naming
+
+```
+feat/topk-aggregate
+fix/parser-empty-input
+refactor/split-statement-module
+docs/update-contributing
+```
+
+### Commit Messages
+
+```
+<type>: <short description>
+
+<optional longer description>
+```
+
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
+
+Examples:
+```
+feat: add TopK aggregate function
+
+refactor: split statement.rs into focused modules
+
+fix: handle empty input in parser
+```
+
+### Pull Request Checklist
+
+Before submitting:
+
+- [ ] All tests pass (`cargo test`)
+- [ ] Snapshot tests pass (`./scripts/run_snapshot_tests.sh`)
+- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
+- [ ] Code is formatted (`cargo fmt --check`)
+- [ ] Public APIs are documented
+- [ ] Complex logic has comments explaining "why"
+- [ ] PR description explains what and why
+
+---
+
+## Current Priorities
+
+We're actively refactoring. See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for details.
+
+| Priority | Task | Status |
+|----------|------|--------|
+| P1 | Remove legacy Tuple2 format | Planned |
+| P2 | Unify type definitions | Planned |
+| P3 | Split statement.rs | Planned |
+| P4 | Consolidate schema systems | Planned |
+| P5 | Unify error types | Planned |
+
+If you want to help with any of these, coordinate with the team first.
+
+---
 
 ## Areas for Contribution
 
@@ -74,34 +347,36 @@ Snapshot tests compare actual output against expected `.out` files:
 - Documentation improvements
 - Additional snapshot tests
 - Error message improvements
-- Performance benchmarks
+- Adding more examples
 
 ### Feature Contributions
 
 - New aggregation functions
 - Query optimization improvements
-- Storage engine enhancements
-- Additional vector distance functions
+- New vector distance functions
+- Temporal operation enhancements
 
 ### Bug Fixes
 
-- Check the [issue tracker](https://github.com/InputLayer/inputlayer/issues)
 - Reproduce the bug first
-- Include a test that fails without the fix
+- Write a failing test
+- Fix and verify all tests pass
 
-## Code of Conduct
+---
 
-- Be respectful and constructive
-- Focus on technical merit
-- Welcome newcomers
+## Getting Help
+
+- **Architecture questions**: Read `docs/IMPLEMENTATION_PLAN.md`
+- **API questions**: `cargo doc --open`
+- **Debugging**: `RUST_LOG=debug cargo run`
+- **Test failures**: `./scripts/run_snapshot_tests.sh -v`
+
+---
 
 ## License
 
 By contributing to InputLayer, you agree that your contributions will be licensed under the Apache License 2.0.
 
-## Questions?
-
-- Open a [GitHub issue](https://github.com/InputLayer/inputlayer/issues)
-- Check existing documentation
+---
 
 Thank you for contributing!

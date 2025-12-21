@@ -13,11 +13,11 @@
 +start[(1, 0)].
 
 // 2-coloring propagation (undirected - check both directions)
-view color(X: int, C: int) :- start(X, C).
-view color(Y: int, 1: int) :- color(X, 0), edge(X, Y).
-view color(Y: int, 1: int) :- color(X, 0), edge(Y, X).
-view color(Y: int, 0: int) :- color(X, 1), edge(X, Y).
-view color(Y: int, 0: int) :- color(X, 1), edge(Y, X).
++color(X, C) :- start(X, C).
++color(Y, 1) :- color(X, 0), edge(X, Y).
++color(Y, 1) :- color(X, 0), edge(Y, X).
++color(Y, 0) :- color(X, 1), edge(X, Y).
++color(Y, 0) :- color(X, 1), edge(Y, X).
 
 // Query all colorings - odd cycle will have nodes with both colors
 // 3-cycle: node 1 gets 0 (start), node 2 gets 1, node 3 gets 0

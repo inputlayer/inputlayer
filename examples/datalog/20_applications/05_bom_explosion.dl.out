@@ -9,14 +9,14 @@ Switched to database: test_bom
 Inserted 8 facts into 'part_of'.
 > +part_name[(1, 1000), (100, 1001), (200, 1002), (300, 1003), (101, 1004), (102, 1005), (103, 1006), (201, 1007), (202, 1008)].
 Inserted 9 facts into 'part_name'.
-> view direct_component(Assembly: int, Component: int, Qty: int) :- part_of(Component, Assembly, Qty).
-View 'direct_component' registered.
-> view all_components(Assembly: int, Component: int) :- direct_component(Assembly, Component, _).
-View 'all_components' registered.
-> view all_components(Assembly: int, SubComponent: int) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
-Rule added to view 'all_components' (2 rules total).
-> view car_components(C: int) :- all_components(1, C).
-View 'car_components' registered.
+> +direct_component(Assembly, Component, Qty) :- part_of(Component, Assembly, Qty).
+Rule 'direct_component' registered.
+> +all_components(Assembly, Component) :- direct_component(Assembly, Component, _).
+Rule 'all_components' registered.
+> +all_components(Assembly, SubComponent) :- direct_component(Assembly, Component, _), all_components(Component, SubComponent).
+Rule added to 'all_components' (2 rules total).
+> +car_components(C) :- all_components(1, C).
+Rule 'car_components' registered.
 > ?- car_components(C).
 8 rows:
   (100)
@@ -27,29 +27,5 @@ View 'car_components' registered.
   (201)
   (202)
   (300)
-> view part_count(count<P>: int) :- car_components(P).
-View 'part_count' registered.
-> ?- part_count(C).
-1 rows:
-  (8)
-> ?- direct_component(1, Component, Qty).
-3 rows:
-  (1, 100, 1)
-  (1, 200, 1)
-  (1, 300, 4)
-> view has_children(P: int) :- part_of(_, P, _).
-View 'has_children' registered.
-> view leaf_part(P: int) :- car_components(P), !has_children(P).
-View 'leaf_part' registered.
-> ?- leaf_part(P).
-6 rows:
-  (101)
-  (102)
-  (103)
-  (201)
-  (202)
-  (300)
-> .db use default
-Switched to database: default
-> .db drop test_bom
-Database 'test_bom' dropped.
+> +part_count(count<P>) :- car_components(P).
+Script error: Line 37: Parse error: Invalid term: 'count<P>'

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/18_advanced_patterns/08_reaching_defs.dl
+Executing script: examples/datalog/18_advanced_patterns/08_reaching_defs.dl
 
 > .db create test_reaching
 Database 'test_reaching' created.
@@ -10,10 +9,10 @@ Switched to database: test_reaching
 Inserted 3 facts into 'cfg'.
 > +def[(1, 1), (2, 2), (3, 1)].
 Inserted 3 facts into 'def'.
-> view reaches(D: int, D: int) :- def(D, _).
-View 'reaches' registered.
-> view reaches(D: int, Q: int) :- reaches(D, P), cfg(P, Q).
-Rule added to view 'reaches' (2 rules total).
+> +reaches(D, D) :- def(D, _).
+Rule 'reaches' registered.
+> +reaches(D, Q) :- reaches(D, P), cfg(P, Q).
+Rule added to 'reaches' (2 rules total).
 > ?- reaches(X, Y).
 9 rows:
   (1, 1)
@@ -25,8 +24,8 @@ Rule added to view 'reaches' (2 rules total).
   (2, 4)
   (3, 3)
   (3, 4)
-> view kills(S: int, D: int) :- def(S, V), def(D, V), S != D.
-View 'kills' registered.
+> +kills(S, D) :- def(S, V), def(D, V), S != D.
+Rule 'kills' registered.
 > ?- kills(X, Y).
 2 rows:
   (1, 3)
@@ -35,4 +34,3 @@ View 'kills' registered.
 Switched to database: default
 > .db drop test_reaching
 Database 'test_reaching' dropped.
-

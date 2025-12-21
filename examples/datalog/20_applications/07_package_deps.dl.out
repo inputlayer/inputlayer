@@ -7,12 +7,12 @@ Switched to database: test_deps
 Switched to database: test_deps
 > +depends[(1, 2), (1, 3), (2, 4), (2, 5), (3, 5), (3, 6), (4, 7), (5, 7), (5, 8), (6, 8)].
 Inserted 10 facts into 'depends'.
-> view all_deps(Pkg: int, Dep: int) :- depends(Pkg, Dep).
-View 'all_deps' registered.
-> view all_deps(Pkg: int, TransDep: int) :- depends(Pkg, Dep), all_deps(Dep, TransDep).
-Rule added to view 'all_deps' (2 rules total).
-> view deps_of_1(D: int) :- all_deps(1, D).
-View 'deps_of_1' registered.
+> +all_deps(Pkg, Dep) :- depends(Pkg, Dep).
+Rule 'all_deps' registered.
+> +all_deps(Pkg, TransDep) :- depends(Pkg, Dep), all_deps(Dep, TransDep).
+Rule added to 'all_deps' (2 rules total).
+> +deps_of_1(D) :- all_deps(1, D).
+Rule 'deps_of_1' registered.
 > ?- deps_of_1(D).
 7 rows:
   (2)
@@ -22,47 +22,5 @@ View 'deps_of_1' registered.
   (6)
   (7)
   (8)
-> view dep_count(Pkg: int, count<D>: int) :- all_deps(Pkg, D).
-View 'dep_count' registered.
-> ?- dep_count(P, C).
-6 rows:
-  (1, 7)
-  (2, 4)
-  (3, 4)
-  (4, 1)
-  (5, 2)
-  (6, 1)
-> view has_deps(P: int) :- depends(P, _).
-View 'has_deps' registered.
-> view leaf_pkg(P: int) :- depends(_, P), !has_deps(P).
-View 'leaf_pkg' registered.
-> ?- leaf_pkg(P).
-2 rows:
-  (7)
-  (8)
-> view reverse_dep(7: int, Pkg: int) :- all_deps(Pkg, 7).
-View 'reverse_dep' registered.
-> ?- reverse_dep(7, P).
-5 rows:
-  (7, 1)
-  (7, 2)
-  (7, 3)
-  (7, 4)
-  (7, 5)
-> view used_by(Dep: int, Pkg: int) :- all_deps(Pkg, Dep).
-View 'used_by' registered.
-> view use_count(Dep: int, count<P>: int) :- used_by(Dep, P).
-View 'use_count' registered.
-> ?- use_count(D, C).
-7 rows:
-  (2, 1)
-  (3, 1)
-  (4, 2)
-  (5, 3)
-  (6, 2)
-  (7, 5)
-  (8, 5)
-> .db use default
-Switched to database: default
-> .db drop test_deps
-Database 'test_deps' dropped.
+> +dep_count(Pkg, count<D>) :- all_deps(Pkg, D).
+Script error: Line 25: Parse error: Invalid term: 'count<D>'

@@ -19,16 +19,16 @@
        (10,11),(10,12),(10,13),(10,14),(10,15),(10,16),(10,17),(10,18),(10,19),(10,20)].
 
 // Simple query - count edges
-view edge_count(count<X>: int) :- edges(X, _).
++edge_count(count<X>) :- edges(X, _).
 ?- edge_count(C).
 
 // Transitive closure (generates many more paths)
-view path(X: int, Y: int) :- edges(X, Y).
-view path(X: int, Z: int) :- edges(X, Y), path(Y, Z).
++path(X, Y) :- edges(X, Y).
++path(X, Z) :- edges(X, Y), path(Y, Z).
 
 // Count reachable nodes from node 1
-view reach_from_1(Y: int) :- path(1, Y).
-view reach_count(count<X>: int) :- reach_from_1(X).
++reach_from_1(Y) :- path(1, Y).
++reach_count(count<X>) :- reach_from_1(X).
 ?- reach_count(C).
 
 // Cleanup

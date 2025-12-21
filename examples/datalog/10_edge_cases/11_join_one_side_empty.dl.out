@@ -1,4 +1,3 @@
-
 Executing script: examples/datalog/10_edge_cases/11_join_one_side_empty.dl
 
 > .db create test_join_empty
@@ -8,12 +7,12 @@ Switched to database: test_join_empty
 Switched to database: test_join_empty
 > +left[(1), (2), (3)].
 Inserted 3 facts into 'left'.
-> view joined(X: int, Y: int) :- left(X), right(Y), X = Y.
-View 'joined' registered.
+> +joined(X, Y) :- left(X), right(Y), X = Y.
+Rule 'joined' registered.
 > ?- joined(X, Y).
 No results.
-> view matched(X: int) :- left(X), right(X).
-View 'matched' registered.
+> +matched(X) :- left(X), right(X).
+Rule 'matched' registered.
 > ?- matched(X).
 No results.
 > +right[(2), (4)].
@@ -36,4 +35,3 @@ No matching tuples to delete.
 Switched to database: default
 > .db drop test_join_empty
 Database 'test_join_empty' dropped.
-

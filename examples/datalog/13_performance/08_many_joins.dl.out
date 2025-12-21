@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/08_many_joins.dl
+Executing script: examples/datalog/13_performance/08_many_joins.dl
 
 > .db create test_many_joins
 Database 'test_many_joins' created.
@@ -16,8 +15,8 @@ Inserted 3 facts into 'r3'.
 Inserted 3 facts into 'r4'.
 > +r5[(10000, 100000), (20000, 200000), (30000, 300000)].
 Inserted 3 facts into 'r5'.
-> view chain5(A: int, F: int) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E), r5(E, F).
-View 'chain5' registered.
+> +chain5(A, F) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E), r5(E, F).
+Rule 'chain5' registered.
 > ?- chain5(A, F).
 3 rows:
   (1, 100000)
@@ -31,8 +30,8 @@ Inserted 1 fact into 'left'.
 Inserted 1 fact into 'right'.
 > +top[(2, 200)].
 Inserted 1 fact into 'top'.
-> view star_join(L: int, T: int, R: int) :- center(A, B, C), left(A, L), top(B, T), right(C, R).
-View 'star_join' registered.
+> +star_join(L, T, R) :- center(A, B, C), left(A, L), top(B, T), right(C, R).
+Rule 'star_join' registered.
 > ?- star_join(L, T, R).
 1 rows:
   (100, 200, 300)
@@ -40,8 +39,8 @@ View 'star_join' registered.
 Inserted 5 facts into 'nodes'.
 > +links[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4), (3, 5)].
 Inserted 7 facts into 'links'.
-> view path3(A: int, B: int, C: int) :- links(A, B), links(B, C), A != C.
-View 'path3' registered.
+> +path3(A, B, C) :- links(A, B), links(B, C), A != C.
+Rule 'path3' registered.
 > ?- path3(A, B, C).
 8 rows:
   (2, 3, 1)
@@ -52,13 +51,5 @@ View 'path3' registered.
   (3, 5, 2)
   (4, 5, 2)
   (4, 5, 3)
-> view path3_count(count<A>: int) :- path3(A, _, _).
-View 'path3_count' registered.
-> ?- path3_count(C).
-1 rows:
-  (8)
-> .db use default
-Switched to database: default
-> .db drop test_many_joins
-Database 'test_many_joins' dropped.
-
+> +path3_count(count<A>) :- path3(A, _, _).
+Script error: Line 37: Parse error: Invalid term: 'count<A>'

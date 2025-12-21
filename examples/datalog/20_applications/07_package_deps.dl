@@ -14,29 +14,29 @@
          (6, 8)].            // pkg 6 depends on 8
 
 // Transitive dependencies
-view all_deps(Pkg: int, Dep: int) :- depends(Pkg, Dep).
-view all_deps(Pkg: int, TransDep: int) :- depends(Pkg, Dep), all_deps(Dep, TransDep).
++all_deps(Pkg, Dep) :- depends(Pkg, Dep).
++all_deps(Pkg, TransDep) :- depends(Pkg, Dep), all_deps(Dep, TransDep).
 
 // All dependencies of package 1
-view deps_of_1(D: int) :- all_deps(1, D).
++deps_of_1(D) :- all_deps(1, D).
 ?- deps_of_1(D).
 
 // Count dependencies per package
-view dep_count(Pkg: int, count<D>: int) :- all_deps(Pkg, D).
++dep_count(Pkg, count<D>) :- all_deps(Pkg, D).
 ?- dep_count(P, C).
 
 // Find leaf packages (no dependencies)
-view has_deps(P: int) :- depends(P, _).
-view leaf_pkg(P: int) :- depends(_, P), !has_deps(P).
++has_deps(P) :- depends(P, _).
++leaf_pkg(P) :- depends(_, P), !has_deps(P).
 ?- leaf_pkg(P).
 
 // Packages that depend on package 7 (reverse deps)
-view reverse_dep(7: int, Pkg: int) :- all_deps(Pkg, 7).
++reverse_dep(7, Pkg) :- all_deps(Pkg, 7).
 ?- reverse_dep(7, P).
 
 // Shared dependencies (deps used by multiple packages)
-view used_by(Dep: int, Pkg: int) :- all_deps(Pkg, Dep).
-view use_count(Dep: int, count<P>: int) :- used_by(Dep, P).
++used_by(Dep, Pkg) :- all_deps(Pkg, Dep).
++use_count(Dep, count<P>) :- used_by(Dep, P).
 ?- use_count(D, C).
 
 // Cleanup

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/15_wildcard_patterns.dl
+Executing script: examples/datalog/15_arithmetic/15_wildcard_patterns.dl
 
 > .db create test_wildcard_patterns
 Database 'test_wildcard_patterns' created.
@@ -118,4 +117,3 @@ Switched to database: default
 (Cleared 10 session rule(s))
 > .db drop test_wildcard_patterns
 Database 'test_wildcard_patterns' dropped.
-

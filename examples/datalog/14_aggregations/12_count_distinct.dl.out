@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/12_count_distinct.dl
+Executing script: examples/datalog/14_aggregations/12_count_distinct.dl
 
 > .db create test_count_distinct
 Database 'test_count_distinct' created.
@@ -8,8 +7,8 @@ Switched to database: test_count_distinct
 Switched to database: test_count_distinct
 > +sales[(1, 100, 5), (1, 100, 3), (1, 101, 2), (2, 100, 10), (2, 102, 4), (2, 103, 1), (3, 100, 7), (3, 100, 8), (3, 100, 9)].
 Inserted 9 facts into 'sales'.
-> view unique_products(Store: int, Product: int) :- sales(Store, Product, _).
-View 'unique_products' registered.
+> +unique_products(Store, Product) :- sales(Store, Product, _).
+Rule 'unique_products' registered.
 > ?- unique_products(S, P).
 6 rows:
   (1, 100)
@@ -18,30 +17,5 @@ View 'unique_products' registered.
   (2, 102)
   (2, 103)
   (3, 100)
-> view products_per_store(Store: int, count<Product>: int) :- unique_products(Store, Product).
-View 'products_per_store' registered.
-> ?- products_per_store(S, C).
-3 rows:
-  (1, 2)
-  (2, 3)
-  (3, 1)
-> view all_products(Product: int) :- sales(_, Product, _).
-View 'all_products' registered.
-> view total_unique_products(count<P>: int) :- all_products(P).
-View 'total_unique_products' registered.
-> ?- total_unique_products(C).
-1 rows:
-  (4)
-> view stores_per_product(Product: int, count<Store>: int) :- unique_products(Store, Product).
-View 'stores_per_product' registered.
-> ?- stores_per_product(P, C).
-4 rows:
-  (100, 3)
-  (101, 1)
-  (102, 1)
-  (103, 1)
-> .db use default
-Switched to database: default
-> .db drop test_count_distinct
-Database 'test_count_distinct' dropped.
-
+> +products_per_store(Store, count<Product>) :- unique_products(Store, Product).
+Script error: Line 18: Parse error: Invalid term: 'count<Product>'

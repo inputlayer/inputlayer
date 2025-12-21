@@ -1,0 +1,28 @@
+Executing script: examples/datalog/25_unified_prefix/01_schema_declarations.dl
+
+> .db create test_unified_schema
+Database 'test_unified_schema' created.
+Switched to database: test_unified_schema
+> .db use test_unified_schema
+Switched to database: test_unified_schema
+> +employee(id: int, name: string, dept: int).
+Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(Int))
+> +department(id: int, name: string).
+Persistent schema 'department' declared: (id: Base(Int), name: Base(String))
+> +employee[(1, "Alice", 10), (2, "Bob", 20), (3, "Charlie", 10)].
+Inserted 3 facts into 'employee'.
+> +department[(10, "Engineering"), (20, "Sales")].
+Inserted 2 facts into 'department'.
+> ?- employee(Id, Name, Dept).
+3 rows:
+  (1, "Alice", 10)
+  (2, "Bob", 20)
+  (3, "Charlie", 10)
+> ?- department(Id, Name).
+2 rows:
+  (10, "Engineering")
+  (20, "Sales")
+> .db use default
+Switched to database: default
+> .db drop test_unified_schema
+Database 'test_unified_schema' dropped.

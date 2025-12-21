@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/21_query_features/02_projection.dl
+Executing script: examples/datalog/21_query_features/02_projection.dl
 
 > .db create test_projection
 Database 'test_projection' created.
@@ -8,31 +7,31 @@ Switched to database: test_projection
 Switched to database: test_projection
 > +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)].
 Inserted 4 facts into 'employees'.
-> view departments(D: int) :- employees(_, _, D).
-View 'departments' registered.
+> +departments(D) :- employees(_, _, D).
+Rule 'departments' registered.
 > ?- departments(D).
 3 rows:
   (10)
   (20)
   (30)
-> view id_salary(Id: int, Sal: int) :- employees(Id, Sal, _).
-View 'id_salary' registered.
+> +id_salary(Id, Sal) :- employees(Id, Sal, _).
+Rule 'id_salary' registered.
 > ?- id_salary(X, Y).
 4 rows:
   (1, 50000)
   (2, 60000)
   (3, 55000)
   (4, 70000)
-> view id_dept(Id: int, D: int) :- employees(Id, _, D).
-View 'id_dept' registered.
+> +id_dept(Id, D) :- employees(Id, _, D).
+Rule 'id_dept' registered.
 > ?- id_dept(X, Y).
 4 rows:
   (1, 10)
   (2, 20)
   (3, 10)
   (4, 30)
-> view high_earners(Emp: int, Pay: int) :- employees(Emp, Pay, _), Pay > 55000.
-View 'high_earners' registered.
+> +high_earners(Emp, Pay) :- employees(Emp, Pay, _), Pay > 55000.
+Rule 'high_earners' registered.
 > ?- high_earners(X, Y).
 2 rows:
   (2, 60000)
@@ -41,4 +40,3 @@ View 'high_earners' registered.
 Switched to database: default
 > .db drop test_projection
 Database 'test_projection' dropped.
-

@@ -12,7 +12,7 @@
 +department[(100, 10), (200, 20)].
 
 // Define a view joining employee to department
-view emp_dept(EmpId: int, DeptName: int) :- employee(EmpId, DeptId), department(DeptId, DeptName).
++emp_dept(EmpId, DeptName) :- employee(EmpId, DeptId), department(DeptId, DeptName).
 
 // Query the join result
 ?- emp_dept(X, Y).

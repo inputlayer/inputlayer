@@ -49,6 +49,10 @@ use serde::{Deserialize, Serialize, Serializer, Deserializer};
 // Re-export Arrow's DataType for schema definitions
 pub use arrow::datatypes::DataType as ArrowDataType;
 
+/// Legacy binary tuple format for backward compatibility.
+/// New code should use `Tuple` directly.
+pub type Tuple2 = (i32, i32);
+
 /// Supported data types for Datalog values
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataType {
@@ -851,6 +855,27 @@ impl Tuple {
         Tuple { values: Vec::new() }
     }
 
+    /// Create a 2-tuple from two i64 values (convenience for tests)
+    pub fn pair(a: i64, b: i64) -> Self {
+        Tuple {
+            values: vec![Value::Int64(a), Value::Int64(b)],
+        }
+    }
+
+    /// Create a 3-tuple from three i64 values (convenience for tests)
+    pub fn triple(a: i64, b: i64, c: i64) -> Self {
+        Tuple {
+            values: vec![Value::Int64(a), Value::Int64(b), Value::Int64(c)],
+        }
+    }
+
+    /// Create a tuple from i32 pairs (legacy compatibility helper)
+    pub fn from_i32_pair(a: i32, b: i32) -> Self {
+        Tuple {
+            values: vec![Value::Int32(a), Value::Int32(b)],
+        }
+    }
+
     /// Get the number of columns in this tuple
     pub fn arity(&self) -> usize {
         self.values.len()
@@ -967,38 +992,21 @@ impl IntoIterator for Tuple {
 }
 
 /// Error type for schema validation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SchemaValidationError {
     /// Tuple has wrong number of columns
+    #[error("Arity mismatch: expected {expected} columns, got {got}")]
     ArityMismatch { expected: usize, got: usize },
     /// Column has wrong type
+    #[error("Type mismatch in column '{column}': expected {expected:?}, got {got:?}")]
     TypeMismatch { column: String, expected: DataType, got: DataType },
     /// Vector column has wrong dimension
+    #[error("Vector dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim")]
     VectorDimensionMismatch { column: String, expected: usize, got: usize },
     /// VectorInt8 column has wrong dimension
+    #[error("VectorInt8 dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim")]
     VectorInt8DimensionMismatch { column: String, expected: usize, got: usize },
 }
-
-impl std::fmt::Display for SchemaValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ArityMismatch { expected, got } => {
-                write!(f, "Arity mismatch: expected {} columns, got {}", expected, got)
-            }
-            Self::TypeMismatch { column, expected, got } => {
-                write!(f, "Type mismatch in column '{}': expected {:?}, got {:?}", column, expected, got)
-            }
-            Self::VectorDimensionMismatch { column, expected, got } => {
-                write!(f, "Vector dimension mismatch in column '{}': expected {}-dim, got {}-dim", column, expected, got)
-            }
-            Self::VectorInt8DimensionMismatch { column, expected, got } => {
-                write!(f, "VectorInt8 dimension mismatch in column '{}': expected {}-dim, got {}-dim", column, expected, got)
-            }
-        }
-    }
-}
-
-impl std::error::Error for SchemaValidationError {}
 
 /// Schema definition for a relation's tuples
 #[derive(Debug, Clone, PartialEq, Eq)]

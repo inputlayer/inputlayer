@@ -17,20 +17,20 @@
 +root_pkg[(1), (2)].
 
 // Find all requirements from root packages
-view root_requires(Dep: int, MinV: int, MaxV: int) :- root_pkg(Pkg), requires(Pkg, Dep, MinV, MaxV).
++root_requires(Dep, MinV, MaxV) :- root_pkg(Pkg), requires(Pkg, Dep, MinV, MaxV).
 ?- root_requires(D, Min, Max).
 
 // Detect conflicts: same dep with non-overlapping version ranges
 // Two requirements conflict if max of one < min of other
-view version_conflict(Dep: int, Pkg1: int, Pkg2: int) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 < Min2.
++version_conflict(Dep, Pkg1, Pkg2) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 < Min2.
 
-view version_conflict(Dep: int, Pkg1: int, Pkg2: int) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max2 < Min1.
++version_conflict(Dep, Pkg1, Pkg2) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max2 < Min1.
 
 // Query conflicts
 ?- version_conflict(Dep, P1, P2).
 
 // Compatible requirements (overlapping ranges)
-view compatible(Dep: int, Pkg1: int, Pkg2: int) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 >= Min2, Max2 >= Min1.
++compatible(Dep, Pkg1, Pkg2) :- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 >= Min2, Max2 >= Min1.
 ?- compatible(Dep, P1, P2).
 
 // Cleanup

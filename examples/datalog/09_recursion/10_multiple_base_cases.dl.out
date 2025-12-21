@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/10_multiple_base_cases.dl
+Executing script: examples/datalog/09_recursion/10_multiple_base_cases.dl
 
 > .db create test_multi_base
 Database 'test_multi_base' created.
@@ -10,10 +9,10 @@ Switched to database: test_multi_base
 Inserted 7 facts into 'edge'.
 > +start[(1), (10), (20)].
 Inserted 3 facts into 'start'.
-> view reachable(X: int) :- start(X).
-View 'reachable' registered.
-> view reachable(Y: int) :- reachable(X), edge(X, Y).
-Rule added to view 'reachable' (2 rules total).
+> +reachable(X) :- start(X).
+Rule 'reachable' registered.
+> +reachable(Y) :- reachable(X), edge(X, Y).
+Rule added to 'reachable' (2 rules total).
 > ?- reachable(X).
 10 rows:
   (1)
@@ -26,12 +25,9 @@ Rule added to view 'reachable' (2 rules total).
   (21)
   (22)
   (23)
-> view reachable_from(S: int, X: int) :- start(S), S = X.
-View 'reachable_from' registered.
-> view reachable_from(S: int, Y: int) :- reachable_from(S, X), edge(X, Y).
-Rule added to view 'reachable_from' (2 rules total).
-> view count_from_start(S: int, count<X>: int) :- reachable_from(S, X).
-View 'count_from_start' registered.
-> ?- count_from_start(S, C).
-Script error: Line 34: Query execution failed: Unsafe rule: Atom { relation: "reachable_from", args: [Variable("S"), Variable("X")] }. Variables ["X"] in head do not appear in positive body atoms.
-
+> +reachable_from(S, X) :- start(S), S = X.
+Rule 'reachable_from' registered.
+> +reachable_from(S, Y) :- reachable_from(S, X), edge(X, Y).
+Rule added to 'reachable_from' (2 rules total).
+> +count_from_start(S, count<X>) :- reachable_from(S, X).
+Script error: Line 33: Parse error: Invalid term: 'count<X>'

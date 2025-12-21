@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/05_delete_all_then_query.dl
+Executing script: examples/datalog/02_relations/05_delete_all_then_query.dl
 
 > .db create test_del_all
 Database 'test_del_all' created.
@@ -27,4 +26,3 @@ Inserted 2 facts into 'edge'.
 Switched to database: default
 > .db drop test_del_all
 Database 'test_del_all' dropped.
-

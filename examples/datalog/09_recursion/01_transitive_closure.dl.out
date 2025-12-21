@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/01_transitive_closure.dl
+Executing script: examples/datalog/09_recursion/01_transitive_closure.dl
 
 > .db create test_tc
 Database 'test_tc' created.
@@ -8,10 +7,10 @@ Switched to database: test_tc
 Switched to database: test_tc
 > +edge[(1,2), (2,3), (3,4), (4,5)].
 Inserted 4 facts into 'edge'.
-> view connected(X: int, Y: int) :- edge(X, Y).
-View 'connected' registered.
-> view connected(X: int, Z: int) :- edge(X, Y), connected(Y, Z).
-Rule added to view 'connected' (2 rules total).
+> +connected(X, Y) :- edge(X, Y).
+Rule 'connected' registered.
+> +connected(X, Z) :- edge(X, Y), connected(Y, Z).
+Rule added to 'connected' (2 rules total).
 > ?- connected(X, Y).
 10 rows:
   (1, 2)
@@ -31,4 +30,3 @@ Rule added to view 'connected' (2 rules total).
 Switched to database: default
 > .db drop test_tc
 Database 'test_tc' dropped.
-

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/08_triple_negation.dl
+Executing script: examples/datalog/08_negation/08_triple_negation.dl
 
 > .db create test_triple_neg
 Database 'test_triple_neg' created.
@@ -14,8 +13,8 @@ Inserted 2 facts into 'sold'.
 Inserted 2 facts into 'reserved'.
 > +damaged[(4, 0), (7, 0)].
 Inserted 2 facts into 'damaged'.
-> view available(X: int, Y: int) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
-View 'available' registered.
+> +available(X, Y) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
+Rule 'available' registered.
 > ?- available(X, Y).
 2 rows:
   (6, 0)
@@ -24,4 +23,3 @@ View 'available' registered.
 Switched to database: default
 > .db drop test_triple_neg
 Database 'test_triple_neg' dropped.
-

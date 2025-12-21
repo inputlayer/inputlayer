@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/07_self_join_patterns.dl
+Executing script: examples/datalog/10_edge_cases/07_self_join_patterns.dl
 
 > .db create test_self_join
 Database 'test_self_join' created.
@@ -8,8 +7,8 @@ Switched to database: test_self_join
 Switched to database: test_self_join
 > +edge[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (4, 1)].
 Inserted 6 facts into 'edge'.
-> view two_hop(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
-View 'two_hop' registered.
+> +two_hop(X, Z) :- edge(X, Y), edge(Y, Z).
+Rule 'two_hop' registered.
 > ?- two_hop(X, Z).
 7 rows:
   (1, 3)
@@ -19,8 +18,8 @@ View 'two_hop' registered.
   (3, 1)
   (4, 2)
   (4, 3)
-> view self_loop(X: int) :- edge(X, X).
-View 'self_loop' registered.
+> +self_loop(X) :- edge(X, X).
+Rule 'self_loop' registered.
 > ?- self_loop(X).
 4 rows:
   (1)
@@ -29,14 +28,13 @@ View 'self_loop' registered.
   (4)
 > +self_edge[(5, 5), (1, 2)].
 Inserted 2 facts into 'self_edge'.
-> view actual_self_loop(X: int) :- self_edge(X, X).
-View 'actual_self_loop' registered.
+> +actual_self_loop(X) :- self_edge(X, X).
+Rule 'actual_self_loop' registered.
 > ?- actual_self_loop(X).
 2 rows:
   (1)
   (5)
-> view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
-View 'triangle' registered.
+> +triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
+Rule 'triangle' registered.
 > ?- triangle(A, B, C).
 Script error: Line 31: Query execution failed: Unsupported ordering constraint pattern
-

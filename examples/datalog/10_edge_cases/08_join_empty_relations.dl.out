@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/08_join_empty_relations.dl
+Executing script: examples/datalog/10_edge_cases/08_join_empty_relations.dl
 
 > .db create test_empty_join
 Database 'test_empty_join' created.
@@ -10,4 +9,3 @@ Switched to database: test_empty_join
 Inserted 3 facts into 'data'.
 > +empty[].
 Script error: Line 13: No valid tuples to insert (requires 2-element tuples with integer values)
-

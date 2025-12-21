@@ -13,16 +13,16 @@
 +pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
 
 // Safe division (no zero divisors)
-view safe_div(X: int, Y: int, X/Y: int) :- pairs(X, Y), Y != 0.
++safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
 ?- safe_div(A, B, C).
 
 // Attempt division including zero (may error or return special value)
 // Uncomment to test actual behavior:
-// all_div(X, Y, X/Y) := pairs(X, Y).
+// +all_div(X, Y, X/Y) :- pairs(X, Y).
 // ?- all_div(A, B, C).
 
 // Modulo by zero test
-view safe_mod(X: int, Y: int, X%Y: int) :- pairs(X, Y), Y != 0.
++safe_mod(X, Y, X%Y) :- pairs(X, Y), Y != 0.
 ?- safe_mod(A, B, C).
 
 // Cleanup

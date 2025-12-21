@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/04_max.dl
+Executing script: examples/datalog/14_aggregations/04_max.dl
 
 > .db create test_agg_max
 Database 'test_agg_max' created.
@@ -8,15 +7,5 @@ Switched to database: test_agg_max
 Switched to database: test_agg_max
 > +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
 Inserted 6 facts into 'reading'.
-> view max_temp(Sensor: int, max<Temp>: int) :- reading(Sensor, Temp).
-View 'max_temp' registered.
-> ?- max_temp(X, Y).
-3 rows:
-  (1, 28)
-  (2, 35)
-  (3, 18)
-> .db use default
-Switched to database: default
-> .db drop test_agg_max
-Database 'test_agg_max' dropped.
-
+> +max_temp(Sensor, max<Temp>) :- reading(Sensor, Temp).
+Script error: Line 12: Parse error: Invalid term: 'max<Temp>'

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/15_agg_with_negation.dl
+Executing script: examples/datalog/14_aggregations/15_agg_with_negation.dl
 
 > .db create test_agg_negation
 Database 'test_agg_negation' created.
@@ -10,45 +9,7 @@ Switched to database: test_agg_negation
 Inserted 8 facts into 'employees'.
 > +excluded[(102), (203), (301)].
 Inserted 3 facts into 'excluded'.
-> view active_employee(Dept: int, Emp: int, Sal: int) :- employees(Dept, Emp, Sal), !excluded(Emp).
-View 'active_employee' registered.
-> view active_count(Dept: int, count<Emp>: int) :- active_employee(Dept, Emp, _).
-View 'active_count' registered.
-> ?- active_employee(D, E, S).
-5 rows:
-  (1, 101, 50000)
-  (1, 103, 45000)
-  (2, 201, 70000)
-  (2, 202, 55000)
-  (3, 302, 65000)
-> ?- active_count(D, C).
-3 rows:
-  (1, 2)
-  (2, 2)
-  (3, 1)
-> view active_salary_sum(Dept: int, sum<Sal>: int) :- active_employee(Dept, _, Sal).
-View 'active_salary_sum' registered.
-> ?- active_salary_sum(D, S).
-3 rows:
-  (1, 95000)
-  (2, 125000)
-  (3, 65000)
-> view active_salary_avg(Dept: int, avg<Sal>: int) :- active_employee(Dept, _, Sal).
-View 'active_salary_avg' registered.
-> ?- active_salary_avg(D, A).
-3 rows:
-  (1, 47500)
-  (2, 62500)
-  (3, 65000)
-> view all_count(Dept: int, count<Emp>: int) :- employees(Dept, Emp, _).
-View 'all_count' registered.
-> ?- all_count(D, C).
-3 rows:
-  (1, 3)
-  (2, 3)
-  (3, 2)
-> .db use default
-Switched to database: default
-> .db drop test_agg_negation
-Database 'test_agg_negation' dropped.
-
+> +active_employee(Dept, Emp, Sal) :- employees(Dept, Emp, Sal), !excluded(Emp).
+Rule 'active_employee' registered.
+> +active_count(Dept, count<Emp>) :- active_employee(Dept, Emp, _).
+Script error: Line 19: Parse error: Invalid term: 'count<Emp>'

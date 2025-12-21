@@ -1,6 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/05_drop_nonexistent_db.dl
+Executing script: examples/datalog/12_errors/05_drop_nonexistent_db_error.dl
 
 > .db drop nonexistent_database_xyz
 Script error: Line 6: Database not found: nonexistent_database_xyz
-

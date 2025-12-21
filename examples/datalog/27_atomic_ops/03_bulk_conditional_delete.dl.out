@@ -1,0 +1,51 @@
+Executing script: examples/datalog/27_atomic_ops/03_bulk_conditional_delete.dl
+
+> .db create bulk_delete_test
+Database 'bulk_delete_test' created.
+Switched to database: bulk_delete_test
+> .db use bulk_delete_test
+Switched to database: bulk_delete_test
+> +log(1, "info", "System started").
+Inserted 1 fact into 'log'.
+> +log(2, "error", "Connection failed").
+Inserted 1 fact into 'log'.
+> +log(3, "info", "User logged in").
+Inserted 1 fact into 'log'.
+> +log(4, "error", "Database timeout").
+Inserted 1 fact into 'log'.
+> +log(5, "info", "Request processed").
+Inserted 1 fact into 'log'.
+> +log(6, "warn", "Low memory").
+Inserted 1 fact into 'log'.
+> ?- log(Id, Level, Message).
+6 rows:
+  (1, "info", "System started")
+  (2, "error", "Connection failed")
+  (3, "info", "User logged in")
+  (4, "error", "Database timeout")
+  (5, "info", "Request processed")
+  (6, "warn", "Low memory")
+> -log(Id, Level, Message) :- log(Id, Level, Message), Level = "error".
+No matching tuples to delete.
+> ?- log(Id, Level, Message).
+6 rows:
+  (1, "info", "System started")
+  (2, "error", "Connection failed")
+  (3, "info", "User logged in")
+  (4, "error", "Database timeout")
+  (5, "info", "Request processed")
+  (6, "warn", "Low memory")
+> -log(Id, Level, Message) :- log(Id, Level, Message), Id > 4.
+No matching tuples to delete.
+> ?- log(Id, Level, Message).
+6 rows:
+  (1, "info", "System started")
+  (2, "error", "Connection failed")
+  (3, "info", "User logged in")
+  (4, "error", "Database timeout")
+  (5, "info", "Request processed")
+  (6, "warn", "Low memory")
+> .db use default
+Switched to database: default
+> .db drop bulk_delete_test
+Database 'bulk_delete_test' dropped.

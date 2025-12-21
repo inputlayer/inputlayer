@@ -16,41 +16,41 @@
 +empty_pairs[].
 
 // Test 1: Join where right side is empty
-view join_empty_right(X: int, Y: int) :- data(X, Y), empty_pairs(X, _).
++join_empty_right(X, Y) :- data(X, Y), empty_pairs(X, _).
 ?- join_empty_right(X, Y).
 // Expected: no results
 
 // Test 2: Join where left side is empty (different from right)
-view join_empty_left(X: int, Y: int) :- empty_pairs(X, _), data(X, Y).
++join_empty_left(X, Y) :- empty_pairs(X, _), data(X, Y).
 ?- join_empty_left(X, Y).
 // Expected: no results
 
 // Test 3: Filter that produces empty intermediate
-view filtered(X: int, Y: int) :- data(X, Y), Y > 1000.
-view join_filtered(X: int, Y: int, Z: int) :- data(X, Y), filtered(Y, Z).
++filtered(X, Y) :- data(X, Y), Y > 1000.
++join_filtered(X, Y, Z) :- data(X, Y), filtered(Y, Z).
 ?- filtered(X, Y).
 ?- join_filtered(X, Y, Z).
 // Expected: both empty
 
 // Test 4: Aggregation over empty join result
-view empty_join_count(count<X>: int) :- join_empty_right(X, _).
++empty_join_count(count<X>) :- join_empty_right(X, _).
 ?- empty_join_count(C).
 // Expected: 0 or no results
 
 // Test 5: Recursion starting from empty base
-view empty_path(X: int, Y: int) :- empty_pairs(X, Y).
-view empty_path(X: int, Z: int) :- empty_path(X, Y), data(Y, Z).
++empty_path(X, Y) :- empty_pairs(X, Y).
++empty_path(X, Z) :- empty_path(X, Y), data(Y, Z).
 ?- empty_path(X, Y).
 // Expected: no results (empty base = empty recursion)
 
 // Test 6: Non-empty to verify system works
-view normal_join(X: int, Y: int) :- data(X, Y), data(Y, _).
++normal_join(X, Y) :- data(X, Y), data(Y, _).
 ?- normal_join(X, Y).
 // Expected: (1, 100) if 100 exists as first column... likely empty
 
 // Test 7: Self-join on data
 +pairs[(1, 2), (2, 3), (3, 1)].
-view chain(X: int, Z: int) :- pairs(X, Y), pairs(Y, Z).
++chain(X, Z) :- pairs(X, Y), pairs(Y, Z).
 ?- chain(X, Z).
 // Expected: (1, 3), (2, 1), (3, 2)
 

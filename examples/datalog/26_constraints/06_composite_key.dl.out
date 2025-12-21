@@ -1,0 +1,35 @@
+Executing script: examples/datalog/26_constraints/06_composite_key.dl
+
+> .db create constraint_composite_test
+Database 'constraint_composite_test' created.
+Switched to database: constraint_composite_test
+> .db use constraint_composite_test
+Switched to database: constraint_composite_test
+> +enrollment(student_id: int @key, course_id: int @key, grade: float, semester: string).
+Persistent schema 'enrollment' declared: (student_id: Base(Int) @primary, course_id: Base(Int) @primary, grade: Base(Float), semester: Base(String))
+> +enrollment(1, 101, 3.5, "Fall 2024").
+Inserted 1 fact into 'enrollment'.
+> +enrollment(1, 102, 4.0, "Fall 2024").
+Inserted 1 fact into 'enrollment'.
+> +enrollment(2, 101, 3.8, "Fall 2024").
+Inserted 1 fact into 'enrollment'.
+> +enrollment(2, 103, 3.2, "Spring 2025").
+Inserted 1 fact into 'enrollment'.
+> ?- enrollment(StudentId, CourseId, Grade, Semester).
+4 rows:
+  (1, 101, 3.5, "Fall 2024")
+  (1, 102, 4, "Fall 2024")
+  (2, 101, 3.8, "Fall 2024")
+  (2, 103, 3.2, "Spring 2025")
+> ?- enrollment(1, CourseId, Grade, Semester).
+2 rows:
+  (1, 101, 3.5, "Fall 2024")
+  (1, 102, 4, "Fall 2024")
+> .rel enrollment
+Relation: enrollment
+Schema: ["col0", "col1", "col2", "col3"]
+Tuple count: 4
+> .db use default
+Switched to database: default
+> .db drop constraint_composite_test
+Database 'constraint_composite_test' dropped.

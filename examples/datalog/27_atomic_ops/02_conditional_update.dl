@@ -1,0 +1,28 @@
+// Test: Conditional Update Operation
+// Category: atomic_ops
+// Description: Tests conditional atomic update with filter
+
+.db create conditional_update_test
+.db use conditional_update_test
+
+// Initial data: counters with values
++counter(1, 100).
++counter(2, 200).
++counter(3, 50).
++counter(4, 150).
+
+// Query initial state
+?- counter(Id, Value).
+
+// Atomic update: increment counters where value > 100 by 10
+-counter(Id, OldVal), +counter(Id, NewVal) :-
+    counter(Id, OldVal),
+    OldVal > 100,
+    NewVal = OldVal + 10.
+
+// Query after conditional update (only large counters changed)
+?- counter(Id, Value).
+
+// Cleanup
+.db use default
+.db drop conditional_update_test

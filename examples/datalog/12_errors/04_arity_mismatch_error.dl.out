@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/04_arity_mismatch.dl
+Executing script: examples/datalog/12_errors/04_arity_mismatch_error.dl
 
 > .db create test_arity_err
 Database 'test_arity_err' created.
@@ -12,4 +11,3 @@ Inserted 3 facts into 'single'.
 Switched to database: default
 > .db drop test_arity_err
 Database 'test_arity_err' dropped.
-

@@ -10,30 +10,30 @@
 +data[(1, 10), (2, 20), (3, 30)].
 
 // Filter that produces empty result
-view filtered(X: int, V: int) :- data(X, V), V > 1000.
++filtered(X, V) :- data(X, V), V > 1000.
 
 // Test 1: SUM over empty result
-view empty_sum(sum<V>: int) :- filtered(_, V).
++empty_sum(sum<V>) :- filtered(_, V).
 ?- empty_sum(S).
 // Expected: 0 or no results
 
 // Test 3: AVG over empty result - CRITICAL TEST
 // This may produce Infinity (division by zero) if not handled
-view empty_avg(avg<V>: int) :- filtered(_, V).
++empty_avg(avg<V>) :- filtered(_, V).
 ?- empty_avg(A).
 // Expected: NULL or no results, NOT Infinity
 
 // Test 4: MIN/MAX over empty result
-view empty_min(min<V>: int) :- filtered(_, V).
-view empty_max(max<V>: int) :- filtered(_, V).
++empty_min(min<V>) :- filtered(_, V).
++empty_max(max<V>) :- filtered(_, V).
 ?- empty_min(M).
 ?- empty_max(M).
 // Expected: NULL or no results
 
 // Test 5: Normal aggregation (for comparison)
-view normal_count(count<X>: int) :- data(X, _).
-view normal_sum(sum<V>: int) :- data(_, V).
-view normal_avg(avg<V>: int) :- data(_, V).
++normal_count(count<X>) :- data(X, _).
++normal_sum(sum<V>) :- data(_, V).
++normal_avg(avg<V>) :- data(_, V).
 ?- normal_count(C).
 ?- normal_sum(S).
 ?- normal_avg(A).
@@ -43,7 +43,7 @@ view normal_avg(avg<V>: int) :- data(_, V).
 +group_data[(1, 100), (1, 200), (3, 300)].
 
 // Groups 2, 4, 5 have no data - do they appear with count 0?
-view group_count(G: int, count<V>: int) :- groups(G), group_data(G, V).
++group_count(G, count<V>) :- groups(G), group_data(G, V).
 ?- group_count(G, C).
 // Note: Groups without data may not appear at all
 

@@ -11,12 +11,12 @@ Inserted 3 facts into 'role_inherits'.
 Inserted 4 facts into 'user_role'.
 > +role_permission[(1, 1000), (1, 1001), (2, 1002), (2, 1003), (3, 1004), (3, 1005), (4, 1006)].
 Inserted 7 facts into 'role_permission'.
-> view has_role(User: int, Role: int) :- user_role(User, Role).
-View 'has_role' registered.
-> view has_role(User: int, ParentRole: int) :- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
-Rule added to view 'has_role' (2 rules total).
-> view has_permission(User: int, Perm: int) :- has_role(User, Role), role_permission(Role, Perm).
-View 'has_permission' registered.
+> +has_role(User, Role) :- user_role(User, Role).
+Rule 'has_role' registered.
+> +has_role(User, ParentRole) :- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole).
+Rule added to 'has_role' (2 rules total).
+> +has_permission(User, Perm) :- has_role(User, Role), role_permission(Role, Perm).
+Rule 'has_permission' registered.
 > ?- has_role(User, Role).
 10 rows:
   (100, 1)
@@ -29,8 +29,8 @@ View 'has_permission' registered.
   (102, 3)
   (102, 4)
   (103, 4)
-> view admin_perms(Perm: int) :- has_permission(100, Perm).
-View 'admin_perms' registered.
+> +admin_perms(Perm) :- has_permission(100, Perm).
+Rule 'admin_perms' registered.
 > ?- admin_perms(P).
 7 rows:
   (1000)
@@ -40,8 +40,8 @@ View 'admin_perms' registered.
   (1004)
   (1005)
   (1006)
-> view employee_perms(Perm: int) :- has_permission(102, Perm).
-View 'employee_perms' registered.
+> +employee_perms(Perm) :- has_permission(102, Perm).
+Rule 'employee_perms' registered.
 > ?- employee_perms(P).
 3 rows:
   (1004)

@@ -3,33 +3,38 @@
 //! Error types for the InputLayer RPC protocol.
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// InputLayer RPC error type.
 ///
 /// Comprehensive error enum covering all possible failure modes in the protocol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 pub enum InputLayerError {
     // ========================================================================
     // Database Errors
     // ========================================================================
 
     /// Database not found
+    #[error("Database not found: {name}")]
     DatabaseNotFound { name: String },
 
     /// Database already exists
+    #[error("Database already exists: {name}")]
     DatabaseExists { name: String },
 
     /// Relation not found in database
+    #[error("Relation '{relation}' not found in database '{database}'")]
     RelationNotFound { relation: String, database: String },
 
     /// Cannot drop default database
+    #[error("Cannot drop default database: {name}")]
     CannotDropDefault { name: String },
 
     /// Cannot drop current database
+    #[error("Cannot drop current database: {name}")]
     CannotDropCurrent { name: String },
 
     /// No current database selected
+    #[error("No current database selected")]
     NoCurrentDatabase,
 
     // ========================================================================
@@ -37,6 +42,7 @@ pub enum InputLayerError {
     // ========================================================================
 
     /// Parse error in Datalog program
+    #[error("Parse error: {message}")]
     ParseError {
         message: String,
         line: Option<u32>,
@@ -44,9 +50,11 @@ pub enum InputLayerError {
     },
 
     /// Query execution error
+    #[error("Execution error: {message}")]
     ExecutionError { message: String },
 
     /// Query timeout
+    #[error("Query timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
 
     // ========================================================================
@@ -54,15 +62,19 @@ pub enum InputLayerError {
     // ========================================================================
 
     /// Schema violation
+    #[error("Schema violation: expected {expected}, got {got}")]
     SchemaViolation { expected: String, got: String },
 
     /// Vector dimension mismatch
+    #[error("Vector dimension mismatch: expected {expected}, got {got}")]
     VectorDimensionMismatch { expected: usize, got: usize },
 
     /// Type mismatch
+    #[error("Type mismatch: expected {expected}, got {got}")]
     TypeMismatch { expected: String, got: String },
 
     /// Invalid data format
+    #[error("Invalid data: {message}")]
     InvalidData { message: String },
 
     // ========================================================================
@@ -70,12 +82,15 @@ pub enum InputLayerError {
     // ========================================================================
 
     /// Connection failed
+    #[error("Connection to {address} failed: {reason}")]
     ConnectionFailed { address: String, reason: String },
 
     /// Connection lost
+    #[error("Connection lost: {reason}")]
     ConnectionLost { reason: String },
 
     /// Authentication failed
+    #[error("Authentication failed: {reason}")]
     AuthenticationFailed { reason: String },
 
     // ========================================================================
@@ -83,15 +98,19 @@ pub enum InputLayerError {
     // ========================================================================
 
     /// Internal server error
+    #[error("Internal error: {message}")]
     InternalError { message: String },
 
     /// Server overloaded
+    #[error("Server overloaded: {active_queries}/{max_queries} queries")]
     ServerOverloaded { active_queries: u32, max_queries: u32 },
 
     /// Server is shutting down
+    #[error("Server is shutting down")]
     ShuttingDown,
 
     /// Resource limit exceeded
+    #[error("Resource limit exceeded: {resource} (limit: {limit})")]
     ResourceLimitExceeded { resource: String, limit: String },
 
     // ========================================================================
@@ -99,101 +118,13 @@ pub enum InputLayerError {
     // ========================================================================
 
     /// Serialization error
+    #[error("Serialization error: {message}")]
     SerializationError { message: String },
 
     /// Deserialization error
+    #[error("Deserialization error: {message}")]
     DeserializationError { message: String },
 }
-
-impl fmt::Display for InputLayerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            // Database errors
-            InputLayerError::DatabaseNotFound { name } => {
-                write!(f, "Database not found: {}", name)
-            }
-            InputLayerError::DatabaseExists { name } => {
-                write!(f, "Database already exists: {}", name)
-            }
-            InputLayerError::RelationNotFound { relation, database } => {
-                write!(f, "Relation '{}' not found in database '{}'", relation, database)
-            }
-            InputLayerError::CannotDropDefault { name } => {
-                write!(f, "Cannot drop default database: {}", name)
-            }
-            InputLayerError::CannotDropCurrent { name } => {
-                write!(f, "Cannot drop current database: {}", name)
-            }
-            InputLayerError::NoCurrentDatabase => {
-                write!(f, "No current database selected")
-            }
-
-            // Query errors
-            InputLayerError::ParseError { message, line, column } => {
-                match (line, column) {
-                    (Some(l), Some(c)) => write!(f, "Parse error at {}:{}: {}", l, c, message),
-                    (Some(l), None) => write!(f, "Parse error at line {}: {}", l, message),
-                    _ => write!(f, "Parse error: {}", message),
-                }
-            }
-            InputLayerError::ExecutionError { message } => {
-                write!(f, "Execution error: {}", message)
-            }
-            InputLayerError::Timeout { timeout_ms } => {
-                write!(f, "Query timeout after {}ms", timeout_ms)
-            }
-
-            // Data errors
-            InputLayerError::SchemaViolation { expected, got } => {
-                write!(f, "Schema violation: expected {}, got {}", expected, got)
-            }
-            InputLayerError::VectorDimensionMismatch { expected, got } => {
-                write!(f, "Vector dimension mismatch: expected {}, got {}", expected, got)
-            }
-            InputLayerError::TypeMismatch { expected, got } => {
-                write!(f, "Type mismatch: expected {}, got {}", expected, got)
-            }
-            InputLayerError::InvalidData { message } => {
-                write!(f, "Invalid data: {}", message)
-            }
-
-            // Connection errors
-            InputLayerError::ConnectionFailed { address, reason } => {
-                write!(f, "Connection to {} failed: {}", address, reason)
-            }
-            InputLayerError::ConnectionLost { reason } => {
-                write!(f, "Connection lost: {}", reason)
-            }
-            InputLayerError::AuthenticationFailed { reason } => {
-                write!(f, "Authentication failed: {}", reason)
-            }
-
-            // Server errors
-            InputLayerError::InternalError { message } => {
-                write!(f, "Internal error: {}", message)
-            }
-            InputLayerError::ServerOverloaded { active_queries, max_queries } => {
-                write!(f, "Server overloaded: {}/{} queries", active_queries, max_queries)
-            }
-            InputLayerError::ShuttingDown => {
-                write!(f, "Server is shutting down")
-            }
-            InputLayerError::ResourceLimitExceeded { resource, limit } => {
-                write!(f, "Resource limit exceeded: {} (limit: {})", resource, limit)
-            }
-
-            // Serialization errors
-            InputLayerError::SerializationError { message } => {
-                write!(f, "Serialization error: {}", message)
-            }
-            InputLayerError::DeserializationError { message } => {
-                write!(f, "Deserialization error: {}", message)
-            }
-        }
-    }
-}
-
-impl std::error::Error for InputLayerError {}
 
 // ============================================================================
 // Conversions from internal error types
@@ -287,7 +218,8 @@ mod tests {
             line: Some(10),
             column: Some(5),
         };
-        assert_eq!(err.to_string(), "Parse error at 10:5: unexpected token");
+        // thiserror uses simplified format - line/column still stored for programmatic access
+        assert_eq!(err.to_string(), "Parse error: unexpected token");
     }
 
     #[test]

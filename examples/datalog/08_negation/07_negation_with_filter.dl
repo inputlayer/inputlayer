@@ -13,15 +13,15 @@
 
 // Combine negation with greater-than filter
 // Find data where id > 1, value > 15, and id not in excluded
-view filtered(Id: int, Val: int) :- data(Id, Val), Id > 1, Val > 15, !excluded(Id, _).
++filtered(Id, Val) :- data(Id, Val), Id > 1, Val > 15, !excluded(Id, _).
 ?- filtered(X, Y).
 
 // Combine negation with less-than filter
-view small_allowed(Id: int, Val: int) :- data(Id, Val), Val < 35, !excluded(Id, _).
++small_allowed(Id, Val) :- data(Id, Val), Val < 35, !excluded(Id, _).
 ?- small_allowed(X, Y).
 
 // Combine negation with equality filter
-view specific(Id: int, Val: int) :- data(Id, Val), Val = 30, !excluded(Id, _).
++specific(Id, Val) :- data(Id, Val), Val = 30, !excluded(Id, _).
 ?- specific(X, Y).
 
 // Cleanup

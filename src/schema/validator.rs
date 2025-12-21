@@ -105,47 +105,22 @@ impl std::fmt::Display for ViolationType {
 }
 
 /// Validation error for batch operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ValidationError {
     /// No schema found for the relation
+    #[error("No schema defined for relation '{0}'")]
     NoSchema(String),
     /// All-or-nothing: batch rejected due to violations
+    #[error("Insert rejected for '{relation}': batch of {total_tuples} tuples violated constraints")]
     BatchRejected {
         relation: String,
         total_tuples: usize,
         violations: Vec<Violation>,
     },
     /// Internal error
+    #[error("Internal validation error: {0}")]
     Internal(String),
 }
-
-impl std::fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ValidationError::NoSchema(rel) => {
-                write!(f, "No schema defined for relation '{}'", rel)
-            }
-            ValidationError::BatchRejected {
-                relation,
-                total_tuples,
-                violations,
-            } => {
-                write!(
-                    f,
-                    "Insert rejected for '{}': {} of {} tuples violated constraints",
-                    relation,
-                    violations.len(),
-                    total_tuples
-                )
-            }
-            ValidationError::Internal(msg) => {
-                write!(f, "Internal validation error: {}", msg)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ValidationError {}
 
 /// Result of successful validation
 #[derive(Debug, Clone)]

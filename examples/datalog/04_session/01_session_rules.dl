@@ -8,7 +8,7 @@
 // Insert base data
 +edge[(1,2), (2,3), (3,4)].
 
-// Add session rules one by one (using :- not :=)
+// Add session rules one by one
 // Note: Session rules are transient, not persisted
 
 // First session rule (base case)

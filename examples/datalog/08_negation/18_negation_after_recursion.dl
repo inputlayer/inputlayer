@@ -14,10 +14,10 @@
 
 // Transitive closure excluding forbidden edges
 // Base case: direct edges that aren't forbidden
-view path(X: int, Y: int) :- edge(X, Y), !forbidden_edge(X, Y).
++path(X, Y) :- edge(X, Y), !forbidden_edge(X, Y).
 
 // Recursive case: extend paths through non-forbidden edges
-view path(X: int, Z: int) :- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
++path(X, Z) :- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z).
 
 // Query reachability from node 1
 // With edges (2,3) and (4,5) forbidden:

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/07_wide_tuples_10col.dl
+Executing script: examples/datalog/13_performance/07_wide_tuples_10col.dl
 
 > .db create test_wide_10
 Database 'test_wide_10' created.
@@ -8,8 +7,8 @@ Switched to database: test_wide_10
 Switched to database: test_wide_10
 > +wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000), (2, 20, 200, 2000, 20000, 3, 30, 300, 3000, 30000), (3, 30, 300, 3000, 30000, 4, 40, 400, 4000, 40000), (4, 40, 400, 4000, 40000, 5, 50, 500, 5000, 50000), (5, 50, 500, 5000, 50000, 6, 60, 600, 6000, 60000)].
 Inserted 5 facts into 'wide_data'.
-> view select_cols(A: int, E: int, J: int) :- wide_data(A, _, _, _, E, _, _, _, _, J).
-View 'select_cols' registered.
+> +select_cols(A, E, J) :- wide_data(A, _, _, _, E, _, _, _, _, J).
+Rule 'select_cols' registered.
 > ?- select_cols(A, E, J).
 5 rows:
   (1, 10000, 20000)
@@ -17,36 +16,5 @@ View 'select_cols' registered.
   (3, 30000, 40000)
   (4, 40000, 50000)
   (5, 50000, 60000)
-> view col_sum(A: int, B+C+D+E: int) :- wide_data(A, B, C, D, E, _, _, _, _, _).
-View 'col_sum' registered.
-> ?- col_sum(A, S).
-5 rows:
-  (1, 11110)
-  (2, 22220)
-  (3, 33330)
-  (4, 44440)
-  (5, 55550)
-> view filtered(A: int) :- wide_data(A, B, C, _, _, _, _, _, _, _), B > 15, C > 150.
-View 'filtered' registered.
-> ?- filtered(A).
-4 rows:
-  (2)
-  (3)
-  (4)
-  (5)
-> +wide_data2[(1, 111), (2, 222), (3, 333), (4, 444), (5, 555)].
-Inserted 5 facts into 'wide_data2'.
-> view joined(A: int, B: int, C: int, V: int) :- wide_data(A, B, C, _, _, _, _, _, _, _), wide_data2(A, V).
-View 'joined' registered.
-> ?- joined(A, B, C, V).
-5 rows:
-  (1, 10, 100, 111)
-  (2, 20, 200, 222)
-  (3, 30, 300, 333)
-  (4, 40, 400, 444)
-  (5, 50, 500, 555)
-> .db use default
-Switched to database: default
-> .db drop test_wide_10
-Database 'test_wide_10' dropped.
-
+> +col_sum(A, B+C+D+E) :- wide_data(A, B, C, D, E, _, _, _, _, _).
+Script error: Line 20: Parse error: Invalid term: 'B+C+D+E'

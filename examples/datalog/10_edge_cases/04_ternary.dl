@@ -9,7 +9,7 @@
 +edge[(1,2), (2,3), (3,1)].
 
 // Ternary relation: path2 has 3 columns (A, B, C)
-view path2(A: int, B: int, C: int) :- edge(A, B), edge(B, C).
++path2(A, B, C) :- edge(A, B), edge(B, C).
 ?- path2(X, Y, Z).
 
 // Another example: find all 2-hop paths starting from node 1

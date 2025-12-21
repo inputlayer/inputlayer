@@ -19,11 +19,11 @@
 // Mutual recursion: even calls odd, odd calls even
 // N is even if N-1 is odd
 // N is odd if N-1 is even
-view is_even(N: int) :- base_even(N).
-view is_even(N: int) :- succ(M, N), is_odd(M).
++is_even(N) :- base_even(N).
++is_even(N) :- succ(M, N), is_odd(M).
 
-view is_odd(N: int) :- base_odd(N).
-view is_odd(N: int) :- succ(M, N), is_even(M).
++is_odd(N) :- base_odd(N).
++is_odd(N) :- succ(M, N), is_even(M).
 
 // Query even and odd numbers
 ?- is_even(X).

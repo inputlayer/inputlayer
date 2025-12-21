@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/06_joins/01_two_way_join.dl
+Executing script: examples/datalog/06_joins/01_two_way_join.dl
 
 > .db create test_join
 Database 'test_join' created.
@@ -10,8 +9,8 @@ Switched to database: test_join
 Inserted 4 facts into 'employee'.
 > +department[(100, 10), (200, 20)].
 Inserted 2 facts into 'department'.
-> view emp_dept(EmpId: int, DeptName: int) :- employee(EmpId, DeptId), department(DeptId, DeptName).
-View 'emp_dept' registered.
+> +emp_dept(EmpId, DeptName) :- employee(EmpId, DeptId), department(DeptId, DeptName).
+Rule 'emp_dept' registered.
 > ?- emp_dept(X, Y).
 4 rows:
   (1, 10)
@@ -22,4 +21,3 @@ View 'emp_dept' registered.
 Switched to database: default
 > .db drop test_join
 Database 'test_join' dropped.
-

@@ -10,19 +10,19 @@
 +data[(1, 100), (3, 101), (5, 102), (7, 103), (9, 104)].
 
 // Less than constant: X < 5
-view lt_five(X: int, Y: int) :- data(X, Y), X < 5.
++lt_five(X, Y) :- data(X, Y), X < 5.
 ?- lt_five(X, Y).
 
 // Greater than constant: X > 5
-view gt_five(X: int, Y: int) :- data(X, Y), X > 5.
++gt_five(X, Y) :- data(X, Y), X > 5.
 ?- gt_five(X, Y).
 
 // Less or equal: X <= 5
-view le_five(X: int, Y: int) :- data(X, Y), X <= 5.
++le_five(X, Y) :- data(X, Y), X <= 5.
 ?- le_five(X, Y).
 
 // Greater or equal: X >= 5
-view ge_five(X: int, Y: int) :- data(X, Y), X >= 5.
++ge_five(X, Y) :- data(X, Y), X >= 5.
 ?- ge_five(X, Y).
 
 // Cleanup

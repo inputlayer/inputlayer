@@ -12,17 +12,17 @@
 ?- mixed(Id, Mid, Large).
 
 // Filter on different column types
-view small_ids(Id: int, M: int, L: int) :- mixed(Id, M, L), Id < 10.
++small_ids(Id, M, L) :- mixed(Id, M, L), Id < 10.
 ?- small_ids(X, Y, Z).
 
 // Arithmetic across columns with different magnitudes
 // Use arithmetic in head position
-view combined(Id: int, M+L: int) :- mixed(Id, M, L).
++combined(Id, M+L) :- mixed(Id, M, L).
 ?- combined(X, Y).
 
 // Join different value ranges
 +lookup[(100, 1), (200, 2), (300, 3)].
-view joined(Id: int, M: int, Rev: int) :- mixed(Id, M, _), lookup(M, Rev).
++joined(Id, M, Rev) :- mixed(Id, M, _), lookup(M, Rev).
 ?- joined(X, Y, Z).
 
 // Cleanup

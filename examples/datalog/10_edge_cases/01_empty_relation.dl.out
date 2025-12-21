@@ -1,13 +1,12 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/10_edge_cases/01_empty_relation.dl
+Executing script: examples/datalog/10_edge_cases/01_empty_relation.dl
 
 > .db create test_empty
 Database 'test_empty' created.
 Switched to database: test_empty
 > .db use test_empty
 Switched to database: test_empty
-> view empty_view(X: int, Y: int) :- nonexistent(X, Y).
-View 'empty_view' registered.
+> +empty_view(X, Y) :- nonexistent(X, Y).
+Rule 'empty_view' registered.
 > ?- empty_view(X, Y).
 No results.
 > +edge[(1,2)].
@@ -18,4 +17,3 @@ No results.
 Switched to database: default
 > .db drop test_empty
 Database 'test_empty' dropped.
-

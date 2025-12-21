@@ -20,7 +20,7 @@
 //! {"op":"delete","relation":"edge","tuples":[[1,2]],"ts":1234567891}
 //! ```
 
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/02_multiply.dl
+Executing script: examples/datalog/15_arithmetic/02_multiply.dl
 
 > .db create test_arith_mul
 Database 'test_arith_mul' created.
@@ -24,4 +23,3 @@ Switched to database: default
 (Cleared 1 session rule(s))
 > .db drop test_arith_mul
 Database 'test_arith_mul' dropped.
-

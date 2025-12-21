@@ -1,0 +1,31 @@
+Executing script: examples/datalog/25_unified_prefix/03_schema_vs_data.dl
+
+> .db create test_schema_vs_data
+Database 'test_schema_vs_data' created.
+Switched to database: test_schema_vs_data
+> .db use test_schema_vs_data
+Switched to database: test_schema_vs_data
+> +person(id: int, name: string, age: int).
+Persistent schema 'person' declared: (id: Base(Int), name: Base(String), age: Base(Int))
+> +person(1, "Alice", 30).
+Inserted 1 fact into 'person'.
+> +person(2, "Bob", 25).
+Inserted 1 fact into 'person'.
+> ?- person(Id, Name, Age).
+2 rows:
+  (1, "Alice", 30)
+  (2, "Bob", 25)
+> +product(sku: string, price: int).
+Persistent schema 'product' declared: (sku: Base(String), price: Base(Int))
+> +product("SKU001", 100).
+Inserted 1 fact into 'product'.
+> +product("SKU002", 200).
+Inserted 1 fact into 'product'.
+> ?- product(Sku, Price).
+2 rows:
+  ("SKU001", 100)
+  ("SKU002", 200)
+> .db use default
+Switched to database: default
+> .db drop test_schema_vs_data
+Database 'test_schema_vs_data' dropped.

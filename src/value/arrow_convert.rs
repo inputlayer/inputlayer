@@ -14,32 +14,17 @@ use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
 
 /// Error type for Arrow conversion operations
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ArrowConvertError {
     /// Schema mismatch between tuples and expected schema
+    #[error("Schema mismatch: {0}")]
     SchemaMismatch(String),
     /// Unsupported data type
+    #[error("Unsupported type: {0}")]
     UnsupportedType(String),
     /// Arrow error
-    ArrowError(arrow::error::ArrowError),
-}
-
-impl std::fmt::Display for ArrowConvertError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ArrowConvertError::SchemaMismatch(msg) => write!(f, "Schema mismatch: {}", msg),
-            ArrowConvertError::UnsupportedType(msg) => write!(f, "Unsupported type: {}", msg),
-            ArrowConvertError::ArrowError(e) => write!(f, "Arrow error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ArrowConvertError {}
-
-impl From<arrow::error::ArrowError> for ArrowConvertError {
-    fn from(e: arrow::error::ArrowError) -> Self {
-        ArrowConvertError::ArrowError(e)
-    }
+    #[error("Arrow error: {0}")]
+    ArrowError(#[from] arrow::error::ArrowError),
 }
 
 /// Convert a vector of tuples to an Arrow RecordBatch

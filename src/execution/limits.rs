@@ -14,21 +14,24 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Resource limit error
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ResourceError {
     /// Memory limit exceeded
+    #[error("Memory limit exceeded: used {used} bytes, limit {limit} bytes")]
     MemoryLimitExceeded {
         limit: usize,
         used: usize,
     },
 
     /// Result size limit exceeded
+    #[error("Result size limit exceeded: {actual} tuples, limit {limit} tuples")]
     ResultSizeLimitExceeded {
         limit: usize,
         actual: usize,
     },
 
     /// Intermediate result size exceeded
+    #[error("Intermediate result limit exceeded at '{stage}': {actual} tuples, limit {limit} tuples")]
     IntermediateResultExceeded {
         limit: usize,
         actual: usize,
@@ -36,48 +39,12 @@ pub enum ResourceError {
     },
 
     /// Row width (tuple arity) exceeded
+    #[error("Row width limit exceeded: {actual} columns, limit {limit} columns")]
     RowWidthExceeded {
         limit: usize,
         actual: usize,
     },
 }
-
-impl std::fmt::Display for ResourceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ResourceError::MemoryLimitExceeded { limit, used } => {
-                write!(
-                    f,
-                    "Memory limit exceeded: used {} bytes, limit {} bytes",
-                    used, limit
-                )
-            }
-            ResourceError::ResultSizeLimitExceeded { limit, actual } => {
-                write!(
-                    f,
-                    "Result size limit exceeded: {} tuples, limit {} tuples",
-                    actual, limit
-                )
-            }
-            ResourceError::IntermediateResultExceeded { limit, actual, stage } => {
-                write!(
-                    f,
-                    "Intermediate result limit exceeded at '{}': {} tuples, limit {} tuples",
-                    stage, actual, limit
-                )
-            }
-            ResourceError::RowWidthExceeded { limit, actual } => {
-                write!(
-                    f,
-                    "Row width limit exceeded: {} columns, limit {} columns",
-                    actual, limit
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ResourceError {}
 
 /// Resource limits configuration
 #[derive(Debug, Clone)]

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/07_numeric_bounds.dl
+Executing script: examples/datalog/11_types/07_numeric_bounds.dl
 
 > .db create test_bounds
 Database 'test_bounds' created.
@@ -19,26 +18,5 @@ Inserted 2 facts into 'large_neg'.
 2 rows:
   (1, -1000000)
   (2, -2000000)
-> view large_sum(Id: int, V+1: int) :- large_pos(Id, V).
-View 'large_sum' registered.
-> ?- large_sum(X, Y).
-3 rows:
-  (1, 1000001)
-  (2, 2000001)
-  (3, 1000000000)
-> view big_enough(Id: int, V: int) :- large_pos(Id, V), V > 1500000.
-View 'big_enough' registered.
-> ?- big_enough(X, Y).
-2 rows:
-  (2, 2000000)
-  (3, 999999999)
-> view total_large(sum<V>: int) :- large_pos(_, V).
-View 'total_large' registered.
-> ?- total_large(S).
-1 rows:
-  (1002999999)
-> .db use default
-Switched to database: default
-> .db drop test_bounds
-Database 'test_bounds' dropped.
-
+> +large_sum(Id, V+1) :- large_pos(Id, V).
+Script error: Line 21: Parse error: Invalid term: 'V+1'

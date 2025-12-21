@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/17_negation_large_exclude.dl
+Executing script: examples/datalog/08_negation/17_negation_large_exclude.dl
 
 > .db create test_neg_large
 Database 'test_neg_large' created.
@@ -10,8 +9,8 @@ Switched to database: test_neg_large
 Inserted 20 facts into 'data'.
 > +exclude[(2, 0), (4, 0), (6, 0), (8, 0), (10, 0), (12, 0), (14, 0), (16, 0), (18, 0), (20, 0)].
 Inserted 10 facts into 'exclude'.
-> view odd_data(X: int, Y: int) :- data(X, Y), !exclude(X, _).
-View 'odd_data' registered.
+> +odd_data(X, Y) :- data(X, Y), !exclude(X, _).
+Rule 'odd_data' registered.
 > ?- odd_data(X, Y).
 10 rows:
   (1, 1)
@@ -28,4 +27,3 @@ View 'odd_data' registered.
 Switched to database: default
 > .db drop test_neg_large
 Database 'test_neg_large' dropped.
-

@@ -178,9 +178,9 @@ impl DatabaseServiceHandler for UnifiedHandler {
         request: db::RegisterViewRequest,
     ) -> Result<db::RegisterViewResponse, db::DatabaseError> {
         // Parse the rule using statement parser
-        let view_def = crate::statement::parse_view_definition(&request.rule)
+        let rule_def = crate::statement::parse_rule_definition(&request.rule)
             .map_err(|e| db::DatabaseError::Internal {
-                message: format!("Failed to parse view definition: {}", e),
+                message: format!("Failed to parse rule definition: {}", e),
             })?;
 
         let mut storage = self.storage.write();
@@ -192,13 +192,13 @@ impl DatabaseServiceHandler for UnifiedHandler {
             })?;
         }
 
-        storage.register_view(&view_def).map_err(|e| db::DatabaseError::Internal {
+        storage.register_rule(&rule_def).map_err(|e| db::DatabaseError::Internal {
             message: e.to_string(),
         })?;
 
         Ok(db::RegisterViewResponse {
             success: true,
-            message: format!("View '{}' registered successfully", view_def.name),
+            message: format!("Rule '{}' registered successfully", rule_def.name),
         })
     }
 
@@ -215,13 +215,13 @@ impl DatabaseServiceHandler for UnifiedHandler {
             })?;
         }
 
-        storage.drop_view(&request.name).map_err(|e| db::DatabaseError::Internal {
+        storage.drop_rule(&request.name).map_err(|e| db::DatabaseError::Internal {
             message: e.to_string(),
         })?;
 
         Ok(db::DropViewResponse {
             success: true,
-            message: format!("View '{}' dropped successfully", request.name),
+            message: format!("Rule '{}' dropped successfully", request.name),
         })
     }
 
@@ -238,11 +238,11 @@ impl DatabaseServiceHandler for UnifiedHandler {
             })?;
         }
 
-        let view_names = storage.list_views().map_err(|e| db::DatabaseError::Internal {
+        let rule_names = storage.list_rules().map_err(|e| db::DatabaseError::Internal {
             message: e.to_string(),
         })?;
 
-        let views = view_names
+        let views = rule_names
             .into_iter()
             .map(|name| db::ViewInfo {
                 name,
@@ -268,7 +268,7 @@ impl DatabaseServiceHandler for UnifiedHandler {
             })?;
         }
 
-        let desc = storage.describe_view(&request.name).map_err(|e| db::DatabaseError::Internal {
+        let desc = storage.describe_rule(&request.name).map_err(|e| db::DatabaseError::Internal {
             message: e.to_string(),
         })?;
 

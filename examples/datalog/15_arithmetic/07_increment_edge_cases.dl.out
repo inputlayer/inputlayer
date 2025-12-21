@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/07_increment_edge_cases.dl
+Executing script: examples/datalog/15_arithmetic/07_increment_edge_cases.dl
 
 > .db create test_inc_edge
 Database 'test_inc_edge' created.
@@ -74,4 +73,3 @@ Switched to database: default
 (Cleared 5 session rule(s))
 > .db drop test_inc_edge
 Database 'test_inc_edge' dropped.
-

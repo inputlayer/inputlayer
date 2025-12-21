@@ -11,17 +11,17 @@
 +set_b[(3, 0), (4, 0), (5, 0), (6, 0)].
 
 // In A but not B (set difference A - B)
-view a_only(X: int, Y: int) :- set_a(X, Y), !set_b(X, _).
++a_only(X, Y) :- set_a(X, Y), !set_b(X, _).
 ?- a_only(X, Y).
 // Should return: (1, 0), (2, 0)
 
 // In B but not A (set difference B - A)
-view b_only(X: int, Y: int) :- set_b(X, Y), !set_a(X, _).
++b_only(X, Y) :- set_b(X, Y), !set_a(X, _).
 ?- b_only(X, Y).
 // Should return: (5, 0), (6, 0)
 
 // Intersection: elements in both A and B
-view intersection(X: int, Y: int) :- set_a(X, Y), set_b(X, _).
++intersection(X, Y) :- set_a(X, Y), set_b(X, _).
 ?- intersection(X, Y).
 // Should return: (3, 0), (4, 0)
 

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/19_negation_symmetric_diff.dl
+Executing script: examples/datalog/08_negation/19_negation_symmetric_diff.dl
 
 > .db create test_neg_sym
 Database 'test_neg_sym' created.
@@ -10,20 +9,20 @@ Switched to database: test_neg_sym
 Inserted 4 facts into 'set_a'.
 > +set_b[(3, 0), (4, 0), (5, 0), (6, 0)].
 Inserted 4 facts into 'set_b'.
-> view a_only(X: int, Y: int) :- set_a(X, Y), !set_b(X, _).
-View 'a_only' registered.
+> +a_only(X, Y) :- set_a(X, Y), !set_b(X, _).
+Rule 'a_only' registered.
 > ?- a_only(X, Y).
 2 rows:
   (1, 0)
   (2, 0)
-> view b_only(X: int, Y: int) :- set_b(X, Y), !set_a(X, _).
-View 'b_only' registered.
+> +b_only(X, Y) :- set_b(X, Y), !set_a(X, _).
+Rule 'b_only' registered.
 > ?- b_only(X, Y).
 2 rows:
   (5, 0)
   (6, 0)
-> view intersection(X: int, Y: int) :- set_a(X, Y), set_b(X, _).
-View 'intersection' registered.
+> +intersection(X, Y) :- set_a(X, Y), set_b(X, _).
+Rule 'intersection' registered.
 > ?- intersection(X, Y).
 2 rows:
   (3, 0)
@@ -32,4 +31,3 @@ View 'intersection' registered.
 Switched to database: default
 > .db drop test_neg_sym
 Database 'test_neg_sym' dropped.
-

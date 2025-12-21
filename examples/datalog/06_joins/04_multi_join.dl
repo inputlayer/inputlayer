@@ -12,7 +12,7 @@
 +d[(4, 5), (40, 50)].
 
 // 4-way chain join: find paths through all relations
-view chain(W: int, Z: int) :- a(W, X), b(X, Y), c(Y, Z).
++chain(W, Z) :- a(W, X), b(X, Y), c(Y, Z).
 
 // Query the chain - finds 3-hop paths
 // Expected: (1, 4) from 1->2->3->4, (10, 40) from 10->20->30->40

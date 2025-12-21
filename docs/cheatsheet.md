@@ -6,11 +6,20 @@ A unified Datalog-native syntax for InputLayer, designed for intuitive data mani
 
 | Operator | Meaning | Persisted | DD Semantics |
 |----------|---------|-----------|--------------|
-| `+` | Insert | Yes | diff = +1 |
-| `-` | Delete | Yes | diff = -1 |
-| `:=` | Define view | Yes | Incremental maintenance |
-| `:-` | Transient rule | No | Ad-hoc computation |
+| `+` | Insert fact or persistent rule | Yes | diff = +1 |
+| `-` | Delete fact or drop rule | Yes | diff = -1 |
+| `:-` | Session rule (transient) | No | Ad-hoc computation |
 | `?-` | Query | No | Ad-hoc query |
+
+## Key Terminology
+
+| Term | Description |
+|------|-------------|
+| **Fact** | Base data stored in a relation (e.g., `+edge(1, 2).`) |
+| **Rule** | Derived relation defined by a Datalog rule (persistent) |
+| **Session Rule** | Transient rule that exists only for current session |
+| **Schema** | Type definition for a relation's columns |
+| **Query** | One-shot question against facts and rules |
 
 ## Meta Commands
 
@@ -26,11 +35,17 @@ Meta commands start with `.` and control the system:
 .rel                 List relations (base facts)
 .rel <name>          Describe relation schema
 
-.view                List persistent views
-.view <name>         Query view (show computed data from DD)
-.view def <name>     Show view definition (rules)
-.view drop <name>    Drop view
+.rule                List persistent rules
+.rule <name>         Query rule (show computed data)
+.rule def <name>     Show rule definition
+.rule drop <name>    Drop rule
+.rule clear <name>   Clear all clauses for re-registration
 
+.session             List session rules
+.session clear       Clear all session rules
+.session drop <n>    Remove session rule #n
+
+.load <file>         Load and execute a .dl file
 .compact             Compact WAL and consolidate batch files
 .status              Show system status
 .help                Show this help
@@ -70,44 +85,50 @@ Delete and insert in one atomic operation:
 -person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge + 1.
 ```
 
-## Persistent Views (`:=`)
+## Persistent Rules (`+head :- body`)
 
-Views are persistent rules that are incrementally maintained by Differential Dataflow.
+Persistent rules are saved to disk and incrementally maintained by Differential Dataflow.
 
-Simple view:
+Simple rule:
 ```datalog
-path(X, Y) := edge(X, Y).
++path(X, Y) :- edge(X, Y).
 ```
 
-Recursive view (transitive closure):
+Recursive rule (transitive closure):
 ```datalog
-path(X, Y) := edge(X, Y).
-path(X, Z) := path(X, Y), edge(Y, Z).
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
 ```
 
-View with filter:
+Rule with filter:
 ```datalog
-adult(Name, Age) := person(Name, Age), Age >= 18.
++adult(Name, Age) :- person(Name, Age), Age >= 18.
 ```
 
-Views are saved to `{db_dir}/views/catalog.json` and automatically loaded on database startup.
+Rules are saved to `{db_dir}/rules/catalog.json` and automatically loaded on database startup.
 
-## Transient Rules (`:-`)
+## Session Rules (`:-`)
 
-Transient rules are executed immediately but not persisted:
+Session rules are executed immediately but not persisted. They're useful for ad-hoc analysis:
 
 ```datalog
 result(X, Y) :- edge(X, Y), X < Y.
 ```
 
-Transient rules can use views:
+Session rules can reference persistent rules:
 ```datalog
-reachable(X) :- path(1, X).
+reachable_from_one(X) :- path(1, X).
+```
+
+Multiple session rules accumulate and evaluate together:
+```datalog
+foo(X, Y) :- bar(X, Y).
+foo(X, Z) :- foo(X, Y), foo(Y, Z).  // Adds to previous rule
 ```
 
 ## Queries (`?-`)
 
-Query a relation or view:
+Query a relation or rule:
 
 Simple query:
 ```datalog
@@ -119,50 +140,103 @@ Query with constraints:
 ?- person(Name, Age), Age > 30.
 ```
 
-Query a view:
+Query a derived relation:
 ```datalog
 ?- path(1, X).
 ```
+
+## Schema Declarations
+
+Define typed relations with optional constraints:
+
+```datalog
++employee(id: int, name: string, dept_id: int).
++user(id: int @key, email: string @unique, name: string @not_empty).
+```
+
+## Aggregations
+
+```datalog
++total_sales(Dept, sum<Amount>) :- sales(Dept, _, Amount).
++employee_count(Dept, count<Id>) :- employee(Id, _, Dept).
++max_salary(Dept, max<Salary>) :- employee(_, Salary, Dept).
++min_age(min<Age>) :- person(_, Age).
++avg_score(avg<Score>) :- test_results(_, Score).
+```
+
+## Vector Operations
+
+```datalog
+// Insert vectors
++vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])].
++query_vec[([0.9, 0.1, 0.0])].
+
+// Compute distances
++nearest(Id, Dist) :- vectors(Id, V), query_vec(Q), Dist = euclidean(V, Q).
++similar(Id, Score) :- vectors(Id, V), query_vec(Q), Score = cosine(V, Q).
+```
+
+Available distance functions: `euclidean`, `cosine`, `dot_product`, `manhattan`
 
 ## Examples
 
 ### Graph Database
 
 ```datalog
--- Create database
+// Create database
 .db create social
+.db use social
 
--- Add edges
+// Add edges
 +follows[(1, 2), (2, 3), (3, 4), (1, 4)].
 
--- Define reachability view
-reach(X, Y) := follows(X, Y).
-reach(X, Z) := reach(X, Y), follows(Y, Z).
+// Define reachability rule (persistent)
++reach(X, Y) :- follows(X, Y).
++reach(X, Z) :- reach(X, Y), follows(Y, Z).
 
--- Query who user 1 can reach
+// Query who user 1 can reach
 ?- reach(1, X).
-
--- Save to disk
-.save
 ```
 
-### Person Database
+### Access Control (RBAC)
 
 ```datalog
--- Create database
-.db create hr
+.db create acl
+.db use acl
 
--- Add people
-+person[(1, 25), (2, 30), (3, 45), (4, 22)].
+// Facts: users, roles, permissions
++user_role[("alice", "admin"), ("bob", "viewer")].
++role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
 
--- Define view for adults
-adult(Id, Age) := person(Id, Age), Age >= 21.
+// Rule: user has permission if they have a role with that permission
++has_permission(User, Perm) :-
+  user_role(User, Role),
+  role_permission(Role, Perm).
 
--- Query adults
-?- adult(Id, Age).
+// Query: what can alice do?
+?- has_permission("alice", Perm).
+```
 
--- Age everyone by 1 year (atomic update)
--person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge + 1.
+### Policy-First RAG
+
+```datalog
+.db create rag
+.db use rag
+
+// Facts
++member[("alice", "engineering"), ("bob", "sales")].
++doc[(101, "Design Doc"), (102, "Sales Pitch")].
++acl[("engineering", 101), ("sales", 102)].
++emb[(101, [1.0, 0.0]), (102, [0.0, 1.0])].
++query_emb[([0.9, 0.1])].
+
+// Rules
++can_access(User, DocId) :- member(User, Group), acl(Group, DocId).
++candidate(DocId, Dist) :- emb(DocId, V), query_emb(Q), Dist = cosine(V, Q).
++retrieve(User, DocId, Dist) :- can_access(User, DocId), candidate(DocId, Dist).
+
+// Query: what can alice retrieve?
+?- retrieve("alice", DocId, Dist).
 ```
 
 ## Differential Dataflow Semantics
@@ -171,31 +245,30 @@ InputLayer is built on Differential Dataflow (DD), which uses a diff-based model
 
 - `+fact.` sends `(fact, time, +1)` to DD
 - `-fact.` sends `(fact, time, -1)` to DD
-- Views are incrementally maintained using DD's `iterative()` scopes
+- Rules are incrementally maintained using DD's `iterate()` operator
 - Queries are executed using DD's dataflow operators
 
 The persistence layer stores `(data, time, diff)` triples, enabling:
-- Time-travel queries (historical state)
 - Efficient incremental updates
 - Crash recovery with WAL (Write-Ahead Log)
 
 ## Architecture
 
 ```
-Statement Parser     →  Statement enum
+Statement Parser     →  Statement enum (facts, rules, queries)
        ↓
 Storage Engine       →  Multi-database management
        ↓
-View Catalog         →  Persistent view definitions (JSON)
+Rule Catalog         →  Persistent rule definitions (JSON)
        ↓
 Datalog Engine       →  DD-based execution
        ↓
-Persist Layer        →  WAL + batched storage
+Persist Layer        →  WAL + batched Parquet storage
 ```
 
 ## File Locations
 
 - Config: `~/.inputlayer/config.toml` or `./inputlayer.toml`
 - Data: `{data_dir}/{database}/`
-- Views: `{data_dir}/{database}/views/catalog.json`
+- Rules: `{data_dir}/{database}/rules/catalog.json`
 - Persist: `{data_dir}/persist/{database}:{relation}/`

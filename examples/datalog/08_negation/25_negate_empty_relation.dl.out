@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/25_negate_empty_relation.dl
+Executing script: examples/datalog/08_negation/25_negate_empty_relation.dl
 
 > .db create test_neg_empty
 Database 'test_neg_empty' created.
@@ -8,8 +7,8 @@ Switched to database: test_neg_empty
 Switched to database: test_neg_empty
 > +items[(1), (2), (3), (4), (5)].
 Inserted 5 facts into 'items'.
-> view not_excluded(X: int) :- items(X), !excluded(X).
-View 'not_excluded' registered.
+> +not_excluded(X) :- items(X), !excluded(X).
+Rule 'not_excluded' registered.
 > ?- not_excluded(X).
 5 rows:
   (1)
@@ -35,4 +34,3 @@ No matching tuples to delete.
 Switched to database: default
 > .db drop test_neg_empty
 Database 'test_neg_empty' dropped.
-

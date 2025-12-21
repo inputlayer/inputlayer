@@ -1,7 +1,8 @@
 //! Catalog: Schema management for relations
 //!
 //! Tracks schemas (column names and types) for all relations in the database.
-//! Used by IR builder to resolve variable positions and for schema validation.
+//! Uses TupleSchema as the single source of truth for schema information.
+//! Column names can be derived from TupleSchema.field_names().
 
 use std::collections::HashMap;
 use crate::value::{TupleSchema, DataType, Tuple, SchemaValidationError};
@@ -9,10 +10,8 @@ use crate::value::{TupleSchema, DataType, Tuple, SchemaValidationError};
 /// Catalog tracks schemas for all relations
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    /// Map from relation name to schema (column names only - for backward compatibility)
-    schemas: HashMap<String, Vec<String>>,
-    /// Map from relation name to typed schema (column names + types)
-    typed_schemas: HashMap<String, TupleSchema>,
+    /// Map from relation name to typed schema (single source of truth)
+    schemas: HashMap<String, TupleSchema>,
 }
 
 impl Catalog {
@@ -20,35 +19,32 @@ impl Catalog {
     pub fn new() -> Self {
         Catalog {
             schemas: HashMap::new(),
-            typed_schemas: HashMap::new(),
         }
     }
 
     /// Register a relation with its schema (column names only)
     /// For backward compatibility - types will default to Int32
     pub fn register_relation(&mut self, relation: String, schema: Vec<String>) {
-        // Also create a typed schema with default Int32 types
-        let typed_schema = TupleSchema::from_names(schema.clone());
-        self.typed_schemas.insert(relation.clone(), typed_schema);
-        self.schemas.insert(relation, schema);
+        let typed_schema = TupleSchema::from_names(schema);
+        self.schemas.insert(relation, typed_schema);
     }
 
     /// Register a relation with a fully typed schema
     pub fn register_typed_relation(&mut self, relation: String, typed_schema: TupleSchema) {
-        // Extract column names for backward compatibility
-        let names: Vec<String> = typed_schema.field_names().iter().map(|s| s.to_string()).collect();
-        self.schemas.insert(relation.clone(), names);
-        self.typed_schemas.insert(relation, typed_schema);
+        self.schemas.insert(relation, typed_schema);
     }
 
     /// Get schema for a relation (column names only)
-    pub fn get_schema(&self, relation: &str) -> Option<&[String]> {
-        self.schemas.get(relation).map(|v| v.as_slice())
+    /// Returns a Vec since the names are derived from TupleSchema
+    pub fn get_schema(&self, relation: &str) -> Option<Vec<String>> {
+        self.schemas.get(relation).map(|s| {
+            s.field_names().iter().map(|n| n.to_string()).collect()
+        })
     }
 
     /// Get typed schema for a relation
     pub fn get_typed_schema(&self, relation: &str) -> Option<&TupleSchema> {
-        self.typed_schemas.get(relation)
+        self.schemas.get(relation)
     }
 
     /// Check if a relation exists
@@ -63,21 +59,20 @@ impl Catalog {
 
     /// Find position of a variable in a schema
     pub fn find_variable_position(&self, relation: &str, var: &str) -> Option<usize> {
-        self.get_schema(relation)?
-            .iter()
-            .position(|v| v == var)
+        let schema = self.schemas.get(relation)?;
+        schema.field_names().iter().position(|v| *v == var)
     }
 
     /// Get the type of a column in a relation
     pub fn get_column_type(&self, relation: &str, column: &str) -> Option<&DataType> {
-        let schema = self.typed_schemas.get(relation)?;
+        let schema = self.schemas.get(relation)?;
         let idx = schema.field_index(column)?;
         schema.field_type(idx)
     }
 
     /// Validate a tuple against a relation's schema
     pub fn validate_tuple(&self, relation: &str, tuple: &Tuple) -> Result<(), SchemaValidationError> {
-        if let Some(schema) = self.typed_schemas.get(relation) {
+        if let Some(schema) = self.schemas.get(relation) {
             schema.validate(tuple)
         } else {
             // No schema registered - allow any tuple
@@ -87,7 +82,7 @@ impl Catalog {
 
     /// Validate multiple tuples against a relation's schema
     pub fn validate_tuples(&self, relation: &str, tuples: &[Tuple]) -> Result<(), SchemaValidationError> {
-        if let Some(schema) = self.typed_schemas.get(relation) {
+        if let Some(schema) = self.schemas.get(relation) {
             for tuple in tuples {
                 schema.validate(tuple)?;
             }
@@ -104,12 +99,13 @@ impl Catalog {
 
         // Infer types from first tuple
         let first = &tuples[0];
-        let fields: Vec<(String, DataType)> = if let Some(names) = self.schemas.get(relation) {
-            names.iter().enumerate().map(|(i, name)| {
+        let fields: Vec<(String, DataType)> = if let Some(existing) = self.schemas.get(relation) {
+            // Use existing field names, update types
+            existing.field_names().iter().enumerate().map(|(i, name)| {
                 let dtype = first.get(i)
                     .map(|v| v.data_type())
                     .unwrap_or(DataType::Null);
-                (name.clone(), dtype)
+                (name.to_string(), dtype)
             }).collect()
         } else {
             // No schema - create anonymous column names
@@ -122,7 +118,7 @@ impl Catalog {
         };
 
         let typed_schema = TupleSchema::new(fields);
-        self.typed_schemas.insert(relation.to_string(), typed_schema);
+        self.schemas.insert(relation.to_string(), typed_schema);
     }
 
     /// Infer join keys between two relations based on shared variables
@@ -150,13 +146,11 @@ impl Catalog {
     /// Clear all registered schemas
     pub fn clear(&mut self) {
         self.schemas.clear();
-        self.typed_schemas.clear();
     }
 
     /// Remove a specific relation from the catalog
     pub fn unregister_relation(&mut self, relation: &str) {
         self.schemas.remove(relation);
-        self.typed_schemas.remove(relation);
     }
 }
 
@@ -184,7 +178,7 @@ mod tests {
         assert!(!catalog.has_relation("path"));
 
         let schema = catalog.get_schema("edge").unwrap();
-        assert_eq!(schema, &["src", "dst"]);
+        assert_eq!(schema, vec!["src".to_string(), "dst".to_string()]);
     }
 
     #[test]
@@ -250,7 +244,7 @@ mod tests {
 
         // Check column names are available
         let schema = catalog.get_schema("person").unwrap();
-        assert_eq!(schema, &["id", "name", "score"]);
+        assert_eq!(schema, vec!["id".to_string(), "name".to_string(), "score".to_string()]);
 
         // Check typed schema is available
         let typed = catalog.get_typed_schema("person").unwrap();

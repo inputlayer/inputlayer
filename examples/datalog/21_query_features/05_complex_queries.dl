@@ -10,27 +10,27 @@
 +customers[(100, 1000), (200, 2000)].
 
 // Join + projection + filter
-view large_orders(OrderId: int, CustCredit: int) :- orders(OrderId, CustId, Qty), customers(CustId, CustCredit), Qty > 10.
++large_orders(OrderId, CustCredit) :- orders(OrderId, CustId, Qty), customers(CustId, CustCredit), Qty > 10.
 ?- large_orders(X, Y).
 
 // Join + aggregation
-view customer_total(CustId: int, sum<Qty>: int) :- orders(_, CustId, Qty).
++customer_total(CustId, sum<Qty>) :- orders(_, CustId, Qty).
 ?- customer_total(X, Y).
 
 // Nested views
 +employees[(1, 50000, 10), (2, 60000, 10), (3, 55000, 20)].
-view dept_10(Id: int, Sal: int) :- employees(Id, Sal, 10).
-view high_paid_dept10(Id: int) :- dept_10(Id, Sal), Sal > 55000.
++dept_10(Id, Sal) :- employees(Id, Sal, 10).
++high_paid_dept10(Id) :- dept_10(Id, Sal), Sal > 55000.
 ?- high_paid_dept10(X).
 
 // Self-join pattern
 +pairs[(1, 2), (2, 3), (3, 4), (1, 3)].
-view two_hop(A: int, C: int) :- pairs(A, B), pairs(B, C).
++two_hop(A, C) :- pairs(A, B), pairs(B, C).
 ?- two_hop(X, Y).
 
 // Aggregation on computed value - use head arithmetic
-view order_value(Oid: int, Qty*10: int) :- orders(Oid, _, Qty).
-view total_value(sum<V>: int) :- order_value(_, V).
++order_value(Oid, Qty*10) :- orders(Oid, _, Qty).
++total_value(sum<V>) :- order_value(_, V).
 ?- total_value(T).
 
 // Cleanup

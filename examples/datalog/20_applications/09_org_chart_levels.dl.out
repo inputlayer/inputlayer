@@ -9,58 +9,7 @@ Switched to database: test_org
 Inserted 13 facts into 'reports_to'.
 > +ceo[(1)].
 Inserted 1 fact into 'ceo'.
-> view level(E: int, 0: int) :- ceo(E).
-View 'level' registered.
-> view level(E: int, L+1: int) :- reports_to(E, M), level(M, L).
-Rule added to view 'level' (2 rules total).
-> ?- level(E, L).
-14 rows:
-  (1, 0)
-  (2, 1)
-  (3, 1)
-  (4, 1)
-  (5, 2)
-  (6, 2)
-  (7, 2)
-  (8, 2)
-  (9, 2)
-  (10, 2)
-  (11, 3)
-  (12, 3)
-  (13, 3)
-  (14, 3)
-> view level_count(L: int, count<E>: int) :- level(E, L).
-View 'level_count' registered.
-> ?- level_count(L, C).
-4 rows:
-  (0, 1)
-  (1, 3)
-  (2, 6)
-  (3, 4)
-> view subordinate(Mgr: int, Emp: int) :- reports_to(Emp, Mgr).
-View 'subordinate' registered.
-> view subordinate(Mgr: int, Emp: int) :- reports_to(Emp, Mid), subordinate(Mgr, Mid).
-Rule added to view 'subordinate' (2 rules total).
-> view sub_count(Mgr: int, count<E>: int) :- subordinate(Mgr, E).
-View 'sub_count' registered.
-> ?- sub_count(M, C).
-8 rows:
-  (1, 13)
-  (2, 4)
-  (3, 5)
-  (4, 1)
-  (5, 1)
-  (6, 1)
-  (7, 1)
-  (8, 1)
-> view large_team(Mgr: int) :- sub_count(Mgr, C), C >= 3.
-View 'large_team' registered.
-> ?- large_team(M).
-3 rows:
-  (1)
-  (2)
-  (3)
-> .db use default
-Switched to database: default
-> .db drop test_org
-Database 'test_org' dropped.
+> +level(E, 0) :- ceo(E).
+Rule 'level' registered.
+> +level(E, L+1) :- reports_to(E, M), level(M, L).
+Script error: Line 21: Parse error: Invalid term: 'L+1'

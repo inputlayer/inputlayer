@@ -140,13 +140,6 @@ impl ExecutionConfig {
 }
 
 // =============================================================================
-// Legacy Type (Backward Compatibility)
-// =============================================================================
-
-/// Type alias for 2-tuple data (legacy, for backward compatibility)
-pub type Tuple2 = (i32, i32);
-
-// =============================================================================
 // Production Code Generator
 // =============================================================================
 
@@ -154,10 +147,8 @@ pub type Tuple2 = (i32, i32);
 ///
 /// Supports arbitrary arity tuples with multiple data types.
 pub struct CodeGenerator {
-    /// Input data for base relations (production format)
+    /// Input data for base relations
     input_tuples: HashMap<String, Vec<Tuple>>,
-    /// Input data for base relations (legacy format)
-    input_data: HashMap<String, Vec<Tuple2>>,
 }
 
 impl CodeGenerator {
@@ -165,30 +156,30 @@ impl CodeGenerator {
     pub fn new() -> Self {
         CodeGenerator {
             input_tuples: HashMap::new(),
-            input_data: HashMap::new(),
         }
     }
 
-    /// Add input data for a relation (production: arbitrary arity)
-    pub fn add_input_tuples(&mut self, relation: String, data: Vec<Tuple>) {
+    /// Add input data for a relation
+    pub fn add_input(&mut self, relation: String, data: Vec<Tuple>) {
         self.input_tuples.insert(relation, data);
     }
 
-    /// Add input data for a relation (legacy: 2-tuples)
-    pub fn add_input_data(&mut self, relation: String, data: Vec<Tuple2>) {
-        // Store in legacy format
-        self.input_data.insert(relation.clone(), data.clone());
-        // Also convert to production format
-        let tuples: Vec<Tuple> = data.into_iter().map(|(a, b)| Tuple::from_pair(a, b)).collect();
-        self.input_tuples.insert(relation, tuples);
+    /// Add input data for a relation (alias for add_input)
+    pub fn add_input_tuples(&mut self, relation: String, data: Vec<Tuple>) {
+        self.add_input(relation, data);
     }
 
-    /// Generate DD code and execute, returning results (production format)
+    /// Execute IR and return results
     ///
-    /// For recursive queries, use `generate_and_execute_recursive` which handles
+    /// For recursive queries, use `execute_recursive` which handles
     /// fixpoint iteration. This method always executes a single pass.
-    pub fn generate_and_execute_tuples(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
+    pub fn execute(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
         self.execute_single_pass(ir)
+    }
+
+    /// Alias for execute (for backward compatibility during migration)
+    pub fn generate_and_execute_tuples(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
+        self.execute(ir)
     }
 
     /// Execute a single-pass (non-recursive) query
@@ -240,8 +231,8 @@ impl CodeGenerator {
     ///
     /// For rules like:
     /// ```datalog
-    /// connected(X, Y) := edge(X, Y).           // base case
-    /// connected(X, Z) := edge(X, Y), connected(Y, Z).  // recursive case
+    /// connected(X, Y) :- edge(X, Y).           // base case
+    /// connected(X, Z) :- edge(X, Y), connected(Y, Z).  // recursive case
     /// ```
     ///
     /// This uses Differential Dataflow's native `.iterative()` scope for efficient
@@ -401,16 +392,11 @@ impl CodeGenerator {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
 
-        // Get edge data - try production format first, then legacy
+        // Get edge data
         let edges: Vec<Tuple> = self
             .input_tuples
             .get(edge_relation)
             .cloned()
-            .or_else(|| {
-                self.input_data.get(edge_relation).map(|data| {
-                    data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect()
-                })
-            })
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -521,15 +507,7 @@ impl CodeGenerator {
         let mut iteration_count = 0;
 
         // Pre-compute input data map once
-        let mut base_input_data: HashMap<String, Vec<Tuple>> = self.input_tuples.clone();
-
-        // Also add legacy format data converted to Tuple
-        for (rel, data) in &self.input_data {
-            if !base_input_data.contains_key(rel) {
-                let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
-                base_input_data.insert(rel.clone(), tuples);
-            }
-        }
+        let base_input_data: HashMap<String, Vec<Tuple>> = self.input_tuples.clone();
 
         while all_results.len() > prev_count {
             iteration_count += 1;
@@ -599,19 +577,11 @@ impl CodeGenerator {
         Ok(final_results)
     }
 
-    /// Generate DD code and execute, returning results (legacy format)
-    pub fn generate_and_execute(&self, ir: &IRNode) -> Result<Vec<Tuple2>, String> {
-        // Use production execution and convert back
-        let tuples = self.generate_and_execute_tuples(ir)?;
-        Ok(tuples.into_iter().filter_map(|t| t.to_pair()).collect())
-    }
-
-    /// Execute a recursive query using fixpoint iteration (legacy format)
+    /// Execute a recursive query using fixpoint iteration
     ///
     /// This is the public API for recursive execution from lib.rs
-    pub fn generate_and_execute_recursive(&self, ir: &IRNode, recursive_rel: &str) -> Result<Vec<Tuple2>, String> {
-        let tuples = self.execute_recursive_fixpoint_tuples(ir, recursive_rel)?;
-        Ok(tuples.into_iter().filter_map(|t| t.to_pair()).collect())
+    pub fn execute_recursive(&self, ir: &IRNode, recursive_rel: &str) -> Result<Vec<Tuple>, String> {
+        self.execute_recursive_fixpoint_tuples(ir, recursive_rel)
     }
 
     /// Execute with configurable number of workers (multi-threaded)
@@ -2118,13 +2088,19 @@ impl CodeGenerator {
     ///
     /// Takes edge relation name and computes transitive closure.
     /// Uses iterative materialization for reliable fixpoint computation.
-    pub fn execute_transitive_closure(&self, edge_relation: &str) -> Result<Vec<Tuple2>, String> {
+    pub fn execute_transitive_closure(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
         use std::collections::{HashSet, HashMap as StdHashMap};
 
-        // Get edges
-        let edges: Vec<(i32, i32)> = self.input_data
+        // Get edges from input_tuples, extract first two i64 values
+        let edges: Vec<(i64, i64)> = self.input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(|tuples| tuples.iter()
+                .filter_map(|t| {
+                    let a = t.get(0).and_then(|v| v.as_i64())?;
+                    let b = t.get(1).and_then(|v| v.as_i64())?;
+                    Some((a, b))
+                })
+                .collect())
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -2132,19 +2108,19 @@ impl CodeGenerator {
         }
 
         // Build adjacency list for efficient lookups
-        let mut adj: StdHashMap<i32, Vec<i32>> = StdHashMap::new();
+        let mut adj: StdHashMap<i64, Vec<i64>> = StdHashMap::new();
         for &(x, y) in &edges {
             adj.entry(x).or_default().push(y);
         }
 
         // Initialize with base case (all direct edges)
-        let mut tc: HashSet<(i32, i32)> = edges.iter().cloned().collect();
+        let mut tc: HashSet<(i64, i64)> = edges.iter().cloned().collect();
         let mut changed = true;
 
         // Iterate until fixpoint
         while changed {
             changed = false;
-            let current: Vec<(i32, i32)> = tc.iter().cloned().collect();
+            let current: Vec<(i64, i64)> = tc.iter().cloned().collect();
 
             for (x, y) in current {
                 // For each (x, y) in tc, look for edges (y, z) to create (x, z)
@@ -2158,7 +2134,8 @@ impl CodeGenerator {
             }
         }
 
-        Ok(tc.into_iter().collect())
+        // Convert to Vec<Tuple>
+        Ok(tc.into_iter().map(|(a, b)| Tuple::pair(a, b)).collect())
     }
 
     /// Execute reachability query from a set of source nodes
@@ -2172,21 +2149,27 @@ impl CodeGenerator {
         &self,
         source_relation: &str,
         edge_relation: &str,
-    ) -> Result<Vec<i32>, String> {
+    ) -> Result<Vec<i64>, String> {
         use std::collections::{HashSet, HashMap as StdHashMap, VecDeque};
 
         // Get source nodes (first column only)
-        let sources: Vec<i32> = self.input_tuples
+        let sources: Vec<i64> = self.input_tuples
             .get(source_relation)
             .map(|tuples| tuples.iter()
-                .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
+                .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
                 .collect())
             .unwrap_or_default();
 
-        // Get edges
-        let edges: Vec<(i32, i32)> = self.input_data
+        // Get edges from input_tuples
+        let edges: Vec<(i64, i64)> = self.input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(|tuples| tuples.iter()
+                .filter_map(|t| {
+                    let a = t.get(0).and_then(|v| v.as_i64())?;
+                    let b = t.get(1).and_then(|v| v.as_i64())?;
+                    Some((a, b))
+                })
+                .collect())
             .unwrap_or_default();
 
         if sources.is_empty() {
@@ -2194,14 +2177,14 @@ impl CodeGenerator {
         }
 
         // Build adjacency list
-        let mut adj: StdHashMap<i32, Vec<i32>> = StdHashMap::new();
+        let mut adj: StdHashMap<i64, Vec<i64>> = StdHashMap::new();
         for &(x, y) in &edges {
             adj.entry(x).or_default().push(y);
         }
 
         // BFS from all sources
-        let mut reachable: HashSet<i32> = sources.iter().cloned().collect();
-        let mut queue: VecDeque<i32> = sources.iter().cloned().collect();
+        let mut reachable: HashSet<i64> = sources.iter().cloned().collect();
+        let mut queue: VecDeque<i64> = sources.iter().cloned().collect();
 
         while let Some(node) = queue.pop_front() {
             if let Some(neighbors) = adj.get(&node) {
@@ -2258,15 +2241,11 @@ impl CodeGenerator {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
 
-        // Get edge data and convert to Tuple format
+        // Get edge data
         let edges: Vec<Tuple> = self
-            .input_data
+            .input_tuples
             .get(edge_relation)
-            .map(|data| {
-                data.iter()
-                    .map(|&(a, b)| Tuple::from_pair(a, b))
-                    .collect()
-            })
+            .cloned()
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -2374,13 +2353,9 @@ impl CodeGenerator {
 
         // Get edges
         let edges: Vec<Tuple> = self
-            .input_data
+            .input_tuples
             .get(edge_relation)
-            .map(|data| {
-                data.iter()
-                    .map(|&(a, b)| Tuple::from_pair(a, b))
-                    .collect()
-            })
+            .cloned()
             .unwrap_or_default();
 
         if sources.is_empty() {
@@ -2467,31 +2442,6 @@ impl CodeGenerator {
         Ok(final_results)
     }
 
-    // =========================================================================
-    // Legacy Methods (for backward compatibility with existing tests)
-    // =========================================================================
-
-    /// Generate DD collection from IR (legacy: Tuple2)
-    fn generate_collection_internal<G>(
-        scope: &mut G,
-        ir: &IRNode,
-        input_data: &HashMap<String, Vec<Tuple2>>,
-    ) -> Collection<G, Tuple2>
-    where
-        G: Scope<Timestamp = ()>,
-    {
-        // Convert legacy input to Tuple format and use new implementation
-        let tuple_input: HashMap<String, Vec<Tuple>> = input_data
-            .iter()
-            .map(|(k, v)| (k.clone(), v.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect()))
-            .collect();
-
-        // Generate with new implementation
-        let tuple_coll = Self::generate_collection_tuples(scope, ir, &tuple_input);
-
-        // Convert back to Tuple2
-        tuple_coll.map(|tuple| tuple.to_pair().unwrap_or((0, 0)))
-    }
 }
 
 impl Default for CodeGenerator {
@@ -2504,27 +2454,39 @@ impl Default for CodeGenerator {
 mod tests {
     use super::*;
 
+    /// Helper to add edges from (i64, i64) tuples
+    fn edges(pairs: &[(i64, i64)]) -> Vec<Tuple> {
+        pairs.iter().map(|&(a, b)| Tuple::pair(a, b)).collect()
+    }
+
     #[test]
     fn test_simple_scan() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input_data("edge".to_string(), vec![(1, 2), (2, 3), (3, 4)]);
+        codegen.add_input("edge".to_string(), vec![
+            Tuple::pair(1, 2),
+            Tuple::pair(2, 3),
+            Tuple::pair(3, 4),
+        ]);
 
         let ir = IRNode::Scan {
             relation: "edge".to_string(),
             schema: vec!["x".to_string(), "y".to_string()],
         };
 
-        let results = codegen.generate_and_execute(&ir).unwrap();
+        let results = codegen.execute(&ir).unwrap();
         assert_eq!(results.len(), 3);
-        assert!(results.contains(&(1, 2)));
-        assert!(results.contains(&(2, 3)));
-        assert!(results.contains(&(3, 4)));
+        assert!(results.contains(&Tuple::pair(1, 2)));
+        assert!(results.contains(&Tuple::pair(2, 3)));
+        assert!(results.contains(&Tuple::pair(3, 4)));
     }
 
     #[test]
     fn test_map_swap() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input_data("edge".to_string(), vec![(1, 2), (2, 3)]);
+        codegen.add_input("edge".to_string(), vec![
+            Tuple::pair(1, 2),
+            Tuple::pair(2, 3),
+        ]);
 
         let ir = IRNode::Map {
             input: Box::new(IRNode::Scan {
@@ -2535,16 +2497,20 @@ mod tests {
             output_schema: vec!["y".to_string(), "x".to_string()],
         };
 
-        let results = codegen.generate_and_execute(&ir).unwrap();
+        let results = codegen.execute(&ir).unwrap();
         assert_eq!(results.len(), 2);
-        assert!(results.contains(&(2, 1)));
-        assert!(results.contains(&(3, 2)));
+        assert!(results.contains(&Tuple::pair(2, 1)));
+        assert!(results.contains(&Tuple::pair(3, 2)));
     }
 
     #[test]
     fn test_filter() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input_data("edge".to_string(), vec![(1, 2), (5, 10), (3, 4)]);
+        codegen.add_input("edge".to_string(), vec![
+            Tuple::pair(1, 2),
+            Tuple::pair(5, 10),
+            Tuple::pair(3, 4),
+        ]);
 
         let ir = IRNode::Filter {
             input: Box::new(IRNode::Scan {
@@ -2554,15 +2520,19 @@ mod tests {
             predicate: Predicate::ColumnGtConst(0, 3),
         };
 
-        let results = codegen.generate_and_execute(&ir).unwrap();
+        let results = codegen.execute(&ir).unwrap();
         assert_eq!(results.len(), 1);
-        assert!(results.contains(&(5, 10)));
+        assert!(results.contains(&Tuple::pair(5, 10)));
     }
 
     #[test]
     fn test_distinct() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input_data("edge".to_string(), vec![(1, 2), (1, 2), (2, 3)]);
+        codegen.add_input("edge".to_string(), vec![
+            Tuple::pair(1, 2),
+            Tuple::pair(1, 2),
+            Tuple::pair(2, 3),
+        ]);
 
         let ir = IRNode::Distinct {
             input: Box::new(IRNode::Scan {
@@ -2571,7 +2541,7 @@ mod tests {
             }),
         };
 
-        let results = codegen.generate_and_execute(&ir).unwrap();
+        let results = codegen.execute(&ir).unwrap();
         assert_eq!(results.len(), 2); // Duplicates removed
     }
 
@@ -2769,9 +2739,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph: 1 -> 2 -> 3 -> 4
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
 
         let results = codegen.execute_transitive_closure("edge").unwrap();
 
@@ -2780,12 +2748,12 @@ mod tests {
         // 2-hop: (1,3), (2,4)
         // 3-hop: (1,4)
         assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
-        assert!(results.contains(&(1, 2)), "Missing (1,2)");
-        assert!(results.contains(&(2, 3)), "Missing (2,3)");
-        assert!(results.contains(&(3, 4)), "Missing (3,4)");
-        assert!(results.contains(&(1, 3)), "Missing (1,3) - 2-hop path");
-        assert!(results.contains(&(2, 4)), "Missing (2,4) - 2-hop path");
-        assert!(results.contains(&(1, 4)), "Missing (1,4) - 3-hop path");
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(2, 3)), "Missing (2,3)");
+        assert!(results.contains(&Tuple::pair(3, 4)), "Missing (3,4)");
+        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3) - 2-hop path");
+        assert!(results.contains(&Tuple::pair(2, 4)), "Missing (2,4) - 2-hop path");
+        assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4) - 3-hop path");
     }
 
     #[test]
@@ -2793,9 +2761,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph with cycle: 1 -> 2 -> 3 -> 1
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 1)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 1)]));
 
         let results = codegen.execute_transitive_closure("edge").unwrap();
 
@@ -2807,9 +2773,9 @@ mod tests {
         assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
 
         // All paths should eventually exist
-        assert!(results.contains(&(1, 2)));
-        assert!(results.contains(&(2, 3)));
-        assert!(results.contains(&(3, 1)));
+        assert!(results.contains(&Tuple::pair(1, 2)));
+        assert!(results.contains(&Tuple::pair(2, 3)));
+        assert!(results.contains(&Tuple::pair(3, 1)));
     }
 
     #[test]
@@ -2817,14 +2783,12 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph: 1 -> 2 -> 3 -> 4
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
 
-        // Source: node 1
-        codegen.add_input_tuples(
+        // Source: node 1 (use Int64 to match edge data)
+        codegen.add_input(
             "source".to_string(),
-            vec![Tuple::new(vec![Value::Int32(1)])]
+            vec![Tuple::new(vec![Value::Int64(1)])]
         );
 
         let results = codegen.execute_reachability("source", "edge").unwrap();
@@ -2832,10 +2796,10 @@ mod tests {
         // From source 1, we can reach: 1, 2, 3, 4
         assert!(results.len() >= 4, "Expected at least 4 reachable nodes, got {}", results.len());
 
-        assert!(results.contains(&1), "Source 1 should be reachable");
-        assert!(results.contains(&2), "Node 2 should be reachable from 1");
-        assert!(results.contains(&3), "Node 3 should be reachable from 1");
-        assert!(results.contains(&4), "Node 4 should be reachable from 1");
+        assert!(results.contains(&1i64), "Source 1 should be reachable");
+        assert!(results.contains(&2i64), "Node 2 should be reachable from 1");
+        assert!(results.contains(&3i64), "Node 3 should be reachable from 1");
+        assert!(results.contains(&4i64), "Node 4 should be reachable from 1");
     }
 
     #[test]
@@ -2843,26 +2807,24 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Two disconnected components: 1 -> 2 and 3 -> 4
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (3, 4)]));
 
-        // Sources: nodes 1 and 3
-        codegen.add_input_tuples(
+        // Sources: nodes 1 and 3 (use Int64 to match edge data)
+        codegen.add_input(
             "source".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1)]),
-                Tuple::new(vec![Value::Int32(3)]),
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(3)]),
             ]
         );
 
         let results = codegen.execute_reachability("source", "edge").unwrap();
 
         // From sources 1 and 3, we can reach: 1, 2, 3, 4
-        assert!(results.contains(&1));
-        assert!(results.contains(&2));
-        assert!(results.contains(&3));
-        assert!(results.contains(&4));
+        assert!(results.contains(&1i64));
+        assert!(results.contains(&2i64));
+        assert!(results.contains(&3i64));
+        assert!(results.contains(&4i64));
     }
 
     // =========================================================================
@@ -2874,9 +2836,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph: 1 -> 2 -> 3 -> 4 (linear chain)
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
@@ -2887,10 +2847,10 @@ mod tests {
         assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
 
         // Check all expected paths using Tuple
-        let expected_pairs = vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (1, 4)];
+        let expected_pairs: Vec<(i64, i64)> = vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (1, 4)];
         for (x, y) in expected_pairs {
             assert!(
-                results.iter().any(|t| t.to_pair() == Some((x, y))),
+                results.contains(&Tuple::pair(x, y)),
                 "Missing path ({}, {})",
                 x, y
             );
@@ -2902,9 +2862,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Tree: 1 -> 2, 1 -> 3, 2 -> 4, 3 -> 5
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (1, 3), (2, 4), (3, 5)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (1, 3), (2, 4), (3, 5)]));
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
@@ -2913,10 +2871,10 @@ mod tests {
         assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
 
         // All paths from node 1
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 2))), "Missing (1,2)");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 3))), "Missing (1,3)");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 4))), "Missing (1,4)");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 5))), "Missing (1,5)");
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3)");
+        assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4)");
+        assert!(results.contains(&Tuple::pair(1, 5)), "Missing (1,5)");
     }
 
     #[test]
@@ -2924,9 +2882,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Cycle: 1 -> 2 -> 3 -> 1
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 1)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 1)]));
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
@@ -2935,9 +2891,9 @@ mod tests {
         assert!(results.len() >= 9, "Expected at least 9 paths in cycle, got {}", results.len());
 
         // Check that 1 can reach all nodes
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 2))), "Missing (1,2)");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 3))), "Missing (1,3)");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 1))), "Missing (1,1) - cycle!");
+        assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
+        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3)");
+        assert!(results.contains(&Tuple::pair(1, 1)), "Missing (1,1) - cycle!");
     }
 
     #[test]
@@ -2945,9 +2901,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Diamond: 1 -> 2, 1 -> 3, 2 -> 4, 3 -> 4
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (1, 3), (2, 4), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (1, 3), (2, 4), (3, 4)]));
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
@@ -2956,7 +2910,7 @@ mod tests {
         assert!(results.len() >= 5, "Expected at least 5 paths, got {}", results.len());
 
         // 1 can reach 4 (via two different paths, but result is same)
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 4))), "Missing (1,4)");
+        assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4)");
     }
 
     #[test]
@@ -2964,7 +2918,7 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // No edges
-        codegen.add_input_data("edge".to_string(), vec![]);
+        codegen.add_input("edge".to_string(), vec![]);
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
         assert!(results.is_empty(), "Expected empty result for empty graph");
@@ -2975,13 +2929,13 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Self-loop: 1 -> 1
-        codegen.add_input_data("edge".to_string(), vec![(1, 1)]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 1)]));
 
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
         // Should contain just (1, 1)
         assert!(results.len() >= 1, "Expected at least 1 path");
-        assert!(results.iter().any(|t| t.to_pair() == Some((1, 1))), "Missing (1,1)");
+        assert!(results.contains(&Tuple::pair(1, 1)), "Missing (1,1)");
     }
 
     #[test]
@@ -2989,12 +2943,10 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph: 1 -> 2 -> 3 -> 4
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 4)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 4)]));
 
         // Source: node 1 (use Int64 to match edge data)
-        codegen.add_input_tuples(
+        codegen.add_input(
             "source".to_string(),
             vec![Tuple::new(vec![Value::Int64(1)])]
         );
@@ -3019,12 +2971,10 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Two disconnected components: 1 -> 2 and 10 -> 20
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (10, 20)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (10, 20)]));
 
         // Sources: nodes 1 and 10 (use Int64 to match edge data)
-        codegen.add_input_tuples(
+        codegen.add_input(
             "source".to_string(),
             vec![
                 Tuple::new(vec![Value::Int64(1)]),
@@ -3050,12 +3000,10 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Graph: 1 -> 2, 10 -> 20 (disconnected)
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (10, 20)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (10, 20)]));
 
         // Source: only node 1 (use Int64 to match edge data)
-        codegen.add_input_tuples(
+        codegen.add_input(
             "source".to_string(),
             vec![Tuple::new(vec![Value::Int64(1)])]
         );
@@ -3078,12 +3026,10 @@ mod tests {
         let mut codegen = CodeGenerator::new();
 
         // Cycle: 1 -> 2 -> 3 -> 1
-        codegen.add_input_data("edge".to_string(), vec![
-            (1, 2), (2, 3), (3, 1)
-        ]);
+        codegen.add_input("edge".to_string(), edges(&[(1, 2), (2, 3), (3, 1)]));
 
         // Source: node 1 (use Int64 to match edge data)
-        codegen.add_input_tuples(
+        codegen.add_input(
             "source".to_string(),
             vec![Tuple::new(vec![Value::Int64(1)])]
         );

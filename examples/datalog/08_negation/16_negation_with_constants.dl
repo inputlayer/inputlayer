@@ -13,7 +13,7 @@
 
 // Find data where the value is not blacklisted
 // Using constant 0 in second position of blacklist
-view not_blacklisted(Id: int, Val: int) :- data(Id, Val), !blacklist(Val, 0).
++not_blacklisted(Id, Val) :- data(Id, Val), !blacklist(Val, 0).
 ?- not_blacklisted(X, Y).
 
 // Should return: (2, 200), (5, 200)

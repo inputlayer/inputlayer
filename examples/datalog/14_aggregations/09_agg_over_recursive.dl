@@ -10,14 +10,14 @@
 +edge[(1, 2), (2, 3), (3, 4), (1, 5), (5, 6)].
 
 // Transitive closure (all reachable pairs)
-view path(X: int, Y: int) :- edge(X, Y).
-view path(X: int, Z: int) :- edge(X, Y), path(Y, Z).
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- edge(X, Y), path(Y, Z).
 
 // Query all paths
 ?- path(A, B).
 
 // Count how many nodes each node can reach
-view reach_count(X: int, count<Y>: int) :- path(X, Y).
++reach_count(X, count<Y>) :- path(X, Y).
 ?- reach_count(X, C).
 
 // Expected reach_count:
@@ -27,7 +27,7 @@ view reach_count(X: int, count<Y>: int) :- path(X, Y).
 // 5 can reach: 6 = 1
 
 // Sum of all destination node IDs reachable from each node
-view reach_sum(X: int, sum<Y>: int) :- path(X, Y).
++reach_sum(X, sum<Y>) :- path(X, Y).
 ?- reach_sum(X, S).
 
 // Cleanup

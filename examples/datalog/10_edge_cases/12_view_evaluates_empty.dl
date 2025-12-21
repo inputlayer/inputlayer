@@ -9,19 +9,19 @@
 +numbers[(1), (2), (3), (4), (5)].
 
 // View with impossible filter - always empty
-view impossible(X: int) :- numbers(X), X > 100.
++impossible(X) :- numbers(X), X > 100.
 ?- impossible(X).
 
 // View that uses impossible view
-view uses_impossible(X: int) :- impossible(X).
++uses_impossible(X) :- impossible(X).
 ?- uses_impossible(X).
 
 // View with contradictory conditions
-view contradictory(X: int) :- numbers(X), X > 3, X < 2.
++contradictory(X) :- numbers(X), X > 3, X < 2.
 ?- contradictory(X).
 
 // View that starts empty but becomes non-empty
-view threshold(X: int) :- numbers(X), X > 10.
++threshold(X) :- numbers(X), X > 10.
 ?- threshold(X).
 
 // Add data that matches

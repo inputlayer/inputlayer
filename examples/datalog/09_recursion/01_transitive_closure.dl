@@ -9,8 +9,8 @@
 +edge[(1,2), (2,3), (3,4), (4,5)].
 
 // Transitive closure with 2 rules
-view connected(X: int, Y: int) :- edge(X, Y).
-view connected(X: int, Z: int) :- edge(X, Y), connected(Y, Z).
++connected(X, Y) :- edge(X, Y).
++connected(X, Z) :- edge(X, Y), connected(Y, Z).
 
 // Query all connected pairs
 ?- connected(X, Y).

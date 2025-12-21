@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/01_simple_negation.dl
+Executing script: examples/datalog/08_negation/01_simple_negation.dl
 
 > .db create test_neg
 Database 'test_neg' created.
@@ -10,8 +9,8 @@ Switched to database: test_neg
 Inserted 4 facts into 'edge'.
 > +skip[(2,3), (4,5)].
 Inserted 2 facts into 'skip'.
-> view filtered(X: int, Y: int) :- edge(X, Y), !skip(X, Y).
-View 'filtered' registered.
+> +filtered(X, Y) :- edge(X, Y), !skip(X, Y).
+Rule 'filtered' registered.
 > ?- filtered(X, Y).
 2 rows:
   (1, 2)
@@ -20,4 +19,3 @@ View 'filtered' registered.
 Switched to database: default
 > .db drop test_neg
 Database 'test_neg' dropped.
-

@@ -1,0 +1,24 @@
+// Test: Schema with Constraints
+// Category: Unified Prefix Syntax
+// Description: Tests parsing of schema declarations with @key, @unique constraints
+
+.db create test_schema_constraints
+.db use test_schema_constraints
+
+// Schema with @key constraint (primary key)
++user(id: int @key, name: string, email: string @unique).
+
+// Schema with @not_empty constraint
++product(sku: string @key, name: string @not_empty, price: int).
+
+// Insert some data
++user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
++product[("SKU001", "Widget", 100), ("SKU002", "Gadget", 200)].
+
+// Query to verify data
+?- user(Id, Name, Email).
+?- product(Sku, Name, Price).
+
+// Cleanup
+.db use default
+.db drop test_schema_constraints

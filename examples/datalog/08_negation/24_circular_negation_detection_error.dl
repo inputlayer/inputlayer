@@ -10,17 +10,17 @@
 +base[(1), (2), (3)].
 
 // Test 1: Simple valid stratification (negation on base relation)
-view valid_neg(X: int) :- base(X), !base(2).
++valid_neg(X) :- base(X), !base(2).
 ?- valid_neg(X).
 
 // Test 2: Two-layer stratification (should work)
-view layer1(X: int) :- base(X).
-view layer2(X: int) :- layer1(X), !layer1(2).
++layer1(X) :- base(X).
++layer2(X) :- layer1(X), !layer1(2).
 ?- layer2(X).
 
 // Test 3: Negation on derived, non-recursive relation (should work)
-view derived(X: int) :- base(X), X > 1.
-view not_derived(X: int) :- base(X), !derived(X).
++derived(X) :- base(X), X > 1.
++not_derived(X) :- base(X), !derived(X).
 ?- not_derived(X).
 
 // Expected: (1) - only 1 is in base but not in derived
@@ -29,18 +29,18 @@ view not_derived(X: int) :- base(X), !derived(X).
 // (Uncomment to test error detection)
 
 // Circular negation type 1: direct self-negation
-// bad1(X) := base(X), !bad1(X).
+// +bad1(X) :- base(X), !bad1(X).
 // ?- bad1(X).
 
 // Circular negation type 2: mutual negation
-// bad2a(X) := base(X), !bad2b(X).
-// bad2b(X) := base(X), !bad2a(X).
+// +bad2a(X) :- base(X), !bad2b(X).
+// +bad2b(X) :- base(X), !bad2a(X).
 // ?- bad2a(X).
 
 // Circular negation type 3: three-way cycle
-// bad3a(X) := base(X), !bad3c(X).
-// bad3b(X) := base(X), !bad3a(X).
-// bad3c(X) := base(X), !bad3b(X).
+// +bad3a(X) :- base(X), !bad3c(X).
+// +bad3b(X) :- base(X), !bad3a(X).
+// +bad3c(X) :- base(X), !bad3b(X).
 // ?- bad3a(X).
 
 // Cleanup

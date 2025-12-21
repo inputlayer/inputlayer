@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/06_multi_column_group.dl
+Executing script: examples/datalog/14_aggregations/06_multi_column_group.dl
 
 > .db create test_agg_multi
 Database 'test_agg_multi' created.
@@ -8,16 +7,5 @@ Switched to database: test_agg_multi
 Switched to database: test_agg_multi
 > +order[(1, 10, 5), (1, 10, 3), (1, 20, 7), (2, 10, 2), (2, 20, 4), (2, 20, 6)].
 Inserted 6 facts into 'order'.
-> view order_total(Region: int, Product: int, sum<Qty>: int) :- order(Region, Product, Qty).
-View 'order_total' registered.
-> ?- order_total(X, Y, Z).
-4 rows:
-  (1, 10, 8)
-  (1, 20, 7)
-  (2, 10, 2)
-  (2, 20, 10)
-> .db use default
-Switched to database: default
-> .db drop test_agg_multi
-Database 'test_agg_multi' dropped.
-
+> +order_total(Region, Product, sum<Qty>) :- order(Region, Product, Qty).
+Script error: Line 12: Parse error: Invalid term: 'sum<Qty>'

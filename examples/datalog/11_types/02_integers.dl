@@ -20,7 +20,7 @@
 ?- zeros(X, Y).
 
 // Arithmetic filter with negative numbers
-view neg_large(X: int, Y: int) :- negative(X, Y), Y < -150.
++neg_large(X, Y) :- negative(X, Y), Y < -150.
 ?- neg_large(X, Y).
 
 // Cleanup

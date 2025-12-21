@@ -13,27 +13,27 @@
         (5, 100), (5, 100), (5, 100), (5, 100)].
 
 // Calculate total per customer
-view customer_total(Customer: int, sum<Amount>: int) :- orders(Customer, Amount).
++customer_total(Customer, sum<Amount>) :- orders(Customer, Amount).
 ?- customer_total(C, T).
 
 // HAVING equivalent: customers with total > 300
-view big_spenders(Customer: int, Total: int) :- customer_total(Customer, Total), Total > 300.
++big_spenders(Customer, Total) :- customer_total(Customer, Total), Total > 300.
 ?- big_spenders(C, T).
 
 // Expected: customers 1 (350), 2 (800), 4 (1000), 5 (400)
 
 // Count orders per customer
-view order_count(Customer: int, count<Amount>: int) :- orders(Customer, Amount).
++order_count(Customer, count<Amount>) :- orders(Customer, Amount).
 ?- order_count(C, N).
 
 // HAVING: customers with more than 2 orders
-view frequent_buyers(Customer: int, Count: int) :- order_count(Customer, Count), Count > 2.
++frequent_buyers(Customer, Count) :- order_count(Customer, Count), Count > 2.
 ?- frequent_buyers(C, N).
 
 // Expected: customers 1 (3 orders), 3 (3 orders), 5 (4 orders)
 
 // Combined filter: big spenders who are also frequent buyers
-view vip_customers(Customer: int) :- big_spenders(Customer, _), frequent_buyers(Customer, _).
++vip_customers(Customer) :- big_spenders(Customer, _), frequent_buyers(Customer, _).
 ?- vip_customers(C).
 
 // Expected: customer 5 (total 400, 4 orders)

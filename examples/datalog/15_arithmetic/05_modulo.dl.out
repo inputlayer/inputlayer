@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/05_modulo.dl
+Executing script: examples/datalog/15_arithmetic/05_modulo.dl
 
 > .db create test_arith_mod
 Database 'test_arith_mod' created.
@@ -26,4 +25,3 @@ Switched to database: default
 (Cleared 1 session rule(s))
 > .db drop test_arith_mod
 Database 'test_arith_mod' dropped.
-

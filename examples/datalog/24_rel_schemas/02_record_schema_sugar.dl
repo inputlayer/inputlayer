@@ -24,7 +24,7 @@ rel address: Address.
 ?- address(Pid, City).
 
 // Join people with addresses
-view person_location(Name: string, City: string) :-
++person_location(Name, City) :-
     person(Id, Name, _),
     address(Id, City).
 

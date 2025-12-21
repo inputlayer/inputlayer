@@ -16,7 +16,7 @@
            (-10, -3), (-11, -3), (-12, -3)].
 
 // Compute modulo for all cases
-view mod_result(X: int, Y: int, X%Y: int) :- mod_cases(X, Y).
++mod_result(X, Y, X%Y) :- mod_cases(X, Y).
 ?- mod_result(A, B, C).
 
 // Expected results depend on implementation:

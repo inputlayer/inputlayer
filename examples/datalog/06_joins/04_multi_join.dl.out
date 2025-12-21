@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/06_joins/04_multi_join.dl
+Executing script: examples/datalog/06_joins/04_multi_join.dl
 
 > .db create test_multi
 Database 'test_multi' created.
@@ -14,8 +13,8 @@ Inserted 2 facts into 'b'.
 Inserted 2 facts into 'c'.
 > +d[(4, 5), (40, 50)].
 Inserted 2 facts into 'd'.
-> view chain(W: int, Z: int) :- a(W, X), b(X, Y), c(Y, Z).
-View 'chain' registered.
+> +chain(W, Z) :- a(W, X), b(X, Y), c(Y, Z).
+Rule 'chain' registered.
 > ?- chain(X, Y).
 2 rows:
   (1, 4)
@@ -24,4 +23,3 @@ View 'chain' registered.
 Switched to database: default
 > .db drop test_multi
 Database 'test_multi' dropped.
-

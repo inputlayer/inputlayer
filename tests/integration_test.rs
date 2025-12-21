@@ -592,7 +592,7 @@ fn test_negation_on_view() {
     // Analysis:
     // edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
     // source_node = edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
-    // target_node(Y, X) := edge(X, Y) gives: [(2,1), (3,2), (4,3), (3,1), (4,2)]
+    // target_node(Y, X) :- edge(X, Y) gives: [(2,1), (3,2), (4,3), (3,1), (4,2)]
     // target_node's first column values: {2, 3, 4}
     //
     // pure_source = source_node where X NOT in target_node's first column

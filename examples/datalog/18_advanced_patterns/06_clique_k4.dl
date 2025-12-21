@@ -9,13 +9,13 @@
 +edge[(1, 2), (1, 3), (1, 4), (1, 5), (2, 3), (2, 4), (2, 5), (3, 4), (3, 5), (4, 5)].
 
 // Undirected connectivity
-view conn(X: int, Y: int) :- edge(X, Y).
-view conn(X: int, Y: int) :- edge(Y, X).
++conn(X, Y) :- edge(X, Y).
++conn(X, Y) :- edge(Y, X).
 
 // Find pairs (A, B) that are part of some K4
 // A K4 exists if A, B, C, D are all pairwise connected
 // Use ordering A < B, B < C, C < D to avoid duplicates
-view in_k4(A: int, B: int) :- conn(A, B), conn(A, C), conn(A, D), conn(B, C), conn(B, D), conn(C, D), A < B, B < C, C < D.
++in_k4(A, B) :- conn(A, B), conn(A, C), conn(A, D), conn(B, C), conn(B, D), conn(C, D), A < B, B < C, C < D.
 
 // Query all pairs in some K4
 ?- in_k4(X, Y).

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/05_double_negation.dl
+Executing script: examples/datalog/08_negation/05_double_negation.dl
 
 > .db create test_double_neg
 Database 'test_double_neg' created.
@@ -12,8 +11,8 @@ Inserted 5 facts into 'candidate'.
 Inserted 2 facts into 'blacklist'.
 > +already_hired[(3, 0)].
 Inserted 1 fact into 'already_hired'.
-> view eligible(X: int, Y: int) :- candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
-View 'eligible' registered.
+> +eligible(X, Y) :- candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
+Rule 'eligible' registered.
 > ?- eligible(X, Y).
 2 rows:
   (1, 0)
@@ -22,4 +21,3 @@ View 'eligible' registered.
 Switched to database: default
 > .db drop test_double_neg
 Database 'test_double_neg' dropped.
-

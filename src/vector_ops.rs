@@ -259,9 +259,10 @@ pub fn abs_f64(x: f64) -> f64 {
 ///
 /// Use checked function variants (e.g., `euclidean_distance_checked`) when you
 /// want explicit error handling instead of silent INFINITY/0.0 returns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VectorError {
     /// Vectors have different dimensions
+    #[error("Vector dimension mismatch: expected {expected}-dimensional, got {got}-dimensional")]
     DimensionMismatch {
         /// Dimension of the first vector
         expected: usize,
@@ -269,25 +270,9 @@ pub enum VectorError {
         got: usize,
     },
     /// Vector is empty
+    #[error("Cannot compute distance on empty vector")]
     EmptyVector,
 }
-
-impl std::fmt::Display for VectorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VectorError::DimensionMismatch { expected, got } => {
-                write!(
-                    f,
-                    "Vector dimension mismatch: expected {}-dimensional, got {}-dimensional",
-                    expected, got
-                )
-            }
-            VectorError::EmptyVector => write!(f, "Cannot compute distance on empty vector"),
-        }
-    }
-}
-
-impl std::error::Error for VectorError {}
 
 // ============================================================================
 // Checked Distance Functions (Return Result<f64, VectorError>)

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/14_no_new_tuples_first_iter.dl
+Executing script: examples/datalog/09_recursion/14_no_new_tuples_first_iter.dl
 
 > .db create test_no_new
 Database 'test_no_new' created.
@@ -34,4 +33,3 @@ Switched to database: default
 (Cleared 4 session rule(s))
 > .db drop test_no_new
 Database 'test_no_new' dropped.
-

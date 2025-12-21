@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/18_advanced_patterns/12_all_features_stress.dl
+Executing script: examples/datalog/18_advanced_patterns/12_all_features_stress.dl
 
 > .db create test_all_features
 Database 'test_all_features' created.
@@ -10,8 +9,8 @@ Switched to database: test_all_features
 Inserted 8 facts into 'link'.
 > +blocked[(3, 5), (1, 5)].
 Inserted 2 facts into 'blocked'.
-> view active_link(X: int, Y: int, C: int) :- link(X, Y, C), !blocked(X, Y).
-View 'active_link' registered.
+> +active_link(X, Y, C) :- link(X, Y, C), !blocked(X, Y).
+Rule 'active_link' registered.
 > ?- active_link(X, Y, C).
 6 rows:
   (1, 2, 10)
@@ -20,74 +19,7 @@ View 'active_link' registered.
   (2, 4, 30)
   (3, 4, 15)
   (4, 5, 25)
-> view path_cost(X: int, Y: int, C: int) :- active_link(X, Y, C).
-View 'path_cost' registered.
-> view path_cost(X: int, Z: int, C1+C2: int) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
-Rule added to view 'path_cost' (2 rules total).
-> ?- path_cost(X, Y, C).
-17 rows:
-  (1, 2, 10)
-  (1, 3, 30)
-  (1, 3, 35)
-  (1, 4, 40)
-  (1, 4, 45)
-  (1, 4, 50)
-  (1, 5, 65)
-  (1, 5, 70)
-  (1, 5, 75)
-  (2, 3, 20)
-  (2, 4, 30)
-  (2, 4, 35)
-  (2, 5, 55)
-  (2, 5, 60)
-  (3, 4, 15)
-  (3, 5, 40)
-  (4, 5, 25)
-> view min_cost(X: int, Y: int, min<C>: int) :- path_cost(X, Y, C).
-View 'min_cost' registered.
-> ?- min_cost(X, Y, C).
-10 rows:
-  (1, 2, 10)
-  (1, 3, 30)
-  (1, 4, 40)
-  (1, 5, 65)
-  (2, 3, 20)
-  (2, 4, 30)
-  (2, 5, 55)
-  (3, 4, 15)
-  (3, 5, 40)
-  (4, 5, 25)
-> view path_count(X: int, Y: int, count<C>: int) :- path_cost(X, Y, C).
-View 'path_count' registered.
-> ?- path_count(X, Y, N).
-10 rows:
-  (1, 2, 1)
-  (1, 3, 2)
-  (1, 4, 3)
-  (1, 5, 3)
-  (2, 3, 1)
-  (2, 4, 2)
-  (2, 5, 2)
-  (3, 4, 1)
-  (3, 5, 1)
-  (4, 5, 1)
-> view avg_cost_from_1(avg<C>: int) :- path_cost(1, _, C).
-View 'avg_cost_from_1' registered.
-> ?- avg_cost_from_1(A).
-1 rows:
-  (46.666666666666664)
-> view total_cost_from_1(sum<C>: int) :- path_cost(1, _, C).
-View 'total_cost_from_1' registered.
-> ?- total_cost_from_1(T).
-No results.
-> view reachable_cost(Y: int, min<C>: int) :- path_cost(1, Y, C).
-View 'reachable_cost' registered.
-> ?- reachable_cost(Y, C).
-No results.
-> +budget[(50)].
-Inserted 1 fact into 'budget'.
-> view within_budget(Y: int) :- min_cost(1, Y, C), budget(B), C <= B.
-View 'within_budget' registered.
-> ?- within_budget(Y).
-Script error: Line 51: Query execution failed: Unsupported ordering constraint pattern
-
+> +path_cost(X, Y, C) :- active_link(X, Y, C).
+Rule 'path_cost' registered.
+> +path_cost(X, Z, C1+C2) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
+Script error: Line 23: Parse error: Invalid term: 'C1+C2'

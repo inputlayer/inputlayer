@@ -229,14 +229,14 @@ fn test_recursion_tests() {
 // Syntax Validation Tests
 // ============================================================================
 
-/// Extract view statements from our test format (new syntax uses "view ... :- ...")
+/// Extract persistent rule statements from our test format (new syntax uses "+name(...) :- ...")
 fn extract_rules_from_test(content: &str) -> Vec<String> {
     content
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            // Keep lines that look like view declarations (start with "view" and contain ":-")
-            if trimmed.starts_with("view ") && trimmed.contains(":-") {
+            // Keep lines that look like persistent rule declarations (start with "+" and contain ":-")
+            if trimmed.starts_with("+") && trimmed.contains(":-") {
                 Some(trimmed.to_string())
             } else {
                 None
@@ -255,10 +255,10 @@ fn test_negation_syntax_valid() {
     let has_negation = rules.iter().any(|r| r.contains("!skip"));
     assert!(has_negation, "Test should contain negation syntax (!skip)");
 
-    // Verify the rule format is correct (new view syntax)
+    // Verify the rule format is correct (new + prefix syntax)
     let negation_rule = rules.iter().find(|r| r.contains("!skip")).unwrap();
     assert!(
-        negation_rule.contains("view filtered") && negation_rule.contains("!skip(X, Y)"),
+        negation_rule.contains("+filtered") && negation_rule.contains("!skip(X, Y)"),
         "Negation rule should have correct format"
     );
 }
@@ -278,9 +278,9 @@ fn test_recursion_syntax_valid() {
 
     // Verify recursive structure (relation used in both head and body)
     let has_recursive = rules.iter().any(|r| {
-        // Extract name after "view " and before "("
-        let after_view = r.strip_prefix("view ").unwrap_or("");
-        let head_name = after_view.split('(').next().unwrap_or("").trim();
+        // Extract name after "+" and before "("
+        let after_plus = r.strip_prefix("+").unwrap_or("");
+        let head_name = after_plus.split('(').next().unwrap_or("").trim();
         let body = r.split(":-").nth(1).unwrap_or("");
         // Check if the relation in head appears in body
         !head_name.is_empty() && body.contains(head_name)

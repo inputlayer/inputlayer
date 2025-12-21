@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/04_dense_graph.dl
+Executing script: examples/datalog/13_performance/04_dense_graph.dl
 
 > .db create test_perf_dense
 Database 'test_perf_dense' created.
@@ -30,8 +29,8 @@ Inserted 20 facts into 'edge'.
   (5, 2)
   (5, 3)
   (5, 4)
-> view triangle(A: int, B: int, C: int) :- edge(A, B), edge(B, C), edge(C, A).
-View 'triangle' registered.
+> +triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A).
+Rule 'triangle' registered.
 > ?- triangle(1, B, C).
 12 rows:
   (1, 2, 3)
@@ -46,10 +45,10 @@ View 'triangle' registered.
   (1, 5, 2)
   (1, 5, 3)
   (1, 5, 4)
-> view reach(X: int, Y: int) :- edge(X, Y).
-View 'reach' registered.
-> view reach(X: int, Z: int) :- reach(X, Y), edge(Y, Z).
-Rule added to view 'reach' (2 rules total).
+> +reach(X, Y) :- edge(X, Y).
+Rule 'reach' registered.
+> +reach(X, Z) :- reach(X, Y), edge(Y, Z).
+Rule added to 'reach' (2 rules total).
 > ?- reach(1, Y).
 5 rows:
   (1, 1)
@@ -61,4 +60,3 @@ Rule added to view 'reach' (2 rules total).
 Switched to database: default
 > .db drop test_perf_dense
 Database 'test_perf_dense' dropped.
-

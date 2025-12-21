@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/14_arity_5col.dl
+Executing script: examples/datalog/15_arithmetic/14_arity_5col.dl
 
 > .db create test_arity_5col
 Database 'test_arity_5col' created.
@@ -101,4 +100,3 @@ Switched to database: default
 (Cleared 10 session rule(s))
 > .db drop test_arity_5col
 Database 'test_arity_5col' dropped.
-

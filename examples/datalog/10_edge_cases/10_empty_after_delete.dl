@@ -12,7 +12,7 @@
 ?- items(X).
 
 // Create a derived view
-view big_items(X: int) :- items(X), X > 3.
++big_items(X) :- items(X), X > 3.
 ?- big_items(X).
 
 // Delete all items

@@ -16,25 +16,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Timeout error
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("Query exceeded timeout of {timeout:?} (ran for {elapsed:?})")]
 pub struct TimeoutError {
     /// The timeout duration that was exceeded
     pub timeout: Duration,
     /// How long the query actually ran
     pub elapsed: Duration,
 }
-
-impl std::fmt::Display for TimeoutError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Query exceeded timeout of {:?} (ran for {:?})",
-            self.timeout, self.elapsed
-        )
-    }
-}
-
-impl std::error::Error for TimeoutError {}
 
 /// Query timeout controller
 ///

@@ -10,18 +10,18 @@
 +special[(2), (4)].
 
 // Single negation: items that are not special
-view not_special(X: int) :- items(X), !special(X).
++not_special(X) :- items(X), !special(X).
 ?- not_special(X).
 
 // Double negation: items that are not in not_special (should equal special intersect items)
-view double_neg(X: int) :- items(X), !not_special(X).
++double_neg(X) :- items(X), !not_special(X).
 ?- double_neg(X).
 
 // Verify original special items
 ?- special(X).
 
 // Triple negation for good measure
-view triple_neg(X: int) :- items(X), !double_neg(X).
++triple_neg(X) :- items(X), !double_neg(X).
 ?- triple_neg(X).
 
 // Cleanup

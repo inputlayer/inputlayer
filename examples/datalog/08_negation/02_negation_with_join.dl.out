@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/02_negation_with_join.dl
+Executing script: examples/datalog/08_negation/02_negation_with_join.dl
 
 > .db create test_neg_join
 Database 'test_neg_join' created.
@@ -10,8 +9,8 @@ Switched to database: test_neg_join
 Inserted 5 facts into 'employee'.
 > +excluded_dept[(200, 0)].
 Inserted 1 fact into 'excluded_dept'.
-> view active_employee(EmpId: int, DeptId: int) :- employee(EmpId, DeptId), !excluded_dept(DeptId, _).
-View 'active_employee' registered.
+> +active_employee(EmpId, DeptId) :- employee(EmpId, DeptId), !excluded_dept(DeptId, _).
+Rule 'active_employee' registered.
 > ?- active_employee(X, Y).
 3 rows:
   (1, 100)
@@ -21,4 +20,3 @@ View 'active_employee' registered.
 Switched to database: default
 > .db drop test_neg_join
 Database 'test_neg_join' dropped.
-

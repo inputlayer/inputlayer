@@ -1,61 +1,61 @@
-//! View Catalog for Persistent Views
+//! Rule Catalog for Persistent Rules (Policies)
 //!
-//! Manages persistent view definitions per database. Views are defined with `:=`
+//! Manages persistent rule definitions per database. Rules are defined with `:-`
 //! and are automatically loaded on database startup.
 //!
 //! ## Storage
 //!
-//! Views are stored in JSON format at `{db_dir}/views/catalog.json`
+//! Rules are stored in JSON format at `{db_dir}/rules/catalog.json`
 //!
 //! ## Example
 //!
 //! ```ignore
-//! let mut catalog = ViewCatalog::new(db_dir)?;
+//! let mut catalog = RuleCatalog::new(db_dir)?;
 //!
-//! // Register a view
+//! // Register a rule
 //! catalog.register("path", rule)?;
 //!
-//! // Get all view rules to prepend to queries
+//! // Get all rules to prepend to queries
 //! let rules = catalog.all_rules();
 //!
-//! // Drop a view
+//! // Drop a rule
 //! catalog.drop("path")?;
 //! ```
 
-use crate::statement::{ViewDef, SerializableRule};
+use crate::statement::{RuleDef, SerializableRule};
 use crate::ast::Rule;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-/// Result of registering a view
+/// Result of registering a rule
 #[derive(Debug, Clone, PartialEq)]
-pub enum ViewRegisterResult {
-    /// New view created (first rule)
+pub enum RuleRegisterResult {
+    /// New rule definition created (first rule)
     Created,
-    /// Rule added to existing view (returns new rule count)
+    /// Rule added to existing definition (returns new rule count)
     RuleAdded(usize),
 }
 
-/// View definition stored in the catalog
+/// Rule definition stored in the catalog
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ViewDefinition {
-    /// View name (relation name)
+pub struct RuleDefinition {
+    /// Rule name (relation name)
     pub name: String,
-    /// Rules defining this view (may have multiple rules for the same view)
+    /// Rules defining this relation (may have multiple rules for recursion)
     pub rules: Vec<SerializableRule>,
-    /// When the view was created
+    /// When the rule was created
     pub created_at: String,
     /// Optional description
     #[serde(default)]
     pub description: Option<String>,
 }
 
-impl ViewDefinition {
-    /// Create a new view definition
+impl RuleDefinition {
+    /// Create a new rule definition
     pub fn new(name: String, rule: SerializableRule) -> Self {
-        ViewDefinition {
+        RuleDefinition {
             name,
             rules: vec![rule],
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -63,7 +63,7 @@ impl ViewDefinition {
         }
     }
 
-    /// Add another rule to this view (for recursive views with multiple rules)
+    /// Add another rule to this definition (for recursive rules with multiple clauses)
     /// Checks for duplicates before adding
     pub fn add_rule(&mut self, rule: SerializableRule) {
         // Check if this rule already exists (avoid duplicates)
@@ -81,14 +81,14 @@ impl ViewDefinition {
         self.rules.iter().map(|r| r.to_rule()).collect()
     }
 
-    /// Get a human-readable description of the view
+    /// Get a human-readable description of the rule
     pub fn describe(&self) -> String {
-        let mut desc = format!("View: {}\n", self.name);
+        let mut desc = format!("Rule: {}\n", self.name);
         // Note: Timestamp removed for deterministic output in snapshot testing
         if let Some(d) = &self.description {
             desc.push_str(&format!("Description: {}\n", d));
         }
-        desc.push_str("Rules:\n");
+        desc.push_str("Clauses:\n");
         for (i, rule) in self.rules.iter().enumerate() {
             let r = rule.to_rule();
             desc.push_str(&format!("  {}. {}\n", i + 1, format_rule(&r)));
@@ -189,37 +189,37 @@ fn format_constraint(constraint: &crate::ast::Constraint) -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CatalogFile {
     version: u32,
-    views: HashMap<String, ViewDefinition>,
+    rules: HashMap<String, RuleDefinition>,
 }
 
 impl Default for CatalogFile {
     fn default() -> Self {
         CatalogFile {
             version: 1,
-            views: HashMap::new(),
+            rules: HashMap::new(),
         }
     }
 }
 
-/// View catalog - manages persistent views per database
+/// Rule catalog - manages persistent rules per database
 #[derive(Debug)]
-pub struct ViewCatalog {
-    /// Views indexed by name
-    views: HashMap<String, ViewDefinition>,
+pub struct RuleCatalog {
+    /// Rules indexed by name
+    rules: HashMap<String, RuleDefinition>,
     /// Path to the catalog file
     catalog_path: PathBuf,
     /// Whether the catalog has been modified since last save
     dirty: bool,
 }
 
-impl ViewCatalog {
-    /// Create a new view catalog for a database directory
+impl RuleCatalog {
+    /// Create a new rule catalog for a database directory
     pub fn new(db_dir: PathBuf) -> Result<Self, String> {
-        let views_dir = db_dir.join("views");
-        let catalog_path = views_dir.join("catalog.json");
+        let rules_dir = db_dir.join("rules");
+        let catalog_path = rules_dir.join("catalog.json");
 
-        let mut catalog = ViewCatalog {
-            views: HashMap::new(),
+        let mut catalog = RuleCatalog {
+            rules: HashMap::new(),
             catalog_path,
             dirty: false,
         };
@@ -232,21 +232,21 @@ impl ViewCatalog {
         Ok(catalog)
     }
 
-    /// Register a view from a ViewDef
-    /// Returns information about whether view was created or updated
-    pub fn register_view(&mut self, view_def: &ViewDef) -> Result<ViewRegisterResult, String> {
-        let name = &view_def.name;
-        let rule = view_def.rule.clone();
+    /// Register a rule from a RuleDef
+    /// Returns information about whether rule was created or updated
+    pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<RuleRegisterResult, String> {
+        let name = &rule_def.name;
+        let rule = rule_def.rule.clone();
 
-        let result = if let Some(existing) = self.views.get_mut(name) {
-            // Check if this is a new rule for an existing view (recursive case)
+        let result = if let Some(existing) = self.rules.get_mut(name) {
+            // Check if this is a new clause for an existing rule (recursive case)
             existing.add_rule(rule);
-            ViewRegisterResult::RuleAdded(existing.rules.len())
+            RuleRegisterResult::RuleAdded(existing.rules.len())
         } else {
-            // Create new view
-            let definition = ViewDefinition::new(name.clone(), rule);
-            self.views.insert(name.clone(), definition);
-            ViewRegisterResult::Created
+            // Create new rule definition
+            let definition = RuleDefinition::new(name.clone(), rule);
+            self.rules.insert(name.clone(), definition);
+            RuleRegisterResult::Created
         };
 
         self.dirty = true;
@@ -254,15 +254,15 @@ impl ViewCatalog {
         Ok(result)
     }
 
-    /// Register a view from a Rule directly
+    /// Register a rule from a Rule directly
     pub fn register(&mut self, name: &str, rule: &Rule) -> Result<(), String> {
         let serializable = SerializableRule::from_rule(rule);
 
-        if let Some(existing) = self.views.get_mut(name) {
+        if let Some(existing) = self.rules.get_mut(name) {
             existing.add_rule(serializable);
         } else {
-            let definition = ViewDefinition::new(name.to_string(), serializable);
-            self.views.insert(name.to_string(), definition);
+            let definition = RuleDefinition::new(name.to_string(), serializable);
+            self.rules.insert(name.to_string(), definition);
         }
 
         self.dirty = true;
@@ -270,10 +270,10 @@ impl ViewCatalog {
         Ok(())
     }
 
-    /// Drop a view
+    /// Drop a rule
     pub fn drop(&mut self, name: &str) -> Result<(), String> {
-        if self.views.remove(name).is_none() {
-            return Err(format!("View '{}' does not exist", name));
+        if self.rules.remove(name).is_none() {
+            return Err(format!("Rule '{}' does not exist", name));
         }
 
         self.dirty = true;
@@ -281,59 +281,59 @@ impl ViewCatalog {
         Ok(())
     }
 
-    /// Clear all rules from a view (for editing/redefining)
-    /// The view remains registered but with no rules, ready for new rule registration
+    /// Clear all clauses from a rule (for editing/redefining)
+    /// The rule remains registered but with no clauses, ready for new registration
     pub fn clear_rules(&mut self, name: &str) -> Result<(), String> {
-        if let Some(view) = self.views.get_mut(name) {
-            view.rules.clear();
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            rule_def.rules.clear();
             self.dirty = true;
             self.save()?;
             Ok(())
         } else {
-            Err(format!("View '{}' does not exist", name))
+            Err(format!("Rule '{}' does not exist", name))
         }
     }
 
-    /// Replace a specific rule in a view by index (0-based)
+    /// Replace a specific clause in a rule by index (0-based)
     pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: SerializableRule) -> Result<(), String> {
-        if let Some(view) = self.views.get_mut(name) {
-            if index >= view.rules.len() {
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            if index >= rule_def.rules.len() {
                 return Err(format!(
-                    "Rule index {} out of bounds. View '{}' has {} rule(s).",
-                    index + 1, name, view.rules.len()
+                    "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
+                    index + 1, name, rule_def.rules.len()
                 ));
             }
-            view.rules[index] = new_rule;
+            rule_def.rules[index] = new_rule;
             self.dirty = true;
             self.save()?;
             Ok(())
         } else {
-            Err(format!("View '{}' does not exist", name))
+            Err(format!("Rule '{}' does not exist", name))
         }
     }
 
-    /// Get the number of rules in a view
+    /// Get the number of clauses in a rule
     pub fn rule_count(&self, name: &str) -> Option<usize> {
-        self.views.get(name).map(|v| v.rules.len())
+        self.rules.get(name).map(|r| r.rules.len())
     }
 
-    /// List all view names
+    /// List all rule names
     pub fn list(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.views.keys().cloned().collect();
+        let mut names: Vec<String> = self.rules.keys().cloned().collect();
         names.sort();
         names
     }
 
-    /// Get a view definition by name
-    pub fn get(&self, name: &str) -> Option<&ViewDefinition> {
-        self.views.get(name)
+    /// Get a rule definition by name
+    pub fn get(&self, name: &str) -> Option<&RuleDefinition> {
+        self.rules.get(name)
     }
 
-    /// Get all rules from all views (for prepending to queries)
+    /// Get all rules from all definitions (for prepending to queries)
     /// Rules are returned in dependency order (topologically sorted)
     /// so that a rule only appears after all rules it depends on.
     pub fn all_rules(&self) -> Vec<Rule> {
-        let all_rules: Vec<Rule> = self.views
+        let all_rules: Vec<Rule> = self.rules
             .values()
             .flat_map(|def| def.to_rules())
             .collect();
@@ -424,24 +424,24 @@ impl ViewCatalog {
         result
     }
 
-    /// Check if a view exists
+    /// Check if a rule exists
     pub fn exists(&self, name: &str) -> bool {
-        self.views.contains_key(name)
+        self.rules.contains_key(name)
     }
 
-    /// Get the number of views
+    /// Get the number of rules
     pub fn len(&self) -> usize {
-        self.views.len()
+        self.rules.len()
     }
 
     /// Check if the catalog is empty
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty()
+        self.rules.is_empty()
     }
 
-    /// Describe a view
+    /// Describe a rule
     pub fn describe(&self, name: &str) -> Option<String> {
-        self.views.get(name).map(|v| v.describe())
+        self.rules.get(name).map(|r| r.describe())
     }
 
     /// Load the catalog from disk
@@ -452,7 +452,7 @@ impl ViewCatalog {
         let catalog_file: CatalogFile = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse catalog: {}", e))?;
 
-        self.views = catalog_file.views;
+        self.rules = catalog_file.rules;
         self.dirty = false;
         Ok(())
     }
@@ -463,15 +463,15 @@ impl ViewCatalog {
             return Ok(());
         }
 
-        // Ensure the views directory exists
+        // Ensure the rules directory exists
         if let Some(parent) = self.catalog_path.parent() {
             fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create views directory: {}", e))?;
+                .map_err(|e| format!("Failed to create rules directory: {}", e))?;
         }
 
         let catalog_file = CatalogFile {
             version: 1,
-            views: self.views.clone(),
+            rules: self.rules.clone(),
         };
 
         let content = serde_json::to_string_pretty(&catalog_file)
@@ -489,15 +489,15 @@ impl ViewCatalog {
         if self.catalog_path.exists() {
             self.load()
         } else {
-            self.views.clear();
+            self.rules.clear();
             self.dirty = false;
             Ok(())
         }
     }
 
-    /// Clear all views (does not save automatically)
+    /// Clear all rules (does not save automatically)
     pub fn clear(&mut self) {
-        self.views.clear();
+        self.rules.clear();
         self.dirty = true;
     }
 }
@@ -525,17 +525,17 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_new() {
+    fn test_rule_catalog_new() {
         let tmp_dir = TempDir::new().unwrap();
-        let catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
         assert!(catalog.is_empty());
         assert_eq!(catalog.len(), 0);
     }
 
     #[test]
-    fn test_view_catalog_register() {
+    fn test_rule_catalog_register() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let rule = make_test_rule("path", "edge");
         catalog.register("path", &rule).unwrap();
@@ -546,9 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_drop() {
+    fn test_rule_catalog_drop() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let rule = make_test_rule("path", "edge");
         catalog.register("path", &rule).unwrap();
@@ -560,24 +560,24 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_drop_nonexistent() {
+    fn test_rule_catalog_drop_nonexistent() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let result = catalog.drop("nonexistent");
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_view_catalog_multiple_rules() {
+    fn test_rule_catalog_multiple_rules() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First rule: path(X, Y) := edge(X, Y).
+        // First rule: path(X, Y) :- edge(X, Y).
         let rule1 = make_test_rule("path", "edge");
         catalog.register("path", &rule1).unwrap();
 
-        // Second rule: path(X, Z) := edge(X, Y), path(Y, Z).
+        // Second rule: path(X, Z) :- edge(X, Y), path(Y, Z).
         let head = Atom::new(
             "path".to_string(),
             vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
@@ -602,20 +602,20 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_persistence() {
+    fn test_rule_catalog_persistence() {
         let tmp_dir = TempDir::new().unwrap();
         let db_path = tmp_dir.path().to_path_buf();
 
         // Create and populate catalog
         {
-            let mut catalog = ViewCatalog::new(db_path.clone()).unwrap();
+            let mut catalog = RuleCatalog::new(db_path.clone()).unwrap();
             let rule = make_test_rule("path", "edge");
             catalog.register("path", &rule).unwrap();
         }
 
         // Reload and verify
         {
-            let catalog = ViewCatalog::new(db_path).unwrap();
+            let catalog = RuleCatalog::new(db_path).unwrap();
             assert!(catalog.exists("path"));
             assert_eq!(catalog.len(), 1);
             let rules = catalog.all_rules();
@@ -625,9 +625,9 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_get() {
+    fn test_rule_catalog_get() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let rule = make_test_rule("path", "edge");
         catalog.register("path", &rule).unwrap();
@@ -640,22 +640,22 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_describe() {
+    fn test_rule_catalog_describe() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let rule = make_test_rule("path", "edge");
         catalog.register("path", &rule).unwrap();
 
         let desc = catalog.describe("path").unwrap();
-        assert!(desc.contains("View: path"));
-        assert!(desc.contains("Rules:"));
+        assert!(desc.contains("Rule: path"));
+        assert!(desc.contains("Clauses:"));
     }
 
     #[test]
-    fn test_view_catalog_all_rules() {
+    fn test_rule_catalog_all_rules() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         catalog.register("path", &make_test_rule("path", "edge")).unwrap();
         catalog.register("reach", &make_test_rule("reach", "source")).unwrap();
@@ -669,9 +669,9 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_clear() {
+    fn test_rule_catalog_clear() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         catalog.register("path", &make_test_rule("path", "edge")).unwrap();
         catalog.register("reach", &make_test_rule("reach", "source")).unwrap();
@@ -683,9 +683,9 @@ mod tests {
     }
 
     #[test]
-    fn test_view_catalog_clear_rules() {
+    fn test_rule_catalog_clear_rules() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         // Register view with 2 rules
         let rule1 = make_test_rule("path", "edge");
@@ -736,7 +736,7 @@ mod tests {
     #[test]
     fn test_replace_rule() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         // Register view with 2 rules
         let rule1 = make_test_rule("path", "edge");
@@ -784,7 +784,7 @@ mod tests {
     #[test]
     fn test_replace_rule_out_of_bounds() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let rule = make_test_rule("path", "edge");
         catalog.register("path", &rule).unwrap();
@@ -800,7 +800,7 @@ mod tests {
     #[test]
     fn test_clear_rules_nonexistent_view() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
         let result = catalog.clear_rules("nonexistent");
         assert!(result.is_err());
@@ -808,10 +808,10 @@ mod tests {
     }
 
     #[test]
-    fn test_view_definition_new() {
+    fn test_rule_definition_new() {
         let rule = make_test_rule("path", "edge");
         let serializable = SerializableRule::from_rule(&rule);
-        let def = ViewDefinition::new("path".to_string(), serializable);
+        let def = RuleDefinition::new("path".to_string(), serializable);
 
         assert_eq!(def.name, "path");
         assert_eq!(def.rules.len(), 1);
@@ -819,27 +819,27 @@ mod tests {
     }
 
     #[test]
-    fn test_register_view_multiple_rules() {
-        use crate::statement::ViewDef;
+    fn test_register_rule_multiple_rules() {
+        use crate::statement::RuleDef;
 
         let tmp_dir = TempDir::new().unwrap();
-        let mut catalog = ViewCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First rule: connected(X, Y) := edge(X, Y).
+        // First rule: connected(X, Y) :- edge(X, Y).
         let rule1 = make_test_rule("connected", "edge");
-        let view_def1 = ViewDef {
+        let rule_def1 = RuleDef {
             name: "connected".to_string(),
             rule: SerializableRule::from_rule(&rule1),
         };
-        catalog.register_view(&view_def1).unwrap();
+        catalog.register_rule(&rule_def1).unwrap();
 
-        println!("After first register_view:");
-        println!("  Number of views: {}", catalog.len());
+        println!("After first register_rule:");
+        println!("  Number of rules: {}", catalog.len());
         if let Some(view) = catalog.get("connected") {
             println!("  Rules in 'connected': {}", view.rules.len());
         }
 
-        // Second rule: connected(X, Z) := edge(X, Y), connected(Y, Z).
+        // Second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
         let head = Atom::new(
             "connected".to_string(),
             vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
@@ -855,13 +855,13 @@ mod tests {
             )),
         ];
         let rule2 = Rule::new(head, body, vec![]);
-        let view_def2 = ViewDef {
+        let rule_def2 = RuleDef {
             name: "connected".to_string(),
             rule: SerializableRule::from_rule(&rule2),
         };
-        catalog.register_view(&view_def2).unwrap();
+        catalog.register_rule(&rule_def2).unwrap();
 
-        println!("After second register_view:");
+        println!("After second register_rule:");
         println!("  Number of views: {}", catalog.len());
         if let Some(view) = catalog.get("connected") {
             println!("  Rules in 'connected': {}", view.rules.len());
@@ -878,23 +878,23 @@ mod tests {
     }
 
     #[test]
-    fn test_register_view_persists_multiple_rules() {
-        use crate::statement::ViewDef;
+    fn test_register_rule_persists_multiple_rules() {
+        use crate::statement::RuleDef;
 
         let tmp_dir = TempDir::new().unwrap();
         let db_path = tmp_dir.path().to_path_buf();
 
         // Register two rules for 'connected'
         {
-            let mut catalog = ViewCatalog::new(db_path.clone()).unwrap();
+            let mut catalog = RuleCatalog::new(db_path.clone()).unwrap();
 
             // First rule
             let rule1 = make_test_rule("connected", "edge");
-            let view_def1 = ViewDef {
+            let rule_def1 = RuleDef {
                 name: "connected".to_string(),
                 rule: SerializableRule::from_rule(&rule1),
             };
-            catalog.register_view(&view_def1).unwrap();
+            catalog.register_rule(&rule_def1).unwrap();
 
             // Second rule
             let head = Atom::new(
@@ -912,11 +912,11 @@ mod tests {
                 )),
             ];
             let rule2 = Rule::new(head, body, vec![]);
-            let view_def2 = ViewDef {
+            let rule_def2 = RuleDef {
                 name: "connected".to_string(),
                 rule: SerializableRule::from_rule(&rule2),
             };
-            catalog.register_view(&view_def2).unwrap();
+            catalog.register_rule(&rule_def2).unwrap();
 
             println!("Before dropping catalog:");
             println!("  Rules count: {}", catalog.all_rules().len());
@@ -925,7 +925,7 @@ mod tests {
 
         // Reload and verify
         {
-            let catalog = ViewCatalog::new(db_path).unwrap();
+            let catalog = RuleCatalog::new(db_path).unwrap();
             println!("After reloading catalog:");
             println!("  Views count: {}", catalog.len());
             println!("  Rules count: {}", catalog.all_rules().len());

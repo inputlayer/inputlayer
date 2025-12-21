@@ -15,8 +15,8 @@
 +parent[(2, 1), (3, 1), (4, 2)].
 
 // Compute ancestors: ancestor(person, ancestor)
-view ancestor(X: int, Y: int) :- parent(X, Y).
-view ancestor(X: int, Z: int) :- parent(X, Y), ancestor(Y, Z).
++ancestor(X, Y) :- parent(X, Y).
++ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
 
 // Query all ancestor relationships
 ?- ancestor(X, Y).

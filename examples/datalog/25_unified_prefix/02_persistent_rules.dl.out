@@ -1,0 +1,35 @@
+Executing script: examples/datalog/25_unified_prefix/02_persistent_rules.dl
+
+> .db create test_unified_rules
+Database 'test_unified_rules' created.
+Switched to database: test_unified_rules
+> .db use test_unified_rules
+Switched to database: test_unified_rules
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> +edge(2, 3).
+Inserted 1 fact into 'edge'.
+> +edge(3, 4).
+Inserted 1 fact into 'edge'.
+> +edge(1, 3).
+Inserted 1 fact into 'edge'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule added to 'reachable' (2 rules total).
+> ?- reachable(X, Y).
+6 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 3)
+  (2, 4)
+  (3, 4)
+> -reachable.
+Rule 'reachable' deleted.
+> .view
+No rules defined.
+> .db use default
+Switched to database: default
+> .db drop test_unified_rules
+Database 'test_unified_rules' dropped.

@@ -11,7 +11,7 @@
 // excluded is empty - not inserting anything
 
 // Query: items that are not excluded (should be all items)
-view not_excluded(X: int) :- items(X), !excluded(X).
++not_excluded(X) :- items(X), !excluded(X).
 ?- not_excluded(X).
 
 // Now add some exclusions

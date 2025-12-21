@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/15_mutual_one_branch_empty.dl
+Executing script: examples/datalog/09_recursion/15_mutual_one_branch_empty.dl
 
 > .db create test_mutual_empty
 Database 'test_mutual_empty' created.
@@ -43,4 +42,3 @@ Switched to database: default
 (Cleared 4 session rule(s))
 > .db drop test_mutual_empty
 Database 'test_mutual_empty' dropped.
-

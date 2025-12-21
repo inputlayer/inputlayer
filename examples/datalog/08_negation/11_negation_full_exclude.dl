@@ -12,7 +12,7 @@
 +exclude_all[(1, 0), (2, 0), (3, 0)].
 
 // All data should be filtered out
-view result(X: int, Y: int) :- data(X, Y), !exclude_all(X, _).
++result(X, Y) :- data(X, Y), !exclude_all(X, _).
 ?- result(X, Y).
 
 // Should return 0 rows

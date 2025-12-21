@@ -9,7 +9,7 @@
 +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
 
 // Get top 3 players by score (descending)
-view top_players(Player: int, top_k<3: int, Points: int, desc>: int) :- score(Player, Points).
++top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).
 
 // Query the result
 ?- top_players(X, Y).

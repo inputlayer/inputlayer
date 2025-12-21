@@ -58,48 +58,37 @@ This directory contains 186 snapshot tests for the InputLayer Datalog engine. Ea
 
 ### Syntax Reference
 
-#### View Definitions (Required Typed Syntax)
+#### Persistent Rules (Views)
 
 ```datalog
-// Basic view with typed columns
-view reachable(X: int, Y: int) :- edge(X, Y).
+// Basic persistent rule
++reachable(X, Y) :- edge(X, Y).
 
-// Recursive view
-view reachable(X: int, Y: int) :- edge(X, Z), reachable(Z, Y).
+// Recursive rule
++reachable(X, Y) :- edge(X, Z), reachable(Z, Y).
 
 // Multi-rule view (adds to existing view)
-view symmetric_edge(A: int, B: int) :- edge(A, B).
-view symmetric_edge(A: int, B: int) :- edge(B, A).
++symmetric_edge(A, B) :- edge(A, B).
++symmetric_edge(A, B) :- edge(B, A).
 
-// Aggregation view
-view total_sales(Dept: int, sum<Amount>: int) :- sales(Dept, Amount).
+// Aggregation
++total_sales(Dept, sum<Amount>) :- sales(Dept, Amount).
 
 // Arithmetic in head
-view doubled(X: int, X*2: int) :- nums(X).
++doubled(X, X*2) :- nums(X).
 
 // Constants in head
-view constant_fact(0: int, 1: int) :- trigger(_).
++constant_fact(0, 1) :- trigger(_).
 ```
 
-#### Type Declarations
+#### Schema Declarations
 
 ```datalog
-// Simple type alias
-type Email: string.
-type UserId: int.
+// Persistent schema with typed columns
++employee(id: int, name: string, dept_id: int).
 
-// Record type
-type User: { id: int, name: string, email: string }.
-```
-
-#### Relation Schemas (rel)
-
-```datalog
-// Explicit column schema
-rel employee(id: int, name: string, dept_id: int).
-
-// Using record type sugar
-rel user: User.
+// Schema with constraints
++user(id: int @key, email: string @unique, name: string @not_empty).
 ```
 
 #### Fact Operations
@@ -126,11 +115,11 @@ rel user: User.
 
 ```datalog
 // Comparison filters
-view filtered(X: int) :- nums(X), X > 10.
-view range(X: int) :- nums(X), X >= 5, X <= 15.
++filtered(X) :- nums(X), X > 10.
++range(X) :- nums(X), X >= 5, X <= 15.
 
 // Negation (stratified)
-view not_in_b(X: int) :- a(X), !b(X).
++not_in_b(X) :- a(X), !b(X).
 ```
 
 ### Embedded Assertions

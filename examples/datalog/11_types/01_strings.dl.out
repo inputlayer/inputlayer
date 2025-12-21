@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/01_strings.dl
+Executing script: examples/datalog/11_types/01_strings.dl
 
 > .db create test_str
 Database 'test_str' created.
@@ -13,8 +12,8 @@ Inserted 3 facts into 'person'.
   (1, 25)
   (2, 30)
   (3, 35)
-> view older(Id: int, Age: int) :- person(Id, Age), Age > 28.
-View 'older' registered.
+> +older(Id, Age) :- person(Id, Age), Age > 28.
+Rule 'older' registered.
 > ?- older(X, Y).
 2 rows:
   (2, 30)
@@ -23,4 +22,3 @@ View 'older' registered.
 Switched to database: default
 > .db drop test_str
 Database 'test_str' dropped.
-

@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/09_recursion/05_left_recursion.dl
+Executing script: examples/datalog/09_recursion/05_left_recursion.dl
 
 > .db create test_left_recursion
 Database 'test_left_recursion' created.
@@ -8,10 +7,10 @@ Switched to database: test_left_recursion
 Switched to database: test_left_recursion
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 Inserted 4 facts into 'edge'.
-> view path(X: int, Y: int) :- edge(X, Y).
-View 'path' registered.
-> view path(X: int, Y: int) :- path(X, Z), edge(Z, Y).
-Rule added to view 'path' (2 rules total).
+> +path(X, Y) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Y) :- path(X, Z), edge(Z, Y).
+Rule added to 'path' (2 rules total).
 > ?- path(A, B).
 10 rows:
   (1, 2)
@@ -28,4 +27,3 @@ Rule added to view 'path' (2 rules total).
 Switched to database: default
 > .db drop test_left_recursion
 Database 'test_left_recursion' dropped.
-

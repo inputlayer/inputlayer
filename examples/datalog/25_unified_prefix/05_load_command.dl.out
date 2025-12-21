@@ -1,0 +1,22 @@
+Executing script: examples/datalog/25_unified_prefix/05_load_command.dl
+
+> .db create test_load
+Database 'test_load' created.
+Switched to database: test_load
+> .db use test_load
+Switched to database: test_load
+> +edge(1, 2).
+Inserted 1 fact into 'edge'.
+> +edge(2, 3).
+Inserted 1 fact into 'edge'.
+> +edge(3, 4).
+Inserted 1 fact into 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> .db use default
+Switched to database: default
+> .db drop test_load
+Database 'test_load' dropped.

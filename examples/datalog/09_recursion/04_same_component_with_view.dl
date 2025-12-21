@@ -9,9 +9,9 @@
 +edge[(1,2), (2,3), (3,4)].
 
 // Define same_component as symmetric transitive closure
-view same_component(X: int, Y: int) :- edge(X, Y).
-view same_component(X: int, Y: int) :- edge(Y, X).
-view same_component(X: int, Z: int) :- same_component(X, Y), same_component(Y, Z), X != Z.
++same_component(X, Y) :- edge(X, Y).
++same_component(X, Y) :- edge(Y, X).
++same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
 
 // Inspect the view (shows rules and computed results)
 .view same_component

@@ -9,30 +9,30 @@
 +data[(1, 0), (2, 10), (3, 0), (4, 20)].
 
 // Find zero values
-view zeros(Id: int) :- data(Id, 0).
++zeros(Id) :- data(Id, 0).
 ?- zeros(X).
 
 // Find non-zero values
-view nonzeros(Id: int, V: int) :- data(Id, V), V > 0.
++nonzeros(Id, V) :- data(Id, V), V > 0.
 ?- nonzeros(X, Y).
 
 // Arithmetic with zero - use head arithmetic
-view plus_zero(Id: int, V+0: int) :- data(Id, V).
++plus_zero(Id, V+0) :- data(Id, V).
 ?- plus_zero(X, Y).
 
-view times_zero(Id: int, V*0: int) :- data(Id, V).
++times_zero(Id, V*0) :- data(Id, V).
 ?- times_zero(X, Y).
 
 // Zero in aggregations
-view sum_with_zeros(sum<V>: int) :- data(_, V).
++sum_with_zeros(sum<V>) :- data(_, V).
 ?- sum_with_zeros(S).
 
-view count_with_zeros(count<Id>: int) :- data(Id, _).
++count_with_zeros(count<Id>) :- data(Id, _).
 ?- count_with_zeros(C).
 
 // Division edge case: divide by non-zero
 +safe_div[(10, 2), (20, 5), (0, 1)].
-view div_result(N: int, D: int, N/D: int) :- safe_div(N, D).
++div_result(N, D, N/D) :- safe_div(N, D).
 ?- div_result(X, Y, Z).
 
 // Cleanup

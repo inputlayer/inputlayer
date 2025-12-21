@@ -9,14 +9,10 @@
 //! ## Example Schema Declaration
 //!
 //! ```datalog
-//! User := schema(
-//!   id:    symbol @primary @not_empty,
-//!   name:  symbol @not_empty,
-//!   age:   int    @range(0, 120),
-//!   email: symbol @pattern("^[^@]+@[^@]+$")
-//! ) @validate(
-//!   @check(no_minors_in_admin)
-//! )
+//! +User(id: symbol @primary @not_empty,
+//!       name: symbol @not_empty,
+//!       age: int @range(0, 120),
+//!       email: symbol @pattern("^[^@]+@[^@]+$")).
 //! ```
 
 pub mod catalog;

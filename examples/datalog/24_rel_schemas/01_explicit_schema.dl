@@ -22,7 +22,7 @@ rel department(dept_id: int, dept_name: string).
 ?- department(Id, Name).
 
 // Create view joining employee and department
-view emp_dept(EmpName: string, DeptName: string) :-
++emp_dept(EmpName, DeptName) :-
     employee(_, EmpName, DeptId),
     department(DeptId, DeptName).
 

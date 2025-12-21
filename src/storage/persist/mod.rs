@@ -33,7 +33,7 @@ pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
 pub use consolidate::{consolidate, consolidate_to_current, filter_since, to_tuples, to_tuple2s, to_tuples_with_multiplicity, to_tuple2s_with_multiplicity};
 pub use wal::PersistWal;
 
-use crate::code_generator::Tuple2;
+use crate::value::Tuple2;
 use crate::storage::{StorageError, StorageResult};
 use crate::value::{Tuple, Value, TupleSchema, DataType, tuples_to_record_batch, record_batch_to_tuples};
 use std::collections::HashMap;

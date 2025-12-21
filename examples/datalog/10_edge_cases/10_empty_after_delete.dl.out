@@ -1,4 +1,3 @@
-
 Executing script: examples/datalog/10_edge_cases/10_empty_after_delete.dl
 
 > .db create test_empty_del
@@ -15,8 +14,8 @@ Inserted 5 facts into 'items'.
   (3)
   (4)
   (5)
-> view big_items(X: int) :- items(X), X > 3.
-View 'big_items' registered.
+> +big_items(X) :- items(X), X > 3.
+Rule 'big_items' registered.
 > ?- big_items(X).
 2 rows:
   (4)
@@ -55,4 +54,3 @@ Inserted 2 facts into 'items'.
 Switched to database: default
 > .db drop test_empty_del
 Database 'test_empty_del' dropped.
-

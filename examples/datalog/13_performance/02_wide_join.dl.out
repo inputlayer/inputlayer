@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/02_wide_join.dl
+Executing script: examples/datalog/13_performance/02_wide_join.dl
 
 > .db create test_perf_wide
 Database 'test_perf_wide' created.
@@ -10,8 +9,8 @@ Switched to database: test_perf_wide
 Inserted 50 facts into 'rel1'.
 > +rel2[(1,100), (2,200), (3,300), (4,400), (5,500), (6,600), (7,700), (8,800), (9,900), (10,1000)].
 Inserted 10 facts into 'rel2'.
-> view joined(A: int, B: int, C: int) :- rel1(A, B), rel2(B, C).
-View 'joined' registered.
+> +joined(A, B, C) :- rel1(A, B), rel2(B, C).
+Rule 'joined' registered.
 > ?- joined(1, B, C).
 5 rows:
   (1, 100, 1)
@@ -23,4 +22,3 @@ View 'joined' registered.
 Switched to database: default
 > .db drop test_perf_wide
 Database 'test_perf_wide' dropped.
-

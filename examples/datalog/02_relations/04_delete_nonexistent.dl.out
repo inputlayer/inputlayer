@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/02_relations/04_delete_nonexistent.dl
+Executing script: examples/datalog/02_relations/04_delete_nonexistent.dl
 
 > .db create test_del_nonexist
 Database 'test_del_nonexist' created.
@@ -31,4 +30,3 @@ No matching tuples to delete.
 Switched to database: default
 > .db drop test_del_nonexist
 Database 'test_del_nonexist' dropped.
-

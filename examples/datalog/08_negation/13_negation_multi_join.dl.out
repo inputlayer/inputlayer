@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/13_negation_multi_join.dl
+Executing script: examples/datalog/08_negation/13_negation_multi_join.dl
 
 > .db create test_neg_multi_join
 Database 'test_neg_multi_join' created.
@@ -12,8 +11,8 @@ Inserted 5 facts into 'employee'.
 Inserted 3 facts into 'department'.
 > +on_leave[(2, 0), (4, 0)].
 Inserted 2 facts into 'on_leave'.
-> view active_emp_manager(EmpId: int, MgrId: int) :- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
-View 'active_emp_manager' registered.
+> +active_emp_manager(EmpId, MgrId) :- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
+Rule 'active_emp_manager' registered.
 > ?- active_emp_manager(X, Y).
 3 rows:
   (1, 100)
@@ -23,4 +22,3 @@ View 'active_emp_manager' registered.
 Switched to database: default
 > .db drop test_neg_multi_join
 Database 'test_neg_multi_join' dropped.
-

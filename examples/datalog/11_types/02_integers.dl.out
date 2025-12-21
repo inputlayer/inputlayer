@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/02_integers.dl
+Executing script: examples/datalog/11_types/02_integers.dl
 
 > .db create test_int
 Database 'test_int' created.
@@ -27,8 +26,8 @@ Inserted 3 facts into 'zeros'.
   (0, 0)
   (0, 1)
   (1, 0)
-> view neg_large(X: int, Y: int) :- negative(X, Y), Y < -150.
-View 'neg_large' registered.
+> +neg_large(X, Y) :- negative(X, Y), Y < -150.
+Rule 'neg_large' registered.
 > ?- neg_large(X, Y).
 2 rows:
   (-3, -300)
@@ -37,4 +36,3 @@ View 'neg_large' registered.
 Switched to database: default
 > .db drop test_int
 Database 'test_int' dropped.
-

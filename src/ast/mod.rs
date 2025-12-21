@@ -2,8 +2,16 @@
 //!
 //! Abstract Syntax Tree types for Datalog programs.
 //! Used across multiple modules for parsing and semantic analysis.
+//!
+//! ## Builders
+//!
+//! For programmatic construction of AST nodes, see the [`builders`] module
+//! which provides fluent APIs like `AtomBuilder` and `RuleBuilder`.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+pub mod builders;
 
 // ============================================================================
 // Core AST Types
@@ -13,7 +21,7 @@ use std::collections::HashSet;
 ///
 /// Note: Does not implement Hash or Eq because TopKThreshold and WithinRadius
 /// contain f64 fields which don't implement these traits.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AggregateFunc {
     Count,
     Sum,
@@ -44,7 +52,7 @@ pub enum AggregateFunc {
 }
 
 /// Built-in function for vector/scalar operations
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BuiltinFunc {
     // Distance functions
     /// Euclidean distance: euclidean(v1, v2) -> Float64

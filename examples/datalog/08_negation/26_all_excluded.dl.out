@@ -1,4 +1,3 @@
-
 Executing script: examples/datalog/08_negation/26_all_excluded.dl
 
 > .db create test_all_excluded
@@ -10,8 +9,8 @@ Switched to database: test_all_excluded
 Inserted 3 facts into 'items'.
 > +excluded[(1), (2), (3)].
 Inserted 3 facts into 'excluded'.
-> view not_excluded(X: int) :- items(X), !excluded(X).
-View 'not_excluded' registered.
+> +not_excluded(X) :- items(X), !excluded(X).
+Rule 'not_excluded' registered.
 > ?- not_excluded(X).
 No results.
 > +items(4).
@@ -27,4 +26,3 @@ No results.
 Switched to database: default
 > .db drop test_all_excluded
 Database 'test_all_excluded' dropped.
-

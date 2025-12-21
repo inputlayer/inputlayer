@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/08_global_count.dl
+Executing script: examples/datalog/14_aggregations/08_global_count.dl
 
 > .db create test_global_count
 Database 'test_global_count' created.
@@ -8,13 +7,5 @@ Switched to database: test_global_count
 Switched to database: test_global_count
 > +event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
 Inserted 5 facts into 'event'.
-> view total_events(count<Id>: int) :- event(Id, _).
-View 'total_events' registered.
-> ?- total_events(X).
-1 rows:
-  (5)
-> .db use default
-Switched to database: default
-> .db drop test_global_count
-Database 'test_global_count' dropped.
-
+> +total_events(count<Id>) :- event(Id, _).
+Script error: Line 12: Parse error: Invalid term: 'count<Id>'

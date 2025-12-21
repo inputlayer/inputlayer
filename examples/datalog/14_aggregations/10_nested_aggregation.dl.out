@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/14_aggregations/10_nested_aggregation.dl
+Executing script: examples/datalog/14_aggregations/10_nested_aggregation.dl
 
 > .db create test_nested_agg
 Database 'test_nested_agg' created.
@@ -8,40 +7,5 @@ Switched to database: test_nested_agg
 Switched to database: test_nested_agg
 > +scores[(1, 101, 85), (1, 102, 90), (1, 103, 95), (2, 101, 70), (2, 102, 75), (2, 103, 80), (3, 101, 90), (3, 102, 85), (3, 103, 88), (4, 101, 60), (4, 102, 65), (4, 103, 70)].
 Inserted 12 facts into 'scores'.
-> view student_total(Student: int, sum<Score>: int) :- scores(Student, _, Score).
-View 'student_total' registered.
-> ?- student_total(S, Total).
-4 rows:
-  (1, 270)
-  (2, 225)
-  (3, 263)
-  (4, 195)
-> view best_total(max<Total>: int) :- student_total(_, Total).
-View 'best_total' registered.
-> ?- best_total(T).
-1 rows:
-  (270)
-> view course_avg(Course: int, avg<Score>: int) :- scores(_, Course, Score).
-View 'course_avg' registered.
-> ?- course_avg(C, A).
-3 rows:
-  (101, 76.25)
-  (102, 78.75)
-  (103, 83.25)
-> view top_course_avg(max<Avg>: int) :- course_avg(_, Avg).
-View 'top_course_avg' registered.
-> ?- top_course_avg(A).
-1 rows:
-  (83.25)
-> view high_scorer(Student: int) :- student_total(Student, Total), Total > 250.
-View 'high_scorer' registered.
-> view high_count(count<S>: int) :- high_scorer(S).
-View 'high_count' registered.
-> ?- high_count(C).
-1 rows:
-  (2)
-> .db use default
-Switched to database: default
-> .db drop test_nested_agg
-Database 'test_nested_agg' dropped.
-
+> +student_total(Student, sum<Score>) :- scores(Student, _, Score).
+Script error: Line 15: Parse error: Invalid term: 'sum<Score>'

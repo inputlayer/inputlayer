@@ -28,9 +28,9 @@
 //! - `.db drop <name>` - Drop a database
 //! - `.rel` - List relations
 //! - `.rel <name>` - Describe relation
-//! - `.view` - List views
-//! - `.view <name>` - Describe view
-//! - `.view drop <name>` - Drop view
+//! - `.rule` - List rules (persistent derived relations)
+//! - `.rule <name>` - Query rule (show computed data)
+//! - `.rule drop <name>` - Drop rule
 //! - `.save` - Flush to disk
 //! - `.status` - System status
 //! - `.help` - Show help
@@ -42,17 +42,18 @@
 //! - `-edge(1, 2).` - Delete fact
 //! - `-edge(X, Y) :- X > 5.` - Conditional delete
 //!
-//! ### Views (Persistent Rules)
-//! - `path(X, Y) := edge(X, Y).` - Define persistent view
+//! ### Rules (Persistent Derived Relations)
+//! - `+path(X, Y) :- edge(X, Y).` - Define persistent rule
 //!
 //! ### Transient Rules & Queries
 //! - `result(X, Y) :- edge(X, Y), X < Y.` - Transient rule
 //! - `?- path(1, X).` - Query
 
 use inputlayer::{
-    statement::{parse_statement, DeletePattern, MetaCommand, Statement},
+    statement::{parse_statement, DeletePattern, MetaCommand, Statement, LoadMode},
     value::{Tuple, Value},
     ast::{Rule, Term},
+    schema::{SchemaCatalog, RelationSchema, ColumnSchema, SchemaType, ValidationEngine},
     Config, StorageEngine,
 };
 use rustyline::error::ReadlineError;
@@ -76,6 +77,12 @@ struct ReplState {
     storage: StorageEngine,
     /// Session-scoped transient rules (cleared on exit or database switch)
     session_rules: Vec<inputlayer::ast::Rule>,
+    /// Session-scoped transient schemas (cleared on exit)
+    session_schemas: SchemaCatalog,
+    /// Persistent schemas (saved to disk)
+    persistent_schemas: SchemaCatalog,
+    /// Validation engine for constraint checking
+    validator: ValidationEngine,
 }
 
 impl ReplState {
@@ -85,7 +92,16 @@ impl ReplState {
         Ok(Self {
             storage,
             session_rules: Vec::new(),
+            session_schemas: SchemaCatalog::new(),
+            persistent_schemas: SchemaCatalog::new(),
+            validator: ValidationEngine::new(),
         })
+    }
+
+    /// Get schema for a relation (checks both session and persistent catalogs)
+    fn get_schema(&self, relation: &str) -> Option<&RelationSchema> {
+        self.session_schemas.get(relation)
+            .or_else(|| self.persistent_schemas.get(relation))
     }
 
     fn prompt(&self) -> String {
@@ -430,11 +446,12 @@ fn handle_statement(state: &mut ReplState, stmt: Statement) -> Result<(), String
         Statement::Delete(op) => handle_delete(state, op),
         Statement::Update(op) => handle_update(state, op),
         Statement::TypeDecl(decl) => handle_type_decl(state, decl),
-        Statement::RelDecl(decl) => handle_rel_decl(state, decl),
-        Statement::ViewDecl(decl) => handle_view_decl(state, decl),
         Statement::SessionRule(rule) => handle_session_rule(state, rule),
         Statement::Fact(rule) => handle_fact(state, rule),
         Statement::Query(goal) => handle_query(state, goal),
+        Statement::SchemaDecl(decl) => handle_schema_decl(state, decl),
+        Statement::PersistentRule(rule) => handle_persistent_rule(state, rule),
+        Statement::DeleteRelationOrRule(name) => handle_delete_relation_or_rule(state, name),
     }
 }
 
@@ -444,25 +461,6 @@ fn handle_type_decl(_state: &mut ReplState, decl: inputlayer::statement::TypeDec
     Ok(())
 }
 
-fn handle_rel_decl(_state: &mut ReplState, decl: inputlayer::statement::RelationDecl) -> Result<(), String> {
-    // TODO: Register relation schema in catalog
-    let col_str = decl.columns.iter()
-        .map(|c| format!("{}: {:?}", c.name, c.col_type))
-        .collect::<Vec<_>>()
-        .join(", ");
-    println!("Relation '{}' schema declared: ({})", decl.name, col_str);
-    Ok(())
-}
-
-fn handle_view_decl(state: &mut ReplState, decl: inputlayer::statement::ViewDecl) -> Result<(), String> {
-    // Convert ViewDecl to legacy ViewDef for existing handling
-    let view_def = inputlayer::statement::ViewDef {
-        name: decl.name.clone(),
-        rule: decl.rule.clone(),
-    };
-    handle_view(state, view_def)
-}
-
 fn handle_session_rule(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
     // Session rules are added as transient rules (not materialized)
     handle_transient_rule(state, rule)
@@ -470,10 +468,126 @@ fn handle_session_rule(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Re
 
 fn handle_fact(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
     // Facts are rules with empty body
-    // Convert to insert operation
-    let head = &rule.head;
     // TODO: For now, treat facts as transient rules
     handle_transient_rule(state, rule)
+}
+
+/// Convert TypeExpr to SchemaType
+fn type_expr_to_schema_type(type_expr: &inputlayer::statement::TypeExpr) -> Result<SchemaType, String> {
+    use inputlayer::statement::{TypeExpr, BaseType};
+    match type_expr {
+        TypeExpr::Base(base) => match base {
+            BaseType::Int => Ok(SchemaType::Int),
+            BaseType::Float => Ok(SchemaType::Float),
+            BaseType::String => Ok(SchemaType::String),
+            BaseType::Bool => Ok(SchemaType::Bool),
+        },
+        TypeExpr::Refined { base, .. } => type_expr_to_schema_type(base),
+        TypeExpr::List(_) => Ok(SchemaType::String), // Serialize lists as strings for now
+        TypeExpr::Record(_) => Err("Record types not supported in column definitions".to_string()),
+        // TypeRef: For now, we don't resolve type aliases, so treat as unknown
+        // TODO: Resolve type aliases from type catalog
+        TypeExpr::TypeRef(_) => Ok(SchemaType::String), // Default to String for unresolved types
+    }
+}
+
+/// Handle schema declaration: +name(col: type @constraint, ...). or name(col: type, ...).
+fn handle_schema_decl(state: &mut ReplState, decl: inputlayer::statement::SchemaDecl) -> Result<(), String> {
+    // Convert ColumnDef to ColumnSchema
+    let mut schema = RelationSchema::new(&decl.name);
+
+    for col in &decl.columns {
+        let schema_type = type_expr_to_schema_type(&col.col_type)?;
+        let mut column = ColumnSchema::new(&col.name, schema_type);
+
+        // Apply annotations from parsing
+        for annot in &col.annotations {
+            column = column.with_annotation(annot.clone());
+        }
+
+        schema = schema.with_column(column);
+    }
+
+    // Register in appropriate catalog
+    let catalog = if decl.persistent {
+        &mut state.persistent_schemas
+    } else {
+        &mut state.session_schemas
+    };
+
+    match catalog.register_or_update(schema) {
+        Ok(()) => {
+            let persistence = if decl.persistent { "Persistent" } else { "Transient" };
+            let col_str = decl.columns.iter()
+                .map(|c| {
+                    let annot_str = if c.annotations.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", c.annotations.iter()
+                            .map(|a| format!("{}", a))
+                            .collect::<Vec<_>>()
+                            .join(" "))
+                    };
+                    format!("{}: {:?}{}", c.name, c.col_type, annot_str)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("{} schema '{}' declared: ({})", persistence, decl.name, col_str);
+            Ok(())
+        }
+        Err(e) => Err(format!("Failed to register schema: {}", e)),
+    }
+}
+
+/// Handle persistent rule: +name(...) :- body.
+fn handle_persistent_rule(state: &mut ReplState, rule: inputlayer::ast::Rule) -> Result<(), String> {
+    // Convert to RuleDef for existing rule handling
+    let rule_def = inputlayer::statement::RuleDef {
+        name: rule.head.relation.clone(),
+        rule: inputlayer::statement::SerializableRule::from_rule(&rule),
+    };
+    handle_rule_def(state, rule_def)
+}
+
+/// Handle delete relation or rule: -name.
+fn handle_delete_relation_or_rule(state: &mut ReplState, name: String) -> Result<(), String> {
+    // Check if it's a rule first
+    let rules = state.storage.list_rules()
+        .map_err(|e| format!("{}", e))?;
+    if rules.contains(&name) {
+        state.storage.drop_rule(&name)
+            .map_err(|e| format!("{}", e))?;
+        println!("Rule '{}' deleted.", name);
+        return Ok(());
+    }
+
+    // Check if it's a schema (session or persistent)
+    if state.session_schemas.has_schema(&name) {
+        state.session_schemas.remove(&name);
+        println!("Transient schema '{}' deleted.", name);
+        return Ok(());
+    }
+    if state.persistent_schemas.has_schema(&name) {
+        state.persistent_schemas.remove(&name);
+        println!("Persistent schema '{}' deleted.", name);
+        return Ok(());
+    }
+
+    // Check if it's a relation with data
+    let relations = state.storage.list_relations()
+        .map_err(|e| format!("{}", e))?;
+    if relations.contains(&name) {
+        // For now, return error suggesting conditional delete for facts
+        // TODO: Implement full relation deletion with data (Phase 3)
+        return Err(format!(
+            "'{}' is a relation with data. Use conditional delete to remove facts:\n  \
+             -{}(...) :- {}(...).   // Delete all facts\n  \
+             Or implement full relation deletion in Phase 3.",
+            name, name, name
+        ));
+    }
+
+    Err(format!("'{}' is not a rule, schema, or relation.", name))
 }
 
 fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), String> {
@@ -557,32 +671,32 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
             }
         }
 
-        MetaCommand::ViewList => {
-            let views = state.storage.list_views()
+        MetaCommand::RuleList => {
+            let rules = state.storage.list_rules()
                 .map_err(|e| format!("{}", e))?;
-            if views.is_empty() {
-                println!("No views defined.");
+            if rules.is_empty() {
+                println!("No rules defined.");
             } else {
-                println!("Views:");
-                for view in views {
-                    println!("  {}", view);
+                println!("Rules:");
+                for rule in rules {
+                    println!("  {}", rule);
                 }
             }
         }
 
-        MetaCommand::ViewQuery(name) => {
-            // .view <name> shows definition AND computed results preview
-            match state.storage.describe_view(&name)
+        MetaCommand::RuleQuery(name) => {
+            // .rule <name> shows definition AND computed results preview
+            match state.storage.describe_rule(&name)
                 .map_err(|e| format!("{}", e))? {
                 Some(desc) => {
                     println!("{}", desc);
 
                     // Also show computed results (up to 10 rows)
                     let query = format!("__result__(X, Y) :- {}(X, Y).", name);
-                    match state.storage.execute_query_with_views(&query) {
+                    match state.storage.execute_query_with_rules(&query) {
                         Ok(results) => {
                             if results.is_empty() {
-                                println!("Results: (empty - no base data or view not computable)");
+                                println!("Results: (empty - no base data or rule not computable)");
                             } else {
                                 let _show_count = std::cmp::min(results.len(), 10);
                                 println!("Results: {} rows{}", results.len(),
@@ -597,52 +711,53 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
                         }
                     }
                 }
-                None => println!("View '{}' not found.", name),
+                None => println!("Rule '{}' not found.", name),
             }
         }
 
-        MetaCommand::ViewDef(name) => {
-            // .view def <name> shows only the definition (no results)
-            match state.storage.describe_view(&name)
+        MetaCommand::RuleShowDef(name) => {
+            // .rule def <name> shows only the definition (no results)
+            match state.storage.describe_rule(&name)
                 .map_err(|e| format!("{}", e))? {
                 Some(desc) => println!("{}", desc),
-                None => println!("View '{}' not found.", name),
+                None => println!("Rule '{}' not found.", name),
             }
         }
 
-        MetaCommand::ViewDrop(name) => {
-            state.storage.drop_view(&name)
+        MetaCommand::RuleDrop(name) => {
+            state.storage.drop_rule(&name)
                 .map_err(|e| format!("{}", e))?;
-            println!("View '{}' dropped.", name);
+            println!("Rule '{}' dropped.", name);
         }
 
-        MetaCommand::ViewEdit { name, index, rule_text } => {
-            // Parse the rule text as a view declaration
-            // The rule_text should be like: view connected(x: int, y: int) :- edge(x, y), connected(y, z).
-            use inputlayer::statement::{parse_statement, Statement};
+        MetaCommand::RuleEdit { name, index, rule_text } => {
+            // Parse the rule text as a persistent rule
+            // The rule_text should be like: +connected(X, Y) :- edge(X, Y), connected(Y, Z).
+            use inputlayer::statement::{parse_statement, Statement, SerializableRule};
 
             match parse_statement(&rule_text) {
-                Ok(Statement::ViewDecl(view_decl)) => {
-                    // Verify the view name matches
-                    if view_decl.name != name {
+                Ok(Statement::PersistentRule(rule)) => {
+                    // Verify the rule name matches
+                    if rule.head.relation != name {
                         return Err(format!(
-                            "Rule head '{}' doesn't match view name '{}'. Use: view {} :- ...",
-                            view_decl.name, name, name
+                            "Rule head '{}' doesn't match rule name '{}'. Use: +{}(...) :- ...",
+                            rule.head.relation, name, name
                         ));
                     }
 
-                    state.storage.replace_view_rule(&name, index, view_decl.rule)
+                    let serializable = SerializableRule::from_rule(&rule);
+                    state.storage.replace_rule(&name, index, serializable)
                         .map_err(|e| format!("{}", e))?;
-                    println!("Rule {} of view '{}' replaced.", index + 1, name);
+                    println!("Rule {} of '{}' replaced.", index + 1, name);
 
-                    // Show updated view
-                    if let Ok(Some(desc)) = state.storage.describe_view(&name) {
-                        println!("\nUpdated view:");
+                    // Show updated rule
+                    if let Ok(Some(desc)) = state.storage.describe_rule(&name) {
+                        println!("\nUpdated rule:");
                         println!("{}", desc);
                     }
                 }
                 Ok(_) => {
-                    return Err("Invalid rule syntax. Use: view name(col: type) :- body.".to_string());
+                    return Err("Invalid rule syntax. Use: +name(X, Y) :- body.".to_string());
                 }
                 Err(e) => {
                     return Err(format!("Failed to parse rule: {}", e));
@@ -650,12 +765,11 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
             }
         }
 
-        MetaCommand::ViewClear(name) => {
-            // Clear all rules from the view, ready for re-registration
-            state.storage.clear_view(&name)
+        MetaCommand::RuleClear(name) => {
+            // Clear all rules from the rule definition, ready for re-registration
+            state.storage.clear_rule(&name)
                 .map_err(|e| format!("{}", e))?;
-            println!("View '{}' cleared. You can now re-register its rules with :=", name);
-            println!("Example: {}(X, Y) := edge(X, Y).", name);
+            println!("Rule '{}' cleared. You can now re-register with +{}(...) :- ...", name, name);
         }
 
         MetaCommand::SessionList => {
@@ -715,9 +829,113 @@ fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<(), St
             println!("Goodbye!");
             std::process::exit(0);
         }
+
+        MetaCommand::Load { path, mode } => {
+            handle_load(state, &path, mode)?;
+        }
     }
 
     Ok(())
+}
+
+/// Handle .load command with optional mode
+fn handle_load(state: &mut ReplState, path: &str, mode: LoadMode) -> Result<(), String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file '{}': {}", path, e))?;
+
+    match mode {
+        LoadMode::Default => {
+            // Default: execute statements one by one
+            println!("Loading file: {}", path);
+            execute_content(state, &content)?;
+            println!("File loaded successfully.");
+        }
+        LoadMode::Replace => {
+            // Replace mode: parse all first, then atomically apply
+            println!("Loading file with --replace: {}", path);
+
+            // Phase 1: Parse and validate all statements (no side effects)
+            let statements = parse_all_statements(&content)?;
+            println!("  Parsed {} statements.", statements.len());
+
+            // Collect rules to replace (from +head :- body rules)
+            let rules_to_replace: std::collections::HashSet<String> = statements.iter()
+                .filter_map(|stmt| {
+                    if let Statement::PersistentRule(rule) = stmt {
+                        Some(rule.head.relation.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Phase 2: Delete existing rules that will be replaced
+            for rule_name in &rules_to_replace {
+                if state.storage.list_rules().map_err(|e| format!("{}", e))?.contains(rule_name) {
+                    state.storage.drop_rule(rule_name)
+                        .map_err(|e| format!("Failed to drop rule '{}' for replace: {}", rule_name, e))?;
+                    println!("  Dropped existing rule: {}", rule_name);
+                }
+            }
+
+            // Phase 3: Execute all statements
+            for stmt in statements {
+                handle_statement(state, stmt)?;
+            }
+
+            println!("File loaded with --replace: {} rules updated.", rules_to_replace.len());
+        }
+        LoadMode::Merge => {
+            // Merge mode: add to existing definitions
+            println!("Loading file with --merge: {}", path);
+            execute_content(state, &content)?;
+            println!("File merged successfully.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute content as a series of statements
+fn execute_content(state: &mut ReplState, content: &str) -> Result<(), String> {
+    let statements = parse_all_statements(content)?;
+    for stmt in statements {
+        handle_statement(state, stmt)?;
+    }
+    Ok(())
+}
+
+/// Parse all statements from content (returning them for deferred execution)
+fn parse_all_statements(content: &str) -> Result<Vec<Statement>, String> {
+    let mut statements = Vec::new();
+    let mut accumulated = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+
+        accumulated.push_str(trimmed);
+        accumulated.push(' ');
+
+        // Check if we have a complete statement
+        if is_complete_statement(&accumulated) {
+            let stmt = parse_statement(&accumulated)?;
+            statements.push(stmt);
+            accumulated.clear();
+        }
+    }
+
+    // Handle any remaining content
+    if !accumulated.trim().is_empty() {
+        let stmt = parse_statement(&accumulated)?;
+        statements.push(stmt);
+    }
+
+    Ok(statements)
 }
 
 fn handle_insert(
@@ -751,6 +969,35 @@ fn handle_insert(
             return Err("No valid tuples to insert".to_string());
         }
 
+        // Validate against schema if one exists
+        if let Some(schema) = state.get_schema(&op.relation).cloned() {
+            // Validate tuples against schema constraints
+            state.validator.validate_batch(&schema, &tuples)
+                .map_err(|e| format!("Validation failed: {}", e))?;
+
+            // Handle @key upsert behavior: if key columns exist, delete existing rows with same key
+            let pk_indices = schema.primary_key_indices();
+            if !pk_indices.is_empty() {
+                // For each tuple, check if a row with the same key exists and delete it
+                for tuple in &tuples {
+                    let key_values: Vec<Value> = pk_indices.iter()
+                        .filter_map(|&i| tuple.get(i).cloned())
+                        .collect();
+
+                    if key_values.len() == pk_indices.len() {
+                        // Try to delete existing row with this key (ignore if not found)
+                        // For 2-column integer keys, use the legacy delete API
+                        if key_values.len() == 2 {
+                            if let (Some(a), Some(b)) = (value_to_i32(&key_values[0]), value_to_i32(&key_values[1])) {
+                                let _ = state.storage.delete(&op.relation, vec![(a, b)]);
+                            }
+                        }
+                        // TODO: Extend to support arbitrary key deletions
+                    }
+                }
+            }
+        }
+
         let (new_count, dup_count) = state.storage.insert_tuples(&op.relation, tuples)
             .map_err(|e| format!("{}", e))?;
 
@@ -775,6 +1022,26 @@ fn handle_insert(
             return Err("No valid tuples to insert (requires 2-element tuples with integer values)".to_string());
         }
 
+        // For legacy API, convert to Tuple for validation if schema exists
+        if let Some(schema) = state.get_schema(&op.relation).cloned() {
+            let validation_tuples: Vec<Tuple> = tuples.iter()
+                .map(|(a, b)| Tuple::new(vec![Value::Int64(*a as i64), Value::Int64(*b as i64)]))
+                .collect();
+
+            // Validate tuples against schema constraints
+            state.validator.validate_batch(&schema, &validation_tuples)
+                .map_err(|e| format!("Validation failed: {}", e))?;
+
+            // Handle @key upsert behavior
+            let pk_indices = schema.primary_key_indices();
+            if !pk_indices.is_empty() && pk_indices.len() <= 2 {
+                // Delete existing rows with same key before insert
+                for (a, b) in &tuples {
+                    let _ = state.storage.delete(&op.relation, vec![(*a, *b)]);
+                }
+            }
+        }
+
         let (new_count, dup_count) = state.storage.insert(&op.relation, tuples)
             .map_err(|e| format!("{}", e))?;
 
@@ -782,6 +1049,16 @@ fn handle_insert(
     }
 
     Ok(())
+}
+
+/// Convert Value to i32 (for key-based deletion)
+fn value_to_i32(value: &Value) -> Option<i32> {
+    match value {
+        Value::Int32(n) => Some(*n),
+        Value::Int64(n) => Some(*n as i32),
+        Value::Float64(f) => Some(*f as i32),
+        _ => None,
+    }
 }
 
 fn print_insert_result(new_count: usize, dup_count: usize, relation: &str) {
@@ -853,34 +1130,57 @@ fn handle_update(
     state: &mut ReplState,
     op: inputlayer::statement::UpdateOp,
 ) -> Result<(), String> {
-    // Build query to find matching tuples
-    let body_str = format_body(&op.body, &op.constraints);
-
-    // Collect all variables
-    let mut all_vars: Vec<String> = Vec::new();
-    for del in &op.deletes {
-        for arg in &del.args {
-            if let Term::Variable(v) = arg {
-                if !all_vars.contains(v) {
-                    all_vars.push(v.clone());
-                }
-            }
-        }
-    }
-    for ins in &op.inserts {
-        for arg in &ins.args {
-            if let Term::Variable(v) = arg {
-                if !all_vars.contains(v) {
-                    all_vars.push(v.clone());
+    // Collect variables that appear in positive body atoms (these are "safe" for querying)
+    let mut body_vars: Vec<String> = Vec::new();
+    for pred in &op.body {
+        if let inputlayer::ast::BodyPredicate::Positive(atom) = pred {
+            for arg in &atom.args {
+                if let Term::Variable(v) = arg {
+                    if !body_vars.contains(v) {
+                        body_vars.push(v.clone());
+                    }
                 }
             }
         }
     }
 
-    let head_vars = all_vars.join(", ");
+    // Build query including body predicates and filter constraints
+    // Filter constraints are those where both sides reference only bound variables
+    // (e.g., OldVal > 100, Id = 1)
+    // Assignment constraints define new variables (e.g., NewVal = OldVal + 5)
+    let mut body_parts: Vec<String> = op.body.iter()
+        .map(format_body_pred)
+        .collect();
+
+    // Add filter constraints (comparison constraints that don't define new variables)
+    for constraint in &op.constraints {
+        let is_filter = match constraint {
+            inputlayer::ast::Constraint::Equal(left, right) => {
+                // Assignment if one side is an unbound variable
+                let left_is_unbound_var = matches!(left, Term::Variable(v) if !body_vars.contains(v));
+                let right_is_unbound_var = matches!(right, Term::Variable(v) if !body_vars.contains(v));
+                // Include in query only if neither side is an unbound variable
+                !left_is_unbound_var && !right_is_unbound_var
+            }
+            // All other comparison constraints are always filters
+            _ => true,
+        };
+        if is_filter {
+            body_parts.push(format_constraint(constraint));
+        }
+    }
+
+    let body_str = body_parts.join(", ");
+
+    if body_vars.is_empty() {
+        return Err("Update requires at least one variable in body atoms".to_string());
+    }
+
+    let head_vars = body_vars.join(", ");
     let query_program = format!("__update_result__({}) :- {}.", head_vars, body_str);
 
-    let results = state.storage.execute_query(&query_program)
+    // Use tuple-based query to support variable arity
+    let results = state.storage.execute_query_with_rules_tuples(&query_program)
         .map_err(|e| format!("{}", e))?;
 
     if results.is_empty() {
@@ -892,19 +1192,39 @@ fn handle_update(
 
     // For each result, perform deletes and inserts
     for result in results {
-        // Build variable bindings from result
-        let bindings: std::collections::HashMap<String, i32> = if all_vars.len() >= 2 {
-            let mut map = std::collections::HashMap::new();
-            if let Some(v) = all_vars.get(0) {
-                map.insert(v.clone(), result.0);
+        // Build variable bindings from query result
+        let mut bindings: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        for (i, var_name) in body_vars.iter().enumerate() {
+            if let Some(value) = result.get(i) {
+                if let Some(int_val) = value.as_i64() {
+                    bindings.insert(var_name.clone(), int_val as i32);
+                }
             }
-            if let Some(v) = all_vars.get(1) {
-                map.insert(v.clone(), result.1);
+        }
+
+        // Evaluate constraints to compute additional variable bindings
+        // This handles cases like: NewVal = OldVal + 5
+        for constraint in &op.constraints {
+            if let inputlayer::ast::Constraint::Equal(left, right) = constraint {
+                // Check if left side is a variable and right side can be evaluated
+                if let Term::Variable(var_name) = left {
+                    if !bindings.contains_key(var_name) {
+                        // Try to evaluate the right side
+                        if let Ok(value) = substitute_term_i32(right, &bindings) {
+                            bindings.insert(var_name.clone(), value);
+                        }
+                    }
+                }
+                // Also check the reverse: right side is variable, left can be evaluated
+                if let Term::Variable(var_name) = right {
+                    if !bindings.contains_key(var_name) {
+                        if let Ok(value) = substitute_term_i32(left, &bindings) {
+                            bindings.insert(var_name.clone(), value);
+                        }
+                    }
+                }
             }
-            map
-        } else {
-            std::collections::HashMap::new()
-        };
+        }
 
         // Perform deletes
         for del in &op.deletes {
@@ -934,21 +1254,21 @@ fn handle_update(
     Ok(())
 }
 
-fn handle_view(
+fn handle_rule_def(
     state: &mut ReplState,
-    def: inputlayer::statement::ViewDef,
+    def: inputlayer::statement::RuleDef,
 ) -> Result<(), String> {
-    use inputlayer::view_catalog::ViewRegisterResult;
+    use inputlayer::rule_catalog::RuleRegisterResult;
 
-    let result = state.storage.register_view(&def)
+    let result = state.storage.register_rule(&def)
         .map_err(|e| format!("{}", e))?;
 
     match result {
-        ViewRegisterResult::Created => {
-            println!("View '{}' registered.", def.name);
+        RuleRegisterResult::Created => {
+            println!("Rule '{}' registered.", def.name);
         }
-        ViewRegisterResult::RuleAdded(rule_count) => {
-            println!("Rule added to view '{}' ({} rules total).", def.name, rule_count);
+        RuleRegisterResult::RuleAdded(rule_count) => {
+            println!("Rule added to '{}' ({} rules total).", def.name, rule_count);
         }
     }
     Ok(())
@@ -967,8 +1287,8 @@ fn handle_transient_rule(
     // Build combined program: all session rules + query for head relation
     let program = build_session_program(&state.session_rules, &head_relation);
 
-    // Execute with persistent views included
-    let results = state.storage.execute_query_with_views(&program)
+    // Execute with persistent rules included
+    let results = state.storage.execute_query_with_rules(&program)
         .map_err(|e| format!("{}", e))?;
 
     // Show results
@@ -1082,7 +1402,7 @@ fn handle_query(
     program.push_str(&format!("__query__({}) :- {}.", head_vars.join(", "), body_parts.join(", ")));
 
     // Use tuple-based execution to support arbitrary arity
-    let results = state.storage.execute_query_with_views_tuples(&program)
+    let results = state.storage.execute_query_with_rules_tuples(&program)
         .map_err(|e| format!("{}", e))?;
 
     if results.is_empty() {
@@ -1148,7 +1468,46 @@ fn substitute_term_i32(
             .ok_or_else(|| format!("Variable '{}' not bound", v)),
         Term::Constant(n) => Ok(*n as i32),
         Term::FloatConstant(f) => Ok(*f as i32),
+        Term::Arithmetic(expr) => evaluate_arith_expr(expr, bindings),
         _ => Err("Unsupported term type".to_string()),
+    }
+}
+
+/// Evaluate an arithmetic expression with variable bindings
+fn evaluate_arith_expr(
+    expr: &inputlayer::ast::ArithExpr,
+    bindings: &std::collections::HashMap<String, i32>,
+) -> Result<i32, String> {
+    use inputlayer::ast::{ArithExpr, ArithOp};
+    match expr {
+        ArithExpr::Variable(v) => bindings
+            .get(v)
+            .copied()
+            .ok_or_else(|| format!("Variable '{}' not bound in arithmetic expression", v)),
+        ArithExpr::Constant(n) => Ok(*n as i32),
+        ArithExpr::Binary { op, left, right } => {
+            let l = evaluate_arith_expr(left, bindings)?;
+            let r = evaluate_arith_expr(right, bindings)?;
+            match op {
+                ArithOp::Add => Ok(l + r),
+                ArithOp::Sub => Ok(l - r),
+                ArithOp::Mul => Ok(l * r),
+                ArithOp::Div => {
+                    if r == 0 {
+                        Err("Division by zero".to_string())
+                    } else {
+                        Ok(l / r)
+                    }
+                }
+                ArithOp::Mod => {
+                    if r == 0 {
+                        Err("Modulo by zero".to_string())
+                    } else {
+                        Ok(l % r)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1289,15 +1648,18 @@ fn print_help() {
     println!("  .db drop <name>      Drop database");
     println!("  .rel                 List relations");
     println!("  .rel <name>          Describe relation");
-    println!("  .view                List views");
-    println!("  .view <name>         Query view (show computed data)");
-    println!("  .view def <name>     Show view definition");
-    println!("  .view edit <name> <n> <rule>   Replace rule #n");
-    println!("  .view clear <name>   Clear all rules for re-registration");
-    println!("  .view drop <name>    Drop view");
-    println!("  .session             List session rules");
+    println!("  .rule                List rules (persistent derived relations)");
+    println!("  .rule <name>         Query rule (show computed data)");
+    println!("  .rule def <name>     Show rule definition");
+    println!("  .rule edit <name> <n> <rule>   Replace rule #n");
+    println!("  .rule clear <name>   Clear all rules for re-registration");
+    println!("  .rule drop <name>    Drop rule");
+    println!("  .session             List session rules (transient)");
     println!("  .session clear       Clear all session rules");
     println!("  .session drop <n>    Remove session rule #n");
+    println!("  .load <file>         Load and execute file");
+    println!("  .load <file> --replace   Load file, replacing existing rules");
+    println!("  .load <file> --merge     Load file, merging with existing");
     println!("  .compact             Compact WAL and consolidate batches");
     println!("  .status              System status");
     println!("  .help                Show this help");
@@ -1309,21 +1671,20 @@ fn print_help() {
     println!("  -edge(1, 2).                   Delete fact");
     println!("  -edge(X, Y) :- X > 5.          Conditional delete");
     println!();
-    println!("Views (Persistent Rules - saved to disk):");
-    println!("  path(X, Y) := edge(X, Y).      Define persistent view");
+    println!("Rules (Persistent Derived Relations - saved to disk):");
+    println!("  +path(X, Y) :- edge(X, Y).     Define persistent rule");
     println!();
     println!("Session Rules (transient - cleared on exit/db switch):");
     println!("  foo(X, Y) :- bar(X, Y).        Add rule to session");
     println!("  foo(X, Z) :- foo(X, Y), foo(Y, Z).   Rules accumulate & evaluate together");
     println!();
     println!("Queries:");
-    println!("  ?- path(1, X).                 Query (uses session rules + views)");
+    println!("  ?- path(1, X).                 Query (uses session rules + persistent rules)");
     println!();
     println!("Operator Reference:");
-    println!("  +   Insert fact                Persisted to disk");
-    println!("  -   Delete fact                Persisted to disk");
-    println!("  :=  Define view                Persisted to disk");
-    println!("  :-  Session rule               Memory only (session)");
-    println!("  ?-  Query                      Memory only (one-shot)");
+    println!("  +   Insert fact / persistent rule    Persisted to disk");
+    println!("  -   Delete fact / drop rule          Persisted to disk");
+    println!("  :-  Session rule                     Memory only (session)");
+    println!("  ?-  Query                            Memory only (one-shot)");
     println!();
 }

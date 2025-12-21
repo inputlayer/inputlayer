@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/08_negation/09_negation_partial_key.dl
+Executing script: examples/datalog/08_negation/09_negation_partial_key.dl
 
 > .db create test_neg_partial
 Database 'test_neg_partial' created.
@@ -10,8 +9,8 @@ Switched to database: test_neg_partial
 Inserted 7 facts into 'assignment'.
 > +restricted[(100, 0), (300, 0)].
 Inserted 2 facts into 'restricted'.
-> view has_open_project(Emp: int, Proj: int) :- assignment(Emp, Proj), !restricted(Proj, _).
-View 'has_open_project' registered.
+> +has_open_project(Emp, Proj) :- assignment(Emp, Proj), !restricted(Proj, _).
+Rule 'has_open_project' registered.
 > ?- has_open_project(X, Y).
 2 rows:
   (1, 200)
@@ -24,4 +23,3 @@ View 'has_open_project' registered.
 Switched to database: default
 > .db drop test_neg_partial
 Database 'test_neg_partial' dropped.
-

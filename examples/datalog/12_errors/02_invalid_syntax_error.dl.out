@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/12_errors/02_invalid_syntax.dl
+Executing script: examples/datalog/12_errors/02_invalid_syntax_error.dl
 
 > .db create test_syntax_err
 Database 'test_syntax_err' created.
@@ -10,4 +9,3 @@ Switched to database: test_syntax_err
 Inserted 2 facts into 'edge'.
 > +broken[(1, 2.
 Script error: Line 12: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
-

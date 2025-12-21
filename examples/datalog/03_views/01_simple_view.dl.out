@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/03_views/01_simple_view.dl
+Executing script: examples/datalog/03_views/01_simple_view.dl
 
 > .db create test_view
 Database 'test_view' created.
@@ -8,10 +7,10 @@ Switched to database: test_view
 Switched to database: test_view
 > +edge[(1,2), (2,3), (3,4)].
 Inserted 3 facts into 'edge'.
-> view reverse(X: int, Y: int) :- edge(Y, X).
-View 'reverse' registered.
+> +reverse(X, Y) :- edge(Y, X).
+Rule 'reverse' registered.
 > .view
-Views:
+Rules:
   reverse
 > ?- reverse(X, Y).
 3 rows:
@@ -19,8 +18,8 @@ Views:
   (3, 2)
   (4, 3)
 > .view reverse
-View: reverse
-Rules:
+Rule: reverse
+Clauses:
   1. reverse(X, Y) :- edge(Y, X).
 
 Results: 3 rows
@@ -31,4 +30,3 @@ Results: 3 rows
 Switched to database: default
 > .db drop test_view
 Database 'test_view' dropped.
-

@@ -17,23 +17,23 @@
 
 // Direct leaf cost contribution to assembly
 // For leaf parts directly in an assembly
-view leaf_contribution(Assembly: int, Part: int, Cost*Qty: int) :- part_of(Part, Assembly, Qty), base_cost(Part, Cost).
++leaf_contribution(Assembly, Part, Cost*Qty) :- part_of(Part, Assembly, Qty), base_cost(Part, Cost).
 
 // Query leaf contributions
 ?- leaf_contribution(A, P, C).
 
 // Sum costs per assembly (from direct leaves only)
-view assembly_direct_cost(Assembly: int, sum<C>: int) :- leaf_contribution(Assembly, _, C).
++assembly_direct_cost(Assembly, sum<C>) :- leaf_contribution(Assembly, _, C).
 ?- assembly_direct_cost(A, C).
 
 // Parts with no sub-components (true leaves)
-view has_children(P: int) :- part_of(_, P, _).
-view is_leaf(P: int) :- base_cost(P, _), !has_children(P).
++has_children(P) :- part_of(_, P, _).
++is_leaf(P) :- base_cost(P, _), !has_children(P).
 ?- is_leaf(P).
 
 // All descendants of assembly 1
-view descendant(1: int, Child: int) :- part_of(Child, 1, _).
-view descendant(1: int, Desc: int) :- descendant(1, Mid), part_of(Desc, Mid, _).
++descendant(1, Child) :- part_of(Child, 1, _).
++descendant(1, Desc) :- descendant(1, Mid), part_of(Desc, Mid, _).
 ?- descendant(1, D).
 
 // Cleanup

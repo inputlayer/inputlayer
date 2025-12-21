@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/05_mixed_type_tuples.dl
+Executing script: examples/datalog/11_types/05_mixed_type_tuples.dl
 
 > .db create test_mixed
 Database 'test_mixed' created.
@@ -13,31 +12,12 @@ Inserted 3 facts into 'mixed'.
   (1, 100, 10000)
   (2, 200, 20000)
   (3, 300, 30000)
-> view small_ids(Id: int, M: int, L: int) :- mixed(Id, M, L), Id < 10.
-View 'small_ids' registered.
+> +small_ids(Id, M, L) :- mixed(Id, M, L), Id < 10.
+Rule 'small_ids' registered.
 > ?- small_ids(X, Y, Z).
 3 rows:
   (1, 100, 10000)
   (2, 200, 20000)
   (3, 300, 30000)
-> view combined(Id: int, M+L: int) :- mixed(Id, M, L).
-View 'combined' registered.
-> ?- combined(X, Y).
-3 rows:
-  (1, 10100)
-  (2, 20200)
-  (3, 30300)
-> +lookup[(100, 1), (200, 2), (300, 3)].
-Inserted 3 facts into 'lookup'.
-> view joined(Id: int, M: int, Rev: int) :- mixed(Id, M, _), lookup(M, Rev).
-View 'joined' registered.
-> ?- joined(X, Y, Z).
-3 rows:
-  (1, 100, 1)
-  (2, 200, 2)
-  (3, 300, 3)
-> .db use default
-Switched to database: default
-> .db drop test_mixed
-Database 'test_mixed' dropped.
-
+> +combined(Id, M+L) :- mixed(Id, M, L).
+Script error: Line 20: Parse error: Invalid term: 'M+L'

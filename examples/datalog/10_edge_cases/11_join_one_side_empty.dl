@@ -10,11 +10,11 @@
 // 'right' is empty
 
 // Join with empty right side - should produce no results
-view joined(X: int, Y: int) :- left(X), right(Y), X = Y.
++joined(X, Y) :- left(X), right(Y), X = Y.
 ?- joined(X, Y).
 
 // Another join pattern
-view matched(X: int) :- left(X), right(X).
++matched(X) :- left(X), right(X).
 ?- matched(X).
 
 // Now add some data to right

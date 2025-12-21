@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/18_advanced_patterns/07_points_to.dl
+Executing script: examples/datalog/18_advanced_patterns/07_points_to.dl
 
 > .db create test_points_to
 Database 'test_points_to' created.
@@ -12,12 +11,12 @@ Inserted 2 facts into 'alloc'.
 Inserted 1 fact into 'store'.
 > +load[(3, 1)].
 Inserted 1 fact into 'load'.
-> view pt(X: int, H: int) :- alloc(X, H).
-View 'pt' registered.
-> view pt(H: int, Z: int) :- store(P, Q), pt(P, H), pt(Q, Z).
-Rule added to view 'pt' (2 rules total).
-> view pt(X: int, Z: int) :- load(X, P), pt(P, H), pt(H, Z).
-Rule added to view 'pt' (3 rules total).
+> +pt(X, H) :- alloc(X, H).
+Rule 'pt' registered.
+> +pt(H, Z) :- store(P, Q), pt(P, H), pt(Q, Z).
+Rule added to 'pt' (2 rules total).
+> +pt(X, Z) :- load(X, P), pt(P, H), pt(H, Z).
+Rule added to 'pt' (3 rules total).
 > ?- pt(X, Y).
 2 rows:
   (1, 101)
@@ -26,4 +25,3 @@ Rule added to view 'pt' (3 rules total).
 Switched to database: default
 > .db drop test_points_to
 Database 'test_points_to' dropped.
-

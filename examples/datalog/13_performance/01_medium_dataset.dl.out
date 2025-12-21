@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/01_medium_dataset.dl
+Executing script: examples/datalog/13_performance/01_medium_dataset.dl
 
 > .db create test_perf_med
 Database 'test_perf_med' created.
@@ -59,8 +58,8 @@ Inserted 49 facts into 'edge'.
   (47, 48)
   (48, 49)
   (49, 50)
-> view two_hop(X: int, Z: int) :- edge(X, Y), edge(Y, Z).
-View 'two_hop' registered.
+> +two_hop(X, Z) :- edge(X, Y), edge(Y, Z).
+Rule 'two_hop' registered.
 > ?- two_hop(1, Z).
 1 rows:
   (1, 3)
@@ -68,4 +67,3 @@ View 'two_hop' registered.
 Switched to database: default
 > .db drop test_perf_med
 Database 'test_perf_med' dropped.
-

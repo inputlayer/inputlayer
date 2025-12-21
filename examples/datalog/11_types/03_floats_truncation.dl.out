@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/11_types/03_floats_truncation.dl
+Executing script: examples/datalog/11_types/03_floats_truncation.dl
 
 > .db create test_float
 Database 'test_float' created.
@@ -19,12 +18,11 @@ Inserted 2 facts into 'negfloat'.
 2 rows:
   (-3.1, -4.8)
   (-1.5, -2.9)
-> view large(X: int, Y: int) :- values(X, Y), X > 2.
-View 'large' registered.
+> +large(X, Y) :- values(X, Y), X > 2.
+Rule 'large' registered.
 > ?- large(X, Y).
 No results.
 > .db use default
 Switched to database: default
 > .db drop test_float
 Database 'test_float' dropped.
-

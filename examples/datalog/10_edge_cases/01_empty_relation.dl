@@ -9,7 +9,7 @@
 // Actually, just query a non-existent relation
 
 // Define a view over empty base relation
-view empty_view(X: int, Y: int) :- nonexistent(X, Y).
++empty_view(X, Y) :- nonexistent(X, Y).
 
 // Query the view (should be empty)
 ?- empty_view(X, Y).

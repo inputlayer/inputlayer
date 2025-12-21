@@ -15,8 +15,8 @@
 +excluded[(102), (203), (301)].
 
 // Count active (non-excluded) employees per department
-view active_employee(Dept: int, Emp: int, Sal: int) :- employees(Dept, Emp, Sal), !excluded(Emp).
-view active_count(Dept: int, count<Emp>: int) :- active_employee(Dept, Emp, _).
++active_employee(Dept, Emp, Sal) :- employees(Dept, Emp, Sal), !excluded(Emp).
++active_count(Dept, count<Emp>) :- active_employee(Dept, Emp, _).
 
 ?- active_employee(D, E, S).
 ?- active_count(D, C).
@@ -24,15 +24,15 @@ view active_count(Dept: int, count<Emp>: int) :- active_employee(Dept, Emp, _).
 // Expected active_count: Dept 1: 2 (101,103), Dept 2: 2 (201,202), Dept 3: 1 (302)
 
 // Sum of salaries for non-excluded employees
-view active_salary_sum(Dept: int, sum<Sal>: int) :- active_employee(Dept, _, Sal).
++active_salary_sum(Dept, sum<Sal>) :- active_employee(Dept, _, Sal).
 ?- active_salary_sum(D, S).
 
 // Average salary of non-excluded employees
-view active_salary_avg(Dept: int, avg<Sal>: int) :- active_employee(Dept, _, Sal).
++active_salary_avg(Dept, avg<Sal>) :- active_employee(Dept, _, Sal).
 ?- active_salary_avg(D, A).
 
 // Compare: all employees vs active employees
-view all_count(Dept: int, count<Emp>: int) :- employees(Dept, Emp, _).
++all_count(Dept, count<Emp>) :- employees(Dept, Emp, _).
 ?- all_count(D, C).
 
 // Cleanup

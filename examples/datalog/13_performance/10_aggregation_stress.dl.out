@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/13_performance/10_aggregation_stress.dl
+Executing script: examples/datalog/13_performance/10_aggregation_stress.dl
 
 > .db create test_agg_stress
 Database 'test_agg_stress' created.
@@ -8,77 +7,5 @@ Switched to database: test_agg_stress
 Switched to database: test_agg_stress
 > +sales[(1, 100, 10), (1, 101, 20), (1, 102, 15), (1, 103, 25), (1, 104, 30), (2, 100, 12), (2, 101, 22), (2, 102, 18), (2, 103, 28), (2, 104, 35), (3, 100, 8), (3, 101, 18), (3, 102, 12), (3, 103, 22), (3, 104, 28), (4, 100, 15), (4, 101, 25), (4, 102, 20), (4, 103, 30), (4, 104, 40), (5, 100, 11), (5, 101, 21), (5, 102, 16), (5, 103, 26), (5, 104, 32)].
 Inserted 25 facts into 'sales'.
-> view store_count(Store: int, count<Product>: int) :- sales(Store, Product, _).
-View 'store_count' registered.
-> view store_sum(Store: int, sum<Amount>: int) :- sales(Store, _, Amount).
-View 'store_sum' registered.
-> view store_avg(Store: int, avg<Amount>: int) :- sales(Store, _, Amount).
-View 'store_avg' registered.
-> view store_min(Store: int, min<Amount>: int) :- sales(Store, _, Amount).
-View 'store_min' registered.
-> view store_max(Store: int, max<Amount>: int) :- sales(Store, _, Amount).
-View 'store_max' registered.
-> ?- store_count(S, C).
-5 rows:
-  (1, 5)
-  (2, 5)
-  (3, 5)
-  (4, 5)
-  (5, 5)
-> ?- store_sum(S, T).
-5 rows:
-  (1, 100)
-  (2, 115)
-  (3, 88)
-  (4, 130)
-  (5, 106)
-> ?- store_avg(S, A).
-5 rows:
-  (1, 20)
-  (2, 23)
-  (3, 17.6)
-  (4, 26)
-  (5, 21.2)
-> ?- store_min(S, M).
-5 rows:
-  (1, 10)
-  (2, 12)
-  (3, 8)
-  (4, 15)
-  (5, 11)
-> ?- store_max(S, M).
-5 rows:
-  (1, 30)
-  (2, 35)
-  (3, 28)
-  (4, 40)
-  (5, 32)
-> view product_total(Product: int, sum<Amount>: int) :- sales(_, Product, Amount).
-View 'product_total' registered.
-> ?- product_total(P, T).
-5 rows:
-  (100, 56)
-  (101, 106)
-  (102, 81)
-  (103, 131)
-  (104, 165)
-> view total_sales(sum<A>: int) :- sales(_, _, A).
-View 'total_sales' registered.
-> view avg_sale(avg<A>: int) :- sales(_, _, A).
-View 'avg_sale' registered.
-> ?- total_sales(T).
-1 rows:
-  (539)
-> ?- avg_sale(A).
-1 rows:
-  (21.56)
-> view max_store_total(max<T>: int) :- store_sum(_, T).
-View 'max_store_total' registered.
-> ?- max_store_total(M).
-1 rows:
-  (130)
-> .db use default
-Switched to database: default
-> .db drop test_agg_stress
-Database 'test_agg_stress' dropped.
-
+> +store_count(Store, count<Product>) :- sales(Store, Product, _).
+Script error: Line 16: Parse error: Invalid term: 'count<Product>'

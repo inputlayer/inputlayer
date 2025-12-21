@@ -1,5 +1,4 @@
-
-Executing script: /Users/samuel.picek/InputLayer/FlowLog/course/final-project/examples/datalog/15_arithmetic/03_subtract.dl
+Executing script: examples/datalog/15_arithmetic/03_subtract.dl
 
 > .db create test_arith_sub
 Database 'test_arith_sub' created.
@@ -24,4 +23,3 @@ Switched to database: default
 (Cleared 1 session rule(s))
 > .db drop test_arith_sub
 Database 'test_arith_sub' dropped.
-

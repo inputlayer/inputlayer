@@ -2,15 +2,15 @@
 //!
 //! Tests for:
 //! - Statement parser integration
-//! - View catalog operations
+//! - Rule catalog operations
 //! - REPL statement handling
-//! - RPC view operations
+//! - RPC rule operations
 
 use inputlayer::{
     statement::{
-        parse_statement, parse_view_definition, DeletePattern, MetaCommand, Statement,
+        parse_statement, parse_rule_definition, DeletePattern, MetaCommand, Statement,
     },
-    Config, StorageEngine, ViewCatalog,
+    Config, StorageEngine, RuleCatalog,
 };
 use tempfile::TempDir;
 
@@ -61,19 +61,19 @@ fn test_parse_meta_commands() {
         Statement::Meta(MetaCommand::RelDescribe(name)) if name == "edge"
     ));
 
-    // View commands
-    assert!(matches!(parse_statement(".view").unwrap(), Statement::Meta(MetaCommand::ViewList)));
+    // Rule commands
+    assert!(matches!(parse_statement(".rule").unwrap(), Statement::Meta(MetaCommand::RuleList)));
     assert!(matches!(
-        parse_statement(".view path").unwrap(),
-        Statement::Meta(MetaCommand::ViewQuery(name)) if name == "path"
+        parse_statement(".rule path").unwrap(),
+        Statement::Meta(MetaCommand::RuleQuery(name)) if name == "path"
     ));
     assert!(matches!(
-        parse_statement(".view def path").unwrap(),
-        Statement::Meta(MetaCommand::ViewDef(name)) if name == "path"
+        parse_statement(".rule def path").unwrap(),
+        Statement::Meta(MetaCommand::RuleShowDef(name)) if name == "path"
     ));
     assert!(matches!(
-        parse_statement(".view drop path").unwrap(),
-        Statement::Meta(MetaCommand::ViewDrop(name)) if name == "path"
+        parse_statement(".rule drop path").unwrap(),
+        Statement::Meta(MetaCommand::RuleDrop(name)) if name == "path"
     ));
 
     // System commands
@@ -127,21 +127,21 @@ fn test_parse_delete_operations() {
 }
 
 #[test]
-fn test_parse_view_definition() {
-    // Simple view
-    let stmt = parse_statement("view path(x: int, y: int) :- edge(x, y).").unwrap();
-    if let Statement::ViewDecl(def) = stmt {
-        assert_eq!(def.name, "path");
+fn test_parse_persistent_rule() {
+    // Simple persistent rule (new syntax using + prefix)
+    let stmt = parse_statement("+path(X, Y) :- edge(X, Y).").unwrap();
+    if let Statement::PersistentRule(rule) = stmt {
+        assert_eq!(rule.head.relation, "path");
     } else {
-        panic!("Expected View statement");
+        panic!("Expected PersistentRule statement");
     }
 
-    // View with filter
-    let stmt = parse_statement("view adult(n: string, a: int) :- person(n, a), a >= 18.").unwrap();
-    if let Statement::ViewDecl(def) = stmt {
-        assert_eq!(def.name, "adult");
+    // Persistent rule with filter
+    let stmt = parse_statement("+adult(N, A) :- person(N, A), A >= 18.").unwrap();
+    if let Statement::PersistentRule(rule) = stmt {
+        assert_eq!(rule.head.relation, "adult");
     } else {
-        panic!("Expected View statement");
+        panic!("Expected PersistentRule statement");
     }
 }
 
@@ -179,21 +179,21 @@ fn test_parse_update_operation() {
 }
 
 #[test]
-fn test_parse_view_definition_function() {
-    let view_def = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    assert_eq!(view_def.name, "path");
+fn test_parse_rule_definition_function() {
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    assert_eq!(rule_def.name, "path");
 
-    let rule = view_def.rule.to_rule();
+    let rule = rule_def.rule.to_rule();
     assert_eq!(rule.head.relation, "path");
     assert_eq!(rule.body.len(), 1);
 }
 
 // ============================================================================
-// View Catalog Integration Tests
+// Rule Catalog Integration Tests
 // ============================================================================
 
 #[test]
-fn test_view_catalog_with_storage_engine() {
+fn test_rule_catalog_with_storage_engine() {
     let (mut storage, _temp) = create_test_storage();
 
     // Create database
@@ -203,31 +203,31 @@ fn test_view_catalog_with_storage_engine() {
     // Insert base data
     storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
 
-    // Register a view
-    let view_def = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    storage.register_view(&view_def).unwrap();
+    // Register a rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&rule_def).unwrap();
 
-    // List views
-    let views = storage.list_views().unwrap();
-    assert!(views.contains(&"path".to_string()));
+    // List rules
+    let rules = storage.list_rules().unwrap();
+    assert!(rules.contains(&"path".to_string()));
 
-    // Describe view
-    let desc = storage.describe_view("path").unwrap();
+    // Describe rule
+    let desc = storage.describe_rule("path").unwrap();
     assert!(desc.is_some());
     assert!(desc.unwrap().contains("path"));
 
-    // Execute query using view
-    let results = storage.execute_query_with_views("result(X, Y) :- path(X, Y).").unwrap();
+    // Execute query using rule
+    let results = storage.execute_query_with_rules("result(X, Y) :- path(X, Y).").unwrap();
     assert_eq!(results.len(), 3);
 
-    // Drop view
-    storage.drop_view("path").unwrap();
-    let views = storage.list_views().unwrap();
-    assert!(!views.contains(&"path".to_string()));
+    // Drop rule
+    storage.drop_rule("path").unwrap();
+    let rules = storage.list_rules().unwrap();
+    assert!(!rules.contains(&"path".to_string()));
 }
 
 #[test]
-fn test_recursive_view_definition() {
+fn test_recursive_rule_definition() {
     let (mut storage, _temp) = create_test_storage();
 
     storage.create_database("graph").unwrap();
@@ -236,23 +236,23 @@ fn test_recursive_view_definition() {
     // Insert edges
     storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
 
-    // Register recursive view (two rules)
-    let base_rule = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    storage.register_view(&base_rule).unwrap();
+    // Register recursive rule (two clauses)
+    let base_rule = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&base_rule).unwrap();
 
-    let recursive_rule = parse_view_definition("path(X, Z) := edge(X, Y), path(Y, Z).").unwrap();
-    storage.register_view(&recursive_rule).unwrap();
+    let recursive_rule = parse_rule_definition("path(X, Z) :-edge(X, Y), path(Y, Z).").unwrap();
+    storage.register_rule(&recursive_rule).unwrap();
 
-    // The view should have 2 rules
-    let desc = storage.describe_view("path").unwrap().unwrap();
+    // The rule should have 2 clauses
+    let desc = storage.describe_rule("path").unwrap().unwrap();
     assert!(desc.contains("path"));
 }
 
 #[test]
-fn test_view_persistence() {
+fn test_rule_persistence() {
     let temp = TempDir::new().unwrap();
 
-    // Create storage, add view, save
+    // Create storage, add rule, save
     {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
@@ -260,33 +260,33 @@ fn test_view_persistence() {
         storage.create_database("mydb").unwrap();
         storage.use_database("mydb").unwrap();
 
-        let view_def = parse_view_definition("derived(X) := base(X).").unwrap();
-        storage.register_view(&view_def).unwrap();
+        let rule_def = parse_rule_definition("derived(X) :-base(X).").unwrap();
+        storage.register_rule(&rule_def).unwrap();
 
         storage.save_all().unwrap();
     }
 
-    // Reload storage, view should still exist
+    // Reload storage, rule should still exist
     {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
         storage.use_database("mydb").unwrap();
 
-        let views = storage.list_views().unwrap();
-        assert!(views.contains(&"derived".to_string()));
+        let rules = storage.list_rules().unwrap();
+        assert!(rules.contains(&"derived".to_string()));
     }
 }
 
 #[test]
-fn test_view_catalog_standalone() {
+fn test_rule_catalog_standalone() {
     let temp = TempDir::new().unwrap();
 
-    let mut catalog = ViewCatalog::new(temp.path().to_path_buf()).unwrap();
+    let mut catalog = RuleCatalog::new(temp.path().to_path_buf()).unwrap();
 
-    // Register view
-    let view_def = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    catalog.register_view(&view_def).unwrap();
+    // Register rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    catalog.register_rule(&rule_def).unwrap();
 
     assert!(catalog.exists("path"));
     assert_eq!(catalog.len(), 1);
@@ -297,12 +297,12 @@ fn test_view_catalog_standalone() {
     assert_eq!(rules[0].head.relation, "path");
 
     // Reload and verify persistence
-    let catalog2 = ViewCatalog::new(temp.path().to_path_buf()).unwrap();
+    let catalog2 = RuleCatalog::new(temp.path().to_path_buf()).unwrap();
     assert!(catalog2.exists("path"));
 }
 
 // ============================================================================
-// Storage Engine View Integration Tests
+// Storage Engine Rule Integration Tests
 // ============================================================================
 
 #[test]
@@ -326,7 +326,7 @@ fn test_storage_engine_list_relations() {
 }
 
 #[test]
-fn test_execute_query_with_views() {
+fn test_execute_query_with_rules() {
     let (mut storage, _temp) = create_test_storage();
 
     storage.create_database("test").unwrap();
@@ -335,12 +335,12 @@ fn test_execute_query_with_views() {
     // Insert data
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
-    // Register view
-    let view_def = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    storage.register_view(&view_def).unwrap();
+    // Register rule
+    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&rule_def).unwrap();
 
-    // Query that uses the view
-    let results = storage.execute_query_with_views("result(X, Y) :- path(X, Y).").unwrap();
+    // Query that uses the rule
+    let results = storage.execute_query_with_rules("result(X, Y) :- path(X, Y).").unwrap();
     assert_eq!(results.len(), 2);
 }
 
@@ -370,7 +370,7 @@ fn test_drop_nonexistent_view() {
     storage.create_database("test").unwrap();
     storage.use_database("test").unwrap();
 
-    let result = storage.drop_view("nonexistent");
+    let result = storage.drop_rule("nonexistent");
     assert!(result.is_err());
 }
 
@@ -379,8 +379,8 @@ fn test_view_operations_on_default_database() {
     let (storage, _temp) = create_test_storage();
 
     // StorageEngine creates a "default" database by default
-    // So list_views should succeed even without explicit database creation
-    let result = storage.list_views();
+    // So list_rules should succeed even without explicit database creation
+    let result = storage.list_rules();
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty()); // No views registered yet
 }
@@ -442,11 +442,11 @@ fn test_view_with_constraints() {
     storage.insert("person", vec![(1, 25), (2, 17), (3, 30), (4, 16)]).unwrap();
 
     // Register view with constraint
-    let view_def = parse_view_definition("adult(Id, Age) := person(Id, Age), Age >= 18.").unwrap();
-    storage.register_view(&view_def).unwrap();
+    let view_def = parse_rule_definition("adult(Id, Age) :-person(Id, Age), Age >= 18.").unwrap();
+    storage.register_rule(&view_def).unwrap();
 
     // Query the view
-    let results = storage.execute_query_with_views("result(Id, Age) :- adult(Id, Age).").unwrap();
+    let results = storage.execute_query_with_rules("result(Id, Age) :- adult(Id, Age).").unwrap();
 
     // Should only get people 18 or older (id 1 age 25, id 3 age 30)
     assert_eq!(results.len(), 2);
@@ -463,13 +463,13 @@ fn test_multiple_views() {
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
     // Register multiple views
-    let view1 = parse_view_definition("path(X, Y) := edge(X, Y).").unwrap();
-    storage.register_view(&view1).unwrap();
+    let view1 = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    storage.register_rule(&view1).unwrap();
 
-    let view2 = parse_view_definition("reach(X) := path(1, X).").unwrap();
-    storage.register_view(&view2).unwrap();
+    let view2 = parse_rule_definition("reach(X) :-path(1, X).").unwrap();
+    storage.register_rule(&view2).unwrap();
 
-    let views = storage.list_views().unwrap();
+    let views = storage.list_rules().unwrap();
     assert_eq!(views.len(), 2);
 }
 
@@ -490,7 +490,7 @@ fn test_query_with_constant_first_arg() {
     // Query: ?- parent(1, X). transformed to query with constraint
     // This mimics the client's handle_query transformation
     let results = storage
-        .execute_query_with_views("__query__(_c0, X) :- parent(_c0, X), _c0 = 1.")
+        .execute_query_with_rules("__query__(_c0, X) :- parent(_c0, X), _c0 = 1.")
         .unwrap();
 
     // Should return (1, 2) and (1, 3) - children of parent 1
@@ -511,7 +511,7 @@ fn test_query_with_all_constants() {
 
     // Query: ?- edge(1, 2). transformed to query with constraints
     let results = storage
-        .execute_query_with_views("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 2.")
+        .execute_query_with_rules("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 2.")
         .unwrap();
 
     // Should return (1, 2) since that fact exists
@@ -520,7 +520,7 @@ fn test_query_with_all_constants() {
 
     // Query: ?- edge(1, 99). - fact doesn't exist
     let results = storage
-        .execute_query_with_views("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 99.")
+        .execute_query_with_rules("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 99.")
         .unwrap();
 
     // Should return empty since (1, 99) doesn't exist
@@ -540,7 +540,7 @@ fn test_query_with_constant_on_base_relation() {
 
     // Query: ?- edge(1, X). - find direct edges from 1
     let results = storage
-        .execute_query_with_views("__query__(_c0, X) :- edge(_c0, X), _c0 = 1.")
+        .execute_query_with_rules("__query__(_c0, X) :- edge(_c0, X), _c0 = 1.")
         .unwrap();
 
     // From 1, direct edges are: (1,2), (1,3)
@@ -561,7 +561,7 @@ fn test_query_constant_second_arg() {
 
     // Query: ?- edge(X, 3). - find all sources pointing to 3
     let results = storage
-        .execute_query_with_views("__query__(X, _c1) :- edge(X, _c1), _c1 = 3.")
+        .execute_query_with_rules("__query__(X, _c1) :- edge(X, _c1), _c1 = 3.")
         .unwrap();
 
     // Should return (1, 3) and (2, 3)
