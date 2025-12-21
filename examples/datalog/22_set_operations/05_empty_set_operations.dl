@@ -1,0 +1,31 @@
+% Test: Empty Set Operations
+% Description: Tests set operations involving empty relations
+
+.kg create test_empty_sets_n22t05
+.kg use test_empty_sets_n22t05
+
++nonempty[(1), (2), (3)].
+
+% Declare but don't populate empty
++empty[].
+
+% Union with empty set - should return nonempty
+union_result(X) :- nonempty(X).
+union_result(X) :- empty(X).
+?- union_result(X).
+
+% Intersection with empty set - should return nothing
+inter_result(X) :- nonempty(X), empty(X).
+?- inter_result(X).
+
+% Difference from empty set - should return empty
+diff_empty(X) :- empty(X), !nonempty(X).
+?- diff_empty(X).
+
+% Difference with empty set - should return original
+diff_result(X) :- nonempty(X), !empty(X).
+?- diff_result(X).
+
+% Cleanup
+.kg use default
+.kg drop test_empty_sets_n22t05

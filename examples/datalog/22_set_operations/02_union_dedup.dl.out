@@ -1,0 +1,48 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_dedup_n22t02
+Knowledge graph 'test_union_dedup_n22t02' created.
+Switched to knowledge graph: test_union_dedup_n22t02
+> .kg use test_union_dedup_n22t02
+Switched to knowledge graph: test_union_dedup_n22t02
+> +set_a[(1), (2), (3)].
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(2), (3), (4)].
+Inserted 3 fact(s) into 'set_b'.
+> +union_ab(X) :- set_a(X).
+Rule 'union_ab' registered.
+> +union_ab(X) :- set_b(X).
+Rule 'union_ab' registered.
+> ?- union_ab(X).
+4 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+> +union_count(count<X>) :- union_ab(X).
+Rule 'union_count' registered.
+> ?- union_count(C).
+1 rows:
+  (4)
+> +pairs_a[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'pairs_a'.
+> +pairs_b[(2, 20), (3, 30), (4, 40)].
+Inserted 3 fact(s) into 'pairs_b'.
+> +pair_union(X, Y) :- pairs_a(X, Y).
+Rule 'pair_union' registered.
+> +pair_union(X, Y) :- pairs_b(X, Y).
+Rule 'pair_union' registered.
+> ?- pair_union(X, Y).
+4 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+  (4, 40)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union_dedup_n22t02
+Knowledge graph 'test_union_dedup_n22t02' dropped.
