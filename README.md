@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**The knowledge and reasoning layer for AI systems.**
+**Knowledge and reasoning engine for AI retrieval.**
 
 InputLayer is an incremental engine purpose-built for AI applications - combining vector similarity, graph traversal, and rule-based reasoning in one fast, lightweight service. It's the layer between your data and your AI where retrieval logic, policies, and context assembly live.
 
