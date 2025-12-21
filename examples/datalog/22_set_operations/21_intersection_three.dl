@@ -1,0 +1,16 @@
+% Test: Intersection of three sets
+
+.kg create test_int_three_n22t21
+.kg use test_int_three_n22t21
+
++set1[(1,), (2,), (3,), (4,)].
++set2[(2,), (3,), (4,), (5,)].
++set3[(3,), (4,), (5,), (6,)].
+
+% In all three
+common(X) :- set1(X), set2(X), set3(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_int_three_n22t21
