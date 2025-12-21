@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_containment_n22t25
+Knowledge graph 'test_containment_n22t25' created.
+Switched to knowledge graph: test_containment_n22t25
+> .kg use test_containment_n22t25
+Switched to knowledge graph: test_containment_n22t25
+> +superset[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'superset'.
+> +subset1[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'subset1'.
+> +subset2[(1,), (2,), (6,)].
+Inserted 3 fact(s) into 'subset2'.
+> subset1_not_in_super(X) :- subset1(X), !superset(X).
+No results.
+(session: 1 rule(s))
+> subset2_not_in_super(X) :- subset2(X), !superset(X).
+1 rows:
+  (6)
+(session: 2 rule(s))
+> ?- subset1_not_in_super(X).
+No results.
+> ?- subset2_not_in_super(X).
+1 rows:
+  (6)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_containment_n22t25
+Knowledge graph 'test_containment_n22t25' dropped.
