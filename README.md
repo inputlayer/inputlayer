@@ -5,7 +5,7 @@
 
 **The knowledge and reasoning layer for AI systems.**
 
-InputLayer is an incremental engine purpose-built for AI applications — combining vector similarity, graph traversal, and rule-based reasoning in one fast, lightweight service. It's the layer between your data and your AI where retrieval logic, policies, and context assembly live.
+InputLayer is an incremental engine purpose-built for AI applications - combining vector similarity, graph traversal, and rule-based reasoning in one fast, lightweight service. It's the layer between your data and your AI where retrieval logic, policies, and context assembly live.
 
 ## AI Retrieval is a Reasoning Problem
 
@@ -19,9 +19,9 @@ Real retrieval requires reasoning:
 
 This isn't filtering. It's inference.
 
-Take "who are the experts on topic X?" There's no experts table to query. Instead: Alice authored a paper, that paper's embedding is similar to topic X, so Alice is an expert. Bob co-authored with Alice, so Bob inherits partial expertise. These facts—`expert(Alice, X, 0.9)` and `expert(Bob, X, 0.6)`—were never stored. They were derived by combining authorship, embeddings, and co-author relationships. And when Alice publishes a new paper or Bob joins a new collaboration, the derived expertise scores update automatically.
+Take "who are the experts on topic X?" There's no experts table to query. Instead: Alice authored a paper, that paper's embedding is similar to topic X, so Alice is an expert. Bob co-authored with Alice, so Bob inherits partial expertise. These facts-`expert(Alice, X, 0.9)` and `expert(Bob, X, 0.6)`-were never stored. They were derived by combining authorship, embeddings, and co-author relationships. And when Alice publishes a new paper or Bob joins a new collaboration, the derived expertise scores update automatically.
 
-```datalog
+```prolog
 +expert(Person, Topic, Score) :-
     authored(Person, Paper),
     similar(Paper, Topic, Score),
@@ -45,7 +45,7 @@ That's inference: new facts derived from rules over existing facts, kept current
 
 Similarity search isn't an afterthought - it's built into the core:
 
-```datalog
+```prolog
 +relevant(DocId, Score) :-
     embeddings(DocId, Vec),
     query_embedding(Q),
@@ -53,13 +53,13 @@ Similarity search isn't an afterthought - it's built into the core:
     Score > 0.7.
 ```
 
-Combine similarity with any other logic—filtering, ranking, access control—in the same query.
+Combine similarity with any other logic-filtering, ranking, access control-in the same query.
 
 ### Natural Graph Recursion
 
 AI systems need to traverse relationships: org charts, knowledge graphs, dependency chains, reasoning paths. Recursion is natural, not awkward CTEs:
 
-```datalog
+```prolog
 // Transitive closure - who can Alice reach through her network?
 +reachable(A, B) :- knows(A, B).
 +reachable(A, C) :- reachable(A, B), knows(B, C).
@@ -75,7 +75,7 @@ AI systems need to traverse relationships: org charts, knowledge graphs, depende
 
 Express policies and constraints as logical rules. The system infers what follows:
 
-```datalog
+```prolog
 // Policy: users can access docs if they're in an allowed group
 +can_access(User, Doc) :-
     user_group(User, Group),
@@ -89,7 +89,7 @@ Express policies and constraints as logical rules. The system infers what follow
 // The engine figures out what each user can access
 ```
 
-This isn't SQL transforms—it's logic programming with incremental maintenance.
+This isn't SQL transforms - it's logic programming with incremental maintenance.
 
 ### Lightweight and Fast
 
@@ -103,7 +103,7 @@ Single binary, starts in seconds, no cluster required. Deploy as a sidecar next 
 
 When retrieval is more than "find similar vectors":
 
-```datalog
+```prolog
 // Combine: similarity + access control + recency + user preferences
 +retrieve(User, Doc, FinalScore) :-
     similar_to_query(Doc, SimScore),
@@ -113,13 +113,13 @@ When retrieval is more than "find similar vectors":
     FinalScore = SimScore * 0.5 + RecencyScore * 0.3 + PrefScore * 0.2.
 ```
 
-All incrementally maintained. When permissions change, when preferences update, when new documents arrive—results stay fresh.
+All incrementally maintained. When permissions change, when preferences update, when new documents arrive, results stay fresh.
 
 ### Agent Context Assembly
 
 Agents need the right context: available tools, relevant memory, applicable constraints. InputLayer assembles this in real-time:
 
-```datalog
+```prolog
 // What tools can this agent use right now?
 +available_tool(Agent, Tool) :-
     agent_capability(Agent, Cap),
@@ -143,7 +143,7 @@ Agents need the right context: available tools, relevant memory, applicable cons
 
 Traverse structured relationships AND rank by semantic similarity:
 
-```datalog
+```prolog
 // Find experts: people connected to the topic through papers they authored
 +expert(Person, Topic, Score) :-
     authored(Person, Paper),
@@ -169,7 +169,7 @@ Every derived fact can be traced back through the rules that produced it. When y
 
 ### 1. Ingest Your Data
 
-```datalog
+```prolog
 // Facts from your systems
 +users[("alice", "engineering"), ("bob", "sales")].
 +documents[(101, "Design Doc", "2024-01-15")].
@@ -179,7 +179,7 @@ Every derived fact can be traced back through the rules that produced it. When y
 
 ### 2. Define Your Logic
 
-```datalog
+```prolog
 // Derived views - incrementally maintained
 +can_access(User, DocId) :-
     users(User, Group),
@@ -193,7 +193,7 @@ Every derived fact can be traced back through the rules that produced it. When y
 
 ### 3. Query in Real-Time
 
-```datalog
+```prolog
 ?- search_results("alice", DocId, Score).
 ```
 
@@ -265,7 +265,7 @@ Building toward a complete AI knowledge layer:
 - Stream processing / analytics → Materialize, Flink
 - Authentication → Auth0, Okta
 
-InputLayer complements your existing stack—it's the reasoning layer, not the storage layer.
+InputLayer complements your existing stack-it's the reasoning layer, not the storage layer.
 
 ---
 

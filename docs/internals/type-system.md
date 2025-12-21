@@ -10,10 +10,10 @@ A program is a sequence of declarations:
 Decl       ::= TypeDecl | RelDecl | RuleDecl | FactDecl
 ```
 
-- `type` — defines **value types** (aliases, refinements, record types)
-- `rel` — defines **relations** (tables) over those value types
-- Facts (`FactDecl`) — provide **base tuples** for relations
-- Rules (`RuleDecl`) — define **derived tuples** for relations
+- `type` - defines **value types** (aliases, refinements, record types)
+- `rel` - defines **relations** (tables) over those value types
+- Facts (`FactDecl`) - provide **base tuples** for relations
+- Rules (`RuleDecl`) - define **derived tuples** for relations
 
 ## 1. Type Declarations (`type`)
 
@@ -370,9 +370,9 @@ All typing information needs to be persisted on a database level. The server imp
 
 To avoid confusion between types and variables:
 
-- **Types**: `UIdent` (capitalized) — `Email`, `User`, `Purchase`
-- **Variables**: `LIdent` (lowercase) — `e`, `u`, `p`, `tags`
-- **Relations**: `LIdent` (lowercase) — `user`, `purchase`, `admin_email`
+- **Types**: `UIdent` (capitalized) - `Email`, `User`, `Purchase`
+- **Variables**: `LIdent` (lowercase) - `e`, `u`, `p`, `tags`
+- **Relations**: `LIdent` (lowercase) - `user`, `purchase`, `admin_email`
 
 ### 7.3 Command vs Keyword Distinction
 
