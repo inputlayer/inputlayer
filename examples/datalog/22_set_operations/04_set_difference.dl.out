@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diff_n22t04
+Knowledge graph 'test_diff_n22t04' created.
+Switched to knowledge graph: test_diff_n22t04
+> .kg use test_diff_n22t04
+Switched to knowledge graph: test_diff_n22t04
+> +set_a[(1), (2), (3), (4), (5)].
+Inserted 5 fact(s) into 'set_a'.
+> +set_b[(2), (4)].
+Inserted 2 fact(s) into 'set_b'.
+> +diff_a_minus_b(X) :- set_a(X), !set_b(X).
+Rule 'diff_a_minus_b' registered.
+> ?- diff_a_minus_b(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> +diff_b_minus_a(X) :- set_b(X), !set_a(X).
+Rule 'diff_b_minus_a' registered.
+> ?- diff_b_minus_a(X).
+No results.
+> +set_c[(3), (4), (5), (6), (7)].
+Inserted 5 fact(s) into 'set_c'.
+> +diff_a_minus_c(X) :- set_a(X), !set_c(X).
+Rule 'diff_a_minus_c' registered.
+> ?- diff_a_minus_c(X).
+2 rows:
+  (1)
+  (2)
+> +set_p[(1), (2), (3)].
+Inserted 3 fact(s) into 'set_p'.
+> +set_q[(2), (3), (4)].
+Inserted 3 fact(s) into 'set_q'.
+> +sym_diff(X) :- set_p(X), !set_q(X).
+Rule 'sym_diff' registered.
+> +sym_diff(X) :- set_q(X), !set_p(X).
+Rule 'sym_diff' registered.
+> ?- sym_diff(X).
+2 rows:
+  (1)
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_diff_n22t04
+Knowledge graph 'test_diff_n22t04' dropped.

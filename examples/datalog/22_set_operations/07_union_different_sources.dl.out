@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_multi_n22t07
+Knowledge graph 'test_union_multi_n22t07' created.
+Switched to knowledge graph: test_union_multi_n22t07
+> .kg use test_union_multi_n22t07
+Switched to knowledge graph: test_union_multi_n22t07
+> +source1[(1, "a"), (2, "b")].
+Inserted 2 fact(s) into 'source1'.
+> +source2[(3, "c"), (4, "d")].
+Inserted 2 fact(s) into 'source2'.
+> +source3[(5, "e"), (1, "a")].
+Inserted 2 fact(s) into 'source3'.
+> +combined(X, Y) :- source1(X, Y).
+Rule 'combined' registered.
+> +combined(X, Y) :- source2(X, Y).
+Rule 'combined' registered.
+> +combined(X, Y) :- source3(X, Y).
+Rule 'combined' registered.
+> ?- combined(X, Y).
+5 rows:
+  (1, "a")
+  (2, "b")
+  (3, "c")
+  (4, "d")
+  (5, "e")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union_multi_n22t07
+Knowledge graph 'test_union_multi_n22t07' dropped.

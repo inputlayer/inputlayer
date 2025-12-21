@@ -1,0 +1,48 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_intersect_n22t03
+Knowledge graph 'test_intersect_n22t03' created.
+Switched to knowledge graph: test_intersect_n22t03
+> .kg use test_intersect_n22t03
+Switched to knowledge graph: test_intersect_n22t03
+> +set_a[(1), (2), (3), (4)].
+Inserted 4 fact(s) into 'set_a'.
+> +set_b[(3), (4), (5), (6)].
+Inserted 4 fact(s) into 'set_b'.
+> +intersection(X) :- set_a(X), set_b(X).
+Rule 'intersection' registered.
+> ?- intersection(X).
+2 rows:
+  (3)
+  (4)
+> +intersect_count(count<X>) :- intersection(X).
+Rule 'intersect_count' registered.
+> ?- intersect_count(C).
+1 rows:
+  (2)
+> +pairs_a[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'pairs_a'.
+> +pairs_b[(2, 20), (3, 30), (4, 40)].
+Inserted 3 fact(s) into 'pairs_b'.
+> +common_pairs(X, Y) :- pairs_a(X, Y), pairs_b(X, Y).
+Rule 'common_pairs' registered.
+> ?- common_pairs(X, Y).
+2 rows:
+  (2, 20)
+  (3, 30)
+> +set_x[(1), (2)].
+Inserted 2 fact(s) into 'set_x'.
+> +set_y[(3), (4)].
+Inserted 2 fact(s) into 'set_y'.
+> +empty_intersect(X) :- set_x(X), set_y(X).
+Rule 'empty_intersect' registered.
+> ?- empty_intersect(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_intersect_n22t03
+Knowledge graph 'test_intersect_n22t03' dropped.
