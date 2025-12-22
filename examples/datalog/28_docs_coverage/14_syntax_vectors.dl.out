@@ -1,0 +1,13 @@
+Executing script: examples/datalog/28_docs_coverage/14_syntax_vectors.dl
+
+> .db create syntax_vectors
+Database 'syntax_vectors' created.
+Switched to database: syntax_vectors
+> .db use syntax_vectors
+Switched to database: syntax_vectors
+> +embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
+Inserted 3 facts into 'embedding'.
+> +point[(1, [0.0, 0.0]), (2, [3.0, 4.0]), (3, [1.0, 1.0])].
+Inserted 3 facts into 'point'.
+> ?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).
+Script error: Line 13: Query execution failed: Unsupported ordering constraint pattern

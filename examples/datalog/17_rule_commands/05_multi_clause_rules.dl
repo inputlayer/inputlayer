@@ -1,0 +1,26 @@
+// Test: Multi-Clause Rules
+// Category: 17_rule_commands
+// Description: Tests rules with multiple clauses and inspecting them
+
+.db create test_multi_clause
+.db use test_multi_clause
+
+// Insert base data
++edge[(1,2), (2,3), (3,4), (4,5)].
+
+// Define a rule with multiple clauses (transitive closure)
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+// List all rules (shows clause count)
+.rule list
+
+// Show definition of multi-clause rule
+.rule def reachable
+
+// Query the rule (shows definition and results)
+.rule reachable
+
+// Cleanup
+.db use default
+.db drop test_multi_clause

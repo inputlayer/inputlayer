@@ -1,0 +1,66 @@
+Executing script: examples/datalog/28_docs_coverage/12_syntax_graph_analysis.dl
+
+> .db create syntax_graph
+Database 'syntax_graph' created.
+Switched to database: syntax_graph
+> .db use syntax_graph
+Switched to database: syntax_graph
+> +edge[(1, 2), (2, 3), (3, 4), (4, 2)].
+Inserted 4 facts into 'edge'.
+> +node[(1), (2), (3), (4), (5)].
+Inserted 5 facts into 'node'.
+> +path(X, Y) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z) :- path(X, Y), edge(Y, Z).
+Rule added to 'path' (2 rules total).
+> ?- path(X, Y).
+12 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (2, 2)
+  (2, 3)
+  (2, 4)
+  (3, 2)
+  (3, 3)
+  (3, 4)
+  (4, 2)
+  (4, 3)
+  (4, 4)
+> +in_cycle(X) :- path(X, X).
+Rule 'in_cycle' registered.
+> ?- in_cycle(X).
+4 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+> +bidir(X, Y) :- edge(X, Y).
+Rule 'bidir' registered.
+> +bidir(X, Y) :- edge(Y, X).
+Rule added to 'bidir' (2 rules total).
+> +connected(X, Y) :- bidir(X, Y).
+Rule 'connected' registered.
+> +connected(X, Z) :- connected(X, Y), bidir(Y, Z).
+Rule added to 'connected' (2 rules total).
+> ?- connected(1, X).
+4 rows:
+  (1, 1)
+  (1, 2)
+  (1, 3)
+  (1, 4)
+> +sink(X) :- node(X), !edge(X, _).
+Rule 'sink' registered.
+> ?- sink(X).
+1 rows:
+  (5)
+> +source(X) :- node(X), !edge(_, X).
+Rule 'source' registered.
+> ?- source(X).
+2 rows:
+  (1)
+  (5)
+> .db use default
+Switched to database: default
+> .db drop syntax_graph
+Database 'syntax_graph' dropped.

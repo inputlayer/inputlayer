@@ -11,7 +11,7 @@ Inserted 3 facts into 'edge'.
 Rule 'connected' registered.
 > +connected(X, Y) :- edge(X, Z), connected(Z, Y).
 Rule added to 'connected' (2 rules total).
-> .view connected
+> .rule connected
 Rule: connected
 Clauses:
   1. connected(X, Y) :- edge(X, Y).

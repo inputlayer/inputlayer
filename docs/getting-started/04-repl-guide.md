@@ -142,20 +142,20 @@ Load and execute Datalog files:
 // Single fact
 -edge(1, 2).
 
-// Conditional delete
--edge(X, Y) :- X > 10.
+// Conditional delete (must reference relation in body)
+-edge(X, Y) :- edge(X, Y), X > 10.
 
 // Delete all from a relation
 -edge(X, Y) :- edge(X, Y).
 ```
 
-### Atomic Updates
+### Updates (Delete then Insert)
 
 ```datalog
-// Delete and insert atomically
--person(Id, OldAge), +person(Id, NewAge) :-
-  person(Id, OldAge),
-  NewAge = OldAge + 1.
+// First delete old value
+-counter(1, 0).
+// Then insert new value
++counter(1, 5).
 ```
 
 ### Persistent Rules (`+head :- body`)
@@ -296,12 +296,18 @@ temp(X) :- complex_query...   // Session rule for analysis
   order(_, UserId, Amount),
   Amount > 1000.
 
-+vip(UserId, TotalSpend) :-
+// Aggregate total spend per customer
++customer_spend(UserId, sum<Amount>) :-
+  order(_, UserId, Amount).
+
+// VIPs have high total spend
++vip(UserId, Total) :-
   high_value_customer(UserId),
-  TotalSpend = sum<Amount> : order(_, UserId, Amount).
+  customer_spend(UserId, Total),
+  Total > 5000.
 
 // Query
-?- vip(User, Spend), Spend > 5000.
+?- vip(User, Spend).
 ```
 
 ### 4. Iterating on Rules

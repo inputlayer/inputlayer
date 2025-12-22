@@ -1,0 +1,35 @@
+Executing script: examples/datalog/28_docs_coverage/10_syntax_recursion.dl
+
+> .db create syntax_recursion
+Database 'syntax_recursion' created.
+Switched to database: syntax_recursion
+> .db use syntax_recursion
+Switched to database: syntax_recursion
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+Inserted 4 facts into 'edge'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule added to 'reachable' (2 rules total).
+> ?- reachable(1, X).
+4 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+> +start(1).
+Inserted 1 fact into 'start'.
+> +odd(X) :- edge(Start, X), start(Start).
+Rule 'odd' registered.
+> +odd(X) :- even(Y), edge(Y, X).
+Rule added to 'odd' (2 rules total).
+> +even(X) :- odd(Y), edge(Y, X).
+Rule 'even' registered.
+> ?- odd(X).
+No results.
+> ?- even(X).
+No results.
+> .db use default
+Switched to database: default
+> .db drop syntax_recursion
+Database 'syntax_recursion' dropped.

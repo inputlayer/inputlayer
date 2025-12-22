@@ -1,0 +1,17 @@
+Executing script: examples/datalog/28_docs_coverage/08_syntax_schemas.dl
+
+> .db create syntax_schemas
+Database 'syntax_schemas' created.
+Switched to database: syntax_schemas
+> .db use syntax_schemas
+Switched to database: syntax_schemas
+> +employee(id: int, name: string, dept: string).
+Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(String))
+> +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
+Inserted 2 facts into 'employee'.
+> ?- employee(Id, Name, Dept).
+2 rows:
+  (1, "alice", "engineering")
+  (2, "bob", "sales")
+> +example( a: int, b: float, c: string, d: vector ).
+Script error: Line 17: Parse error: Unknown base type: 'vector'. Use int, string, bool, float, or a type name.

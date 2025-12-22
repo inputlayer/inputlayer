@@ -1,0 +1,21 @@
+Executing script: examples/datalog/28_docs_coverage/13_syntax_bom.dl
+
+> .db create syntax_bom
+Database 'syntax_bom' created.
+Switched to database: syntax_bom
+> .db use syntax_bom
+Switched to database: syntax_bom
+> +contains[(100, 10, 2), (100, 20, 1), (20, 30, 4), (20, 40, 2)].
+Inserted 4 facts into 'contains'.
+> +requires(Asm, Part) :- contains(Asm, Part, _).
+Rule added to 'requires' (2 rules total).
+> +requires(Asm, Part) :- contains(Asm, Sub, _), requires(Sub, Part).
+Rule added to 'requires' (2 rules total).
+> ?- requires(100, Part).
+4 rows:
+  (100, 10, 2)
+  (100, 20, 1)
+  (100, 30)
+  (100, 40)
+> +total_qty(Asm, Part, sum<Qty>) :- contains(Asm, Part, Qty).
+Script error: Line 20: Parse error: Invalid term: 'sum<Qty>'

@@ -4,8 +4,8 @@
 //! - Meta Commands: `.db`, `.rel`, `.rule`, `.save`, `.status`, `.help`, `.quit`
 //! - Data Manipulation: `+`/`-` operators (DD-native diff model)
 //! - Type Declarations: `type Name: TypeExpr.`
-//! - Relation Declarations: `rel name(col: type, ...).`
-//! - Rules: `:-` operator (persistent if rel exists, query-only otherwise)
+//! - Schema Declarations: `+name(col: type, ...).`
+//! - Rules: `+name(...) :- body.` (persistent) or `name(...) :- body.` (session)
 //! - Queries: `?-` operator
 
 // Submodules

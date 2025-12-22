@@ -31,7 +31,7 @@ cargo --version
 ### Option 1: Install from crates.io (Recommended)
 
 ```bash
-cargo install inputlayer
+cargo install inputlayer --bin inputlayer-client
 ```
 
 This installs the `inputlayer-client` binary to `~/.cargo/bin/`.

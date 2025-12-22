@@ -1,0 +1,33 @@
+// Test: Drop Multi-Clause Rule
+// Category: 17_rule_commands
+// Description: Tests dropping a rule that has multiple clauses
+
+.db create test_drop_multi
+.db use test_drop_multi
+
+// Insert base data
++edge[(1,2), (2,3), (3,4)].
+
+// Define multiple rules, one with multiple clauses
++simple(X, Y) :- edge(Y, X).
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+// List all rules before drop
+.rule list
+
+// Query reachable before drop
+?- reachable(1, Y).
+
+// Drop the multi-clause rule
+.rule drop reachable
+
+// List rules after drop (only simple remains)
+.rule list
+
+// Verify reachable is gone - should error or return empty
+?- reachable(1, Y).
+
+// Cleanup
+.db use default
+.db drop test_drop_multi

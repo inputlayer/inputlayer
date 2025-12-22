@@ -33,9 +33,7 @@ This directory contains 186 snapshot tests for the InputLayer Datalog engine. Ea
 |-----------|-------------|-------|
 | `01_database/` | Database create, use, drop commands | 1 |
 | `02_relations/` | Insert and delete operations | 6 |
-| `03_views/` | Basic view definitions | 1 |
 | `04_session/` | Session-scoped rules | 1 |
-| `05_queries/` | Query execution | 1 |
 | `06_joins/` | Two-way, self, and multi-way joins | 5 |
 | `07_filters/` | Equality, inequality, comparisons | 4 |
 | `08_negation/` | Negation patterns | 27 |
@@ -47,11 +45,11 @@ This directory contains 186 snapshot tests for the InputLayer Datalog engine. Ea
 | `14_aggregations/` | count, sum, min, max, avg | 16 |
 | `15_arithmetic/` | Arithmetic in rule heads | 17 |
 | `16_vectors/` | Vector distance functions | 5 |
-| `17_view_commands/` | View list, describe, drop, def | 4 |
+| `17_rule_commands/` | Rule list, query, drop, def, clear, edit | 8 |
 | `18_advanced_patterns/` | Graph algorithms, complex patterns | 12 |
 | `19_self_checking/` | Tests with embedded assertions | 4 |
 | `20_applications/` | Real-world use cases (RBAC, graphs) | 10 |
-| `21_query_features/` | Distinct, projection, selection | 5 |
+| `21_query_features/` | Scan, distinct, projection, selection | 6 |
 | `22_set_operations/` | Union, intersection, difference | 4 |
 | `23_type_declarations/` | Type aliases and record types | 3 |
 | `24_rel_schemas/` | Relation schema declarations | 3 |

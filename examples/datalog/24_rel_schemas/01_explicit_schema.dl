@@ -1,13 +1,13 @@
 // Test: Explicit Relation Schema
 // Category: Rel Schemas
-// Description: Tests explicit rel schema declaration with column types
+// Description: Tests explicit schema declaration with column types using + prefix
 
 .db create test_rel_schema
 .db use test_rel_schema
 
-// Declare relation schema explicitly
-rel employee(emp_id: int, name: string, dept_id: int).
-rel department(dept_id: int, dept_name: string).
+// Declare relation schema explicitly using + prefix
++employee(emp_id: int, name: string, dept_id: int).
++department(dept_id: int, dept_name: string).
 
 // Insert employees
 +employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)].

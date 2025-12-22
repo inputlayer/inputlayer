@@ -1,5 +1,5 @@
 // Test: Scan All Query
-// Category: 05_queries
+// Category: 21_query_features
 // Description: Tests querying all tuples from a relation
 
 .db create test_scan

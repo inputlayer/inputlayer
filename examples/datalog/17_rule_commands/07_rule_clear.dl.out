@@ -1,0 +1,40 @@
+Executing script: examples/datalog/17_rule_commands/07_rule_clear.dl
+
+> .db create test_rule_clear
+Database 'test_rule_clear' created.
+Switched to database: test_rule_clear
+> .db use test_rule_clear
+Switched to database: test_rule_clear
+> +edge[(1,2), (2,3), (3,4)].
+Inserted 3 facts into 'edge'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+Rule added to 'reachable' (2 rules total).
+> .rule def reachable
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) :- edge(X, Y).
+  2. reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+> .rule clear reachable
+Rule 'reachable' cleared. You can now re-register with +reachable(...) :- ...
+> .rule list
+Rules:
+  reachable
+> +reachable(X, Y) :- edge(X, Y).
+Rule added to 'reachable' (1 rules total).
+> .rule def reachable
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) :- edge(X, Y).
+
+> ?- reachable(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> .db use default
+Switched to database: default
+> .db drop test_rule_clear
+Database 'test_rule_clear' dropped.

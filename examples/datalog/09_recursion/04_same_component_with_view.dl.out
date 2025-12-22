@@ -13,7 +13,7 @@ Rule 'same_component' registered.
 Rule added to 'same_component' (2 rules total).
 > +same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
 Rule added to 'same_component' (3 rules total).
-> .view same_component
+> .rule same_component
 Rule: same_component
 Clauses:
   1. same_component(X, Y) :- edge(X, Y).

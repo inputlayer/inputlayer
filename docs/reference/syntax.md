@@ -245,48 +245,28 @@ Define typed schemas for relations.
 
 ### Built-in Functions
 
-**String functions:**
-```datalog
-+upper_name(upper(Name)) :- person(Name, _).
-+lower_name(lower(Name)) :- person(Name, _).
-+name_length(strlen(Name)) :- person(Name, _).
-+combined(concat(First, Last)) :- name(First, Last).
-+has_prefix(Name) :- person(Name, _), starts_with(Name, "A").
-+has_suffix(Name) :- person(Name, _), ends_with(Name, "son").
-+contains_text(Name) :- person(Name, _), contains(Name, "ali").
-```
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `upper(s)` | Uppercase | `upper("hi")` → `"HI"` |
-| `lower(s)` | Lowercase | `lower("HI")` → `"hi"` |
-| `strlen(s)` | Length | `strlen("hi")` → `2` |
-| `concat(a, b)` | Concatenate | `concat("a", "b")` → `"ab"` |
-| `starts_with(s, p)` | Prefix check | Boolean |
-| `ends_with(s, p)` | Suffix check | Boolean |
-| `contains(s, p)` | Contains check | Boolean |
-| `substr(s, start, len)` | Substring | Extract portion |
-
-**Math functions:**
-```datalog
-+abs_value(abs(X)) :- number(X).
-+square(X * X) :- number(X).
-```
-
-| Function | Description |
-|----------|-------------|
-| `abs(n)` | Absolute value |
-
 **Vector functions:**
+
+InputLayer provides built-in vector distance and similarity functions:
+
 ```datalog
-+similarity(cosine(V1, V2)) :- embedding(Id1, V1), embedding(Id2, V2).
-+distance(euclidean(V1, V2)) :- point(Id1, V1), point(Id2, V2).
+// Compute cosine similarity between embeddings
+?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2,
+   Sim = cosine(V1, V2), Sim > 0.9.
+
+// Compute Euclidean distance between points
+?- point(Id1, V1), point(Id2, V2), Id1 < Id2,
+   Dist = euclidean(V1, V2), Dist < 1.0.
 ```
 
 | Function | Description |
 |----------|-------------|
-| `cosine(v1, v2)` | Cosine similarity |
 | `euclidean(v1, v2)` | Euclidean distance |
+| `cosine(v1, v2)` | Cosine similarity |
+| `dot(v1, v2)` | Dot product |
+| `manhattan(v1, v2)` | Manhattan distance |
+
+**Note**: Vector functions are used in query bodies (filters/constraints), not in rule heads.
 
 ## Aggregations
 

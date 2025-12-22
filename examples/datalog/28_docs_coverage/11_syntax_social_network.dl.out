@@ -1,0 +1,19 @@
+Executing script: examples/datalog/28_docs_coverage/11_syntax_social_network.dl
+
+> .db create syntax_social
+Database 'syntax_social' created.
+Switched to database: syntax_social
+> .db use syntax_social
+Switched to database: syntax_social
+> +person(id: int, name: string, age: int).
+Persistent schema 'person' declared: (id: Base(Int), name: Base(String), age: Base(Int))
+> +follows(follower: int, followed: int).
+Persistent schema 'follows' declared: (follower: Base(Int), followed: Base(Int))
+> +person[(1, "alice", 30), (2, "bob", 25), (3, "carol", 35)].
+Inserted 3 facts into 'person'.
+> +follows[(1, 2), (2, 3), (1, 3), (2, 1)].
+Inserted 4 facts into 'follows'.
+> +mutual_follow(A, B) :- follows(A, B), follows(B, A), A < B.
+Rule added to 'mutual_follow' (1 rules total).
+> ?- mutual_follow(A, B).
+Script error: Line 23: Query execution failed: Unsupported ordering constraint pattern

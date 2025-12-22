@@ -1,13 +1,13 @@
 // Test: Schema with Derived Views
 // Category: Rel Schemas
-// Description: Tests rel schemas combined with materialized views
+// Description: Tests schemas combined with materialized views
 
 .db create test_schema_views
 .db use test_schema_views
 
-// Base relation schemas
-rel orders(order_id: int, customer_id: int, amount: int).
-rel customers(customer_id: int, name: string).
+// Base relation schemas using + prefix
++orders(order_id: int, customer_id: int, amount: int).
++customers(customer_id: int, name: string).
 
 // Insert orders
 +orders[(1, 100, 500), (2, 100, 300), (3, 200, 1500), (4, 200, 200)].

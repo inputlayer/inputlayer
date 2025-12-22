@@ -1,0 +1,17 @@
+Executing script: examples/datalog/28_docs_coverage/04_cheatsheet_aggregations.dl
+
+> .db create cheatsheet_agg
+Database 'cheatsheet_agg' created.
+Switched to database: cheatsheet_agg
+> .db use cheatsheet_agg
+Switched to database: cheatsheet_agg
+> +sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)].
+Inserted 3 facts into 'sales'.
+> +employee[(1, "engineering"), (2, "engineering"), (3, "sales"), (4, "engineering")].
+Inserted 4 facts into 'employee'.
+> +person[("alice", 30), ("bob", 25), ("carol", 35), ("dave", 28)].
+Inserted 4 facts into 'person'.
+> +test_results[("alice", 85), ("bob", 90), ("carol", 78)].
+Inserted 3 facts into 'test_results'.
+> +total_sales(Dept, sum<Amount>) :- sales(Dept, _, Amount).
+Script error: Line 17: Parse error: Invalid term: 'sum<Amount>'

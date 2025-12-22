@@ -1,6 +1,6 @@
-// Test: Connected with View Inspection
+// Test: Connected with Rule Inspection
 // Category: 09_recursion
-// Description: Tests transitive closure with .view command
+// Description: Tests transitive closure with .rule command
 
 .db create test_conn
 .db use test_conn
@@ -12,8 +12,8 @@
 +connected(X, Y) :- edge(X, Y).
 +connected(X, Y) :- edge(X, Z), connected(Z, Y).
 
-// Inspect the view (shows rules and computed results)
-.view connected
+// Inspect the rule (shows rules and computed results)
+.rule connected
 
 // Query: Is node 1 connected to node 3?
 ?- connected(1, 3).

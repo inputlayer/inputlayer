@@ -5,5 +5,13 @@ Database 'test_schema_views' created.
 Switched to database: test_schema_views
 > .db use test_schema_views
 Switched to database: test_schema_views
-> rel orders(order_id: int, customer_id: int, amount: int).
-Script error: Line 9: Parse error: Invalid relation name: 'rel orders'
+> +orders(order_id: int, customer_id: int, amount: int).
+Persistent schema 'orders' declared: (order_id: Base(Int), customer_id: Base(Int), amount: Base(Int))
+> +customers(customer_id: int, name: string).
+Persistent schema 'customers' declared: (customer_id: Base(Int), name: Base(String))
+> +orders[(1, 100, 500), (2, 100, 300), (3, 200, 1500), (4, 200, 200)].
+Inserted 4 facts into 'orders'.
+> +customers[(100, "Acme Corp"), (200, "Widgets Inc")].
+Inserted 2 facts into 'customers'.
+> +customer_total(CustId, sum<Amount>) :- orders(_, CustId, Amount).
+Script error: Line 19: Parse error: Invalid term: 'sum<Amount>'

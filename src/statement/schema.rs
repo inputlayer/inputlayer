@@ -140,7 +140,7 @@ fn validate_column_name(col_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Parse relation columns from the inside of rel name(...)
+/// Parse relation columns from inside a schema declaration: +name(col: type, ...)
 /// Supports annotations: `name: type @key @unique`
 fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
     let mut columns = Vec::new();

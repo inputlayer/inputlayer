@@ -279,17 +279,6 @@ Merge with existing definitions.
 | Extension | Description |
 |-----------|-------------|
 | `.dl` | Datalog script (statements) |
-| `.json` | JSON data (requires `as <name>`) |
-| `.parquet` | Parquet files (requires `as <name>`) |
-
-### Loading External Data
-
-```
-.load users.json as user
-.load sales.parquet as sale
-```
-
-Schema is inferred from the file structure.
 
 ## System Commands
 

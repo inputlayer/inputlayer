@@ -1,0 +1,43 @@
+// Test: Cheatsheet Basic Operations
+// Category: docs_coverage
+// Description: Tests examples from docs/cheatsheet.md - basic operations
+
+.db create cheatsheet_basics
+.db use cheatsheet_basics
+
+// === Insert Facts (from cheatsheet) ===
+
+// Single fact
++edge(1, 2).
+
+// Bulk insert
++edge[(2, 3), (3, 4), (4, 5)].
+
+// Query to verify
+?- edge(X, Y).
+
+// === Delete Facts ===
+
+// Single fact delete
+-edge(4, 5).
+
+?- edge(X, Y).
+
+// Conditional delete (must reference relation in body)
+-edge(X, Y) :- edge(X, Y), X > 2.
+
+?- edge(X, Y).
+
+// === Updates (Delete then Insert) ===
++counter[(1, 0), (2, 10)].
+
+// Delete old value
+-counter(1, 0).
+// Insert new value
++counter(1, 5).
+
+?- counter(Id, Val).
+
+// Cleanup
+.db use default
+.db drop cheatsheet_basics

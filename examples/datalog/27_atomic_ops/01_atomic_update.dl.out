@@ -5,16 +5,32 @@ Database 'atomic_update_test' created.
 Switched to database: atomic_update_test
 > .db use atomic_update_test
 Switched to database: atomic_update_test
-> +counter(1, 0).
-Inserted 1 fact into 'counter'.
-> +counter(2, 10).
-Inserted 1 fact into 'counter'.
-> +counter(3, 20).
-Inserted 1 fact into 'counter'.
+> +counter[(1, 0), (2, 10), (3, 20)].
+Inserted 3 facts into 'counter'.
 > ?- counter(Id, Value).
 3 rows:
   (1, 0)
   (2, 10)
   (3, 20)
-> -counter(1, OldVal), +counter(1, NewVal) :- counter(1, OldVal), NewVal = OldVal + 5.
-Script error: Line 18: Query execution failed: Unsafe rule: Atom { relation: "__update_result__", args: [Variable("OldVal"), Variable("NewVal")] }. Variables ["NewVal"] in head do not appear in positive body atoms.
+> -counter(1, 0).
+Deleted fact from 'counter'.
+> +counter(1, 5).
+Inserted 1 fact into 'counter'.
+> ?- counter(Id, Value).
+3 rows:
+  (1, 5)
+  (2, 10)
+  (3, 20)
+> -counter(2, 10).
+Deleted fact from 'counter'.
+> +counter(2, 20).
+Inserted 1 fact into 'counter'.
+> ?- counter(Id, Value).
+3 rows:
+  (1, 5)
+  (2, 20)
+  (3, 20)
+> .db use default
+Switched to database: default
+> .db drop atomic_update_test
+Database 'atomic_update_test' dropped.

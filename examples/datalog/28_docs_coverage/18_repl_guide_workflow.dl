@@ -1,0 +1,42 @@
+// Test: REPL Guide Common Workflows
+// Category: docs_coverage
+// Description: Tests workflow examples from docs/getting-started/04-repl-guide.md
+
+.db create repl_workflow
+.db use repl_workflow
+
+// === Building Business Rules Example ===
+
+// Define schemas
++user(id: int, name: string).
++order(id: int, user_id: int, amount: float).
+
+// Load data
++user[(1, "alice"), (2, "bob"), (3, "carol")].
++order[(101, 1, 1500.0), (102, 1, 800.0), (103, 2, 200.0), (104, 1, 2000.0)].
+
+// Define persistent rules
++high_value_customer(UserId) :-
+  order(_, UserId, Amount),
+  Amount > 1000.
+
+?- high_value_customer(UserId).
+
+// Aggregate total spend per customer
++customer_spend(UserId, sum<Amount>) :-
+  order(_, UserId, Amount).
+
+?- customer_spend(UserId, Total).
+
+// VIPs have high total spend
++vip(UserId, Total) :-
+  high_value_customer(UserId),
+  customer_spend(UserId, Total),
+  Total > 3000.
+
+?- vip(User, Spend).
+
+// Cleanup
+.db use default
+.db drop repl_workflow
+

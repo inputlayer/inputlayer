@@ -10,8 +10,8 @@ type Email: string.
 type UserId: int.
 type Score: int.
 
-// Use types in a rel schema
-rel users(id: UserId, email: Email, score: Score).
+// Use types in schema with + prefix
++users(id: UserId, email: Email, score: Score).
 
 // Insert data
 +users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)].

@@ -7,5 +7,16 @@ Switched to database: test_record_type
 Switched to database: test_record_type
 > type User: { id: int, name: string }.
 Type 'User' declared.
-> rel user: User.
-Script error: Line 12: Parse error: Unrecognized statement: rel user: User.
+> +user(id: int, name: string).
+Persistent schema 'user' declared: (id: Base(Int), name: Base(String))
+> +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")].
+Inserted 3 facts into 'user'.
+> ?- user(X, Y).
+3 rows:
+  (1, "Alice")
+  (2, "Bob")
+  (3, "Charlie")
+> .db use default
+Switched to database: default
+> .db drop test_record_type
+Database 'test_record_type' dropped.

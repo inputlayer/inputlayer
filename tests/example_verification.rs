@@ -45,9 +45,7 @@ fn test_all_datalog_examples_present() {
     let expected_categories = vec![
         "01_database",
         "02_relations",
-        "03_views",
         "04_session",
-        "05_queries",
         "06_joins",
         "07_filters",
         "08_negation",
@@ -195,13 +193,6 @@ fn test_relations_tests() {
     let dir = Path::new("examples/datalog/02_relations");
     let files = find_dl_files(dir);
     assert!(files.len() >= 3, "02_relations should have at least 3 tests (insert, bulk, delete)");
-}
-
-#[test]
-fn test_views_tests() {
-    let dir = Path::new("examples/datalog/03_views");
-    let files = find_dl_files(dir);
-    assert!(!files.is_empty(), "03_views should have at least one test");
 }
 
 #[test]

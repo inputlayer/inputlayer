@@ -27,7 +27,7 @@ Rule added to 'reachable' (2 rules total).
   (3, 4)
 > -reachable.
 Rule 'reachable' deleted.
-> .view
+> .rule
 No rules defined.
 > .db use default
 Switched to database: default

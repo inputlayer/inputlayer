@@ -57,7 +57,7 @@ Or use the snapshot test runner:
 
 | Example | What You'll Learn |
 |---------|-------------------|
-| `05_queries/01_scan_all.dl` | Querying all data from a relation |
+| `21_query_features/00_scan_all.dl` | Querying all data from a relation |
 
 **Key Concepts**:
 - `?- relation(X, Y).` - Query with variables
@@ -86,7 +86,6 @@ Or use the snapshot test runner:
 
 | Example | What You'll Learn |
 |---------|-------------------|
-| `03_views/01_simple_view.dl` | Basic persistent rule |
 | `25_unified_prefix/02_persistent_rules.dl` | The `+` prefix for persistence |
 
 **Key Concepts**:
@@ -97,18 +96,24 @@ Or use the snapshot test runner:
 
 | Example | What You'll Learn |
 |---------|-------------------|
-| `17_view_commands/01_view_list.dl` | Listing defined rules |
-| `17_view_commands/02_view_describe.dl` | Viewing rule definitions |
-| `17_view_commands/03_view_drop.dl` | Removing rules |
-| `17_view_commands/04_view_def.dl` | Showing rule clauses |
+| `17_rule_commands/01_rule_list.dl` | Listing defined rules |
+| `17_rule_commands/02_rule_query.dl` | Querying rule results |
+| `17_rule_commands/03_rule_drop.dl` | Removing rules |
+| `17_rule_commands/04_rule_def.dl` | Showing rule definitions |
+| `17_rule_commands/05_multi_clause_rules.dl` | Multi-clause rules and inspection |
+| `17_rule_commands/06_drop_multi_clause.dl` | Dropping multi-clause rules |
+| `17_rule_commands/07_rule_clear.dl` | Clearing rules for re-registration |
+| `17_rule_commands/08_rule_edit.dl` | Editing specific clauses |
 
 **Key Concepts**:
-- `.rule` - List all rules
-- `.rule <name>` - Query a rule
-- `.rule def <name>` - Show definition
-- `.rule drop <name>` - Delete a rule
+- `.rule` / `.rule list` - List all rules
+- `.rule <name>` - Query a rule (shows clauses and results)
+- `.rule def <name>` - Show definition only
+- `.rule drop <name>` - Delete a rule entirely
+- `.rule clear <name>` - Clear clauses for re-registration
+- `.rule edit <name> <index> <clause>` - Edit a specific clause
 
-**Checkpoint**: You can now create both session and persistent rules.
+**Checkpoint**: You can now create, inspect, modify, and delete rules.
 
 ---
 
@@ -438,9 +443,7 @@ Or use the snapshot test runner:
 |----------|----------|------------|
 | `01_database/` | Database management | Beginner |
 | `02_relations/` | Fact operations | Beginner |
-| `03_views/` | Basic rules | Beginner |
 | `04_session/` | Session rules | Beginner |
-| `05_queries/` | Basic queries | Beginner |
 | `06_joins/` | Joining data | Beginner |
 | `07_filters/` | Filtering | Beginner |
 | `08_negation/` | Negation | Intermediate |
@@ -452,7 +455,7 @@ Or use the snapshot test runner:
 | `14_aggregations/` | Aggregations | Intermediate |
 | `15_arithmetic/` | Arithmetic | Intermediate |
 | `16_vectors/` | Vector ops | Advanced |
-| `17_view_commands/` | Rule management | Beginner |
+| `17_rule_commands/` | Rule management | Beginner |
 | `18_advanced_patterns/` | Graph algorithms | Advanced |
 | `19_self_checking/` | Assertions | Intermediate |
 | `20_applications/` | Real apps | Advanced |

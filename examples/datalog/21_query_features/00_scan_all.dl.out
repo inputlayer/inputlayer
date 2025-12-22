@@ -1,4 +1,4 @@
-Executing script: examples/datalog/05_queries/01_scan_all.dl
+Executing script: examples/datalog/21_query_features/00_scan_all.dl
 
 > .db create test_scan
 Database 'test_scan' created.

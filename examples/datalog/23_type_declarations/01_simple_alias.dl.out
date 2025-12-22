@@ -11,5 +11,7 @@ Type 'Email' declared.
 Type 'UserId' declared.
 > type Score: int.
 Type 'Score' declared.
-> rel users(id: UserId, email: Email, score: Score).
-Script error: Line 14: Parse error: Invalid relation name: 'rel users'
+> +users(id: UserId, email: Email, score: Score).
+Persistent schema 'users' declared: (id: TypeRef("UserId"), email: TypeRef("Email"), score: TypeRef("Score"))
+> +users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)].
+Script error: Line 17: Validation failed: Insert rejected for 'users': batch of 2 tuples violated constraints

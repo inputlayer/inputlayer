@@ -13,5 +13,9 @@ Type 'Price' declared.
 Type 'Quantity' declared.
 > type ProductName: string.
 Type 'ProductName' declared.
-> rel products(id: ProductId, name: ProductName, price: Price).
-Script error: Line 15: Parse error: Invalid relation name: 'rel products'
+> +products(id: ProductId, name: ProductName, price: Price).
+Persistent schema 'products' declared: (id: TypeRef("ProductId"), name: TypeRef("ProductName"), price: TypeRef("Price"))
+> +inventory(product_id: ProductId, qty: Quantity).
+Persistent schema 'inventory' declared: (product_id: TypeRef("ProductId"), qty: TypeRef("Quantity"))
+> +products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].
+Script error: Line 19: Validation failed: Insert rejected for 'products': batch of 3 tuples violated constraints

@@ -5,46 +5,40 @@ Database 'bulk_delete_test' created.
 Switched to database: bulk_delete_test
 > .db use bulk_delete_test
 Switched to database: bulk_delete_test
-> +log(1, "info", "System started").
-Inserted 1 fact into 'log'.
-> +log(2, "error", "Connection failed").
-Inserted 1 fact into 'log'.
-> +log(3, "info", "User logged in").
-Inserted 1 fact into 'log'.
-> +log(4, "error", "Database timeout").
-Inserted 1 fact into 'log'.
-> +log(5, "info", "Request processed").
-Inserted 1 fact into 'log'.
-> +log(6, "warn", "Low memory").
-Inserted 1 fact into 'log'.
-> ?- log(Id, Level, Message).
+> +entry(1, 1).
+Inserted 1 fact into 'entry'.
+> +entry(2, 2).
+Inserted 1 fact into 'entry'.
+> +entry(3, 1).
+Inserted 1 fact into 'entry'.
+> +entry(4, 2).
+Inserted 1 fact into 'entry'.
+> +entry(5, 1).
+Inserted 1 fact into 'entry'.
+> +entry(6, 3).
+Inserted 1 fact into 'entry'.
+> ?- entry(Id, Type).
 6 rows:
-  (1, "info", "System started")
-  (2, "error", "Connection failed")
-  (3, "info", "User logged in")
-  (4, "error", "Database timeout")
-  (5, "info", "Request processed")
-  (6, "warn", "Low memory")
-> -log(Id, Level, Message) :- log(Id, Level, Message), Level = "error".
-No matching tuples to delete.
-> ?- log(Id, Level, Message).
-6 rows:
-  (1, "info", "System started")
-  (2, "error", "Connection failed")
-  (3, "info", "User logged in")
-  (4, "error", "Database timeout")
-  (5, "info", "Request processed")
-  (6, "warn", "Low memory")
-> -log(Id, Level, Message) :- log(Id, Level, Message), Id > 4.
-No matching tuples to delete.
-> ?- log(Id, Level, Message).
-6 rows:
-  (1, "info", "System started")
-  (2, "error", "Connection failed")
-  (3, "info", "User logged in")
-  (4, "error", "Database timeout")
-  (5, "info", "Request processed")
-  (6, "warn", "Low memory")
+  (1, 1)
+  (2, 2)
+  (3, 1)
+  (4, 2)
+  (5, 1)
+  (6, 3)
+> -entry(Id, Type) :- entry(Id, Type), Type = 2.
+Deleted 2 facts from 'entry'.
+> ?- entry(Id, Type).
+4 rows:
+  (1, 1)
+  (3, 1)
+  (5, 1)
+  (6, 3)
+> -entry(Id, Type) :- entry(Id, Type), Id > 4.
+Deleted 2 facts from 'entry'.
+> ?- entry(Id, Type).
+2 rows:
+  (1, 1)
+  (3, 1)
 > .db use default
 Switched to database: default
 > .db drop bulk_delete_test

@@ -1,17 +1,17 @@
-Executing script: examples/datalog/17_view_commands/04_view_def.dl
+Executing script: examples/datalog/17_rule_commands/04_rule_def.dl
 
-> .db create test_view_def
-Database 'test_view_def' created.
-Switched to database: test_view_def
-> .db use test_view_def
-Switched to database: test_view_def
+> .db create test_rule_def
+Database 'test_rule_def' created.
+Switched to database: test_rule_def
+> .db use test_rule_def
+Switched to database: test_rule_def
 > +edge[(1,2), (2,3)].
 Inserted 2 facts into 'edge'.
 > +reach(X, Y) :- edge(X, Y).
 Rule 'reach' registered.
 > +reach(X, Z) :- reach(X, Y), edge(Y, Z).
 Rule added to 'reach' (2 rules total).
-> .view def reach
+> .rule def reach
 Rule: reach
 Clauses:
   1. reach(X, Y) :- edge(X, Y).
@@ -19,5 +19,5 @@ Clauses:
 
 > .db use default
 Switched to database: default
-> .db drop test_view_def
-Database 'test_view_def' dropped.
+> .db drop test_rule_def
+Database 'test_rule_def' dropped.

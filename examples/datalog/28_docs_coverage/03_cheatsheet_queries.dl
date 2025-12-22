@@ -1,0 +1,29 @@
+// Test: Cheatsheet Queries
+// Category: docs_coverage
+// Description: Tests examples from docs/cheatsheet.md - query patterns
+
+.db create cheatsheet_queries
+.db use cheatsheet_queries
+
+// Setup
++edge[(1, 2), (2, 3), (3, 4)].
++person[("alice", 30), ("bob", 25), ("carol", 35)].
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
+
+// === Simple query ===
+?- edge(1, X).
+
+// === Query with constraints ===
+?- person(Name, Age), Age > 30.
+
+// === Query a derived relation ===
+?- path(1, X).
+
+// === Using wildcards ===
+// Get all source nodes (ignore target)
+?- edge(X, _).
+
+// Cleanup
+.db use default
+.db drop cheatsheet_queries

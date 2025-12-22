@@ -1,0 +1,42 @@
+Executing script: examples/datalog/28_docs_coverage/07_syntax_literals.dl
+
+> .db create syntax_literals
+Database 'syntax_literals' created.
+Switched to database: syntax_literals
+> .db use syntax_literals
+Switched to database: syntax_literals
+> +int_values[(42), (-17), (0)].
+Inserted 3 facts into 'int_values'.
+> ?- int_values(X).
+3 rows:
+  (-17)
+  (0)
+  (42)
+> +float_values[(3.14), (-0.5)].
+Inserted 2 facts into 'float_values'.
+> ?- float_values(X).
+2 rows:
+  (-0.5)
+  (3.14)
+> +string_values[("hello"), ("hello world")].
+Inserted 2 facts into 'string_values'.
+> ?- string_values(X).
+2 rows:
+  ("hello")
+  ("hello world")
+> +vectors[([1.0, 2.0, 3.0]), ([0.1, 0.2, 0.3, 0.4])].
+Inserted 2 facts into 'vectors'.
+> ?- vectors(X).
+2 rows:
+  ([1.0000, 2.0000, 3.0000])
+  ([0.1000, 0.2000, 0.3000, 0.4000])
+> +location[("NYC", 40.7, -74.0), ("LA", 34.0, -118.2)].
+Inserted 2 facts into 'location'.
+> ?- location(Name, Lat, Lon).
+2 rows:
+  ("LA", 34, -118.2)
+  ("NYC", 40.7, -74)
+> .db use default
+Switched to database: default
+> .db drop syntax_literals
+Database 'syntax_literals' dropped.

@@ -5,32 +5,26 @@ Database 'delete_all_test' created.
 Switched to database: delete_all_test
 > .db use delete_all_test
 Switched to database: delete_all_test
-> +temp_data(1, "first").
+> +temp_data(1, 100).
 Inserted 1 fact into 'temp_data'.
-> +temp_data(2, "second").
+> +temp_data(2, 200).
 Inserted 1 fact into 'temp_data'.
-> +temp_data(3, "third").
+> +temp_data(3, 300).
 Inserted 1 fact into 'temp_data'.
 > ?- temp_data(Id, Value).
 3 rows:
-  (1, "first")
-  (2, "second")
-  (3, "third")
+  (1, 100)
+  (2, 200)
+  (3, 300)
 > -temp_data(Id, Value) :- temp_data(Id, Value).
-No matching tuples to delete.
+Deleted 3 facts from 'temp_data'.
 > ?- temp_data(Id, Value).
-3 rows:
-  (1, "first")
-  (2, "second")
-  (3, "third")
-> +temp_data(10, "new data").
+No results.
+> +temp_data(10, 999).
 Inserted 1 fact into 'temp_data'.
 > ?- temp_data(Id, Value).
-4 rows:
-  (1, "first")
-  (2, "second")
-  (3, "third")
-  (10, "new data")
+1 rows:
+  (10, 999)
 > .db use default
 Switched to database: default
 > .db drop delete_all_test

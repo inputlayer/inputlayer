@@ -1,0 +1,27 @@
+Executing script: examples/datalog/28_docs_coverage/17_repl_guide_schemas.dl
+
+> .db create repl_schemas
+Database 'repl_schemas' created.
+Switched to database: repl_schemas
+> .db use repl_schemas
+Switched to database: repl_schemas
+> +employee(id: int, name: string, dept: string).
+Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(String))
+> +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
+Inserted 2 facts into 'employee'.
+> ?- employee(Id, Name, Dept).
+2 rows:
+  (1, "alice", "engineering")
+  (2, "bob", "sales")
+> +user(id: int, email: string).
+Persistent schema 'user' declared: (id: Base(Int), email: Base(String))
+> +user[(1, "alice@example.com"), (2, "bob@example.com")].
+Inserted 2 facts into 'user'.
+> ?- user(Id, Email).
+2 rows:
+  (1, "alice@example.com")
+  (2, "bob@example.com")
+> .db use default
+Switched to database: default
+> .db drop repl_schemas
+Database 'repl_schemas' dropped.

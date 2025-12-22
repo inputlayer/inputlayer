@@ -18,11 +18,11 @@
 // Query reachable pairs
 ?- reachable(X, Y).
 
-// Delete the view
+// Delete the rule
 -reachable.
 
-// Verify view is gone
-.view
+// Verify rule is gone
+.rule
 
 // Cleanup
 .db use default

@@ -5,19 +5,29 @@ Database 'conditional_update_test' created.
 Switched to database: conditional_update_test
 > .db use conditional_update_test
 Switched to database: conditional_update_test
-> +product(1, "Widget", 100).
-Inserted 1 fact into 'product'.
-> +product(2, "Gadget", 200).
-Inserted 1 fact into 'product'.
-> +product(3, "Gizmo", 50).
-Inserted 1 fact into 'product'.
-> +product(4, "Doohickey", 150).
-Inserted 1 fact into 'product'.
-> ?- product(Id, Name, Price).
+> +counter[(1, 100), (2, 200), (3, 50), (4, 150)].
+Inserted 4 facts into 'counter'.
+> ?- counter(Id, Value).
 4 rows:
-  (1, "Widget", 100)
-  (2, "Gadget", 200)
-  (3, "Gizmo", 50)
-  (4, "Doohickey", 150)
-> -product(Id, Name, OldPrice), +product(Id, Name, NewPrice) :- product(Id, Name, OldPrice), OldPrice > 100, NewPrice = OldPrice * 0.9.
-Script error: Line 18: Parse error: Invalid arithmetic expression: '0.9'
+  (1, 100)
+  (2, 200)
+  (3, 50)
+  (4, 150)
+> -counter(Id, Value) :- counter(Id, Value), Value > 100.
+Deleted 2 facts from 'counter'.
+> ?- counter(Id, Value).
+2 rows:
+  (1, 100)
+  (3, 50)
+> +counter[(2, 210), (4, 160)].
+Inserted 2 facts into 'counter'.
+> ?- counter(Id, Value).
+4 rows:
+  (1, 100)
+  (2, 210)
+  (3, 50)
+  (4, 160)
+> .db use default
+Switched to database: default
+> .db drop conditional_update_test
+Database 'conditional_update_test' dropped.

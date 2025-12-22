@@ -1,0 +1,21 @@
+Executing script: examples/datalog/28_docs_coverage/18_repl_guide_workflow.dl
+
+> .db create repl_workflow
+Database 'repl_workflow' created.
+Switched to database: repl_workflow
+> .db use repl_workflow
+Switched to database: repl_workflow
+> +user(id: int, name: string).
+Persistent schema 'user' declared: (id: Base(Int), name: Base(String))
+> +order(id: int, user_id: int, amount: float).
+Persistent schema 'order' declared: (id: Base(Int), user_id: Base(Int), amount: Base(Float))
+> +user[(1, "alice"), (2, "bob"), (3, "carol")].
+Inserted 3 facts into 'user'.
+> +order[(101, 1, 1500.0), (102, 1, 800.0), (103, 2, 200.0), (104, 1, 2000.0)].
+Inserted 4 facts into 'order'.
+> +high_value_customer(UserId) :- order(_, UserId, Amount), Amount > 1000.
+Rule added to 'high_value_customer' (1 rules total).
+> ?- high_value_customer(UserId).
+No results.
+> +customer_spend(UserId, sum<Amount>) :- order(_, UserId, Amount).
+Script error: Line 26: Parse error: Invalid term: 'sum<Amount>'

@@ -1,0 +1,35 @@
+// Test: Rule Clear Command
+// Category: 17_rule_commands
+// Description: Tests .rule clear to remove all clauses for re-registration
+
+.db create test_rule_clear
+.db use test_rule_clear
+
+// Insert base data
++edge[(1,2), (2,3), (3,4)].
+
+// Define a multi-clause rule
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+// Show original definition
+.rule def reachable
+
+// Clear all clauses
+.rule clear reachable
+
+// Verify rule is cleared
+.rule list
+
+// Re-register with different logic (just direct edges)
++reachable(X, Y) :- edge(X, Y).
+
+// Show new definition
+.rule def reachable
+
+// Query new results (should only be direct edges)
+?- reachable(X, Y).
+
+// Cleanup
+.db use default
+.db drop test_rule_clear

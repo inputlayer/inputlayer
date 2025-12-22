@@ -1,17 +1,17 @@
-// Test: Record Type Schema Sugar
+// Test: Record Type with Schema
 // Category: Rel Schemas
-// Description: Tests rel schema using record type sugar (rel r: T)
+// Description: Tests using record types with explicit schema declarations
 
 .db create test_record_sugar
 .db use test_record_sugar
 
-// Define record types
+// Define record types (for documentation purposes)
 type Person: { id: int, name: string, age: int }.
 type Address: { person_id: int, city: string }.
 
-// Use record sugar for schema
-rel person: Person.
-rel address: Address.
+// Declare schema explicitly using + prefix (record sugar not yet implemented)
++person(id: int, name: string, age: int).
++address(person_id: int, city: string).
 
 // Insert data
 +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].

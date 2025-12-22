@@ -11,9 +11,9 @@ type Price: int.
 type Quantity: int.
 type ProductName: string.
 
-// Use types in schema
-rel products(id: ProductId, name: ProductName, price: Price).
-rel inventory(product_id: ProductId, qty: Quantity).
+// Use types in schema with + prefix
++products(id: ProductId, name: ProductName, price: Price).
++inventory(product_id: ProductId, qty: Quantity).
 
 // Insert data
 +products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].

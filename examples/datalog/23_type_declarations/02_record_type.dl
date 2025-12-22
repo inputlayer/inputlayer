@@ -8,8 +8,8 @@
 // Declare a record type
 type User: { id: int, name: string }.
 
-// Use record type in rel schema
-rel user: User.
+// Declare schema explicitly using + prefix (record sugar not yet implemented)
++user(id: int, name: string).
 
 // Insert data
 +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")].

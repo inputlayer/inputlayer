@@ -1,0 +1,24 @@
+Executing script: examples/datalog/28_docs_coverage/06_cheatsheet_rbac_example.dl
+
+> .db create acl
+Database 'acl' created.
+Switched to database: acl
+> .db use acl
+Switched to database: acl
+> +user_role[("alice", "admin"), ("bob", "viewer")].
+Inserted 2 facts into 'user_role'.
+> +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
+Inserted 3 facts into 'role_permission'.
+> +has_permission(User, Perm) :- user_role(User, Role), role_permission(Role, Perm).
+Rule 'has_permission' registered.
+> ?- has_permission("alice", Perm).
+2 rows:
+  ("alice", "read")
+  ("alice", "write")
+> ?- has_permission("bob", Perm).
+1 rows:
+  ("bob", "read")
+> .db use default
+Switched to database: default
+> .db drop acl
+Database 'acl' dropped.

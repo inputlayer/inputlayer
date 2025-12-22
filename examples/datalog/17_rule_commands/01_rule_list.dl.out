@@ -1,10 +1,10 @@
-Executing script: examples/datalog/17_view_commands/01_view_list.dl
+Executing script: examples/datalog/17_rule_commands/01_rule_list.dl
 
-> .db create test_view_list
-Database 'test_view_list' created.
-Switched to database: test_view_list
-> .db use test_view_list
-Switched to database: test_view_list
+> .db create test_rule_list
+Database 'test_rule_list' created.
+Switched to database: test_rule_list
+> .db use test_rule_list
+Switched to database: test_rule_list
 > +edge[(1,2), (2,3)].
 Inserted 2 facts into 'edge'.
 > +reverse(X, Y) :- edge(Y, X).
@@ -13,11 +13,11 @@ Rule 'reverse' registered.
 Rule 'paths' registered.
 > +paths(X, Z) :- paths(X, Y), edge(Y, Z).
 Rule added to 'paths' (2 rules total).
-> .view
+> .rule
 Rules:
   paths
   reverse
 > .db use default
 Switched to database: default
-> .db drop test_view_list
-Database 'test_view_list' dropped.
+> .db drop test_rule_list
+Database 'test_rule_list' dropped.

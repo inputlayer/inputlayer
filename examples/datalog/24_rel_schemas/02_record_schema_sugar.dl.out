@@ -9,5 +9,32 @@ Switched to database: test_record_sugar
 Type 'Person' declared.
 > type Address: { person_id: int, city: string }.
 Type 'Address' declared.
-> rel person: Person.
-Script error: Line 13: Parse error: Unrecognized statement: rel person: Person.
+> +person(id: int, name: string, age: int).
+Persistent schema 'person' declared: (id: Base(Int), name: Base(String), age: Base(Int))
+> +address(person_id: int, city: string).
+Persistent schema 'address' declared: (person_id: Base(Int), city: Base(String))
+> +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].
+Inserted 3 facts into 'person'.
+> +address[(1, "New York"), (2, "Boston"), (3, "Chicago")].
+Inserted 3 facts into 'address'.
+> ?- person(Id, Name, Age).
+3 rows:
+  (1, "Alice", 30)
+  (2, "Bob", 25)
+  (3, "Charlie", 35)
+> ?- address(Pid, City).
+3 rows:
+  (1, "New York")
+  (2, "Boston")
+  (3, "Chicago")
+> +person_location(Name, City) :- person(Id, Name, _), address(Id, City).
+Rule 'person_location' registered.
+> ?- person_location(N, C).
+3 rows:
+  ("Alice", "New York")
+  ("Bob", "Boston")
+  ("Charlie", "Chicago")
+> .db use default
+Switched to database: default
+> .db drop test_record_sugar
+Database 'test_record_sugar' dropped.

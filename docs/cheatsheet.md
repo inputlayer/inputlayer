@@ -75,14 +75,17 @@ Single fact:
 
 Conditional delete (query-based):
 ```datalog
--edge(X, Y) :- X > 5.
+-edge(X, Y) :- edge(X, Y), X > 5.
 ```
 
-### Atomic Updates
+### Updates (Delete then Insert)
 
-Delete and insert in one atomic operation:
+To update data, delete the old value then insert the new:
 ```datalog
--person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge + 1.
+// Delete old value
+-counter(1, 0).
+// Insert new value
++counter(1, 5).
 ```
 
 ## Persistent Rules (`+head :- body`)
@@ -169,14 +172,19 @@ Define typed relations with optional constraints:
 ```datalog
 // Insert vectors
 +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])].
-+query_vec[([0.9, 0.1, 0.0])].
 
-// Compute distances
-+nearest(Id, Dist) :- vectors(Id, V), query_vec(Q), Dist = euclidean(V, Q).
-+similar(Id, Score) :- vectors(Id, V), query_vec(Q), Score = cosine(V, Q).
+// Query with distance computation
+?- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
+   Dist = euclidean(V1, V2), Dist < 1.0.
+
+// Query with similarity computation
+?- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
+   Sim = cosine(V1, V2), Sim > 0.9.
 ```
 
-Available distance functions: `euclidean`, `cosine`, `dot_product`, `manhattan`
+Available distance functions: `euclidean`, `cosine`, `dot`, `manhattan`
+
+**Note**: Vector functions are used in query bodies, not in rule heads.
 
 ## Examples
 
@@ -228,15 +236,13 @@ Available distance functions: `euclidean`, `cosine`, `dot_product`, `manhattan`
 +doc[(101, "Design Doc"), (102, "Sales Pitch")].
 +acl[("engineering", 101), ("sales", 102)].
 +emb[(101, [1.0, 0.0]), (102, [0.0, 1.0])].
-+query_emb[([0.9, 0.1])].
 
-// Rules
+// Rule: user can access docs via group membership
 +can_access(User, DocId) :- member(User, Group), acl(Group, DocId).
-+candidate(DocId, Dist) :- emb(DocId, V), query_emb(Q), Dist = cosine(V, Q).
-+retrieve(User, DocId, Dist) :- can_access(User, DocId), candidate(DocId, Dist).
 
-// Query: what can alice retrieve?
-?- retrieve("alice", DocId, Dist).
+// Query: what can alice retrieve, with similarity score?
+?- can_access("alice", DocId), emb(DocId, V),
+   Sim = cosine(V, [0.9, 0.1]), Sim > 0.5.
 ```
 
 ## Differential Dataflow Semantics

@@ -1,0 +1,20 @@
+// Test: Cheatsheet Graph Database Example
+// Category: docs_coverage
+// Description: Tests the complete graph database example from docs/cheatsheet.md
+
+.db create social
+.db use social
+
+// Add edges (from cheatsheet example)
++follows[(1, 2), (2, 3), (3, 4), (1, 4)].
+
+// Define reachability rule (persistent)
++reach(X, Y) :- follows(X, Y).
++reach(X, Z) :- reach(X, Y), follows(Y, Z).
+
+// Query who user 1 can reach
+?- reach(1, X).
+
+// Cleanup
+.db use default
+.db drop social
