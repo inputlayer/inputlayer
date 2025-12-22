@@ -1,0 +1,15 @@
+% Test: Set minus pattern
+
+.kg create test_minus_n22t29
+.kg use test_minus_n22t29
+
++all_items[(1,), (2,), (3,), (4,), (5,)].
++to_remove[(2,), (4,)].
+
+% All items minus those to remove
+remaining(X) :- all_items(X), !to_remove(X).
+
+?- remaining(X).
+
+.kg use default
+.kg drop test_minus_n22t29

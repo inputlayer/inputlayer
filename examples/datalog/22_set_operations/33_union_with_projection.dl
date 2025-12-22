@@ -1,0 +1,16 @@
+% Test: Union with projection
+
+.kg create test_union_proj_n22t33
+.kg use test_union_proj_n22t33
+
++employees[(1, "Alice", "Eng"), (2, "Bob", "Sales")].
++contractors[(3, "Carol", "Eng"), (4, "Dave", "Marketing")].
+
+% Union of names from both
+all_names(Name) :- employees(_, Name, _).
+all_names(Name) :- contractors(_, Name, _).
+
+?- all_names(Name).
+
+.kg use default
+.kg drop test_union_proj_n22t33

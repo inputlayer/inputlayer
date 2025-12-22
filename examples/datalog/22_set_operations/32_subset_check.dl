@@ -1,0 +1,21 @@
+% Test: Subset check pattern
+
+.kg create test_subset_n22t32
+.kg use test_subset_n22t32
+
++set_a[(1,), (2,), (3,)].
++set_b[(1,), (2,), (3,), (4,), (5,)].
++set_c[(1,), (2,)].
+
+% Elements in A not in B (should be empty if A is subset of B)
+a_not_in_b(X) :- set_a(X), !set_b(X).
+
+?- a_not_in_b(X).
+
+% Elements in C not in A (should be empty if C is subset of A)
+c_not_in_a(X) :- set_c(X), !set_a(X).
+
+?- c_not_in_a(X).
+
+.kg use default
+.kg drop test_subset_n22t32
