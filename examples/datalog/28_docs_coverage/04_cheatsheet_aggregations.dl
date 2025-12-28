@@ -1,0 +1,42 @@
+% Test: Cheatsheet Aggregations
+% Description: Tests examples from docs/cheatsheet.md - aggregation patterns
+
+.kg create cheatsheet_agg_n28t04
+.kg use cheatsheet_agg_n28t04
+
+% Setup data
++sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)].
++employee[(1, "engineering"), (2, "engineering"), (3, "sales"), (4, "engineering")].
++person[("alice", 30), ("bob", 25), ("carol", 35), ("dave", 28)].
++test_results[("alice", 85), ("bob", 90), ("carol", 78)].
+
+% === Aggregation examples from cheatsheet ===
+
+% Sum
++total_sales(Dept, sum<Amount>) :- sales(Dept, _, Amount).
+
+?- total_sales(Dept, Total).
+
+% Count
++employee_count(Dept, count<Id>) :- employee(Id, Dept).
+
+?- employee_count(Dept, Count).
+
+% Max (simulated with different data)
++max_age(max<Age>) :- person(_, Age).
+
+?- max_age(M).
+
+% Min
++min_age(min<Age>) :- person(_, Age).
+
+?- min_age(M).
+
+% Avg
++avg_score(avg<Score>) :- test_results(_, Score).
+
+?- avg_score(A).
+
+% Cleanup
+.kg use default
+.kg drop cheatsheet_agg_n28t04

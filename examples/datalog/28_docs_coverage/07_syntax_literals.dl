@@ -1,0 +1,35 @@
+% Test: Syntax Literals
+% Description: Tests literal types from docs/reference/syntax.md
+
+.kg create syntax_literals_n28t07
+.kg use syntax_literals_n28t07
+
+% === Integer literals ===
++int_values[(42), (-17), (0)].
+
+?- int_values(X).
+
+% === Float literals ===
++float_values[(3.14), (-0.5)].
+
+?- float_values(X).
+
+% === String literals ===
++string_values[("hello"), ("hello world")].
+
+?- string_values(X).
+
+% === Vector literals ===
++vectors[([1.0, 2.0, 3.0]), ([0.1, 0.2, 0.3, 0.4])].
+
+?- vectors(X).
+
+% === Mixed types in relations ===
++location[("NYC", 40.7, -74.0), ("LA", 34.0, -118.2)].
+
+?- location(Name, Lat, Lon).
+
+% Cleanup
+.kg use default
+.kg drop syntax_literals_n28t07
+
