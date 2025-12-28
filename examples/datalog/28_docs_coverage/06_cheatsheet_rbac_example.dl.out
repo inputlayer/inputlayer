@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create acl_n28t06
+Knowledge graph 'acl_n28t06' created.
+Switched to knowledge graph: acl_n28t06
+> .kg use acl_n28t06
+Switched to knowledge graph: acl_n28t06
+> +user_role[("alice", "admin"), ("bob", "viewer")].
+Inserted 2 fact(s) into 'user_role'.
+> +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
+Inserted 3 fact(s) into 'role_permission'.
+> +has_permission(User, Perm) :- user_role(User, Role), role_permission(Role, Perm).
+Rule 'has_permission' registered.
+> ?- has_permission("alice", Perm).
+2 rows:
+  ("alice", "read")
+  ("alice", "write")
+> ?- has_permission("bob", Perm).
+1 rows:
+  ("bob", "read")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop acl_n28t06
+Knowledge graph 'acl_n28t06' dropped.
