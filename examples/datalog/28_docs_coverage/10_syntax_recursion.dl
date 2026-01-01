@@ -1,0 +1,30 @@
+% Test: Syntax Recursion
+% Description: Tests recursion examples from docs/reference/syntax.md
+
+.kg create syntax_recursion_n28t10
+.kg use syntax_recursion_n28t10
+
+% === Basic transitive closure ===
++edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+
+% Base case
++reachable(X, Y) :- edge(X, Y).
+% Recursive case
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+?- reachable(1, X).
+
+% === Mutual recursion (odd/even distance) ===
++start(1).
+
++odd(X) :- edge(Start, X), start(Start).
++odd(X) :- even(Y), edge(Y, X).
++even(X) :- odd(Y), edge(Y, X).
+
+?- odd(X).
+?- even(X).
+
+% Cleanup
+.kg use default
+.kg drop syntax_recursion_n28t10
+
