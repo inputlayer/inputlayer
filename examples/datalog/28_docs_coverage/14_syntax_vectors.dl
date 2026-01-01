@@ -1,0 +1,29 @@
+% Test: Syntax Vector Functions
+% Description: Tests vector function examples from docs/reference/syntax.md
+
+.kg create syntax_vectors_n28t14
+.kg use syntax_vectors_n28t14
+
+% === Vector embeddings ===
++embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
++point[(1, [0.0, 0.0]), (2, [3.0, 4.0]), (3, [1.0, 1.0])].
+
+% === Cosine similarity ===
+?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).
+
+% === Euclidean distance ===
+?- point(Id1, V1), point(Id2, V2), Id1 < Id2, Dist = euclidean(V1, V2).
+
+% === Dot product ===
+?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = dot(V1, V2).
+
+% === Manhattan distance ===
+?- point(Id1, V1), point(Id2, V2), Id1 < Id2, Dist = manhattan(V1, V2).
+
+% === Filter by similarity threshold ===
+?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2), Sim > 0.5.
+
+% Cleanup
+.kg use default
+.kg drop syntax_vectors_n28t14
+
