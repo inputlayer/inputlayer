@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_schemas_n28t17
+Knowledge graph 'repl_schemas_n28t17' created.
+Switched to knowledge graph: repl_schemas_n28t17
+> .kg use repl_schemas_n28t17
+Switched to knowledge graph: repl_schemas_n28t17
+> +employee(id: int, name: string, dept: string).
+Schema 'employee' declared (persistent).
+> +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
+Inserted 2 fact(s) into 'employee'.
+> ?- employee(Id, Name, Dept).
+2 rows:
+  (1, "alice", "engineering")
+  (2, "bob", "sales")
+> +user(id: int, email: string).
+Schema 'user' declared (persistent).
+> +user[(1, "alice@example.com"), (2, "bob@example.com")].
+Inserted 2 fact(s) into 'user'.
+> ?- user(Id, Email).
+2 rows:
+  (1, "alice@example.com")
+  (2, "bob@example.com")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_schemas_n28t17
+Knowledge graph 'repl_schemas_n28t17' dropped.
