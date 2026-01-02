@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_guide_n28t15
+Knowledge graph 'repl_guide_n28t15' created.
+Switched to knowledge graph: repl_guide_n28t15
+> .kg use repl_guide_n28t15
+Switched to knowledge graph: repl_guide_n28t15
+> +edge(1, 2).
+Inserted 1 fact(s) into 'edge'.
+> +edge[(2, 3), (3, 4)].
+Inserted 2 fact(s) into 'edge'.
+> +person("alice", 30, "engineering").
+Inserted 1 fact(s) into 'person'.
+> ?- edge(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> ?- person(Name, Age, Dept).
+1 rows:
+  ("alice", 30, "engineering")
+> -edge(1, 2).
+Deleted 1 facts from 'edge'.
+> ?- edge(X, Y).
+2 rows:
+  (2, 3)
+  (3, 4)
+> +edge(10, 20).
+Inserted 1 fact(s) into 'edge'.
+> +edge(15, 25).
+Inserted 1 fact(s) into 'edge'.
+> -edge(X, Y) :- edge(X, Y), X > 10.
+Conditional delete: 1 fact(s) deleted from 'edge'.
+> ?- edge(X, Y).
+3 rows:
+  (2, 3)
+  (3, 4)
+  (10, 20)
+> +counter(1, 0).
+Inserted 1 fact(s) into 'counter'.
+> ?- counter(Id, Val).
+1 rows:
+  (1, 0)
+> -counter(1, 0).
+Deleted 1 facts from 'counter'.
+> +counter(1, 5).
+Inserted 1 fact(s) into 'counter'.
+> ?- counter(Id, Val).
+1 rows:
+  (1, 5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_guide_n28t15
+Knowledge graph 'repl_guide_n28t15' dropped.

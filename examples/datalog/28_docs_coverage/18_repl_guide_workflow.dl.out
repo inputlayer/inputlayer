@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_workflow_n28t18
+Knowledge graph 'repl_workflow_n28t18' created.
+Switched to knowledge graph: repl_workflow_n28t18
+> .kg use repl_workflow_n28t18
+Switched to knowledge graph: repl_workflow_n28t18
+> +user(id: int, name: string).
+Schema 'user' declared (persistent).
+> +order(id: int, user_id: int, amount: float).
+Schema 'order' declared (persistent).
+> +user[(1, "alice"), (2, "bob"), (3, "carol")].
+Inserted 3 fact(s) into 'user'.
+> +order[(101, 1, 1500.0), (102, 1, 800.0), (103, 2, 200.0), (104, 1, 2000.0)].
+Inserted 4 fact(s) into 'order'.
+> +high_value_customer(UserId) :- order(_, UserId, Amount), Amount > 1000.
+Rule 'high_value_customer' registered.
+> ?- high_value_customer(UserId).
+1 rows:
+  (1)
+> +customer_spend(UserId, sum<Amount>) :- order(_, UserId, Amount).
+Rule 'customer_spend' registered.
+> ?- customer_spend(UserId, Total).
+2 rows:
+  (1, 4300)
+  (2, 200)
+> +vip(UserId, Total) :- high_value_customer(UserId), customer_spend(UserId, Total), Total > 3000.
+Rule 'vip' registered.
+> ?- vip(User, Spend).
+1 rows:
+  (1, 4300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_workflow_n28t18
+Knowledge graph 'repl_workflow_n28t18' dropped.

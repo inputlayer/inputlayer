@@ -1,0 +1,54 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_rules_n28t16
+Knowledge graph 'repl_rules_n28t16' created.
+Switched to knowledge graph: repl_rules_n28t16
+> .kg use repl_rules_n28t16
+Switched to knowledge graph: repl_rules_n28t16
+> +person[("alice", 30), ("bob", 17), ("carol", 25)].
+Inserted 3 fact(s) into 'person'.
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'edge'.
+> +employee[(1, "engineering"), (2, "sales"), (3, "engineering")].
+Inserted 3 fact(s) into 'employee'.
+> +adult(Name, Age) :- person(Name, Age), Age >= 18.
+Rule 'adult' registered.
+> ?- adult(Name, Age).
+2 rows:
+  ("alice", 30)
+  ("carol", 25)
+> +path(X, Y) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z) :- path(X, Y), edge(Y, Z).
+Rule 'path' registered.
+> ?- path(1, X).
+3 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+> +dept_count(Dept, count<Id>) :- employee(Id, Dept).
+Rule 'dept_count' registered.
+> ?- dept_count(Dept, Count).
+2 rows:
+  ("engineering", 2)
+  ("sales", 1)
+> temp_result(X, Y) :- edge(X, Y), X < Y.
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+(session: 1 rule(s))
+> ?- temp_result(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop repl_rules_n28t16
+Knowledge graph 'repl_rules_n28t16' dropped.
