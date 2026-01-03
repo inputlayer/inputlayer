@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_quantize_linear_n30t01
+Knowledge graph 'test_quantize_linear_n30t01' created.
+Switched to knowledge graph: test_quantize_linear_n30t01
+> .kg use test_quantize_linear_n30t01
+Switched to knowledge graph: test_quantize_linear_n30t01
+> +embedding[(1, [1.0, 0.5, -0.5, -1.0])].
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(2, [0.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(3, [0.25, 0.75, -0.25, -0.75])].
+Inserted 1 fact(s) into 'embedding'.
+> ?- embedding(Id, V), Q = quantize_linear(V).
+3 rows:
+  (1, [Number(1.0), Number(0.5), Number(-0.5), Number(-1.0)], [Number(127), Number(63), Number(-64), Number(-128)])
+  (2, [Number(0.0), Number(0.0), Number(0.0), Number(0.0)], [Number(0), Number(0), Number(0), Number(0)])
+  (3, [Number(0.25), Number(0.75), Number(-0.25), Number(-0.75)], [Number(42), Number(127), Number(-43), Number(-128)])
+> quantized(Id, Q) :- embedding(Id, V), Q = quantize_linear(V).
+3 rows:
+  (1, [Number(127), Number(63), Number(-64), Number(-128)])
+  (2, [Number(0), Number(0), Number(0), Number(0)])
+  (3, [Number(42), Number(127), Number(-43), Number(-128)])
+(session: 1 rule(s))
+> ?- quantized(Id, Q).
+3 rows:
+  (1, [Number(127), Number(63), Number(-64), Number(-128)])
+  (2, [Number(0), Number(0), Number(0), Number(0)])
+  (3, [Number(42), Number(127), Number(-43), Number(-128)])
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_quantize_linear_n30t01
+Knowledge graph 'test_quantize_linear_n30t01' dropped.

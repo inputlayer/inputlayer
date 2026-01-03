@@ -1,0 +1,25 @@
+% Test: euclidean_int8 function
+% Euclidean distance for int8 quantized vectors
+.kg create test_euclidean_int8_n30t05
+.kg use test_euclidean_int8_n30t05
+
+% Create vectors
++embedding[(1, [1.0, 0.0, 0.0, 0.0])].
++embedding[(2, [0.0, 1.0, 0.0, 0.0])].
+
+% First, verify quantization works
+?- embedding(Id, V), Q = quantize_linear(V).
+
+% Test euclidean_int8 with a single vector against a literal query vector
+% Using a self-comparison (quantize same vector twice)
+self_dist(Id, Dist) :-
+    embedding(Id, V),
+    Q = quantize_linear(V),
+    Dist = euclidean_int8(Q, Q).
+?- self_dist(Id, Dist).
+
+% Compare each vector to a fixed query vector [127, 0, 0, 0]
+% Note: Int8 vectors need to be pre-quantized for direct comparison
+
+.kg use default
+.kg drop test_euclidean_int8_n30t05
