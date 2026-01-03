@@ -1,0 +1,18 @@
+% Test: Session drop with invalid index
+
+.kg create test_session_invalid_n33t09
+.kg use test_session_invalid_n33t09
+
+% Create a session rule using valid syntax with positive atom
++base[(1, 2)].
+computed(X, Y) :- base(X, Y).
+
+.session
+
+% Try to drop an invalid index (very high)
+.session drop 999
+
+.session
+
+.kg use default
+.kg drop test_session_invalid_n33t09
