@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_clear_n33t07
+Knowledge graph 'test_session_clear_n33t07' created.
+Switched to knowledge graph: test_session_clear_n33t07
+> .kg use test_session_clear_n33t07
+Switched to knowledge graph: test_session_clear_n33t07
+> +edge[(1, 2), (2, 3)].
+Inserted 2 fact(s) into 'edge'.
+> connected(X, Y) :- edge(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+(session: 1 rule(s))
+> path(X, Y) :- edge(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+(session: 2 rule(s))
+> .session
+Session rules (2):
+  1. connected(X, Y) :- edge(X, Y).
+  2. path(X, Y) :- edge(X, Y).
+> .session clear
+Cleared 0 session fact(s), 2 session rule(s).
+> .session
+No session data defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_clear_n33t07
+Knowledge graph 'test_session_clear_n33t07' dropped.
