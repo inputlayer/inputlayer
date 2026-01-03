@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_assertion_demo_n19t03
+Knowledge graph 'test_assertion_demo_n19t03' created.
+Switched to knowledge graph: test_assertion_demo_n19t03
+> .kg use test_assertion_demo_n19t03
+Switched to knowledge graph: test_assertion_demo_n19t03
+> +data[(1, 5), (2, 10), (3, 15)].
+Inserted 3 fact(s) into 'data'.
+> +link[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'link'.
+> result1(Y, D+1) :- data(X, D), link(X, Y).
+3 rows:
+  (100, 6)
+  (200, 11)
+  (300, 16)
+(session: 1 rule(s))
+> ?- result1(A, B).
+3 rows:
+  (100, 6)
+  (200, 11)
+  (300, 16)
+> result2(X, D+10) :- data(X, D).
+3 rows:
+  (1, 15)
+  (2, 20)
+  (3, 25)
+(session: 2 rule(s))
+> ?- result2(A, B).
+3 rows:
+  (1, 15)
+  (2, 20)
+  (3, 25)
+> empty_result(X) :- data(X, Y), Y > 100.
+No results.
+(session: 3 rule(s))
+> ?- empty_result(X).
+No results.
+> +src3[(1, 5, 999), (2, 10, 888)].
+Inserted 2 fact(s) into 'src3'.
+> result3(Y, D+1) :- src3(X, D, _), link(X, Y).
+2 rows:
+  (100, 6)
+  (200, 11)
+(session: 4 rule(s))
+> ?- result3(A, B).
+2 rows:
+  (100, 6)
+  (200, 11)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_assertion_demo_n19t03
+Knowledge graph 'test_assertion_demo_n19t03' dropped.

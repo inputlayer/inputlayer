@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_check_inc_n19t01
+Knowledge graph 'test_self_check_inc_n19t01' created.
+Switched to knowledge graph: test_self_check_inc_n19t01
+> .kg use test_self_check_inc_n19t01
+Switched to knowledge graph: test_self_check_inc_n19t01
+> +test_inc[(1, 0, 1), (2, 5, 6), (3, -1, 0), (4, 99, 100), (5, -100, -99)].
+Inserted 5 fact(s) into 'test_inc'.
+> +link[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+Inserted 5 fact(s) into 'link'.
+> computed(X, D+1) :- test_inc(X, D, _), link(X, _).
+5 rows:
+  (1, 1)
+  (2, 6)
+  (3, 0)
+  (4, 100)
+  (5, -99)
+(session: 1 rule(s))
+> expected(X, E) :- test_inc(X, _, E).
+5 rows:
+  (1, 1)
+  (2, 6)
+  (3, 0)
+  (4, 100)
+  (5, -99)
+(session: 2 rule(s))
+> ?- computed(X, Y).
+5 rows:
+  (1, 1)
+  (2, 6)
+  (3, 0)
+  (4, 100)
+  (5, -99)
+> ?- expected(X, Y).
+5 rows:
+  (1, 1)
+  (2, 6)
+  (3, 0)
+  (4, 100)
+  (5, -99)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_check_inc_n19t01
+Knowledge graph 'test_self_check_inc_n19t01' dropped.
