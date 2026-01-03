@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_multi_n33t22
+Knowledge graph 'test_rel_multi_n33t22' created.
+Switched to knowledge graph: test_rel_multi_n33t22
+> .kg use test_rel_multi_n33t22
+Switched to knowledge graph: test_rel_multi_n33t22
+> +rel_a[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'rel_a'.
+> +rel_b[(1, "a"), (2, "b")].
+Inserted 2 fact(s) into 'rel_b'.
+> +rel_c[(1, 2, 3)].
+Inserted 1 fact(s) into 'rel_c'.
+> .rel
+Relations:
+  rel_a (arity: 1)
+  rel_b (arity: 2)
+  rel_c (arity: 3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_multi_n33t22
+Knowledge graph 'test_rel_multi_n33t22' dropped.
