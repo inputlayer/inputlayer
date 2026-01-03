@@ -1,0 +1,15 @@
+% Test: Describe relation
+
+.kg create test_rel_desc_n33t23
+.kg use test_rel_desc_n33t23
+
++users[(1, "Alice", 30), (2, "Bob", 25), (3, "Carol", 35)].
+
+.rel
+
+.rel users
+
+?- users(Id, Name, Age).
+
+.kg use default
+.kg drop test_rel_desc_n33t23
