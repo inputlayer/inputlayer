@@ -1,0 +1,17 @@
+% Test: Load Command
+% Description: Tests the .load command for loading files
+
+.kg create test_load_n25t05
+.kg use test_load_n25t05
+
+% First, create a file to load
++edge(1, 2).
++edge(2, 3).
++edge(3, 4).
+
+% Query to verify initial data
+?- edge(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_load_n25t05
