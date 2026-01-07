@@ -1,0 +1,25 @@
+% Test: lsh_multi_probe function
+% Compute bucket and generate smart probe sequence in one call
+.kg create test_lsh_multi_probe_n31t03
+.kg use test_lsh_multi_probe_n31t03
+
+% Create vectors
++vectors[(1, [1.0, 0.5, 0.0, -0.5])].
++vectors[(2, [0.0, 1.0, 0.5, 0.0])].
+
+% lsh_multi_probe(vector, table_idx, num_hyperplanes, num_probes)
+multi_probe_result(Id, Probes) :-
+    vectors(Id, V),
+    Probes = lsh_multi_probe(V, 0, 4, 5).
+?- multi_probe_result(Id, Probes).
+
+% Compare with separate bucket + probes calls
+compare_result(Id, Bucket, SeparateProbes, MultiProbes) :-
+    vectors(Id, V),
+    Bucket = lsh_bucket(V, 0, 4),
+    SeparateProbes = lsh_probes(Bucket, 4, 5),
+    MultiProbes = lsh_multi_probe(V, 0, 4, 5).
+?- compare_result(Id, Bucket, SeparateProbes, MultiProbes).
+
+.kg use default
+.kg drop test_lsh_multi_probe_n31t03
