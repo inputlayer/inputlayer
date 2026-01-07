@@ -1,0 +1,75 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_n39t05
+Knowledge graph 'test_session_n39t05' created.
+Switched to knowledge graph: test_session_n39t05
+> .kg use test_session_n39t05
+Switched to knowledge graph: test_session_n39t05
+> +base_data[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'base_data'.
+> .session
+No session data defined.
+> temp_data(10).
+Session fact added for 'temp_data'. (Use +temp_data(...) to persist)
+> temp_data(20).
+Session fact added for 'temp_data'. (Use +temp_data(...) to persist)
+> temp_data(30).
+Session fact added for 'temp_data'. (Use +temp_data(...) to persist)
+> .session
+Session facts (3):
+  1. temp_data(10).
+  2. temp_data(20).
+  3. temp_data(30).
+> ?- temp_data(X).
+3 rows:
+  (10)
+  (20)
+  (30)
+> derived(X) :- temp_data(X).
+3 rows:
+  (10)
+  (20)
+  (30)
+(session: 1 rule(s))
+> .session
+Session facts (3):
+  1. temp_data(10).
+  2. temp_data(20).
+  3. temp_data(30).
+Session rules (1):
+  1. derived(X) :- temp_data(X).
+> ?- derived(X).
+3 rows:
+  (10)
+  (20)
+  (30)
+> .session drop 1
+Removed rule 1: derived(X) :- temp_data(X).
+> .session
+Session facts (3):
+  1. temp_data(10).
+  2. temp_data(20).
+  3. temp_data(30).
+> another_derived(X) :- base_data(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 1 rule(s))
+> .session clear
+Cleared 3 session fact(s), 1 session rule(s).
+> .session
+No session data defined.
+> ?- base_data(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_n39t05
+Knowledge graph 'test_session_n39t05' dropped.

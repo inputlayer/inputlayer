@@ -1,0 +1,72 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_ops_n39t04
+Knowledge graph 'test_rel_ops_n39t04' created.
+Switched to knowledge graph: test_rel_ops_n39t04
+> .kg use test_rel_ops_n39t04
+Switched to knowledge graph: test_rel_ops_n39t04
+> +users[("alice", 25), ("bob", 30), ("carol", 28)].
+Inserted 3 fact(s) into 'users'.
+> +products[(1, "Widget", 9.99), (2, "Gadget", 19.99)].
+Inserted 2 fact(s) into 'products'.
+> +orders[(1, "alice", 1, 2), (2, "bob", 2, 1)].
+Inserted 2 fact(s) into 'orders'.
+> .rel
+Relations:
+  orders (arity: 4)
+  products (arity: 3)
+  users (arity: 2)
+> .rel users
+Relation: users
+  Columns: ["col0", "col1"]
+  Total rows: 3
+  Preview (first 3):
+    ("alice", 25)
+    ("bob", 30)
+    ("carol", 28)
+> .rel products
+Relation: products
+  Columns: ["col0", "col1", "col2"]
+  Total rows: 2
+  Preview (first 2):
+    (1, "Widget", 9.99)
+    (2, "Gadget", 19.99)
+> .rel orders
+Relation: orders
+  Columns: ["col0", "col1", "col2", "col3"]
+  Total rows: 2
+  Preview (first 2):
+    (1, "alice", 1, 2)
+    (2, "bob", 2, 1)
+> ?- users(Name, Age).
+3 rows:
+  ("alice", 25)
+  ("bob", 30)
+  ("carol", 28)
+> ?- products(Id, Name, Price).
+2 rows:
+  (1, "Widget", 9.99)
+  (2, "Gadget", 19.99)
+> +categories[(1, "Electronics"), (2, "Home")].
+Inserted 2 fact(s) into 'categories'.
+> .rel
+Relations:
+  categories (arity: 2)
+  orders (arity: 4)
+  products (arity: 3)
+  users (arity: 2)
+> .rel categories
+Relation: categories
+  Columns: ["col0", "col1"]
+  Total rows: 2
+  Preview (first 2):
+    (1, "Electronics")
+    (2, "Home")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_ops_n39t04
+Knowledge graph 'test_rel_ops_n39t04' dropped.

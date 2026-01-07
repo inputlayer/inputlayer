@@ -1,0 +1,53 @@
+% Test: Complete Session Lifecycle
+% Description: Tests session facts, rules, list, clear, and drop
+
+.kg create test_session_n39t05
+.kg use test_session_n39t05
+
+% Insert persistent base facts
++base_data[(1,), (2,), (3,)].
+
+% Show session info (should be empty)
+.session
+
+% Add session facts (not persisted) - facts without + prefix
+temp_data(10).
+temp_data(20).
+temp_data(30).
+
+% Show session info (should show temp_data)
+.session
+
+% Query session facts
+?- temp_data(X).
+
+% Add session rule (no + prefix)
+derived(X) :- temp_data(X).
+
+% Show session info (should show rules)
+.session
+
+% Query session rule
+?- derived(X).
+
+% Drop specific session rule (1-based index)
+.session drop 1
+
+% Show session after drop
+.session
+
+% Add more session rules
+another_derived(X) :- base_data(X).
+
+% Clear all session data
+.session clear
+
+% Show session after clear (should be empty)
+.session
+
+% Verify persistent data still exists
+?- base_data(X).
+
+% Cleanup
+.kg use default
+.kg drop test_session_n39t05
