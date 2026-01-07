@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_manhattan_int8_n30t08
+Knowledge graph 'test_manhattan_int8_n30t08' created.
+Switched to knowledge graph: test_manhattan_int8_n30t08
+> .kg use test_manhattan_int8_n30t08
+Switched to knowledge graph: test_manhattan_int8_n30t08
+> +embedding[(1, [1.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(2, [0.0, 1.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(3, [0.5, 0.5, 0.5, 0.5])].
+Inserted 1 fact(s) into 'embedding'.
+> int8_manhattan(Id1, Id2, Dist) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Q1 = quantize_linear(V1), Q2 = quantize_linear(V2), Dist = manhattan_int8(Q1, Q2).
+3 rows:
+  (1, 2, 510.0)
+  (1, 3, 511.0)
+  (2, 3, 511.0)
+(session: 1 rule(s))
+> ?- int8_manhattan(Id1, Id2, Dist).
+3 rows:
+  (1, 2, 510.0)
+  (1, 3, 511.0)
+  (2, 3, 511.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_manhattan_int8_n30t08
+Knowledge graph 'test_manhattan_int8_n30t08' dropped.
