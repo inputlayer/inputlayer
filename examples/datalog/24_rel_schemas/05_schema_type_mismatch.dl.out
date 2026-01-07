@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_type_mismatch_n24t05
+Knowledge graph 'test_type_mismatch_n24t05' created.
+Switched to knowledge graph: test_type_mismatch_n24t05
+> .kg use test_type_mismatch_n24t05
+Switched to knowledge graph: test_type_mismatch_n24t05
+> +users(id: int, name: string, age: int).
+Schema 'users' declared (persistent).
+> +users[(1, "Alice", 30), (2, "Bob", 25)].
+Inserted 2 fact(s) into 'users'.
+> ?- users(Id, Name, Active).
+2 rows:
+  (1, "Alice", 30)
+  (2, "Bob", 25)
+> .rel users
+Relation: users
+  Columns: ["col0", "col1", "col2"]
+  Total rows: 2
+  Preview (first 2):
+    (1, "Alice", 30)
+    (2, "Bob", 25)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_type_mismatch_n24t05
+Knowledge graph 'test_type_mismatch_n24t05' dropped.
