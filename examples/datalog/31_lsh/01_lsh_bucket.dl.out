@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lsh_bucket_n31t01
+Knowledge graph 'test_lsh_bucket_n31t01' created.
+Switched to knowledge graph: test_lsh_bucket_n31t01
+> .kg use test_lsh_bucket_n31t01
+Switched to knowledge graph: test_lsh_bucket_n31t01
+> +vectors[(1, [1.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(2, [0.0, 1.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(3, [1.0, 1.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(4, [-1.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> bucket_result(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4).
+4 rows:
+  (1, 8)
+  (2, 8)
+  (3, 8)
+  (4, 7)
+(session: 1 rule(s))
+> ?- bucket_result(Id, Bucket).
+4 rows:
+  (1, 8)
+  (2, 8)
+  (3, 8)
+  (4, 7)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_bucket_n31t01
+Knowledge graph 'test_lsh_bucket_n31t01' dropped.

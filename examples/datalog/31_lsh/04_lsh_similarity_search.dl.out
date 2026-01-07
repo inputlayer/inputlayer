@@ -1,0 +1,56 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lsh_similarity_n31t04
+Knowledge graph 'test_lsh_similarity_n31t04' created.
+Switched to knowledge graph: test_lsh_similarity_n31t04
+> .kg use test_lsh_similarity_n31t04
+Switched to knowledge graph: test_lsh_similarity_n31t04
+> +vectors[(1, [1.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(2, [0.9, 0.1, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(3, [0.0, 1.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(4, [0.0, 0.9, 0.1, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(5, [-1.0, 0.0, 0.0, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> lsh_index(Id, V, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 3).
+5 rows:
+  (1, [Number(1.0), Number(0.0), Number(0.0), Number(0.0)], 0)
+  (2, [Number(0.8999999761581421), Number(0.10000000149011612), Number(0.0), Number(0.0)], 0)
+  (3, [Number(0.0), Number(1.0), Number(0.0), Number(0.0)], 0)
+  (4, [Number(0.0), Number(0.8999999761581421), Number(0.10000000149011612), Number(0.0)], 0)
+  (5, [Number(-1.0), Number(0.0), Number(0.0), Number(0.0)], 7)
+(session: 1 rule(s))
+> ?- lsh_index(Id, V, Bucket).
+5 rows:
+  (1, [Number(1.0), Number(0.0), Number(0.0), Number(0.0)], 0)
+  (2, [Number(0.8999999761581421), Number(0.10000000149011612), Number(0.0), Number(0.0)], 0)
+  (3, [Number(0.0), Number(1.0), Number(0.0), Number(0.0)], 0)
+  (4, [Number(0.0), Number(0.8999999761581421), Number(0.10000000149011612), Number(0.0)], 0)
+  (5, [Number(-1.0), Number(0.0), Number(0.0), Number(0.0)], 7)
+> +query[(100, [0.95, 0.05, 0.0, 0.0])].
+Inserted 1 fact(s) into 'query'.
+> lsh_candidate(QueryId, CandidateId, QueryBucket) :- query(QueryId, QV), QueryBucket = lsh_bucket(QV, 0, 3), lsh_index(CandidateId, _, CandidateB), QueryBucket = CandidateB.
+4 rows:
+  (100, 1, 0)
+  (100, 2, 0)
+  (100, 3, 0)
+  (100, 4, 0)
+(session: 2 rule(s))
+> ?- lsh_candidate(QueryId, CandidateId, Bucket).
+4 rows:
+  (100, 1, 0)
+  (100, 2, 0)
+  (100, 3, 0)
+  (100, 4, 0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_similarity_n31t04
+Knowledge graph 'test_lsh_similarity_n31t04' dropped.
