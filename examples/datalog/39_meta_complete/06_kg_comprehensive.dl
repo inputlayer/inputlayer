@@ -1,0 +1,48 @@
+% Test: Comprehensive Knowledge Graph Operations
+% Description: Tests KG create, use, list, info, and drop
+
+% List initial knowledge graphs
+.kg list
+
+% Create multiple knowledge graphs
+.kg create kg_alpha_n39t06
+.kg create kg_beta_n39t06
+.kg create kg_gamma_n39t06
+
+% List knowledge graphs (should show all)
+.kg list
+
+% Use first KG and add data
+.kg use kg_alpha_n39t06
++alpha_data[(1, "first"), (2, "second")].
+?- alpha_data(Id, Val).
+
+% Switch to second KG
+.kg use kg_beta_n39t06
++beta_data[(10, 20), (30, 40)].
+
+% Show current KG
+.kg
+
+% Switch to third KG
+.kg use kg_gamma_n39t06
++gamma_data[("x",), ("y",), ("z",)].
+
+% List all KGs
+.kg list
+
+% Switch back to alpha and verify data isolation
+.kg use kg_alpha_n39t06
+?- alpha_data(Id, Val).
+
+% Verify beta data is not visible in alpha
+?- beta_data(X, Y).
+
+% Cleanup - drop all test KGs
+.kg use default
+.kg drop kg_alpha_n39t06
+.kg drop kg_beta_n39t06
+.kg drop kg_gamma_n39t06
+
+% Verify cleanup
+.kg list

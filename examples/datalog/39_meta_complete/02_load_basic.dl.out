@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_meta_basic_n39t02
+Knowledge graph 'test_meta_basic_n39t02' created.
+Switched to knowledge graph: test_meta_basic_n39t02
+> .kg use test_meta_basic_n39t02
+Switched to knowledge graph: test_meta_basic_n39t02
+> +data[(1, "a"), (2, "b")].
+Inserted 2 fact(s) into 'data'.
+> ?- data(X, Y).
+2 rows:
+  (1, "a")
+  (2, "b")
+> +derived(X, Y) :- data(X, Y).
+Rule 'derived' registered.
+> ?- derived(X, Y).
+2 rows:
+  (1, "a")
+  (2, "b")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_meta_basic_n39t02
+Knowledge graph 'test_meta_basic_n39t02' dropped.
