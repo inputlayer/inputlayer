@@ -1,0 +1,32 @@
+% Test: Explicit Relation Schema
+% Description: Tests explicit schema declaration with column types using + prefix
+
+.kg create test_rel_schema_n24t01
+.kg use test_rel_schema_n24t01
+
+% Declare relation schema explicitly using + prefix
++employee(emp_id: int, name: string, dept_id: int).
++department(dept_id: int, dept_name: string).
+
+% Insert employees
++employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)].
+
+% Insert departments
++department[(10, "Engineering"), (20, "Sales")].
+
+% Query employees
+?- employee(Id, Name, Dept).
+
+% Query departments
+?- department(Id, Name).
+
+% Create view joining employee and department
++emp_dept(EmpName, DeptName) :-
+    employee(_, EmpName, DeptId),
+    department(DeptId, DeptName).
+
+?- emp_dept(E, D).
+
+% Cleanup
+.kg use default
+.kg drop test_rel_schema_n24t01
