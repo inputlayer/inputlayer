@@ -1,0 +1,9 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .load examples/datalog/nonexistent_file_that_does_not_exist.dl
+Loading file: examples/datalog/nonexistent_file_that_does_not_exist.dl
+Script error: Failed to read script 'examples/datalog/nonexistent_file_that_does_not_exist.dl': No such file or directory (os error 2)
