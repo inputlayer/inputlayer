@@ -1,28 +1,28 @@
-// Test: Delete All Then Query
-// Category: 02_relations
-// Description: Tests querying after deleting all facts from a relation
+% Test: Delete All Then Query
+% Category: 02_relations
+% Description: Tests querying after deleting all facts from a relation
 
-.db create test_del_all
-.db use test_del_all
+.kg create test_del_all
+.kg use test_del_all
 
-// Insert initial data
+% Insert initial data
 +edge[(1,2), (2,3), (3,4)].
 
-// Show initial state
+% Show initial state
 ?- edge(X, Y).
 
-// Delete all facts
+% Delete all facts
 -edge(X, Y) :- edge(X, Y).
 
-// Query empty relation
+% Query empty relation
 ?- edge(X, Y).
 
-// Insert new data after deletion
+% Insert new data after deletion
 +edge[(10,20), (20,30)].
 
-// Verify new data
+% Verify new data
 ?- edge(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_del_all
+% Cleanup
+.kg use default
+.kg drop test_del_all

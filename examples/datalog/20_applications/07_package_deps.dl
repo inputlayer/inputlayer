@@ -1,11 +1,11 @@
-// Test: Package Dependency Resolution
-// Category: Applications
-// Verifies: Transitive dependency analysis
+% Test: Package Dependency Resolution
+% Category: Applications
+% Verifies: Transitive dependency analysis
 
-.db create test_deps
-.db use test_deps
+.kg create test_deps
+.kg use test_deps
 
-// Package dependencies: depends(package, dependency)
+% Package dependencies: depends(package, dependency)
 +depends[(1, 2), (1, 3),     // pkg 1 depends on 2, 3
          (2, 4), (2, 5),     // pkg 2 depends on 4, 5
          (3, 5), (3, 6),     // pkg 3 depends on 5, 6
@@ -13,32 +13,32 @@
          (5, 7), (5, 8),     // pkg 5 depends on 7, 8
          (6, 8)].            // pkg 6 depends on 8
 
-// Transitive dependencies
+% Transitive dependencies
 +all_deps(Pkg, Dep) :- depends(Pkg, Dep).
 +all_deps(Pkg, TransDep) :- depends(Pkg, Dep), all_deps(Dep, TransDep).
 
-// All dependencies of package 1
+% All dependencies of package 1
 +deps_of_1(D) :- all_deps(1, D).
 ?- deps_of_1(D).
 
-// Count dependencies per package
+% Count dependencies per package
 +dep_count(Pkg, count<D>) :- all_deps(Pkg, D).
 ?- dep_count(P, C).
 
-// Find leaf packages (no dependencies)
+% Find leaf packages (no dependencies)
 +has_deps(P) :- depends(P, _).
 +leaf_pkg(P) :- depends(_, P), !has_deps(P).
 ?- leaf_pkg(P).
 
-// Packages that depend on package 7 (reverse deps)
+% Packages that depend on package 7 (reverse deps)
 +reverse_dep(7, Pkg) :- all_deps(Pkg, 7).
 ?- reverse_dep(7, P).
 
-// Shared dependencies (deps used by multiple packages)
+% Shared dependencies (deps used by multiple packages)
 +used_by(Dep, Pkg) :- all_deps(Pkg, Dep).
 +use_count(Dep, count<P>) :- used_by(Dep, P).
 ?- use_count(D, C).
 
-// Cleanup
-.db use default
-.db drop test_deps
+% Cleanup
+.kg use default
+.kg drop test_deps

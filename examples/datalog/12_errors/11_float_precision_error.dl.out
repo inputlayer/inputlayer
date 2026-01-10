@@ -1,11 +1,15 @@
-Executing script: examples/datalog/12_errors/11_float_precision_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_float_precision
-Database 'test_float_precision' created.
-Switched to database: test_float_precision
-> .db use test_float_precision
-Switched to database: test_float_precision
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_precision
+Knowledge graph 'test_float_precision' created.
+Switched to knowledge graph: test_float_precision
+> .kg use test_float_precision
+Switched to knowledge graph: test_float_precision
 > +scaled_floats[(1, 2, 3), (10, 20, 30), (100, 200, 300)].
-Inserted 3 facts into 'scaled_floats'.
+Inserted 3 fact(s) into 'scaled_floats'.
 > +add_test(A, B, C, A+B) :- scaled_floats(A, B, C).
-Script error: Line 13: Parse error: Invalid term: 'A+B'
+Script error: Parse error: Invalid term: 'A+B'

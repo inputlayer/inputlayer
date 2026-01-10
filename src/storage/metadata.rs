@@ -1,6 +1,6 @@
 //! Metadata Management for Storage Engine
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -8,16 +8,16 @@ use std::path::Path;
 
 use super::error::{StorageError, StorageResult};
 
-/// System-wide metadata for all databases
+/// System-wide metadata for all knowledge graphs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabasesMetadata {
+pub struct KnowledgeGraphsMetadata {
     pub version: String,
-    pub databases: Vec<DatabaseInfo>,
+    pub knowledge_graphs: Vec<KnowledgeGraphInfo>,
 }
 
-/// Information about a single database
+/// Information about a single knowledge graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseInfo {
+pub struct KnowledgeGraphInfo {
     pub name: String,
     pub created_at: String,
     pub last_accessed: String,
@@ -25,9 +25,9 @@ pub struct DatabaseInfo {
     pub total_tuples: usize,
 }
 
-/// Metadata for a single database
+/// Metadata for a single knowledge graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseMetadata {
+pub struct KnowledgeGraphMetadata {
     pub name: String,
     pub version: String,
     pub created_at: String,
@@ -44,12 +44,12 @@ pub struct RelationMetadata {
     pub last_modified: String,
 }
 
-impl DatabasesMetadata {
+impl KnowledgeGraphsMetadata {
     /// Create new empty metadata
     pub fn new() -> Self {
-        DatabasesMetadata {
+        KnowledgeGraphsMetadata {
             version: "1.0".to_string(),
-            databases: Vec::new(),
+            knowledge_graphs: Vec::new(),
         }
     }
 
@@ -77,16 +77,16 @@ impl DatabasesMetadata {
     }
 }
 
-impl Default for DatabasesMetadata {
+impl Default for KnowledgeGraphsMetadata {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DatabaseMetadata {
-    /// Create new database metadata
+impl KnowledgeGraphMetadata {
+    /// Create new knowledge graph metadata
     pub fn new(name: String) -> Self {
-        DatabaseMetadata {
+        KnowledgeGraphMetadata {
             name,
             version: "1.0".to_string(),
             created_at: Utc::now().to_rfc3339(),
@@ -97,8 +97,9 @@ impl DatabaseMetadata {
 
     /// Load from file
     pub fn load(path: &Path) -> StorageResult<Self> {
-        let file = File::open(path)
-            .map_err(|e| StorageError::MetadataError(format!("Failed to open metadata file: {}", e)))?;
+        let file = File::open(path).map_err(|e| {
+            StorageError::MetadataError(format!("Failed to open metadata file: {}", e))
+        })?;
 
         let metadata = serde_json::from_reader(file)
             .map_err(|e| StorageError::MetadataError(format!("Failed to parse metadata: {}", e)))?;
@@ -153,13 +154,13 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_databases_metadata_roundtrip() {
+    fn test_knowledge_graphs_metadata_roundtrip() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("databases.json");
+        let path = temp.path().join("knowledge_graphs.json");
 
-        let mut metadata = DatabasesMetadata::new();
-        metadata.databases.push(DatabaseInfo {
-            name: "test_db".to_string(),
+        let mut metadata = KnowledgeGraphsMetadata::new();
+        metadata.knowledge_graphs.push(KnowledgeGraphInfo {
+            name: "test_kg".to_string(),
             created_at: Utc::now().to_rfc3339(),
             last_accessed: Utc::now().to_rfc3339(),
             relations_count: 2,
@@ -167,18 +168,18 @@ mod tests {
         });
 
         metadata.save(&path).unwrap();
-        let loaded = DatabasesMetadata::load(&path).unwrap();
+        let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
 
-        assert_eq!(loaded.databases.len(), 1);
-        assert_eq!(loaded.databases[0].name, "test_db");
+        assert_eq!(loaded.knowledge_graphs.len(), 1);
+        assert_eq!(loaded.knowledge_graphs[0].name, "test_kg");
     }
 
     #[test]
-    fn test_database_metadata_roundtrip() {
+    fn test_knowledge_graph_metadata_roundtrip() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("db_metadata.json");
+        let path = temp.path().join("kg_metadata.json");
 
-        let mut metadata = DatabaseMetadata::new("test_db".to_string());
+        let mut metadata = KnowledgeGraphMetadata::new("test_kg".to_string());
         metadata.add_relation(
             "edge".to_string(),
             vec!["col0".to_string(), "col1".to_string()],
@@ -186,9 +187,9 @@ mod tests {
         );
 
         metadata.save(&path).unwrap();
-        let loaded = DatabaseMetadata::load(&path).unwrap();
+        let loaded = KnowledgeGraphMetadata::load(&path).unwrap();
 
-        assert_eq!(loaded.name, "test_db");
+        assert_eq!(loaded.name, "test_kg");
         assert_eq!(loaded.relations.len(), 1);
         assert!(loaded.relations.contains_key("edge"));
         assert_eq!(loaded.relations["edge"].tuple_count, 50);

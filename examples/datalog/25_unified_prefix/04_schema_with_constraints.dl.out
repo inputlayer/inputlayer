@@ -1,18 +1,22 @@
-Executing script: examples/datalog/25_unified_prefix/04_schema_with_constraints.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_schema_constraints
-Database 'test_schema_constraints' created.
-Switched to database: test_schema_constraints
-> .db use test_schema_constraints
-Switched to database: test_schema_constraints
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_schema_constraints
+Knowledge graph 'test_schema_constraints' created.
+Switched to knowledge graph: test_schema_constraints
+> .kg use test_schema_constraints
+Switched to knowledge graph: test_schema_constraints
 > +user(id: int @key, name: string, email: string @unique).
-Persistent schema 'user' declared: (id: Base(Int) @primary, name: Base(String), email: Base(String) @unique)
+Schema 'user' declared (persistent).
 > +product(sku: string @key, name: string @not_empty, price: int).
-Persistent schema 'product' declared: (sku: Base(String) @primary, name: Base(String) @not_empty, price: Base(Int))
+Schema 'product' declared (persistent).
 > +user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
-Inserted 2 facts into 'user'.
+Inserted 2 fact(s) into 'user'.
 > +product[("SKU001", "Widget", 100), ("SKU002", "Gadget", 200)].
-Inserted 2 facts into 'product'.
+Inserted 2 fact(s) into 'product'.
 > ?- user(Id, Name, Email).
 2 rows:
   (1, "Alice", "alice@example.com")
@@ -21,7 +25,7 @@ Inserted 2 facts into 'product'.
 2 rows:
   ("SKU001", "Widget", 100)
   ("SKU002", "Gadget", 200)
-> .db use default
-Switched to database: default
-> .db drop test_schema_constraints
-Database 'test_schema_constraints' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_schema_constraints
+Knowledge graph 'test_schema_constraints' dropped.

@@ -173,7 +173,7 @@ fn test_parse_with_comments() {
 
     let program = "
         % This is a comment
-        // This is also a comment
+        % This is also a comment (Prolog-style)
         result(X, Y) :- edge(X, Y).
 
         % Another comment
@@ -356,11 +356,21 @@ __result__(X, Y) :- same_component(X, Y).
     assert!(results.contains(&(3, 2)), "Should contain (3, 2) - reverse");
 
     // Transitive: 1 connected to 3 via 2
-    assert!(results.contains(&(1, 3)), "Should contain (1, 3) - transitive");
-    assert!(results.contains(&(3, 1)), "Should contain (3, 1) - transitive reverse");
+    assert!(
+        results.contains(&(1, 3)),
+        "Should contain (1, 3) - transitive"
+    );
+    assert!(
+        results.contains(&(3, 1)),
+        "Should contain (3, 1) - transitive reverse"
+    );
 
     // Should have many more due to transitivity
-    assert!(results.len() >= 6, "Should have at least 6 results, got {}", results.len());
+    assert!(
+        results.len() >= 6,
+        "Should have at least 6 results, got {}",
+        results.len()
+    );
 }
 
 #[test]
@@ -519,7 +529,10 @@ fn test_simple_negation() {
     let mut engine = DatalogEngine::new();
 
     // All employees
-    engine.add_fact("employee", vec![(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)]);
+    engine.add_fact(
+        "employee",
+        vec![(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)],
+    );
     // Employees on leave
     engine.add_fact("on_leave", vec![(2, 0), (4, 0)]);
 
@@ -530,14 +543,25 @@ fn test_simple_negation() {
     let results = engine.execute(program).unwrap();
 
     // Should return employees 1, 3, 5 (those NOT on leave)
-    assert_eq!(results.len(), 3, "Expected 3 active employees, got {:?}", results);
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 active employees, got {:?}",
+        results
+    );
     assert!(results.contains(&(1, 10)), "Employee 1 should be active");
     assert!(results.contains(&(3, 20)), "Employee 3 should be active");
     assert!(results.contains(&(5, 30)), "Employee 5 should be active");
 
     // Should NOT contain on_leave employees
-    assert!(!results.contains(&(2, 10)), "Employee 2 is on leave, should not be in results");
-    assert!(!results.contains(&(4, 20)), "Employee 4 is on leave, should not be in results");
+    assert!(
+        !results.contains(&(2, 10)),
+        "Employee 2 is on leave, should not be in results"
+    );
+    assert!(
+        !results.contains(&(4, 20)),
+        "Employee 4 is on leave, should not be in results"
+    );
 }
 
 #[test]
@@ -545,7 +569,10 @@ fn test_negation_with_join() {
     let mut engine = DatalogEngine::new();
 
     // Employees with department
-    engine.add_fact("employee", vec![(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)]);
+    engine.add_fact(
+        "employee",
+        vec![(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)],
+    );
     // Departments with managers
     engine.add_fact("department", vec![(10, 100), (20, 200), (30, 300)]);
     // Employees on leave
@@ -558,14 +585,34 @@ fn test_negation_with_join() {
     let results = engine.execute(program).unwrap();
 
     // Should return (1, 100), (3, 200), (5, 300) - employees NOT on leave with their managers
-    assert_eq!(results.len(), 3, "Expected 3 active employee-manager pairs, got {:?}", results);
-    assert!(results.contains(&(1, 100)), "Employee 1 with manager 100 should be active");
-    assert!(results.contains(&(3, 200)), "Employee 3 with manager 200 should be active");
-    assert!(results.contains(&(5, 300)), "Employee 5 with manager 300 should be active");
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 active employee-manager pairs, got {:?}",
+        results
+    );
+    assert!(
+        results.contains(&(1, 100)),
+        "Employee 1 with manager 100 should be active"
+    );
+    assert!(
+        results.contains(&(3, 200)),
+        "Employee 3 with manager 200 should be active"
+    );
+    assert!(
+        results.contains(&(5, 300)),
+        "Employee 5 with manager 300 should be active"
+    );
 
     // Should NOT contain on_leave employees
-    assert!(!results.contains(&(2, 100)), "Employee 2 is on leave, should not be in results");
-    assert!(!results.contains(&(4, 200)), "Employee 4 is on leave, should not be in results");
+    assert!(
+        !results.contains(&(2, 100)),
+        "Employee 2 is on leave, should not be in results"
+    );
+    assert!(
+        !results.contains(&(4, 200)),
+        "Employee 4 is on leave, should not be in results"
+    );
 }
 
 #[test]
@@ -601,12 +648,32 @@ fn test_negation_on_view() {
     // Only X=1 passes: (1,2) and (1,3)
     //
     // Expected: [(1, 2), (1, 3)]
-    assert_eq!(results.len(), 2, "Expected 2 pure source nodes, got {:?}", results);
-    assert!(results.contains(&(1, 2)), "Node (1,2) should be a pure source");
-    assert!(results.contains(&(1, 3)), "Node (1,3) should be a pure source");
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 pure source nodes, got {:?}",
+        results
+    );
+    assert!(
+        results.contains(&(1, 2)),
+        "Node (1,2) should be a pure source"
+    );
+    assert!(
+        results.contains(&(1, 3)),
+        "Node (1,3) should be a pure source"
+    );
 
     // These should NOT be in results (their X value is in target_node's first column)
-    assert!(!results.contains(&(2, 3)), "Node (2,3) has X=2 which is in target_node");
-    assert!(!results.contains(&(3, 4)), "Node (3,4) has X=3 which is in target_node");
-    assert!(!results.contains(&(2, 4)), "Node (2,4) has X=2 which is in target_node");
+    assert!(
+        !results.contains(&(2, 3)),
+        "Node (2,3) has X=2 which is in target_node"
+    );
+    assert!(
+        !results.contains(&(3, 4)),
+        "Node (3,4) has X=3 which is in target_node"
+    );
+    assert!(
+        !results.contains(&(2, 4)),
+        "Node (2,4) has X=2 which is in target_node"
+    );
 }

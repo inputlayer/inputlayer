@@ -1,27 +1,27 @@
-// Test: Schema vs Data Distinction
-// Category: Unified Prefix Syntax
-// Description: Tests that parser correctly distinguishes typed (schema) from value (data) arguments
+% Test: Schema vs Data Distinction
+% Category: Unified Prefix Syntax
+% Description: Tests that parser correctly distinguishes typed (schema) from value (data) arguments
 
-.db create test_schema_vs_data
-.db use test_schema_vs_data
+.kg create test_schema_vs_data
+.kg use test_schema_vs_data
 
-// Schema declaration (typed arguments with colons)
+% Schema declaration (typed arguments with colons)
 +person(id: int, name: string, age: int).
 
-// Data insert (value arguments - integers, strings, variables)
+% Data insert (value arguments - integers, strings, variables)
 +person(1, "Alice", 30).
 +person(2, "Bob", 25).
 
-// Query to verify data
+% Query to verify data
 ?- person(Id, Name, Age).
 
-// Another example: same relation name, different operations
+% Another example: same relation name, different operations
 +product(sku: string, price: int).
 +product("SKU001", 100).
 +product("SKU002", 200).
 
 ?- product(Sku, Price).
 
-// Cleanup
-.db use default
-.db drop test_schema_vs_data
+% Cleanup
+.kg use default
+.kg drop test_schema_vs_data

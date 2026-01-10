@@ -1,22 +1,26 @@
-Executing script: examples/datalog/28_docs_coverage/05_cheatsheet_graph_example.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create social
-Database 'social' created.
-Switched to database: social
-> .db use social
-Switched to database: social
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create social
+Knowledge graph 'social' created.
+Switched to knowledge graph: social
+> .kg use social
+Switched to knowledge graph: social
 > +follows[(1, 2), (2, 3), (3, 4), (1, 4)].
-Inserted 4 facts into 'follows'.
+Inserted 4 fact(s) into 'follows'.
 > +reach(X, Y) :- follows(X, Y).
 Rule 'reach' registered.
 > +reach(X, Z) :- reach(X, Y), follows(Y, Z).
-Rule added to 'reach' (2 rules total).
+Rule 'reach' registered.
 > ?- reach(1, X).
 3 rows:
   (1, 2)
   (1, 3)
   (1, 4)
-> .db use default
-Switched to database: default
-> .db drop social
-Database 'social' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop social
+Knowledge graph 'social' dropped.

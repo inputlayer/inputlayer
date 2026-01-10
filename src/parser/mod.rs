@@ -33,18 +33,72 @@
 //! A minimal but complete parser for Datalog programs.
 //! Supports: rules, atoms, variables, constants, basic constraints.
 
-use crate::ast::{AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule, Term};
+use crate::ast::{
+    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule,
+    Term,
+};
+
+/// Strip block comments (/* ... */) from source text
+/// Handles nested block comments properly and respects string literals
+pub fn strip_block_comments(source: &str) -> String {
+    let mut result = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut depth = 0;
+    let mut in_string = false;
+
+    while let Some(c) = chars.next() {
+        // Track string literals - don't strip comments inside strings
+        if c == '"' && depth == 0 {
+            in_string = !in_string;
+            result.push(c);
+        } else if in_string {
+            // Inside a string, copy everything as-is
+            result.push(c);
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // consume '*'
+            depth += 1;
+        } else if c == '*' && chars.peek() == Some(&'/') && depth > 0 {
+            chars.next(); // consume '/'
+            depth -= 1;
+            if depth == 0 {
+                result.push(' '); // Replace comment with space to preserve spacing
+            }
+        } else if depth == 0 {
+            result.push(c);
+        }
+    }
+
+    result
+}
 
 /// Parse a Datalog program from source text
+///
+/// Supports comments:
+/// - `%` - Line comment (Prolog style, preferred)
+/// - `/* ... */` - Block comment (C style, can span multiple lines)
 pub fn parse_program(source: &str) -> Result<Program, String> {
     let mut program = Program::new();
+
+    // First strip block comments
+    let source = strip_block_comments(source);
 
     // Split into lines and parse each rule
     for line in source.lines() {
         let line = line.trim();
 
-        // Skip empty lines and comments
-        if line.is_empty() || line.starts_with('%') || line.starts_with("//") {
+        // Skip empty lines and line comments (% is the standard style)
+        if line.is_empty() || line.starts_with('%') {
+            continue;
+        }
+
+        // Strip inline % comments
+        let line = if let Some(pos) = find_comment_start(line) {
+            line[..pos].trim()
+        } else {
+            line
+        };
+
+        if line.is_empty() {
             continue;
         }
 
@@ -54,6 +108,24 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
     }
 
     Ok(program)
+}
+
+/// Find the start position of a % comment, respecting string literals
+fn find_comment_start(line: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut chars = line.char_indices();
+
+    while let Some((i, c)) = chars.next() {
+        if c == '"' && !in_string {
+            in_string = true;
+        } else if c == '"' && in_string {
+            in_string = false;
+        } else if c == '%' && !in_string {
+            return Some(i);
+        }
+    }
+
+    None
 }
 
 /// Parse a single rule
@@ -180,7 +252,9 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
             '<' => {
                 // Only track angle depth if this looks like aggregate syntax:
                 // previous char was alphanumeric (word char), no space before <
-                let prev_is_word = current.chars().last()
+                let prev_is_word = current
+                    .chars()
+                    .last()
                     .map(|c| c.is_alphanumeric() || c == '_')
                     .unwrap_or(false);
                 if prev_is_word {
@@ -222,9 +296,7 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
     let relation = s[..paren_pos].trim().to_string();
 
     // Extract arguments - find matching closing parenthesis
-    let args_str = s[paren_pos + 1..]
-        .trim_end_matches(')')
-        .trim();
+    let args_str = s[paren_pos + 1..].trim_end_matches(')').trim();
 
     let args = if args_str.is_empty() {
         vec![]
@@ -318,7 +390,7 @@ fn parse_term(s: &str) -> Result<Term, String> {
 
     // Check for string literal: "hello"
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         return Ok(Term::StringConstant(inner.to_string()));
     }
 
@@ -433,7 +505,7 @@ fn parse_term(s: &str) -> Result<Term, String> {
 
 /// Parse a vector literal like [1.0, 2.0, 3.0]
 fn parse_vector_literal(s: &str) -> Result<Term, String> {
-    let inner = s[1..s.len()-1].trim();
+    let inner = s[1..s.len() - 1].trim();
     if inner.is_empty() {
         return Ok(Term::VectorLiteral(vec![]));
     }
@@ -763,7 +835,8 @@ mod tests {
 
     #[test]
     fn test_parse_rule_with_multiple_constraints() {
-        let rule = parse_rule("result(X, Y) :- data(X, Y), X >= 2, X <= 4, Y >= 20, Y <= 40").unwrap();
+        let rule =
+            parse_rule("result(X, Y) :- data(X, Y), X >= 2, X <= 4, Y >= 20, Y <= 40").unwrap();
         println!("Body: {:?}", rule.body);
         println!("Constraints: {:?}", rule.constraints);
         assert_eq!(rule.body.len(), 1, "Expected 1 body predicate");
@@ -847,22 +920,28 @@ mod tests {
         assert!(matches!(atom.args[0], Term::Variable(ref v) if v == "Category"));
         assert!(matches!(atom.args[1], Term::Aggregate(AggregateFunc::Min, ref v) if v == "Price"));
         assert!(matches!(atom.args[2], Term::Aggregate(AggregateFunc::Max, ref v) if v == "Price"));
-        assert!(matches!(atom.args[3], Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Quantity"));
+        assert!(
+            matches!(atom.args[3], Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Quantity")
+        );
     }
 
     #[test]
     fn test_parse_aggregation_rule() {
-        let rule = parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
+        let rule =
+            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
         assert_eq!(rule.head.relation, "total_sales");
         assert_eq!(rule.head.args.len(), 2);
         assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Category"));
-        assert!(matches!(rule.head.args[1], Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount"));
+        assert!(
+            matches!(rule.head.args[1], Term::Aggregate(AggregateFunc::Sum, ref v) if v == "Amount")
+        );
         assert_eq!(rule.body.len(), 1);
     }
 
     #[test]
     fn test_parse_count_rule() {
-        let rule = parse_rule("item_count(Category, count<Item>) :- inventory(Category, Item).").unwrap();
+        let rule =
+            parse_rule("item_count(Category, count<Item>) :- inventory(Category, Item).").unwrap();
         assert_eq!(rule.head.relation, "item_count");
         assert!(rule.head.has_aggregates());
         assert_eq!(rule.head.aggregates().len(), 1);
@@ -884,7 +963,13 @@ mod tests {
     fn test_parse_arithmetic_simple_add() {
         let term = parse_term("D+1").unwrap();
         if let Term::Arithmetic(expr) = term {
-            assert!(matches!(expr, ArithExpr::Binary { op: ArithOp::Add, .. }));
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Add,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -894,7 +979,13 @@ mod tests {
     fn test_parse_arithmetic_simple_sub() {
         let term = parse_term("X-Y").unwrap();
         if let Term::Arithmetic(expr) = term {
-            assert!(matches!(expr, ArithExpr::Binary { op: ArithOp::Sub, .. }));
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Sub,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -904,7 +995,13 @@ mod tests {
     fn test_parse_arithmetic_mul() {
         let term = parse_term("A*B").unwrap();
         if let Term::Arithmetic(expr) = term {
-            assert!(matches!(expr, ArithExpr::Binary { op: ArithOp::Mul, .. }));
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -914,7 +1011,13 @@ mod tests {
     fn test_parse_arithmetic_div() {
         let term = parse_term("X/2").unwrap();
         if let Term::Arithmetic(expr) = term {
-            assert!(matches!(expr, ArithExpr::Binary { op: ArithOp::Div, .. }));
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Div,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -924,7 +1027,13 @@ mod tests {
     fn test_parse_arithmetic_mod() {
         let term = parse_term("N%2").unwrap();
         if let Term::Arithmetic(expr) = term {
-            assert!(matches!(expr, ArithExpr::Binary { op: ArithOp::Mod, .. }));
+            assert!(matches!(
+                expr,
+                ArithExpr::Binary {
+                    op: ArithOp::Mod,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -937,7 +1046,13 @@ mod tests {
         if let Term::Arithmetic(ArithExpr::Binary { op, left, right }) = term {
             assert_eq!(op, ArithOp::Add);
             assert!(matches!(*left, ArithExpr::Variable(ref v) if v == "A"));
-            assert!(matches!(*right, ArithExpr::Binary { op: ArithOp::Mul, .. }));
+            assert!(matches!(
+                *right,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected arithmetic term, got {:?}", term);
         }
@@ -979,7 +1094,10 @@ mod tests {
     #[test]
     fn test_parse_arithmetic_with_spaces() {
         let term = parse_term("D + 1").unwrap();
-        if let Term::Arithmetic(ArithExpr::Binary { op: ArithOp::Add, .. }) = term {
+        if let Term::Arithmetic(ArithExpr::Binary {
+            op: ArithOp::Add, ..
+        }) = term
+        {
             // Good
         } else {
             panic!("Expected Add expression");
@@ -992,8 +1110,20 @@ mod tests {
         let term = parse_term("A*B+C*D").unwrap();
         if let Term::Arithmetic(ArithExpr::Binary { op, left, right }) = term {
             assert_eq!(op, ArithOp::Add);
-            assert!(matches!(*left, ArithExpr::Binary { op: ArithOp::Mul, .. }));
-            assert!(matches!(*right, ArithExpr::Binary { op: ArithOp::Mul, .. }));
+            assert!(matches!(
+                *left,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                *right,
+                ArithExpr::Binary {
+                    op: ArithOp::Mul,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected Add of two Mul expressions");
         }
@@ -1113,8 +1243,14 @@ mod tests {
         if let Term::FunctionCall(func, args) = term {
             assert_eq!(func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
-            assert!(matches!(args[0], Term::FunctionCall(BuiltinFunc::VecNormalize, _)));
-            assert!(matches!(args[1], Term::FunctionCall(BuiltinFunc::VecNormalize, _)));
+            assert!(matches!(
+                args[0],
+                Term::FunctionCall(BuiltinFunc::VecNormalize, _)
+            ));
+            assert!(matches!(
+                args[1],
+                Term::FunctionCall(BuiltinFunc::VecNormalize, _)
+            ));
         } else {
             panic!("Expected nested FunctionCall");
         }
@@ -1151,7 +1287,15 @@ mod tests {
     #[test]
     fn test_parse_top_k_aggregate() {
         let term = parse_term("top_k<10, Score>").unwrap();
-        if let Term::Aggregate(AggregateFunc::TopK { k, order_var, descending }, _) = term {
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+            },
+            _,
+        ) = term
+        {
             assert_eq!(k, 10);
             assert_eq!(order_var, "Score");
             assert!(!descending);
@@ -1163,7 +1307,15 @@ mod tests {
     #[test]
     fn test_parse_top_k_descending() {
         let term = parse_term("top_k<5, Dist, desc>").unwrap();
-        if let Term::Aggregate(AggregateFunc::TopK { k, order_var, descending }, _) = term {
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+            },
+            _,
+        ) = term
+        {
             assert_eq!(k, 5);
             assert_eq!(order_var, "Dist");
             assert!(descending);
@@ -1175,7 +1327,16 @@ mod tests {
     #[test]
     fn test_parse_top_k_threshold() {
         let term = parse_term("top_k_threshold<10, Score, 0.8>").unwrap();
-        if let Term::Aggregate(AggregateFunc::TopKThreshold { k, order_var, threshold, descending }, _) = term {
+        if let Term::Aggregate(
+            AggregateFunc::TopKThreshold {
+                k,
+                order_var,
+                threshold,
+                descending,
+            },
+            _,
+        ) = term
+        {
             assert_eq!(k, 10);
             assert_eq!(order_var, "Score");
             assert!((threshold - 0.8).abs() < f64::EPSILON);
@@ -1188,7 +1349,14 @@ mod tests {
     #[test]
     fn test_parse_within_radius() {
         let term = parse_term("within_radius<Dist, 0.5>").unwrap();
-        if let Term::Aggregate(AggregateFunc::WithinRadius { distance_var, max_distance }, _) = term {
+        if let Term::Aggregate(
+            AggregateFunc::WithinRadius {
+                distance_var,
+                max_distance,
+            },
+            _,
+        ) = term
+        {
             assert_eq!(distance_var, "Dist");
             assert!((max_distance - 0.5).abs() < f64::EPSILON);
         } else {
@@ -1204,19 +1372,32 @@ mod tests {
     fn test_parse_vector_search_rule() {
         // Example: nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).
         // Note: The parser may count the constraint as a body item internally
-        let rule = parse_rule("nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).").unwrap();
+        let rule =
+            parse_rule("nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).")
+                .unwrap();
         assert_eq!(rule.head.relation, "nearest");
         // Body contains vectors(Id, V) and query(Q) - constraint may or may not be counted
         assert!(rule.body.len() >= 2, "Expected at least 2 body predicates");
 
         // Check that euclidean function call is captured in constraints
         let euclidean_constraint = rule.constraints.iter().find(|c| {
-            matches!(c, Constraint::Equal(Term::Variable(_), Term::FunctionCall(BuiltinFunc::Euclidean, _)))
+            matches!(
+                c,
+                Constraint::Equal(
+                    Term::Variable(_),
+                    Term::FunctionCall(BuiltinFunc::Euclidean, _)
+                )
+            )
         });
-        assert!(euclidean_constraint.is_some(),
-            "Expected euclidean function call constraint, got {:?}", rule.constraints);
+        assert!(
+            euclidean_constraint.is_some(),
+            "Expected euclidean function call constraint, got {:?}",
+            rule.constraints
+        );
 
-        if let Some(Constraint::Equal(Term::Variable(v), Term::FunctionCall(func, args))) = euclidean_constraint {
+        if let Some(Constraint::Equal(Term::Variable(v), Term::FunctionCall(func, args))) =
+            euclidean_constraint
+        {
             assert_eq!(v, "Dist");
             assert_eq!(*func, BuiltinFunc::Euclidean);
             assert_eq!(args.len(), 2);
@@ -1226,7 +1407,9 @@ mod tests {
     #[test]
     fn test_parse_lsh_rule() {
         // Example: hash_t0(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 8).
-        let rule = parse_rule("hash_t0(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 8).").unwrap();
+        let rule =
+            parse_rule("hash_t0(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 8).")
+                .unwrap();
         assert_eq!(rule.head.relation, "hash_t0");
         assert_eq!(rule.constraints.len(), 1);
 
@@ -1241,9 +1424,152 @@ mod tests {
     #[test]
     fn test_parse_top_k_rule() {
         // Example: top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).
-        let rule = parse_rule("top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
+        let rule =
+            parse_rule("top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
         assert_eq!(rule.head.relation, "top_results");
         assert_eq!(rule.head.args.len(), 3);
         assert!(rule.head.has_aggregates());
+    }
+
+    // =========================================================================
+    // Comment Parsing Tests
+    // =========================================================================
+
+    #[test]
+    fn test_strip_block_comments_simple() {
+        let source = "edge(1, 2). /* comment */ edge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2).   edge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_multiline() {
+        let source = "edge(1, 2).\n/* multi\nline\ncomment */\nedge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2).\n \nedge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_nested() {
+        let source = "edge(1, 2). /* outer /* inner */ outer */ edge(3, 4).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, "edge(1, 2).   edge(3, 4).");
+    }
+
+    #[test]
+    fn test_strip_block_comments_empty() {
+        let source = "/* just a comment */";
+        let result = strip_block_comments(source);
+        assert_eq!(result, " ");
+    }
+
+    #[test]
+    fn test_strip_block_comments_no_comments() {
+        let source = "edge(1, 2). path(X, Y).";
+        let result = strip_block_comments(source);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn test_strip_block_comments_in_string_ignored() {
+        // Block comments inside strings should NOT be stripped
+        let source = r#"+message("test /* not a comment */ test")."#;
+        let result = strip_block_comments(source);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn test_strip_block_comments_mixed_string_and_comment() {
+        // String followed by actual comment
+        let source = r#"+message("hello"). /* real comment */ +edge(1, 2)."#;
+        let result = strip_block_comments(source);
+        assert_eq!(result, r#"+message("hello").   +edge(1, 2)."#);
+    }
+
+    #[test]
+    fn test_find_comment_start_simple() {
+        let line = "edge(1, 2). % comment";
+        let pos = find_comment_start(line);
+        assert_eq!(pos, Some(12));
+    }
+
+    #[test]
+    fn test_find_comment_start_no_comment() {
+        let line = "edge(1, 2).";
+        let pos = find_comment_start(line);
+        assert_eq!(pos, None);
+    }
+
+    #[test]
+    fn test_find_comment_start_in_string_ignored() {
+        let line = r#"message("hello % world")."#;
+        let pos = find_comment_start(line);
+        assert_eq!(pos, None);
+    }
+
+    #[test]
+    fn test_find_comment_start_after_string() {
+        let line = r#"message("hello"). % comment"#;
+        let pos = find_comment_start(line);
+        assert_eq!(pos, Some(18));
+    }
+
+    #[test]
+    fn test_parse_program_with_line_comments() {
+        let source = "
+            % This is a comment
+            path(X, Y) :- edge(X, Y).
+            % Another comment
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_with_inline_comments() {
+        let source = "
+            path(X, Y) :- edge(X, Y). % base case
+            path(X, Z) :- path(X, Y), edge(Y, Z). % recursive case
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_with_block_comments() {
+        let source = "
+            /* This rule defines direct paths */
+            path(X, Y) :- edge(X, Y).
+            /*
+             * This rule defines transitive paths
+             * through recursive evaluation
+             */
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_with_mixed_comments() {
+        let source = "
+            % Line comment
+            path(X, Y) :- edge(X, Y). % inline comment
+            /* Block comment */
+            path(X, Z) :- path(X, Y), edge(Y, Z).
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_program_comment_only() {
+        let source = "
+            % Just comments
+            /* No rules here */
+        ";
+        let program = parse_program(source).unwrap();
+        assert_eq!(program.rules.len(), 0);
     }
 }

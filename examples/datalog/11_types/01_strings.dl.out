@@ -1,12 +1,16 @@
-Executing script: examples/datalog/11_types/01_strings.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_str
-Database 'test_str' created.
-Switched to database: test_str
-> .db use test_str
-Switched to database: test_str
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str
+Knowledge graph 'test_str' created.
+Switched to knowledge graph: test_str
+> .kg use test_str
+Switched to knowledge graph: test_str
 > +person[(1, 25), (2, 30), (3, 35)].
-Inserted 3 facts into 'person'.
+Inserted 3 fact(s) into 'person'.
 > ?- person(Id, Age).
 3 rows:
   (1, 25)
@@ -18,7 +22,7 @@ Rule 'older' registered.
 2 rows:
   (2, 30)
   (3, 35)
-> .db use default
-Switched to database: default
-> .db drop test_str
-Database 'test_str' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_str
+Knowledge graph 'test_str' dropped.

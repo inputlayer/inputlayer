@@ -33,11 +33,16 @@ trap "rm -rf $TEMP_DIR" EXIT
 # - Strips timestamps (e.g., "Created: 2025-12-04T...")
 # - Strips "Executing script:" lines
 # - Strips Rust compiler warnings
+# - Strips connection header lines (server state dependent)
 # - Normalizes whitespace
 normalize_output() {
     local input="$1"
     echo "$input" | \
         grep -v "^Executing script:" | \
+        grep -v "^Connecting to server" | \
+        grep -v "^Connected!" | \
+        grep -v "^Server status:" | \
+        grep -v "^Current knowledge graph:" | \
         grep -v "^warning:" | \
         grep -v "^   -->" | \
         grep -v "^    |" | \
@@ -54,9 +59,17 @@ normalize_output() {
         sed 's/[[:space:]]*$//' # Trim trailing whitespace
 }
 
-# Function to clean database state before each test
+# Function to clean knowledge graph state before each test
 clean_state() {
-    # Remove test databases directories
+    # Delete all non-default knowledge graphs via API
+    local kgs=$(curl -s http://127.0.0.1:8080/api/v1/knowledge-graphs 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
+    for kg in $kgs; do
+        if [[ "$kg" != "default" ]]; then
+            curl -s -X DELETE "http://127.0.0.1:8080/api/v1/knowledge-graphs/$kg" >/dev/null 2>&1 || true
+        fi
+    done
+
+    # Remove test knowledge graph directories from disk
     find "$PROJECT_DIR/data" -maxdepth 1 -type d -name "test_*" -exec rm -rf {} \; 2>/dev/null || true
 
     # Clean ALL persist state completely - delete all files in these directories
@@ -67,11 +80,11 @@ clean_state() {
     # Also clean any view catalog files that might be persisted
     find "$PROJECT_DIR/data" -type f -name "views.json" -delete 2>/dev/null || true
 
-    # Reset metadata to only have default database
-    cat > "$PROJECT_DIR/data/metadata/databases.json" << 'EOF'
+    # Reset metadata to only have default knowledge graph
+    cat > "$PROJECT_DIR/data/metadata/knowledge_graphs.json" << 'EOF'
 {
   "version": "1.0",
-  "databases": [
+  "knowledge_graphs": [
     {
       "name": "default",
       "created_at": "2025-12-04T12:05:31.328858+00:00",
@@ -98,11 +111,17 @@ run_test() {
         return
     fi
 
-    # Clean state before test
+    # Clean server state before each test to ensure idempotency
     clean_state
 
     # Run the test and capture output (stderr to /dev/null to skip warnings)
     local actual_output
+    local cmd="cargo run --bin inputlayer-client --release --quiet -- --script \"$test_file\""
+
+    if [[ "${VERBOSE:-0}" == "1" ]]; then
+        echo -e "${CYAN}CMD${NC} $cmd"
+    fi
+
     actual_output=$(cd "$PROJECT_DIR" && cargo run --bin inputlayer-client --release --quiet -- --script "$test_file" 2>/dev/null) || true
 
     # In update mode, write the output to the expected file

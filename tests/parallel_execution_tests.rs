@@ -2,8 +2,8 @@
 //!
 //! Tests for the worker pool infrastructure and parallel query execution:
 //! - Thread pool configuration
-//! - Concurrent query execution across multiple databases
-//! - Database isolation during concurrent access
+//! - Concurrent query execution across multiple knowledge_graphs
+//! - KnowledgeGraph isolation during concurrent access
 //! - Parallel execution modes
 //! - Error handling in parallel contexts
 //! - Performance characteristics
@@ -57,7 +57,10 @@ fn test_multiple_storage_engines_share_thread_pool() {
     let cpus1 = storage1.num_cpus();
     let cpus2 = storage2.num_cpus();
 
-    assert_eq!(cpus1, cpus2, "All storage engines share the same global thread pool");
+    assert_eq!(
+        cpus1, cpus2,
+        "All storage engines share the same global thread pool"
+    );
 }
 
 // ============================================================================
@@ -65,17 +68,19 @@ fn test_multiple_storage_engines_share_thread_pool() {
 // ============================================================================
 
 #[test]
-fn test_execute_queries_on_multiple_databases_concurrently() {
+fn test_execute_queries_on_multiple_knowledge_graphs_concurrently() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create 4 databases with different data
+    // Create 4 knowledge_graphs with different data
     for i in 1..=4 {
         let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
-        storage.insert_into(&db_name, "edge", vec![(i, i * 10)]).unwrap();
+        storage.create_knowledge_graph(&db_name).unwrap();
+        storage
+            .insert_into(&db_name, "edge", vec![(i, i * 10)])
+            .unwrap();
     }
 
-    // Execute queries on all databases in parallel
+    // Execute queries on all knowledge_graphs in parallel
     let queries = vec![
         ("db1", "result(X,Y) :- edge(X,Y)."),
         ("db2", "result(X,Y) :- edge(X,Y)."),
@@ -83,11 +88,13 @@ fn test_execute_queries_on_multiple_databases_concurrently() {
         ("db4", "result(X,Y) :- edge(X,Y)."),
     ];
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
     assert_eq!(results.len(), 4);
 
-    // Verify each database returned its own data
+    // Verify each knowledge_graph returned its own data
     for (db_name, result) in &results {
         assert_eq!(result.len(), 1);
         let db_num = db_name.chars().last().unwrap().to_digit(10).unwrap() as i32;
@@ -96,23 +103,25 @@ fn test_execute_queries_on_multiple_databases_concurrently() {
 }
 
 #[test]
-fn test_same_query_on_multiple_databases() {
+fn test_same_query_on_multiple_knowledge_graphs() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create databases with increasing amounts of data
+    // Create knowledge_graphs with increasing amounts of data
     for i in 1..=3 {
         let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
+        storage.create_knowledge_graph(&db_name).unwrap();
 
         let edges: Vec<(i32, i32)> = (0..i).map(|j| (j, j + 1)).collect();
         storage.insert_into(&db_name, "edge", edges).unwrap();
     }
 
-    // Execute same query on all databases in parallel
-    let databases = vec!["db1", "db2", "db3"];
+    // Execute same query on all knowledge_graphs in parallel
+    let knowledge_graphs = vec!["db1", "db2", "db3"];
     let query = "result(X,Y) :- edge(X,Y).";
 
-    let results = storage.execute_query_on_multiple_databases(databases, query).unwrap();
+    let results = storage
+        .execute_query_on_multiple_knowledge_graphs(knowledge_graphs, query)
+        .unwrap();
 
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].1.len(), 1); // db1 has 1 edge
@@ -121,45 +130,65 @@ fn test_same_query_on_multiple_databases() {
 }
 
 #[test]
-fn test_multiple_queries_on_same_database() {
+fn test_multiple_queries_on_same_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.insert_into("test", "edge", vec![
-        (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10)
-    ]).unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into(
+            "test",
+            "edge",
+            vec![
+                (1, 2),
+                (2, 3),
+                (3, 4),
+                (4, 5),
+                (5, 6),
+                (6, 7),
+                (7, 8),
+                (8, 9),
+                (9, 10),
+            ],
+        )
+        .unwrap();
 
-    // Execute multiple queries on the same database in parallel
+    // Execute multiple queries on the same knowledge_graph in parallel
     let queries = vec![
-        "q1(X,Y) :- edge(X,Y).",                    // All edges
-        "q2(X,Y) :- edge(X,Y), X > 5.",            // x > 5
-        "q3(X,Y) :- edge(X,Y), X < 5.",            // x < 5
-        "q4(X,Y) :- edge(X,Y), X > 3, X < 7.",     // 3 < x < 7
+        "q1(X,Y) :- edge(X,Y).",               // All edges
+        "q2(X,Y) :- edge(X,Y), X > 5.",        // x > 5
+        "q3(X,Y) :- edge(X,Y), X < 5.",        // x < 5
+        "q4(X,Y) :- edge(X,Y), X > 3, X < 7.", // 3 < x < 7
     ];
 
-    let results = storage.execute_parallel_queries_on_database("test", queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
 
     assert_eq!(results.len(), 4);
-    assert_eq!(results[0].len(), 9);  // All edges
-    assert_eq!(results[1].len(), 4);  // x > 5: 6,7,8,9
-    assert_eq!(results[2].len(), 4);  // x < 5: 1,2,3,4
-    assert_eq!(results[3].len(), 3);  // 3 < x < 7: 4,5,6
+    assert_eq!(results[0].len(), 9); // All edges
+    assert_eq!(results[1].len(), 4); // x > 5: 6,7,8,9
+    assert_eq!(results[2].len(), 4); // x < 5: 1,2,3,4
+    assert_eq!(results[3].len(), 3); // 3 < x < 7: 4,5,6
 }
 
 // ============================================================================
-// Database Isolation Tests (Concurrent Access)
+// KnowledgeGraph Isolation Tests (Concurrent Access)
 // ============================================================================
 
 #[test]
-fn test_parallel_queries_maintain_database_isolation() {
+fn test_parallel_queries_maintain_knowledge_graph_isolation() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create databases with different data
-    storage.create_database("db1").unwrap();
-    storage.insert_into("db1", "edge", vec![(1, 2), (2, 3)]).unwrap();
+    // Create knowledge_graphs with different data
+    storage.create_knowledge_graph("db1").unwrap();
+    storage
+        .insert_into("db1", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
 
-    storage.create_database("db2").unwrap();
-    storage.insert_into("db2", "edge", vec![(10, 20), (20, 30)]).unwrap();
+    storage.create_knowledge_graph("db2").unwrap();
+    storage
+        .insert_into("db2", "edge", vec![(10, 20), (20, 30)])
+        .unwrap();
 
     // Execute queries in parallel
     let queries = vec![
@@ -167,9 +196,11 @@ fn test_parallel_queries_maintain_database_isolation() {
         ("db2", "result(X,Y) :- edge(X,Y)."),
     ];
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
-    // Verify each database only sees its own data
+    // Verify each knowledge_graph only sees its own data
     let db1_results = results.iter().find(|(db, _)| db == "db1").unwrap();
     let db2_results = results.iter().find(|(db, _)| db == "db2").unwrap();
 
@@ -186,17 +217,20 @@ fn test_parallel_queries_maintain_database_isolation() {
 fn test_concurrent_queries_on_different_relations() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.insert_into("test", "edge", vec![(1, 2), (2, 3)]).unwrap();
-    storage.insert_into("test", "person", vec![(100, 200), (200, 300)]).unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into("test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
+    storage
+        .insert_into("test", "person", vec![(100, 200), (200, 300)])
+        .unwrap();
 
     // Query different relations in parallel
-    let queries = vec![
-        "q1(X,Y) :- edge(X,Y).",
-        "q2(X,Y) :- person(X,Y).",
-    ];
+    let queries = vec!["q1(X,Y) :- edge(X,Y).", "q2(X,Y) :- person(X,Y)."];
 
-    let results = storage.execute_parallel_queries_on_database("test", queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
 
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].len(), 2); // edge results
@@ -212,21 +246,21 @@ fn test_concurrent_queries_on_different_relations() {
 // ============================================================================
 
 #[test]
-fn test_parallel_queries_with_invalid_database() {
+fn test_parallel_queries_with_invalid_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("db1").unwrap();
+    storage.create_knowledge_graph("db1").unwrap();
     storage.insert_into("db1", "edge", vec![(1, 2)]).unwrap();
 
-    // Mix valid and invalid databases
+    // Mix valid and invalid knowledge_graphs
     let queries = vec![
         ("db1", "result(X,Y) :- edge(X,Y)."),
         ("nonexistent", "result(X,Y) :- edge(X,Y)."),
     ];
 
-    let result = storage.execute_parallel_queries_on_databases(queries);
+    let result = storage.execute_parallel_queries_on_knowledge_graphs(queries);
 
-    // Should return error because one database doesn't exist
+    // Should return error because one knowledge_graph doesn't exist
     assert!(result.is_err());
 }
 
@@ -234,10 +268,10 @@ fn test_parallel_queries_with_invalid_database() {
 fn test_parallel_queries_handle_empty_results() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create databases with no data
+    // Create knowledge_graphs with no data
     for i in 1..=3 {
         let db_name = format!("empty_db{}", i);
-        storage.create_database(&db_name).unwrap();
+        storage.create_knowledge_graph(&db_name).unwrap();
     }
 
     let queries = vec![
@@ -246,7 +280,9 @@ fn test_parallel_queries_handle_empty_results() {
         ("empty_db3", "result(X,Y) :- edge(X,Y)."),
     ];
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
     // Should succeed but return empty results
     assert_eq!(results.len(), 3);
@@ -260,31 +296,40 @@ fn test_parallel_queries_handle_empty_results() {
 // ============================================================================
 
 #[test]
-fn test_parallel_execution_with_many_databases() {
+fn test_parallel_execution_with_many_knowledge_graphs() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create 10 databases
-    let num_databases = 10;
-    for i in 1..=num_databases {
+    // Create 10 knowledge_graphs
+    let num_knowledge_graphs = 10;
+    for i in 1..=num_knowledge_graphs {
         let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
-        storage.insert_into(&db_name, "data", vec![(i, i * 100)]).unwrap();
+        storage.create_knowledge_graph(&db_name).unwrap();
+        storage
+            .insert_into(&db_name, "data", vec![(i, i * 100)])
+            .unwrap();
     }
 
-    // Execute queries on all databases in parallel
-    let queries: Vec<(&str, &str)> = (1..=num_databases)
+    // Execute queries on all knowledge_graphs in parallel
+    let queries: Vec<(&str, &str)> = (1..=num_knowledge_graphs)
         .map(|i| (format!("db{}", i), "result(X,Y) :- data(X,Y)."))
         .map(|(db, q)| (Box::leak(db.into_boxed_str()) as &str, q))
         .collect();
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
-    assert_eq!(results.len(), num_databases as usize);
+    assert_eq!(results.len(), num_knowledge_graphs as usize);
 
     // Verify all results are correct
     for (db_name, result) in &results {
         assert_eq!(result.len(), 1);
-        let db_num = db_name.chars().skip(2).collect::<String>().parse::<i32>().unwrap();
+        let db_num = db_name
+            .chars()
+            .skip(2)
+            .collect::<String>()
+            .parse::<i32>()
+            .unwrap();
         assert_eq!(result[0], (db_num, db_num * 100));
     }
 }
@@ -293,7 +338,7 @@ fn test_parallel_execution_with_many_databases() {
 fn test_parallel_execution_with_complex_queries() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
 
     // Insert more data for complex queries
     let edges: Vec<(i32, i32)> = (0..20).map(|i| (i, i + 1)).collect();
@@ -307,10 +352,12 @@ fn test_parallel_execution_with_complex_queries() {
         "q4(X,Y) :- edge(X,Y), Y > 10.",
     ];
 
-    let results = storage.execute_parallel_queries_on_database("test", queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
 
     assert_eq!(results.len(), 4);
-    assert!(results[0].len() > 0);  // Should have results
+    assert!(results[0].len() > 0); // Should have results
     assert!(results[1].len() > 0);
     assert!(results[2].len() > 0);
     assert!(results[3].len() > 0);
@@ -324,11 +371,13 @@ fn test_parallel_execution_with_complex_queries() {
 fn test_parallel_queries_use_internal_thread_safety() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("shared_db").unwrap();
-    storage.insert_into("shared_db", "edge", vec![(1, 2), (2, 3)]).unwrap();
+    storage.create_knowledge_graph("shared_db").unwrap();
+    storage
+        .insert_into("shared_db", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
 
     // Execute same query multiple times in parallel via the parallel API
-    // This tests that the internal Arc<RwLock<Database>> mechanism works
+    // This tests that the internal Arc<RwLock<KnowledgeGraph>> mechanism works
     let queries = vec![
         ("shared_db", "q1(X,Y) :- edge(X,Y)."),
         ("shared_db", "q2(X,Y) :- edge(X,Y)."),
@@ -336,9 +385,11 @@ fn test_parallel_queries_use_internal_thread_safety() {
         ("shared_db", "q4(X,Y) :- edge(X,Y)."),
     ];
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
-    // Verify all queries got the same results (thread-safe access to shared database)
+    // Verify all queries got the same results (thread-safe access to shared knowledge_graph)
     assert_eq!(results.len(), 4);
     for (_, query_results) in &results {
         assert_eq!(query_results.len(), 2);
@@ -351,10 +402,10 @@ fn test_parallel_queries_use_internal_thread_safety() {
 fn test_concurrent_queries_do_not_deadlock() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create multiple databases
+    // Create multiple knowledge_graphs
     for i in 1..=5 {
         let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
+        storage.create_knowledge_graph(&db_name).unwrap();
         storage.insert_into(&db_name, "data", vec![(i, i)]).unwrap();
     }
 
@@ -363,16 +414,24 @@ fn test_concurrent_queries_do_not_deadlock() {
         .flat_map(|i| {
             let db = format!("db{}", i);
             vec![
-                (Box::leak(db.clone().into_boxed_str()) as &str, "q1(X,Y) :- data(X,Y)."),
-                (Box::leak(db.into_boxed_str()) as &str, "q2(X,Y) :- data(X,Y)."),
+                (
+                    Box::leak(db.clone().into_boxed_str()) as &str,
+                    "q1(X,Y) :- data(X,Y).",
+                ),
+                (
+                    Box::leak(db.into_boxed_str()) as &str,
+                    "q2(X,Y) :- data(X,Y).",
+                ),
             ]
         })
         .collect();
 
     // This should not deadlock
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
-    assert_eq!(results.len(), 10); // 5 databases × 2 queries
+    assert_eq!(results.len(), 10); // 5 knowledge_graphs × 2 queries
 }
 
 // ============================================================================
@@ -384,7 +443,9 @@ fn test_parallel_query_with_empty_query_list() {
     let (storage, _temp) = create_test_storage();
 
     let queries: Vec<(&str, &str)> = vec![];
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
     assert_eq!(results.len(), 0);
 }
@@ -393,11 +454,13 @@ fn test_parallel_query_with_empty_query_list() {
 fn test_parallel_query_with_single_query() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("solo").unwrap();
+    storage.create_knowledge_graph("solo").unwrap();
     storage.insert_into("solo", "edge", vec![(1, 2)]).unwrap();
 
     let queries = vec![("solo", "result(X,Y) :- edge(X,Y).")];
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].1, vec![(1, 2)]);

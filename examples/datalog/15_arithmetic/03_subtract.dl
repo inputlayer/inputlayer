@@ -1,19 +1,19 @@
-// Test: Subtract Computed Column
-// Category: 15_arithmetic
-// Description: Tests subtraction in rule head
+% Test: Subtract Computed Column
+% Category: 15_arithmetic
+% Description: Tests subtraction in rule head
 
-.db create test_arith_sub
-.db use test_arith_sub
+.kg create test_arith_sub
+.kg use test_arith_sub
 
-// Insert values: value(id, amount)
+% Insert values: value(id, amount)
 +value[(1, 100), (2, 250), (3, 175)].
 
-// Compute value minus 50
+% Compute value minus 50
 reduced(Id, Amount-50) :- value(Id, Amount).
 
-// Query reduced values
+% Query reduced values
 ?- reduced(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_arith_sub
+% Cleanup
+.kg use default
+.kg drop test_arith_sub

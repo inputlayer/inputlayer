@@ -206,12 +206,12 @@ RelOp       ::= "=" | "!=" | "<" | ">" | "<=" | ">="
 ### 4.4 Persistent vs Session Rules
 
 ```datalog
-// Persistent rule (with + prefix) - stored and incrementally maintained
+% Persistent rule (with + prefix) - stored and incrementally maintained
 +admin_email(Email) :-
     user(_, _, Email),
     admin(Email).
 
-// Session rule (no + prefix) - computed on-demand, not stored
+% Session rule (no + prefix) - computed on-demand, not stored
 temp_result(X, Y) :- source(X, Y), X > 10.
 ```
 
@@ -283,27 +283,27 @@ Do NOT confuse:
 ## 8. Complete Example
 
 ```datalog
-// Type definitions
+% Type definitions
 type Id: int(range(1, 1000000)).
 type Email: string(pattern("^[^@]+@[^@]+$")).
 
-// Schema declarations
+% Schema declarations
 +user(id: Id, name: string, email: Email).
 +purchase(user_id: Id, amount: int).
 
-// Base data
+% Base data
 +user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
 +purchase[(1, 1500), (1, 200), (2, 300)].
 
-// Persistent rule (explicit DD materialization)
+% Persistent rule (explicit DD materialization)
 +high_spender(UserId) :-
     purchase(UserId, Amount),
     Amount > 1000.
 
-// Session rule (not materialized, just computed on query)
+% Session rule (not materialized, just computed on query)
 temp(Id) :- user(Id, _, _), high_spender(Id).
 
-// Query
+% Query
 ?- high_spender(X).
 ```
 

@@ -1,13 +1,17 @@
-Executing script: examples/datalog/18_advanced_patterns/11_recursion_arithmetic_agg.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rec_arith_agg
-Database 'test_rec_arith_agg' created.
-Switched to database: test_rec_arith_agg
-> .db use test_rec_arith_agg
-Switched to database: test_rec_arith_agg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_arith_agg
+Knowledge graph 'test_rec_arith_agg' created.
+Switched to knowledge graph: test_rec_arith_agg
+> .kg use test_rec_arith_agg
+Switched to knowledge graph: test_rec_arith_agg
 > +edge[(1, 2, 10), (2, 3, 20), (3, 4, 15), (1, 3, 50), (2, 4, 25)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > +path_weight(X, Y, W) :- edge(X, Y, W).
 Rule 'path_weight' registered.
 > +path_weight(X, Z, W1+W2) :- path_weight(X, Y, W1), edge(Y, Z, W2).
-Script error: Line 17: Parse error: Invalid term: 'W1+W2'
+Script error: Parse error: Invalid term: 'W1+W2'

@@ -1,14 +1,18 @@
-Executing script: examples/datalog/06_joins/03_triangle.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_tri
-Database 'test_tri' created.
-Switched to database: test_tri
-> .db use test_tri
-Switched to database: test_tri
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_tri
+Knowledge graph 'test_tri' created.
+Switched to knowledge graph: test_tri
+> .kg use test_tri
+Switched to knowledge graph: test_tri
 > +edge[(1,2), (2,3), (3,1)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +edge[(4,5), (5,6)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A).
 Rule 'triangle' registered.
 > ?- triangle(X, Y, Z).
@@ -16,7 +20,7 @@ Rule 'triangle' registered.
   (1, 2, 3)
   (2, 3, 1)
   (3, 1, 2)
-> .db use default
-Switched to database: default
-> .db drop test_tri
-Database 'test_tri' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_tri
+Knowledge graph 'test_tri' dropped.

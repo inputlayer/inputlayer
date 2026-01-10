@@ -1,14 +1,18 @@
-Executing script: examples/datalog/15_arithmetic/12_arity_3col.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arity_3col
-Database 'test_arity_3col' created.
-Switched to database: test_arity_3col
-> .db use test_arity_3col
-Switched to database: test_arity_3col
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_3col
+Knowledge graph 'test_arity_3col' created.
+Switched to knowledge graph: test_arity_3col
+> .kg use test_arity_3col
+Switched to knowledge graph: test_arity_3col
 > +src3[(1, 5, 100), (2, 10, 200), (3, 0, 300), (4, -5, 400)].
-Inserted 4 facts into 'src3'.
+Inserted 4 fact(s) into 'src3'.
 > +link[(1, 10), (2, 20), (3, 30), (4, 40)].
-Inserted 4 facts into 'link'.
+Inserted 4 fact(s) into 'link'.
 > inc_wildcard_end(Y, D+1) :- src3(X, D, _), link(X, Y).
 4 rows:
   (10, 6)
@@ -36,7 +40,11 @@ Inserted 4 facts into 'link'.
   (30, 1)
   (40, -4)
 > inc_with_extra(Y, D+1, Z) :- src3(X, D, Z), link(X, Y).
-No results for 'inc_with_extra'.
+4 rows:
+  (10, 6, 100)
+  (20, 11, 200)
+  (30, 1, 300)
+  (40, -4, 400)
 (session: 3 rule(s))
 > ?- inc_with_extra(A, B, C).
 4 rows:
@@ -58,7 +66,11 @@ No results for 'inc_with_extra'.
   (30, 301)
   (40, 401)
 > inc_double_wildcard(D+1) :- src3(_, D, _).
-No results for 'inc_double_wildcard'.
+4 rows:
+  (-4)
+  (1)
+  (6)
+  (11)
 (session: 5 rule(s))
 > ?- inc_double_wildcard(A).
 4 rows:
@@ -67,9 +79,9 @@ No results for 'inc_double_wildcard'.
   (6)
   (11)
 > +src3b[(100, 1, 5), (200, 2, 10), (300, 3, 0)].
-Inserted 3 facts into 'src3b'.
+Inserted 3 fact(s) into 'src3b'.
 > +link_b[(1, 1000), (2, 2000), (3, 3000)].
-Inserted 3 facts into 'link_b'.
+Inserted 3 fact(s) into 'link_b'.
 > inc_wildcard_start(Y, D+1) :- src3b(_, X, D), link_b(X, Y).
 3 rows:
   (1000, 6)
@@ -81,8 +93,8 @@ Inserted 3 facts into 'link_b'.
   (1000, 6)
   (2000, 11)
   (3000, 1)
-> .db use default
-Switched to database: default
-(Cleared 6 session rule(s))
-> .db drop test_arity_3col
-Database 'test_arity_3col' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 6 session rule(s), 0 session fact(s))
+> .kg drop test_arity_3col
+Knowledge graph 'test_arity_3col' dropped.

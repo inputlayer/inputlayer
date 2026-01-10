@@ -7,10 +7,8 @@
 //! - RPC rule operations
 
 use inputlayer::{
-    statement::{
-        parse_statement, parse_rule_definition, DeletePattern, MetaCommand, Statement,
-    },
-    Config, StorageEngine, RuleCatalog,
+    statement::{parse_rule_definition, parse_statement, DeletePattern, MetaCommand, Statement},
+    Config, RuleCatalog, StorageEngine,
 };
 use tempfile::TempDir;
 
@@ -38,31 +36,43 @@ fn create_test_storage() -> (StorageEngine, TempDir) {
 
 #[test]
 fn test_parse_meta_commands() {
-    // Database commands
-    assert!(matches!(parse_statement(".db").unwrap(), Statement::Meta(MetaCommand::DbShow)));
-    assert!(matches!(parse_statement(".db list").unwrap(), Statement::Meta(MetaCommand::DbList)));
+    // Knowledge graph commands
     assert!(matches!(
-        parse_statement(".db create mydb").unwrap(),
-        Statement::Meta(MetaCommand::DbCreate(name)) if name == "mydb"
+        parse_statement(".kg").unwrap(),
+        Statement::Meta(MetaCommand::KgShow)
     ));
     assert!(matches!(
-        parse_statement(".db use mydb").unwrap(),
-        Statement::Meta(MetaCommand::DbUse(name)) if name == "mydb"
+        parse_statement(".kg list").unwrap(),
+        Statement::Meta(MetaCommand::KgList)
     ));
     assert!(matches!(
-        parse_statement(".db drop mydb").unwrap(),
-        Statement::Meta(MetaCommand::DbDrop(name)) if name == "mydb"
+        parse_statement(".kg create mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgCreate(name)) if name == "mykg"
+    ));
+    assert!(matches!(
+        parse_statement(".kg use mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgUse(name)) if name == "mykg"
+    ));
+    assert!(matches!(
+        parse_statement(".kg drop mykg").unwrap(),
+        Statement::Meta(MetaCommand::KgDrop(name)) if name == "mykg"
     ));
 
     // Relation commands
-    assert!(matches!(parse_statement(".rel").unwrap(), Statement::Meta(MetaCommand::RelList)));
+    assert!(matches!(
+        parse_statement(".rel").unwrap(),
+        Statement::Meta(MetaCommand::RelList)
+    ));
     assert!(matches!(
         parse_statement(".rel edge").unwrap(),
         Statement::Meta(MetaCommand::RelDescribe(name)) if name == "edge"
     ));
 
     // Rule commands
-    assert!(matches!(parse_statement(".rule").unwrap(), Statement::Meta(MetaCommand::RuleList)));
+    assert!(matches!(
+        parse_statement(".rule").unwrap(),
+        Statement::Meta(MetaCommand::RuleList)
+    ));
     assert!(matches!(
         parse_statement(".rule path").unwrap(),
         Statement::Meta(MetaCommand::RuleQuery(name)) if name == "path"
@@ -77,11 +87,26 @@ fn test_parse_meta_commands() {
     ));
 
     // System commands
-    assert!(matches!(parse_statement(".compact").unwrap(), Statement::Meta(MetaCommand::Compact)));
-    assert!(matches!(parse_statement(".status").unwrap(), Statement::Meta(MetaCommand::Status)));
-    assert!(matches!(parse_statement(".help").unwrap(), Statement::Meta(MetaCommand::Help)));
-    assert!(matches!(parse_statement(".quit").unwrap(), Statement::Meta(MetaCommand::Quit)));
-    assert!(matches!(parse_statement(".exit").unwrap(), Statement::Meta(MetaCommand::Quit)));
+    assert!(matches!(
+        parse_statement(".compact").unwrap(),
+        Statement::Meta(MetaCommand::Compact)
+    ));
+    assert!(matches!(
+        parse_statement(".status").unwrap(),
+        Statement::Meta(MetaCommand::Status)
+    ));
+    assert!(matches!(
+        parse_statement(".help").unwrap(),
+        Statement::Meta(MetaCommand::Help)
+    ));
+    assert!(matches!(
+        parse_statement(".quit").unwrap(),
+        Statement::Meta(MetaCommand::Quit)
+    ));
+    assert!(matches!(
+        parse_statement(".exit").unwrap(),
+        Statement::Meta(MetaCommand::Quit)
+    ));
 }
 
 #[test]
@@ -167,7 +192,10 @@ fn test_parse_query() {
 
 #[test]
 fn test_parse_update_operation() {
-    let stmt = parse_statement("-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge.").unwrap();
+    let stmt = parse_statement(
+        "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge.",
+    )
+    .unwrap();
     if let Statement::Update(op) = stmt {
         assert_eq!(op.deletes.len(), 1);
         assert_eq!(op.inserts.len(), 1);
@@ -196,12 +224,14 @@ fn test_parse_rule_definition_function() {
 fn test_rule_catalog_with_storage_engine() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create database
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    // Create knowledge_graph
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert base data
-    storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
 
     // Register a rule
     let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
@@ -217,7 +247,9 @@ fn test_rule_catalog_with_storage_engine() {
     assert!(desc.unwrap().contains("path"));
 
     // Execute query using rule
-    let results = storage.execute_query_with_rules("result(X, Y) :- path(X, Y).").unwrap();
+    let results = storage
+        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .unwrap();
     assert_eq!(results.len(), 3);
 
     // Drop rule
@@ -230,11 +262,13 @@ fn test_rule_catalog_with_storage_engine() {
 fn test_recursive_rule_definition() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("graph").unwrap();
-    storage.use_database("graph").unwrap();
+    storage.create_knowledge_graph("graph").unwrap();
+    storage.use_knowledge_graph("graph").unwrap();
 
     // Insert edges
-    storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
 
     // Register recursive rule (two clauses)
     let base_rule = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
@@ -257,8 +291,8 @@ fn test_rule_persistence() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("mydb").unwrap();
-        storage.use_database("mydb").unwrap();
+        storage.create_knowledge_graph("mydb").unwrap();
+        storage.use_knowledge_graph("mydb").unwrap();
 
         let rule_def = parse_rule_definition("derived(X) :-base(X).").unwrap();
         storage.register_rule(&rule_def).unwrap();
@@ -271,7 +305,7 @@ fn test_rule_persistence() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.use_database("mydb").unwrap();
+        storage.use_knowledge_graph("mydb").unwrap();
 
         let rules = storage.list_rules().unwrap();
         assert!(rules.contains(&"derived".to_string()));
@@ -309,8 +343,8 @@ fn test_rule_catalog_standalone() {
 fn test_storage_engine_list_relations() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Initially empty
     let relations = storage.list_relations().unwrap();
@@ -329,8 +363,8 @@ fn test_storage_engine_list_relations() {
 fn test_execute_query_with_rules() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert data
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
@@ -340,7 +374,9 @@ fn test_execute_query_with_rules() {
     storage.register_rule(&rule_def).unwrap();
 
     // Query that uses the rule
-    let results = storage.execute_query_with_rules("result(X, Y) :- path(X, Y).").unwrap();
+    let results = storage
+        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .unwrap();
     assert_eq!(results.len(), 2);
 }
 
@@ -354,7 +390,7 @@ fn test_parse_invalid_statements() {
     assert!(parse_statement(".unknown").is_err());
 
     // Missing arguments
-    assert!(parse_statement(".db create").is_err());
+    assert!(parse_statement(".kg create").is_err());
 
     // Invalid syntax
     assert!(parse_statement("this is not valid").is_err());
@@ -367,19 +403,19 @@ fn test_parse_invalid_statements() {
 fn test_drop_nonexistent_view() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     let result = storage.drop_rule("nonexistent");
     assert!(result.is_err());
 }
 
 #[test]
-fn test_view_operations_on_default_database() {
+fn test_view_operations_on_default_knowledge_graph() {
     let (storage, _temp) = create_test_storage();
 
-    // StorageEngine creates a "default" database by default
-    // So list_rules should succeed even without explicit database creation
+    // StorageEngine creates a "default" knowledge_graph by default
+    // So list_rules should succeed even without explicit knowledge_graph creation
     let result = storage.list_rules();
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty()); // No views registered yet
@@ -391,8 +427,8 @@ fn test_view_operations_on_default_database() {
 
 #[test]
 fn test_serializable_rule_roundtrip() {
-    use inputlayer::statement::SerializableRule;
     use inputlayer::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
 
     let rule_str = "path(X, Y) :- edge(X, Y), X < Y.";
     let rule = parse_rule(rule_str).unwrap();
@@ -410,8 +446,8 @@ fn test_serializable_rule_roundtrip() {
 
 #[test]
 fn test_serializable_rule_json() {
-    use inputlayer::statement::SerializableRule;
     use inputlayer::parser::parse_rule;
+    use inputlayer::statement::SerializableRule;
 
     let rule_str = "result(X, Y) :- edge(X, Y).";
     let rule = parse_rule(rule_str).unwrap();
@@ -435,18 +471,22 @@ fn test_serializable_rule_json() {
 fn test_view_with_constraints() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert data
-    storage.insert("person", vec![(1, 25), (2, 17), (3, 30), (4, 16)]).unwrap();
+    storage
+        .insert("person", vec![(1, 25), (2, 17), (3, 30), (4, 16)])
+        .unwrap();
 
     // Register view with constraint
     let view_def = parse_rule_definition("adult(Id, Age) :-person(Id, Age), Age >= 18.").unwrap();
     storage.register_rule(&view_def).unwrap();
 
     // Query the view
-    let results = storage.execute_query_with_rules("result(Id, Age) :- adult(Id, Age).").unwrap();
+    let results = storage
+        .execute_query_with_rules("result(Id, Age) :- adult(Id, Age).")
+        .unwrap();
 
     // Should only get people 18 or older (id 1 age 25, id 3 age 30)
     assert_eq!(results.len(), 2);
@@ -456,8 +496,8 @@ fn test_view_with_constraints() {
 fn test_multiple_views() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert data
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
@@ -481,11 +521,13 @@ fn test_multiple_views() {
 fn test_query_with_constant_first_arg() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert parent relationships
-    storage.insert("parent", vec![(1, 2), (1, 3), (2, 4)]).unwrap();
+    storage
+        .insert("parent", vec![(1, 2), (1, 3), (2, 4)])
+        .unwrap();
 
     // Query: ?- parent(1, X). transformed to query with constraint
     // This mimics the client's handle_query transformation
@@ -503,11 +545,13 @@ fn test_query_with_constant_first_arg() {
 fn test_query_with_all_constants() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert data
-    storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
 
     // Query: ?- edge(1, 2). transformed to query with constraints
     let results = storage
@@ -532,11 +576,13 @@ fn test_query_with_constant_on_base_relation() {
     // Test query with constant directly on base relation (no view)
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert edges
-    storage.insert("edge", vec![(1, 2), (1, 3), (2, 4)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (1, 3), (2, 4)])
+        .unwrap();
 
     // Query: ?- edge(1, X). - find direct edges from 1
     let results = storage
@@ -553,11 +599,13 @@ fn test_query_with_constant_on_base_relation() {
 fn test_query_constant_second_arg() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
     // Insert edges
-    storage.insert("edge", vec![(1, 3), (2, 3), (4, 5)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 3), (2, 3), (4, 5)])
+        .unwrap();
 
     // Query: ?- edge(X, 3). - find all sources pointing to 3
     let results = storage

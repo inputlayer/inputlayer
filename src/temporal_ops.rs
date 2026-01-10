@@ -84,7 +84,9 @@ pub fn time_sub(ts: i64, duration_ms: i64) -> i64 {
 /// Weight in [0, 1]. Returns 1.0 for future timestamps, 0.0 for invalid half_life.
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::temporal_ops::time_decay;
+///
 /// let now = 1700000000000i64;  // Current time
 /// let one_hour_ago = now - 3600000;
 /// let half_life = 3600000i64;  // 1 hour

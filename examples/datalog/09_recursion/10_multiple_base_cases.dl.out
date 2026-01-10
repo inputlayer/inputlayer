@@ -1,18 +1,22 @@
-Executing script: examples/datalog/09_recursion/10_multiple_base_cases.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_multi_base
-Database 'test_multi_base' created.
-Switched to database: test_multi_base
-> .db use test_multi_base
-Switched to database: test_multi_base
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_base
+Knowledge graph 'test_multi_base' created.
+Switched to knowledge graph: test_multi_base
+> .kg use test_multi_base
+Switched to knowledge graph: test_multi_base
 > +edge[(1, 2), (2, 3), (10, 11), (11, 12), (20, 21), (21, 22), (22, 23)].
-Inserted 7 facts into 'edge'.
+Inserted 7 fact(s) into 'edge'.
 > +start[(1), (10), (20)].
-Inserted 3 facts into 'start'.
+Inserted 3 fact(s) into 'start'.
 > +reachable(X) :- start(X).
 Rule 'reachable' registered.
 > +reachable(Y) :- reachable(X), edge(X, Y).
-Rule added to 'reachable' (2 rules total).
+Rule 'reachable' registered.
 > ?- reachable(X).
 10 rows:
   (1)
@@ -28,6 +32,12 @@ Rule added to 'reachable' (2 rules total).
 > +reachable_from(S, X) :- start(S), S = X.
 Rule 'reachable_from' registered.
 > +reachable_from(S, Y) :- reachable_from(S, X), edge(X, Y).
-Rule added to 'reachable_from' (2 rules total).
+Rule 'reachable_from' registered.
 > +count_from_start(S, count<X>) :- reachable_from(S, X).
-Script error: Line 33: Parse error: Invalid term: 'count<X>'
+Rule 'count_from_start' registered.
+> ?- count_from_start(S, C).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_base
+Knowledge graph 'test_multi_base' dropped.

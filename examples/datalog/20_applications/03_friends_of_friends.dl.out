@@ -1,16 +1,20 @@
-Executing script: examples/datalog/20_applications/03_friends_of_friends.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_social
-Database 'test_social' created.
-Switched to database: test_social
-> .db use test_social
-Switched to database: test_social
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_social
+Knowledge graph 'test_social' created.
+Switched to knowledge graph: test_social
+> .kg use test_social
+Switched to knowledge graph: test_social
 > +friend[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6), (4, 7), (5, 6), (6, 8)].
-Inserted 8 facts into 'friend'.
+Inserted 8 fact(s) into 'friend'.
 > +symmetric_friend(A, B) :- friend(A, B).
 Rule 'symmetric_friend' registered.
 > +symmetric_friend(A, B) :- friend(B, A).
-Rule added to 'symmetric_friend' (2 rules total).
+Rule 'symmetric_friend' registered.
 > +direct_friends_of_1(F) :- symmetric_friend(1, F).
 Rule 'direct_friends_of_1' registered.
 > ?- direct_friends_of_1(F).
@@ -27,4 +31,29 @@ Rule 'fof_of_1' registered.
   (5)
   (6)
 > +friend_count(User, count<Friend>) :- symmetric_friend(User, Friend).
-Script error: Line 29: Parse error: Invalid term: 'count<Friend>'
+Rule 'friend_count' registered.
+> ?- friend_count(U, C).
+8 rows:
+  (1, 2)
+  (2, 3)
+  (3, 2)
+  (4, 2)
+  (5, 2)
+  (6, 3)
+  (7, 1)
+  (8, 1)
+> +max_friends(max<C>) :- friend_count(_, C).
+Rule 'max_friends' registered.
+> ?- max_friends(M).
+1 rows:
+  (3)
+> +popular(User) :- friend_count(User, C), C >= 3.
+Rule 'popular' registered.
+> ?- popular(U).
+2 rows:
+  (2)
+  (6)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_social
+Knowledge graph 'test_social' dropped.

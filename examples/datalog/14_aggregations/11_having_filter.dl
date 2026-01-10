@@ -1,43 +1,43 @@
-// Test: HAVING-Style Filter on Aggregations
-// Category: Aggregation
-// Verifies: Filtering groups based on aggregate values
+% Test: HAVING-Style Filter on Aggregations
+% Category: Aggregation
+% Verifies: Filtering groups based on aggregate values
 
-.db create test_having
-.db use test_having
+.kg create test_having
+.kg use test_having
 
-// Orders: customer_id, order_amount
+% Orders: customer_id, order_amount
 +orders[(1, 100), (1, 200), (1, 50),
         (2, 500), (2, 300),
         (3, 25), (3, 30), (3, 20),
         (4, 1000),
         (5, 100), (5, 100), (5, 100), (5, 100)].
 
-// Calculate total per customer
+% Calculate total per customer
 +customer_total(Customer, sum<Amount>) :- orders(Customer, Amount).
 ?- customer_total(C, T).
 
-// HAVING equivalent: customers with total > 300
+% HAVING equivalent: customers with total > 300
 +big_spenders(Customer, Total) :- customer_total(Customer, Total), Total > 300.
 ?- big_spenders(C, T).
 
-// Expected: customers 1 (350), 2 (800), 4 (1000), 5 (400)
+% Expected: customers 1 (350), 2 (800), 4 (1000), 5 (400)
 
-// Count orders per customer
+% Count orders per customer
 +order_count(Customer, count<Amount>) :- orders(Customer, Amount).
 ?- order_count(C, N).
 
-// HAVING: customers with more than 2 orders
+% HAVING: customers with more than 2 orders
 +frequent_buyers(Customer, Count) :- order_count(Customer, Count), Count > 2.
 ?- frequent_buyers(C, N).
 
-// Expected: customers 1 (3 orders), 3 (3 orders), 5 (4 orders)
+% Expected: customers 1 (3 orders), 3 (3 orders), 5 (4 orders)
 
-// Combined filter: big spenders who are also frequent buyers
+% Combined filter: big spenders who are also frequent buyers
 +vip_customers(Customer) :- big_spenders(Customer, _), frequent_buyers(Customer, _).
 ?- vip_customers(C).
 
-// Expected: customer 5 (total 400, 4 orders)
+% Expected: customer 5 (total 400, 4 orders)
 
-// Cleanup
-.db use default
-.db drop test_having
+% Cleanup
+.kg use default
+.kg drop test_having

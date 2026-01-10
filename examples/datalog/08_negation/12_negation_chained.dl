@@ -1,25 +1,25 @@
-// Test: Chained Negation (Direct, No View Dependencies)
-// Category: 08_negation
-// Description: Tests multiple negations in a single rule (not chained through views)
-// NOTE: Negation on views has limitations - this test uses base relations only
+% Test: Chained Negation (Direct, No View Dependencies)
+% Category: 08_negation
+% Description: Tests multiple negations in a single rule (not chained through views)
+% NOTE: Negation on views has limitations - this test uses base relations only
 
-.db create test_neg_chain
-.db use test_neg_chain
+.kg create test_neg_chain
+.kg use test_neg_chain
 
-// Base data
+% Base data
 +all_users[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
 +banned[(2, 0)].
 +premium[(1, 0), (3, 0)].
 
-// All filters in one rule (not chained through views)
-// Users who are not banned AND not premium
+% All filters in one rule (not chained through views)
+% Users who are not banned AND not premium
 +basic_user(X, Y) :- all_users(X, Y), !banned(X, _), !premium(X, _).
 
-// Query
+% Query
 ?- basic_user(X, Y).
 
-// Should return: (4, 0), (5, 0)
+% Should return: (4, 0), (5, 0)
 
-// Cleanup
-.db use default
-.db drop test_neg_chain
+% Cleanup
+.kg use default
+.kg drop test_neg_chain

@@ -1,12 +1,16 @@
-Executing script: examples/datalog/15_arithmetic/03_subtract.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arith_sub
-Database 'test_arith_sub' created.
-Switched to database: test_arith_sub
-> .db use test_arith_sub
-Switched to database: test_arith_sub
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arith_sub
+Knowledge graph 'test_arith_sub' created.
+Switched to knowledge graph: test_arith_sub
+> .kg use test_arith_sub
+Switched to knowledge graph: test_arith_sub
 > +value[(1, 100), (2, 250), (3, 175)].
-Inserted 3 facts into 'value'.
+Inserted 3 fact(s) into 'value'.
 > reduced(Id, Amount-50) :- value(Id, Amount).
 3 rows:
   (1, 50)
@@ -18,8 +22,8 @@ Inserted 3 facts into 'value'.
   (1, 50)
   (2, 200)
   (3, 125)
-> .db use default
-Switched to database: default
-(Cleared 1 session rule(s))
-> .db drop test_arith_sub
-Database 'test_arith_sub' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_arith_sub
+Knowledge graph 'test_arith_sub' dropped.

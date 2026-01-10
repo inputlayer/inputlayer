@@ -1,12 +1,16 @@
-Executing script: examples/datalog/09_recursion/16_self_loop_single.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_self_loop
-Database 'test_self_loop' created.
-Switched to database: test_self_loop
-> .db use test_self_loop
-Switched to database: test_self_loop
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_loop
+Knowledge graph 'test_self_loop' created.
+Switched to knowledge graph: test_self_loop
+> .kg use test_self_loop
+Switched to knowledge graph: test_self_loop
 > +edge(1, 1).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > path(X, Y) :- edge(X, Y).
 1 rows:
   (1, 1)
@@ -19,20 +23,20 @@ Inserted 1 fact into 'edge'.
 1 rows:
   (1, 1)
 > +edge(2, 2).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > ?- path(X, Y).
 2 rows:
   (1, 1)
   (2, 2)
 > +edge(1, 2).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > ?- path(X, Y).
 3 rows:
   (1, 1)
   (1, 2)
   (2, 2)
-> .db use default
-Switched to database: default
-(Cleared 2 session rule(s))
-> .db drop test_self_loop
-Database 'test_self_loop' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_loop
+Knowledge graph 'test_self_loop' dropped.

@@ -1,12 +1,12 @@
-// Test: Bulk Conditional Delete
-// Category: atomic_ops
-// Description: Tests conditional delete with filter condition
+% Test: Bulk Conditional Delete
+% Category: atomic_ops
+% Description: Tests conditional delete with filter condition
 
-.db create bulk_delete_test
-.db use bulk_delete_test
+.kg create bulk_delete_test
+.kg use bulk_delete_test
 
-// Initial data: entries with (id, value) pairs
-// Values: 1=info, 2=error, 3=warn
+% Initial data: entries with (id, value) pairs
+% Values: 1=info, 2=error, 3=warn
 +entry(1, 1).
 +entry(2, 2).
 +entry(3, 1).
@@ -14,21 +14,21 @@
 +entry(5, 1).
 +entry(6, 3).
 
-// Query initial state
+% Query initial state
 ?- entry(Id, Type).
 
-// Conditional delete: remove all error entries (type=2)
+% Conditional delete: remove all error entries (type=2)
 -entry(Id, Type) :- entry(Id, Type), Type = 2.
 
-// Query after deleting errors
+% Query after deleting errors
 ?- entry(Id, Type).
 
-// Conditional delete: remove entries with id > 4
+% Conditional delete: remove entries with id > 4
 -entry(Id, Type) :- entry(Id, Type), Id > 4.
 
-// Query final state
+% Query final state
 ?- entry(Id, Type).
 
-// Cleanup
-.db use default
-.db drop bulk_delete_test
+% Cleanup
+.kg use default
+.kg drop bulk_delete_test

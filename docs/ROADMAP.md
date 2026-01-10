@@ -61,17 +61,17 @@ Currently, vector functions (`euclidean`, `cosine`, `dot`, `manhattan`) only wor
 
 **Current limitation**:
 ```datalog
-// Works - query body
+% Works - query body
 ?- embedding(Id1, V1), embedding(Id2, V2), Dist = euclidean(V1, V2).
 
-// Does NOT work - rule head
+% Does NOT work - rule head
 +similarity(Id1, Id2, cosine(V1, V2)) :-
     embedding(Id1, V1), embedding(Id2, V2).
 ```
 
 **Target behavior**:
 ```datalog
-// Should work - compute and store similarities
+% Should work - compute and store similarities
 +similarity(Id1, Id2, Score) :-
     embedding(Id1, V1), embedding(Id2, V2),
     Id1 < Id2,

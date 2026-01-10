@@ -1,32 +1,32 @@
-// Test: All Items Excluded
-// Category: Negation
-// Description: Tests when negation excludes all results
+% Test: All Items Excluded
+% Category: Negation
+% Description: Tests when negation excludes all results
 
-.db create test_all_excluded
-.db use test_all_excluded
+.kg create test_all_excluded
+.kg use test_all_excluded
 
-// Insert base facts
+% Insert base facts
 +items[(1), (2), (3)].
 
-// Exclude all items
+% Exclude all items
 +excluded[(1), (2), (3)].
 
-// Query: items not excluded (should be empty)
+% Query: items not excluded (should be empty)
 +not_excluded(X) :- items(X), !excluded(X).
 ?- not_excluded(X).
 
-// Add an item that's not excluded
+% Add an item that's not excluded
 +items(4).
 
-// Now we should get one result
+% Now we should get one result
 ?- not_excluded(X).
 
-// Exclude that too
+% Exclude that too
 +excluded(4).
 
-// Back to empty
+% Back to empty
 ?- not_excluded(X).
 
-// Cleanup
-.db use default
-.db drop test_all_excluded
+% Cleanup
+.kg use default
+.kg drop test_all_excluded

@@ -1,16 +1,16 @@
-// Test: Invalid Syntax Errors
-// Category: 12_errors
-// Description: Tests error handling for various syntax errors
+% Test: Invalid Syntax Errors
+% Category: 12_errors
+% Description: Tests error handling for various syntax errors
 
-.db create test_syntax_err
-.db use test_syntax_err
+.kg create test_syntax_err
+.kg use test_syntax_err
 
-// Insert some valid data first
+% Insert some valid data first
 +edge[(1, 2), (2, 3)].
 
-// Missing closing bracket - should error
+% Missing closing bracket - should error
 +broken[(1, 2.
 
-// Cleanup (may not execute if above fails)
-.db use default
-.db drop test_syntax_err
+% Cleanup (may not execute if above fails)
+.kg use default
+.kg drop test_syntax_err

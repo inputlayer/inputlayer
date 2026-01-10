@@ -1,37 +1,26 @@
-Executing script: examples/datalog/17_rule_commands/08_rule_edit.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rule_edit
-Database 'test_rule_edit' created.
-Switched to database: test_rule_edit
-> .db use test_rule_edit
-Switched to database: test_rule_edit
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_edit
+Knowledge graph 'test_rule_edit' created.
+Switched to knowledge graph: test_rule_edit
+> .kg use test_rule_edit
+Switched to knowledge graph: test_rule_edit
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +reachable(X, Y) :- edge(X, Y).
 Rule 'reachable' registered.
 > +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
-Rule added to 'reachable' (2 rules total).
+Rule 'reachable' registered.
 > .rule def reachable
-Rule: reachable
-Clauses:
-  1. reachable(X, Y) :- edge(X, Y).
-  2. reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
-
+This command is not yet implemented over HTTP.
 > .rule edit reachable 2 +reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
-Rule 2 of 'reachable' replaced.
-
-Updated rule:
-Rule: reachable
-Clauses:
-  1. reachable(X, Y) :- edge(X, Y).
-  2. reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
-
+This command is not yet implemented over HTTP.
 > .rule def reachable
-Rule: reachable
-Clauses:
-  1. reachable(X, Y) :- edge(X, Y).
-  2. reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
-
+This command is not yet implemented over HTTP.
 > ?- reachable(X, Y).
 6 rows:
   (1, 2)
@@ -40,7 +29,7 @@ Clauses:
   (2, 3)
   (2, 4)
   (3, 4)
-> .db use default
-Switched to database: default
-> .db drop test_rule_edit
-Database 'test_rule_edit' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_edit
+Knowledge graph 'test_rule_edit' dropped.

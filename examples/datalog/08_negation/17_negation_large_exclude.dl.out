@@ -1,14 +1,18 @@
-Executing script: examples/datalog/08_negation/17_negation_large_exclude.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_large
-Database 'test_neg_large' created.
-Switched to database: test_neg_large
-> .db use test_neg_large
-Switched to database: test_neg_large
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_large
+Knowledge graph 'test_neg_large' created.
+Switched to knowledge graph: test_neg_large
+> .kg use test_neg_large
+Switched to knowledge graph: test_neg_large
 > +data[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10), (11, 11), (12, 12), (13, 13), (14, 14), (15, 15), (16, 16), (17, 17), (18, 18), (19, 19), (20, 20)].
-Inserted 20 facts into 'data'.
+Inserted 20 fact(s) into 'data'.
 > +exclude[(2, 0), (4, 0), (6, 0), (8, 0), (10, 0), (12, 0), (14, 0), (16, 0), (18, 0), (20, 0)].
-Inserted 10 facts into 'exclude'.
+Inserted 10 fact(s) into 'exclude'.
 > +odd_data(X, Y) :- data(X, Y), !exclude(X, _).
 Rule 'odd_data' registered.
 > ?- odd_data(X, Y).
@@ -23,7 +27,7 @@ Rule 'odd_data' registered.
   (15, 15)
   (17, 17)
   (19, 19)
-> .db use default
-Switched to database: default
-> .db drop test_neg_large
-Database 'test_neg_large' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_large
+Knowledge graph 'test_neg_large' dropped.

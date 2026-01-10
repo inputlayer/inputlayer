@@ -1,14 +1,18 @@
-Executing script: examples/datalog/28_docs_coverage/06_cheatsheet_rbac_example.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create acl
-Database 'acl' created.
-Switched to database: acl
-> .db use acl
-Switched to database: acl
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create acl
+Knowledge graph 'acl' created.
+Switched to knowledge graph: acl
+> .kg use acl
+Switched to knowledge graph: acl
 > +user_role[("alice", "admin"), ("bob", "viewer")].
-Inserted 2 facts into 'user_role'.
+Inserted 2 fact(s) into 'user_role'.
 > +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
-Inserted 3 facts into 'role_permission'.
+Inserted 3 fact(s) into 'role_permission'.
 > +has_permission(User, Perm) :- user_role(User, Role), role_permission(Role, Perm).
 Rule 'has_permission' registered.
 > ?- has_permission("alice", Perm).
@@ -18,7 +22,7 @@ Rule 'has_permission' registered.
 > ?- has_permission("bob", Perm).
 1 rows:
   ("bob", "read")
-> .db use default
-Switched to database: default
-> .db drop acl
-Database 'acl' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop acl
+Knowledge graph 'acl' dropped.

@@ -1,28 +1,28 @@
-// Test: Composite Key Constraint
-// Category: constraints
-// Description: Tests composite primary key with multiple @key columns
+% Test: Composite Key Constraint
+% Category: constraints
+% Description: Tests composite primary key with multiple @key columns
 
-.db create constraint_composite_test
-.db use constraint_composite_test
+.kg create constraint_composite_test
+.kg use constraint_composite_test
 
-// Schema with composite key (student_id + course_id together form the key)
+% Schema with composite key (student_id + course_id together form the key)
 +enrollment(student_id: int @key, course_id: int @key, grade: float, semester: string).
 
-// Insert enrollments
+% Insert enrollments
 +enrollment(1, 101, 3.5, "Fall 2024").
 +enrollment(1, 102, 4.0, "Fall 2024").
 +enrollment(2, 101, 3.8, "Fall 2024").
 +enrollment(2, 103, 3.2, "Spring 2025").
 
-// Query all enrollments
+% Query all enrollments
 ?- enrollment(StudentId, CourseId, Grade, Semester).
 
-// Query by student
+% Query by student
 ?- enrollment(1, CourseId, Grade, Semester).
 
-// Show schema
+% Show schema
 .rel enrollment
 
-// Cleanup
-.db use default
-.db drop constraint_composite_test
+% Cleanup
+.kg use default
+.kg drop constraint_composite_test

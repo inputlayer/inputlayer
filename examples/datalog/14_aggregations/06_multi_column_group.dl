@@ -1,19 +1,19 @@
-// Test: Multi-Column Group By
-// Category: 14_aggregations
-// Description: Tests aggregation with multiple grouping columns
+% Test: Multi-Column Group By
+% Category: 14_aggregations
+% Description: Tests aggregation with multiple grouping columns
 
-.db create test_agg_multi
-.db use test_agg_multi
+.kg create test_agg_multi
+.kg use test_agg_multi
 
-// Insert order data: order(region, product, quantity)
+% Insert order data: order(region, product, quantity)
 +order[(1, 10, 5), (1, 10, 3), (1, 20, 7), (2, 10, 2), (2, 20, 4), (2, 20, 6)].
 
-// Sum quantity per region and product
+% Sum quantity per region and product
 +order_total(Region, Product, sum<Qty>) :- order(Region, Product, Qty).
 
-// Query the result
+% Query the result
 ?- order_total(X, Y, Z).
 
-// Cleanup
-.db use default
-.db drop test_agg_multi
+% Cleanup
+.kg use default
+.kg drop test_agg_multi

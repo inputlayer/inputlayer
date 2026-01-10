@@ -1,12 +1,16 @@
-Executing script: examples/datalog/13_performance/07_wide_tuples_10col.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_wide_10
-Database 'test_wide_10' created.
-Switched to database: test_wide_10
-> .db use test_wide_10
-Switched to database: test_wide_10
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wide_10
+Knowledge graph 'test_wide_10' created.
+Switched to knowledge graph: test_wide_10
+> .kg use test_wide_10
+Switched to knowledge graph: test_wide_10
 > +wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000), (2, 20, 200, 2000, 20000, 3, 30, 300, 3000, 30000), (3, 30, 300, 3000, 30000, 4, 40, 400, 4000, 40000), (4, 40, 400, 4000, 40000, 5, 50, 500, 5000, 50000), (5, 50, 500, 5000, 50000, 6, 60, 600, 6000, 60000)].
-Inserted 5 facts into 'wide_data'.
+Inserted 5 fact(s) into 'wide_data'.
 > +select_cols(A, E, J) :- wide_data(A, _, _, _, E, _, _, _, _, J).
 Rule 'select_cols' registered.
 > ?- select_cols(A, E, J).
@@ -17,4 +21,4 @@ Rule 'select_cols' registered.
   (4, 40000, 50000)
   (5, 50000, 60000)
 > +col_sum(A, B+C+D+E) :- wide_data(A, B, C, D, E, _, _, _, _, _).
-Script error: Line 20: Parse error: Invalid term: 'B+C+D+E'
+Script error: Parse error: Invalid term: 'B+C+D+E'

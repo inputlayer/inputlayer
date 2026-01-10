@@ -216,10 +216,7 @@ impl TryFrom<WireTuple> for (i32, i32) {
 
     fn try_from(tuple: WireTuple) -> Result<Self, Self::Error> {
         if tuple.values.len() < 2 {
-            return Err(format!(
-                "Expected 2 values, got {}",
-                tuple.values.len()
-            ));
+            return Err(format!("Expected 2 values, got {}", tuple.values.len()));
         }
 
         let a = tuple.values[0]
@@ -289,6 +286,41 @@ impl ColumnDef {
 }
 
 // ============================================================================
+// Query Result
+// ============================================================================
+
+/// Result of a query execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResult {
+    /// Result rows
+    pub rows: Vec<WireTuple>,
+    /// Schema of the result
+    pub schema: Vec<ColumnDef>,
+    /// Execution time in milliseconds
+    pub execution_time_ms: u64,
+}
+
+impl QueryResult {
+    /// Create an empty query result
+    pub fn empty() -> Self {
+        Self {
+            rows: Vec::new(),
+            schema: Vec::new(),
+            execution_time_ms: 0,
+        }
+    }
+
+    /// Create a result with rows and schema
+    pub fn new(rows: Vec<WireTuple>, schema: Vec<ColumnDef>, execution_time_ms: u64) -> Self {
+        Self {
+            rows,
+            schema,
+            execution_time_ms,
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -306,7 +338,10 @@ mod tests {
             WireDataType::String
         );
         assert_eq!(WireValue::Bool(true).data_type(), WireDataType::Bool);
-        assert_eq!(WireValue::Timestamp(1234567890).data_type(), WireDataType::Timestamp);
+        assert_eq!(
+            WireValue::Timestamp(1234567890).data_type(),
+            WireDataType::Timestamp
+        );
     }
 
     #[test]
@@ -314,7 +349,10 @@ mod tests {
         assert_eq!(WireValue::Int32(42).as_i32(), Some(42));
         assert_eq!(WireValue::Int64(42).as_i64(), Some(42));
         assert_eq!(WireValue::Float64(3.14).as_f64(), Some(3.14));
-        assert_eq!(WireValue::String("hello".to_string()).as_str(), Some("hello"));
+        assert_eq!(
+            WireValue::String("hello".to_string()).as_str(),
+            Some("hello")
+        );
         assert_eq!(WireValue::Bool(true).as_bool(), Some(true));
         assert!(WireValue::Null.is_null());
     }

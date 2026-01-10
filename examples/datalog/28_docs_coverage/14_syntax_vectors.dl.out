@@ -1,13 +1,29 @@
-Executing script: examples/datalog/28_docs_coverage/14_syntax_vectors.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create syntax_vectors
-Database 'syntax_vectors' created.
-Switched to database: syntax_vectors
-> .db use syntax_vectors
-Switched to database: syntax_vectors
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create syntax_vectors
+Knowledge graph 'syntax_vectors' created.
+Switched to knowledge graph: syntax_vectors
+> .kg use syntax_vectors
+Switched to knowledge graph: syntax_vectors
 > +embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
-Inserted 3 facts into 'embedding'.
+No facts inserted (3 duplicate skipped).
 > +point[(1, [0.0, 0.0]), (2, [3.0, 4.0]), (3, [1.0, 1.0])].
-Inserted 3 facts into 'point'.
+No facts inserted (3 duplicate skipped).
 > ?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).
-Script error: Line 13: Query execution failed: Unsupported ordering constraint pattern
+No results.
+> ?- point(Id1, V1), point(Id2, V2), Id1 < Id2, Dist = euclidean(V1, V2).
+No results.
+> ?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = dot(V1, V2).
+No results.
+> ?- point(Id1, V1), point(Id2, V2), Id1 < Id2, Dist = manhattan(V1, V2).
+No results.
+> ?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2), Sim > 0.5.
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop syntax_vectors
+Knowledge graph 'syntax_vectors' dropped.

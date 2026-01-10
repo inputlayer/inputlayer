@@ -1,18 +1,22 @@
-Executing script: examples/datalog/26_constraints/04_range_constraint.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create constraint_range_test
-Database 'constraint_range_test' created.
-Switched to database: constraint_range_test
-> .db use constraint_range_test
-Switched to database: constraint_range_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create constraint_range_test
+Knowledge graph 'constraint_range_test' created.
+Switched to knowledge graph: constraint_range_test
+> .kg use constraint_range_test
+Switched to knowledge graph: constraint_range_test
 > +employee(id: int @key, name: string, age: int @range(0, 150)).
-Persistent schema 'employee' declared: (id: Base(Int) @primary, name: Base(String), age: Base(Int) @range(0, 150))
+Schema 'employee' declared (persistent).
 > +employee(1, "Alice", 30).
-Inserted 1 fact into 'employee'.
+Inserted 1 fact(s) into 'employee'.
 > +employee(2, "Bob", 25).
-Inserted 1 fact into 'employee'.
+Inserted 1 fact(s) into 'employee'.
 > +employee(3, "Carol", 45).
-Inserted 1 fact into 'employee'.
+Inserted 1 fact(s) into 'employee'.
 > ?- employee(Id, Name, Age).
 3 rows:
   (1, "Alice", 30)
@@ -20,9 +24,13 @@ Inserted 1 fact into 'employee'.
   (3, "Carol", 45)
 > .rel employee
 Relation: employee
-Schema: ["col0", "col1", "col2"]
-Tuple count: 3
-> .db use default
-Switched to database: default
-> .db drop constraint_range_test
-Database 'constraint_range_test' dropped.
+  Columns: ["col0", "col1", "col2"]
+  Total rows: 3
+  Preview (first 3):
+    (1, "Alice", 30)
+    (2, "Bob", 25)
+    (3, "Carol", 45)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop constraint_range_test
+Knowledge graph 'constraint_range_test' dropped.

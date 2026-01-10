@@ -1,25 +1,29 @@
-Executing script: examples/datalog/01_database/01_create_use_drop.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_db
-Database 'test_db' created.
-Switched to database: test_db
-> .db use test_db
-Switched to database: test_db
-> .db
-Current database: test_db
-> .db list
-Databases:
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_db
+Knowledge graph 'test_db' created.
+Switched to knowledge graph: test_db
+> .kg use test_db
+Switched to knowledge graph: test_db
+> .kg
+Current knowledge graph: test_db
+> .kg list
+Knowledge Graphs:
   default
   test_db *
 > +edge(1, 2).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > ?- edge(X, Y).
 1 rows:
   (1, 2)
-> .db use default
-Switched to database: default
-> .db drop test_db
-Database 'test_db' dropped.
-> .db list
-Databases:
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_db
+Knowledge graph 'test_db' dropped.
+> .kg list
+Knowledge Graphs:
   default *

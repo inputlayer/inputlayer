@@ -1,13 +1,33 @@
-Executing script: examples/datalog/08_negation/24_circular_negation_detection_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_circular_neg
-Database 'test_circular_neg' created.
-Switched to database: test_circular_neg
-> .db use test_circular_neg
-Switched to database: test_circular_neg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_circular_neg
+Knowledge graph 'test_circular_neg' created.
+Switched to knowledge graph: test_circular_neg
+> .kg use test_circular_neg
+Switched to knowledge graph: test_circular_neg
 > +base[(1), (2), (3)].
-Inserted 3 facts into 'base'.
+Inserted 3 fact(s) into 'base'.
 > +valid_neg(X) :- base(X), !base(2).
 Rule 'valid_neg' registered.
 > ?- valid_neg(X).
-Script error: Line 14: Query execution failed: Negated predicate !base(...) shares no variables with positive predicates. Negation requires at least one shared variable.
+No results.
+> +layer1(X) :- base(X).
+Rule 'layer1' registered.
+> +layer2(X) :- layer1(X), !layer1(2).
+Rule 'layer2' registered.
+> ?- layer2(X).
+No results.
+> +derived(X) :- base(X), X > 1.
+Rule 'derived' registered.
+> +not_derived(X) :- base(X), !derived(X).
+Rule 'not_derived' registered.
+> ?- not_derived(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_circular_neg
+Knowledge graph 'test_circular_neg' dropped.

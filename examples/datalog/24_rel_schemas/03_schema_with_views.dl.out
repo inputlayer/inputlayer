@@ -1,17 +1,35 @@
-Executing script: examples/datalog/24_rel_schemas/03_schema_with_views.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_schema_views
-Database 'test_schema_views' created.
-Switched to database: test_schema_views
-> .db use test_schema_views
-Switched to database: test_schema_views
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_schema_views
+Knowledge graph 'test_schema_views' created.
+Switched to knowledge graph: test_schema_views
+> .kg use test_schema_views
+Switched to knowledge graph: test_schema_views
 > +orders(order_id: int, customer_id: int, amount: int).
-Persistent schema 'orders' declared: (order_id: Base(Int), customer_id: Base(Int), amount: Base(Int))
+Schema 'orders' declared (persistent).
 > +customers(customer_id: int, name: string).
-Persistent schema 'customers' declared: (customer_id: Base(Int), name: Base(String))
+Schema 'customers' declared (persistent).
 > +orders[(1, 100, 500), (2, 100, 300), (3, 200, 1500), (4, 200, 200)].
-Inserted 4 facts into 'orders'.
+Inserted 4 fact(s) into 'orders'.
 > +customers[(100, "Acme Corp"), (200, "Widgets Inc")].
-Inserted 2 facts into 'customers'.
+Inserted 2 fact(s) into 'customers'.
 > +customer_total(CustId, sum<Amount>) :- orders(_, CustId, Amount).
-Script error: Line 19: Parse error: Invalid term: 'sum<Amount>'
+Rule 'customer_total' registered.
+> ?- customer_total(C, T).
+2 rows:
+  (100, 800)
+  (200, 1700)
+> +high_value(CustId, Name, Total) :- customer_total(CustId, Total), customers(CustId, Name), Total > 500.
+Rule 'high_value' registered.
+> ?- high_value(Id, Name, Total).
+2 rows:
+  (100, "Acme Corp", 800)
+  (200, "Widgets Inc", 1700)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_schema_views
+Knowledge graph 'test_schema_views' dropped.

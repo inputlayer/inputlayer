@@ -148,10 +148,17 @@ impl CancelHandle {
     }
 }
 
+// TODO: Consider using these utilities for simple synchronous timeout scenarios.
+// Reserved as convenience wrappers for timeout handling. The codebase currently
+// uses the more flexible QueryTimeout controller pattern (with periodic check()
+// calls), but these wrappers may be useful for simpler one-shot timeout needs
+// where wrapping the entire operation is sufficient.
+
 /// Execute a closure with timeout
 ///
 /// This is a convenience function for running synchronous code with a timeout.
 /// For async code, use tokio or async-std timeout functions.
+#[allow(dead_code)]
 pub fn with_timeout<T, F>(timeout: Duration, f: F) -> Result<T, TimeoutError>
 where
     F: FnOnce(&QueryTimeout) -> T,
@@ -168,6 +175,7 @@ where
 }
 
 /// Execute a fallible closure with timeout
+#[allow(dead_code)]
 pub fn with_timeout_result<T, E, F>(timeout: Duration, f: F) -> Result<Result<T, E>, TimeoutError>
 where
     F: FnOnce(&QueryTimeout) -> Result<T, E>,

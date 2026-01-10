@@ -1,31 +1,31 @@
-// Test: Negation on Empty Relation
-// Category: Negation
-// Description: Tests negation behavior when the negated relation is empty
+% Test: Negation on Empty Relation
+% Category: Negation
+% Description: Tests negation behavior when the negated relation is empty
 
-.db create test_neg_empty
-.db use test_neg_empty
+.kg create test_neg_empty
+.kg use test_neg_empty
 
-// Insert base facts
+% Insert base facts
 +items[(1), (2), (3), (4), (5)].
 
-// excluded is empty - not inserting anything
+% excluded is empty - not inserting anything
 
-// Query: items that are not excluded (should be all items)
+% Query: items that are not excluded (should be all items)
 +not_excluded(X) :- items(X), !excluded(X).
 ?- not_excluded(X).
 
-// Now add some exclusions
+% Now add some exclusions
 +excluded[(2), (4)].
 
-// Query again
+% Query again
 ?- not_excluded(X).
 
-// Delete all exclusions
+% Delete all exclusions
 -excluded(X) :- excluded(X).
 
-// Query again - back to all items
+% Query again - back to all items
 ?- not_excluded(X).
 
-// Cleanup
-.db use default
-.db drop test_neg_empty
+% Cleanup
+.kg use default
+.kg drop test_neg_empty

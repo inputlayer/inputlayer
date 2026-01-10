@@ -30,12 +30,14 @@ pub mod consolidate;
 pub mod wal;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
-pub use consolidate::{consolidate, consolidate_to_current, filter_since, to_tuples, to_tuple2s, to_tuples_with_multiplicity, to_tuple2s_with_multiplicity};
+pub use consolidate::{
+    consolidate, consolidate_to_current, filter_since, to_tuple2s, to_tuple2s_with_multiplicity,
+    to_tuples, to_tuples_with_multiplicity,
+};
 pub use wal::PersistWal;
 
-use crate::value::Tuple2;
 use crate::storage::{StorageError, StorageResult};
-use crate::value::{Tuple, Value, TupleSchema, DataType, tuples_to_record_batch, record_batch_to_tuples};
+use crate::value::{record_batch_to_tuples, tuples_to_record_batch, DataType, Tuple, TupleSchema};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -43,7 +45,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 
 // Parquet I/O for batches
-use arrow::array::{Int32Array, Int64Array, UInt64Array, ArrayRef};
+use arrow::array::{ArrayRef, Int32Array, Int64Array, UInt64Array};
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -153,8 +155,9 @@ impl FilePersist {
 
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
                 let content = fs::read_to_string(&path)?;
-                let meta: ShardMeta = serde_json::from_str(&content)
-                    .map_err(|e| StorageError::Other(format!("Failed to parse shard metadata: {}", e)))?;
+                let meta: ShardMeta = serde_json::from_str(&content).map_err(|e| {
+                    StorageError::Other(format!("Failed to parse shard metadata: {}", e))
+                })?;
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
@@ -166,10 +169,13 @@ impl FilePersist {
                     }
                 }
 
-                shards.insert(meta.name.clone(), ShardState {
-                    meta,
-                    buffer: Vec::new(),
-                });
+                shards.insert(
+                    meta.name.clone(),
+                    ShardState {
+                        meta,
+                        buffer: Vec::new(),
+                    },
+                );
             }
         }
 
@@ -184,12 +190,12 @@ impl FilePersist {
         let mut shards = self.shards.write().unwrap();
 
         for entry in entries {
-            let state = shards.entry(entry.shard.clone()).or_insert_with(|| {
-                ShardState {
+            let state = shards
+                .entry(entry.shard.clone())
+                .or_insert_with(|| ShardState {
                     meta: ShardMeta::new(entry.shard.clone()),
                     buffer: Vec::new(),
-                }
-            });
+                });
             state.buffer.push(entry.update);
         }
 
@@ -198,22 +204,33 @@ impl FilePersist {
 
     /// Save shard metadata to disk
     fn save_shard_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
-        let path = self.config.path.join("shards").join(format!("{}.json", sanitize_name(&meta.name)));
-        let content = serde_json::to_string_pretty(meta)
-            .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {}", e)))?;
+        let path = self
+            .config
+            .path
+            .join("shards")
+            .join(format!("{}.json", sanitize_name(&meta.name)));
+        let content = serde_json::to_string_pretty(meta).map_err(|e| {
+            StorageError::Other(format!("Failed to serialize shard metadata: {}", e))
+        })?;
         fs::write(&path, content)?;
         Ok(())
     }
 
     /// Generate a unique batch ID
     fn generate_batch_id(&self) -> String {
-        self.next_batch_id.fetch_add(1, Ordering::Relaxed).to_string()
+        self.next_batch_id
+            .fetch_add(1, Ordering::Relaxed)
+            .to_string()
     }
 
     /// Write a batch to a Parquet file
     fn write_batch(&self, updates: &[Update]) -> StorageResult<(String, PathBuf)> {
         let batch_id = self.generate_batch_id();
-        let path = self.config.path.join("batches").join(format!("{}.parquet", batch_id));
+        let path = self
+            .config
+            .path
+            .join("batches")
+            .join(format!("{}.parquet", batch_id));
 
         write_updates_parquet(&path, updates)?;
 
@@ -241,12 +258,12 @@ impl PersistBackend for FilePersist {
         // Add to buffer
         let should_flush = {
             let mut shards = self.shards.write().unwrap();
-            let state = shards.entry(shard.to_string()).or_insert_with(|| {
-                ShardState {
+            let state = shards
+                .entry(shard.to_string())
+                .or_insert_with(|| ShardState {
                     meta: ShardMeta::new(shard.to_string()),
                     buffer: Vec::new(),
-                }
-            });
+                });
 
             state.buffer.extend_from_slice(updates);
 
@@ -271,9 +288,9 @@ impl PersistBackend for FilePersist {
     fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
         let shards = self.shards.read().unwrap();
 
-        let state = shards.get(shard).ok_or_else(|| {
-            StorageError::Other(format!("Shard not found: {}", shard))
-        })?;
+        let state = shards
+            .get(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
 
         let mut updates = Vec::new();
 
@@ -296,9 +313,9 @@ impl PersistBackend for FilePersist {
         self.flush(shard)?;
 
         let mut shards = self.shards.write().unwrap();
-        let state = shards.get_mut(shard).ok_or_else(|| {
-            StorageError::Other(format!("Shard not found: {}", shard))
-        })?;
+        let state = shards
+            .get_mut(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
 
         // Read all updates
         let mut all_updates = Vec::new();
@@ -308,7 +325,8 @@ impl PersistBackend for FilePersist {
         }
 
         // Filter and consolidate
-        let mut filtered: Vec<Update> = all_updates.into_iter()
+        let mut filtered: Vec<Update> = all_updates
+            .into_iter()
             .filter(|u| u.time >= new_since)
             .collect();
         consolidate(&mut filtered);
@@ -347,9 +365,9 @@ impl PersistBackend for FilePersist {
 
     fn shard_info(&self, shard: &str) -> StorageResult<ShardInfo> {
         let shards = self.shards.read().unwrap();
-        let state = shards.get(shard).ok_or_else(|| {
-            StorageError::Other(format!("Shard not found: {}", shard))
-        })?;
+        let state = shards
+            .get(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
         Ok(ShardInfo::from(&state.meta))
     }
 
@@ -358,10 +376,13 @@ impl PersistBackend for FilePersist {
         if !shards.contains_key(shard) {
             let meta = ShardMeta::new(shard.to_string());
             self.save_shard_meta(&meta)?;
-            shards.insert(shard.to_string(), ShardState {
-                meta,
-                buffer: Vec::new(),
-            });
+            shards.insert(
+                shard.to_string(),
+                ShardState {
+                    meta,
+                    buffer: Vec::new(),
+                },
+            );
         }
         Ok(())
     }
@@ -373,9 +394,9 @@ impl PersistBackend for FilePersist {
 
     fn flush(&self, shard: &str) -> StorageResult<()> {
         let mut shards = self.shards.write().unwrap();
-        let state = shards.get_mut(shard).ok_or_else(|| {
-            StorageError::Other(format!("Shard not found: {}", shard))
-        })?;
+        let state = shards
+            .get_mut(shard)
+            .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
 
         if state.buffer.is_empty() {
             return Ok(());
@@ -465,9 +486,12 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
                 Arc::new(UInt64Array::from(Vec::<u64>::new())),
                 Arc::new(Int64Array::from(Vec::<i64>::new())),
             ],
-        ).map_err(|e| StorageError::Arrow(e))?;
+        )
+        .map_err(|e| StorageError::Arrow(e))?;
 
-        writer.write(&empty_batch).map_err(|e| StorageError::Parquet(e))?;
+        writer
+            .write(&empty_batch)
+            .map_err(|e| StorageError::Parquet(e))?;
         writer.close().map_err(|e| StorageError::Parquet(e))?;
 
         return Ok(());
@@ -484,7 +508,12 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
         .map_err(|e| StorageError::Other(format!("Arrow conversion error: {}", e)))?;
 
     // Build full schema with time and diff columns
-    let mut fields: Vec<Field> = data_batch.schema().fields().iter().map(|f| f.as_ref().clone()).collect();
+    let mut fields: Vec<Field> = data_batch
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
     fields.push(Field::new("time", ArrowDataType::UInt64, false));
     fields.push(Field::new("diff", ArrowDataType::Int64, false));
     let full_schema = Arc::new(Schema::new(fields));
@@ -498,8 +527,8 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
     columns.push(Arc::new(UInt64Array::from(times)));
     columns.push(Arc::new(Int64Array::from(diffs)));
 
-    let batch = RecordBatch::try_new(full_schema.clone(), columns)
-        .map_err(|e| StorageError::Arrow(e))?;
+    let batch =
+        RecordBatch::try_new(full_schema.clone(), columns).map_err(|e| StorageError::Arrow(e))?;
 
     let file = fs::File::create(path)?;
     let props = WriterProperties::builder()
@@ -518,8 +547,8 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
 /// Read updates from a Parquet file
 fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
     let file = fs::File::open(path)?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
-        .map_err(|e| StorageError::Parquet(e))?;
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| StorageError::Parquet(e))?;
 
     let reader = builder.build().map_err(|e| StorageError::Parquet(e))?;
 
@@ -532,20 +561,31 @@ fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
         // Last two columns are always time and diff
         // Data columns are all columns except the last two
         if num_cols < 2 {
-            return Err(StorageError::Other("Invalid parquet file: not enough columns".to_string()));
+            return Err(StorageError::Other(
+                "Invalid parquet file: not enough columns".to_string(),
+            ));
         }
 
         let time_col_idx = num_cols - 2;
         let diff_col_idx = num_cols - 1;
 
-        let times = batch.column(time_col_idx).as_any().downcast_ref::<UInt64Array>()
+        let times = batch
+            .column(time_col_idx)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
             .ok_or_else(|| StorageError::Other("Invalid time column type".to_string()))?;
-        let diffs = batch.column(diff_col_idx).as_any().downcast_ref::<Int64Array>()
+        let diffs = batch
+            .column(diff_col_idx)
+            .as_any()
+            .downcast_ref::<Int64Array>()
             .ok_or_else(|| StorageError::Other("Invalid diff column type".to_string()))?;
 
         // Create a sub-batch with only data columns
         let data_schema = Arc::new(Schema::new(
-            batch.schema().fields()[..time_col_idx].iter().map(|f| f.as_ref().clone()).collect::<Vec<_>>()
+            batch.schema().fields()[..time_col_idx]
+                .iter()
+                .map(|f| f.as_ref().clone())
+                .collect::<Vec<_>>(),
         ));
         let data_columns: Vec<ArrayRef> = batch.columns()[..time_col_idx].to_vec();
 
@@ -554,8 +594,8 @@ fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
             continue;
         }
 
-        let data_batch = RecordBatch::try_new(data_schema, data_columns)
-            .map_err(|e| StorageError::Arrow(e))?;
+        let data_batch =
+            RecordBatch::try_new(data_schema, data_columns).map_err(|e| StorageError::Arrow(e))?;
 
         // Convert data batch back to tuples
         let (tuples, _) = record_batch_to_tuples(&data_batch)
@@ -586,6 +626,7 @@ fn sanitize_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Value;
     use tempfile::TempDir;
 
     fn create_test_persist() -> (TempDir, FilePersist) {
@@ -638,13 +679,18 @@ mod tests {
 
     #[test]
     fn test_auto_flush_on_buffer_full() {
-        let (_temp, persist) = create_test_persist();  // buffer_size = 5
+        let (_temp, persist) = create_test_persist(); // buffer_size = 5
 
         persist.ensure_shard("db:edge").unwrap();
 
         // Add 6 updates (exceeds buffer of 5)
         for i in 0..6 {
-            persist.append("db:edge", &[Update::insert(Tuple::from_pair(i, i), i as u64)]).unwrap();
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
         }
 
         // Should have flushed
@@ -659,9 +705,15 @@ mod tests {
         persist.ensure_shard("db:edge").unwrap();
 
         // Insert and delete the same tuple
-        persist.append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)]).unwrap();
-        persist.append("db:edge", &[Update::delete(Tuple::from_pair(1, 2), 10)]).unwrap();
-        persist.append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)]).unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::delete(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
 
         let mut updates = persist.read("db:edge", 0).unwrap();
         consolidate(&mut updates);
@@ -679,9 +731,15 @@ mod tests {
         persist.ensure_shard("db:edge").unwrap();
 
         // Add updates at different times
-        persist.append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)]).unwrap();
-        persist.append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)]).unwrap();
-        persist.append("db:edge", &[Update::insert(Tuple::from_pair(5, 6), 30)]).unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(5, 6), 30)])
+            .unwrap();
         persist.flush("db:edge").unwrap();
 
         // Compact to time 15 (should discard time 10)
@@ -725,10 +783,15 @@ mod tests {
             let persist = FilePersist::new(config).unwrap();
 
             persist.ensure_shard("db:edge").unwrap();
-            persist.append("db:edge", &[
-                Update::insert(Tuple::from_pair(1, 2), 10),
-                Update::insert(Tuple::from_pair(3, 4), 20),
-            ]).unwrap();
+            persist
+                .append(
+                    "db:edge",
+                    &[
+                        Update::insert(Tuple::from_pair(1, 2), 10),
+                        Update::insert(Tuple::from_pair(3, 4), 20),
+                    ],
+                )
+                .unwrap();
             persist.flush("db:edge").unwrap();
         }
 
@@ -755,8 +818,14 @@ mod tests {
 
         // Test with 3-arity tuples
         let updates = vec![
-            Update::insert(Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]), 10),
-            Update::insert(Tuple::new(vec![Value::Int32(4), Value::Int32(5), Value::Int32(6)]), 20),
+            Update::insert(
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]),
+                10,
+            ),
+            Update::insert(
+                Tuple::new(vec![Value::Int32(4), Value::Int32(5), Value::Int32(6)]),
+                20,
+            ),
         ];
 
         persist.ensure_shard("db:triple").unwrap();
@@ -777,12 +846,20 @@ mod tests {
         // Test with mixed types
         let updates = vec![
             Update::insert(
-                Tuple::new(vec![Value::Int32(1), Value::string("hello"), Value::Float64(3.14)]),
-                10
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("hello"),
+                    Value::Float64(3.14),
+                ]),
+                10,
             ),
             Update::insert(
-                Tuple::new(vec![Value::Int32(2), Value::string("world"), Value::Float64(2.71)]),
-                20
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("world"),
+                    Value::Float64(2.71),
+                ]),
+                20,
             ),
         ];
 

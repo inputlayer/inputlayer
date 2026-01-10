@@ -1,18 +1,22 @@
-Executing script: examples/datalog/22_set_operations/02_union_dedup.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_union_dedup
-Database 'test_union_dedup' created.
-Switched to database: test_union_dedup
-> .db use test_union_dedup
-Switched to database: test_union_dedup
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_dedup
+Knowledge graph 'test_union_dedup' created.
+Switched to knowledge graph: test_union_dedup
+> .kg use test_union_dedup
+Switched to knowledge graph: test_union_dedup
 > +set_a[(1), (2), (3)].
-Inserted 3 facts into 'set_a'.
+Inserted 3 fact(s) into 'set_a'.
 > +set_b[(2), (3), (4)].
-Inserted 3 facts into 'set_b'.
+Inserted 3 fact(s) into 'set_b'.
 > +union_ab(X) :- set_a(X).
 Rule 'union_ab' registered.
 > +union_ab(X) :- set_b(X).
-Rule added to 'union_ab' (2 rules total).
+Rule 'union_ab' registered.
 > ?- union_ab(X).
 4 rows:
   (1)
@@ -20,4 +24,25 @@ Rule added to 'union_ab' (2 rules total).
   (3)
   (4)
 > +union_count(count<X>) :- union_ab(X).
-Script error: Line 20: Parse error: Invalid term: 'count<X>'
+Rule 'union_count' registered.
+> ?- union_count(C).
+1 rows:
+  (4)
+> +pairs_a[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'pairs_a'.
+> +pairs_b[(2, 20), (3, 30), (4, 40)].
+Inserted 3 fact(s) into 'pairs_b'.
+> +pair_union(X, Y) :- pairs_a(X, Y).
+Rule 'pair_union' registered.
+> +pair_union(X, Y) :- pairs_b(X, Y).
+Rule 'pair_union' registered.
+> ?- pair_union(X, Y).
+4 rows:
+  (1, 10)
+  (2, 20)
+  (3, 30)
+  (4, 40)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union_dedup
+Knowledge graph 'test_union_dedup' dropped.

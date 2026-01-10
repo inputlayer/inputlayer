@@ -1,32 +1,32 @@
-// Test: Non-Bipartite Graph Detection
-// Category: 18_advanced_patterns
-// Description: 3-cycle is NOT bipartite - demonstrates 2-coloring conflict
+% Test: Non-Bipartite Graph Detection
+% Category: 18_advanced_patterns
+% Description: 3-cycle is NOT bipartite - demonstrates 2-coloring conflict
 
-.db create test_non_bipartite
-.db use test_non_bipartite
+.kg create test_non_bipartite
+.kg use test_non_bipartite
 
-// 3-cycle graph (NOT bipartite - odd cycle):
-// 1 - 2
-//  \ /
-//   3
+% 3-cycle graph (NOT bipartite - odd cycle):
+% 1 - 2
+%  \ /
+%   3
 +edge[(1, 2), (2, 3), (3, 1)].
 +start[(1, 0)].
 
-// 2-coloring propagation (undirected - check both directions)
+% 2-coloring propagation (undirected - check both directions)
 +color(X, C) :- start(X, C).
 +color(Y, 1) :- color(X, 0), edge(X, Y).
 +color(Y, 1) :- color(X, 0), edge(Y, X).
 +color(Y, 0) :- color(X, 1), edge(X, Y).
 +color(Y, 0) :- color(X, 1), edge(Y, X).
 
-// Query all colorings - odd cycle will have nodes with both colors
-// 3-cycle: node 1 gets 0 (start), node 2 gets 1, node 3 gets 0
-// But node 3 also connects back to node 1, creating a conflict
+% Query all colorings - odd cycle will have nodes with both colors
+% 3-cycle: node 1 gets 0 (start), node 2 gets 1, node 3 gets 0
+% But node 3 also connects back to node 1, creating a conflict
 ?- color(X, C).
 
-// Note: Conflict detection via self-join has a known bug - skipping for now
-// Expected: Non-bipartite graph shows same node with different colors in the output
+% Note: Conflict detection via self-join has a known bug - skipping for now
+% Expected: Non-bipartite graph shows same node with different colors in the output
 
-// Cleanup
-.db use default
-.db drop test_non_bipartite
+% Cleanup
+.kg use default
+.kg drop test_non_bipartite

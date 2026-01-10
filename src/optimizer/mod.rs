@@ -53,9 +53,7 @@ pub struct Optimizer {
 impl Optimizer {
     /// Create a new optimizer with default max iterations
     pub fn new() -> Self {
-        Optimizer {
-            max_iterations: 10,
-        }
+        Optimizer { max_iterations: 10 }
     }
 
     /// Create optimizer with custom max iterations
@@ -70,13 +68,13 @@ impl Optimizer {
     pub fn optimize(&self, ir: IRNode) -> IRNode {
         let mut current = ir;
 
-        for iteration in 0..self.max_iterations {
+        for _iteration in 0..self.max_iterations {
             let optimized = self.apply_all_rules(current.clone());
 
             // Check if we reached fixpoint
             if Self::ir_equals(&optimized, &current) {
                 #[cfg(test)]
-                println!("Optimizer reached fixpoint at iteration {}", iteration);
+                println!("Optimizer reached fixpoint at iteration {}", _iteration);
                 break;
             }
 
@@ -336,7 +334,6 @@ impl Optimizer {
                         output_schema,
                     } => {
                         let left_schema = left.output_schema();
-                        let right_schema = right.output_schema();
                         let left_cols = left_schema.len();
 
                         // Analyze which side(s) the predicate references
@@ -495,9 +492,7 @@ impl Optimizer {
 
     /// Adjust column indices in a predicate by an offset
     fn adjust_predicate_columns(predicate: &Predicate, offset: i32) -> Predicate {
-        let adjust = |col: usize| -> usize {
-            ((col as i32) + offset) as usize
-        };
+        let adjust = |col: usize| -> usize { ((col as i32) + offset) as usize };
 
         match predicate {
             Predicate::ColumnEqConst(col, val) => Predicate::ColumnEqConst(adjust(*col), *val),
@@ -688,10 +683,7 @@ impl Optimizer {
                 let input_schema = input.output_schema();
 
                 // Check if projection is identity
-                let is_identity = projection
-                    .iter()
-                    .enumerate()
-                    .all(|(i, &p)| i == p)
+                let is_identity = projection.iter().enumerate().all(|(i, &p)| i == p)
                     && projection.len() == input_schema.len();
 
                 if is_identity {

@@ -1,14 +1,18 @@
-Executing script: examples/datalog/11_types/07_numeric_bounds.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_bounds
-Database 'test_bounds' created.
-Switched to database: test_bounds
-> .db use test_bounds
-Switched to database: test_bounds
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bounds
+Knowledge graph 'test_bounds' created.
+Switched to knowledge graph: test_bounds
+> .kg use test_bounds
+Switched to knowledge graph: test_bounds
 > +large_pos[(1, 1000000), (2, 2000000), (3, 999999999)].
-Inserted 3 facts into 'large_pos'.
+Inserted 3 fact(s) into 'large_pos'.
 > +large_neg[(1, -1000000), (2, -2000000)].
-Inserted 2 facts into 'large_neg'.
+Inserted 2 fact(s) into 'large_neg'.
 > ?- large_pos(Id, Val).
 3 rows:
   (1, 1000000)
@@ -19,4 +23,4 @@ Inserted 2 facts into 'large_neg'.
   (1, -1000000)
   (2, -2000000)
 > +large_sum(Id, V+1) :- large_pos(Id, V).
-Script error: Line 21: Parse error: Invalid term: 'V+1'
+Script error: Parse error: Invalid term: 'V+1'

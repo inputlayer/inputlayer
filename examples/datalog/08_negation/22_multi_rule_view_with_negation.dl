@@ -1,28 +1,28 @@
-// Test: Multi-Rule View with Negation (Symmetric Difference)
-// Category: 08_negation
-// Description: Tests a view with multiple rules, each containing negation
-// This computes symmetric difference: (A - B) ∪ (B - A)
+% Test: Multi-Rule View with Negation (Symmetric Difference)
+% Category: 08_negation
+% Description: Tests a view with multiple rules, each containing negation
+% This computes symmetric difference: (A - B) ∪ (B - A)
 
-.db create test_multi_rule_neg
-.db use test_multi_rule_neg
+.kg create test_multi_rule_neg
+.kg use test_multi_rule_neg
 
-// Two sets
+% Two sets
 +set_a[(1, 0), (2, 0), (3, 0), (4, 0)].
 +set_b[(3, 0), (4, 0), (5, 0), (6, 0)].
 
-// Symmetric difference using two rules with negation
-// Rule 1: elements in A but not B
+% Symmetric difference using two rules with negation
+% Rule 1: elements in A but not B
 +sym_diff(X, Y) :- set_a(X, Y), !set_b(X, _).
-// Rule 2: elements in B but not A
+% Rule 2: elements in B but not A
 +sym_diff(X, Y) :- set_b(X, Y), !set_a(X, _).
 
-// Query the symmetric difference
+% Query the symmetric difference
 ?- sym_diff(X, Y).
 
-// Expected: (1, 0), (2, 0), (5, 0), (6, 0)
-// Elements unique to A: 1, 2
-// Elements unique to B: 5, 6
+% Expected: (1, 0), (2, 0), (5, 0), (6, 0)
+% Elements unique to A: 1, 2
+% Elements unique to B: 5, 6
 
-// Cleanup
-.db use default
-.db drop test_multi_rule_neg
+% Cleanup
+.kg use default
+.kg drop test_multi_rule_neg

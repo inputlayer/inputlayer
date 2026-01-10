@@ -1,12 +1,16 @@
-Executing script: examples/datalog/11_types/08_comparison_ops.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_compare
-Database 'test_compare' created.
-Switched to database: test_compare
-> .db use test_compare
-Switched to database: test_compare
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compare
+Knowledge graph 'test_compare' created.
+Switched to knowledge graph: test_compare
+> .kg use test_compare
+Switched to knowledge graph: test_compare
 > +vals[(1, 10), (2, 20), (3, 30), (4, 20), (5, 40)].
-Inserted 5 facts into 'vals'.
+Inserted 5 fact(s) into 'vals'.
 > +less_than_25(Id, V) :- vals(Id, V), V < 25.
 Rule 'less_than_25' registered.
 > ?- less_than_25(X, Y).
@@ -36,7 +40,7 @@ Rule 'greater_eq_20' registered.
   (4, 20)
   (5, 40)
 > +targets[(20)].
-Inserted 1 fact into 'targets'.
+Inserted 1 fact(s) into 'targets'.
 > +equals_target(Id, V) :- vals(Id, V), targets(V).
 Rule 'equals_target' registered.
 > ?- equals_target(X, Y).
@@ -57,7 +61,7 @@ Rule 'in_range' registered.
   (2, 20)
   (3, 30)
   (4, 20)
-> .db use default
-Switched to database: default
-> .db drop test_compare
-Database 'test_compare' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_compare
+Knowledge graph 'test_compare' dropped.

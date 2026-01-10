@@ -1,19 +1,23 @@
-Executing script: examples/datalog/11_types/03_floats_truncation.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_float
-Database 'test_float' created.
-Switched to database: test_float
-> .db use test_float
-Switched to database: test_float
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float
+Knowledge graph 'test_float' created.
+Switched to knowledge graph: test_float
+> .kg use test_float
+Switched to knowledge graph: test_float
 > +values[(1.9, 2.1), (3.7, 4.9), (0.5, 0.1)].
-Inserted 3 facts into 'values'.
+Inserted 3 fact(s) into 'values'.
 > ?- values(X, Y).
 3 rows:
   (0.5, 0.1)
   (1.9, 2.1)
   (3.7, 4.9)
 > +negfloat[(-1.5, -2.9), (-3.1, -4.8)].
-Inserted 2 facts into 'negfloat'.
+Inserted 2 fact(s) into 'negfloat'.
 > ?- negfloat(X, Y).
 2 rows:
   (-3.1, -4.8)
@@ -22,7 +26,7 @@ Inserted 2 facts into 'negfloat'.
 Rule 'large' registered.
 > ?- large(X, Y).
 No results.
-> .db use default
-Switched to database: default
-> .db drop test_float
-Database 'test_float' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_float
+Knowledge graph 'test_float' dropped.

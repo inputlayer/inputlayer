@@ -23,3 +23,17 @@ config.local.toml
 # Test temporary files
 tmp/
 *.tmp
+
+# GUI (Next.js) - Build artifacts and dependencies
+gui/node_modules/
+gui/.next/
+gui/dist/
+gui/out/
+
+# GUI - Package manager lock files (keep package.json only)
+gui/pnpm-lock.yaml
+gui/package-lock.json
+
+# GUI - Editor/IDE cache
+gui/.turbo/
+gui/.vercel/

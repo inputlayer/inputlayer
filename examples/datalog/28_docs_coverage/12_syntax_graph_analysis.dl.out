@@ -1,18 +1,22 @@
-Executing script: examples/datalog/28_docs_coverage/12_syntax_graph_analysis.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create syntax_graph
-Database 'syntax_graph' created.
-Switched to database: syntax_graph
-> .db use syntax_graph
-Switched to database: syntax_graph
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create syntax_graph
+Knowledge graph 'syntax_graph' created.
+Switched to knowledge graph: syntax_graph
+> .kg use syntax_graph
+Switched to knowledge graph: syntax_graph
 > +edge[(1, 2), (2, 3), (3, 4), (4, 2)].
-Inserted 4 facts into 'edge'.
+Inserted 4 fact(s) into 'edge'.
 > +node[(1), (2), (3), (4), (5)].
-Inserted 5 facts into 'node'.
+Inserted 5 fact(s) into 'node'.
 > +path(X, Y) :- edge(X, Y).
 Rule 'path' registered.
 > +path(X, Z) :- path(X, Y), edge(Y, Z).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > ?- path(X, Y).
 12 rows:
   (1, 2)
@@ -38,11 +42,11 @@ Rule 'in_cycle' registered.
 > +bidir(X, Y) :- edge(X, Y).
 Rule 'bidir' registered.
 > +bidir(X, Y) :- edge(Y, X).
-Rule added to 'bidir' (2 rules total).
+Rule 'bidir' registered.
 > +connected(X, Y) :- bidir(X, Y).
 Rule 'connected' registered.
 > +connected(X, Z) :- connected(X, Y), bidir(Y, Z).
-Rule added to 'connected' (2 rules total).
+Rule 'connected' registered.
 > ?- connected(1, X).
 4 rows:
   (1, 1)
@@ -60,7 +64,7 @@ Rule 'source' registered.
 2 rows:
   (1)
   (5)
-> .db use default
-Switched to database: default
-> .db drop syntax_graph
-Database 'syntax_graph' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop syntax_graph
+Knowledge graph 'syntax_graph' dropped.

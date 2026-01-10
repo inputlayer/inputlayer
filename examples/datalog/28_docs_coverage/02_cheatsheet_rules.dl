@@ -1,41 +1,41 @@
-// Test: Cheatsheet Rules
-// Category: docs_coverage
-// Description: Tests examples from docs/cheatsheet.md - persistent and session rules
+% Test: Cheatsheet Rules
+% Category: docs_coverage
+% Description: Tests examples from docs/cheatsheet.md - persistent and session rules
 
-.db create cheatsheet_rules
-.db use cheatsheet_rules
+.kg create cheatsheet_rules
+.kg use cheatsheet_rules
 
-// === Setup data ===
+% === Setup data ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 +person[("alice", 30), ("bob", 17), ("carol", 25)].
 
-// === Persistent Rules ===
+% === Persistent Rules ===
 
-// Simple rule
+% Simple rule
 +path(X, Y) :- edge(X, Y).
 
-// Recursive rule (transitive closure)
+% Recursive rule (transitive closure)
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
 ?- path(X, Y).
 
-// Rule with filter
+% Rule with filter
 +adult(Name, Age) :- person(Name, Age), Age >= 18.
 
 ?- adult(Name, Age).
 
-// === Session Rules ===
+% === Session Rules ===
 
-// Transient rule (no + prefix)
+% Transient rule (no + prefix)
 result(X, Y) :- edge(X, Y), X < Y.
 
 ?- result(X, Y).
 
-// Session rules referencing persistent rules
+% Session rules referencing persistent rules
 reachable_from_one(X) :- path(1, X).
 
 ?- reachable_from_one(X).
 
-// Cleanup
-.db use default
-.db drop cheatsheet_rules
+% Cleanup
+.kg use default
+.kg drop cheatsheet_rules

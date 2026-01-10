@@ -1,16 +1,20 @@
-Executing script: examples/datalog/11_types/04_large_integers.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_large_int
-Database 'test_large_int' created.
-Switched to database: test_large_int
-> .db use test_large_int
-Switched to database: test_large_int
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_int
+Knowledge graph 'test_large_int' created.
+Switched to knowledge graph: test_large_int
+> .kg use test_large_int
+Switched to knowledge graph: test_large_int
 > +large_pos[(1000000, 2000000), (999999, 1000001)].
-Inserted 2 facts into 'large_pos'.
+Inserted 2 fact(s) into 'large_pos'.
 > +large_neg[(-1000000, -2000000), (-999999, -1000001)].
-Inserted 2 facts into 'large_neg'.
+Inserted 2 fact(s) into 'large_neg'.
 > +mixed[(1000000, -1000000), (-999999, 999999)].
-Inserted 2 facts into 'mixed'.
+Inserted 2 fact(s) into 'mixed'.
 > ?- large_pos(X, Y).
 2 rows:
   (999999, 1000001)
@@ -26,4 +30,8 @@ Inserted 2 facts into 'mixed'.
 > +sum_large(X, Y) :- large_pos(X, Y), X + Y > 2500000.
 Rule 'sum_large' registered.
 > ?- sum_large(X, Y).
-Script error: Line 24: Query execution failed: Unsupported ordering constraint pattern
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_large_int
+Knowledge graph 'test_large_int' dropped.

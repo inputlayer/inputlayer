@@ -83,3 +83,18 @@ level = "info"
 # "text" is human-readable
 # "json" is machine-parseable (useful for log aggregation)
 format = "text"
+
+[http]
+# Enable HTTP server (REST API + GUI)
+enabled = true
+host = "127.0.0.1"
+port = 8080
+
+[http.gui]
+# Enable GUI dashboard serving
+enabled = true
+static_dir = "./gui/dist"
+
+[http.auth]
+# Authentication is disabled by default
+enabled = false

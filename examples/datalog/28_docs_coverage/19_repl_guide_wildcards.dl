@@ -1,21 +1,21 @@
-// Test: REPL Guide Wildcards
-// Category: docs_coverage
-// Description: Tests wildcard examples from docs/getting-started/04-repl-guide.md
+% Test: REPL Guide Wildcards
+% Category: docs_coverage
+% Description: Tests wildcard examples from docs/getting-started/04-repl-guide.md
 
-.db create repl_wildcards
-.db use repl_wildcards
+.kg create repl_wildcards
+.kg use repl_wildcards
 
-// Setup data
+% Setup data
 +edge[(1, 2), (1, 3), (2, 4), (3, 4)].
 
-// Get all source nodes (ignore target) using wildcard
+% Get all source nodes (ignore target) using wildcard
 ?- edge(X, _).
 
-// Count using wildcard
+% Count using wildcard
 temp(count<X>) :- edge(X, _).
 ?- temp(C).
 
-// Cleanup
-.db use default
-.db drop repl_wildcards
+% Cleanup
+.kg use default
+.kg drop repl_wildcards
 

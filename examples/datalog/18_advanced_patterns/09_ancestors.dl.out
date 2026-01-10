@@ -1,23 +1,27 @@
-Executing script: examples/datalog/18_advanced_patterns/09_ancestors.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_ancestors
-Database 'test_ancestors' created.
-Switched to database: test_ancestors
-> .db use test_ancestors
-Switched to database: test_ancestors
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestors
+Knowledge graph 'test_ancestors' created.
+Switched to knowledge graph: test_ancestors
+> .kg use test_ancestors
+Switched to knowledge graph: test_ancestors
 > +parent[(2, 1), (3, 1), (4, 2)].
-Inserted 3 facts into 'parent'.
+Inserted 3 fact(s) into 'parent'.
 > +ancestor(X, Y) :- parent(X, Y).
 Rule 'ancestor' registered.
 > +ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
-Rule added to 'ancestor' (2 rules total).
+Rule 'ancestor' registered.
 > ?- ancestor(X, Y).
 4 rows:
   (2, 1)
   (3, 1)
   (4, 1)
   (4, 2)
-> .db use default
-Switched to database: default
-> .db drop test_ancestors
-Database 'test_ancestors' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ancestors
+Knowledge graph 'test_ancestors' dropped.

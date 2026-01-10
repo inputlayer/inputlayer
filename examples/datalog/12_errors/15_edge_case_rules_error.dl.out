@@ -1,33 +1,37 @@
-Executing script: examples/datalog/12_errors/15_edge_case_rules_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_edge_rules
-Database 'test_edge_rules' created.
-Switched to database: test_edge_rules
-> .db use test_edge_rules
-Switched to database: test_edge_rules
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_edge_rules
+Knowledge graph 'test_edge_rules' created.
+Switched to knowledge graph: test_edge_rules
+> .kg use test_edge_rules
+Switched to knowledge graph: test_edge_rules
 > +trigger[(1)].
-Inserted 1 fact into 'trigger'.
+Inserted 1 fact(s) into 'trigger'.
 > +constant_fact(0, 1) :- trigger(_).
 Rule 'constant_fact' registered.
 > ?- constant_fact(X, Y).
 1 rows:
   (0, 1)
 > +source[(1, 100), (2, 100), (3, 100)].
-Inserted 3 facts into 'source'.
+Inserted 3 fact(s) into 'source'.
 > +extract_second(Y) :- source(_, Y).
 Rule 'extract_second' registered.
 > ?- extract_second(X).
 1 rows:
   (100)
 > +any_data[(1), (2), (3)].
-Inserted 3 facts into 'any_data'.
+Inserted 3 fact(s) into 'any_data'.
 > +always_true(0, 1) :- any_data(_).
 Rule 'always_true' registered.
 > ?- always_true(X, Y).
 1 rows:
   (0, 1)
 > +pairs[(1, 1), (2, 2), (3, 4), (5, 5)].
-Inserted 4 facts into 'pairs'.
+Inserted 4 fact(s) into 'pairs'.
 > +diagonal(X) :- pairs(X, X).
 Rule 'diagonal' registered.
 > ?- diagonal(X).
@@ -37,6 +41,6 @@ Rule 'diagonal' registered.
   (3)
   (5)
 > +nums[(1), (2), (3), (4)].
-Inserted 4 facts into 'nums'.
+Inserted 4 fact(s) into 'nums'.
 > +doubled(X, X*2) :- nums(X).
-Script error: Line 34: Parse error: Invalid term: 'X*2'
+Script error: Parse error: Invalid term: 'X*2'

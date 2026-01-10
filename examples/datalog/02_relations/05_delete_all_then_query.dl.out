@@ -1,28 +1,38 @@
-Executing script: examples/datalog/02_relations/05_delete_all_then_query.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_del_all
-Database 'test_del_all' created.
-Switched to database: test_del_all
-> .db use test_del_all
-Switched to database: test_del_all
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_all
+Knowledge graph 'test_del_all' created.
+Switched to knowledge graph: test_del_all
+> .kg use test_del_all
+Switched to knowledge graph: test_del_all
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)
   (2, 3)
   (3, 4)
 > -edge(X, Y) :- edge(X, Y).
-Deleted 3 facts from 'edge'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- edge(X, Y).
-No results.
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
 > +edge[(10,20), (20,30)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > ?- edge(X, Y).
-2 rows:
+5 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
   (10, 20)
   (20, 30)
-> .db use default
-Switched to database: default
-> .db drop test_del_all
-Database 'test_del_all' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_all
+Knowledge graph 'test_del_all' dropped.

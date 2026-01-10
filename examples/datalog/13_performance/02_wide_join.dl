@@ -1,22 +1,22 @@
-// Test: Wide Join (Many-to-Many)
-// Category: 13_performance
-// Description: Tests join performance with many matching tuples
+% Test: Wide Join (Many-to-Many)
+% Category: 13_performance
+% Description: Tests join performance with many matching tuples
 
-.db create test_perf_wide
-.db use test_perf_wide
+.kg create test_perf_wide
+.kg use test_perf_wide
 
-// Create relations where many tuples will match
-// R1: (1,1), (1,2), ..., (5,10) = 50 tuples
+% Create relations where many tuples will match
+% R1: (1,1), (1,2), ..., (5,10) = 50 tuples
 +rel1[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (2,1), (2,2), (2,3), (2,4), (2,5), (2,6), (2,7), (2,8), (2,9), (2,10), (3,1), (3,2), (3,3), (3,4), (3,5), (3,6), (3,7), (3,8), (3,9), (3,10), (4,1), (4,2), (4,3), (4,4), (4,5), (4,6), (4,7), (4,8), (4,9), (4,10), (5,1), (5,2), (5,3), (5,4), (5,5), (5,6), (5,7), (5,8), (5,9), (5,10)].
 
 +rel2[(1,100), (2,200), (3,300), (4,400), (5,500), (6,600), (7,700), (8,800), (9,900), (10,1000)].
 
-// Join produces 50 results (each of 50 rel1 tuples joins with one rel2 tuple)
+% Join produces 50 results (each of 50 rel1 tuples joins with one rel2 tuple)
 +joined(A, B, C) :- rel1(A, B), rel2(B, C).
 
-// Query subset
+% Query subset
 ?- joined(1, B, C).
 
-// Cleanup
-.db use default
-.db drop test_perf_wide
+% Cleanup
+.kg use default
+.kg drop test_perf_wide

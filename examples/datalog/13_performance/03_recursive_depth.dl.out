@@ -1,16 +1,20 @@
-Executing script: examples/datalog/13_performance/03_recursive_depth.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_perf_rec
-Database 'test_perf_rec' created.
-Switched to database: test_perf_rec
-> .db use test_perf_rec
-Switched to database: test_perf_rec
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_perf_rec
+Knowledge graph 'test_perf_rec' created.
+Switched to knowledge graph: test_perf_rec
+> .kg use test_perf_rec
+Switched to knowledge graph: test_perf_rec
 > +edge[(1,2), (2,3), (3,4), (4,5), (5,6), (6,7), (7,8), (8,9), (9,10), (10,11), (11,12), (12,13), (13,14), (14,15), (15,16), (16,17), (17,18), (18,19), (19,20)].
-Inserted 19 facts into 'edge'.
+Inserted 19 fact(s) into 'edge'.
 > +path(X, Y) :- edge(X, Y).
 Rule 'path' registered.
 > +path(X, Z) :- path(X, Y), edge(Y, Z).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > ?- path(1, X).
 19 rows:
   (1, 2)
@@ -245,7 +249,7 @@ Rule added to 'path' (2 rules total).
   (18, 19)
   (18, 20)
   (19, 20)
-> .db use default
-Switched to database: default
-> .db drop test_perf_rec
-Database 'test_perf_rec' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_perf_rec
+Knowledge graph 'test_perf_rec' dropped.

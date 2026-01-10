@@ -1,23 +1,23 @@
-// Test: String Data Types
-// Category: 11_types
-// Description: Tests string values in facts and queries
+% Test: String Data Types
+% Category: 11_types
+% Description: Tests string values in facts and queries
 
-.db create test_str
-.db use test_str
+.kg create test_str
+.kg use test_str
 
-// Note: Current implementation converts all values to integers
-// This test documents the current behavior
+% Note: Current implementation converts all values to integers
+% This test documents the current behavior
 
-// Insert numeric data that represents IDs
+% Insert numeric data that represents IDs
 +person[(1, 25), (2, 30), (3, 35)].
 
-// Query all persons
+% Query all persons
 ?- person(Id, Age).
 
-// Find older persons (age > 28)
+% Find older persons (age > 28)
 +older(Id, Age) :- person(Id, Age), Age > 28.
 ?- older(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_str
+% Cleanup
+.kg use default
+.kg drop test_str

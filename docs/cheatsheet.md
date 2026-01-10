@@ -26,11 +26,11 @@ A unified Datalog-native syntax for InputLayer, designed for intuitive data mani
 Meta commands start with `.` and control the system:
 
 ```
-.db                  Show current database
-.db list             List all databases
-.db create <name>    Create database
-.db use <name>       Switch to database
-.db drop <name>      Drop database (cannot drop current)
+.kg                  Show current knowledge graph
+.kg list             List all knowledge graphs
+.kg create <name>    Create knowledge graph
+.kg use <name>       Switch to knowledge graph
+.kg drop <name>      Drop knowledge graph (cannot drop current)
 
 .rel                 List relations (base facts)
 .rel <name>          Describe relation schema
@@ -82,9 +82,9 @@ Conditional delete (query-based):
 
 To update data, delete the old value then insert the new:
 ```datalog
-// Delete old value
+% Delete old value
 -counter(1, 0).
-// Insert new value
+% Insert new value
 +counter(1, 5).
 ```
 
@@ -108,7 +108,7 @@ Rule with filter:
 +adult(Name, Age) :- person(Name, Age), Age >= 18.
 ```
 
-Rules are saved to `{db_dir}/rules/catalog.json` and automatically loaded on database startup.
+Rules are saved to `{kg_dir}/rules/catalog.json` and automatically loaded on knowledge graph startup.
 
 ## Session Rules (`:-`)
 
@@ -126,7 +126,7 @@ reachable_from_one(X) :- path(1, X).
 Multiple session rules accumulate and evaluate together:
 ```datalog
 foo(X, Y) :- bar(X, Y).
-foo(X, Z) :- foo(X, Y), foo(Y, Z).  // Adds to previous rule
+foo(X, Z) :- foo(X, Y), foo(Y, Z).  % Adds to previous rule
 ```
 
 ## Queries (`?-`)
@@ -170,14 +170,14 @@ Define typed relations with optional constraints:
 ## Vector Operations
 
 ```datalog
-// Insert vectors
+% Insert vectors
 +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])].
 
-// Query with distance computation
+% Query with distance computation
 ?- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
    Dist = euclidean(V1, V2), Dist < 1.0.
 
-// Query with similarity computation
+% Query with similarity computation
 ?- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
    Sim = cosine(V1, V2), Sim > 0.9.
 ```
@@ -188,59 +188,59 @@ Available distance functions: `euclidean`, `cosine`, `dot`, `manhattan`
 
 ## Examples
 
-### Graph Database
+### Social Graph
 
 ```datalog
-// Create database
-.db create social
-.db use social
+% Create knowledge graph
+.kg create social
+.kg use social
 
-// Add edges
+% Add edges
 +follows[(1, 2), (2, 3), (3, 4), (1, 4)].
 
-// Define reachability rule (persistent)
+% Define reachability rule (persistent)
 +reach(X, Y) :- follows(X, Y).
 +reach(X, Z) :- reach(X, Y), follows(Y, Z).
 
-// Query who user 1 can reach
+% Query who user 1 can reach
 ?- reach(1, X).
 ```
 
 ### Access Control (RBAC)
 
 ```datalog
-.db create acl
-.db use acl
+.kg create acl
+.kg use acl
 
-// Facts: users, roles, permissions
+% Facts: users, roles, permissions
 +user_role[("alice", "admin"), ("bob", "viewer")].
 +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
 
-// Rule: user has permission if they have a role with that permission
+% Rule: user has permission if they have a role with that permission
 +has_permission(User, Perm) :-
   user_role(User, Role),
   role_permission(Role, Perm).
 
-// Query: what can alice do?
+% Query: what can alice do?
 ?- has_permission("alice", Perm).
 ```
 
 ### Policy-First RAG
 
 ```datalog
-.db create rag
-.db use rag
+.kg create rag
+.kg use rag
 
-// Facts
+% Facts
 +member[("alice", "engineering"), ("bob", "sales")].
 +doc[(101, "Design Doc"), (102, "Sales Pitch")].
 +acl[("engineering", 101), ("sales", 102)].
 +emb[(101, [1.0, 0.0]), (102, [0.0, 1.0])].
 
-// Rule: user can access docs via group membership
+% Rule: user can access docs via group membership
 +can_access(User, DocId) :- member(User, Group), acl(Group, DocId).
 
-// Query: what can alice retrieve, with similarity score?
+% Query: what can alice retrieve, with similarity score?
 ?- can_access("alice", DocId), emb(DocId, V),
    Sim = cosine(V, [0.9, 0.1]), Sim > 0.5.
 ```
@@ -263,7 +263,7 @@ The persistence layer stores `(data, time, diff)` triples, enabling:
 ```
 Statement Parser     →  Statement enum (facts, rules, queries)
        ↓
-Storage Engine       →  Multi-database management
+Storage Engine       →  Multi-knowledge-graph management
        ↓
 Rule Catalog         →  Persistent rule definitions (JSON)
        ↓
@@ -275,6 +275,6 @@ Persist Layer        →  WAL + batched Parquet storage
 ## File Locations
 
 - Config: `~/.inputlayer/config.toml` or `./inputlayer.toml`
-- Data: `{data_dir}/{database}/`
-- Rules: `{data_dir}/{database}/rules/catalog.json`
-- Persist: `{data_dir}/persist/{database}:{relation}/`
+- Data: `{data_dir}/{knowledge_graph}/`
+- Rules: `{data_dir}/{knowledge_graph}/rules/catalog.json`
+- Persist: `{data_dir}/persist/{knowledge_graph}:{relation}/`

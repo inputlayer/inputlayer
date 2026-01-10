@@ -1,0 +1,42 @@
+% Test: Comment Syntax
+% This test verifies that all comment styles work correctly
+
+.kg create comments_test
+.kg use comments_test
+
+% Test 1: Line comments with %
+% This is a full line comment
++edge(1, 2).  % This is an inline comment
+
+% Test 2: Block comments
+/* This is a block comment */
++edge(2, 3).
+
+/* This is a
+   multi-line
+   block comment */
++edge(3, 4).
+
+% Test 3: Nested block comments
+/* outer /* inner */ still outer */
++edge(4, 5).
+
+% Test 4: Query after comments to verify data integrity
+?- edge(X, Y).
+
+% Test 5: Rule with mixed comments
+/* Define transitive closure */
++path(X, Y) :- edge(X, Y).  % base case
++path(X, Z) :- path(X, Y), edge(Y, Z).  % recursive case
+
+?- path(1, X).
+
+% Test 6: Comment edge cases in rules
++data(100, 200).  % inline after fact
+/* block before */ +data(101, 201).  % and inline after
+
+?- data(X, Y).
+
+% Cleanup - switch to default before dropping
+.kg use default
+.kg drop comments_test

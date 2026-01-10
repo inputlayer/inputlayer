@@ -4,13 +4,11 @@
 //! - `+name(col: type @constraint, ...).` - persistent schema
 //! - `name(col: type, ...).` - transient schema
 
+use crate::schema::{ColumnAnnotation, ColumnSchema, RelationSchema, SchemaType, TypeAlias};
 use serde::{Deserialize, Serialize};
-use crate::schema::{
-    RelationSchema, ColumnSchema, SchemaType, ColumnAnnotation, TypeAlias,
-};
 
-use super::types::{TypeExpr, parse_type_expr, split_respecting_braces};
 use super::parser::validate_relation_name;
+use super::types::{parse_type_expr, split_respecting_braces, TypeExpr};
 
 /// Schema declaration via unified prefix syntax: +name(col: type, ...). or name(col: type, ...).
 /// Use `+` prefix for persistent schema, no prefix for transient (session-only) schema.
@@ -49,7 +47,8 @@ pub fn parse_schema_decl(input: &str, persistent: bool) -> Result<Statement, Str
     let input = input.trim().trim_end_matches('.');
 
     // Extract relation name and column definitions
-    let paren_pos = input.find('(')
+    let paren_pos = input
+        .find('(')
         .ok_or("Schema declaration must have columns: name(col: type, ...)")?;
 
     let name = input[..paren_pos].trim().to_string();
@@ -127,7 +126,10 @@ fn validate_column_name(col_name: &str) -> Result<(), String> {
             c.is_alphanumeric() || c == '_' || arith_ops.contains(&c) || c == '(' || c == ')'
         });
         if !valid_chars {
-            return Err(format!("Invalid computed column expression: '{}'", col_name));
+            return Err(format!(
+                "Invalid computed column expression: '{}'",
+                col_name
+            ));
         }
         return Ok(());
     }
@@ -153,7 +155,8 @@ fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
         }
 
         // Split on first ':' to get name and type+annotations
-        let colon_pos = part.find(':')
+        let colon_pos = part
+            .find(':')
             .ok_or_else(|| format!("Column definition '{}' must have type: 'name: type'", part))?;
 
         let col_name = part[..colon_pos].trim().to_string();
@@ -166,7 +169,11 @@ fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
         let (type_str, annotations) = parse_type_and_annotations(type_and_annot)?;
 
         let col_type = parse_type_expr(&type_str)?;
-        columns.push(ColumnDef { name: col_name, col_type, annotations });
+        columns.push(ColumnDef {
+            name: col_name,
+            col_type,
+            annotations,
+        });
     }
 
     if columns.is_empty() {
@@ -252,11 +259,18 @@ fn parse_single_annotation(token: &str) -> Result<ColumnAnnotation, String> {
                 // range(min, max)
                 let parts: Vec<&str> = args.split(',').collect();
                 if parts.len() != 2 {
-                    return Err(format!("range requires two arguments: range(min, max), got: {}", args));
+                    return Err(format!(
+                        "range requires two arguments: range(min, max), got: {}",
+                        args
+                    ));
                 }
-                let min: i64 = parts[0].trim().parse()
+                let min: i64 = parts[0]
+                    .trim()
+                    .parse()
                     .map_err(|_| format!("Invalid range min value: {}", parts[0].trim()))?;
-                let max: i64 = parts[1].trim().parse()
+                let max: i64 = parts[1]
+                    .trim()
+                    .parse()
                     .map_err(|_| format!("Invalid range max value: {}", parts[1].trim()))?;
                 return Ok(ColumnAnnotation::Range { min, max });
             }
@@ -276,7 +290,10 @@ fn parse_single_annotation(token: &str) -> Result<ColumnAnnotation, String> {
                     args.split(',').collect()
                 };
                 if parts.len() != 2 {
-                    return Err(format!("references requires relation.column or (relation, column): {}", args));
+                    return Err(format!(
+                        "references requires relation.column or (relation, column): {}",
+                        args
+                    ));
                 }
                 return Ok(ColumnAnnotation::ForeignKey {
                     relation: parts[0].trim().to_string(),
@@ -301,7 +318,7 @@ fn parse_default_value(s: &str) -> Result<crate::value::Value, String> {
 
     // String value
     if s.starts_with('"') && s.ends_with('"') {
-        return Ok(crate::value::Value::string(&s[1..s.len()-1]));
+        return Ok(crate::value::Value::string(&s[1..s.len() - 1]));
     }
 
     // Integer
@@ -323,7 +340,8 @@ fn parse_default_value(s: &str) -> Result<crate::value::Value, String> {
 
     // Atom (lowercase identifier)
     if s.chars().next().map_or(false, |c| c.is_lowercase())
-       && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
         return Ok(crate::value::Value::string(s));
     }
 
@@ -377,11 +395,13 @@ fn tokenize_type_def(input: &str) -> Vec<String> {
 #[allow(dead_code)]
 pub fn parse_type_alias(input: &str) -> Result<TypeAlias, String> {
     // Remove "type " prefix and trailing period
-    let input = input.trim_start_matches("type ").trim().trim_end_matches('.');
+    let input = input
+        .trim_start_matches("type ")
+        .trim()
+        .trim_end_matches('.');
 
     // Split on '=' to get name and definition
-    let eq_pos = input.find('=')
-        .ok_or("Type alias must contain '='")?;
+    let eq_pos = input.find('=').ok_or("Type alias must contain '='")?;
 
     let name = input[..eq_pos].trim();
     let definition = input[eq_pos + 1..].trim();
@@ -391,7 +411,10 @@ pub fn parse_type_alias(input: &str) -> Result<TypeAlias, String> {
         return Err("Type alias name cannot be empty".to_string());
     }
     if !name.chars().next().unwrap().is_uppercase() {
-        return Err(format!("Type alias name '{}' must start with uppercase letter", name));
+        return Err(format!(
+            "Type alias name '{}' must start with uppercase letter",
+            name
+        ));
     }
 
     // Parse the definition: base_type followed by optional constraints
@@ -443,14 +466,18 @@ pub fn try_parse_schema_definition(input: &str) -> Result<Option<RelationSchema>
         return Err("Schema name cannot be empty".to_string());
     }
     if !name.chars().next().unwrap().is_uppercase() {
-        return Err(format!("Schema name '{}' must start with uppercase letter", name));
+        return Err(format!(
+            "Schema name '{}' must start with uppercase letter",
+            name
+        ));
     }
     if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return Err(format!("Invalid schema name: '{}'", name));
     }
 
     // Extract columns from schema(...)
-    let content = definition.strip_prefix("schema(")
+    let content = definition
+        .strip_prefix("schema(")
         .and_then(|s| s.strip_suffix(')'))
         .ok_or("Invalid schema syntax: expected schema(...)")?;
 
@@ -479,8 +506,12 @@ fn parse_schema_columns(content: &str) -> Result<Vec<ColumnSchema>, String> {
         }
 
         // Split on ':' to get name and type+constraints
-        let colon_pos = part.find(':')
-            .ok_or_else(|| format!("Invalid column definition '{}': expected 'name: type'", part))?;
+        let colon_pos = part.find(':').ok_or_else(|| {
+            format!(
+                "Invalid column definition '{}': expected 'name: type'",
+                part
+            )
+        })?;
 
         let col_name = part[..colon_pos].trim();
         let type_and_constraints = part[colon_pos + 1..].trim();
@@ -597,7 +628,10 @@ mod tests {
             assert_eq!(decl.columns.len(), 2);
             assert_eq!(decl.columns[0].name, "id");
             assert_eq!(decl.columns[0].annotations.len(), 1);
-            assert!(matches!(decl.columns[0].annotations[0], ColumnAnnotation::Primary));
+            assert!(matches!(
+                decl.columns[0].annotations[0],
+                ColumnAnnotation::Primary
+            ));
         } else {
             panic!("Expected SchemaDecl");
         }
@@ -605,7 +639,9 @@ mod tests {
 
     #[test]
     fn test_parse_schema_with_multiple_annotations() {
-        let result = parse_schema_decl("user(id: int @key, email: string @unique @not_empty)", true).unwrap();
+        let result =
+            parse_schema_decl("user(id: int @key, email: string @unique @not_empty)", true)
+                .unwrap();
         if let Statement::SchemaDecl(decl) = result {
             assert_eq!(decl.name, "user");
             assert_eq!(decl.columns.len(), 2);

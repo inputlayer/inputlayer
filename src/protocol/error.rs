@@ -10,37 +10,38 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 pub enum InputLayerError {
     // ========================================================================
-    // Database Errors
+    // Knowledge Graph Errors
     // ========================================================================
+    /// Knowledge graph not found
+    #[error("Knowledge graph not found: {name}")]
+    KnowledgeGraphNotFound { name: String },
 
-    /// Database not found
-    #[error("Database not found: {name}")]
-    DatabaseNotFound { name: String },
+    /// Knowledge graph already exists
+    #[error("Knowledge graph already exists: {name}")]
+    KnowledgeGraphExists { name: String },
 
-    /// Database already exists
-    #[error("Database already exists: {name}")]
-    DatabaseExists { name: String },
+    /// Relation not found in knowledge graph
+    #[error("Relation '{relation}' not found in knowledge graph '{knowledge_graph}'")]
+    RelationNotFound {
+        relation: String,
+        knowledge_graph: String,
+    },
 
-    /// Relation not found in database
-    #[error("Relation '{relation}' not found in database '{database}'")]
-    RelationNotFound { relation: String, database: String },
-
-    /// Cannot drop default database
-    #[error("Cannot drop default database: {name}")]
+    /// Cannot drop default knowledge graph
+    #[error("Cannot drop default knowledge graph: {name}")]
     CannotDropDefault { name: String },
 
-    /// Cannot drop current database
-    #[error("Cannot drop current database: {name}")]
+    /// Cannot drop current knowledge graph
+    #[error("Cannot drop current knowledge graph: {name}")]
     CannotDropCurrent { name: String },
 
-    /// No current database selected
-    #[error("No current database selected")]
-    NoCurrentDatabase,
+    /// No current knowledge graph selected
+    #[error("No current knowledge graph selected")]
+    NoCurrentKnowledgeGraph,
 
     // ========================================================================
     // Query Errors
     // ========================================================================
-
     /// Parse error in Datalog program
     #[error("Parse error: {message}")]
     ParseError {
@@ -60,7 +61,6 @@ pub enum InputLayerError {
     // ========================================================================
     // Data Errors
     // ========================================================================
-
     /// Schema violation
     #[error("Schema violation: expected {expected}, got {got}")]
     SchemaViolation { expected: String, got: String },
@@ -80,7 +80,6 @@ pub enum InputLayerError {
     // ========================================================================
     // Connection Errors
     // ========================================================================
-
     /// Connection failed
     #[error("Connection to {address} failed: {reason}")]
     ConnectionFailed { address: String, reason: String },
@@ -96,14 +95,16 @@ pub enum InputLayerError {
     // ========================================================================
     // Server Errors
     // ========================================================================
-
     /// Internal server error
     #[error("Internal error: {message}")]
     InternalError { message: String },
 
     /// Server overloaded
     #[error("Server overloaded: {active_queries}/{max_queries} queries")]
-    ServerOverloaded { active_queries: u32, max_queries: u32 },
+    ServerOverloaded {
+        active_queries: u32,
+        max_queries: u32,
+    },
 
     /// Server is shutting down
     #[error("Server is shutting down")]
@@ -116,7 +117,6 @@ pub enum InputLayerError {
     // ========================================================================
     // Serialization Errors
     // ========================================================================
-
     /// Serialization error
     #[error("Serialization error: {message}")]
     SerializationError { message: String },
@@ -133,23 +133,28 @@ pub enum InputLayerError {
 impl From<crate::storage::StorageError> for InputLayerError {
     fn from(e: crate::storage::StorageError) -> Self {
         match e {
-            crate::storage::StorageError::DatabaseNotFound(name) => {
-                InputLayerError::DatabaseNotFound { name }
+            crate::storage::StorageError::KnowledgeGraphNotFound(name) => {
+                InputLayerError::KnowledgeGraphNotFound { name }
             }
-            crate::storage::StorageError::DatabaseExists(name) => {
-                InputLayerError::DatabaseExists { name }
+            crate::storage::StorageError::KnowledgeGraphExists(name) => {
+                InputLayerError::KnowledgeGraphExists { name }
             }
-            crate::storage::StorageError::CannotDropDefault => {
-                InputLayerError::CannotDropDefault { name: "default".to_string() }
+            crate::storage::StorageError::CannotDropDefault => InputLayerError::CannotDropDefault {
+                name: "default".to_string(),
+            },
+            crate::storage::StorageError::CannotDropCurrentKnowledgeGraph => {
+                InputLayerError::CannotDropCurrent {
+                    name: "current".to_string(),
+                }
             }
-            crate::storage::StorageError::CannotDropCurrentDatabase => {
-                InputLayerError::CannotDropCurrent { name: "current".to_string() }
+            crate::storage::StorageError::NoCurrentKnowledgeGraph => {
+                InputLayerError::NoCurrentKnowledgeGraph
             }
-            crate::storage::StorageError::NoCurrentDatabase => {
-                InputLayerError::NoCurrentDatabase
-            }
-            crate::storage::StorageError::RelationNotFound(relation, database) => {
-                InputLayerError::RelationNotFound { relation, database }
+            crate::storage::StorageError::RelationNotFound(relation, knowledge_graph) => {
+                InputLayerError::RelationNotFound {
+                    relation,
+                    knowledge_graph,
+                }
             }
             _ => InputLayerError::InternalError {
                 message: e.to_string(),
@@ -205,10 +210,10 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let err = InputLayerError::DatabaseNotFound {
+        let err = InputLayerError::KnowledgeGraphNotFound {
             name: "test".to_string(),
         };
-        assert_eq!(err.to_string(), "Database not found: test");
+        assert_eq!(err.to_string(), "Knowledge graph not found: test");
     }
 
     #[test]

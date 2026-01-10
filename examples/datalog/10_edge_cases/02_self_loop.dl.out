@@ -1,12 +1,16 @@
-Executing script: examples/datalog/10_edge_cases/02_self_loop.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_loop
-Database 'test_loop' created.
-Switched to database: test_loop
-> .db use test_loop
-Switched to database: test_loop
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_loop
+Knowledge graph 'test_loop' created.
+Switched to knowledge graph: test_loop
+> .kg use test_loop
+Switched to knowledge graph: test_loop
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > ?- edge(X, Y).
 5 rows:
   (1, 1)
@@ -24,13 +28,13 @@ Rule 'loop' registered.
 > +tc(X, Y) :- edge(X, Y).
 Rule 'tc' registered.
 > +tc(X, Z) :- tc(X, Y), edge(Y, Z).
-Rule added to 'tc' (2 rules total).
+Rule 'tc' registered.
 > ?- tc(1, X).
 3 rows:
   (1, 1)
   (1, 2)
   (1, 3)
-> .db use default
-Switched to database: default
-> .db drop test_loop
-Database 'test_loop' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_loop
+Knowledge graph 'test_loop' dropped.

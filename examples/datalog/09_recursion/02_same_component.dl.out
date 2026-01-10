@@ -1,18 +1,22 @@
-Executing script: examples/datalog/09_recursion/02_same_component.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_sc
-Database 'test_sc' created.
-Switched to database: test_sc
-> .db use test_sc
-Switched to database: test_sc
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sc
+Knowledge graph 'test_sc' created.
+Switched to knowledge graph: test_sc
+> .kg use test_sc
+Switched to knowledge graph: test_sc
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +same_component(X, Y) :- edge(X, Y).
 Rule 'same_component' registered.
 > +same_component(X, Y) :- edge(Y, X).
-Rule added to 'same_component' (2 rules total).
+Rule 'same_component' registered.
 > +same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
-Rule added to 'same_component' (3 rules total).
+Rule 'same_component' registered.
 > ?- same_component(X, Y).
 12 rows:
   (1, 2)
@@ -33,7 +37,7 @@ Rule added to 'same_component' (3 rules total).
 > ?- same_component(4, 1).
 1 rows:
   (4, 1)
-> .db use default
-Switched to database: default
-> .db drop test_sc
-Database 'test_sc' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sc
+Knowledge graph 'test_sc' dropped.

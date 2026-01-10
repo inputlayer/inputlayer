@@ -1,32 +1,32 @@
-// Test: Negation on Recursive View
-// Category: 08_negation
-// Description: Tests negation on the result of a recursive view (transitive closure)
-// This is a critical test for stratified negation
+% Test: Negation on Recursive View
+% Category: 08_negation
+% Description: Tests negation on the result of a recursive view (transitive closure)
+% This is a critical test for stratified negation
 
-.db create test_neg_rec_view
-.db use test_neg_rec_view
+.kg create test_neg_rec_view
+.kg use test_neg_rec_view
 
-// Graph edges
+% Graph edges
 +edge[(1, 2), (2, 3), (3, 4)].
 
-// All nodes
+% All nodes
 +node[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
 
-// Recursive transitive closure
+% Recursive transitive closure
 +reach(X, Y) :- edge(X, Y).
 +reach(X, Z) :- reach(X, Y), edge(Y, Z).
 
-// Query reachability - should compute full transitive closure
+% Query reachability - should compute full transitive closure
 ?- reach(1, X).
 
-// Nodes NOT reachable from node 1
-// From node 1, we can reach: 2, 3, 4
-// So unreachable from 1: 1, 5 (1 can't reach itself in this graph, 5 is isolated)
+% Nodes NOT reachable from node 1
+% From node 1, we can reach: 2, 3, 4
+% So unreachable from 1: 1, 5 (1 can't reach itself in this graph, 5 is isolated)
 +unreachable(X, Y) :- node(X, Y), !reach(1, X).
 ?- unreachable(X, Y).
 
-// Expected: (1, 0), (5, 0)
+% Expected: (1, 0), (5, 0)
 
-// Cleanup
-.db use default
-.db drop test_neg_rec_view
+% Cleanup
+.kg use default
+.kg drop test_neg_rec_view

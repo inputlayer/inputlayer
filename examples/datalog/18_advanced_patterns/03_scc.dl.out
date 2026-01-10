@@ -1,16 +1,20 @@
-Executing script: examples/datalog/18_advanced_patterns/03_scc.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_scc
-Database 'test_scc' created.
-Switched to database: test_scc
-> .db use test_scc
-Switched to database: test_scc
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_scc
+Knowledge graph 'test_scc' created.
+Switched to knowledge graph: test_scc
+> .kg use test_scc
+Switched to knowledge graph: test_scc
 > +edge[(1, 2), (2, 3), (3, 4), (4, 2), (5, 6), (6, 5)].
-Inserted 6 facts into 'edge'.
+Inserted 6 fact(s) into 'edge'.
 > +reachable(X, Y) :- edge(X, Y).
 Rule 'reachable' registered.
 > +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
-Rule added to 'reachable' (2 rules total).
+Rule 'reachable' registered.
 > +same_scc(X, Y) :- reachable(X, Y), reachable(Y, X).
 Rule 'same_scc' registered.
 > ?- same_scc(X, Y).
@@ -28,7 +32,7 @@ Rule 'same_scc' registered.
   (5, 6)
   (6, 5)
   (6, 6)
-> .db use default
-Switched to database: default
-> .db drop test_scc
-Database 'test_scc' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_scc
+Knowledge graph 'test_scc' dropped.

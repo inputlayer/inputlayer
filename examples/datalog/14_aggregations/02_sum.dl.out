@@ -1,11 +1,24 @@
-Executing script: examples/datalog/14_aggregations/02_sum.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_agg_sum
-Database 'test_agg_sum' created.
-Switched to database: test_agg_sum
-> .db use test_agg_sum
-Switched to database: test_agg_sum
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_sum
+Knowledge graph 'test_agg_sum' created.
+Switched to knowledge graph: test_agg_sum
+> .kg use test_agg_sum
+Switched to knowledge graph: test_agg_sum
 > +sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)].
-Inserted 6 facts into 'sales'.
+Inserted 6 fact(s) into 'sales'.
 > +region_total(Region, sum<Amount>) :- sales(Region, Amount).
-Script error: Line 12: Parse error: Invalid term: 'sum<Amount>'
+Rule 'region_total' registered.
+> ?- region_total(X, Y).
+3 rows:
+  (1, 450)
+  (2, 550)
+  (3, 500)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_sum
+Knowledge graph 'test_agg_sum' dropped.

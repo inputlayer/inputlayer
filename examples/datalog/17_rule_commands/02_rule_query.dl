@@ -1,20 +1,20 @@
-// Test: Rule Query Command
-// Category: 17_rule_commands
-// Description: Tests .rule <name> to query a specific rule
+% Test: Rule Query Command
+% Category: 17_rule_commands
+% Description: Tests .rule <name> to query a specific rule
 
-.db create test_rule_desc
-.db use test_rule_desc
+.kg create test_rule_desc
+.kg use test_rule_desc
 
-// Insert base data
+% Insert base data
 +edge[(1,2), (2,3), (3,4)].
 
-// Define a rule with multiple clauses
+% Define a rule with multiple clauses
 +reach(X, Y) :- edge(X, Y).
 +reach(X, Z) :- reach(X, Y), edge(Y, Z).
 
-// Query the rule (shows definition and results)
+% Query the rule (shows definition and results)
 .rule reach
 
-// Cleanup
-.db use default
-.db drop test_rule_desc
+% Cleanup
+.kg use default
+.kg drop test_rule_desc

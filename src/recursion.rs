@@ -29,7 +29,7 @@
 //! - Non-recursive strata: direct DD code
 //! - Recursive strata: wrap in `.iterative()` scope
 //! - Pattern from Module 11:
-//!   ```rust,ignore
+//!   ```text
 //!   scope.iterative::<u32, _, _>(|inner| {
 //!       let (handle, stream) = inner.new_collection();
 //!       let base = base_case.enter(inner);
@@ -423,9 +423,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
         return StratificationResult::Success(vec![]);
     }
 
-    // Build extended dependency graph
-    let graph = build_extended_dependency_graph(program);
-
     // Build positive-only graph for SCC detection
     let positive_graph = build_dependency_graph(program);
 
@@ -438,7 +435,10 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
     for (scc_idx, scc) in sccs.iter().enumerate() {
         for relation in scc {
             relation_to_scc.insert(relation.clone(), scc_idx);
-            scc_to_relations.entry(scc_idx).or_default().push(relation.clone());
+            scc_to_relations
+                .entry(scc_idx)
+                .or_default()
+                .push(relation.clone());
         }
     }
 
@@ -566,12 +566,6 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
 /// ```
 ///
 /// Note: For programs with negation, use `stratify_with_negation` instead.
-/// Result type for stratification that can indicate non-stratifiable programs
-pub enum StratifyResult {
-    Success(Vec<Vec<usize>>),
-    NotStratifiable { relation: String, reason: String },
-}
-
 pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
     // Delegate to the negation-aware version
     match stratify_with_negation(program) {
@@ -579,18 +573,11 @@ pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
         StratificationResult::NotStratifiable { relation, reason } => {
             // Fall back to basic stratification (ignoring negation constraints)
             // This maintains backward compatibility
-            eprintln!("Warning: Program not stratifiable: {} - {}", relation, reason);
+            eprintln!(
+                "Warning: Program not stratifiable: {} - {}",
+                relation, reason
+            );
             basic_stratify(program)
-        }
-    }
-}
-
-/// Stratify with explicit error handling for non-stratifiable programs
-pub fn stratify_strict(program: &Program) -> StratifyResult {
-    match stratify_with_negation(program) {
-        StratificationResult::Success(strata) => StratifyResult::Success(strata),
-        StratificationResult::NotStratifiable { relation, reason } => {
-            StratifyResult::NotStratifiable { relation, reason }
         }
     }
 }
@@ -648,16 +635,25 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -672,11 +668,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         );
@@ -692,11 +694,17 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         ));
@@ -707,16 +715,25 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -733,11 +750,17 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         ));
@@ -746,16 +769,25 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -811,11 +843,17 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         ));
@@ -836,11 +874,17 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         ));
@@ -849,16 +893,25 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -892,16 +945,28 @@ mod tests {
         // reach(x) :- source(x).
         program.add_rule(Rule::new_simple(
             Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("source".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
         // unreachable(x) :- node(x), !reach(x).
         program.add_rule(Rule::new(
-            Atom::new("unreachable".to_string(), vec![Term::Variable("x".to_string())]),
+            Atom::new(
+                "unreachable".to_string(),
+                vec![Term::Variable("x".to_string())],
+            ),
             vec![
-                BodyPredicate::Positive(Atom::new("node".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "reach".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
             ],
             vec![],
         ));
@@ -928,8 +993,14 @@ mod tests {
         program.add_rule(Rule::new(
             Atom::new("p".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
-                BodyPredicate::Positive(Atom::new("q".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("p".to_string(), vec![Term::Variable("x".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "q".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "p".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
             ],
             vec![],
         ));
@@ -956,7 +1027,10 @@ mod tests {
         // a(x) :- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("base".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
@@ -964,8 +1038,14 @@ mod tests {
         program.add_rule(Rule::new(
             Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
-                BodyPredicate::Positive(Atom::new("a".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("c".to_string(), vec![Term::Variable("x".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "a".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
             ],
             vec![],
         ));
@@ -973,7 +1053,10 @@ mod tests {
         // c(x) :- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("base".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
@@ -1000,11 +1083,17 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         ));
@@ -1013,16 +1102,25 @@ mod tests {
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -1032,14 +1130,26 @@ mod tests {
         program.add_rule(Rule::new(
             Atom::new(
                 "not_connected".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![
-                BodyPredicate::Positive(Atom::new("node".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Positive(Atom::new("node".to_string(), vec![Term::Variable("y".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("y".to_string())],
+                )),
                 BodyPredicate::Negated(Atom::new(
                     "tc".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 )),
             ],
             vec![],
@@ -1055,7 +1165,10 @@ mod tests {
 
         let tc_stratum = strata.iter().position(|s| s.contains(&0)).unwrap();
         let not_connected_stratum = strata.iter().position(|s| s.contains(&2)).unwrap();
-        assert!(not_connected_stratum > tc_stratum, "not_connected must be after tc");
+        assert!(
+            not_connected_stratum > tc_stratum,
+            "not_connected must be after tc"
+        );
     }
 
     #[test]
@@ -1067,8 +1180,14 @@ mod tests {
         program.add_rule(Rule::new(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
-                BodyPredicate::Positive(Atom::new("b".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("c".to_string(), vec![Term::Variable("x".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "b".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
             ],
             vec![],
         ));
@@ -1096,21 +1215,30 @@ mod tests {
         // a(x) :- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("base".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
         // b(x) :- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("base".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
         // c(x) :- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new("base".to_string(), vec![Term::Variable("x".to_string())])],
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
             vec![],
         ));
 
@@ -1118,9 +1246,18 @@ mod tests {
         program.add_rule(Rule::new(
             Atom::new("d".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
-                BodyPredicate::Positive(Atom::new("a".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("b".to_string(), vec![Term::Variable("x".to_string())])),
-                BodyPredicate::Negated(Atom::new("c".to_string(), vec![Term::Variable("x".to_string())])),
+                BodyPredicate::Positive(Atom::new(
+                    "a".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "b".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "c".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
             ],
             vec![],
         ));

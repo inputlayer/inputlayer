@@ -1,14 +1,18 @@
-Executing script: examples/datalog/06_joins/01_two_way_join.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_join
-Database 'test_join' created.
-Switched to database: test_join
-> .db use test_join
-Switched to database: test_join
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_join
+Knowledge graph 'test_join' created.
+Switched to knowledge graph: test_join
+> .kg use test_join
+Switched to knowledge graph: test_join
 > +employee[(1, 100), (2, 100), (3, 200), (4, 200)].
-Inserted 4 facts into 'employee'.
+Inserted 4 fact(s) into 'employee'.
 > +department[(100, 10), (200, 20)].
-Inserted 2 facts into 'department'.
+Inserted 2 fact(s) into 'department'.
 > +emp_dept(EmpId, DeptName) :- employee(EmpId, DeptId), department(DeptId, DeptName).
 Rule 'emp_dept' registered.
 > ?- emp_dept(X, Y).
@@ -17,7 +21,7 @@ Rule 'emp_dept' registered.
   (2, 10)
   (3, 20)
   (4, 20)
-> .db use default
-Switched to database: default
-> .db drop test_join
-Database 'test_join' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_join
+Knowledge graph 'test_join' dropped.

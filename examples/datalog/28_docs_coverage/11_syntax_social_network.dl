@@ -1,20 +1,20 @@
-// Test: Syntax Social Network Example
-// Category: docs_coverage
-// Description: Tests the complete social network example from docs/reference/syntax.md
+% Test: Syntax Social Network Example
+% Category: docs_coverage
+% Description: Tests the complete social network example from docs/reference/syntax.md
 
-.db create syntax_social
-.db use syntax_social
+.kg create syntax_social
+.kg use syntax_social
 
-// Schema
+% Schema
 +person(id: int, name: string, age: int).
 +follows(follower: int, followed: int).
 
-// Data
+% Data
 +person[(1, "alice", 30), (2, "bob", 25), (3, "carol", 35)].
 +follows[(1, 2), (2, 3), (1, 3), (2, 1)].
 
-// Rules
-// Mutual follows (both follow each other)
+% Rules
+% Mutual follows (both follow each other)
 +mutual_follow(A, B) :-
   follows(A, B),
   follows(B, A),
@@ -22,16 +22,16 @@
 
 ?- mutual_follow(A, B).
 
-// Influencer count (how many followers each person has)
+% Influencer count (how many followers each person has)
 +influencer(Id, count<Follower>) :-
   follows(Follower, Id).
 
 ?- influencer(Id, Count).
 
-// Query influencers with more than 1 follower
+% Query influencers with more than 1 follower
 ?- influencer(Id, Count), Count > 1.
 
-// Cleanup
-.db use default
-.db drop syntax_social
+% Cleanup
+.kg use default
+.kg drop syntax_social
 

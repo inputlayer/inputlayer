@@ -1,12 +1,16 @@
-Executing script: examples/datalog/02_relations/02_insert_bulk.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_bulk
-Database 'test_bulk' created.
-Switched to database: test_bulk
-> .db use test_bulk
-Switched to database: test_bulk
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bulk
+Knowledge graph 'test_bulk' created.
+Switched to knowledge graph: test_bulk
+> .kg use test_bulk
+Switched to knowledge graph: test_bulk
 > +edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > ?- edge(X, Y).
 5 rows:
   (1, 2)
@@ -14,7 +18,7 @@ Inserted 5 facts into 'edge'.
   (3, 4)
   (4, 5)
   (5, 6)
-> .db use default
-Switched to database: default
-> .db drop test_bulk
-Database 'test_bulk' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bulk
+Knowledge graph 'test_bulk' dropped.

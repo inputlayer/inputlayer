@@ -1,11 +1,11 @@
-// Test: Multiple Constraints Combined
-// Category: constraints
-// Description: Tests combining multiple constraints on a single schema
+% Test: Multiple Constraints Combined
+% Category: constraints
+% Description: Tests combining multiple constraints on a single schema
 
-.db create constraint_multi_test
-.db use constraint_multi_test
+.kg create constraint_multi_test
+.kg use constraint_multi_test
 
-// Schema with multiple constraints
+% Schema with multiple constraints
 +customer(
     id: int @key,
     email: string @unique,
@@ -13,17 +13,17 @@
     age: int @range(18, 120)
 ).
 
-// Insert valid data
+% Insert valid data
 +customer(1, "alice@example.com", "Alice Smith", 30).
 +customer(2, "bob@example.com", "Bob Jones", 25).
 +customer(3, "carol@example.com", "Carol White", 45).
 
-// Query all customers
+% Query all customers
 ?- customer(Id, Email, Name, Age).
 
-// Show schema with all constraints
+% Show schema with all constraints
 .rel customer
 
-// Cleanup
-.db use default
-.db drop constraint_multi_test
+% Cleanup
+.kg use default
+.kg drop constraint_multi_test

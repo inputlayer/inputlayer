@@ -192,14 +192,16 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
 
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10)).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
         assert_eq!(wal.entries_written(), 1);
 
         wal.clear().unwrap();
         assert_eq!(wal.entries_written(), 0);
 
         // New writes should work
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20)).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
         let entries = wal.read_all().unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].update.data, Tuple::from_pair(3, 4));

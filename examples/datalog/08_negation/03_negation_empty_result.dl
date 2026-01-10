@@ -1,22 +1,22 @@
-// Test: Negation with Empty Result
-// Category: 08_negation
-// Description: Tests negation where all tuples are filtered out
+% Test: Negation with Empty Result
+% Category: 08_negation
+% Description: Tests negation where all tuples are filtered out
 
-.db create test_neg_empty
-.db use test_neg_empty
+.kg create test_neg_empty
+.kg use test_neg_empty
 
-// All edges
+% All edges
 +edge[(1,2), (2,3), (3,4)].
 
-// Block all edges
+% Block all edges
 +blocked[(1,2), (2,3), (3,4)].
 
-// Filter - should return empty since all edges are blocked
+% Filter - should return empty since all edges are blocked
 +allowed(X, Y) :- edge(X, Y), !blocked(X, Y).
 
-// Expected: No results (all filtered)
+% Expected: No results (all filtered)
 ?- allowed(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_neg_empty
+% Cleanup
+.kg use default
+.kg drop test_neg_empty

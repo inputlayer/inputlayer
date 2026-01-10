@@ -1,19 +1,19 @@
-// Test: Multiply Computed Column
-// Category: 15_arithmetic
-// Description: Tests multiplication in rule head
+% Test: Multiply Computed Column
+% Category: 15_arithmetic
+% Description: Tests multiplication in rule head
 
-.db create test_arith_mul
-.db use test_arith_mul
+.kg create test_arith_mul
+.kg use test_arith_mul
 
-// Insert prices: item(id, unit_price)
+% Insert prices: item(id, unit_price)
 +item[(1, 10), (2, 25), (3, 15)].
 
-// Compute doubled price
+% Compute doubled price
 double_price(Id, Price*2) :- item(Id, Price).
 
-// Query doubled prices
+% Query doubled prices
 ?- double_price(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_arith_mul
+% Cleanup
+.kg use default
+.kg drop test_arith_mul

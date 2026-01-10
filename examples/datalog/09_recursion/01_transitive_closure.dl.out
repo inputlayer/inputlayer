@@ -1,16 +1,20 @@
-Executing script: examples/datalog/09_recursion/01_transitive_closure.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_tc
-Database 'test_tc' created.
-Switched to database: test_tc
-> .db use test_tc
-Switched to database: test_tc
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_tc
+Knowledge graph 'test_tc' created.
+Switched to knowledge graph: test_tc
+> .kg use test_tc
+Switched to knowledge graph: test_tc
 > +edge[(1,2), (2,3), (3,4), (4,5)].
-Inserted 4 facts into 'edge'.
+Inserted 4 fact(s) into 'edge'.
 > +connected(X, Y) :- edge(X, Y).
 Rule 'connected' registered.
 > +connected(X, Z) :- edge(X, Y), connected(Y, Z).
-Rule added to 'connected' (2 rules total).
+Rule 'connected' registered.
 > ?- connected(X, Y).
 10 rows:
   (1, 2)
@@ -26,7 +30,7 @@ Rule added to 'connected' (2 rules total).
 > ?- connected(1, 5).
 1 rows:
   (1, 5)
-> .db use default
-Switched to database: default
-> .db drop test_tc
-Database 'test_tc' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_tc
+Knowledge graph 'test_tc' dropped.

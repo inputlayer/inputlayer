@@ -253,9 +253,7 @@ impl QueryCache {
     /// Evict the least recently used entry from compiled cache
     fn evict_lru<T: Clone>(&self, cache: &mut HashMap<u64, CacheEntry<T>>) {
         // Find entry with oldest last_accessed time
-        if let Some((&key_to_remove, _)) = cache
-            .iter()
-            .min_by_key(|(_, entry)| entry.last_accessed)
+        if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
             let mut stats = self.stats.write().unwrap();
@@ -282,9 +280,7 @@ impl QueryCache {
         }
 
         // Otherwise evict LRU
-        if let Some((&key_to_remove, _)) = cache
-            .iter()
-            .min_by_key(|(_, entry)| entry.last_accessed)
+        if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
             let mut stats = self.stats.write().unwrap();
@@ -355,9 +351,16 @@ impl Clone for QueryCache {
     }
 }
 
+// TODO: Integrate data fingerprinting into result cache for invalidation.
+// Reserved for data-aware cache invalidation. The cache infrastructure accepts
+// fingerprints in put_results()/get_results(), but nothing computes them yet.
+// Also needs signature update to use generic Value types instead of (i32, i32).
+// Will enable cache entries to be invalidated when underlying data changes.
+
 /// Compute a fingerprint for input data
 ///
 /// Used to detect when cached results may be stale.
+#[allow(dead_code)]
 pub fn compute_data_fingerprint(data: &HashMap<String, Vec<(i32, i32)>>) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     let mut hasher = DefaultHasher::new();
@@ -483,10 +486,16 @@ mod tests {
         data3.insert("edge".to_string(), vec![(1, 2), (5, 6)]);
 
         // Same data should have same fingerprint
-        assert_eq!(compute_data_fingerprint(&data1), compute_data_fingerprint(&data2));
+        assert_eq!(
+            compute_data_fingerprint(&data1),
+            compute_data_fingerprint(&data2)
+        );
 
         // Different data should have different fingerprint
-        assert_ne!(compute_data_fingerprint(&data1), compute_data_fingerprint(&data3));
+        assert_ne!(
+            compute_data_fingerprint(&data1),
+            compute_data_fingerprint(&data3)
+        );
     }
 
     #[test]

@@ -1,11 +1,22 @@
-Executing script: examples/datalog/14_aggregations/08_global_count.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_global_count
-Database 'test_global_count' created.
-Switched to database: test_global_count
-> .db use test_global_count
-Switched to database: test_global_count
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_global_count
+Knowledge graph 'test_global_count' created.
+Switched to knowledge graph: test_global_count
+> .kg use test_global_count
+Switched to knowledge graph: test_global_count
 > +event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)].
-Inserted 5 facts into 'event'.
+Inserted 5 fact(s) into 'event'.
 > +total_events(count<Id>) :- event(Id, _).
-Script error: Line 12: Parse error: Invalid term: 'count<Id>'
+Rule 'total_events' registered.
+> ?- total_events(X).
+1 rows:
+  (5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_global_count
+Knowledge graph 'test_global_count' dropped.

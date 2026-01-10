@@ -1,23 +1,23 @@
-// Test: Three-Way Mutual Recursion
-// Category: Recursion
-// Verifies: Three predicates in circular dependency (A -> B -> C -> A)
-// Pattern: Mod-3 classification: zero_mod, one_mod, two_mod
+% Test: Three-Way Mutual Recursion
+% Category: Recursion
+% Verifies: Three predicates in circular dependency (A -> B -> C -> A)
+% Pattern: Mod-3 classification: zero_mod, one_mod, two_mod
 
-.db create test_three_way_mutual
-.db use test_three_way_mutual
+.kg create test_three_way_mutual
+.kg use test_three_way_mutual
 
-// Successor relation for numbers 0-12
+% Successor relation for numbers 0-12
 +succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12)].
 
-// Base cases for mod 3
+% Base cases for mod 3
 +base_zero[(0)].
 +base_one[(1)].
 +base_two[(2)].
 
-// Three-way mutual recursion:
-// N is zero_mod if N-1 is two_mod (0,3,6,9,12)
-// N is one_mod if N-1 is zero_mod (1,4,7,10)
-// N is two_mod if N-1 is one_mod (2,5,8,11)
+% Three-way mutual recursion:
+% N is zero_mod if N-1 is two_mod (0,3,6,9,12)
+% N is one_mod if N-1 is zero_mod (1,4,7,10)
+% N is two_mod if N-1 is one_mod (2,5,8,11)
 
 +zero_mod(N) :- base_zero(N).
 +zero_mod(N) :- succ(M, N), two_mod(M).
@@ -28,15 +28,15 @@
 +two_mod(N) :- base_two(N).
 +two_mod(N) :- succ(M, N), one_mod(M).
 
-// Query each class
+% Query each class
 ?- zero_mod(X).
 ?- one_mod(X).
 ?- two_mod(X).
 
-// Expected:
-// zero_mod: 0, 3, 6, 9, 12
-// one_mod: 1, 4, 7, 10
-// two_mod: 2, 5, 8, 11
+% Expected:
+% zero_mod: 0, 3, 6, 9, 12
+% one_mod: 1, 4, 7, 10
+% two_mod: 2, 5, 8, 11
 
-.db use default
-.db drop test_three_way_mutual
+.kg use default
+.kg drop test_three_way_mutual

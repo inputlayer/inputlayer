@@ -1,7 +1,7 @@
 //! Statement Parser for Datalog-Native Syntax
 //!
 //! This module implements the unified Datalog-native syntax for InputLayer:
-//! - Meta Commands: `.db`, `.rel`, `.rule`, `.save`, `.status`, `.help`, `.quit`
+//! - Meta Commands: `.kg`, `.rel`, `.rule`, `.save`, `.status`, `.help`, `.quit`
 //! - Data Manipulation: `+`/`-` operators (DD-native diff model)
 //! - Type Declarations: `type Name: TypeExpr.`
 //! - Schema Declarations: `+name(col: type, ...).`
@@ -19,11 +19,11 @@ pub mod types;
 // Re-exports
 pub use data::{DeleteOp, DeletePattern, DeleteTarget, InsertOp, InsertTarget, UpdateOp};
 pub use meta::{LoadMode, MetaCommand};
-pub use parser::QueryGoal;
+pub use parser::{parse_query, parse_transient_rule, QueryGoal};
 pub use schema::{ColumnDef, SchemaDecl};
 pub use serialize::{
-    SerializableArithExpr, SerializableArithOp, SerializableBodyPred, SerializableConstraint,
-    SerializableRule, SerializableTerm, RuleDef,
+    RuleDef, SerializableArithExpr, SerializableArithOp, SerializableBodyPred,
+    SerializableConstraint, SerializableRule, SerializableTerm,
 };
 pub use types::{BaseType, RecordField, Refinement, RefinementArg, TypeDecl, TypeExpr};
 
@@ -36,7 +36,7 @@ use crate::ast::Rule;
 /// Top-level statement parsed from user input
 #[derive(Debug, Clone)]
 pub enum Statement {
-    /// Meta commands (dot-prefix): .db, .rel, .rule, etc.
+    /// Meta commands (dot-prefix): .kg, .rel, .rule, etc.
     Meta(MetaCommand),
     /// Insert operation: +relation(args). or +relation[(t1), (t2), ...].
     Insert(InsertOp),
@@ -66,7 +66,7 @@ pub enum Statement {
 
 use parser::{
     extract_args_content, has_typed_arguments, is_simple_name_deletion, parse_persistent_rule,
-    parse_query, parse_transient_rule, strip_inline_comment, validate_relation_name,
+    strip_inline_comment, validate_relation_name,
 };
 
 /// Parse a statement from user input
@@ -435,8 +435,12 @@ mod tests {
     fn test_floats_still_work() {
         let stmt = parse_statement("+data(3.14, 2.71).").unwrap();
         if let Statement::Insert(op) = stmt {
-            assert!(matches!(&op.tuples[0][0], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001));
-            assert!(matches!(&op.tuples[0][1], Term::FloatConstant(f) if (*f - 2.71).abs() < 0.001));
+            assert!(
+                matches!(&op.tuples[0][0], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001)
+            );
+            assert!(
+                matches!(&op.tuples[0][1], Term::FloatConstant(f) if (*f - 2.71).abs() < 0.001)
+            );
         } else {
             panic!("Expected Insert");
         }
@@ -585,7 +589,10 @@ mod tests {
             assert_eq!(decl.columns.len(), 2);
             assert_eq!(decl.columns[0].name, "id");
             assert_eq!(decl.columns[0].annotations.len(), 1);
-            assert!(matches!(decl.columns[0].annotations[0], crate::schema::ColumnAnnotation::Primary));
+            assert!(matches!(
+                decl.columns[0].annotations[0],
+                crate::schema::ColumnAnnotation::Primary
+            ));
         } else {
             panic!("Expected SchemaDecl, got {:?}", stmt);
         }
@@ -593,7 +600,8 @@ mod tests {
 
     #[test]
     fn test_parse_schema_with_multiple_annotations() {
-        let stmt = parse_statement("+user(id: int @key, email: string @unique @not_empty).").unwrap();
+        let stmt =
+            parse_statement("+user(id: int @key, email: string @unique @not_empty).").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "user");
             assert_eq!(decl.columns.len(), 2);

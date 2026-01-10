@@ -1,14 +1,18 @@
-Executing script: examples/datalog/08_negation/07_negation_with_filter.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_filter
-Database 'test_neg_filter' created.
-Switched to database: test_neg_filter
-> .db use test_neg_filter
-Switched to database: test_neg_filter
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_filter
+Knowledge graph 'test_neg_filter' created.
+Switched to knowledge graph: test_neg_filter
+> .kg use test_neg_filter
+Switched to knowledge graph: test_neg_filter
 > +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
-Inserted 5 facts into 'data'.
+Inserted 5 fact(s) into 'data'.
 > +excluded[(2, 0), (4, 0)].
-Inserted 2 facts into 'excluded'.
+Inserted 2 fact(s) into 'excluded'.
 > +filtered(Id, Val) :- data(Id, Val), Id > 1, Val > 15, !excluded(Id, _).
 Rule 'filtered' registered.
 > ?- filtered(X, Y).
@@ -26,7 +30,7 @@ Rule 'specific' registered.
 > ?- specific(X, Y).
 1 rows:
   (3, 30)
-> .db use default
-Switched to database: default
-> .db drop test_neg_filter
-Database 'test_neg_filter' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_filter
+Knowledge graph 'test_neg_filter' dropped.

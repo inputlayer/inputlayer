@@ -245,13 +245,13 @@ storage.save_database("analytics")?;
 
 ### Parallel Execution
 ```rust
-// Multiple queries on same database
+% Multiple queries on same database
 let results = storage.execute_parallel_queries_on_database(
     "mydb",
     vec!["q1(x,y) :- edge(x,y).", "q2(x) :- node(x)."]
 )?;
 
-// Same query across databases
+% Same query across databases
 let results = storage.execute_query_on_multiple_databases(
     vec!["db1", "db2", "db3"],
     "result(x,y) :- edge(x,y)."

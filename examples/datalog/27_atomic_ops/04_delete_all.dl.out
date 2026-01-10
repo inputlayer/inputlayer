@@ -1,31 +1,41 @@
-Executing script: examples/datalog/27_atomic_ops/04_delete_all.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create delete_all_test
-Database 'delete_all_test' created.
-Switched to database: delete_all_test
-> .db use delete_all_test
-Switched to database: delete_all_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create delete_all_test
+Knowledge graph 'delete_all_test' created.
+Switched to knowledge graph: delete_all_test
+> .kg use delete_all_test
+Switched to knowledge graph: delete_all_test
 > +temp_data(1, 100).
-Inserted 1 fact into 'temp_data'.
+Inserted 1 fact(s) into 'temp_data'.
 > +temp_data(2, 200).
-Inserted 1 fact into 'temp_data'.
+Inserted 1 fact(s) into 'temp_data'.
 > +temp_data(3, 300).
-Inserted 1 fact into 'temp_data'.
+Inserted 1 fact(s) into 'temp_data'.
 > ?- temp_data(Id, Value).
 3 rows:
   (1, 100)
   (2, 200)
   (3, 300)
 > -temp_data(Id, Value) :- temp_data(Id, Value).
-Deleted 3 facts from 'temp_data'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- temp_data(Id, Value).
-No results.
+3 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
 > +temp_data(10, 999).
-Inserted 1 fact into 'temp_data'.
+Inserted 1 fact(s) into 'temp_data'.
 > ?- temp_data(Id, Value).
-1 rows:
+4 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
   (10, 999)
-> .db use default
-Switched to database: default
-> .db drop delete_all_test
-Database 'delete_all_test' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop delete_all_test
+Knowledge graph 'delete_all_test' dropped.

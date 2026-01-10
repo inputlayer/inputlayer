@@ -1,28 +1,32 @@
-Executing script: examples/datalog/08_negation/26_all_excluded.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_all_excluded
-Database 'test_all_excluded' created.
-Switched to database: test_all_excluded
-> .db use test_all_excluded
-Switched to database: test_all_excluded
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_excluded
+Knowledge graph 'test_all_excluded' created.
+Switched to knowledge graph: test_all_excluded
+> .kg use test_all_excluded
+Switched to knowledge graph: test_all_excluded
 > +items[(1), (2), (3)].
-Inserted 3 facts into 'items'.
+Inserted 3 fact(s) into 'items'.
 > +excluded[(1), (2), (3)].
-Inserted 3 facts into 'excluded'.
+Inserted 3 fact(s) into 'excluded'.
 > +not_excluded(X) :- items(X), !excluded(X).
 Rule 'not_excluded' registered.
 > ?- not_excluded(X).
 No results.
 > +items(4).
-Inserted 1 fact into 'items'.
+Inserted 1 fact(s) into 'items'.
 > ?- not_excluded(X).
 1 rows:
   (4)
 > +excluded(4).
-Inserted 1 fact into 'excluded'.
+Inserted 1 fact(s) into 'excluded'.
 > ?- not_excluded(X).
 No results.
-> .db use default
-Switched to database: default
-> .db drop test_all_excluded
-Database 'test_all_excluded' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_excluded
+Knowledge graph 'test_all_excluded' dropped.

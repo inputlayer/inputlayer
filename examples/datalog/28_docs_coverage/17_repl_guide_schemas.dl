@@ -1,25 +1,25 @@
-// Test: REPL Guide Schema Declarations
-// Category: docs_coverage
-// Description: Tests schema examples from docs/getting-started/04-repl-guide.md
+% Test: REPL Guide Schema Declarations
+% Category: docs_coverage
+% Description: Tests schema examples from docs/getting-started/04-repl-guide.md
 
-.db create repl_schemas
-.db use repl_schemas
+.kg create repl_schemas
+.kg use repl_schemas
 
-// === Typed schema ===
+% === Typed schema ===
 +employee(id: int, name: string, dept: string).
 
 +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
 
 ?- employee(Id, Name, Dept).
 
-// === Schema with constraints ===
+% === Schema with constraints ===
 +user(id: int, email: string).
 
 +user[(1, "alice@example.com"), (2, "bob@example.com")].
 
 ?- user(Id, Email).
 
-// Cleanup
-.db use default
-.db drop repl_schemas
+% Cleanup
+.kg use default
+.kg drop repl_schemas
 

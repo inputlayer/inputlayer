@@ -265,7 +265,7 @@ Building toward a complete AI knowledge layer:
 - Stream processing / analytics → Materialize, Flink
 - Authentication → Auth0, Okta
 
-InputLayer complements your existing stack-it's the reasoning layer, not the storage layer.
+InputLayer complements your existing stack - it's the reasoning layer, not the storage layer.
 
 ---
 
@@ -303,7 +303,6 @@ inputlayer-server --host 0.0.0.0 --port 9090
 ## License
 
 - **Core**: Apache 2.0 ([LICENSE](LICENSE))
-- **Enterprise**: Commercial license for SSO, HA, audit logging, SLA support
 
 ---
 

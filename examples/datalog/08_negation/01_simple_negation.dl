@@ -1,21 +1,21 @@
-// Test: Simple Negation (Antijoin)
-// Category: 08_negation
-// Description: Tests negation for set difference operations
+% Test: Simple Negation (Antijoin)
+% Category: 08_negation
+% Description: Tests negation for set difference operations
 
-.db create test_neg
-.db use test_neg
+.kg create test_neg
+.kg use test_neg
 
-// Two sets of edges
+% Two sets of edges
 +edge[(1,2), (2,3), (3,4), (4,5)].
 +skip[(2,3), (4,5)].
 
-// Edges not in skip (set difference using negation)
+% Edges not in skip (set difference using negation)
 +filtered(X, Y) :- edge(X, Y), !skip(X, Y).
 
-// Query filtered edges - returns edges NOT in skip
-// Expected: (1,2), (3,4)
+% Query filtered edges - returns edges NOT in skip
+% Expected: (1,2), (3,4)
 ?- filtered(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_neg
+% Cleanup
+.kg use default
+.kg drop test_neg

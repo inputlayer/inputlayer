@@ -1,14 +1,18 @@
-Executing script: examples/datalog/08_negation/19_negation_symmetric_diff.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_sym
-Database 'test_neg_sym' created.
-Switched to database: test_neg_sym
-> .db use test_neg_sym
-Switched to database: test_neg_sym
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_sym
+Knowledge graph 'test_neg_sym' created.
+Switched to knowledge graph: test_neg_sym
+> .kg use test_neg_sym
+Switched to knowledge graph: test_neg_sym
 > +set_a[(1, 0), (2, 0), (3, 0), (4, 0)].
-Inserted 4 facts into 'set_a'.
+Inserted 4 fact(s) into 'set_a'.
 > +set_b[(3, 0), (4, 0), (5, 0), (6, 0)].
-Inserted 4 facts into 'set_b'.
+Inserted 4 fact(s) into 'set_b'.
 > +a_only(X, Y) :- set_a(X, Y), !set_b(X, _).
 Rule 'a_only' registered.
 > ?- a_only(X, Y).
@@ -27,7 +31,7 @@ Rule 'intersection' registered.
 2 rows:
   (3, 0)
   (4, 0)
-> .db use default
-Switched to database: default
-> .db drop test_neg_sym
-Database 'test_neg_sym' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_sym
+Knowledge graph 'test_neg_sym' dropped.

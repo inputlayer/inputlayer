@@ -1,22 +1,26 @@
-Executing script: examples/datalog/23_type_declarations/02_record_type.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_record_type
-Database 'test_record_type' created.
-Switched to database: test_record_type
-> .db use test_record_type
-Switched to database: test_record_type
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_record_type
+Knowledge graph 'test_record_type' created.
+Switched to knowledge graph: test_record_type
+> .kg use test_record_type
+Switched to knowledge graph: test_record_type
 > type User: { id: int, name: string }.
-Type 'User' declared.
+Type 'User' declared (local only).
 > +user(id: int, name: string).
-Persistent schema 'user' declared: (id: Base(Int), name: Base(String))
+Schema 'user' declared (persistent).
 > +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")].
-Inserted 3 facts into 'user'.
+Inserted 3 fact(s) into 'user'.
 > ?- user(X, Y).
 3 rows:
   (1, "Alice")
   (2, "Bob")
   (3, "Charlie")
-> .db use default
-Switched to database: default
-> .db drop test_record_type
-Database 'test_record_type' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_record_type
+Knowledge graph 'test_record_type' dropped.

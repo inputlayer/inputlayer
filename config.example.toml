@@ -83,3 +83,51 @@ level = "info"
 # "text" is human-readable
 # "json" is machine-parseable (useful for log aggregation)
 format = "text"
+
+# =============================================================================
+# HTTP Server Configuration (REST API + GUI)
+# =============================================================================
+#
+# The HTTP server provides:
+# - REST API at /api/v1/*
+# - Swagger UI at /api/docs
+# - Optional GUI dashboard at /
+
+[http]
+# Enable HTTP server
+# When disabled, only the RPC server (QUIC+TLS) runs
+enabled = true
+
+# HTTP server bind address
+# "127.0.0.1" for local access only
+# "0.0.0.0" for external access
+host = "127.0.0.1"
+
+# HTTP server port
+port = 8080
+
+# Allowed CORS origins for API requests
+# Empty list = allow all origins (development mode)
+# Specify origins for production, e.g., ["https://myapp.com"]
+cors_origins = []
+
+[http.gui]
+# Enable GUI dashboard serving
+# When enabled, static files from static_dir are served at /
+enabled = true
+
+# Directory containing GUI static files
+# Usually the output of a Vue/React build (e.g., "./gui/dist")
+static_dir = "./gui/dist"
+
+[http.auth]
+# Enable JWT-based authentication
+# When disabled, all API endpoints are public
+enabled = false
+
+# JWT signing secret
+# IMPORTANT: Change this in production!
+jwt_secret = "change-me-in-production"
+
+# Session timeout in seconds (default: 24 hours)
+session_timeout_secs = 86400

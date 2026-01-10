@@ -1,21 +1,41 @@
-Executing script: examples/datalog/23_type_declarations/03_multiple_types.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_multi_types
-Database 'test_multi_types' created.
-Switched to database: test_multi_types
-> .db use test_multi_types
-Switched to database: test_multi_types
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_types
+Knowledge graph 'test_multi_types' created.
+Switched to knowledge graph: test_multi_types
+> .kg use test_multi_types
+Switched to knowledge graph: test_multi_types
 > type ProductId: int.
-Type 'ProductId' declared.
+Type 'ProductId' declared (local only).
 > type Price: int.
-Type 'Price' declared.
+Type 'Price' declared (local only).
 > type Quantity: int.
-Type 'Quantity' declared.
+Type 'Quantity' declared (local only).
 > type ProductName: string.
-Type 'ProductName' declared.
+Type 'ProductName' declared (local only).
 > +products(id: ProductId, name: ProductName, price: Price).
-Persistent schema 'products' declared: (id: TypeRef("ProductId"), name: TypeRef("ProductName"), price: TypeRef("Price"))
+Schema 'products' declared (persistent).
 > +inventory(product_id: ProductId, qty: Quantity).
-Persistent schema 'inventory' declared: (product_id: TypeRef("ProductId"), qty: TypeRef("Quantity"))
+Schema 'inventory' declared (persistent).
 > +products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].
-Script error: Line 19: Validation failed: Insert rejected for 'products': batch of 3 tuples violated constraints
+Inserted 3 fact(s) into 'products'.
+> +inventory[(1, 50), (2, 30), (3, 75)].
+Inserted 3 fact(s) into 'inventory'.
+> ?- products(Id, Name, Price).
+3 rows:
+  (1, "Widget", 100)
+  (2, "Gadget", 200)
+  (3, "Gizmo", 150)
+> ?- inventory(Pid, Qty).
+3 rows:
+  (1, 50)
+  (2, 30)
+  (3, 75)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_types
+Knowledge graph 'test_multi_types' dropped.

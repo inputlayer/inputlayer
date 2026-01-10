@@ -1,26 +1,26 @@
-// Test: Rule Drop Command
-// Category: 17_rule_commands
-// Description: Tests .rule drop <name> to remove a rule
+% Test: Rule Drop Command
+% Category: 17_rule_commands
+% Description: Tests .rule drop <name> to remove a rule
 
-.db create test_rule_drop
-.db use test_rule_drop
+.kg create test_rule_drop
+.kg use test_rule_drop
 
-// Insert base data
+% Insert base data
 +edge[(1,2), (2,3)].
 
-// Define rules
+% Define rules
 +reverse(X, Y) :- edge(Y, X).
 +paths(X, Y) :- edge(X, Y).
 
-// List rules before drop
+% List rules before drop
 .rule
 
-// Drop one rule
+% Drop one rule
 .rule drop reverse
 
-// List rules after drop
+% List rules after drop
 .rule
 
-// Cleanup
-.db use default
-.db drop test_rule_drop
+% Cleanup
+.kg use default
+.kg drop test_rule_drop

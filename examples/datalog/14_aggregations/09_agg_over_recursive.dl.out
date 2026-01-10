@@ -1,16 +1,20 @@
-Executing script: examples/datalog/14_aggregations/09_agg_over_recursive.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_agg_recursive
-Database 'test_agg_recursive' created.
-Switched to database: test_agg_recursive
-> .db use test_agg_recursive
-Switched to database: test_agg_recursive
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_recursive
+Knowledge graph 'test_agg_recursive' created.
+Switched to knowledge graph: test_agg_recursive
+> .kg use test_agg_recursive
+Switched to knowledge graph: test_agg_recursive
 > +edge[(1, 2), (2, 3), (3, 4), (1, 5), (5, 6)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > +path(X, Y) :- edge(X, Y).
 Rule 'path' registered.
 > +path(X, Z) :- edge(X, Y), path(Y, Z).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > ?- path(A, B).
 9 rows:
   (1, 2)
@@ -23,4 +27,22 @@ Rule added to 'path' (2 rules total).
   (3, 4)
   (5, 6)
 > +reach_count(X, count<Y>) :- path(X, Y).
-Script error: Line 20: Parse error: Invalid term: 'count<Y>'
+Rule 'reach_count' registered.
+> ?- reach_count(X, C).
+4 rows:
+  (1, 5)
+  (2, 2)
+  (3, 1)
+  (5, 1)
+> +reach_sum(X, sum<Y>) :- path(X, Y).
+Rule 'reach_sum' registered.
+> ?- reach_sum(X, S).
+4 rows:
+  (1, 20)
+  (2, 7)
+  (3, 4)
+  (5, 6)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_recursive
+Knowledge graph 'test_agg_recursive' dropped.

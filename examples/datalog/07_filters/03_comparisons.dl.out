@@ -1,12 +1,16 @@
-Executing script: examples/datalog/07_filters/03_comparisons.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_cmp
-Database 'test_cmp' created.
-Switched to database: test_cmp
-> .db use test_cmp
-Switched to database: test_cmp
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cmp
+Knowledge graph 'test_cmp' created.
+Switched to knowledge graph: test_cmp
+> .kg use test_cmp
+Switched to knowledge graph: test_cmp
 > +data[(1, 100), (3, 101), (5, 102), (7, 103), (9, 104)].
-Inserted 5 facts into 'data'.
+Inserted 5 fact(s) into 'data'.
 > +lt_five(X, Y) :- data(X, Y), X < 5.
 Rule 'lt_five' registered.
 > ?- lt_five(X, Y).
@@ -33,7 +37,7 @@ Rule 'ge_five' registered.
   (5, 102)
   (7, 103)
   (9, 104)
-> .db use default
-Switched to database: default
-> .db drop test_cmp
-Database 'test_cmp' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cmp
+Knowledge graph 'test_cmp' dropped.

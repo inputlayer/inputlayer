@@ -1,16 +1,16 @@
 //! Meta command parsing for InputLayer.
 //!
-//! Meta commands are dot-prefixed: .db, .rel, .rule, .session, etc.
+//! Meta commands are dot-prefixed: .kg, .rel, .rule, .session, etc.
 
-/// Meta commands for database/relation/rule management
+/// Meta commands for knowledge graph/relation/rule management
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaCommand {
-    // Database commands
-    DbShow,
-    DbList,
-    DbCreate(String),
-    DbUse(String),
-    DbDrop(String),
+    // Knowledge graph commands
+    KgShow,
+    KgList,
+    KgCreate(String),
+    KgUse(String),
+    KgDrop(String),
 
     // Relation commands
     RelList,
@@ -18,20 +18,21 @@ pub enum MetaCommand {
 
     // Rule commands (persistent derived relations)
     RuleList,
-    RuleQuery(String),      // .rule <name> - query the rule and show results
-    RuleShowDef(String),    // .rule def <name> - show rule definition
+    RuleQuery(String),   // .rule <name> - query the rule and show results
+    RuleShowDef(String), // .rule def <name> - show rule definition
     RuleDrop(String),
-    RuleEdit {              // .rule edit <name> <index> <rule> - edit specific rule
+    RuleEdit {
+        // .rule edit <name> <index> <rule> - edit specific rule
         name: String,
         index: usize,
         rule_text: String,
     },
-    RuleClear(String),      // .rule clear <name> - clear all rules for re-registration
+    RuleClear(String), // .rule clear <name> - clear all rules for re-registration
 
     // Session commands (transient rules)
-    SessionList,            // .session - list session rules
-    SessionClear,           // .session clear - clear all session rules
-    SessionDrop(usize),     // .session drop <n> - remove rule #n (0-based internally)
+    SessionList,        // .session - list session rules
+    SessionClear,       // .session clear - clear all session rules
+    SessionDrop(usize), // .session drop <n> - remove rule #n (0-based internally)
 
     // System commands
     Compact,
@@ -68,7 +69,7 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
     }
 
     match parts[0].to_lowercase().as_str() {
-        "db" => parse_db_command(&parts),
+        "kg" => parse_kg_command(&parts),
         "rel" | "relation" => parse_rel_command(&parts),
         "rule" => parse_rule_command(&parts, input),
         "session" | "rules" => parse_session_command(&parts),
@@ -81,34 +82,34 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
     }
 }
 
-fn parse_db_command(parts: &[&str]) -> Result<MetaCommand, String> {
+fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
     if parts.len() == 1 {
-        Ok(MetaCommand::DbShow)
+        Ok(MetaCommand::KgShow)
     } else {
         match parts[1].to_lowercase().as_str() {
-            "list" => Ok(MetaCommand::DbList),
+            "list" => Ok(MetaCommand::KgList),
             "create" => {
                 if parts.len() < 3 {
-                    Err("Usage: .db create <name>".to_string())
+                    Err("Usage: .kg create <name>".to_string())
                 } else {
-                    Ok(MetaCommand::DbCreate(parts[2].to_string()))
+                    Ok(MetaCommand::KgCreate(parts[2].to_string()))
                 }
             }
             "use" => {
                 if parts.len() < 3 {
-                    Err("Usage: .db use <name>".to_string())
+                    Err("Usage: .kg use <name>".to_string())
                 } else {
-                    Ok(MetaCommand::DbUse(parts[2].to_string()))
+                    Ok(MetaCommand::KgUse(parts[2].to_string()))
                 }
             }
             "drop" => {
                 if parts.len() < 3 {
-                    Err("Usage: .db drop <name>".to_string())
+                    Err("Usage: .kg drop <name>".to_string())
                 } else {
-                    Ok(MetaCommand::DbDrop(parts[2].to_string()))
+                    Ok(MetaCommand::KgDrop(parts[2].to_string()))
                 }
             }
-            _ => Err(format!("Unknown db subcommand: {}", parts[1])),
+            _ => Err(format!("Unknown kg subcommand: {}", parts[1])),
         }
     }
 }
@@ -144,7 +145,8 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
             Err("Usage: .rule edit <name> <index> <rule>\nExample: .rule edit connected 2 rule connected(x: int, z: int) :- edge(x, y), connected(y, z).".to_string())
         } else {
             let name = parts[2].to_string();
-            let index: usize = parts[3].parse()
+            let index: usize = parts[3]
+                .parse()
                 .map_err(|_| format!("Invalid index '{}': must be a number (1-based)", parts[3]))?;
             if index == 0 {
                 return Err("Index must be 1 or greater (1-based indexing)".to_string());
@@ -155,7 +157,11 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
             if rule_text.is_empty() {
                 return Err("Missing rule definition".to_string());
             }
-            Ok(MetaCommand::RuleEdit { name, index: index - 1, rule_text }) // Convert to 0-based
+            Ok(MetaCommand::RuleEdit {
+                name,
+                index: index - 1,
+                rule_text,
+            }) // Convert to 0-based
         }
     } else if parts[1].to_lowercase() == "clear" {
         // .rule clear <name> - clear all rules
@@ -180,15 +186,19 @@ fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
                 if parts.len() < 3 {
                     Err("Usage: .session drop <n>".to_string())
                 } else {
-                    let index: usize = parts[2].parse()
-                        .map_err(|_| format!("Invalid index '{}': must be a number (1-based)", parts[2]))?;
+                    let index: usize = parts[2].parse().map_err(|_| {
+                        format!("Invalid index '{}': must be a number (1-based)", parts[2])
+                    })?;
                     if index == 0 {
                         return Err("Index must be 1 or greater (1-based indexing)".to_string());
                     }
-                    Ok(MetaCommand::SessionDrop(index - 1))  // Convert to 0-based
+                    Ok(MetaCommand::SessionDrop(index - 1)) // Convert to 0-based
                 }
             }
-            _ => Err(format!("Unknown session subcommand: {}. Use: clear, drop <n>", parts[1]))
+            _ => Err(format!(
+                "Unknown session subcommand: {}. Use: clear, drop <n>",
+                parts[1]
+            )),
         }
     }
 }
@@ -203,7 +213,12 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
             match parts[2].to_lowercase().as_str() {
                 "--replace" | "-r" | "replace" => LoadMode::Replace,
                 "--merge" | "-m" | "merge" => LoadMode::Merge,
-                _ => return Err(format!("Unknown load mode: {}. Use --replace or --merge", parts[2])),
+                _ => {
+                    return Err(format!(
+                        "Unknown load mode: {}. Use --replace or --merge",
+                        parts[2]
+                    ))
+                }
             }
         } else {
             LoadMode::Default
@@ -217,34 +232,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_db_show() {
-        let cmd = parse_meta_command(".db").unwrap();
-        assert!(matches!(cmd, MetaCommand::DbShow));
+    fn test_parse_kg_show() {
+        let cmd = parse_meta_command(".kg").unwrap();
+        assert!(matches!(cmd, MetaCommand::KgShow));
     }
 
     #[test]
-    fn test_parse_db_list() {
-        let cmd = parse_meta_command(".db list").unwrap();
-        assert!(matches!(cmd, MetaCommand::DbList));
+    fn test_parse_kg_list() {
+        let cmd = parse_meta_command(".kg list").unwrap();
+        assert!(matches!(cmd, MetaCommand::KgList));
     }
 
     #[test]
-    fn test_parse_db_create() {
-        let cmd = parse_meta_command(".db create test").unwrap();
-        if let MetaCommand::DbCreate(name) = cmd {
+    fn test_parse_kg_create() {
+        let cmd = parse_meta_command(".kg create test").unwrap();
+        if let MetaCommand::KgCreate(name) = cmd {
             assert_eq!(name, "test");
         } else {
-            panic!("Expected DbCreate");
+            panic!("Expected KgCreate");
         }
     }
 
     #[test]
-    fn test_parse_db_use() {
-        let cmd = parse_meta_command(".db use mydb").unwrap();
-        if let MetaCommand::DbUse(name) = cmd {
-            assert_eq!(name, "mydb");
+    fn test_parse_kg_use() {
+        let cmd = parse_meta_command(".kg use mykg").unwrap();
+        if let MetaCommand::KgUse(name) = cmd {
+            assert_eq!(name, "mykg");
         } else {
-            panic!("Expected DbUse");
+            panic!("Expected KgUse");
         }
     }
 

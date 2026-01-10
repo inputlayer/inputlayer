@@ -9,17 +9,17 @@
 
 use arrow::array::{Array, Int32Array, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
-use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
-use parquet::file::properties::WriterProperties;
+use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ArrowWriter};
 use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
 use super::error::{StorageError, StorageResult};
+use crate::value::arrow_convert::{record_batch_to_tuples, tuples_to_record_batch};
 use crate::value::Tuple2;
 use crate::value::{Tuple, TupleSchema};
-use crate::value::arrow_convert::{tuples_to_record_batch, record_batch_to_tuples, ArrowConvertError};
 
 // =============================================================================
 // Production-Grade Tuple Storage (Arbitrary Arity)
@@ -83,7 +83,10 @@ pub fn load_tuples_from_parquet(path: &Path) -> StorageResult<(Vec<Tuple>, Tuple
         all_tuples.extend(tuples);
     }
 
-    Ok((all_tuples, inferred_schema.unwrap_or_else(TupleSchema::empty)))
+    Ok((
+        all_tuples,
+        inferred_schema.unwrap_or_else(TupleSchema::empty),
+    ))
 }
 
 // =============================================================================
@@ -103,10 +106,7 @@ pub fn save_to_parquet(path: &Path, tuples: &[Tuple2]) -> StorageResult<()> {
     let col1: Int32Array = tuples.iter().map(|(_, b)| *b).collect();
 
     // Create RecordBatch
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![Arc::new(col0), Arc::new(col1)],
-    )?;
+    let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(col0), Arc::new(col1)])?;
 
     // Configure writer with Snappy compression
     let props = WriterProperties::builder()
@@ -144,12 +144,14 @@ pub fn load_from_parquet(path: &Path) -> StorageResult<Vec<Tuple2>> {
         let batch = batch_result?;
 
         // Extract columns
-        let col0 = batch.column(0)
+        let col0 = batch
+            .column(0)
             .as_any()
             .downcast_ref::<Int32Array>()
             .ok_or_else(|| StorageError::Other("Column 0 is not Int32Array".to_string()))?;
 
-        let col1 = batch.column(1)
+        let col1 = batch
+            .column(1)
             .as_any()
             .downcast_ref::<Int32Array>()
             .ok_or_else(|| StorageError::Other("Column 1 is not Int32Array".to_string()))?;
@@ -199,9 +201,11 @@ pub fn load_from_csv(path: &Path) -> StorageResult<Vec<Tuple2>> {
         let parts: Vec<&str> = line.trim().split(',').collect();
 
         if parts.len() == 2 {
-            let a: i32 = parts[0].parse()
+            let a: i32 = parts[0]
+                .parse()
                 .map_err(|e| StorageError::Other(format!("Failed to parse integer: {}", e)))?;
-            let b: i32 = parts[1].parse()
+            let b: i32 = parts[1]
+                .parse()
                 .map_err(|e| StorageError::Other(format!("Failed to parse integer: {}", e)))?;
             tuples.push((a, b));
         }

@@ -191,7 +191,7 @@ ParseError { message: String, line: Option<u32>, column: Option<u32> }
 
 | Feature | Documentation | Implementation |
 |---------|--------------|----------------|
-| `.db list` current marker | `(current)` | `*` |
+| `.kg list` current marker | `(current)` | `*` |
 | `.rel` row counts | Shows counts | No counts shown |
 | Query results | `Results: N rows` | `[N] rows:` |
 | `.rule <name>` | "Computed N tuples" | "Results: N rows" |

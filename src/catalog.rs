@@ -4,8 +4,8 @@
 //! Uses TupleSchema as the single source of truth for schema information.
 //! Column names can be derived from TupleSchema.field_names().
 
+use crate::value::{DataType, SchemaValidationError, Tuple, TupleSchema};
 use std::collections::HashMap;
-use crate::value::{TupleSchema, DataType, Tuple, SchemaValidationError};
 
 /// Catalog tracks schemas for all relations
 #[derive(Debug, Clone)]
@@ -37,9 +37,9 @@ impl Catalog {
     /// Get schema for a relation (column names only)
     /// Returns a Vec since the names are derived from TupleSchema
     pub fn get_schema(&self, relation: &str) -> Option<Vec<String>> {
-        self.schemas.get(relation).map(|s| {
-            s.field_names().iter().map(|n| n.to_string()).collect()
-        })
+        self.schemas
+            .get(relation)
+            .map(|s| s.field_names().iter().map(|n| n.to_string()).collect())
     }
 
     /// Get typed schema for a relation
@@ -71,7 +71,11 @@ impl Catalog {
     }
 
     /// Validate a tuple against a relation's schema
-    pub fn validate_tuple(&self, relation: &str, tuple: &Tuple) -> Result<(), SchemaValidationError> {
+    pub fn validate_tuple(
+        &self,
+        relation: &str,
+        tuple: &Tuple,
+    ) -> Result<(), SchemaValidationError> {
         if let Some(schema) = self.schemas.get(relation) {
             schema.validate(tuple)
         } else {
@@ -81,7 +85,11 @@ impl Catalog {
     }
 
     /// Validate multiple tuples against a relation's schema
-    pub fn validate_tuples(&self, relation: &str, tuples: &[Tuple]) -> Result<(), SchemaValidationError> {
+    pub fn validate_tuples(
+        &self,
+        relation: &str,
+        tuples: &[Tuple],
+    ) -> Result<(), SchemaValidationError> {
         if let Some(schema) = self.schemas.get(relation) {
             for tuple in tuples {
                 schema.validate(tuple)?;
@@ -101,20 +109,29 @@ impl Catalog {
         let first = &tuples[0];
         let fields: Vec<(String, DataType)> = if let Some(existing) = self.schemas.get(relation) {
             // Use existing field names, update types
-            existing.field_names().iter().enumerate().map(|(i, name)| {
-                let dtype = first.get(i)
-                    .map(|v| v.data_type())
-                    .unwrap_or(DataType::Null);
-                (name.to_string(), dtype)
-            }).collect()
+            existing
+                .field_names()
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let dtype = first
+                        .get(i)
+                        .map(|v| v.data_type())
+                        .unwrap_or(DataType::Null);
+                    (name.to_string(), dtype)
+                })
+                .collect()
         } else {
             // No schema - create anonymous column names
-            (0..first.arity()).map(|i| {
-                let dtype = first.get(i)
-                    .map(|v| v.data_type())
-                    .unwrap_or(DataType::Null);
-                (format!("col{}", i), dtype)
-            }).collect()
+            (0..first.arity())
+                .map(|i| {
+                    let dtype = first
+                        .get(i)
+                        .map(|v| v.data_type())
+                        .unwrap_or(DataType::Null);
+                    (format!("col{}", i), dtype)
+                })
+                .collect()
         };
 
         let typed_schema = TupleSchema::new(fields);
@@ -184,10 +201,7 @@ mod tests {
     #[test]
     fn test_variable_position() {
         let mut catalog = Catalog::new();
-        catalog.register_relation(
-            "edge".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
 
         assert_eq!(catalog.find_variable_position("edge", "x"), Some(0));
         assert_eq!(catalog.find_variable_position("edge", "y"), Some(1));
@@ -202,11 +216,8 @@ mod tests {
         let right_schema = vec!["y".to_string(), "z".to_string()];
         let shared_vars = vec!["y".to_string()];
 
-        let (left_keys, right_keys) = catalog.infer_join_keys(
-            &left_schema,
-            &right_schema,
-            &shared_vars,
-        );
+        let (left_keys, right_keys) =
+            catalog.infer_join_keys(&left_schema, &right_schema, &shared_vars);
 
         assert_eq!(left_keys, vec![1]); // 'y' is at position 1 in left
         assert_eq!(right_keys, vec![0]); // 'y' is at position 0 in right
@@ -220,11 +231,8 @@ mod tests {
         let right_schema = vec!["b".to_string(), "c".to_string(), "d".to_string()];
         let shared_vars = vec!["b".to_string(), "c".to_string()];
 
-        let (left_keys, right_keys) = catalog.infer_join_keys(
-            &left_schema,
-            &right_schema,
-            &shared_vars,
-        );
+        let (left_keys, right_keys) =
+            catalog.infer_join_keys(&left_schema, &right_schema, &shared_vars);
 
         assert_eq!(left_keys, vec![1, 2]); // b=1, c=2
         assert_eq!(right_keys, vec![0, 1]); // b=0, c=1
@@ -244,7 +252,10 @@ mod tests {
 
         // Check column names are available
         let schema = catalog.get_schema("person").unwrap();
-        assert_eq!(schema, vec!["id".to_string(), "name".to_string(), "score".to_string()]);
+        assert_eq!(
+            schema,
+            vec!["id".to_string(), "name".to_string(), "score".to_string()]
+        );
 
         // Check typed schema is available
         let typed = catalog.get_typed_schema("person").unwrap();
@@ -265,8 +276,14 @@ mod tests {
 
         catalog.register_typed_relation("person".to_string(), typed_schema);
 
-        assert_eq!(catalog.get_column_type("person", "id"), Some(&DataType::Int32));
-        assert_eq!(catalog.get_column_type("person", "name"), Some(&DataType::String));
+        assert_eq!(
+            catalog.get_column_type("person", "id"),
+            Some(&DataType::Int32)
+        );
+        assert_eq!(
+            catalog.get_column_type("person", "name"),
+            Some(&DataType::String)
+        );
         assert_eq!(catalog.get_column_type("person", "missing"), None);
         assert_eq!(catalog.get_column_type("unknown", "id"), None);
     }
@@ -282,10 +299,7 @@ mod tests {
 
         catalog.register_typed_relation("person".to_string(), typed_schema);
 
-        let valid_tuple = Tuple::new(vec![
-            Value::Int32(1),
-            Value::string("Alice"),
-        ]);
+        let valid_tuple = Tuple::new(vec![Value::Int32(1), Value::string("Alice")]);
 
         assert!(catalog.validate_tuple("person", &valid_tuple).is_ok());
     }
@@ -345,30 +359,34 @@ mod tests {
         );
 
         // Infer types from actual data
-        let tuples = vec![
-            Tuple::new(vec![
-                Value::Int32(1),
-                Value::string("Alice"),
-                Value::Float64(95.5),
-            ]),
-        ];
+        let tuples = vec![Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("Alice"),
+            Value::Float64(95.5),
+        ])];
 
         catalog.infer_types_from_tuples("data", &tuples);
 
         // Check inferred types
-        assert_eq!(catalog.get_column_type("data", "id"), Some(&DataType::Int32));
-        assert_eq!(catalog.get_column_type("data", "name"), Some(&DataType::String));
-        assert_eq!(catalog.get_column_type("data", "score"), Some(&DataType::Float64));
+        assert_eq!(
+            catalog.get_column_type("data", "id"),
+            Some(&DataType::Int32)
+        );
+        assert_eq!(
+            catalog.get_column_type("data", "name"),
+            Some(&DataType::String)
+        );
+        assert_eq!(
+            catalog.get_column_type("data", "score"),
+            Some(&DataType::Float64)
+        );
     }
 
     #[test]
     fn test_unregister_relation() {
         let mut catalog = Catalog::new();
 
-        catalog.register_relation(
-            "edge".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
 
         assert!(catalog.has_relation("edge"));
 
@@ -399,10 +417,7 @@ mod tests {
         let mut catalog = Catalog::new();
 
         // Register with just column names (backward compatible API)
-        catalog.register_relation(
-            "edge".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
 
         // Types should default to Int32
         assert_eq!(catalog.get_column_type("edge", "x"), Some(&DataType::Int32));

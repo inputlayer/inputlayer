@@ -1,17 +1,21 @@
-Executing script: examples/datalog/28_docs_coverage/08_syntax_schemas.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create syntax_schemas
-Database 'syntax_schemas' created.
-Switched to database: syntax_schemas
-> .db use syntax_schemas
-Switched to database: syntax_schemas
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create syntax_schemas
+Knowledge graph 'syntax_schemas' created.
+Switched to knowledge graph: syntax_schemas
+> .kg use syntax_schemas
+Switched to knowledge graph: syntax_schemas
 > +employee(id: int, name: string, dept: string).
-Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(String))
+Schema 'employee' declared (persistent).
 > +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
-Inserted 2 facts into 'employee'.
+Inserted 2 fact(s) into 'employee'.
 > ?- employee(Id, Name, Dept).
 2 rows:
   (1, "alice", "engineering")
   (2, "bob", "sales")
 > +example( a: int, b: float, c: string, d: vector ).
-Script error: Line 17: Parse error: Unknown base type: 'vector'. Use int, string, bool, float, or a type name.
+Script error: Parse error: Unknown base type: 'vector'. Use int, string, bool, float, or a type name.

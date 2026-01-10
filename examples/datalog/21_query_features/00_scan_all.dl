@@ -1,20 +1,20 @@
-// Test: Scan All Query
-// Category: 21_query_features
-// Description: Tests querying all tuples from a relation
+% Test: Scan All Query
+% Category: 21_query_features
+% Description: Tests querying all tuples from a relation
 
-.db create test_scan
-.db use test_scan
+.kg create test_scan
+.kg use test_scan
 
-// Insert test data
+% Insert test data
 +edge[(1,2), (2,3), (3,4)].
 +node[(1,10), (2,20), (3,30)].
 
-// Query all from edge
+% Query all from edge
 ?- edge(X, Y).
 
-// Query all from node
+% Query all from node
 ?- node(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_scan
+% Cleanup
+.kg use default
+.kg drop test_scan

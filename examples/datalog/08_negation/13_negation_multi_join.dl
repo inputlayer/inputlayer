@@ -1,22 +1,22 @@
-// Test: Negation with Multiple Joins
-// Category: 08_negation
-// Description: Tests negation combined with multiple positive joins
+% Test: Negation with Multiple Joins
+% Category: 08_negation
+% Description: Tests negation combined with multiple positive joins
 
-.db create test_neg_multi_join
-.db use test_neg_multi_join
+.kg create test_neg_multi_join
+.kg use test_neg_multi_join
 
-// Relations
+% Relations
 +employee[(1, 10), (2, 10), (3, 20), (4, 20), (5, 30)].
 +department[(10, 100), (20, 200), (30, 300)].
 +on_leave[(2, 0), (4, 0)].
 
-// Join employee with department, excluding those on leave
-// emp_id -> dept_id -> manager_id, filtered by leave status
+% Join employee with department, excluding those on leave
+% emp_id -> dept_id -> manager_id, filtered by leave status
 +active_emp_manager(EmpId, MgrId) :- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
 ?- active_emp_manager(X, Y).
 
-// Should return: (1, 100), (3, 200), (5, 300)
+% Should return: (1, 100), (3, 200), (5, 300)
 
-// Cleanup
-.db use default
-.db drop test_neg_multi_join
+% Cleanup
+.kg use default
+.kg drop test_neg_multi_join

@@ -1,33 +1,33 @@
-// Test: Explicit Relation Schema
-// Category: Rel Schemas
-// Description: Tests explicit schema declaration with column types using + prefix
+% Test: Explicit Relation Schema
+% Category: Rel Schemas
+% Description: Tests explicit schema declaration with column types using + prefix
 
-.db create test_rel_schema
-.db use test_rel_schema
+.kg create test_rel_schema
+.kg use test_rel_schema
 
-// Declare relation schema explicitly using + prefix
+% Declare relation schema explicitly using + prefix
 +employee(emp_id: int, name: string, dept_id: int).
 +department(dept_id: int, dept_name: string).
 
-// Insert employees
+% Insert employees
 +employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)].
 
-// Insert departments
+% Insert departments
 +department[(10, "Engineering"), (20, "Sales")].
 
-// Query employees
+% Query employees
 ?- employee(Id, Name, Dept).
 
-// Query departments
+% Query departments
 ?- department(Id, Name).
 
-// Create view joining employee and department
+% Create view joining employee and department
 +emp_dept(EmpName, DeptName) :-
     employee(_, EmpName, DeptId),
     department(DeptId, DeptName).
 
 ?- emp_dept(E, D).
 
-// Cleanup
-.db use default
-.db drop test_rel_schema
+% Cleanup
+.kg use default
+.kg drop test_rel_schema

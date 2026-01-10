@@ -1,11 +1,15 @@
-Executing script: examples/datalog/12_errors/12_deep_nesting_limit_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_deep_nest
-Database 'test_deep_nest' created.
-Switched to database: test_deep_nest
-> .db use test_deep_nest
-Switched to database: test_deep_nest
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_deep_nest
+Knowledge graph 'test_deep_nest' created.
+Switched to knowledge graph: test_deep_nest
+> .kg use test_deep_nest
+Switched to knowledge graph: test_deep_nest
 > +base[(1), (2), (3)].
-Inserted 3 facts into 'base'.
+Inserted 3 fact(s) into 'base'.
 > +nest5(X, ((((X+1)+1)+1)+1)+1) :- base(X).
-Script error: Line 12: Parse error: Invalid term: '((((X+1)+1)+1)+1)+1'
+Script error: Parse error: Invalid term: '((((X+1)+1)+1)+1)+1'

@@ -1,0 +1,16 @@
+# Build output
+dist/
+
+# Node modules
+node_modules/
+
+# Generated files (regenerate with `npm run generate`)
+src/generated/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store

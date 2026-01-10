@@ -1,19 +1,23 @@
-Executing script: examples/datalog/06_joins/02_self_join.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_self
-Database 'test_self' created.
-Switched to database: test_self
-> .db use test_self
-Switched to database: test_self
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self
+Knowledge graph 'test_self' created.
+Switched to knowledge graph: test_self
+> .kg use test_self
+Switched to knowledge graph: test_self
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +path2(X, Z) :- edge(X, Y), edge(Y, Z).
 Rule 'path2' registered.
 > ?- path2(X, Y).
 2 rows:
   (1, 3)
   (2, 4)
-> .db use default
-Switched to database: default
-> .db drop test_self
-Database 'test_self' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self
+Knowledge graph 'test_self' dropped.

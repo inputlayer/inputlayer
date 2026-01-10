@@ -1,22 +1,26 @@
-Executing script: examples/datalog/24_rel_schemas/02_record_schema_sugar.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_record_sugar
-Database 'test_record_sugar' created.
-Switched to database: test_record_sugar
-> .db use test_record_sugar
-Switched to database: test_record_sugar
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_record_sugar
+Knowledge graph 'test_record_sugar' created.
+Switched to knowledge graph: test_record_sugar
+> .kg use test_record_sugar
+Switched to knowledge graph: test_record_sugar
 > type Person: { id: int, name: string, age: int }.
-Type 'Person' declared.
+Type 'Person' declared (local only).
 > type Address: { person_id: int, city: string }.
-Type 'Address' declared.
+Type 'Address' declared (local only).
 > +person(id: int, name: string, age: int).
-Persistent schema 'person' declared: (id: Base(Int), name: Base(String), age: Base(Int))
+Schema 'person' declared (persistent).
 > +address(person_id: int, city: string).
-Persistent schema 'address' declared: (person_id: Base(Int), city: Base(String))
+Schema 'address' declared (persistent).
 > +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].
-Inserted 3 facts into 'person'.
+Inserted 3 fact(s) into 'person'.
 > +address[(1, "New York"), (2, "Boston"), (3, "Chicago")].
-Inserted 3 facts into 'address'.
+Inserted 3 fact(s) into 'address'.
 > ?- person(Id, Name, Age).
 3 rows:
   (1, "Alice", 30)
@@ -34,7 +38,7 @@ Rule 'person_location' registered.
   ("Alice", "New York")
   ("Bob", "Boston")
   ("Charlie", "Chicago")
-> .db use default
-Switched to database: default
-> .db drop test_record_sugar
-Database 'test_record_sugar' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_record_sugar
+Knowledge graph 'test_record_sugar' dropped.

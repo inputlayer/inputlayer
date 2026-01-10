@@ -108,16 +108,11 @@ pub fn load_from_csv_with_options<P: AsRef<Path>>(
 
         // If no header, create schema from first data row
         if schema.is_empty() {
-            schema = (0..fields.len())
-                .map(|i| format!("col{}", i))
-                .collect();
+            schema = (0..fields.len()).map(|i| format!("col{}", i)).collect();
         }
 
         // Parse fields into values
-        let values: Vec<Value> = fields
-            .into_iter()
-            .map(|field| parse_value(field))
-            .collect();
+        let values: Vec<Value> = fields.into_iter().map(|field| parse_value(field)).collect();
 
         if values.len() != schema.len() {
             return Err(StorageError::ParseError(format!(
@@ -379,9 +374,21 @@ mod tests {
 
         let schema = vec!["id".to_string(), "name".to_string(), "score".to_string()];
         let tuples = vec![
-            Tuple::new(vec![Value::Int32(1), Value::String(Arc::from("Alice")), Value::Float64(95.5)]),
-            Tuple::new(vec![Value::Int32(2), Value::String(Arc::from("Bob")), Value::Float64(87.0)]),
-            Tuple::new(vec![Value::Int32(3), Value::String(Arc::from("Carol")), Value::Float64(92.3)]),
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::String(Arc::from("Alice")),
+                Value::Float64(95.5),
+            ]),
+            Tuple::new(vec![
+                Value::Int32(2),
+                Value::String(Arc::from("Bob")),
+                Value::Float64(87.0),
+            ]),
+            Tuple::new(vec![
+                Value::Int32(3),
+                Value::String(Arc::from("Carol")),
+                Value::Float64(92.3),
+            ]),
         ];
 
         // Save

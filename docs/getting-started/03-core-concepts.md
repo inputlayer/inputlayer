@@ -31,16 +31,16 @@ Facts are the raw data you store. They're like rows in a database table.
 ### Examples
 
 ```datalog
-// A single fact: edge from node 1 to node 2
+% A single fact: edge from node 1 to node 2
 +edge(1, 2).
 
-// Multiple facts at once (bulk insert)
+% Multiple facts at once (bulk insert)
 +edge[(1, 2), (2, 3), (3, 4)].
 
-// Different data types
-+person("alice", 30).           // String and integer
-+location("NYC", 40.7, -74.0).  // Floats
-+embedding(1, [0.1, 0.2, 0.3]). // Vector
+% Different data types
++person("alice", 30).           % String and integer
++location("NYC", 40.7, -74.0).  % Floats
++embedding(1, [0.1, 0.2, 0.3]). % Vector
 ```
 
 ### Key Points
@@ -53,10 +53,10 @@ Facts are the raw data you store. They're like rows in a database table.
 ### Deleting Facts
 
 ```datalog
-// Delete a specific fact
+% Delete a specific fact
 -edge(1, 2).
 
-// Conditional delete (delete all edges from node 1)
+% Conditional delete (delete all edges from node 1)
 -edge(1, Y) :- edge(1, Y).
 ```
 
@@ -77,7 +77,7 @@ Rules compute new data from existing facts and other rules. They're the heart of
 ### Simple Rule Example
 
 ```datalog
-// "adult" contains people who are 18 or older
+% "adult" contains people who are 18 or older
 +adult(Name, Age) :- person(Name, Age), Age >= 18.
 ```
 
@@ -88,11 +88,11 @@ Reading this: "Name and Age are in `adult` IF they're in `person` AND Age >= 18.
 Variables that appear in multiple body atoms create joins:
 
 ```datalog
-// Facts
+% Facts
 +employee("alice", "engineering").
 +department("engineering", "Building A").
 
-// Rule: where does each employee work?
+% Rule: where does each employee work?
 +works_in(Name, Building) :-
   employee(Name, Dept),
   department(Dept, Building).
@@ -105,10 +105,10 @@ The shared variable `Dept` joins `employee` and `department`.
 Rules can reference themselves for powerful recursive computations:
 
 ```datalog
-// Base case: direct edges are paths
+% Base case: direct edges are paths
 +path(X, Y) :- edge(X, Y).
 
-// Recursive case: extend paths through edges
+% Recursive case: extend paths through edges
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 ```
 
@@ -133,16 +133,16 @@ Queries ask questions about your data (facts and derived rules).
 ### Examples
 
 ```datalog
-// All edges from node 1
+% All edges from node 1
 ?- edge(1, X).
 
-// All paths with length info
+% All paths with length info
 ?- path(X, Y).
 
-// Filtered query
+% Filtered query
 ?- person(Name, Age), Age > 25.
 
-// Constant matching
+% Constant matching
 ?- employee("alice", Dept).
 ```
 
@@ -157,7 +157,7 @@ Queries ask questions about your data (facts and derived rules).
 For ad-hoc analysis, use session rules (no `+` prefix):
 
 ```datalog
-// Session rule - not persisted
+% Session rule - not persisted
 temp(X, Y) :- edge(X, Y), X < Y.
 ```
 
@@ -179,16 +179,16 @@ View session rules with `.session`, clear with `.session clear`.
 ### Pattern Matching
 
 ```datalog
-// Match any edge
+% Match any edge
 ?- edge(X, Y).
 
-// Match edges from node 1
+% Match edges from node 1
 ?- edge(1, X).
 
-// Match self-loops
+% Match self-loops
 ?- edge(X, X).
 
-// Ignore second column
+% Ignore second column
 ?- person(Name, _).
 ```
 
@@ -197,10 +197,10 @@ View session rules with `.session`, clear with `.session clear`.
 Use `!` or `not` to express "does not exist":
 
 ```datalog
-// People without a manager
+% People without a manager
 +unmanaged(E) :- employee(E), !manages(_, E).
 
-// Nodes with no outgoing edges (sinks)
+% Nodes with no outgoing edges (sinks)
 +sink(X) :- node(X), !edge(X, _).
 ```
 
@@ -211,13 +211,13 @@ Use `!` or `not` to express "does not exist":
 Compute aggregates over groups:
 
 ```datalog
-// Count employees per department
+% Count employees per department
 +dept_size(Dept, count<Emp>) :- employee(Emp, Dept).
 
-// Total salary per department
+% Total salary per department
 +dept_salary(Dept, sum<Salary>) :- employee(_, Dept, Salary).
 
-// Other aggregates: min, max, avg
+% Other aggregates: min, max, avg
 +oldest(max<Age>) :- person(_, Age).
 ```
 
@@ -226,12 +226,12 @@ Compute aggregates over groups:
 Declare types for relations:
 
 ```datalog
-// Schema declaration
+% Schema declaration
 +employee(id: int, name: string, dept: string).
 
-// Now insertions are type-checked
-+employee(1, "alice", "engineering").  // OK
-+employee("x", "bob", "sales").        // Error: id should be int
+% Now insertions are type-checked
++employee(1, "alice", "engineering").  % OK
++employee("x", "bob", "sales").        % Error: id should be int
 ```
 
 ## How It All Fits Together

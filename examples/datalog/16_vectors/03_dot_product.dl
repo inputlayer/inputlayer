@@ -1,22 +1,22 @@
-// Test: Dot Product
-// Category: 16_vectors
-// Description: Tests dot product calculation between vectors
+% Test: Dot Product
+% Category: 16_vectors
+% Description: Tests dot product calculation between vectors
 
-.db create test_vec_dot
-.db use test_vec_dot
+.kg create test_vec_dot
+.kg use test_vec_dot
 
-// Insert vectors: vectors(id, vector)
+% Insert vectors: vectors(id, vector)
 +vectors[(1, [1.0, 2.0, 3.0]), (2, [2.0, 0.0, 1.0]), (3, [1.0, 1.0, 1.0])].
 
-// Insert query vector
+% Insert query vector
 +query[([1.0, 1.0, 1.0])].
 
-// Calculate dot product of each vector with query
+% Calculate dot product of each vector with query
 dot_result(Id, Score) :- vectors(Id, V), query(Q), Score = dot(V, Q).
 
-// Query dot products
+% Query dot products
 ?- dot_result(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_vec_dot
+% Cleanup
+.kg use default
+.kg drop test_vec_dot

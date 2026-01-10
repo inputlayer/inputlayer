@@ -1,18 +1,22 @@
-Executing script: examples/datalog/26_constraints/05_multiple_constraints.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create constraint_multi_test
-Database 'constraint_multi_test' created.
-Switched to database: constraint_multi_test
-> .db use constraint_multi_test
-Switched to database: constraint_multi_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create constraint_multi_test
+Knowledge graph 'constraint_multi_test' created.
+Switched to knowledge graph: constraint_multi_test
+> .kg use constraint_multi_test
+Switched to knowledge graph: constraint_multi_test
 > +customer( id: int @key, email: string @unique, name: string @not_empty, age: int @range(18, 120) ).
-Persistent schema 'customer' declared: (id: Base(Int) @primary, email: Base(String) @unique, name: Base(String) @not_empty, age: Base(Int) @range(18, 120))
+Schema 'customer' declared (persistent).
 > +customer(1, "alice@example.com", "Alice Smith", 30).
-Inserted 1 fact into 'customer'.
+Inserted 1 fact(s) into 'customer'.
 > +customer(2, "bob@example.com", "Bob Jones", 25).
-Inserted 1 fact into 'customer'.
+Inserted 1 fact(s) into 'customer'.
 > +customer(3, "carol@example.com", "Carol White", 45).
-Inserted 1 fact into 'customer'.
+Inserted 1 fact(s) into 'customer'.
 > ?- customer(Id, Email, Name, Age).
 3 rows:
   (1, "alice@example.com", "Alice Smith", 30)
@@ -20,9 +24,13 @@ Inserted 1 fact into 'customer'.
   (3, "carol@example.com", "Carol White", 45)
 > .rel customer
 Relation: customer
-Schema: ["col0", "col1", "col2", "col3"]
-Tuple count: 3
-> .db use default
-Switched to database: default
-> .db drop constraint_multi_test
-Database 'constraint_multi_test' dropped.
+  Columns: ["col0", "col1", "col2", "col3"]
+  Total rows: 3
+  Preview (first 3):
+    (1, "alice@example.com", "Alice Smith", 30)
+    (2, "bob@example.com", "Bob Jones", 25)
+    (3, "carol@example.com", "Carol White", 45)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop constraint_multi_test
+Knowledge graph 'constraint_multi_test' dropped.

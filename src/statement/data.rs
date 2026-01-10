@@ -172,8 +172,13 @@ pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
         let (relation, head_args) = parse_head_atom(head_str)?;
 
         // Parse the body using the existing parser
-        let dummy_rule_str = format!("__dummy__({}) :- {}",
-            head_args.iter().map(term_to_string).collect::<Vec<_>>().join(", "),
+        let dummy_rule_str = format!(
+            "__dummy__({}) :- {}",
+            head_args
+                .iter()
+                .map(term_to_string)
+                .collect::<Vec<_>>()
+                .join(", "),
             body_str
         );
         let rule = parse_rule(&dummy_rule_str)?;

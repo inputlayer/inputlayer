@@ -33,30 +33,30 @@
 //! ### Storage Engine Integration
 //! ```text
 //! StorageEngine
-//!     ├── Multiple Databases (namespace isolation)
+//!     ├── Multiple Knowledge Graphs (namespace isolation)
 //!     ├── Parquet Persistence
 //!     ├── Parallel Query Execution (Rayon)
-//!     └── Each Database → DatalogEngine instance
+//!     └── Each Knowledge Graph → DatalogEngine instance
 //! ```
 //!
 //! ## Usage
 //!
 //! ### Basic Query Execution
-//! ```rust,ignore
-//! use datalog_engine::DatalogEngine;
+//! ```rust
+//! use inputlayer::DatalogEngine;
 //!
 //! let mut engine = DatalogEngine::new();
 //!
 //! // Define base facts
 //! engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 //!
-//! // Define and execute rules
+//! // Define and execute rules (variables must be uppercase)
 //! let program = "
-//!     path(x, y) :- edge(x, y).
-//!     path(x, z) :- path(x, y), edge(y, z).
+//!     path(X, Y) :- edge(X, Y).
+//!     path(X, Z) :- path(X, Y), edge(Y, Z).
 //! ";
 //!
-//! let results = engine.execute(program)?;
+//! let results = engine.execute(program).unwrap();
 //!
 //! // Check if program has recursive rules
 //! if engine.is_recursive() {
@@ -64,23 +64,23 @@
 //! }
 //! ```
 //!
-//! ### Multi-Database with Persistence
-//! ```rust,ignore
-//! use datalog_engine::{StorageEngine, Config};
+//! ### Multi-Knowledge-Graph with Persistence
+//! ```rust,no_run
+//! use inputlayer::{StorageEngine, Config};
 //!
-//! let config = Config::load()?;
-//! let mut storage = StorageEngine::new(config)?;
+//! let config = Config::default();
+//! let mut storage = StorageEngine::new(config).unwrap();
 //!
-//! // Create and use databases
-//! storage.create_database("analytics")?;
-//! storage.use_database("analytics")?;
+//! // Create and use knowledge graphs
+//! storage.create_knowledge_graph("analytics").unwrap();
+//! storage.use_knowledge_graph("analytics").unwrap();
 //!
-//! // Insert data and query
-//! storage.insert("edge", vec![(1, 2), (2, 3)])?;
-//! let results = storage.execute_query("path(x,y) :- edge(x,y).")?;
+//! // Insert data and query (variables must be uppercase)
+//! storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+//! let results = storage.execute_query("path(X,Y) :- edge(X,Y).").unwrap();
 //!
 //! // Persist to disk
-//! storage.save_database("analytics")?;
+//! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 //!
 //! ## Module Organization
@@ -96,58 +96,57 @@
 //! | `boolean_specialization` | M10 | Semiring selection |
 //! | `code_generator` | M11 | IR → Differential Dataflow |
 //! | `recursion` | M11 | Recursion detection & stratification |
-//! | `storage_engine` | - | Multi-database persistence |
+//! | `storage_engine` | - | Multi-knowledge-graph persistence |
 
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod ir;
 
 // Re-export types from internal modules
+pub use crate::ast::builders::{fact, simple_rule, AtomBuilder, RuleBuilder};
 pub use crate::ast::{
-    Atom, BodyPredicate, Constraint, Program, Rule, Term,
-    AggregateFunc, BuiltinFunc, ArithExpr, ArithOp,
+    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule,
+    Term,
 };
-pub use crate::ast::builders::{AtomBuilder, RuleBuilder, fact, simple_rule};
 pub use crate::ir::{IRNode, Predicate};
 
 // Internal modules - Course Modules (M04, M05, M06-M10, M11)
-pub mod parser;           // Module 04: Parsing & AST Construction
-pub mod statement;        // Datalog-native statement parser
-pub mod rule_catalog;     // Rule catalog for persistent rules (policies)
-mod ir_builder;       // Module 05: IR Construction
-mod optimizer;        // Module 06: Basic Optimizations
-mod join_planning;    // Module 07: Join Planning (identity transform)
-mod sip_rewriting;    // Module 08: SIP Rewriting (identity transform)
-mod subplan_sharing;  // Module 09: Subplan Sharing (identity transform)
 mod boolean_specialization; // Module 10: Boolean Specialization (identity transform)
-pub mod code_generator;   // Module 11: Code Generation (public for aggregation tests)
+pub mod code_generator;
+mod ir_builder; // Module 05: IR Construction
+mod join_planning; // Module 07: Join Planning (identity transform)
+mod optimizer; // Module 06: Basic Optimizations
+pub mod parser; // Module 04: Parsing & AST Construction
+pub mod rule_catalog; // Rule catalog for persistent rules (policies)
+mod sip_rewriting; // Module 08: SIP Rewriting (identity transform)
+pub mod statement; // Datalog-native statement parser
+mod subplan_sharing; // Module 09: Subplan Sharing (identity transform) // Module 11: Code Generation (public for aggregation tests)
 
 // Storage Engine
-pub mod config;          // Configuration system
-pub mod storage;         // Storage formats (Parquet, metadata)
-pub mod storage_engine;  // Multi-database storage engine
+pub mod config; // Configuration system
+pub mod storage; // Storage formats (Parquet, metadata)
+pub mod storage_engine; // Multi-knowledge-graph storage engine
 
 // Network Protocol (RPC)
-pub mod protocol;        // InputLayer RPC protocol (server/client)
+pub mod protocol; // InputLayer RPC protocol (server/client)
 
 // Execution hardening
-pub mod execution;       // Query timeout, resource limits, caching
+pub mod execution; // Query timeout, resource limits, caching
 
 // Value type system (production-grade arbitrary arity tuples)
 pub mod value;
 
 // Re-export value types for convenience
-pub use value::{DataType, Value, Tuple, TupleSchema, SchemaValidationError};
+pub use value::{DataType, SchemaValidationError, Tuple, TupleSchema, Value};
 
 // Schema validation module
 pub mod schema;
 
 // Re-export schema types for convenience
 pub use schema::{
-    RelationSchema, ColumnSchema, SchemaType, ColumnAnnotation,
-    ValidationConfig, CheckConstraint, ValidationTiming, FailureAction,
-    SchemaCatalog, ValidationEngine, ValidationError, Violation,
-    TypeAlias,
+    CheckConstraint, ColumnAnnotation, ColumnSchema, FailureAction, RelationSchema, SchemaCatalog,
+    SchemaType, TypeAlias, ValidationConfig, ValidationEngine, ValidationError, ValidationTiming,
+    Violation,
 };
 
 // Vector operations (distance functions, LSH, top-k)
@@ -155,22 +154,38 @@ pub mod vector_ops;
 
 // Re-export vector operation types
 pub use vector_ops::{
-    VectorError,
+    abs_f64,
+    abs_i64,
+    clear_lsh_cache,
+    cosine_distance_dequantized,
+    cosine_distance_int8,
+    dequantize_vector,
+    dequantize_vector_with_scale,
+    dot_product_int8,
+    euclidean_distance_dequantized,
+    // Int8 distance functions
+    euclidean_distance_int8,
+    get_lsh_cache_stats,
+    // Utility functions
+    hamming_distance,
+    lsh_bucket_int8,
+    lsh_bucket_with_distances,
+    lsh_bucket_with_distances_int8,
+    lsh_multi_probe,
+    lsh_multi_probe_int8,
+    // Multi-probe LSH
+    lsh_probes,
+    lsh_probes_ranked,
+    manhattan_distance_int8,
+    quantize_vector,
+    quantize_vector_linear,
+    quantize_vector_minmax,
+    quantize_vector_symmetric,
+    // Cache management
+    LshCacheStats,
     // Quantization
     QuantizationMethod,
-    quantize_vector, quantize_vector_linear, quantize_vector_symmetric, quantize_vector_minmax,
-    dequantize_vector, dequantize_vector_with_scale,
-    // Int8 distance functions
-    euclidean_distance_int8, cosine_distance_int8, dot_product_int8, manhattan_distance_int8,
-    euclidean_distance_dequantized, cosine_distance_dequantized,
-    lsh_bucket_int8,
-    // Multi-probe LSH
-    lsh_probes, lsh_bucket_with_distances, lsh_bucket_with_distances_int8,
-    lsh_probes_ranked, lsh_multi_probe, lsh_multi_probe_int8,
-    // Utility functions
-    hamming_distance, abs_i64, abs_f64,
-    // Cache management
-    LshCacheStats, get_lsh_cache_stats, clear_lsh_cache,
+    VectorError,
 };
 
 // Temporal operations (time decay, temporal predicates, interval operations)
@@ -178,51 +193,46 @@ pub mod temporal_ops;
 
 // Utilities
 mod catalog;
-mod recursion;
 mod pipeline_trace;
+mod recursion;
 #[cfg(test)]
 mod test_arithmetic;
 
 // Re-export public types
 pub use catalog::Catalog;
 pub use code_generator::CodeGenerator;
-pub use value::Tuple2;  // Legacy format, use Tuple for new code
 pub use config::Config;
 pub use ir_builder::IRBuilder;
 pub use optimizer::Optimizer;
-pub use pipeline_trace::{PipelineTrace, OptimizationStats};
+pub use pipeline_trace::{OptimizationStats, PipelineTrace};
 pub use storage_engine::StorageEngine;
+pub use value::Tuple2; // Legacy format, use Tuple for new code
 
 // Re-export storage utilities (Parquet and CSV)
 pub use storage::{
-    load_from_parquet, save_to_parquet,
-    load_from_csv, save_to_csv, load_from_csv_with_options, save_to_csv_with_options, CsvOptions,
-    StorageError, StorageResult,
+    load_from_csv, load_from_csv_with_options, load_from_parquet, save_to_csv,
+    save_to_csv_with_options, save_to_parquet, CsvOptions, StorageError, StorageResult,
 };
 
 // Re-export execution utilities (timeout, limits, caching)
 pub use execution::{
-    ExecutionConfig, ExecutionError, ExecutionResult,
-    QueryTimeout, TimeoutError, CancelHandle,
-    ResourceLimits, ResourceError, MemoryTracker,
-    QueryCache, CacheEntry, CacheStats,
+    CacheEntry, CacheStats, CancelHandle, ExecutionConfig, ExecutionError, ExecutionResult,
+    MemoryTracker, QueryCache, QueryTimeout, ResourceError, ResourceLimits, TimeoutError,
 };
 
 // Re-export optimization modules for extensibility
+pub use boolean_specialization::BooleanSpecializer;
 pub use join_planning::JoinPlanner;
 pub use sip_rewriting::SipRewriter;
 pub use subplan_sharing::SubplanSharer;
-pub use boolean_specialization::BooleanSpecializer;
 
 // Re-export statement parser types
 pub use statement::{
-    Statement, MetaCommand, InsertOp, DeleteOp, DeletePattern, UpdateOp,
-    RuleDef, QueryGoal, DeleteTarget, InsertTarget, LoadMode,
-    SerializableRule, SerializableTerm, SerializableBodyPred, SerializableConstraint,
-    SerializableArithExpr, SerializableArithOp,
-    TypeDecl, TypeExpr, BaseType, RecordField, Refinement, RefinementArg,
-    SchemaDecl, ColumnDef,
-    parse_statement, parse_rule_definition,
+    parse_rule_definition, parse_statement, BaseType, ColumnDef, DeleteOp, DeletePattern,
+    DeleteTarget, InsertOp, InsertTarget, LoadMode, MetaCommand, QueryGoal, RecordField,
+    Refinement, RefinementArg, RuleDef, SchemaDecl, SerializableArithExpr, SerializableArithOp,
+    SerializableBodyPred, SerializableConstraint, SerializableRule, SerializableTerm, Statement,
+    TypeDecl, TypeExpr, UpdateOp,
 };
 
 // Re-export parser functions
@@ -233,10 +243,17 @@ pub use rule_catalog::{RuleCatalog, RuleDefinition};
 
 // Re-export recursion utilities
 pub use recursion::{
-    is_recursive_rule, has_recursion, build_dependency_graph, find_sccs, stratify,
+    build_dependency_graph,
+    build_extended_dependency_graph,
+    find_sccs,
+    has_recursion,
+    is_recursive_rule,
+    stratify,
+    stratify_with_negation,
+    DependencyGraph,
     // New exports for negation-aware stratification
-    DependencyType, DependencyGraph, build_extended_dependency_graph,
-    stratify_with_negation, StratificationResult,
+    DependencyType,
+    StratificationResult,
 };
 
 use std::collections::HashMap;
@@ -370,7 +387,10 @@ impl DatalogEngine {
     /// Automatically registers the relation schema in the catalog.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```rust
+    /// use inputlayer::DatalogEngine;
+    ///
+    /// let mut engine = DatalogEngine::new();
     /// engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
     /// ```
     pub fn add_fact(&mut self, relation: &str, data: Vec<Tuple2>) {
@@ -405,7 +425,8 @@ impl DatalogEngine {
             if !rule.is_safe() {
                 let head_vars = rule.head.variables();
                 let body_vars = rule.positive_body_variables();
-                let unsafe_vars: Vec<_> = head_vars.difference(&body_vars).collect();
+                let mut unsafe_vars: Vec<_> = head_vars.difference(&body_vars).cloned().collect();
+                unsafe_vars.sort(); // Sort for deterministic output
 
                 return Err(format!(
                     "Unsafe rule: {:?}. Variables {:?} in head do not appear in positive body atoms.",
@@ -434,7 +455,8 @@ impl DatalogEngine {
     pub fn build_ir(&mut self) -> Result<(), String> {
         use std::collections::HashMap;
 
-        let program = self.program
+        let program = self
+            .program
             .as_ref()
             .ok_or("No program parsed yet. Call parse() first.")?
             .clone();
@@ -493,7 +515,10 @@ impl DatalogEngine {
     fn update_catalog_from_program(&mut self, program: &Program) {
         for rule in &program.rules {
             // Register head relation
-            let head_schema: Vec<_> = rule.head.args.iter()
+            let head_schema: Vec<_> = rule
+                .head
+                .args
+                .iter()
                 .enumerate()
                 .map(|(i, term)| match term {
                     Term::Variable(v) => v.clone(),
@@ -502,16 +527,16 @@ impl DatalogEngine {
                 .collect();
 
             if !self.catalog.has_relation(&rule.head.relation) {
-                self.catalog.register_relation(
-                    rule.head.relation.clone(),
-                    head_schema,
-                );
+                self.catalog
+                    .register_relation(rule.head.relation.clone(), head_schema);
             }
 
             // Register body relations
             for pred in &rule.body {
                 let atom = pred.atom();
-                let body_schema: Vec<_> = atom.args.iter()
+                let body_schema: Vec<_> = atom
+                    .args
+                    .iter()
                     .enumerate()
                     .map(|(i, term)| match term {
                         Term::Variable(v) => v.clone(),
@@ -520,10 +545,8 @@ impl DatalogEngine {
                     .collect();
 
                 if !self.catalog.has_relation(&atom.relation) {
-                    self.catalog.register_relation(
-                        atom.relation.clone(),
-                        body_schema,
-                    );
+                    self.catalog
+                        .register_relation(atom.relation.clone(), body_schema);
                 }
             }
         }
@@ -544,7 +567,8 @@ impl DatalogEngine {
         // Module 07: Join Planning
         if self.optimization_config.enable_join_planning {
             let join_planner = join_planning::JoinPlanner::new();
-            self.ir_nodes = self.ir_nodes
+            self.ir_nodes = self
+                .ir_nodes
                 .iter()
                 .map(|ir| join_planner.plan_joins(ir.clone()))
                 .collect();
@@ -553,7 +577,8 @@ impl DatalogEngine {
         // Module 08: SIP Rewriting (for recursive queries)
         if self.optimization_config.enable_sip_rewriting {
             let mut sip_rewriter = sip_rewriting::SipRewriter::new();
-            self.ir_nodes = self.ir_nodes
+            self.ir_nodes = self
+                .ir_nodes
                 .iter()
                 .map(|ir| sip_rewriter.rewrite(ir.clone()))
                 .collect();
@@ -562,12 +587,16 @@ impl DatalogEngine {
         // Module 09: Subplan Sharing (common subexpression elimination)
         if self.optimization_config.enable_subplan_sharing {
             let subplan_sharer = subplan_sharing::SubplanSharer::new();
-            let (optimized_irs, shared_views) = subplan_sharer.share_subplans(self.ir_nodes.clone());
+            let (optimized_irs, shared_views) =
+                subplan_sharer.share_subplans(self.ir_nodes.clone());
             self.ir_nodes = optimized_irs;
             // Store shared views - they will be executed BEFORE main rules
             self.shared_views = shared_views;
             if std::env::var("DATALOG_DEBUG").is_ok() && !self.shared_views.is_empty() {
-                eprintln!("DEBUG optimize_ir: created {} shared views", self.shared_views.len());
+                eprintln!(
+                    "DEBUG optimize_ir: created {} shared views",
+                    self.shared_views.len()
+                );
                 for (name, _ir) in &self.shared_views {
                     eprintln!("  - {}", name);
                 }
@@ -577,7 +606,8 @@ impl DatalogEngine {
         // Module 10: Boolean Specialization (semiring selection)
         if self.optimization_config.enable_boolean_specialization {
             let mut bool_specializer = boolean_specialization::BooleanSpecializer::new();
-            self.ir_nodes = self.ir_nodes
+            self.ir_nodes = self
+                .ir_nodes
                 .iter()
                 .map(|ir| {
                     let (optimized_ir, _annotation) = bool_specializer.specialize(ir.clone());
@@ -588,7 +618,8 @@ impl DatalogEngine {
 
         // Module 06: Basic Optimizations (always applied)
         let optimizer = Optimizer::new();
-        self.ir_nodes = self.ir_nodes
+        self.ir_nodes = self
+            .ir_nodes
             .iter()
             .map(|ir| optimizer.optimize(ir.clone()))
             .collect();
@@ -603,9 +634,7 @@ impl DatalogEngine {
     pub fn execute_ir(&self, ir: &IRNode) -> Result<Vec<Tuple2>, String> {
         // Execute as Tuples and convert to Tuple2
         let tuples = self.execute_ir_tuples(ir)?;
-        Ok(tuples.iter()
-            .filter_map(|t| t.to_pair())
-            .collect())
+        Ok(tuples.iter().filter_map(|t| t.to_pair()).collect())
     }
 
     /// Generate and execute Differential Dataflow code (arbitrary arity)
@@ -618,9 +647,7 @@ impl DatalogEngine {
 
         // Load input data (legacy format - convert to Tuple)
         for (relation, data) in &self.input_data {
-            let tuples: Vec<Tuple> = data.iter()
-                .map(|&(a, b)| Tuple::from_pair(a, b))
-                .collect();
+            let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
             codegen.add_input(relation.clone(), tuples);
         }
 
@@ -680,49 +707,66 @@ impl DatalogEngine {
     fn detect_recursion_info(&self, rule_heads: &[String]) -> Vec<Option<String>> {
         let debug = std::env::var("DATALOG_DEBUG").is_ok();
 
-        self.ir_nodes.iter().enumerate().map(|(i, ir)| {
-            let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-            if let IRNode::Union { inputs } = ir {
-                let is_recursive = CodeGenerator::references_relation(ir, &head_name);
-                if debug {
-                    eprintln!(
-                        "DEBUG: IR[{}] head='{}' is Union with {} inputs, recursive={}",
-                        i, head_name, inputs.len(), is_recursive
-                    );
-                }
-                if is_recursive {
-                    Some(head_name)
+        self.ir_nodes
+            .iter()
+            .enumerate()
+            .map(|(i, ir)| {
+                let head_name = rule_heads.get(i).cloned().unwrap_or_default();
+                if let IRNode::Union { inputs } = ir {
+                    let is_recursive = CodeGenerator::references_relation(ir, &head_name);
+                    if debug {
+                        eprintln!(
+                            "DEBUG: IR[{}] head='{}' is Union with {} inputs, recursive={}",
+                            i,
+                            head_name,
+                            inputs.len(),
+                            is_recursive
+                        );
+                    }
+                    if is_recursive {
+                        Some(head_name)
+                    } else {
+                        None
+                    }
                 } else {
+                    if debug {
+                        eprintln!("DEBUG: IR[{}] head='{}' is not Union", i, head_name);
+                    }
                     None
                 }
-            } else {
-                if debug {
-                    eprintln!("DEBUG: IR[{}] head='{}' is not Union", i, head_name);
-                }
-                None
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Load all input data into a CodeGenerator
-    fn load_inputs_into_codegen(&self, codegen: &mut CodeGenerator, accumulated: &HashMap<String, Vec<Tuple>>) {
+    fn load_inputs_into_codegen(
+        &self,
+        codegen: &mut CodeGenerator,
+        accumulated: &HashMap<String, Vec<Tuple>>,
+    ) {
         let debug = std::env::var("DATALOG_DEBUG").is_ok();
 
         // Load legacy Tuple2 format (convert to Tuple)
         for (relation, data) in &self.input_data {
             if debug {
-                eprintln!("DEBUG: loading input_data['{}'] = {} tuples (legacy)", relation, data.len());
+                eprintln!(
+                    "DEBUG: loading input_data['{}'] = {} tuples (legacy)",
+                    relation,
+                    data.len()
+                );
             }
-            let tuples: Vec<Tuple> = data.iter()
-                .map(|&(a, b)| Tuple::from_pair(a, b))
-                .collect();
+            let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
             codegen.add_input(relation.clone(), tuples);
         }
 
         // Load production format (arbitrary arity tuples)
         for (relation, data) in &self.input_tuples {
             if debug {
-                eprintln!("DEBUG: loading input_tuples['{}'] = {} tuples", relation, data.len());
+                eprintln!(
+                    "DEBUG: loading input_tuples['{}'] = {} tuples",
+                    relation,
+                    data.len()
+                );
                 for t in data.iter().take(3) {
                     eprintln!("  - {:?}", t);
                 }
@@ -733,7 +777,11 @@ impl DatalogEngine {
         // Load accumulated results from previously executed rules
         for (rel_name, rel_data) in accumulated {
             if debug {
-                eprintln!("DEBUG: loading accumulated['{}'] = {} tuples", rel_name, rel_data.len());
+                eprintln!(
+                    "DEBUG: loading accumulated['{}'] = {} tuples",
+                    rel_name,
+                    rel_data.len()
+                );
             }
             codegen.add_input(rel_name.clone(), rel_data.clone());
         }
@@ -755,7 +803,11 @@ impl DatalogEngine {
             let view_results = codegen.execute(view_ir)?;
 
             if debug {
-                eprintln!("DEBUG: shared view '{}' produced {} tuples", view_name, view_results.len());
+                eprintln!(
+                    "DEBUG: shared view '{}' produced {} tuples",
+                    view_name,
+                    view_results.len()
+                );
             }
 
             results.insert(view_name.clone(), view_results);
@@ -780,7 +832,10 @@ impl DatalogEngine {
         self.build_ir()?;
 
         if debug {
-            eprintln!("DEBUG execute_tuples: built {} IR nodes", self.ir_nodes.len());
+            eprintln!(
+                "DEBUG execute_tuples: built {} IR nodes",
+                self.ir_nodes.len()
+            );
         }
 
         // Step 2: Detect recursion BEFORE optimization (optimization destroys Union structure)
@@ -829,7 +884,10 @@ impl DatalogEngine {
     /// Execute all rules in the program
     ///
     /// Returns a map from rule index to results.
-    pub fn execute_all_rules(&mut self, source: &str) -> Result<HashMap<usize, Vec<Tuple2>>, String> {
+    pub fn execute_all_rules(
+        &mut self,
+        source: &str,
+    ) -> Result<HashMap<usize, Vec<Tuple2>>, String> {
         // Pipeline
         self.parse(source)?;
         self.build_ir()?;
@@ -849,7 +907,10 @@ impl DatalogEngine {
     ///
     /// Returns both results and a trace of all pipeline stages.
     /// Useful for debugging and understanding query processing.
-    pub fn execute_with_trace(&mut self, source: &str) -> Result<(Vec<Tuple2>, PipelineTrace), String> {
+    pub fn execute_with_trace(
+        &mut self,
+        source: &str,
+    ) -> Result<(Vec<Tuple2>, PipelineTrace), String> {
         let mut trace = PipelineTrace::new();
 
         // Stage 1: Parse
@@ -880,7 +941,10 @@ impl DatalogEngine {
     /// Execute all rules with full pipeline tracing
     ///
     /// Returns results for each rule and a complete pipeline trace.
-    pub fn execute_all_with_trace(&mut self, source: &str) -> Result<(HashMap<usize, Vec<Tuple2>>, PipelineTrace), String> {
+    pub fn execute_all_with_trace(
+        &mut self,
+        source: &str,
+    ) -> Result<(HashMap<usize, Vec<Tuple2>>, PipelineTrace), String> {
         let mut trace = PipelineTrace::new();
 
         // Stage 1: Parse
@@ -946,17 +1010,13 @@ impl DatalogEngine {
         // Execute
         let mut codegen = CodeGenerator::new();
         if let Some(data) = self.input_data.get(relation) {
-            let tuples: Vec<Tuple> = data.iter()
-                .map(|&(a, b)| Tuple::from_pair(a, b))
-                .collect();
+            let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
             codegen.add_input(relation.to_string(), tuples);
         }
 
         let result_tuples = codegen.execute(&optimized_ir)?;
         // Convert to Tuple2 for legacy return type
-        let results: Vec<Tuple2> = result_tuples.iter()
-            .filter_map(|t| t.to_pair())
-            .collect();
+        let results: Vec<Tuple2> = result_tuples.iter().filter_map(|t| t.to_pair()).collect();
         Ok(results)
     }
 

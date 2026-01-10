@@ -120,7 +120,7 @@ fn generate_filter(schema: &TupleSchema, predicate: &Predicate) {
 // GOOD: Focused modules
 // statement/
 //   mod.rs          - Re-exports and Statement enum
-//   meta.rs         - Meta command parsing (.db, .rule, .load)
+//   meta.rs         - Meta command parsing (.kg, .rule, .load)
 //   schema.rs       - Schema declaration parsing
 //   data.rs         - Insert/Delete/Update operations
 //   serialize.rs    - JSON serialization types
@@ -528,7 +528,7 @@ Syntax: top_k<10, score, desc>
 refactor: split statement.rs into focused modules
 
 Improves maintainability by separating concerns:
-- meta.rs: .db, .rule, .load commands
+- meta.rs: .kg, .rule, .load commands
 - schema.rs: type declarations
 - data.rs: insert/delete/update
 ```

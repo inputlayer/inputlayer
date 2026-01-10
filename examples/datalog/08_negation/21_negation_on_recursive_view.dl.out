@@ -1,18 +1,22 @@
-Executing script: examples/datalog/08_negation/21_negation_on_recursive_view.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_rec_view
-Database 'test_neg_rec_view' created.
-Switched to database: test_neg_rec_view
-> .db use test_neg_rec_view
-Switched to database: test_neg_rec_view
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_rec_view
+Knowledge graph 'test_neg_rec_view' created.
+Switched to knowledge graph: test_neg_rec_view
+> .kg use test_neg_rec_view
+Switched to knowledge graph: test_neg_rec_view
 > +edge[(1, 2), (2, 3), (3, 4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +node[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
-Inserted 5 facts into 'node'.
+Inserted 5 fact(s) into 'node'.
 > +reach(X, Y) :- edge(X, Y).
 Rule 'reach' registered.
 > +reach(X, Z) :- reach(X, Y), edge(Y, Z).
-Rule added to 'reach' (2 rules total).
+Rule 'reach' registered.
 > ?- reach(1, X).
 3 rows:
   (1, 2)
@@ -24,7 +28,7 @@ Rule 'unreachable' registered.
 2 rows:
   (1, 0)
   (5, 0)
-> .db use default
-Switched to database: default
-> .db drop test_neg_rec_view
-Database 'test_neg_rec_view' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_rec_view
+Knowledge graph 'test_neg_rec_view' dropped.

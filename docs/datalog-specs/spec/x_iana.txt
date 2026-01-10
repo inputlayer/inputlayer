@@ -1,0 +1,92 @@
+Media type name: application
+Media subtype name: vnd.datalog
+
+Required parameters: N/A
+
+Optional parameters:
+
+The optional "features" parameter allows the transport to identify language
+features used within the representation. The value of this parameter is a
+comma-separated list of feature pragma identifiers supported by the
+specification. Feature pragmas exist to turn on/off certain language
+capabilities, and the purpose of this parameter is to save a client from
+having to parse a document if the features identified in the parameter are
+unsupported by them.
+
+Feature identifiers conform to the following EBNF production.
+
+    id ::= LC_ALPHA ( ALPHA | DIGIT | UNDERSCORE )* ;
+
+If this parameter is specified more than once its values MUST be aggregated
+into a set, removing duplicates.
+
+The optional "dialect" parameter identifies the tool which generated the
+document, there are some existing tools with extensive usage that deviate from
+this core specification. Dialect identifiers conform to the same `id`
+production described for feature identifiers.
+
+If this parameter is specified more than once, the first value MUST be used
+and any subsequent value MUST be discarded.
+
+Encoding considerations: 8bit
+
+The content encoding of a Datalog text document MUST be UTF-8
+
+Security considerations:
+
+This media type does include program code for a Datalog interpreter to
+execute. However, as Datalog is a restricted deductive logic language its
+execution environment is limited to entailment and query, and not capable of
+general purpose programming.
+
+The Datalog language does contain references to additional resources that may
+be required to complete a program. For example, an "input" processing
+instruction will add facts from an external resource (using IRIs) to an
+extensional relation whereas the "output" processing instruction will be some
+local resource that may be written to. The ability to include malicious data
+in an input file is limited by the supported representations such as CSV. The
+ability to write to a local system may be intercepted by a parser to redirect
+to safe locations, and as such the allowed reference is always relative.
+
+Privacy and integrity services are not required, or provided, by this
+specification.
+
+Interoperability considerations:
+
+A number of vendors have extended Datalog with additional syntax, this has
+been a general problem for some years. The introduction of a common standard,
+and support for the "dialect" parameter will help clients understand the
+potential parsing issues of a specific document.
+
+Published specification:
+
+https://datalog-specs.info/vnd_datalog_text/abstract.html;
+Version: 1.0, 2 April 2022.
+
+Applications which use this media:
+
+Applications that need to upload, download, or transfer Datalog programs.
+
+Fragment identifier considerations: None identified by this specification.
+
+Additional information:
+
+1. Deprecated alias names for this type: N/A
+2. Magic number(s): N/A
+3. File extension(s): dl
+4. Macintosh file type code: TEXT
+5. Object Identifiers: N/A
+
+Person & email address to contact for further information:
+
+Simon Johnston, johnstonskj@gmail.com
+
+Intended usage: COMMON
+
+Restrictions on usage: None identified by this specification.
+
+Author: Simon Johnston, johnstonskj@gmail.com
+
+Change controller: N/A
+
+Provisional registration? (standards tree only): N/A

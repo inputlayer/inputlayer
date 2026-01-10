@@ -1,21 +1,37 @@
-Executing script: examples/datalog/28_docs_coverage/18_repl_guide_workflow.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create repl_workflow
-Database 'repl_workflow' created.
-Switched to database: repl_workflow
-> .db use repl_workflow
-Switched to database: repl_workflow
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_workflow
+Knowledge graph 'repl_workflow' created.
+Switched to knowledge graph: repl_workflow
+> .kg use repl_workflow
+Switched to knowledge graph: repl_workflow
 > +user(id: int, name: string).
-Persistent schema 'user' declared: (id: Base(Int), name: Base(String))
+Schema 'user' declared (persistent).
 > +order(id: int, user_id: int, amount: float).
-Persistent schema 'order' declared: (id: Base(Int), user_id: Base(Int), amount: Base(Float))
+Schema 'order' declared (persistent).
 > +user[(1, "alice"), (2, "bob"), (3, "carol")].
-Inserted 3 facts into 'user'.
+Inserted 3 fact(s) into 'user'.
 > +order[(101, 1, 1500.0), (102, 1, 800.0), (103, 2, 200.0), (104, 1, 2000.0)].
-Inserted 4 facts into 'order'.
+Inserted 4 fact(s) into 'order'.
 > +high_value_customer(UserId) :- order(_, UserId, Amount), Amount > 1000.
-Rule added to 'high_value_customer' (1 rules total).
+Rule 'high_value_customer' registered.
 > ?- high_value_customer(UserId).
 No results.
 > +customer_spend(UserId, sum<Amount>) :- order(_, UserId, Amount).
-Script error: Line 26: Parse error: Invalid term: 'sum<Amount>'
+Rule 'customer_spend' registered.
+> ?- customer_spend(UserId, Total).
+2 rows:
+  (1, 4300)
+  (2, 200)
+> +vip(UserId, Total) :- high_value_customer(UserId), customer_spend(UserId, Total), Total > 3000.
+Rule 'vip' registered.
+> ?- vip(User, Spend).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_workflow
+Knowledge graph 'repl_workflow' dropped.

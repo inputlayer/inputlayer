@@ -1,32 +1,32 @@
-// Arity Variation Tests - 2-column source relations (baseline)
-// This is the known-working baseline for arithmetic operations
+% Arity Variation Tests - 2-column source relations (baseline)
+% This is the known-working baseline for arithmetic operations
 
-.db create test_arity_2col
-.db use test_arity_2col
+.kg create test_arity_2col
+.kg use test_arity_2col
 
-// 2-column source relations - these should all work correctly
+% 2-column source relations - these should all work correctly
 +src2[(1, 5), (2, 10), (3, 0), (4, -5)].
 +link[(1, 100), (2, 200), (3, 300), (4, 400)].
 
-// Test increment (D+1)
+% Test increment (D+1)
 inc_result(Y, D+1) :- src2(X, D), link(X, Y).
 ?- inc_result(A, B).
 
-// Test decrement (D-1)
+% Test decrement (D-1)
 dec_result(Y, D-1) :- src2(X, D), link(X, Y).
 ?- dec_result(A, B).
 
-// Test multiplication (D*2)
+% Test multiplication (D*2)
 mul_result(Y, D*2) :- src2(X, D), link(X, Y).
 ?- mul_result(A, B).
 
-// Test addition with constant (D+10)
+% Test addition with constant (D+10)
 add_result(Y, D+10) :- src2(X, D), link(X, Y).
 ?- add_result(A, B).
 
-// Test with all variables bound (no wildcards)
+% Test with all variables bound (no wildcards)
 full_bind(X, Y, D+1) :- src2(X, D), link(X, Y).
 ?- full_bind(A, B, C).
 
-.db use default
-.db drop test_arity_2col
+.kg use default
+.kg drop test_arity_2col

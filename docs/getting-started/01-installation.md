@@ -78,8 +78,8 @@ inputlayer>
 Try a simple command:
 
 ```
-inputlayer> .db list
-Databases:
+inputlayer> .kg list
+Knowledge Graphs:
   default
 ```
 
@@ -98,7 +98,7 @@ InputLayer works out of the box with sensible defaults. For customization, creat
 ```toml
 [storage]
 data_dir = "~/.inputlayer/data"
-default_database = "default"
+default_knowledge_graph = "default"
 
 [storage.performance]
 num_threads = 4
@@ -117,7 +117,7 @@ By default, InputLayer stores data in:
 The data directory contains:
 ```
 ~/.inputlayer/data/
-├── default/           # Default database
+├── default/           # Default knowledge graph
 │   ├── relations/     # Base fact storage
 │   └── rules/         # Persistent rule definitions
 ├── persist/           # WAL and batch files

@@ -263,10 +263,10 @@ src/
 ├── storage/               # Persistence layer
 ├── storage_engine/        # Multi-database engine
 ├── execution/             # Runtime (timeout, limits)
-├── protocol/              # RPC services
-│   ├── stubs/             # Service definitions
-│   ├── generated/         # rpcnet-gen output
-│   └── unified_handler.rs # Service implementations
+├── protocol/              # Network protocol
+│   ├── rest/              # REST API (Axum + OpenAPI)
+│   ├── handler.rs         # Request handler
+│   └── wire.rs            # Wire format utilities
 └── bin/
     ├── server.rs          # inputlayer-server
     └── client.rs          # inputlayer-client
@@ -279,7 +279,7 @@ src/
 InputLayer is a **complete, production-ready Datalog engine** with:
 - Full compilation pipeline (M04-M11)
 - Persistent multi-database storage
-- RPC protocol with QUIC+TLS
+- REST API with OpenAPI documentation
 - Vector and temporal operations
 - Comprehensive test coverage
 - Clean, well-documented codebase

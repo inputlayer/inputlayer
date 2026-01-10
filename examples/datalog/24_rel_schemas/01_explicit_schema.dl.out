@@ -1,18 +1,22 @@
-Executing script: examples/datalog/24_rel_schemas/01_explicit_schema.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rel_schema
-Database 'test_rel_schema' created.
-Switched to database: test_rel_schema
-> .db use test_rel_schema
-Switched to database: test_rel_schema
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_schema
+Knowledge graph 'test_rel_schema' created.
+Switched to knowledge graph: test_rel_schema
+> .kg use test_rel_schema
+Switched to knowledge graph: test_rel_schema
 > +employee(emp_id: int, name: string, dept_id: int).
-Persistent schema 'employee' declared: (emp_id: Base(Int), name: Base(String), dept_id: Base(Int))
+Schema 'employee' declared (persistent).
 > +department(dept_id: int, dept_name: string).
-Persistent schema 'department' declared: (dept_id: Base(Int), dept_name: Base(String))
+Schema 'department' declared (persistent).
 > +employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)].
-Inserted 3 facts into 'employee'.
+Inserted 3 fact(s) into 'employee'.
 > +department[(10, "Engineering"), (20, "Sales")].
-Inserted 2 facts into 'department'.
+Inserted 2 fact(s) into 'department'.
 > ?- employee(Id, Name, Dept).
 3 rows:
   (1, "Alice", 10)
@@ -29,7 +33,7 @@ Rule 'emp_dept' registered.
   ("Alice", "Engineering")
   ("Bob", "Engineering")
   ("Charlie", "Sales")
-> .db use default
-Switched to database: default
-> .db drop test_rel_schema
-Database 'test_rel_schema' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_schema
+Knowledge graph 'test_rel_schema' dropped.

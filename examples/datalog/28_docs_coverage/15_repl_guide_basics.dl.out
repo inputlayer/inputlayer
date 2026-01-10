@@ -1,16 +1,20 @@
-Executing script: examples/datalog/28_docs_coverage/15_repl_guide_basics.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create repl_guide
-Database 'repl_guide' created.
-Switched to database: repl_guide
-> .db use repl_guide
-Switched to database: repl_guide
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_guide
+Knowledge graph 'repl_guide' created.
+Switched to knowledge graph: repl_guide
+> .kg use repl_guide
+Switched to knowledge graph: repl_guide
 > +edge(1, 2).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > +edge[(2, 3), (3, 4)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +person("alice", 30, "engineering").
-Inserted 1 fact into 'person'.
+Inserted 1 fact(s) into 'person'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)
@@ -20,35 +24,36 @@ Inserted 1 fact into 'person'.
 1 rows:
   ("alice", 30, "engineering")
 > -edge(1, 2).
-Deleted fact from 'edge'.
+Deleted 1 facts from 'edge'.
 > ?- edge(X, Y).
 2 rows:
   (2, 3)
   (3, 4)
 > +edge(10, 20).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > +edge(15, 25).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > -edge(X, Y) :- edge(X, Y), X > 10.
-Deleted 1 facts from 'edge'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- edge(X, Y).
-3 rows:
+4 rows:
   (2, 3)
   (3, 4)
   (10, 20)
+  (15, 25)
 > +counter(1, 0).
-Inserted 1 fact into 'counter'.
+Inserted 1 fact(s) into 'counter'.
 > ?- counter(Id, Val).
 1 rows:
   (1, 0)
 > -counter(1, 0).
-Deleted fact from 'counter'.
+Deleted 1 facts from 'counter'.
 > +counter(1, 5).
-Inserted 1 fact into 'counter'.
+Inserted 1 fact(s) into 'counter'.
 > ?- counter(Id, Val).
 1 rows:
   (1, 5)
-> .db use default
-Switched to database: default
-> .db drop repl_guide
-Database 'repl_guide' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_guide
+Knowledge graph 'repl_guide' dropped.

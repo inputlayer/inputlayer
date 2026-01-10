@@ -1,28 +1,28 @@
-// Test: Negation on Simple View
-// Category: 08_negation
-// Description: Tests negation where the excluded relation is a computed view
-// This test verifies that negation works on views, not just base relations
+% Test: Negation on Simple View
+% Category: 08_negation
+% Description: Tests negation where the excluded relation is a computed view
+% This test verifies that negation works on views, not just base relations
 
-.db create test_neg_view
-.db use test_neg_view
+.kg create test_neg_view
+.kg use test_neg_view
 
-// Base relations
+% Base relations
 +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
 +exclude_ids[(2, 0), (4, 0)].
 
-// Simple view that just wraps data
+% Simple view that just wraps data
 +data_view(X, Y) :- data(X, Y).
 
-// Query the view directly - should work
+% Query the view directly - should work
 ?- data_view(X, Y).
 
-// Now use negation on the view
-// This should exclude IDs 2 and 4 from data_view
+% Now use negation on the view
+% This should exclude IDs 2 and 4 from data_view
 +result(X, Y) :- data_view(X, Y), !exclude_ids(X, _).
 ?- result(X, Y).
 
-// Expected: (1, 10), (3, 30), (5, 50)
+% Expected: (1, 10), (3, 30), (5, 50)
 
-// Cleanup
-.db use default
-.db drop test_neg_view
+% Cleanup
+.kg use default
+.kg drop test_neg_view

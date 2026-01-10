@@ -1,47 +1,47 @@
-// Test: Recursion + Arithmetic + Aggregation Combined
-// Category: Advanced Patterns
-// Verifies: All three features working together
-// CRITICAL: Complex integration test
+% Test: Recursion + Arithmetic + Aggregation Combined
+% Category: Advanced Patterns
+% Verifies: All three features working together
+% CRITICAL: Complex integration test
 
-.db create test_rec_arith_agg
-.db use test_rec_arith_agg
+.kg create test_rec_arith_agg
+.kg use test_rec_arith_agg
 
-// Weighted graph: edge(from, to, weight)
+% Weighted graph: edge(from, to, weight)
 +edge[(1, 2, 10), (2, 3, 20), (3, 4, 15), (1, 3, 50), (2, 4, 25)].
 
-// Compute all paths with total weight (recursion + arithmetic)
-// Base case: direct edges
+% Compute all paths with total weight (recursion + arithmetic)
+% Base case: direct edges
 +path_weight(X, Y, W) :- edge(X, Y, W).
 
-// Recursive case: extend path, accumulate weight
+% Recursive case: extend path, accumulate weight
 +path_weight(X, Z, W1+W2) :- path_weight(X, Y, W1), edge(Y, Z, W2).
 
-// Query all path weights
+% Query all path weights
 ?- path_weight(X, Y, W).
 
-// Expected paths from 1:
-// 1->2: 10
-// 1->3: 50 (direct) and 30 (via 2)
-// 1->4: 35 (1->2->4), 45 (1->2->3->4), 65 (1->3->4)
+% Expected paths from 1:
+% 1->2: 10
+% 1->3: 50 (direct) and 30 (via 2)
+% 1->4: 35 (1->2->4), 45 (1->2->3->4), 65 (1->3->4)
 
-// Find minimum weight path using aggregation
+% Find minimum weight path using aggregation
 +min_path(X, Y, min<W>) :- path_weight(X, Y, W).
 ?- min_path(X, Y, W).
 
-// Expected: 1->2: 10, 1->3: 30, 1->4: 35, 2->3: 20, 2->4: 25, 3->4: 15
+% Expected: 1->2: 10, 1->3: 30, 1->4: 35, 2->3: 20, 2->4: 25, 3->4: 15
 
-// Count number of distinct paths between each pair
+% Count number of distinct paths between each pair
 +path_count(X, Y, count<W>) :- path_weight(X, Y, W).
 ?- path_count(X, Y, C).
 
-// Total weight of all paths from node 1
+% Total weight of all paths from node 1
 +total_from_1(sum<W>) :- path_weight(1, _, W).
 ?- total_from_1(T).
 
-// Average path weight from node 1
+% Average path weight from node 1
 +avg_from_1(avg<W>) :- path_weight(1, _, W).
 ?- avg_from_1(A).
 
-// Cleanup
-.db use default
-.db drop test_rec_arith_agg
+% Cleanup
+.kg use default
+.kg drop test_rec_arith_agg

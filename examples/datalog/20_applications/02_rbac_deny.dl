@@ -1,37 +1,37 @@
-// Test: RBAC with Deny Rules
-// Category: Applications
-// Verifies: Permission system with explicit denials using negation
+% Test: RBAC with Deny Rules
+% Category: Applications
+% Verifies: Permission system with explicit denials using negation
 
-.db create test_rbac_deny
-.db use test_rbac_deny
+.kg create test_rbac_deny
+.kg use test_rbac_deny
 
-// Users and their roles
+% Users and their roles
 +user_role[(1, 100), (2, 100), (3, 101), (4, 102)].
 
-// Role permissions (allow)
+% Role permissions (allow)
 +role_allow[(100, 1), (100, 2), (100, 3),   // role 100: perms 1,2,3
             (101, 1), (101, 2),              // role 101: perms 1,2
             (102, 1)].                       // role 102: perm 1
 
-// Explicit denials for specific users
+% Explicit denials for specific users
 +user_deny[(2, 3), (3, 2)].  // user 2 denied perm 3, user 3 denied perm 2
 
-// Base permissions from role
+% Base permissions from role
 +base_permission(User, Perm) :- user_role(User, Role), role_allow(Role, Perm).
 
-// Effective permission = base permission AND NOT denied
+% Effective permission = base permission AND NOT denied
 +effective_permission(User, Perm) :- base_permission(User, Perm), !user_deny(User, Perm).
 
-// Query base permissions
+% Query base permissions
 ?- base_permission(U, P).
 
-// Query effective permissions (after denials)
+% Query effective permissions (after denials)
 ?- effective_permission(U, P).
 
-// Find denied permissions
+% Find denied permissions
 +denied(User, Perm) :- base_permission(User, Perm), user_deny(User, Perm).
 ?- denied(U, P).
 
-// Cleanup
-.db use default
-.db drop test_rbac_deny
+% Cleanup
+.kg use default
+.kg drop test_rbac_deny

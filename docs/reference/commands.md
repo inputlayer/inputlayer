@@ -2,61 +2,61 @@
 
 Meta commands control the InputLayer environment. They start with a `.` prefix.
 
-## Database Commands
+## Knowledge Graph Commands
 
-### `.db`
+### `.kg`
 
-Show current database.
-
-```
-.db
-```
-
-**Output:**
-```
-Current database: mydb
-```
-
-### `.db list`
-
-List all databases.
+Show current knowledge graph.
 
 ```
-.db list
+.kg
 ```
 
 **Output:**
 ```
-Databases:
+Current knowledge graph: mykg
+```
+
+### `.kg list`
+
+List all knowledge graphs.
+
+```
+.kg list
+```
+
+**Output:**
+```
+Knowledge Graphs:
   default
-  mydb (current)
+  mykg (current)
   analytics
 ```
 
-### `.db create <name>`
+### `.kg create <name>`
 
-Create a new database.
-
-```
-.db create analytics
-```
-
-### `.db use <name>`
-
-Switch to a database.
+Create a new knowledge graph.
 
 ```
-.db use analytics
+.kg create analytics
 ```
 
-**Note:** Switching databases clears session rules and transient data.
+### `.kg use <name>`
 
-### `.db drop <name>`
-
-Delete a database and all its data.
+Switch to a knowledge graph.
 
 ```
-.db drop old_database
+.kg use analytics
+```
+
+**Note:** Switching knowledge graphs clears session rules and transient data.
+
+### `.kg drop <name>`
+
+Delete a knowledge graph and all its data.
+
+```
+.kg drop old_knowledge_graph
 ```
 
 **Warning:** This permanently deletes all relations, rules, and data.
@@ -292,7 +292,7 @@ Show system status.
 
 **Output:**
 ```
-Database: mydb
+Knowledge graph: mykg
 Relations: 5
 Rules: 3
 Session rules: 2
@@ -339,12 +339,12 @@ Unknown meta command: .foo
 ### Missing Arguments
 
 ```
-.db create
+.kg create
 ```
 
 **Output:**
 ```
-Usage: .db create <name>
+Usage: .kg create <name>
 ```
 
 ### Rule Not Found

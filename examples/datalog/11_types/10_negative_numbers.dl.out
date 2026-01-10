@@ -1,12 +1,16 @@
-Executing script: examples/datalog/11_types/10_negative_numbers.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_negative
-Database 'test_negative' created.
-Switched to database: test_negative
-> .db use test_negative
-Switched to database: test_negative
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_negative
+Knowledge graph 'test_negative' created.
+Switched to knowledge graph: test_negative
+> .kg use test_negative
+Switched to knowledge graph: test_negative
 > +temps[(1, -10), (2, 5), (3, -20), (4, 15), (5, 0)].
-Inserted 5 facts into 'temps'.
+Inserted 5 fact(s) into 'temps'.
 > +negatives(Id, T) :- temps(Id, T), T < 0.
 Rule 'negatives' registered.
 > ?- negatives(X, Y).
@@ -21,4 +25,4 @@ Rule 'non_neg' registered.
   (4, 15)
   (5, 0)
 > +minus_ten(Id, T-10) :- temps(Id, T).
-Script error: Line 20: Parse error: Invalid term: 'T-10'
+Script error: Parse error: Invalid term: 'T-10'

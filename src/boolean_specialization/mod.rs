@@ -318,7 +318,12 @@ impl BooleanSpecializer {
                     .collect(),
             },
 
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => IRNode::Aggregate {
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
                 input: Box::new(self.transform_for_semiring(*input, annotation)),
                 group_by,
                 aggregations,
@@ -399,11 +404,7 @@ impl BooleanSpecializer {
                 }
             }
 
-            IRNode::Join {
-                left,
-                right,
-                ..
-            } => {
+            IRNode::Join { left, right, .. } => {
                 // Join may introduce multiplicities
                 let left_ann = self.analyze_node(left);
                 let right_ann = self.analyze_node(right);
@@ -452,8 +453,7 @@ impl BooleanSpecializer {
                 for input in inputs.iter().skip(1) {
                     let child = self.analyze_node(input);
                     combined.semiring = combined.semiring.meet(&child.semiring);
-                    combined.needs_duplicates =
-                        combined.needs_duplicates || child.needs_duplicates;
+                    combined.needs_duplicates = combined.needs_duplicates || child.needs_duplicates;
                     combined.is_recursive = combined.is_recursive || child.is_recursive;
                 }
                 combined.reason = format!("union of {} inputs", inputs.len());
@@ -471,11 +471,7 @@ impl BooleanSpecializer {
                 }
             }
 
-            IRNode::Antijoin {
-                left,
-                right,
-                ..
-            } => {
+            IRNode::Antijoin { left, right, .. } => {
                 // Antijoin filters left based on right, similar to Join
                 let left_ann = self.analyze_node(left);
                 let right_ann = self.analyze_node(right);

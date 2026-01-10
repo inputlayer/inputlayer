@@ -1,27 +1,31 @@
-Executing script: examples/datalog/18_advanced_patterns/07_points_to.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_points_to
-Database 'test_points_to' created.
-Switched to database: test_points_to
-> .db use test_points_to
-Switched to database: test_points_to
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_points_to
+Knowledge graph 'test_points_to' created.
+Switched to knowledge graph: test_points_to
+> .kg use test_points_to
+Switched to knowledge graph: test_points_to
 > +alloc[(1, 101), (2, 102)].
-Inserted 2 facts into 'alloc'.
+Inserted 2 fact(s) into 'alloc'.
 > +store[(1, 2)].
-Inserted 1 fact into 'store'.
+Inserted 1 fact(s) into 'store'.
 > +load[(3, 1)].
-Inserted 1 fact into 'load'.
+Inserted 1 fact(s) into 'load'.
 > +pt(X, H) :- alloc(X, H).
 Rule 'pt' registered.
 > +pt(H, Z) :- store(P, Q), pt(P, H), pt(Q, Z).
-Rule added to 'pt' (2 rules total).
+Rule 'pt' registered.
 > +pt(X, Z) :- load(X, P), pt(P, H), pt(H, Z).
-Rule added to 'pt' (3 rules total).
+Rule 'pt' registered.
 > ?- pt(X, Y).
 2 rows:
   (1, 101)
   (2, 102)
-> .db use default
-Switched to database: default
-> .db drop test_points_to
-Database 'test_points_to' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_points_to
+Knowledge graph 'test_points_to' dropped.

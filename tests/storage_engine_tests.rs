@@ -1,7 +1,7 @@
 //! Comprehensive Storage Engine Integration Tests
 //!
 //! Tests for:
-//! - Multi-database operations
+//! - Multi-knowledge-graph operations
 //! - Persistence and recovery
 //! - Parallel query execution
 //! - Configuration loading
@@ -9,7 +9,6 @@
 //! - Thread safety
 
 use inputlayer::{Config, StorageEngine};
-use std::fs;
 use tempfile::TempDir;
 
 // ============================================================================
@@ -37,7 +36,7 @@ fn create_test_storage() -> (StorageEngine, TempDir) {
 #[test]
 fn test_config_default() {
     let config = Config::default();
-    assert_eq!(config.storage.default_database, "default");
+    assert_eq!(config.storage.default_knowledge_graph, "default");
     assert_eq!(config.storage.data_dir, std::path::PathBuf::from("./data"));
 }
 
@@ -55,75 +54,79 @@ fn test_config_thread_pool() {
 fn test_storage_engine_creation() {
     let (storage, _temp) = create_test_storage();
 
-    // Should have default database
-    let databases = storage.list_databases();
-    assert!(databases.contains(&"default".to_string()));
+    // Should have default knowledge graph
+    let knowledge_graphs = storage.list_knowledge_graphs();
+    assert!(knowledge_graphs.contains(&"default".to_string()));
 
-    // Should be using default database
-    assert_eq!(storage.current_database(), Some("default"));
+    // Should be using default knowledge graph
+    assert_eq!(storage.current_knowledge_graph(), Some("default"));
 }
 
 #[test]
-fn test_create_multiple_databases() {
+fn test_create_multiple_knowledge_graphs() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("db1").unwrap();
-    storage.create_database("db2").unwrap();
-    storage.create_database("db3").unwrap();
+    storage.create_knowledge_graph("kg1").unwrap();
+    storage.create_knowledge_graph("kg2").unwrap();
+    storage.create_knowledge_graph("kg3").unwrap();
 
-    let databases = storage.list_databases();
-    assert_eq!(databases.len(), 4); // default + 3 new
-    assert!(databases.contains(&"db1".to_string()));
-    assert!(databases.contains(&"db2".to_string()));
-    assert!(databases.contains(&"db3".to_string()));
+    let knowledge_graphs = storage.list_knowledge_graphs();
+    assert_eq!(knowledge_graphs.len(), 4); // default + 3 new
+    assert!(knowledge_graphs.contains(&"kg1".to_string()));
+    assert!(knowledge_graphs.contains(&"kg2".to_string()));
+    assert!(knowledge_graphs.contains(&"kg3".to_string()));
 }
 
 #[test]
-fn test_database_already_exists_error() {
+fn test_knowledge_graph_already_exists_error() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    let result = storage.create_database("test");
+    storage.create_knowledge_graph("test").unwrap();
+    let result = storage.create_knowledge_graph("test");
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("already exists"));
 }
 
 #[test]
-fn test_use_nonexistent_database() {
+fn test_use_nonexistent_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    let result = storage.use_database("nonexistent");
+    let result = storage.use_knowledge_graph("nonexistent");
     assert!(result.is_err());
 }
 
 #[test]
-fn test_drop_database() {
+fn test_drop_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("temp_db").unwrap();
-    assert!(storage.list_databases().contains(&"temp_db".to_string()));
+    storage.create_knowledge_graph("temp_kg").unwrap();
+    assert!(storage
+        .list_knowledge_graphs()
+        .contains(&"temp_kg".to_string()));
 
-    storage.drop_database("temp_db").unwrap();
-    assert!(!storage.list_databases().contains(&"temp_db".to_string()));
+    storage.drop_knowledge_graph("temp_kg").unwrap();
+    assert!(!storage
+        .list_knowledge_graphs()
+        .contains(&"temp_kg".to_string()));
 }
 
 #[test]
-fn test_cannot_drop_default_database() {
+fn test_cannot_drop_default_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    let result = storage.drop_database("default");
+    let result = storage.drop_knowledge_graph("default");
     assert!(result.is_err());
 }
 
 #[test]
-fn test_cannot_drop_current_database() {
+fn test_cannot_drop_current_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.use_database("test").unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage.use_knowledge_graph("test").unwrap();
 
-    let result = storage.drop_database("test");
+    let result = storage.drop_knowledge_graph("test");
     assert!(result.is_err());
 }
 
@@ -135,10 +138,12 @@ fn test_cannot_drop_current_database() {
 fn test_insert_and_query() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test_db").unwrap();
-    storage.use_database("test_db").unwrap();
+    storage.create_knowledge_graph("test_kg").unwrap();
+    storage.use_knowledge_graph("test_kg").unwrap();
 
-    storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
 
     let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
     assert_eq!(results.len(), 3);
@@ -151,12 +156,14 @@ fn test_insert_and_query() {
 fn test_insert_multiple_relations() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.use_database("default").unwrap();
+    storage.use_knowledge_graph("default").unwrap();
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
     storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
 
     let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-    let person_results = storage.execute_query("result(X,Y) :- person(X,Y).").unwrap();
+    let person_results = storage
+        .execute_query("result(X,Y) :- person(X,Y).")
+        .unwrap();
 
     assert_eq!(edge_results.len(), 2);
     assert_eq!(person_results.len(), 2);
@@ -166,8 +173,10 @@ fn test_insert_multiple_relations() {
 fn test_delete_tuples() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.use_database("default").unwrap();
-    storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+    storage.use_knowledge_graph("default").unwrap();
+    storage
+        .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+        .unwrap();
 
     storage.delete("edge", vec![(2, 3)]).unwrap();
 
@@ -177,20 +186,20 @@ fn test_delete_tuples() {
 }
 
 #[test]
-fn test_database_isolation() {
+fn test_knowledge_graph_isolation() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Insert data in db1
-    storage.create_database("db1").unwrap();
-    storage.use_database("db1").unwrap();
+    // Insert data in kg1
+    storage.create_knowledge_graph("kg1").unwrap();
+    storage.use_knowledge_graph("kg1").unwrap();
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
-    // Check db2 doesn't see db1's data
-    storage.create_database("db2").unwrap();
-    storage.use_database("db2").unwrap();
+    // Check kg2 doesn't see kg1's data
+    storage.create_knowledge_graph("kg2").unwrap();
+    storage.use_knowledge_graph("kg2").unwrap();
 
     let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-    assert_eq!(results.len(), 0); // No data in db2
+    assert_eq!(results.len(), 0); // No data in kg2
 }
 
 // ============================================================================
@@ -198,41 +207,49 @@ fn test_database_isolation() {
 // ============================================================================
 
 #[test]
-fn test_insert_into_specific_database() {
+fn test_insert_into_specific_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("db1").unwrap();
-    storage.create_database("db2").unwrap();
+    storage.create_knowledge_graph("kg1").unwrap();
+    storage.create_knowledge_graph("kg2").unwrap();
 
-    // Insert without switching databases
-    storage.use_database("default").unwrap();
-    storage.insert_into("db1", "edge", vec![(1, 2)]).unwrap();
-    storage.insert_into("db2", "edge", vec![(3, 4)]).unwrap();
+    // Insert without switching knowledge graphs
+    storage.use_knowledge_graph("default").unwrap();
+    storage.insert_into("kg1", "edge", vec![(1, 2)]).unwrap();
+    storage.insert_into("kg2", "edge", vec![(3, 4)]).unwrap();
 
-    // Verify data in correct databases
-    let db1_results = storage.execute_query_on("db1", "result(X,Y) :- edge(X,Y).").unwrap();
-    let db2_results = storage.execute_query_on("db2", "result(X,Y) :- edge(X,Y).").unwrap();
+    // Verify data in correct knowledge graphs
+    let kg1_results = storage
+        .execute_query_on("kg1", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
+    let kg2_results = storage
+        .execute_query_on("kg2", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
 
-    assert_eq!(db1_results, vec![(1, 2)]);
-    assert_eq!(db2_results, vec![(3, 4)]);
+    assert_eq!(kg1_results, vec![(1, 2)]);
+    assert_eq!(kg2_results, vec![(3, 4)]);
 
-    // Current database should still be default
-    assert_eq!(storage.current_database(), Some("default"));
+    // Current knowledge graph should still be default
+    assert_eq!(storage.current_knowledge_graph(), Some("default"));
 }
 
 #[test]
-fn test_execute_query_on_specific_database() {
+fn test_execute_query_on_specific_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.insert_into("test", "edge", vec![(1, 2), (2, 3)]).unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into("test", "edge", vec![(1, 2), (2, 3)])
+        .unwrap();
 
-    // Query without switching databases
-    let results = storage.execute_query_on("test", "result(X,Y) :- edge(X,Y).").unwrap();
+    // Query without switching knowledge graphs
+    let results = storage
+        .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+        .unwrap();
     assert_eq!(results.len(), 2);
 
-    // Current database unchanged
-    assert_eq!(storage.current_database(), Some("default"));
+    // Current knowledge graph unchanged
+    assert_eq!(storage.current_knowledge_graph(), Some("default"));
 }
 
 // ============================================================================
@@ -240,31 +257,35 @@ fn test_execute_query_on_specific_database() {
 // ============================================================================
 
 #[test]
-fn test_save_and_load_database() {
+fn test_save_and_load_knowledge_graph() {
     let temp = TempDir::new().unwrap();
 
-    // Create and populate database
+    // Create and populate knowledge graph
     {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("persist_test").unwrap();
-        storage.use_database("persist_test").unwrap();
-        storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+        storage.create_knowledge_graph("persist_test").unwrap();
+        storage.use_knowledge_graph("persist_test").unwrap();
+        storage
+            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+            .unwrap();
         storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
 
-        storage.save_database("persist_test").unwrap();
+        storage.save_knowledge_graph("persist_test").unwrap();
     }
 
-    // Load database in new storage engine instance
+    // Load knowledge graph in new storage engine instance
     {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.use_database("persist_test").unwrap();
+        storage.use_knowledge_graph("persist_test").unwrap();
 
         let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-        let person_results = storage.execute_query("result(X,Y) :- person(X,Y).").unwrap();
+        let person_results = storage
+            .execute_query("result(X,Y) :- person(X,Y).")
+            .unwrap();
 
         assert_eq!(edge_results.len(), 3);
         assert_eq!(person_results.len(), 2);
@@ -274,19 +295,19 @@ fn test_save_and_load_database() {
 }
 
 #[test]
-fn test_save_all_databases() {
+fn test_save_all_knowledge_graphs() {
     let temp = TempDir::new().unwrap();
 
-    // Create multiple databases
+    // Create multiple knowledge graphs
     {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("db1").unwrap();
-        storage.insert_into("db1", "data", vec![(1, 1)]).unwrap();
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.insert_into("kg1", "data", vec![(1, 1)]).unwrap();
 
-        storage.create_database("db2").unwrap();
-        storage.insert_into("db2", "data", vec![(2, 2)]).unwrap();
+        storage.create_knowledge_graph("kg2").unwrap();
+        storage.insert_into("kg2", "data", vec![(2, 2)]).unwrap();
 
         storage.save_all().unwrap();
     }
@@ -296,11 +317,15 @@ fn test_save_all_databases() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        let db1_results = storage.execute_query_on("db1", "result(X,Y) :- data(X,Y).").unwrap();
-        let db2_results = storage.execute_query_on("db2", "result(X,Y) :- data(X,Y).").unwrap();
+        let kg1_results = storage
+            .execute_query_on("kg1", "result(X,Y) :- data(X,Y).")
+            .unwrap();
+        let kg2_results = storage
+            .execute_query_on("kg2", "result(X,Y) :- data(X,Y).")
+            .unwrap();
 
-        assert_eq!(db1_results, vec![(1, 1)]);
-        assert_eq!(db2_results, vec![(2, 2)]);
+        assert_eq!(kg1_results, vec![(1, 1)]);
+        assert_eq!(kg2_results, vec![(2, 2)]);
     }
 }
 
@@ -312,17 +337,17 @@ fn test_persistence_metadata() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("test").unwrap();
+        storage.create_knowledge_graph("test").unwrap();
         storage.insert_into("test", "edge", vec![(1, 2)]).unwrap();
         storage.save_all().unwrap();
     }
 
     // Check metadata files exist (DD-native persistence layout)
-    // - metadata/databases.json: database registry
+    // - metadata/knowledge_graphs.json: knowledge graph registry
     // - persist/shards/test_edge.json: shard metadata (sanitized from "test:edge")
     // - persist/batches/*.parquet: batch files (created on flush)
     // - persist/wal/: WAL directory
-    assert!(temp.path().join("metadata/databases.json").exists());
+    assert!(temp.path().join("metadata/knowledge_graphs.json").exists());
     assert!(temp.path().join("persist/shards/test_edge.json").exists());
     assert!(temp.path().join("persist/batches").exists());
 }
@@ -332,24 +357,28 @@ fn test_persistence_metadata() {
 // ============================================================================
 
 #[test]
-fn test_parallel_queries_on_databases() {
+fn test_parallel_queries_on_knowledge_graphs() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create multiple databases with data
+    // Create multiple knowledge graphs with data
     for i in 1..=3 {
-        let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
-        storage.insert_into(&db_name, "edge", vec![(i, i + 1)]).unwrap();
+        let kg_name = format!("kg{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        storage
+            .insert_into(&kg_name, "edge", vec![(i, i + 1)])
+            .unwrap();
     }
 
     // Execute queries in parallel
     let queries = vec![
-        ("db1", "result(X,Y) :- edge(X,Y)."),
-        ("db2", "result(X,Y) :- edge(X,Y)."),
-        ("db3", "result(X,Y) :- edge(X,Y)."),
+        ("kg1", "result(X,Y) :- edge(X,Y)."),
+        ("kg2", "result(X,Y) :- edge(X,Y)."),
+        ("kg3", "result(X,Y) :- edge(X,Y)."),
     ];
 
-    let results = storage.execute_parallel_queries_on_databases(queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graphs(queries)
+        .unwrap();
 
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].1, vec![(1, 2)]);
@@ -358,22 +387,23 @@ fn test_parallel_queries_on_databases() {
 }
 
 #[test]
-fn test_same_query_on_multiple_databases() {
+fn test_same_query_on_multiple_knowledge_graphs() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create databases with different data
+    // Create knowledge graphs with different data
     for i in 1..=3 {
-        let db_name = format!("db{}", i);
-        storage.create_database(&db_name).unwrap();
-        storage.insert_into(&db_name, "edge", vec![(i * 10, i * 10 + 1)]).unwrap();
+        let kg_name = format!("kg{}", i);
+        storage.create_knowledge_graph(&kg_name).unwrap();
+        storage
+            .insert_into(&kg_name, "edge", vec![(i * 10, i * 10 + 1)])
+            .unwrap();
     }
 
-    // Execute same query on all databases
-    let databases = vec!["db1", "db2", "db3"];
-    let results = storage.execute_query_on_multiple_databases(
-        databases,
-        "result(X,Y) :- edge(X,Y)."
-    ).unwrap();
+    // Execute same query on all knowledge graphs
+    let knowledge_graphs = vec!["kg1", "kg2", "kg3"];
+    let results = storage
+        .execute_query_on_multiple_knowledge_graphs(knowledge_graphs, "result(X,Y) :- edge(X,Y).")
+        .unwrap();
 
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].1, vec![(10, 11)]);
@@ -382,13 +412,13 @@ fn test_same_query_on_multiple_databases() {
 }
 
 #[test]
-fn test_multiple_queries_on_same_database() {
+fn test_multiple_queries_on_same_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
-    storage.create_database("test").unwrap();
-    storage.insert_into("test", "edge", vec![
-        (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)
-    ]).unwrap();
+    storage.create_knowledge_graph("test").unwrap();
+    storage
+        .insert_into("test", "edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)])
+        .unwrap();
 
     // Execute multiple queries in parallel
     let queries = vec![
@@ -397,7 +427,9 @@ fn test_multiple_queries_on_same_database() {
         "q3(X,Y) :- edge(X,Y), X < 4.",
     ];
 
-    let results = storage.execute_parallel_queries_on_database("test", queries).unwrap();
+    let results = storage
+        .execute_parallel_queries_on_knowledge_graph("test", queries)
+        .unwrap();
 
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].len(), 5); // All edges
@@ -419,7 +451,7 @@ fn test_worker_pool_configuration() {
 // ============================================================================
 
 #[test]
-fn test_query_nonexistent_database() {
+fn test_query_nonexistent_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
     let result = storage.execute_query_on("nonexistent", "result(X,Y) :- edge(X,Y).");
@@ -427,12 +459,12 @@ fn test_query_nonexistent_database() {
 }
 
 #[test]
-fn test_insert_without_current_database() {
+fn test_insert_without_current_knowledge_graph() {
     let temp = TempDir::new().unwrap();
     let config = create_test_config(temp.path().to_path_buf());
     let mut storage = StorageEngine::new(config).unwrap();
 
-    // Drop default database and try to insert (should use current_database)
+    // Drop default knowledge graph and try to insert (should use current_knowledge_graph)
     // This should work because default is current
     let result = storage.insert("edge", vec![(1, 2)]);
     assert!(result.is_ok());
@@ -443,15 +475,15 @@ fn test_insert_without_current_database() {
 // ============================================================================
 
 #[test]
-fn test_multi_database_workflow() {
+fn test_multi_knowledge_graph_workflow() {
     let (mut storage, _temp) = create_test_storage();
 
-    // Create staging and production databases
-    storage.create_database("staging").unwrap();
-    storage.create_database("production").unwrap();
+    // Create staging and production knowledge graphs
+    storage.create_knowledge_graph("staging").unwrap();
+    storage.create_knowledge_graph("production").unwrap();
 
     // Add data to staging
-    storage.use_database("staging").unwrap();
+    storage.use_knowledge_graph("staging").unwrap();
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
     // Verify staging
@@ -459,7 +491,7 @@ fn test_multi_database_workflow() {
     assert_eq!(staging_results.len(), 2);
 
     // Add different data to production
-    storage.use_database("production").unwrap();
+    storage.use_knowledge_graph("production").unwrap();
     storage.insert("edge", vec![(10, 20), (20, 30)]).unwrap();
 
     // Verify production
@@ -468,7 +500,7 @@ fn test_multi_database_workflow() {
     assert!(prod_results.contains(&(10, 20)));
 
     // Verify isolation
-    storage.use_database("staging").unwrap();
+    storage.use_knowledge_graph("staging").unwrap();
     let staging_results2 = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
     assert!(!staging_results2.contains(&(10, 20))); // Production data not in staging
 }
@@ -482,9 +514,9 @@ fn test_persistence_with_updates() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("test").unwrap();
+        storage.create_knowledge_graph("test").unwrap();
         storage.insert_into("test", "edge", vec![(1, 2)]).unwrap();
-        storage.save_database("test").unwrap();
+        storage.save_knowledge_graph("test").unwrap();
     }
 
     // Load and update
@@ -492,9 +524,9 @@ fn test_persistence_with_updates() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.use_database("test").unwrap();
+        storage.use_knowledge_graph("test").unwrap();
         storage.insert("edge", vec![(2, 3), (3, 4)]).unwrap();
-        storage.save_database("test").unwrap();
+        storage.save_knowledge_graph("test").unwrap();
     }
 
     // Load and verify all data
@@ -502,7 +534,9 @@ fn test_persistence_with_updates() {
         let config = create_test_config(temp.path().to_path_buf());
         let mut storage = StorageEngine::new(config).unwrap();
 
-        let results = storage.execute_query_on("test", "result(X,Y) :- edge(X,Y).").unwrap();
+        let results = storage
+            .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+            .unwrap();
         assert_eq!(results.len(), 3);
         assert!(results.contains(&(1, 2)));
         assert!(results.contains(&(2, 3)));

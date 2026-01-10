@@ -21,23 +21,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.storage.data_dir = temp_dir.path().to_path_buf();
 
     println!("Data directory: {:?}", config.storage.data_dir);
-    println!("Thread pool size: {} (0 = all CPUs)\n", config.storage.performance.num_threads);
+    println!(
+        "Thread pool size: {} (0 = all CPUs)\n",
+        config.storage.performance.num_threads
+    );
 
     // Create storage engine
     let mut storage = StorageEngine::new(config)?;
 
-    println!("Available CPUs for parallel execution: {}\n", storage.num_cpus());
+    println!(
+        "Available CPUs for parallel execution: {}\n",
+        storage.num_cpus()
+    );
 
     // ========================================================================
     // Demo 1: Create Multiple Databases
     // ========================================================================
     println!("--- Demo 1: Creating Multiple Databases ---");
 
-    storage.create_database("analytics")?;
-    storage.create_database("staging")?;
-    storage.create_database("production")?;
+    storage.create_knowledge_graph("analytics")?;
+    storage.create_knowledge_graph("staging")?;
+    storage.create_knowledge_graph("production")?;
 
-    let databases = storage.list_databases();
+    let databases = storage.list_knowledge_graphs();
     println!("Created databases: {:?}\n", databases);
 
     // ========================================================================
@@ -45,21 +51,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================================================
     println!("--- Demo 2: Working with Analytics Database ---");
 
-    storage.use_database("analytics")?;
-    println!("Switched to database: {}", storage.current_database().unwrap());
+    storage.use_knowledge_graph("analytics")?;
+    println!(
+        "Switched to database: {}",
+        storage.current_knowledge_graph().unwrap()
+    );
 
     // Insert edge data
-    storage.insert("edge", vec![
-        (1, 2), (2, 3), (3, 4), (4, 5),
-        (2, 6), (6, 7), (7, 8)
-    ])?;
+    storage.insert(
+        "edge",
+        vec![(1, 2), (2, 3), (3, 4), (4, 5), (2, 6), (6, 7), (7, 8)],
+    )?;
     println!("Inserted 7 edges into 'edge' relation");
 
     // Insert person data
-    storage.insert("person", vec![
-        (1, 100), (2, 200), (3, 300),
-        (4, 400), (5, 500)
-    ])?;
+    storage.insert(
+        "person",
+        vec![(1, 100), (2, 200), (3, 300), (4, 400), (5, 500)],
+    )?;
     println!("Inserted 5 tuples into 'person' relation");
 
     // Query edge data
@@ -79,9 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================================================
     println!("\n--- Demo 3: Database Isolation ---");
 
-    storage.create_database("isolated")?;
-    storage.use_database("isolated")?;
-    println!("Switched to database: {}", storage.current_database().unwrap());
+    storage.create_knowledge_graph("isolated")?;
+    storage.use_knowledge_graph("isolated")?;
+    println!(
+        "Switched to database: {}",
+        storage.current_knowledge_graph().unwrap()
+    );
 
     // Try to query edge (should fail - no data in this database)
     match storage.execute_query("result(x,y) :- edge(x,y).") {
@@ -92,15 +104,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add some data to isolated database
     storage.insert("test", vec![(10, 20), (20, 30)])?;
     let results = storage.execute_query("result(x,y) :- test(x,y).")?;
-    println!("Inserted and queried 'test' relation: {} tuples", results.len());
+    println!(
+        "Inserted and queried 'test' relation: {} tuples",
+        results.len()
+    );
 
     // ========================================================================
     // Demo 4: Persistence
     // ========================================================================
     println!("\n--- Demo 4: Persistence ---");
 
-    storage.use_database("analytics")?;
-    storage.save_database("analytics")?;
+    storage.use_knowledge_graph("analytics")?;
+    storage.save_knowledge_graph("analytics")?;
     println!("Saved 'analytics' database to disk");
 
     storage.save_all()?;
@@ -119,13 +134,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let results = storage.execute_query_on("staging", "result(x,y) :- data(x,y).")?;
     println!("Queried 'staging' database: {} tuples", results.len());
 
-    println!("\nCurrent database is still: {}", storage.current_database().unwrap());
+    println!(
+        "\nCurrent database is still: {}",
+        storage.current_knowledge_graph().unwrap()
+    );
 
     // ========================================================================
     // Summary
     // ========================================================================
     println!("\n--- Summary ---");
-    let databases = storage.list_databases();
+    let databases = storage.list_knowledge_graphs();
     println!("Total databases: {}", databases.len());
     for db in &databases {
         println!("  - {}", db);

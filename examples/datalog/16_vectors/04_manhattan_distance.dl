@@ -1,22 +1,22 @@
-// Test: Manhattan Distance
-// Category: 16_vectors
-// Description: Tests Manhattan (L1) distance between vectors
+% Test: Manhattan Distance
+% Category: 16_vectors
+% Description: Tests Manhattan (L1) distance between vectors
 
-.db create test_vec_manhattan
-.db use test_vec_manhattan
+.kg create test_vec_manhattan
+.kg use test_vec_manhattan
 
-// Insert vectors on a grid: vectors(id, vector)
+% Insert vectors on a grid: vectors(id, vector)
 +vectors[(1, [0.0, 0.0]), (2, [1.0, 1.0]), (3, [2.0, 2.0]), (4, [3.0, 0.0])].
 
-// Insert query at origin
+% Insert query at origin
 +query[([0.0, 0.0])].
 
-// Calculate manhattan distance from query
+% Calculate manhattan distance from query
 l1_dist(Id, Dist) :- vectors(Id, V), query(Q), Dist = manhattan(V, Q).
 
-// Query distances
+% Query distances
 ?- l1_dist(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_vec_manhattan
+% Cleanup
+.kg use default
+.kg drop test_vec_manhattan

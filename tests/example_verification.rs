@@ -43,7 +43,7 @@ fn test_all_datalog_examples_present() {
 
     // Expected test categories
     let expected_categories = vec![
-        "01_database",
+        "01_knowledge_graph",
         "02_relations",
         "04_session",
         "06_joins",
@@ -72,7 +72,11 @@ fn test_all_datalog_examples_present() {
         dl_files.len()
     );
 
-    println!("Found {} datalog test files across {} categories", dl_files.len(), expected_categories.len());
+    println!(
+        "Found {} datalog test files across {} categories",
+        dl_files.len(),
+        expected_categories.len()
+    );
 }
 
 #[test]
@@ -104,8 +108,7 @@ fn test_all_rust_examples_present() {
         panic!("examples/rust directory does not exist!");
     }
 
-    let entries = fs::read_dir(examples_dir)
-        .expect("Failed to read examples/rust directory");
+    let entries = fs::read_dir(examples_dir).expect("Failed to read examples/rust directory");
 
     let mut rs_files: Vec<String> = entries
         .filter_map(|entry| {
@@ -140,8 +143,8 @@ fn test_examples_not_empty() {
     let dl_files = find_dl_files(examples_dir);
 
     for path in dl_files {
-        let content = fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!("Failed to read {:?}", path));
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {:?}", path));
 
         assert!(
             !content.trim().is_empty(),
@@ -182,17 +185,23 @@ fn test_output_files_not_empty() {
 // ============================================================================
 
 #[test]
-fn test_database_tests() {
-    let dir = Path::new("examples/datalog/01_database");
+fn test_knowledge_graph_tests() {
+    let dir = Path::new("examples/datalog/01_knowledge_graph");
     let files = find_dl_files(dir);
-    assert!(!files.is_empty(), "01_database should have at least one test");
+    assert!(
+        !files.is_empty(),
+        "01_knowledge_graph should have at least one test"
+    );
 }
 
 #[test]
 fn test_relations_tests() {
     let dir = Path::new("examples/datalog/02_relations");
     let files = find_dl_files(dir);
-    assert!(files.len() >= 3, "02_relations should have at least 3 tests (insert, bulk, delete)");
+    assert!(
+        files.len() >= 3,
+        "02_relations should have at least 3 tests (insert, bulk, delete)"
+    );
 }
 
 #[test]
@@ -206,14 +215,20 @@ fn test_joins_tests() {
 fn test_negation_tests() {
     let dir = Path::new("examples/datalog/08_negation");
     let files = find_dl_files(dir);
-    assert!(!files.is_empty(), "08_negation should have at least one test");
+    assert!(
+        !files.is_empty(),
+        "08_negation should have at least one test"
+    );
 }
 
 #[test]
 fn test_recursion_tests() {
     let dir = Path::new("examples/datalog/09_recursion");
     let files = find_dl_files(dir);
-    assert!(files.len() >= 2, "09_recursion should have at least 2 tests");
+    assert!(
+        files.len() >= 2,
+        "09_recursion should have at least 2 tests"
+    );
 }
 
 // ============================================================================
@@ -309,5 +324,8 @@ fn test_example_statistics() {
 
     // Verify minimum counts
     assert!(rust_count >= 4, "Should have at least 4 Rust examples");
-    assert!(datalog_count >= 20, "Should have at least 20 Datalog test files");
+    assert!(
+        datalog_count >= 20,
+        "Should have at least 20 Datalog test files"
+    );
 }

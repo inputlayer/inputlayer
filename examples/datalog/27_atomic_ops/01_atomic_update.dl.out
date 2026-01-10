@@ -1,36 +1,40 @@
-Executing script: examples/datalog/27_atomic_ops/01_atomic_update.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create atomic_update_test
-Database 'atomic_update_test' created.
-Switched to database: atomic_update_test
-> .db use atomic_update_test
-Switched to database: atomic_update_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create atomic_update_test
+Knowledge graph 'atomic_update_test' created.
+Switched to knowledge graph: atomic_update_test
+> .kg use atomic_update_test
+Switched to knowledge graph: atomic_update_test
 > +counter[(1, 0), (2, 10), (3, 20)].
-Inserted 3 facts into 'counter'.
+Inserted 3 fact(s) into 'counter'.
 > ?- counter(Id, Value).
 3 rows:
   (1, 0)
   (2, 10)
   (3, 20)
 > -counter(1, 0).
-Deleted fact from 'counter'.
+Deleted 1 facts from 'counter'.
 > +counter(1, 5).
-Inserted 1 fact into 'counter'.
+Inserted 1 fact(s) into 'counter'.
 > ?- counter(Id, Value).
 3 rows:
   (1, 5)
   (2, 10)
   (3, 20)
 > -counter(2, 10).
-Deleted fact from 'counter'.
+Deleted 1 facts from 'counter'.
 > +counter(2, 20).
-Inserted 1 fact into 'counter'.
+Inserted 1 fact(s) into 'counter'.
 > ?- counter(Id, Value).
 3 rows:
   (1, 5)
   (2, 20)
   (3, 20)
-> .db use default
-Switched to database: default
-> .db drop atomic_update_test
-Database 'atomic_update_test' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop atomic_update_test
+Knowledge graph 'atomic_update_test' dropped.

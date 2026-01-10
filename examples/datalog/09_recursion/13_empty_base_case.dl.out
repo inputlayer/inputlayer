@@ -1,31 +1,38 @@
-Executing script: examples/datalog/09_recursion/13_empty_base_case.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_empty_base
-Database 'test_empty_base' created.
-Switched to database: test_empty_base
-> .db use test_empty_base
-Switched to database: test_empty_base
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_base
+Knowledge graph 'test_empty_base' created.
+Switched to knowledge graph: test_empty_base
+> .kg use test_empty_base
+Switched to knowledge graph: test_empty_base
 > path(X, Y) :- edge(X, Y).
-No results for 'path'.
+No results.
 (session: 1 rule(s))
 > path(X, Z) :- edge(X, Y), path(Y, Z).
-No results for 'path'.
+No results.
 (session: 2 rule(s))
 > ?- path(X, Y).
 No results.
 > +edge[(1, 2), (2, 3)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > ?- path(X, Y).
 3 rows:
   (1, 2)
   (1, 3)
   (2, 3)
 > -edge(X, Y) :- edge(X, Y).
-Deleted 2 facts from 'edge'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- path(X, Y).
-No results.
-> .db use default
-Switched to database: default
-(Cleared 2 session rule(s))
-> .db drop test_empty_base
-Database 'test_empty_base' dropped.
+3 rows:
+  (1, 2)
+  (1, 3)
+  (2, 3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_empty_base
+Knowledge graph 'test_empty_base' dropped.

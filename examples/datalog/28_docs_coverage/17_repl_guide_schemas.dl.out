@@ -1,27 +1,31 @@
-Executing script: examples/datalog/28_docs_coverage/17_repl_guide_schemas.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create repl_schemas
-Database 'repl_schemas' created.
-Switched to database: repl_schemas
-> .db use repl_schemas
-Switched to database: repl_schemas
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create repl_schemas
+Knowledge graph 'repl_schemas' created.
+Switched to knowledge graph: repl_schemas
+> .kg use repl_schemas
+Switched to knowledge graph: repl_schemas
 > +employee(id: int, name: string, dept: string).
-Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(String))
+Schema 'employee' declared (persistent).
 > +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
-Inserted 2 facts into 'employee'.
+Inserted 2 fact(s) into 'employee'.
 > ?- employee(Id, Name, Dept).
 2 rows:
   (1, "alice", "engineering")
   (2, "bob", "sales")
 > +user(id: int, email: string).
-Persistent schema 'user' declared: (id: Base(Int), email: Base(String))
+Schema 'user' declared (persistent).
 > +user[(1, "alice@example.com"), (2, "bob@example.com")].
-Inserted 2 facts into 'user'.
+Inserted 2 fact(s) into 'user'.
 > ?- user(Id, Email).
 2 rows:
   (1, "alice@example.com")
   (2, "bob@example.com")
-> .db use default
-Switched to database: default
-> .db drop repl_schemas
-Database 'repl_schemas' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop repl_schemas
+Knowledge graph 'repl_schemas' dropped.

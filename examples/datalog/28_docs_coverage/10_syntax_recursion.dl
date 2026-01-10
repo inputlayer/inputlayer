@@ -1,21 +1,21 @@
-// Test: Syntax Recursion
-// Category: docs_coverage
-// Description: Tests recursion examples from docs/reference/syntax.md
+% Test: Syntax Recursion
+% Category: docs_coverage
+% Description: Tests recursion examples from docs/reference/syntax.md
 
-.db create syntax_recursion
-.db use syntax_recursion
+.kg create syntax_recursion
+.kg use syntax_recursion
 
-// === Basic transitive closure ===
+% === Basic transitive closure ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 
-// Base case
+% Base case
 +reachable(X, Y) :- edge(X, Y).
-// Recursive case
+% Recursive case
 +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
 
 ?- reachable(1, X).
 
-// === Mutual recursion (odd/even distance) ===
+% === Mutual recursion (odd/even distance) ===
 +start(1).
 
 +odd(X) :- edge(Start, X), start(Start).
@@ -25,7 +25,7 @@
 ?- odd(X).
 ?- even(X).
 
-// Cleanup
-.db use default
-.db drop syntax_recursion
+% Cleanup
+.kg use default
+.kg drop syntax_recursion
 

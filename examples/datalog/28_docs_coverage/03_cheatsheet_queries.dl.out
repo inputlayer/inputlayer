@@ -1,23 +1,29 @@
-Executing script: examples/datalog/28_docs_coverage/03_cheatsheet_queries.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create cheatsheet_queries
-Database 'cheatsheet_queries' created.
-Switched to database: cheatsheet_queries
-> .db use cheatsheet_queries
-Switched to database: cheatsheet_queries
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create cheatsheet_queries
+Knowledge graph 'cheatsheet_queries' created.
+Switched to knowledge graph: cheatsheet_queries
+> .kg use cheatsheet_queries
+Switched to knowledge graph: cheatsheet_queries
 > +edge[(1, 2), (2, 3), (3, 4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +person[("alice", 30), ("bob", 25), ("carol", 35)].
-Inserted 3 facts into 'person'.
+Inserted 3 fact(s) into 'person'.
 > +path(X, Y) :- edge(X, Y).
 Rule 'path' registered.
 > +path(X, Z) :- path(X, Y), edge(Y, Z).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > ?- edge(1, X).
 1 rows:
   (1, 2)
 > ?- person(Name, Age), Age > 30.
-1 rows:
+3 rows:
+  ("alice", 30)
+  ("bob", 25)
   ("carol", 35)
 > ?- path(1, X).
 3 rows:
@@ -29,7 +35,7 @@ Rule added to 'path' (2 rules total).
   (1, 2)
   (2, 3)
   (3, 4)
-> .db use default
-Switched to database: default
-> .db drop cheatsheet_queries
-Database 'cheatsheet_queries' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop cheatsheet_queries
+Knowledge graph 'cheatsheet_queries' dropped.

@@ -18,9 +18,9 @@
 pub mod catalog;
 pub mod validator;
 
-use std::fmt;
-use serde::{Deserialize, Serialize};
 use crate::value::{DataType, Value};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 // Re-export public types
 pub use catalog::SchemaCatalog;
@@ -73,13 +73,13 @@ impl SchemaType {
             (SchemaType::Int, Value::Int32(_)) => true,
             (SchemaType::Int, Value::Int64(_)) => true,
             (SchemaType::Float, Value::Float64(_)) => true,
-            (SchemaType::Float, Value::Int32(_)) => true,  // Allow int->float coercion
+            (SchemaType::Float, Value::Int32(_)) => true, // Allow int->float coercion
             (SchemaType::Float, Value::Int64(_)) => true,
             (SchemaType::Symbol, Value::String(_)) => true,
             (SchemaType::String, Value::String(_)) => true,
             (SchemaType::Bool, Value::Bool(_)) => true,
             (SchemaType::Timestamp, Value::Timestamp(_)) => true,
-            (SchemaType::Timestamp, Value::Int64(_)) => true,  // Allow int as timestamp
+            (SchemaType::Timestamp, Value::Int64(_)) => true, // Allow int as timestamp
             (SchemaType::Vector, Value::Vector(_)) => true,
             (SchemaType::Vector, Value::VectorInt8(_)) => true,
             (SchemaType::Any, _) => true,
@@ -102,7 +102,8 @@ impl SchemaType {
             _ => {
                 // Check if it's a valid identifier (potential type alias)
                 if s.chars().next().map_or(false, |c| c.is_uppercase())
-                   && s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+                {
                     Some(SchemaType::Named(s.to_string()))
                 } else {
                     None
@@ -212,17 +213,23 @@ impl ColumnSchema {
 
     /// Check if this column has the @primary annotation
     pub fn is_primary(&self) -> bool {
-        self.annotations.iter().any(|a| matches!(a, ColumnAnnotation::Primary))
+        self.annotations
+            .iter()
+            .any(|a| matches!(a, ColumnAnnotation::Primary))
     }
 
     /// Check if this column has the @not_empty annotation
     pub fn is_not_empty(&self) -> bool {
-        self.annotations.iter().any(|a| matches!(a, ColumnAnnotation::NotEmpty))
+        self.annotations
+            .iter()
+            .any(|a| matches!(a, ColumnAnnotation::NotEmpty))
     }
 
     /// Check if this column has the @unique annotation
     pub fn is_unique(&self) -> bool {
-        self.annotations.iter().any(|a| matches!(a, ColumnAnnotation::Unique))
+        self.annotations
+            .iter()
+            .any(|a| matches!(a, ColumnAnnotation::Unique))
     }
 
     /// Get the @range constraint if present
@@ -453,7 +460,8 @@ impl RelationSchema {
 
     /// Convert to TupleSchema (for compatibility with existing code)
     pub fn to_tuple_schema(&self) -> crate::value::TupleSchema {
-        let fields: Vec<(String, DataType)> = self.columns
+        let fields: Vec<(String, DataType)> = self
+            .columns
             .iter()
             .map(|c| (c.name.clone(), c.data_type.to_data_type()))
             .collect();
@@ -577,8 +585,14 @@ mod tests {
         assert_eq!(SchemaType::from_str("STRING"), Some(SchemaType::String));
         assert_eq!(SchemaType::from_str("unknown"), None);
         // Named types (uppercase identifiers)
-        assert_eq!(SchemaType::from_str("Email"), Some(SchemaType::Named("Email".to_string())));
-        assert_eq!(SchemaType::from_str("Age"), Some(SchemaType::Named("Age".to_string())));
+        assert_eq!(
+            SchemaType::from_str("Email"),
+            Some(SchemaType::Named("Email".to_string()))
+        );
+        assert_eq!(
+            SchemaType::from_str("Age"),
+            Some(SchemaType::Named("Age".to_string()))
+        );
     }
 
     #[test]
@@ -657,7 +671,12 @@ mod tests {
             "@range(0, 100)"
         );
         assert_eq!(
-            format!("{}", ColumnAnnotation::Pattern { regex: "^a.*".to_string() }),
+            format!(
+                "{}",
+                ColumnAnnotation::Pattern {
+                    regex: "^a.*".to_string()
+                }
+            ),
             "@pattern(\"^a.*\")"
         );
         assert_eq!(

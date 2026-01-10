@@ -1,24 +1,24 @@
-// Test: Range Constraint Declaration
-// Category: constraints
-// Description: Tests @range constraint parsing and schema declaration
+% Test: Range Constraint Declaration
+% Category: constraints
+% Description: Tests @range constraint parsing and schema declaration
 
-.db create constraint_range_test
-.db use constraint_range_test
+.kg create constraint_range_test
+.kg use constraint_range_test
 
-// Schema with @range constraint (age must be 0-150)
+% Schema with @range constraint (age must be 0-150)
 +employee(id: int @key, name: string, age: int @range(0, 150)).
 
-// Insert data with valid ages
+% Insert data with valid ages
 +employee(1, "Alice", 30).
 +employee(2, "Bob", 25).
 +employee(3, "Carol", 45).
 
-// Query all employees
+% Query all employees
 ?- employee(Id, Name, Age).
 
-// Show schema
+% Show schema
 .rel employee
 
-// Cleanup
-.db use default
-.db drop constraint_range_test
+% Cleanup
+.kg use default
+.kg drop constraint_range_test

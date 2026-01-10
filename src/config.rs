@@ -11,7 +11,7 @@
 //! # config.toml
 //! [storage]
 //! data_dir = "/var/lib/inputlayer/data"
-//! default_database = "default"
+//! default_knowledge_graph = "default"
 //!
 //! [storage.persistence]
 //! format = "parquet"
@@ -24,7 +24,10 @@
 //! FLOWLOG_STORAGE__PERSISTENCE__FORMAT=csv
 //! ```
 
-use figment::{Figment, providers::{Env, Format, Toml}};
+use figment::{
+    providers::{Env, Format, Toml},
+    Figment,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -35,20 +38,23 @@ pub struct Config {
     pub optimization: OptimizationConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub http: HttpConfig,
 }
 
 /// Storage engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Base directory for all database storage
+    /// Base directory for all knowledge graph storage
     pub data_dir: PathBuf,
 
-    /// Default database (created on startup if missing)
-    pub default_database: String,
+    /// Default knowledge graph (created on startup if missing)
+    #[serde(alias = "default_database")]
+    pub default_knowledge_graph: String,
 
-    /// Automatically create databases if they don't exist
-    #[serde(default)]
-    pub auto_create_databases: bool,
+    /// Automatically create knowledge graphs if they don't exist
+    #[serde(default, alias = "auto_create_databases")]
+    pub auto_create_knowledge_graphs: bool,
 
     /// Persistence settings (legacy, for compatibility)
     pub persistence: PersistenceConfig,
@@ -100,7 +106,9 @@ pub struct PersistLayerConfig {
     pub compaction_window: u64,
 }
 
-fn default_buffer_size() -> usize { 10000 }
+fn default_buffer_size() -> usize {
+    10000
+}
 
 impl Default for PersistLayerConfig {
     fn default() -> Self {
@@ -188,13 +196,96 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
+/// HTTP server configuration for REST API and GUI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpConfig {
+    /// Enable HTTP server (REST API + optional GUI)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// HTTP server bind address
+    #[serde(default = "default_http_host")]
+    pub host: String,
+
+    /// HTTP server port
+    #[serde(default = "default_http_port")]
+    pub port: u16,
+
+    /// Allowed CORS origins (empty = allow all in dev mode)
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+
+    /// GUI static file serving configuration
+    #[serde(default)]
+    pub gui: GuiConfig,
+
+    /// Authentication configuration
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+/// GUI static file serving configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuiConfig {
+    /// Enable GUI dashboard serving
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Directory containing GUI static files (e.g., "./gui/dist")
+    #[serde(default = "default_gui_static_dir")]
+    pub static_dir: String,
+}
+
+/// Authentication configuration for HTTP API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// Enable authentication (JWT-based)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// JWT signing secret (MUST be changed in production)
+    #[serde(default = "default_jwt_secret")]
+    pub jwt_secret: String,
+
+    /// Session timeout in seconds (default: 24 hours)
+    #[serde(default = "default_session_timeout")]
+    pub session_timeout_secs: u64,
+}
+
 // Default value functions
-fn default_initial_capacity() -> usize { 10000 }
-fn default_batch_size() -> usize { 1000 }
-fn default_async_io() -> bool { true }
-fn default_true() -> bool { true }
-fn default_log_level() -> String { "info".to_string() }
-fn default_log_format() -> String { "text".to_string() }
+fn default_initial_capacity() -> usize {
+    10000
+}
+fn default_batch_size() -> usize {
+    1000
+}
+fn default_async_io() -> bool {
+    true
+}
+fn default_true() -> bool {
+    true
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_log_format() -> String {
+    "text".to_string()
+}
+fn default_http_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_http_port() -> u16 {
+    8080
+}
+fn default_gui_static_dir() -> String {
+    "./gui/dist".to_string()
+}
+fn default_jwt_secret() -> String {
+    "change-me-in-production".to_string()
+}
+fn default_session_timeout() -> u64 {
+    86400
+} // 24 hours
 
 impl Config {
     /// Load configuration from default locations
@@ -224,8 +315,8 @@ impl Config {
         Config {
             storage: StorageConfig {
                 data_dir: PathBuf::from("./data"),
-                default_database: "default".to_string(),
-                auto_create_databases: false,
+                default_knowledge_graph: "default".to_string(),
+                auto_create_knowledge_graphs: false,
                 persistence: PersistenceConfig {
                     format: StorageFormat::Parquet,
                     compression: CompressionType::Snappy,
@@ -250,6 +341,7 @@ impl Config {
                 level: "info".to_string(),
                 format: "text".to_string(),
             },
+            http: HttpConfig::default(),
         }
     }
 }
@@ -280,6 +372,38 @@ impl Default for LoggingConfig {
     }
 }
 
+impl Default for HttpConfig {
+    fn default() -> Self {
+        HttpConfig {
+            enabled: true,
+            host: default_http_host(),
+            port: default_http_port(),
+            cors_origins: Vec::new(),
+            gui: GuiConfig::default(),
+            auth: AuthConfig::default(),
+        }
+    }
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        GuiConfig {
+            enabled: true,
+            static_dir: default_gui_static_dir(),
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig {
+            enabled: false,
+            jwt_secret: default_jwt_secret(),
+            session_timeout_secs: default_session_timeout(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,10 +411,16 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.storage.default_database, "default");
+        assert_eq!(config.storage.default_knowledge_graph, "default");
         assert_eq!(config.storage.data_dir, PathBuf::from("./data"));
-        assert!(matches!(config.storage.persistence.format, StorageFormat::Parquet));
-        assert!(matches!(config.storage.persistence.compression, CompressionType::Snappy));
+        assert!(matches!(
+            config.storage.persistence.format,
+            StorageFormat::Parquet
+        ));
+        assert!(matches!(
+            config.storage.persistence.compression,
+            CompressionType::Snappy
+        ));
     }
 
     #[test]

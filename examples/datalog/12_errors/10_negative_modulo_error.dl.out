@@ -1,11 +1,15 @@
-Executing script: examples/datalog/12_errors/10_negative_modulo_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_mod
-Database 'test_neg_mod' created.
-Switched to database: test_neg_mod
-> .db use test_neg_mod
-Switched to database: test_neg_mod
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_mod
+Knowledge graph 'test_neg_mod' created.
+Switched to knowledge graph: test_neg_mod
+> .kg use test_neg_mod
+Switched to knowledge graph: test_neg_mod
 > +mod_cases[(10, 3), (11, 3), (12, 3), (-10, 3), (-11, 3), (-12, 3), (10, -3), (11, -3), (12, -3), (-10, -3), (-11, -3), (-12, -3)].
-Inserted 12 facts into 'mod_cases'.
-> +mod_result(X, Y, X%Y) :- mod_cases(X, Y).
-Script error: Line 19: Parse error: Invalid term: 'X%Y'
+Inserted 12 fact(s) into 'mod_cases'.
+> +mod_result(X, Y, X ?- mod_result(A, B, C).
+Script error: Parse error: Invalid term: 'X ?- mod_result(A, B, C'

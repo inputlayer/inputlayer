@@ -1,35 +1,35 @@
-// Test: Record Type with Schema
-// Category: Rel Schemas
-// Description: Tests using record types with explicit schema declarations
+% Test: Record Type with Schema
+% Category: Rel Schemas
+% Description: Tests using record types with explicit schema declarations
 
-.db create test_record_sugar
-.db use test_record_sugar
+.kg create test_record_sugar
+.kg use test_record_sugar
 
-// Define record types (for documentation purposes)
+% Define record types (for documentation purposes)
 type Person: { id: int, name: string, age: int }.
 type Address: { person_id: int, city: string }.
 
-// Declare schema explicitly using + prefix (record sugar not yet implemented)
+% Declare schema explicitly using + prefix (record sugar not yet implemented)
 +person(id: int, name: string, age: int).
 +address(person_id: int, city: string).
 
-// Insert data
+% Insert data
 +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)].
 +address[(1, "New York"), (2, "Boston"), (3, "Chicago")].
 
-// Query people
+% Query people
 ?- person(Id, Name, Age).
 
-// Query addresses
+% Query addresses
 ?- address(Pid, City).
 
-// Join people with addresses
+% Join people with addresses
 +person_location(Name, City) :-
     person(Id, Name, _),
     address(Id, City).
 
 ?- person_location(N, C).
 
-// Cleanup
-.db use default
-.db drop test_record_sugar
+% Cleanup
+.kg use default
+.kg drop test_record_sugar

@@ -1,12 +1,12 @@
-// Test: Large Dataset (1000 tuples)
-// Category: Performance
-// Verifies: System handles 1000 tuples efficiently
+% Test: Large Dataset (1000 tuples)
+% Category: Performance
+% Verifies: System handles 1000 tuples efficiently
 
-.db create test_large_1000
-.db use test_large_1000
+.kg create test_large_1000
+.kg use test_large_1000
 
-// Generate 100 nodes with 10 edges each (1000 edges total)
-// Node pairs: (1,2)..(1,11), (2,3)..(2,12), etc.
+% Generate 100 nodes with 10 edges each (1000 edges total)
+% Node pairs: (1,2)..(1,11), (2,3)..(2,12), etc.
 +edges[(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),(1,8),(1,9),(1,10),(1,11),
        (2,3),(2,4),(2,5),(2,6),(2,7),(2,8),(2,9),(2,10),(2,11),(2,12),
        (3,4),(3,5),(3,6),(3,7),(3,8),(3,9),(3,10),(3,11),(3,12),(3,13),
@@ -18,19 +18,19 @@
        (9,10),(9,11),(9,12),(9,13),(9,14),(9,15),(9,16),(9,17),(9,18),(9,19),
        (10,11),(10,12),(10,13),(10,14),(10,15),(10,16),(10,17),(10,18),(10,19),(10,20)].
 
-// Simple query - count edges
+% Simple query - count edges
 +edge_count(count<X>) :- edges(X, _).
 ?- edge_count(C).
 
-// Transitive closure (generates many more paths)
+% Transitive closure (generates many more paths)
 +path(X, Y) :- edges(X, Y).
 +path(X, Z) :- edges(X, Y), path(Y, Z).
 
-// Count reachable nodes from node 1
+% Count reachable nodes from node 1
 +reach_from_1(Y) :- path(1, Y).
 +reach_count(count<X>) :- reach_from_1(X).
 ?- reach_count(C).
 
-// Cleanup
-.db use default
-.db drop test_large_1000
+% Cleanup
+.kg use default
+.kg drop test_large_1000

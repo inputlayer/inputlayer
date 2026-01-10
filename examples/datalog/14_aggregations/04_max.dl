@@ -1,19 +1,19 @@
-// Test: Max Aggregation
-// Category: 14_aggregations
-// Description: Tests max aggregation to find maximum value per group
+% Test: Max Aggregation
+% Category: 14_aggregations
+% Description: Tests max aggregation to find maximum value per group
 
-.db create test_agg_max
-.db use test_agg_max
+.kg create test_agg_max
+.kg use test_agg_max
 
-// Insert temperature readings: reading(sensor_id, temperature)
+% Insert temperature readings: reading(sensor_id, temperature)
 +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
 
-// Find maximum temperature per sensor
+% Find maximum temperature per sensor
 +max_temp(Sensor, max<Temp>) :- reading(Sensor, Temp).
 
-// Query the max result
+% Query the max result
 ?- max_temp(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_agg_max
+% Cleanup
+.kg use default
+.kg drop test_agg_max

@@ -9,21 +9,22 @@
 //!
 //! ## Example
 //!
-//! ```ignore
-//! let mut catalog = RuleCatalog::new(db_dir)?;
+//! ```rust,no_run
+//! use inputlayer::RuleCatalog;
+//! use std::path::PathBuf;
 //!
-//! // Register a rule
-//! catalog.register("path", rule)?;
+//! let db_dir = PathBuf::from("/tmp/mydb");
+//! let mut catalog = RuleCatalog::new(db_dir).unwrap();
 //!
 //! // Get all rules to prepend to queries
 //! let rules = catalog.all_rules();
 //!
 //! // Drop a rule
-//! catalog.drop("path")?;
+//! catalog.drop("path").unwrap();
 //! ```
 
-use crate::statement::{RuleDef, SerializableRule};
 use crate::ast::Rule;
+use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -160,7 +161,12 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
                 format!("top_k<{}, {}>", k, var)
             }
         }
-        AggregateFunc::TopKThreshold { k, threshold, descending, .. } => {
+        AggregateFunc::TopKThreshold {
+            k,
+            threshold,
+            descending,
+            ..
+        } => {
             if *descending {
                 format!("top_k_threshold<{}, {}, {}, desc>", k, var, threshold)
             } else {
@@ -177,11 +183,21 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
 fn format_constraint(constraint: &crate::ast::Constraint) -> String {
     match constraint {
         crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::NotEqual(l, r) => {
+            format!("{} != {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::LessThan(l, r) => {
+            format!("{} < {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::LessOrEqual(l, r) => {
+            format!("{} <= {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::GreaterThan(l, r) => {
+            format!("{} > {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::GreaterOrEqual(l, r) => {
+            format!("{} >= {}", format_term(l), format_term(r))
+        }
     }
 }
 
@@ -295,12 +311,19 @@ impl RuleCatalog {
     }
 
     /// Replace a specific clause in a rule by index (0-based)
-    pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: SerializableRule) -> Result<(), String> {
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: SerializableRule,
+    ) -> Result<(), String> {
         if let Some(rule_def) = self.rules.get_mut(name) {
             if index >= rule_def.rules.len() {
                 return Err(format!(
                     "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
-                    index + 1, name, rule_def.rules.len()
+                    index + 1,
+                    name,
+                    rule_def.rules.len()
                 ));
             }
             rule_def.rules[index] = new_rule;
@@ -333,10 +356,7 @@ impl RuleCatalog {
     /// Rules are returned in dependency order (topologically sorted)
     /// so that a rule only appears after all rules it depends on.
     pub fn all_rules(&self) -> Vec<Rule> {
-        let all_rules: Vec<Rule> = self.rules
-            .values()
-            .flat_map(|def| def.to_rules())
-            .collect();
+        let all_rules: Vec<Rule> = self.rules.values().flat_map(|def| def.to_rules()).collect();
 
         // Topologically sort rules by their dependencies
         self.topological_sort_rules(all_rules)
@@ -509,17 +529,23 @@ impl RuleCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{Atom, BodyPredicate, Term};
     use tempfile::TempDir;
-    use crate::ast::{Atom, Term, BodyPredicate};
 
     fn make_test_rule(head_rel: &str, body_rel: &str) -> Rule {
         let head = Atom::new(
             head_rel.to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
         );
         let body = vec![BodyPredicate::Positive(Atom::new(
             body_rel.to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
         ))];
         Rule::new(head, body, vec![])
     }
@@ -580,16 +606,25 @@ mod tests {
         // Second rule: path(X, Z) :- edge(X, Y), path(Y, Z).
         let head = Atom::new(
             "path".to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
         );
         let body = vec![
             BodyPredicate::Positive(Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             )),
             BodyPredicate::Positive(Atom::new(
                 "path".to_string(),
-                vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             )),
         ];
         let rule2 = Rule::new(head, body, vec![]);
@@ -657,8 +692,12 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        catalog.register("path", &make_test_rule("path", "edge")).unwrap();
-        catalog.register("reach", &make_test_rule("reach", "source")).unwrap();
+        catalog
+            .register("path", &make_test_rule("path", "edge"))
+            .unwrap();
+        catalog
+            .register("reach", &make_test_rule("reach", "source"))
+            .unwrap();
 
         let rules = catalog.all_rules();
         assert_eq!(rules.len(), 2);
@@ -673,8 +712,12 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        catalog.register("path", &make_test_rule("path", "edge")).unwrap();
-        catalog.register("reach", &make_test_rule("reach", "source")).unwrap();
+        catalog
+            .register("path", &make_test_rule("path", "edge"))
+            .unwrap();
+        catalog
+            .register("reach", &make_test_rule("reach", "source"))
+            .unwrap();
 
         assert_eq!(catalog.len(), 2);
 
@@ -693,16 +736,25 @@ mod tests {
 
         let head = Atom::new(
             "path".to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
         );
         let body = vec![
             BodyPredicate::Positive(Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             )),
             BodyPredicate::Positive(Atom::new(
                 "path".to_string(),
-                vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             )),
         ];
         let rule2 = Rule::new(head, body, vec![]);
@@ -744,16 +796,25 @@ mod tests {
 
         let head = Atom::new(
             "path".to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
         );
         let body = vec![
             BodyPredicate::Positive(Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             )),
             BodyPredicate::Positive(Atom::new(
                 "path".to_string(),
-                vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             )),
         ];
         let rule2 = Rule::new(head, body, vec![]);
@@ -842,16 +903,25 @@ mod tests {
         // Second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
         let head = Atom::new(
             "connected".to_string(),
-            vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
         );
         let body = vec![
             BodyPredicate::Positive(Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             )),
             BodyPredicate::Positive(Atom::new(
                 "connected".to_string(),
-                vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             )),
         ];
         let rule2 = Rule::new(head, body, vec![]);
@@ -873,7 +943,9 @@ mod tests {
         assert_eq!(rules.len(), 2, "Should have exactly 2 rules total");
 
         // Check the view has both rules
-        let view = catalog.get("connected").expect("View 'connected' should exist");
+        let view = catalog
+            .get("connected")
+            .expect("View 'connected' should exist");
         assert_eq!(view.rules.len(), 2, "View 'connected' should have 2 rules");
     }
 
@@ -899,16 +971,25 @@ mod tests {
             // Second rule
             let head = Atom::new(
                 "connected".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             );
             let body = vec![
                 BodyPredicate::Positive(Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
                 )),
                 BodyPredicate::Positive(Atom::new(
                     "connected".to_string(),
-                    vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                    vec![
+                        Term::Variable("Y".to_string()),
+                        Term::Variable("Z".to_string()),
+                    ],
                 )),
             ];
             let rule2 = Rule::new(head, body, vec![]);
@@ -931,7 +1012,11 @@ mod tests {
             println!("  Rules count: {}", catalog.all_rules().len());
 
             assert_eq!(catalog.len(), 1, "Should have 1 view after reload");
-            assert_eq!(catalog.all_rules().len(), 2, "Should have 2 rules after reload");
+            assert_eq!(
+                catalog.all_rules().len(),
+                2,
+                "Should have 2 rules after reload"
+            );
 
             let view = catalog.get("connected").expect("View should exist");
             assert_eq!(view.rules.len(), 2, "View should have 2 rules after reload");

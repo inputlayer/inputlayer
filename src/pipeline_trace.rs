@@ -102,7 +102,12 @@ impl PipelineTrace {
                 1 + Self::count_ir_nodes(left) + Self::count_ir_nodes(right)
             }
             IRNode::Distinct { input } => 1 + Self::count_ir_nodes(input),
-            IRNode::Union { inputs } => 1 + inputs.iter().map(|i| Self::count_ir_nodes(i)).sum::<usize>(),
+            IRNode::Union { inputs } => {
+                1 + inputs
+                    .iter()
+                    .map(|i| Self::count_ir_nodes(i))
+                    .sum::<usize>()
+            }
             IRNode::Aggregate { input, .. } => 1 + Self::count_ir_nodes(input),
             IRNode::Compute { input, .. } => 1 + Self::count_ir_nodes(input),
         }
@@ -111,7 +116,10 @@ impl PipelineTrace {
     /// Compute optimization statistics by comparing before/after
     fn compute_stats(&mut self) {
         // This is a simplified version - could be more sophisticated
-        let nodes_eliminated = self.stats.nodes_before.saturating_sub(self.stats.nodes_after);
+        let nodes_eliminated = self
+            .stats
+            .nodes_before
+            .saturating_sub(self.stats.nodes_after);
 
         // Heuristic: attribute eliminated nodes to different optimizations
         // In a real implementation, the optimizer would track this
@@ -137,21 +145,39 @@ impl PipelineTrace {
             output.push_str(&format!("  Rules parsed: {}\n\n", ast.rules.len()));
 
             for (i, rule) in ast.rules.iter().enumerate() {
-                output.push_str(&format!("  Rule {}: {}({}) :- ",
+                output.push_str(&format!(
+                    "  Rule {}: {}({}) :- ",
                     i + 1,
                     rule.head.relation,
-                    rule.head.args.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(", ")
+                    rule.head
+                        .args
+                        .iter()
+                        .map(|t| format!("{:?}", t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
 
-                let body_str: Vec<_> = rule.body.iter()
+                let body_str: Vec<_> = rule
+                    .body
+                    .iter()
                     .map(|p| match p {
-                        crate::ast::BodyPredicate::Positive(a) => format!("{}({})",
+                        crate::ast::BodyPredicate::Positive(a) => format!(
+                            "{}({})",
                             a.relation,
-                            a.args.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(", ")
+                            a.args
+                                .iter()
+                                .map(|t| format!("{:?}", t))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ),
-                        crate::ast::BodyPredicate::Negated(a) => format!("!{}({})",
+                        crate::ast::BodyPredicate::Negated(a) => format!(
+                            "!{}({})",
                             a.relation,
-                            a.args.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join(", ")
+                            a.args
+                                .iter()
+                                .map(|t| format!("{:?}", t))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ),
                     })
                     .collect();
@@ -187,20 +213,32 @@ impl PipelineTrace {
             output.push_str("┌─────────────────────────────────────────────────────────┐\n");
             output.push_str("│ STAGE 3: OPTIMIZATION                                   │\n");
             output.push_str("└─────────────────────────────────────────────────────────┘\n");
-            output.push_str(&format!("  IR nodes: {} → {} ({} eliminated)\n",
+            output.push_str(&format!(
+                "  IR nodes: {} → {} ({} eliminated)\n",
                 self.stats.nodes_before,
                 self.stats.nodes_after,
-                self.stats.nodes_before.saturating_sub(self.stats.nodes_after)
+                self.stats
+                    .nodes_before
+                    .saturating_sub(self.stats.nodes_after)
             ));
 
             if self.stats.identity_maps_removed > 0 {
-                output.push_str(&format!("  - Identity maps removed: {}\n", self.stats.identity_maps_removed));
+                output.push_str(&format!(
+                    "  - Identity maps removed: {}\n",
+                    self.stats.identity_maps_removed
+                ));
             }
             if self.stats.true_filters_removed > 0 {
-                output.push_str(&format!("  - Always-true filters removed: {}\n", self.stats.true_filters_removed));
+                output.push_str(&format!(
+                    "  - Always-true filters removed: {}\n",
+                    self.stats.true_filters_removed
+                ));
             }
             if self.stats.false_filters_removed > 0 {
-                output.push_str(&format!("  - Always-false filters removed: {}\n", self.stats.false_filters_removed));
+                output.push_str(&format!(
+                    "  - Always-false filters removed: {}\n",
+                    self.stats.false_filters_removed
+                ));
             }
             output.push_str("\n");
 
@@ -218,7 +256,11 @@ impl PipelineTrace {
             output.push_str("└─────────────────────────────────────────────────────────┘\n");
 
             for (i, result) in self.results.iter().enumerate() {
-                output.push_str(&format!("  Rule {} results: {} tuples\n", i + 1, result.len()));
+                output.push_str(&format!(
+                    "  Rule {} results: {} tuples\n",
+                    i + 1,
+                    result.len()
+                ));
 
                 if result.len() <= 10 {
                     for tuple in result {
@@ -246,21 +288,44 @@ impl PipelineTrace {
 
         match ir {
             IRNode::Scan { relation, schema } => {
-                output.push_str(&format!("{}Scan({})[{}]\n",
-                    prefix, relation, schema.join(", ")));
+                output.push_str(&format!(
+                    "{}Scan({})[{}]\n",
+                    prefix,
+                    relation,
+                    schema.join(", ")
+                ));
             }
-            IRNode::Map { input, projection, output_schema } => {
-                output.push_str(&format!("{}Map[{:?}] → [{}]\n",
-                    prefix, projection, output_schema.join(", ")));
+            IRNode::Map {
+                input,
+                projection,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Map[{:?}] → [{}]\n",
+                    prefix,
+                    projection,
+                    output_schema.join(", ")
+                ));
                 output.push_str(&Self::format_ir_tree(input, indent + 2));
             }
             IRNode::Filter { input, predicate } => {
                 output.push_str(&format!("{}Filter({:?})\n", prefix, predicate));
                 output.push_str(&Self::format_ir_tree(input, indent + 2));
             }
-            IRNode::Join { left, right, left_keys, right_keys, output_schema } => {
-                output.push_str(&format!("{}Join[L:{:?}, R:{:?}] → [{}]\n",
-                    prefix, left_keys, right_keys, output_schema.join(", ")));
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Join[L:{:?}, R:{:?}] → [{}]\n",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema.join(", ")
+                ));
                 output.push_str(&format!("{}├─ Left:\n", prefix));
                 output.push_str(&Self::format_ir_tree(left, indent + 4));
                 output.push_str(&format!("{}└─ Right:\n", prefix));
@@ -277,26 +342,47 @@ impl PipelineTrace {
                     output.push_str(&Self::format_ir_tree(input, indent + 4));
                 }
             }
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => {
-                let agg_strs: Vec<String> = aggregations.iter()
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let agg_strs: Vec<String> = aggregations
+                    .iter()
                     .map(|(f, c)| format!("{:?}({})", f, c))
                     .collect();
-                output.push_str(&format!("{}Aggregate[group_by={:?}, aggs=[{}]] → [{}]\n",
-                    prefix, group_by, agg_strs.join(", "), output_schema.join(", ")));
+                output.push_str(&format!(
+                    "{}Aggregate[group_by={:?}, aggs=[{}]] → [{}]\n",
+                    prefix,
+                    group_by,
+                    agg_strs.join(", "),
+                    output_schema.join(", ")
+                ));
                 output.push_str(&Self::format_ir_tree(input, indent + 2));
             }
-            IRNode::Antijoin { left, right, left_keys, right_keys, output_schema } => {
-                output.push_str(&format!("{}Antijoin[L:{:?}, R:{:?}] → [{}]\n",
-                    prefix, left_keys, right_keys, output_schema.join(", ")));
+            IRNode::Antijoin {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                output_schema,
+            } => {
+                output.push_str(&format!(
+                    "{}Antijoin[L:{:?}, R:{:?}] → [{}]\n",
+                    prefix,
+                    left_keys,
+                    right_keys,
+                    output_schema.join(", ")
+                ));
                 output.push_str(&format!("{}├─ Left:\n", prefix));
                 output.push_str(&Self::format_ir_tree(left, indent + 4));
                 output.push_str(&format!("{}└─ Right:\n", prefix));
                 output.push_str(&Self::format_ir_tree(right, indent + 4));
             }
             IRNode::Compute { input, expressions } => {
-                let expr_strs: Vec<String> = expressions.iter()
-                    .map(|(name, _)| name.clone())
-                    .collect();
+                let expr_strs: Vec<String> =
+                    expressions.iter().map(|(name, _)| name.clone()).collect();
                 output.push_str(&format!("{}Compute[{}]\n", prefix, expr_strs.join(", ")));
                 output.push_str(&Self::format_ir_tree(input, indent + 2));
             }

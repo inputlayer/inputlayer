@@ -49,7 +49,7 @@
 //! IRNode with Joins → [SIP Rewriting] → IRNode with Existence Filters → Code Gen
 //! ```
 
-use crate::ir::{IRNode, Predicate};
+use crate::ir::IRNode;
 use std::collections::{HashMap, HashSet};
 
 /// Variable binding status
@@ -122,7 +122,14 @@ pub struct SipStats {
     pub estimated_reduction: f64,
 }
 
-/// SIP traversal order for acyclic queries
+// TODO: Implement full Yannakakis-style SIP for multi-join queries.
+// Reserved for bidirectional semijoin optimization:
+// - Forward pass: Add semijoin filters in traversal order
+// - Backward pass: Add semijoin filters in reverse order
+// Currently only single-join queries are handled. The `enable_sip_rewriting`
+// config exists but is disabled due to correctness issues with certain patterns.
+// When fixing those issues, this infrastructure will enable multi-join SIP.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SipTraversal {
     /// Forward pass order (node indices)
@@ -131,6 +138,7 @@ pub struct SipTraversal {
     pub backward_order: Vec<usize>,
 }
 
+#[allow(dead_code)]
 impl SipTraversal {
     /// Create traversal from a rooted tree
     pub fn from_tree(edges: &[(usize, usize)], root: usize, num_nodes: usize) -> Self {
@@ -229,22 +237,6 @@ impl SipRewriter {
         // Apply SIP transformation
         self.apply_sip(ir)
     }
-
-    /// Check if IR contains joins
-    fn has_joins(ir: &IRNode) -> bool {
-        match ir {
-            IRNode::Join { .. } => true,
-            IRNode::Antijoin { .. } => false,
-            IRNode::Scan { .. } => false,
-            IRNode::Map { input, .. } => Self::has_joins(input),
-            IRNode::Filter { input, .. } => Self::has_joins(input),
-            IRNode::Distinct { input } => Self::has_joins(input),
-            IRNode::Union { inputs } => inputs.iter().any(Self::has_joins),
-            IRNode::Aggregate { input, .. } => Self::has_joins(input),
-            IRNode::Compute { input, .. } => Self::has_joins(input),
-        }
-    }
-
     /// Get all base relation names that appear in an IR tree
     fn get_base_relations(ir: &IRNode) -> HashSet<String> {
         match ir {
@@ -341,7 +333,12 @@ impl SipRewriter {
                 IRNode::Union { inputs: inputs_sip }
             }
 
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => {
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
                 let input_sip = self.apply_sip(*input);
                 IRNode::Aggregate {
                     input: Box::new(input_sip),
@@ -421,12 +418,7 @@ impl SipRewriter {
 
         // Apply semijoin filters:
         // 1. Filter left to keep only tuples where key values exist in right
-        let left_filtered = self.create_semijoin_filter(
-            left,
-            &right,
-            left_keys,
-            right_keys,
-        );
+        let left_filtered = self.create_semijoin_filter(left, &right, left_keys, right_keys);
 
         // 2. Filter right to keep only tuples where key values exist in left
         let right_filtered = self.create_semijoin_filter(
@@ -542,11 +534,7 @@ impl SipRewriter {
     }
 
     /// Check if two relations share variables
-    pub fn find_shared_variables(
-        &self,
-        schema1: &[String],
-        schema2: &[String],
-    ) -> HashSet<String> {
+    pub fn find_shared_variables(&self, schema1: &[String], schema2: &[String]) -> HashSet<String> {
         let set1: HashSet<_> = schema1.iter().cloned().collect();
         let set2: HashSet<_> = schema2.iter().cloned().collect();
         set1.intersection(&set2).cloned().collect()

@@ -24,7 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut storage = StorageEngine::new(config)?;
 
-    println!("Worker pool configured with {} threads (all CPUs)", storage.num_cpus());
+    println!(
+        "Worker pool configured with {} threads (all CPUs)",
+        storage.num_cpus()
+    );
     println!();
 
     // ========================================================================
@@ -35,14 +38,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_names = vec!["db1", "db2", "db3", "db4"];
 
     for (i, name) in database_names.iter().enumerate() {
-        storage.create_database(name)?;
-        storage.use_database(name)?;
+        storage.create_knowledge_graph(name)?;
+        storage.use_knowledge_graph(name)?;
 
         // Insert edge data (different sizes for each database)
         let size = (i + 1) * 100;
-        let edges: Vec<(i32, i32)> = (0..size)
-            .map(|j| (j as i32, (j + 1) as i32))
-            .collect();
+        let edges: Vec<(i32, i32)> = (0..size).map(|j| (j as i32, (j + 1) as i32)).collect();
 
         storage.insert("edge", edges)?;
         println!("  {} - Inserted {} edges", name, size);
@@ -63,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let start = Instant::now();
-    let results = storage.execute_parallel_queries_on_databases(queries)?;
+    let results = storage.execute_parallel_queries_on_knowledge_graphs(queries)?;
     let duration = start.elapsed();
 
     println!("Executed {} queries in parallel", results.len());
@@ -80,10 +81,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let query = "result(x,y) :- edge(x,y), x > 10.";
 
     let start = Instant::now();
-    let results = storage.execute_query_on_multiple_databases(
-        database_names.clone(),
-        query,
-    )?;
+    let results =
+        storage.execute_query_on_multiple_knowledge_graphs(database_names.clone(), query)?;
     let duration = start.elapsed();
 
     println!("Query: {}", query);
@@ -106,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let start = Instant::now();
-    let results = storage.execute_parallel_queries_on_database("db2", queries)?;
+    let results = storage.execute_parallel_queries_on_knowledge_graph("db2", queries)?;
     let duration = start.elapsed();
 
     println!("Executed {} queries on 'db2' in parallel", results.len());
@@ -134,10 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parallel execution
     println!("Parallel execution:");
     let start = Instant::now();
-    let _ = storage.execute_query_on_multiple_databases(
-        database_names.clone(),
-        test_query,
-    )?;
+    let _ =
+        storage.execute_query_on_multiple_knowledge_graphs(database_names.clone(), test_query)?;
     let par_duration = start.elapsed();
     println!("  Time: {:?}", par_duration);
 
@@ -154,13 +151,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Demo 5: Scaling with More Databases ---");
 
     // Create more databases for scaling test
-    let large_db_names: Vec<String> = (1..=8)
-        .map(|i| format!("scale_db{}", i))
-        .collect();
+    let large_db_names: Vec<String> = (1..=8).map(|i| format!("scale_db{}", i)).collect();
 
     for (i, name) in large_db_names.iter().enumerate() {
-        storage.create_database(name)?;
-        storage.use_database(name)?;
+        storage.create_knowledge_graph(name)?;
+        storage.use_knowledge_graph(name)?;
 
         let edges: Vec<(i32, i32)> = (0..50)
             .map(|j| (j + (i * 50) as i32, j + (i * 50) as i32 + 1))
@@ -172,16 +167,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_refs: Vec<&str> = large_db_names.iter().map(|s| s.as_str()).collect();
 
     let start = Instant::now();
-    let results = storage.execute_query_on_multiple_databases(
-        db_refs,
-        "result(x,y) :- edge(x,y).",
-    )?;
+    let results =
+        storage.execute_query_on_multiple_knowledge_graphs(db_refs, "result(x,y) :- edge(x,y).")?;
     let duration = start.elapsed();
 
     println!("Executed query on {} databases in parallel", results.len());
-    println!("Total tuples returned: {}", results.iter().map(|(_, r)| r.len()).sum::<usize>());
+    println!(
+        "Total tuples returned: {}",
+        results.iter().map(|(_, r)| r.len()).sum::<usize>()
+    );
     println!("Time: {:?}", duration);
-    println!("Average time per database: {:?}", duration / results.len() as u32);
+    println!(
+        "Average time per database: {:?}",
+        duration / results.len() as u32
+    );
 
     // ========================================================================
     // Summary
@@ -189,7 +188,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Summary ---");
     println!("✅ Worker pool infrastructure is functioning correctly");
     println!("✅ Queries execute in parallel across multiple databases");
-    println!("✅ Efficient CPU utilization with {} threads", storage.num_cpus());
+    println!(
+        "✅ Efficient CPU utilization with {} threads",
+        storage.num_cpus()
+    );
     println!("✅ Scalable to many databases and queries");
 
     println!("\n✅ Parallel query execution demo completed successfully!");

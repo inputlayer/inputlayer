@@ -7,24 +7,22 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use datalog_engine::execution::{QueryExecutor, ExecutionConfig, ResourceLimits};
+//! ```rust,no_run
+//! use inputlayer::execution::{ExecutionConfig, ResourceLimits};
+//! use std::time::Duration;
 //!
 //! let config = ExecutionConfig::default()
 //!     .with_timeout(Duration::from_secs(30))
 //!     .with_max_results(100_000);
-//!
-//! let executor = QueryExecutor::new(config);
-//! let result = executor.execute(&mut engine, "path(x,y) :- edge(x,y).")?;
 //! ```
 
-mod timeout;
-mod limits;
 mod cache;
+mod limits;
+mod timeout;
 
-pub use timeout::{QueryTimeout, TimeoutError, CancelHandle};
-pub use limits::{ResourceLimits, ResourceError, MemoryTracker};
-pub use cache::{QueryCache, CacheEntry, CacheStats};
+pub use cache::{CacheEntry, CacheStats, QueryCache};
+pub use limits::{MemoryTracker, ResourceError, ResourceLimits};
+pub use timeout::{CancelHandle, QueryTimeout, TimeoutError};
 
 use std::time::Duration;
 

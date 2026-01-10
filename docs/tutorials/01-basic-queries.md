@@ -9,23 +9,23 @@ This tutorial covers the fundamentals of querying data in InputLayer.
 
 ## Setup
 
-Let's create a sample database to work with:
+Let's create a sample knowledge graph to work with:
 
 ```datalog
-.db create query_tutorial
-.db use query_tutorial
+.kg create query_tutorial
+.kg use query_tutorial
 
-// People: (id, name, age, city)
+% People: (id, name, age, city)
 +person[(1, "alice", 30, "NYC"),
         (2, "bob", 25, "LA"),
         (3, "carol", 35, "NYC"),
         (4, "dave", 28, "Chicago"),
         (5, "eve", 32, "LA")].
 
-// Friendships: (person1_id, person2_id)
+% Friendships: (person1_id, person2_id)
 +friends[(1, 2), (1, 3), (2, 4), (3, 5), (4, 5)].
 
-// Purchases: (person_id, item, amount)
+% Purchases: (person_id, item, amount)
 +purchase[(1, "laptop", 1200),
           (1, "phone", 800),
           (2, "tablet", 500),
@@ -170,9 +170,9 @@ Find friends of friends:
 Find the city of alice's friends:
 
 ```datalog
-?- person(1, "alice", _, _),    // Start with alice
-   friends(1, FId),              // Get her friend IDs
-   person(FId, FName, _, FCity). // Get friend details
+?- person(1, "alice", _, _),    % Start with alice
+   friends(1, FId),              % Get her friend IDs
+   person(FId, FName, _, FCity). % Get friend details
 ```
 
 Result:
@@ -321,13 +321,13 @@ People in NYC but not in the friends table:
 Find friends-of-friends who aren't already friends:
 
 ```datalog
-// Friends of friends
+% Friends of friends
 +fof(Person, FoF) :-
   friends(Person, Friend),
   friends(Friend, FoF),
   Person != FoF.
 
-// Potential new friends (FoF but not already friends)
+% Potential new friends (FoF but not already friends)
 +recommendation(Person, FoF) :-
   fof(Person, FoF),
   !friends(Person, FoF).
@@ -348,10 +348,10 @@ High-value customers (spent more than $1500 total):
 Cities with above-average age:
 
 ```datalog
-// First, compute overall average
+% First, compute overall average
 +overall_avg(avg<Age>) :- person(_, _, Age, _).
 
-// Then find cities above average
+% Then find cities above average
 +older_city(City, CityAvg) :-
   avg_age_by_city(City, CityAvg),
   overall_avg(OverallAvg),

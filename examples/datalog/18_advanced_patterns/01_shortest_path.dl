@@ -1,28 +1,28 @@
-// Test: Single-Source Shortest Path
-// Category: 18_advanced_patterns
-// Description: BFS-style shortest path using recursion + min aggregation
+% Test: Single-Source Shortest Path
+% Category: 18_advanced_patterns
+% Description: BFS-style shortest path using recursion + min aggregation
 
-.db create test_shortest
-.db use test_shortest
+.kg create test_shortest
+.kg use test_shortest
 
-// DAG for shortest path:
-//     1 -> 2 -> 4
-//     |    |
-//     v    v
-//     3 -> 4
+% DAG for shortest path:
+%     1 -> 2 -> 4
+%     |    |
+%     v    v
+%     3 -> 4
 +edge[(1, 2), (1, 3), (2, 3), (2, 4), (3, 4)].
 +source[(1, 0)].
 
-// Compute all distances (may include non-shortest)
+% Compute all distances (may include non-shortest)
 +dist(X, D) :- source(X, D).
 +dist(Y, D+1) :- dist(X, D), edge(X, Y).
 
-// Aggregate to get shortest distance per node
+% Aggregate to get shortest distance per node
 +shortest(Y, min<D>) :- dist(Y, D).
 
-// Query shortest paths
+% Query shortest paths
 ?- shortest(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_shortest
+% Cleanup
+.kg use default
+.kg drop test_shortest

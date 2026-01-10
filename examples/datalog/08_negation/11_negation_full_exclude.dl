@@ -1,22 +1,22 @@
-// Test: Negation with Full Exclusion (All Filtered)
-// Category: 08_negation
-// Description: Tests negation when all tuples are excluded
+% Test: Negation with Full Exclusion (All Filtered)
+% Category: 08_negation
+% Description: Tests negation when all tuples are excluded
 
-.db create test_neg_full_excl
-.db use test_neg_full_excl
+.kg create test_neg_full_excl
+.kg use test_neg_full_excl
 
-// Data to filter
+% Data to filter
 +data[(1, 10), (2, 20), (3, 30)].
 
-// Exclusion set that covers all data
+% Exclusion set that covers all data
 +exclude_all[(1, 0), (2, 0), (3, 0)].
 
-// All data should be filtered out
+% All data should be filtered out
 +result(X, Y) :- data(X, Y), !exclude_all(X, _).
 ?- result(X, Y).
 
-// Should return 0 rows
+% Should return 0 rows
 
-// Cleanup
-.db use default
-.db drop test_neg_full_excl
+% Cleanup
+.kg use default
+.kg drop test_neg_full_excl

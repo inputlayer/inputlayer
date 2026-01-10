@@ -1,20 +1,31 @@
-Executing script: examples/datalog/20_applications/04_influence_propagation.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_influence
-Database 'test_influence' created.
-Switched to database: test_influence
-> .db use test_influence
-Switched to database: test_influence
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_influence
+Knowledge graph 'test_influence' created.
+Switched to knowledge graph: test_influence
+> .kg use test_influence
+Switched to knowledge graph: test_influence
 > +follows[(1, 2), (1, 3), (2, 4), (3, 4), (4, 5), (5, 6), (6, 7), (3, 7)].
-Inserted 8 facts into 'follows'.
+Inserted 8 fact(s) into 'follows'.
 > +influencer[(1)].
-Inserted 1 fact into 'influencer'.
+Inserted 1 fact(s) into 'influencer'.
 > +influenced(X) :- influencer(X).
 Rule 'influenced' registered.
 > +influenced(Y) :- influenced(X), follows(Y, X).
-Rule added to 'influenced' (2 rules total).
+Rule 'influenced' registered.
 > ?- influenced(U).
 1 rows:
   (1)
 > +influence_reach(count<U>) :- influenced(U).
-Script error: Line 23: Parse error: Invalid term: 'count<U>'
+Rule 'influence_reach' registered.
+> ?- influence_reach(C).
+1 rows:
+  (1)
+> +influence_dist(X, 0) :- influencer(X).
+Rule 'influence_dist' registered.
+> +influence_dist(Y, D+1) :- influence_dist(X, D), follows(Y, X), D < 10.
+Script error: Parse error: Invalid term: 'D+1'

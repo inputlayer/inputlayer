@@ -2,8 +2,8 @@
 //!
 //! Tests for Module 06: IR Optimization
 
-use inputlayer::Optimizer;
 use inputlayer::ir::{IRNode, Predicate};
+use inputlayer::Optimizer;
 
 #[test]
 fn test_identity_map_single() {
@@ -43,7 +43,10 @@ fn test_identity_map_nested() {
 
     let optimized = optimizer.optimize(ir);
 
-    assert!(optimized.is_scan(), "Nested identity maps should be eliminated");
+    assert!(
+        optimized.is_scan(),
+        "Nested identity maps should be eliminated"
+    );
 }
 
 #[test]
@@ -62,7 +65,10 @@ fn test_non_identity_map_preserved() {
     let optimized = optimizer.optimize(ir);
 
     // Check that it's still a Map node
-    assert!(matches!(optimized, IRNode::Map { .. }), "Non-identity map should be preserved");
+    assert!(
+        matches!(optimized, IRNode::Map { .. }),
+        "Non-identity map should be preserved"
+    );
 }
 
 #[test]
@@ -79,7 +85,10 @@ fn test_always_true_filter() {
 
     let optimized = optimizer.optimize(ir);
 
-    assert!(optimized.is_scan(), "Always-true filter should be eliminated");
+    assert!(
+        optimized.is_scan(),
+        "Always-true filter should be eliminated"
+    );
 }
 
 #[test]
@@ -145,7 +154,10 @@ fn test_real_predicate_preserved() {
     let optimized = optimizer.optimize(ir);
 
     // Check that it's still a Filter node
-    assert!(matches!(optimized, IRNode::Filter { .. }), "Real filter should be preserved");
+    assert!(
+        matches!(optimized, IRNode::Filter { .. }),
+        "Real filter should be preserved"
+    );
 }
 
 #[test]
@@ -371,14 +383,14 @@ fn test_multiple_real_filters_preserved() {
 
     // Filters should be fused into a single filter with And predicate
     match optimized {
-        IRNode::Filter {
-            input,
-            predicate,
-        } => {
+        IRNode::Filter { input, predicate } => {
             // Input should be the scan
             assert!(input.is_scan(), "After fusion, input should be scan");
             // Predicate should be And of both conditions
-            assert!(matches!(predicate, Predicate::And(_, _)), "Filters should be fused with And");
+            assert!(
+                matches!(predicate, Predicate::And(_, _)),
+                "Filters should be fused with And"
+            );
         }
         _ => panic!("Expected fused filter"),
     }
@@ -427,7 +439,10 @@ fn test_boolean_specializer_analyzes_semiring() {
 
     // Specializer should return the IR (possibly with Distinct wrapper)
     // and an annotation with semiring information
-    assert!(!annotation.reason.is_empty(), "Annotation should have a reason");
+    assert!(
+        !annotation.reason.is_empty(),
+        "Annotation should have a reason"
+    );
 
     // The result should be a valid IR node
     match &optimized {
@@ -487,7 +502,10 @@ fn test_sip_rewriter_analyzes_joins() {
     let result = rewriter.rewrite(ir.clone());
 
     // Result should be a valid IR (possibly transformed)
-    assert!(matches!(result, IRNode::Join { .. } | IRNode::Filter { .. }));
+    assert!(matches!(
+        result,
+        IRNode::Join { .. } | IRNode::Filter { .. }
+    ));
 }
 
 #[test]

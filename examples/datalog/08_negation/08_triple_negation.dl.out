@@ -1,25 +1,29 @@
-Executing script: examples/datalog/08_negation/08_triple_negation.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_triple_neg
-Database 'test_triple_neg' created.
-Switched to database: test_triple_neg
-> .db use test_triple_neg
-Switched to database: test_triple_neg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_triple_neg
+Knowledge graph 'test_triple_neg' created.
+Switched to knowledge graph: test_triple_neg
+> .kg use test_triple_neg
+Switched to knowledge graph: test_triple_neg
 > +item[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0)].
-Inserted 8 facts into 'item'.
+Inserted 8 fact(s) into 'item'.
 > +sold[(1, 0), (3, 0)].
-Inserted 2 facts into 'sold'.
+Inserted 2 fact(s) into 'sold'.
 > +reserved[(2, 0), (5, 0)].
-Inserted 2 facts into 'reserved'.
+Inserted 2 fact(s) into 'reserved'.
 > +damaged[(4, 0), (7, 0)].
-Inserted 2 facts into 'damaged'.
+Inserted 2 fact(s) into 'damaged'.
 > +available(X, Y) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
 Rule 'available' registered.
 > ?- available(X, Y).
 2 rows:
   (6, 0)
   (8, 0)
-> .db use default
-Switched to database: default
-> .db drop test_triple_neg
-Database 'test_triple_neg' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triple_neg
+Knowledge graph 'test_triple_neg' dropped.

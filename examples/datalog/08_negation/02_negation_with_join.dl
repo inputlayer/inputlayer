@@ -1,23 +1,23 @@
-// Test: Negation Combined with Join
-// Category: 08_negation
-// Description: Tests negation used together with a join operation
+% Test: Negation Combined with Join
+% Category: 08_negation
+% Description: Tests negation used together with a join operation
 
-.db create test_neg_join
-.db use test_neg_join
+.kg create test_neg_join
+.kg use test_neg_join
 
-// Employees and their departments
+% Employees and their departments
 +employee[(1, 100), (2, 100), (3, 200), (4, 200), (5, 300)].
 
-// Departments to exclude (using dummy second column for binary tuple requirement)
+% Departments to exclude (using dummy second column for binary tuple requirement)
 +excluded_dept[(200, 0)].
 
-// Find employees NOT in excluded departments
-// This combines a scan and negation with partial key match
+% Find employees NOT in excluded departments
+% This combines a scan and negation with partial key match
 +active_employee(EmpId, DeptId) :- employee(EmpId, DeptId), !excluded_dept(DeptId, _).
 
-// Expected: employees 1,2 (dept 100) and 5 (dept 300), NOT 3,4 (dept 200)
+% Expected: employees 1,2 (dept 100) and 5 (dept 300), NOT 3,4 (dept 200)
 ?- active_employee(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_neg_join
+% Cleanup
+.kg use default
+.kg drop test_neg_join

@@ -9,11 +9,11 @@
 //! - LSH hyperplanes generated on-the-fly for memory efficiency
 //! - All functions are pure and thread-safe
 
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
 // ============================================================================
 // Orderable Float Wrapper for BinaryHeap
@@ -34,14 +34,14 @@ impl PartialOrd for OrdF64 {
 
 impl Ord for OrdF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.partial_cmp(&other.0).unwrap_or_else(|| {
-            match (self.0.is_nan(), other.0.is_nan()) {
+        self.0
+            .partial_cmp(&other.0)
+            .unwrap_or_else(|| match (self.0.is_nan(), other.0.is_nan()) {
                 (true, true) => std::cmp::Ordering::Equal,
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
                 (false, false) => unreachable!(),
-            }
-        })
+            })
     }
 }
 
@@ -93,7 +93,8 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
-    let sum_sq: f32 = a.iter()
+    let sum_sq: f32 = a
+        .iter()
         .zip(b.iter())
         .map(|(x, y)| {
             let diff = x - y;
@@ -114,7 +115,8 @@ pub fn euclidean_distance_squared(a: &[f32], b: &[f32]) -> f64 {
         return f64::INFINITY;
     }
 
-    let sum_sq: f32 = a.iter()
+    let sum_sq: f32 = a
+        .iter()
         .zip(b.iter())
         .map(|(x, y)| {
             let diff = x - y;
@@ -221,7 +223,9 @@ pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
 /// Number of differing bits (0 to 64 for i64)
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::vector_ops::hamming_distance;
+///
 /// let h1 = 0b1010_1010i64;
 /// let h2 = 0b1010_1000i64;  // Differs in 1 bit
 /// assert_eq!(hamming_distance(h1, h2), 1);
@@ -454,7 +458,9 @@ pub enum QuantizationMethod {
 /// This method uses the full int8 range but doesn't preserve zero.
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::vector_ops::quantize_vector_linear;
+///
 /// let v = vec![0.0, 0.5, 1.0];
 /// let q = quantize_vector_linear(&v);
 /// assert_eq!(q[0], -128); // min -> -128
@@ -488,7 +494,9 @@ pub fn quantize_vector_linear(v: &[f32]) -> Vec<i8> {
 /// This method is preferred when zero is meaningful (e.g., centered embeddings).
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::vector_ops::quantize_vector_symmetric;
+///
 /// let v = vec![-1.0, 0.0, 1.0];
 /// let q = quantize_vector_symmetric(&v);
 /// assert_eq!(q[0], -127); // -max_abs -> -127
@@ -578,7 +586,8 @@ pub fn euclidean_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return f64::INFINITY;
     }
 
-    let sum_sq: i64 = a.iter()
+    let sum_sq: i64 = a
+        .iter()
         .zip(b.iter())
         .map(|(&x, &y)| {
             let diff = (x as i32) - (y as i32);
@@ -638,7 +647,8 @@ pub fn dot_product_int8(a: &[i8], b: &[i8]) -> f64 {
         return 0.0;
     }
 
-    let sum: i64 = a.iter()
+    let sum: i64 = a
+        .iter()
         .zip(b.iter())
         .map(|(&x, &y)| (x as i64) * (y as i64))
         .sum();
@@ -659,7 +669,8 @@ pub fn manhattan_distance_int8(a: &[i8], b: &[i8]) -> f64 {
         return f64::INFINITY;
     }
 
-    let sum: i64 = a.iter()
+    let sum: i64 = a
+        .iter()
         .zip(b.iter())
         .map(|(&x, &y)| ((x as i32) - (y as i32)).abs() as i64)
         .sum();
@@ -710,7 +721,8 @@ pub fn lsh_bucket_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize) -> i64 
 
     for h in 0..hyperplanes.num_hyperplanes {
         let hp = hyperplanes.hyperplane(h);
-        let dot: f64 = v.iter()
+        let dot: f64 = v
+            .iter()
             .zip(hp.iter())
             .map(|(&vi, &hi)| (vi as f64) * (hi as f64))
             .sum();
@@ -749,7 +761,7 @@ type HyperplaneCacheKey = (i64, usize, usize);
 /// (atomic refcount increment) instead of O(n) (deep copy).
 #[derive(Clone)]
 struct CachedHyperplanes {
-    data: Arc<[f32]>,  // Zero-copy clone via Arc
+    data: Arc<[f32]>, // Zero-copy clone via Arc
     num_hyperplanes: usize,
     dimension: usize,
 }
@@ -758,7 +770,7 @@ impl CachedHyperplanes {
     fn new(data: Vec<f32>, num_hyperplanes: usize, dimension: usize) -> Self {
         debug_assert_eq!(data.len(), num_hyperplanes * dimension);
         Self {
-            data: data.into(),  // Vec<f32> -> Arc<[f32]>
+            data: data.into(), // Vec<f32> -> Arc<[f32]>
             num_hyperplanes,
             dimension,
         }
@@ -801,7 +813,8 @@ impl HyperplaneCacheEntry {
     /// Update access time (can be called through shared reference on read path)
     #[inline]
     fn touch(&self) {
-        self.last_accessed.store(next_access_time(), Ordering::Relaxed);
+        self.last_accessed
+            .store(next_access_time(), Ordering::Relaxed);
         self.access_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -825,7 +838,11 @@ impl LshCacheStats {
     /// Get the cache hit rate (0.0 to 1.0)
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
-        if total == 0 { 0.0 } else { self.hits as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
     }
 }
 
@@ -917,7 +934,11 @@ fn random_f32_from_seed(seed: u64) -> f32 {
 ///
 /// Creates deterministic random hyperplanes based on (table_idx, hyperplane_index, dimension).
 /// This is called once per configuration and cached for reuse.
-fn generate_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: usize) -> CachedHyperplanes {
+fn generate_hyperplanes(
+    table_idx: i64,
+    num_hyperplanes: usize,
+    dimension: usize,
+) -> CachedHyperplanes {
     let num_bits = num_hyperplanes.min(62);
     let mut data = Vec::with_capacity(num_bits * dimension);
 
@@ -938,7 +959,11 @@ fn generate_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: usize
 /// Uses double-checked locking for optimal performance:
 /// - Fast path: read lock for cache hit (O(1) Arc clone + atomic LRU update)
 /// - Slow path: write lock for cache miss with LRU eviction
-fn get_or_create_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: usize) -> CachedHyperplanes {
+fn get_or_create_hyperplanes(
+    table_idx: i64,
+    num_hyperplanes: usize,
+    dimension: usize,
+) -> CachedHyperplanes {
     let key = (table_idx, num_hyperplanes, dimension);
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
@@ -947,9 +972,9 @@ fn get_or_create_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: 
     {
         let read_guard = cache.read().unwrap();
         if let Some(entry) = read_guard.cache.get(&key) {
-            entry.touch();  // Update LRU timestamp atomically
+            entry.touch(); // Update LRU timestamp atomically
             stats.hits.fetch_add(1, Ordering::Relaxed);
-            return entry.hyperplanes.clone();  // O(1) Arc clone
+            return entry.hyperplanes.clone(); // O(1) Arc clone
         }
     }
 
@@ -958,7 +983,7 @@ fn get_or_create_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: 
 
     // Double-check after acquiring write lock (another thread may have inserted)
     if let Some(entry) = write_guard.cache.get(&key) {
-        entry.touch();  // Update LRU timestamp
+        entry.touch(); // Update LRU timestamp
         stats.hits.fetch_add(1, Ordering::Relaxed);
         return entry.hyperplanes.clone();
     }
@@ -967,8 +992,11 @@ fn get_or_create_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: 
 
     // LRU eviction if at capacity
     if write_guard.cache.len() >= write_guard.max_entries {
-        if let Some((&lru_key, _)) = write_guard.cache.iter()
-            .min_by_key(|(_, e)| e.last_access())  // Use atomic load
+        if let Some((&lru_key, _)) = write_guard
+            .cache
+            .iter()
+            .min_by_key(|(_, e)| e.last_access())
+        // Use atomic load
         {
             write_guard.cache.remove(&lru_key);
             stats.evictions.fetch_add(1, Ordering::Relaxed);
@@ -977,7 +1005,9 @@ fn get_or_create_hyperplanes(table_idx: i64, num_hyperplanes: usize, dimension: 
 
     // Generate and cache
     let hyperplanes = generate_hyperplanes(table_idx, num_hyperplanes, dimension);
-    write_guard.cache.insert(key, HyperplaneCacheEntry::new(hyperplanes.clone()));
+    write_guard
+        .cache
+        .insert(key, HyperplaneCacheEntry::new(hyperplanes.clone()));
 
     hyperplanes
 }
@@ -1021,7 +1051,9 @@ fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -
 /// - Uses deterministic seeding for reproducibility
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::vector_ops::lsh_bucket;
+///
 /// let v1 = vec![1.0, 0.0, 0.0];
 /// let bucket1 = lsh_bucket(&v1, 0, 8);
 ///
@@ -1029,6 +1061,7 @@ fn compute_bucket_from_hyperplanes(v: &[f32], hyperplanes: &CachedHyperplanes) -
 /// let bucket2 = lsh_bucket(&v2, 0, 8);
 ///
 /// // bucket1 and bucket2 are likely to be equal
+/// // (probabilistic - no assertion)
 /// ```
 pub fn lsh_bucket(v: &[f32], table_idx: i64, num_hyperplanes: usize) -> i64 {
     if v.is_empty() || num_hyperplanes == 0 {
@@ -1117,10 +1150,13 @@ pub fn prewarm_lsh_cache(table_idx: i64, num_hyperplanes: usize, dimension: usiz
 /// Vec of bucket IDs to probe, starting with the original bucket.
 ///
 /// # Example
-/// ```ignore
-/// let bucket = 0b00110101; // 53
+/// ```rust
+/// use inputlayer::vector_ops::lsh_probes;
+///
+/// let bucket = 0b00110101i64; // 53
 /// let probes = lsh_probes(bucket, 8, 5);
-/// // Returns: [53, 52, 55, 49, 61] (original + 4 single-bit flips)
+/// assert_eq!(probes[0], 53); // Original bucket first
+/// assert_eq!(probes.len(), 5);
 /// ```
 pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec<i64> {
     if num_probes == 0 {
@@ -1185,13 +1221,19 @@ pub fn lsh_probes(bucket: i64, num_hyperplanes: usize, num_probes: usize) -> Vec
 /// - boundary_distances: Vec of |dot product| for each hyperplane (smaller = closer to boundary)
 ///
 /// # Example
-/// ```ignore
+/// ```rust,no_run
+/// use inputlayer::vector_ops::lsh_bucket_with_distances;
+///
 /// let v = vec![0.5, 0.3, -0.01]; // -0.01 is close to zero (hyperplane boundary)
 /// let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
 /// // distances[i] tells us how confident we are about bit i
 /// // Lower distance = less confident = should probe that bit first
 /// ```
-pub fn lsh_bucket_with_distances(v: &[f32], table_idx: i64, num_hyperplanes: usize) -> (i64, Vec<f64>) {
+pub fn lsh_bucket_with_distances(
+    v: &[f32],
+    table_idx: i64,
+    num_hyperplanes: usize,
+) -> (i64, Vec<f64>) {
     if v.is_empty() || num_hyperplanes == 0 {
         return (0, Vec::new());
     }
@@ -1204,7 +1246,11 @@ pub fn lsh_bucket_with_distances(v: &[f32], table_idx: i64, num_hyperplanes: usi
 
     for h in 0..hyperplanes.num_hyperplanes {
         let hp = hyperplanes.hyperplane(h);
-        let dot: f64 = v.iter().zip(hp.iter()).map(|(&a, &b)| (a as f64) * (b as f64)).sum();
+        let dot: f64 = v
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &b)| (a as f64) * (b as f64))
+            .sum();
 
         if dot > 0.0 {
             bucket |= 1i64 << h;
@@ -1218,7 +1264,11 @@ pub fn lsh_bucket_with_distances(v: &[f32], table_idx: i64, num_hyperplanes: usi
 /// Compute LSH bucket with boundary distances for int8 vectors.
 ///
 /// Same as `lsh_bucket_with_distances` but for quantized int8 vectors.
-pub fn lsh_bucket_with_distances_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize) -> (i64, Vec<f64>) {
+pub fn lsh_bucket_with_distances_int8(
+    v: &[i8],
+    table_idx: i64,
+    num_hyperplanes: usize,
+) -> (i64, Vec<f64>) {
     if v.is_empty() || num_hyperplanes == 0 {
         return (0, Vec::new());
     }
@@ -1231,7 +1281,11 @@ pub fn lsh_bucket_with_distances_int8(v: &[i8], table_idx: i64, num_hyperplanes:
 
     for h in 0..hyperplanes.num_hyperplanes {
         let hp = hyperplanes.hyperplane(h);
-        let dot: f64 = v.iter().zip(hp.iter()).map(|(&a, &b)| (a as f64) * (b as f64)).sum();
+        let dot: f64 = v
+            .iter()
+            .zip(hp.iter())
+            .map(|(&a, &b)| (a as f64) * (b as f64))
+            .sum();
 
         if dot > 0.0 {
             bucket |= 1i64 << h;
@@ -1265,7 +1319,10 @@ pub fn lsh_bucket_with_distances_int8(v: &[i8], table_idx: i64, num_hyperplanes:
 ///    - etc.
 ///
 /// # Example
-/// ```ignore
+/// ```rust,no_run
+/// use inputlayer::vector_ops::{lsh_bucket_with_distances, lsh_probes_ranked};
+///
+/// let v = vec![0.5, 0.3, -0.01];
 /// let (bucket, distances) = lsh_bucket_with_distances(&v, 0, 8);
 /// let probes = lsh_probes_ranked(bucket, &distances, 10);
 /// // Probes are ordered by likelihood of finding similar vectors
@@ -1356,14 +1413,22 @@ pub fn lsh_probes_ranked(bucket: i64, boundary_distances: &[f64], num_probes: us
 /// The first element is always the exact bucket for the input vector.
 ///
 /// # Example
-/// ```ignore
+/// ```rust,no_run
+/// use inputlayer::vector_ops::lsh_multi_probe;
+///
+/// let query_vec = vec![0.5, 0.3, -0.01];
 /// let probes = lsh_multi_probe(&query_vec, 0, 8, 10);
 /// // Now search for candidates in all these buckets
-/// for probe_bucket in probes {
-///     candidates.extend(index.get_bucket(probe_bucket));
-/// }
+/// // for probe_bucket in probes {
+/// //     candidates.extend(index.get_bucket(probe_bucket));
+/// // }
 /// ```
-pub fn lsh_multi_probe(v: &[f32], table_idx: i64, num_hyperplanes: usize, num_probes: usize) -> Vec<i64> {
+pub fn lsh_multi_probe(
+    v: &[f32],
+    table_idx: i64,
+    num_hyperplanes: usize,
+    num_probes: usize,
+) -> Vec<i64> {
     let (bucket, distances) = lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
     lsh_probes_ranked(bucket, &distances, num_probes)
 }
@@ -1371,7 +1436,12 @@ pub fn lsh_multi_probe(v: &[f32], table_idx: i64, num_hyperplanes: usize, num_pr
 /// Convenience function: compute LSH bucket and generate smart probe sequence for int8 vectors.
 ///
 /// Same as `lsh_multi_probe` but for quantized int8 vectors.
-pub fn lsh_multi_probe_int8(v: &[i8], table_idx: i64, num_hyperplanes: usize, num_probes: usize) -> Vec<i64> {
+pub fn lsh_multi_probe_int8(
+    v: &[i8],
+    table_idx: i64,
+    num_hyperplanes: usize,
+    num_probes: usize,
+) -> Vec<i64> {
     let (bucket, distances) = lsh_bucket_with_distances_int8(v, table_idx, num_hyperplanes);
     lsh_probes_ranked(bucket, &distances, num_probes)
 }
@@ -1422,7 +1492,8 @@ where
     if descending {
         // Top k largest: use min-heap (via Reverse) to track largest items
         // We keep the k largest seen so far; when full, evict the smallest
-        let mut heap: BinaryHeap<Reverse<HeapEntry<ScoredItem<T>>>> = BinaryHeap::with_capacity(k + 1);
+        let mut heap: BinaryHeap<Reverse<HeapEntry<ScoredItem<T>>>> =
+            BinaryHeap::with_capacity(k + 1);
 
         for item in items {
             let score = OrdF64(item.score);
@@ -1438,7 +1509,11 @@ where
 
         // Extract and sort descending for final output
         let mut result: Vec<_> = heap.into_iter().map(|Reverse(entry)| entry.item).collect();
-        result.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        result.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         result
     } else {
         // Top k smallest: use max-heap to track smallest items
@@ -1459,7 +1534,11 @@ where
 
         // Extract and sort ascending for final output
         let mut result: Vec<_> = heap.into_iter().map(|entry| entry.item).collect();
-        result.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+        result.sort_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         result
     }
 }
@@ -1495,9 +1574,7 @@ where
     I: Iterator<Item = ScoredItem<T>>,
     T: Clone,
 {
-    items
-        .filter(|item| item.score <= max_distance)
-        .collect()
+    items.filter(|item| item.score <= max_distance).collect()
 }
 
 // ============================================================================
@@ -1794,8 +1871,11 @@ mod tests {
         assert_eq!(result.len(), k);
         // Verify descending order
         for i in 1..result.len() {
-            assert!(result[i - 1].score >= result[i].score,
-                "Results not in descending order at index {}", i);
+            assert!(
+                result[i - 1].score >= result[i].score,
+                "Results not in descending order at index {}",
+                i
+            );
         }
 
         // Performance assertion: should complete in < 50ms
@@ -1804,7 +1884,9 @@ mod tests {
             elapsed.as_millis() < 50,
             "top_k too slow for O(n log k): {:?}ms for n={}, k={}. \
              This suggests O(n log n) complexity instead of O(n log k).",
-            elapsed.as_millis(), n, k
+            elapsed.as_millis(),
+            n,
+            k
         );
     }
 
@@ -1862,10 +1944,26 @@ mod tests {
         let b_h8 = lsh_bucket(&v, 20001, 8);
 
         // Verify determinism
-        assert_eq!(b_t1, lsh_bucket(&v, 20001, 8), "Same config should return same bucket");
-        assert_eq!(b_t2, lsh_bucket(&v, 20002, 8), "Same config should return same bucket");
-        assert_eq!(b_h4, lsh_bucket(&v, 20001, 4), "Same config should return same bucket");
-        assert_eq!(b_h8, lsh_bucket(&v, 20001, 8), "Same config should return same bucket");
+        assert_eq!(
+            b_t1,
+            lsh_bucket(&v, 20001, 8),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_t2,
+            lsh_bucket(&v, 20002, 8),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_h4,
+            lsh_bucket(&v, 20001, 4),
+            "Same config should return same bucket"
+        );
+        assert_eq!(
+            b_h8,
+            lsh_bucket(&v, 20001, 8),
+            "Same config should return same bucket"
+        );
     }
 
     #[test]
@@ -1885,7 +1983,10 @@ mod tests {
         let bucket2 = lsh_bucket(&v, table_idx, num_hp);
 
         // Results must be identical
-        assert_eq!(bucket1, bucket2, "Cache should produce deterministic results");
+        assert_eq!(
+            bucket1, bucket2,
+            "Cache should produce deterministic results"
+        );
     }
 
     #[test]
@@ -1914,8 +2015,8 @@ mod tests {
 
     #[test]
     fn test_lsh_cache_thread_safety() {
-        use std::thread;
         use std::sync::Arc;
+        use std::thread;
 
         let v = Arc::new(vec![1.0; 128]);
 
@@ -1970,7 +2071,10 @@ mod tests {
         // Verify prewarm produces same result as a fresh computation
         clear_lsh_cache();
         let bucket_fresh = lsh_bucket(&v, unique_table_idx, 6);
-        assert_eq!(bucket1, bucket_fresh, "Prewarm should produce same result as fresh computation");
+        assert_eq!(
+            bucket1, bucket_fresh,
+            "Prewarm should produce same result as fresh computation"
+        );
     }
 
     #[test]
@@ -1984,7 +2088,11 @@ mod tests {
             evictions: 0,
             entries: 0,
         };
-        assert_eq!(stats_zero.hit_rate(), 0.0, "Zero total should give 0 hit rate");
+        assert_eq!(
+            stats_zero.hit_rate(),
+            0.0,
+            "Zero total should give 0 hit rate"
+        );
 
         let stats_all_hits = LshCacheStats {
             hits: 10,
@@ -2000,7 +2108,11 @@ mod tests {
             evictions: 0,
             entries: 1,
         };
-        assert_eq!(stats_all_misses.hit_rate(), 0.0, "All misses should give 0.0");
+        assert_eq!(
+            stats_all_misses.hit_rate(),
+            0.0,
+            "All misses should give 0.0"
+        );
 
         let stats_mixed = LshCacheStats {
             hits: 9,
@@ -2008,7 +2120,10 @@ mod tests {
             evictions: 0,
             entries: 1,
         };
-        assert!((stats_mixed.hit_rate() - 0.9).abs() < 0.001, "9/10 should give 0.9");
+        assert!(
+            (stats_mixed.hit_rate() - 0.9).abs() < 0.001,
+            "9/10 should give 0.9"
+        );
     }
 
     // ============================================================================
@@ -2037,7 +2152,10 @@ mod tests {
         let v = vec![1.0, 2.0, 3.0];
         let result = lsh_bucket(&v, 0, 1);
         // Result should be 0 or 1 (single bit)
-        assert!(result == 0 || result == 1, "Single hyperplane should give 0 or 1");
+        assert!(
+            result == 0 || result == 1,
+            "Single hyperplane should give 0 or 1"
+        );
     }
 
     #[test]
@@ -2066,7 +2184,10 @@ mod tests {
         let result_pos = lsh_bucket(&v, 1, 8);
         // Different table indices should produce different results (usually)
         // Just verify no panic
-        assert!(result_neg >= 0 || result_neg < 0, "Negative table_idx should not panic");
+        assert!(
+            result_neg >= 0 || result_neg < 0,
+            "Negative table_idx should not panic"
+        );
         // They might be the same or different depending on hash, just verify they work
         let _ = result_pos;
     }
@@ -2098,10 +2219,14 @@ mod tests {
         let bucket_11_again = lsh_bucket(&v11, unique_idx, 8);
         let bucket_13_again = lsh_bucket(&v13, unique_idx, 8);
 
-        assert_eq!(bucket_11, bucket_11_again,
-                   "Same dimension should produce same bucket");
-        assert_eq!(bucket_13, bucket_13_again,
-                   "Same dimension should produce same bucket");
+        assert_eq!(
+            bucket_11, bucket_11_again,
+            "Same dimension should produce same bucket"
+        );
+        assert_eq!(
+            bucket_13, bucket_13_again,
+            "Same dimension should produce same bucket"
+        );
 
         // The buckets for different dimensions will likely differ
         // (but this is not guaranteed, so we just verify determinism)
@@ -2113,7 +2238,10 @@ mod tests {
         let v = vec![1.0];
         let result = lsh_bucket(&v, 0, 8);
         // Should produce some bucket, verify no panic
-        assert!(result >= 0, "Single element vector should produce valid bucket");
+        assert!(
+            result >= 0,
+            "Single element vector should produce valid bucket"
+        );
     }
 
     #[test]
@@ -2121,11 +2249,17 @@ mod tests {
         // Large dimension vectors should work (simulating embeddings)
         let v = vec![0.1; 1536]; // Common embedding dimension
         let result = lsh_bucket(&v, 0, 8);
-        assert!(result >= 0, "Large dimension vector should produce valid bucket");
+        assert!(
+            result >= 0,
+            "Large dimension vector should produce valid bucket"
+        );
 
         // Verify it's cached and deterministic
         let result2 = lsh_bucket(&v, 0, 8);
-        assert_eq!(result, result2, "Large dimension results should be deterministic");
+        assert_eq!(
+            result, result2,
+            "Large dimension results should be deterministic"
+        );
     }
 
     #[test]
@@ -2142,7 +2276,10 @@ mod tests {
         // All-negative vector should still produce valid buckets
         let v = vec![-1.0; 100];
         let result = lsh_bucket(&v, 0, 8);
-        assert!(result >= 0, "All-negative vector should produce valid bucket");
+        assert!(
+            result >= 0,
+            "All-negative vector should produce valid bucket"
+        );
     }
 
     #[test]
@@ -2158,8 +2295,14 @@ mod tests {
         let b3 = lsh_bucket(&v3, 0, 8);
 
         // At least 2 should be different (probabilistically almost certain with 8 hyperplanes)
-        let unique_count = [b1, b2, b3].iter().collect::<std::collections::HashSet<_>>().len();
-        assert!(unique_count >= 2, "Orthogonal vectors should have different buckets");
+        let unique_count = [b1, b2, b3]
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(
+            unique_count >= 2,
+            "Orthogonal vectors should have different buckets"
+        );
     }
 
     #[test]
@@ -2209,8 +2352,10 @@ mod tests {
         // Compute again - should get same result (deterministic hyperplanes)
         let bucket_after = lsh_bucket(&v, unique_idx, 8);
 
-        assert_eq!(bucket_before, bucket_after,
-                   "Results should be deterministic even after cache clear");
+        assert_eq!(
+            bucket_before, bucket_after,
+            "Results should be deterministic even after cache clear"
+        );
     }
 
     #[test]
@@ -2240,18 +2385,29 @@ mod tests {
 
         let buckets = lsh_buckets(&v, num_tables, num_hyperplanes);
 
-        assert_eq!(buckets.len(), num_tables, "Should return one bucket per table");
+        assert_eq!(
+            buckets.len(),
+            num_tables,
+            "Should return one bucket per table"
+        );
 
         // Verify each bucket matches individual lsh_bucket calls
         for (table_idx, &bucket) in buckets.iter().enumerate() {
             let expected = lsh_bucket(&v, table_idx as i64, num_hyperplanes);
-            assert_eq!(bucket, expected, "Bucket {} should match lsh_bucket", table_idx);
+            assert_eq!(
+                bucket, expected,
+                "Bucket {} should match lsh_bucket",
+                table_idx
+            );
         }
 
         // Different tables should (usually) produce different buckets
         // With 4 tables and 8 hyperplanes, very likely to have some variation
         let unique_buckets: std::collections::HashSet<_> = buckets.iter().collect();
-        assert!(unique_buckets.len() >= 2, "Different tables should produce some different buckets");
+        assert!(
+            unique_buckets.len() >= 2,
+            "Different tables should produce some different buckets"
+        );
     }
 
     #[test]
@@ -2265,7 +2421,10 @@ mod tests {
         let b2 = lsh_bucket(&v, 80001, 8);
 
         // Results should still be deterministic
-        assert_eq!(b1, b2, "Results should be deterministic even with zero-size cache");
+        assert_eq!(
+            b1, b2,
+            "Results should be deterministic even with zero-size cache"
+        );
 
         // Reset to default
         configure_lsh_cache_size(64);
@@ -2334,7 +2493,10 @@ mod tests {
 
     #[test]
     fn test_vector_error_display() {
-        let err = VectorError::DimensionMismatch { expected: 3, got: 5 };
+        let err = VectorError::DimensionMismatch {
+            expected: 3,
+            got: 5,
+        };
         assert_eq!(
             err.to_string(),
             "Vector dimension mismatch: expected 3-dimensional, got 5-dimensional"
@@ -2359,7 +2521,10 @@ mod tests {
         let result = euclidean_distance_checked(&a, &b);
         assert!(matches!(
             result,
-            Err(VectorError::DimensionMismatch { expected: 2, got: 3 })
+            Err(VectorError::DimensionMismatch {
+                expected: 2,
+                got: 3
+            })
         ));
     }
 
@@ -2386,7 +2551,10 @@ mod tests {
         let result = cosine_distance_checked(&a, &b);
         assert!(matches!(
             result,
-            Err(VectorError::DimensionMismatch { expected: 2, got: 1 })
+            Err(VectorError::DimensionMismatch {
+                expected: 2,
+                got: 1
+            })
         ));
     }
 
@@ -2405,7 +2573,10 @@ mod tests {
         let result = dot_product_checked(&a, &b);
         assert!(matches!(
             result,
-            Err(VectorError::DimensionMismatch { expected: 2, got: 4 })
+            Err(VectorError::DimensionMismatch {
+                expected: 2,
+                got: 4
+            })
         ));
     }
 
@@ -2424,7 +2595,10 @@ mod tests {
         let result = manhattan_distance_checked(&a, &b);
         assert!(matches!(
             result,
-            Err(VectorError::DimensionMismatch { expected: 1, got: 2 })
+            Err(VectorError::DimensionMismatch {
+                expected: 1,
+                got: 2
+            })
         ));
     }
 
@@ -2463,27 +2637,42 @@ mod tests {
 
         assert!(matches!(
             euclidean_distance_checked(&empty, &non_empty),
-            Err(VectorError::DimensionMismatch { expected: 0, got: 3 })
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
         ));
 
         assert!(matches!(
             euclidean_distance_checked(&non_empty, &empty),
-            Err(VectorError::DimensionMismatch { expected: 3, got: 0 })
+            Err(VectorError::DimensionMismatch {
+                expected: 3,
+                got: 0
+            })
         ));
 
         assert!(matches!(
             cosine_distance_checked(&empty, &non_empty),
-            Err(VectorError::DimensionMismatch { expected: 0, got: 3 })
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
         ));
 
         assert!(matches!(
             dot_product_checked(&empty, &non_empty),
-            Err(VectorError::DimensionMismatch { expected: 0, got: 3 })
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
         ));
 
         assert!(matches!(
             manhattan_distance_checked(&empty, &non_empty),
-            Err(VectorError::DimensionMismatch { expected: 0, got: 3 })
+            Err(VectorError::DimensionMismatch {
+                expected: 0,
+                got: 3
+            })
         ));
     }
 
@@ -2503,7 +2692,10 @@ mod tests {
         let c: Vec<f32> = (0..768).map(|i| (i as f32) / 1000.0).collect();
         assert!(matches!(
             euclidean_distance_checked(&a, &c),
-            Err(VectorError::DimensionMismatch { expected: 1536, got: 768 })
+            Err(VectorError::DimensionMismatch {
+                expected: 1536,
+                got: 768
+            })
         ));
     }
 
@@ -2541,8 +2733,8 @@ mod tests {
         let q = quantize_vector_linear(&v);
         assert_eq!(q.len(), 3);
         assert_eq!(q[0], -128); // min -> -128
-        assert_eq!(q[2], 127);  // max -> 127
-        // 0.5 should be close to middle (around 0)
+        assert_eq!(q[2], 127); // max -> 127
+                               // 0.5 should be close to middle (around 0)
         assert!(q[1].abs() < 5); // Allow small rounding error
     }
 
@@ -2552,8 +2744,8 @@ mod tests {
         let q = quantize_vector_symmetric(&v);
         assert_eq!(q.len(), 3);
         assert_eq!(q[0], -127); // -max_abs -> -127
-        assert_eq!(q[1], 0);    // 0 -> 0 (preserved)
-        assert_eq!(q[2], 127);  // max_abs -> 127
+        assert_eq!(q[1], 0); // 0 -> 0 (preserved)
+        assert_eq!(q[2], 127); // max_abs -> 127
     }
 
     #[test]
@@ -2742,7 +2934,11 @@ mod tests {
 
         // Check monotonicity preserved
         for i in 1..d.len() {
-            assert!(d[i] >= d[i-1], "Monotonicity not preserved at index {}", i);
+            assert!(
+                d[i] >= d[i - 1],
+                "Monotonicity not preserved at index {}",
+                i
+            );
         }
     }
 
@@ -3002,7 +3198,9 @@ mod tests {
                 assert!(
                     query_probes.contains(&similar_bucket),
                     "Similar vector bucket {} not found in probes for query bucket {} (HD={})",
-                    similar_bucket, query_bucket, hamming
+                    similar_bucket,
+                    query_bucket,
+                    hamming
                 );
             }
         }
@@ -3015,11 +3213,7 @@ mod tests {
         let probes = lsh_probes(bucket, 8, 50);
 
         let unique: std::collections::HashSet<_> = probes.iter().collect();
-        assert_eq!(
-            unique.len(),
-            probes.len(),
-            "Duplicate probes found"
-        );
+        assert_eq!(unique.len(), probes.len(), "Duplicate probes found");
     }
 
     #[test]
@@ -3116,19 +3310,19 @@ mod tests {
     fn test_hamming_distance_phash_example() {
         // Simulating perceptual hash comparison (using smaller values to avoid overflow)
         let phash1 = 0x0BCD_1234_5678_9ABCu64 as i64;
-        let phash2 = 0x0BCD_1234_5678_9ABDu64 as i64;  // 1 bit different
+        let phash2 = 0x0BCD_1234_5678_9ABDu64 as i64; // 1 bit different
         assert_eq!(hamming_distance(phash1, phash2), 1);
 
-        let phash3 = 0x0BCD_1234_5678_0000u64 as i64;  // Many bits different
+        let phash3 = 0x0BCD_1234_5678_0000u64 as i64; // Many bits different
         let dist = hamming_distance(phash1, phash3);
-        assert!(dist > 5);  // Very different
+        assert!(dist > 5); // Very different
     }
 
     #[test]
     fn test_hamming_distance_negative_numbers() {
         // Works with negative numbers (treats as bit patterns)
-        assert_eq!(hamming_distance(-1, 0), 64);  // All bits differ
-        assert_eq!(hamming_distance(-1, -2), 1);  // Only LSB differs
+        assert_eq!(hamming_distance(-1, 0), 64); // All bits differ
+        assert_eq!(hamming_distance(-1, -2), 1); // Only LSB differs
     }
 
     // ========================================================================

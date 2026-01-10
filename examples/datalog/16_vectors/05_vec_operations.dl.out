@@ -1,23 +1,23 @@
-Executing script: examples/datalog/16_vectors/05_vec_operations.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_vec_ops
-Database 'test_vec_ops' created.
-Switched to database: test_vec_ops
-> .db use test_vec_ops
-Switched to database: test_vec_ops
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_ops
+Knowledge graph 'test_vec_ops' created.
+Switched to knowledge graph: test_vec_ops
+> .kg use test_vec_ops
+Switched to knowledge graph: test_vec_ops
 > +vectors[(1, [3.0, 4.0]), (2, [1.0, 0.0])].
-Inserted 2 facts into 'vectors'.
+No facts inserted (2 duplicate skipped).
 > vec_info(Id, Dim) :- vectors(Id, V), Dim = vec_dim(V).
-2 rows:
-  (1, 2)
-  (2, 2)
+No results.
 (session: 1 rule(s))
 > ?- vec_info(X, Y).
-2 rows:
-  (1, 2)
-  (2, 2)
-> .db use default
-Switched to database: default
-(Cleared 1 session rule(s))
-> .db drop test_vec_ops
-Database 'test_vec_ops' dropped.
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_ops
+Knowledge graph 'test_vec_ops' dropped.

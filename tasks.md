@@ -237,7 +237,7 @@ right_schema.iter().position(...).unwrap_or(0) // WRONG!
 **Mismatches to fix**:
 | Feature | Doc says | Code does | Fix |
 |---------|----------|-----------|-----|
-| `.db list` marker | `(current)` | `*` | Update docs or code |
+| `.kg list` marker | `(current)` | `*` | Update docs or code |
 | `.rel` output | Shows counts | No counts | Add counts to code |
 | Query results | `Results: N rows` | `[N] rows:` | Standardize |
 

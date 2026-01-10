@@ -1,18 +1,22 @@
-Executing script: examples/datalog/28_docs_coverage/02_cheatsheet_rules.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create cheatsheet_rules
-Database 'cheatsheet_rules' created.
-Switched to database: cheatsheet_rules
-> .db use cheatsheet_rules
-Switched to database: cheatsheet_rules
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create cheatsheet_rules
+Knowledge graph 'cheatsheet_rules' created.
+Switched to knowledge graph: cheatsheet_rules
+> .kg use cheatsheet_rules
+Switched to knowledge graph: cheatsheet_rules
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
-Inserted 4 facts into 'edge'.
+Inserted 4 fact(s) into 'edge'.
 > +person[("alice", 30), ("bob", 17), ("carol", 25)].
-Inserted 3 facts into 'person'.
+Inserted 3 fact(s) into 'person'.
 > +path(X, Y) :- edge(X, Y).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > +path(X, Z) :- path(X, Y), edge(Y, Z).
-Rule added to 'path' (2 rules total).
+Rule 'path' registered.
 > ?- path(X, Y).
 10 rows:
   (1, 2)
@@ -26,10 +30,23 @@ Rule added to 'path' (2 rules total).
   (3, 5)
   (4, 5)
 > +adult(Name, Age) :- person(Name, Age), Age >= 18.
-Rule added to 'adult' (1 rules total).
+Rule 'adult' registered.
 > ?- adult(Name, Age).
 2 rows:
   ("alice", 30)
   ("carol", 25)
 > result(X, Y) :- edge(X, Y), X < Y.
-Script error: Line 30: Query execution failed: Unsupported ordering constraint pattern
+No results.
+(session: 1 rule(s))
+> ?- result(X, Y).
+No results.
+> reachable_from_one(X) :- path(1, X).
+No results.
+(session: 2 rule(s))
+> ?- reachable_from_one(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop cheatsheet_rules
+Knowledge graph 'cheatsheet_rules' dropped.

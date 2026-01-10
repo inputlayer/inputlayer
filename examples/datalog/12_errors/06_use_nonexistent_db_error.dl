@@ -1,8 +1,8 @@
-// Test: Use Non-existent Database
-// Category: 12_errors
-// Description: Tests error handling when switching to a database that doesn't exist
+% Test: Use Non-existent Database
+% Category: 12_errors
+% Description: Tests error handling when switching to a database that doesn't exist
 
-// Attempt to use a database that doesn't exist
-.db use nonexistent_database_xyz
+% Attempt to use a database that doesn't exist
+.kg use nonexistent_database_xyz
 
-// This should produce an error message
+% This should produce an error message

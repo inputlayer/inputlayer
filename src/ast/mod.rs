@@ -336,9 +336,16 @@ impl AggregateFunc {
 
         let k: usize = parts[0].parse().ok()?;
         let order_var = parts[1].to_string();
-        let descending = parts.get(2).map(|s| s.to_lowercase() == "desc").unwrap_or(false);
+        let descending = parts
+            .get(2)
+            .map(|s| s.to_lowercase() == "desc")
+            .unwrap_or(false);
 
-        Some(AggregateFunc::TopK { k, order_var, descending })
+        Some(AggregateFunc::TopK {
+            k,
+            order_var,
+            descending,
+        })
     }
 
     /// Parse top_k_threshold with parameters: top_k_threshold<10, score, 0.5> or top_k_threshold<10, score, 0.5, desc>
@@ -351,9 +358,17 @@ impl AggregateFunc {
         let k: usize = parts[0].parse().ok()?;
         let order_var = parts[1].to_string();
         let threshold: f64 = parts[2].parse().ok()?;
-        let descending = parts.get(3).map(|s| s.to_lowercase() == "desc").unwrap_or(false);
+        let descending = parts
+            .get(3)
+            .map(|s| s.to_lowercase() == "desc")
+            .unwrap_or(false);
 
-        Some(AggregateFunc::TopKThreshold { k, order_var, threshold, descending })
+        Some(AggregateFunc::TopKThreshold {
+            k,
+            order_var,
+            threshold,
+            descending,
+        })
     }
 
     /// Parse within_radius with parameters: within_radius<dist, 0.5>
@@ -366,7 +381,10 @@ impl AggregateFunc {
         let distance_var = parts[0].to_string();
         let max_distance: f64 = parts[1].parse().ok()?;
 
-        Some(AggregateFunc::WithinRadius { distance_var, max_distance })
+        Some(AggregateFunc::WithinRadius {
+            distance_var,
+            max_distance,
+        })
     }
 
     /// Check if this is a ranking aggregate (affects output cardinality)
@@ -522,9 +540,7 @@ impl Term {
                 set
             }
             Term::Arithmetic(expr) => expr.variables(),
-            Term::FunctionCall(_, args) => {
-                args.iter().flat_map(|t| t.variables()).collect()
-            }
+            Term::FunctionCall(_, args) => args.iter().flat_map(|t| t.variables()).collect(),
             _ => std::collections::HashSet::new(),
         }
     }

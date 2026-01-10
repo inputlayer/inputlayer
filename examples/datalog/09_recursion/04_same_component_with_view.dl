@@ -1,24 +1,24 @@
-// Test: Same Component with Rule Inspection
-// Category: 09_recursion
-// Description: Tests 3-rule recursion with .rule command
+% Test: Same Component with Rule Inspection
+% Category: 09_recursion
+% Description: Tests 3-rule recursion with .rule command
 
-.db create test_sc2
-.db use test_sc2
+.kg create test_sc2
+.kg use test_sc2
 
-// Create a simple chain: 1 -> 2 -> 3 -> 4
+% Create a simple chain: 1 -> 2 -> 3 -> 4
 +edge[(1,2), (2,3), (3,4)].
 
-// Define same_component as symmetric transitive closure
+% Define same_component as symmetric transitive closure
 +same_component(X, Y) :- edge(X, Y).
 +same_component(X, Y) :- edge(Y, X).
 +same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
 
-// Inspect the rule (shows rules and computed results)
+% Inspect the rule (shows rules and computed results)
 .rule same_component
 
-// Query: Is node 1 in the same component as node 4?
+% Query: Is node 1 in the same component as node 4?
 ?- same_component(1, 4).
 
-// Cleanup
-.db use default
-.db drop test_sc2
+% Cleanup
+.kg use default
+.kg drop test_sc2

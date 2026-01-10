@@ -1,31 +1,35 @@
-Executing script: examples/datalog/25_unified_prefix/03_schema_vs_data.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_schema_vs_data
-Database 'test_schema_vs_data' created.
-Switched to database: test_schema_vs_data
-> .db use test_schema_vs_data
-Switched to database: test_schema_vs_data
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_schema_vs_data
+Knowledge graph 'test_schema_vs_data' created.
+Switched to knowledge graph: test_schema_vs_data
+> .kg use test_schema_vs_data
+Switched to knowledge graph: test_schema_vs_data
 > +person(id: int, name: string, age: int).
-Persistent schema 'person' declared: (id: Base(Int), name: Base(String), age: Base(Int))
+Schema 'person' declared (persistent).
 > +person(1, "Alice", 30).
-Inserted 1 fact into 'person'.
+Inserted 1 fact(s) into 'person'.
 > +person(2, "Bob", 25).
-Inserted 1 fact into 'person'.
+Inserted 1 fact(s) into 'person'.
 > ?- person(Id, Name, Age).
 2 rows:
   (1, "Alice", 30)
   (2, "Bob", 25)
 > +product(sku: string, price: int).
-Persistent schema 'product' declared: (sku: Base(String), price: Base(Int))
+Schema 'product' declared (persistent).
 > +product("SKU001", 100).
-Inserted 1 fact into 'product'.
+Inserted 1 fact(s) into 'product'.
 > +product("SKU002", 200).
-Inserted 1 fact into 'product'.
+Inserted 1 fact(s) into 'product'.
 > ?- product(Sku, Price).
 2 rows:
   ("SKU001", 100)
   ("SKU002", 200)
-> .db use default
-Switched to database: default
-> .db drop test_schema_vs_data
-Database 'test_schema_vs_data' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_schema_vs_data
+Knowledge graph 'test_schema_vs_data' dropped.

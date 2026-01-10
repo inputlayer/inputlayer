@@ -3,8 +3,8 @@
 //! This module defines the core data structures for persisting
 //! Differential Dataflow-style (data, time, diff) updates.
 
-use crate::value::Tuple2;
 use crate::value::Tuple;
+use crate::value::Tuple2;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -27,22 +27,38 @@ pub struct Update {
 impl Update {
     /// Create an insert update from a Tuple
     pub fn insert(data: Tuple, time: u64) -> Self {
-        Update { data, time, diff: 1 }
+        Update {
+            data,
+            time,
+            diff: 1,
+        }
     }
 
     /// Create a delete update from a Tuple
     pub fn delete(data: Tuple, time: u64) -> Self {
-        Update { data, time, diff: -1 }
+        Update {
+            data,
+            time,
+            diff: -1,
+        }
     }
 
     /// Create an insert update from a Tuple2 (legacy compatibility)
     pub fn insert_tuple2(data: Tuple2, time: u64) -> Self {
-        Update { data: Tuple::from_pair(data.0, data.1), time, diff: 1 }
+        Update {
+            data: Tuple::from_pair(data.0, data.1),
+            time,
+            diff: 1,
+        }
     }
 
     /// Create a delete update from a Tuple2 (legacy compatibility)
     pub fn delete_tuple2(data: Tuple2, time: u64) -> Self {
-        Update { data: Tuple::from_pair(data.0, data.1), time, diff: -1 }
+        Update {
+            data: Tuple::from_pair(data.0, data.1),
+            time,
+            diff: -1,
+        }
     }
 }
 
@@ -64,8 +80,17 @@ impl Batch {
     /// Create a new batch from updates
     pub fn new(updates: Vec<Update>) -> Self {
         let lower = updates.iter().map(|u| u.time).min().unwrap_or(0);
-        let upper = updates.iter().map(|u| u.time).max().map(|t| t + 1).unwrap_or(0);
-        Batch { updates, lower, upper }
+        let upper = updates
+            .iter()
+            .map(|u| u.time)
+            .max()
+            .map(|t| t + 1)
+            .unwrap_or(0);
+        Batch {
+            updates,
+            lower,
+            upper,
+        }
     }
 
     /// Check if batch is empty

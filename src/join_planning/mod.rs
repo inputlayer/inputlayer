@@ -51,15 +51,21 @@
 //! ```
 
 use crate::ir::IRNode;
-use std::collections::{HashMap, HashSet, BinaryHeap};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// Node in the join graph representing a relation/scan
 #[derive(Debug, Clone)]
 pub struct JoinGraphNode {
-    /// Index of this node in the graph
+    // TODO: Implement selectivity-based cost model that uses relation statistics.
+    // Reserved for future join planning optimizations:
+    // - `index`: Maps back to original relation position for cost model lookups
+    // - `relation`: Stores relation name for cardinality estimation and debugging
+    // Currently unused because join planner uses simplified cost model based only
+    // on shared variable counts. Will be needed for selectivity-based optimization.
+    #[allow(dead_code)]
     pub index: usize,
-    /// Name of the relation
+    #[allow(dead_code)]
     pub relation: String,
     /// Variables (column names) from this relation
     pub variables: HashSet<String>,
@@ -76,7 +82,11 @@ pub struct JoinGraphEdge {
     pub to: usize,
     /// Weight = number of shared variables
     pub weight: usize,
-    /// The actual shared variable names
+    // TODO: Implement join key selectivity estimation using shared variable types.
+    // Reserved for advanced cost model that considers which variables are shared,
+    // not just how many. Currently only `weight` (count of shared vars) is used
+    // by the MST algorithm. Will enable selectivity hints and key type analysis.
+    #[allow(dead_code)]
     pub shared_vars: HashSet<String>,
 }
 
@@ -292,15 +302,21 @@ impl Default for JoinGraph {
 /// A rooted Join Spanning Tree with computed join order
 #[derive(Debug, Clone)]
 pub struct RootedJST {
-    /// Root node index
+    // TODO: Implement join tree visualization and incremental tree modification.
+    // Reserved for debugging tools and advanced tree operations:
+    // - `root`: For tree traversal starting point in visualization
+    // - `parent`/`children`: For incremental tree restructuring without rebuilding
+    // Currently only `join_order` and `cost` are used; tree structure is discarded
+    // after post-order traversal computes the execution order.
+    #[allow(dead_code)]
     pub root: usize,
     /// Join order (post-order traversal of the tree)
     pub join_order: Vec<usize>,
     /// Structural cost: max variables accumulated at any point
     pub cost: usize,
-    /// Parent of each node in the tree (root has parent = itself)
+    #[allow(dead_code)]
     parent: HashMap<usize, usize>,
-    /// Children of each node in the tree
+    #[allow(dead_code)]
     children: HashMap<usize, Vec<usize>>,
 }
 
@@ -486,7 +502,9 @@ impl JoinPlanner {
     fn has_antijoin(ir: &IRNode) -> bool {
         match ir {
             IRNode::Antijoin { .. } => true,
-            IRNode::Join { left, right, .. } => Self::has_antijoin(left) || Self::has_antijoin(right),
+            IRNode::Join { left, right, .. } => {
+                Self::has_antijoin(left) || Self::has_antijoin(right)
+            }
             IRNode::Scan { .. } => false,
             IRNode::Map { input, .. } => Self::has_antijoin(input),
             IRNode::Filter { input, .. } => Self::has_antijoin(input),
@@ -611,7 +629,8 @@ impl JoinPlanner {
                 // Remap filter predicate column indices
                 let old_input_schema = input.output_schema();
                 let new_input_schema = inner.output_schema();
-                let remapped_predicate = Self::remap_predicate(predicate, &old_input_schema, &new_input_schema);
+                let remapped_predicate =
+                    Self::remap_predicate(predicate, &old_input_schema, &new_input_schema);
 
                 IRNode::Filter {
                     input: Box::new(inner),
@@ -624,7 +643,12 @@ impl JoinPlanner {
                     input: Box::new(inner),
                 }
             }
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => {
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
                 let inner = self.preserve_top_operations(input, new_joins);
                 IRNode::Aggregate {
                     input: Box::new(inner),
@@ -642,7 +666,10 @@ impl JoinPlanner {
                 let remapped_expressions: Vec<(String, crate::ir::IRExpression)> = expressions
                     .iter()
                     .map(|(name, expr)| {
-                        (name.clone(), Self::remap_expression(expr, &old_input_schema, &new_input_schema))
+                        (
+                            name.clone(),
+                            Self::remap_expression(expr, &old_input_schema, &new_input_schema),
+                        )
                     })
                     .collect();
 
@@ -669,7 +696,10 @@ impl JoinPlanner {
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
                 let col_name = &old_schema[old_idx];
-                new_schema.iter().position(|c| c == col_name).unwrap_or(old_idx)
+                new_schema
+                    .iter()
+                    .position(|c| c == col_name)
+                    .unwrap_or(old_idx)
             } else {
                 old_idx
             }
@@ -684,8 +714,12 @@ impl JoinPlanner {
             Predicate::ColumnGeConst(col, val) => Predicate::ColumnGeConst(remap_idx(*col), *val),
             Predicate::ColumnLeConst(col, val) => Predicate::ColumnLeConst(remap_idx(*col), *val),
             // String comparisons
-            Predicate::ColumnEqStr(col, val) => Predicate::ColumnEqStr(remap_idx(*col), val.clone()),
-            Predicate::ColumnNeStr(col, val) => Predicate::ColumnNeStr(remap_idx(*col), val.clone()),
+            Predicate::ColumnEqStr(col, val) => {
+                Predicate::ColumnEqStr(remap_idx(*col), val.clone())
+            }
+            Predicate::ColumnNeStr(col, val) => {
+                Predicate::ColumnNeStr(remap_idx(*col), val.clone())
+            }
             // Float comparisons
             Predicate::ColumnEqFloat(col, val) => Predicate::ColumnEqFloat(remap_idx(*col), *val),
             Predicate::ColumnNeFloat(col, val) => Predicate::ColumnNeFloat(remap_idx(*col), *val),
@@ -697,18 +731,14 @@ impl JoinPlanner {
             Predicate::ColumnsEq(l, r) => Predicate::ColumnsEq(remap_idx(*l), remap_idx(*r)),
             Predicate::ColumnsNe(l, r) => Predicate::ColumnsNe(remap_idx(*l), remap_idx(*r)),
             // Logical combinators
-            Predicate::And(p1, p2) => {
-                Predicate::And(
-                    Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
-                    Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
-                )
-            }
-            Predicate::Or(p1, p2) => {
-                Predicate::Or(
-                    Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
-                    Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
-                )
-            }
+            Predicate::And(p1, p2) => Predicate::And(
+                Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
+                Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
+            ),
+            Predicate::Or(p1, p2) => Predicate::Or(
+                Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
+                Box::new(Self::remap_predicate(p2, old_schema, new_schema)),
+            ),
             Predicate::True => Predicate::True,
             Predicate::False => Predicate::False,
         }
@@ -725,7 +755,10 @@ impl JoinPlanner {
         let remap_idx = |old_idx: usize| -> usize {
             if old_idx < old_schema.len() {
                 let col_name = &old_schema[old_idx];
-                new_schema.iter().position(|c| c == col_name).unwrap_or(old_idx)
+                new_schema
+                    .iter()
+                    .position(|c| c == col_name)
+                    .unwrap_or(old_idx)
             } else {
                 old_idx
             }
@@ -743,13 +776,11 @@ impl JoinPlanner {
                     .collect();
                 IRExpression::FunctionCall(func.clone(), remapped_args)
             }
-            IRExpression::Arithmetic { op, left, right } => {
-                IRExpression::Arithmetic {
-                    op: *op,
-                    left: Box::new(Self::remap_expression(left, old_schema, new_schema)),
-                    right: Box::new(Self::remap_expression(right, old_schema, new_schema)),
-                }
-            }
+            IRExpression::Arithmetic { op, left, right } => IRExpression::Arithmetic {
+                op: *op,
+                left: Box::new(Self::remap_expression(left, old_schema, new_schema)),
+                right: Box::new(Self::remap_expression(right, old_schema, new_schema)),
+            },
         }
     }
 
@@ -818,8 +849,14 @@ mod tests {
         let left_schema = left.output_schema();
         let right_schema = right.output_schema();
 
-        let left_key = left_schema.iter().position(|v| v == shared_var).unwrap_or(0);
-        let right_key = right_schema.iter().position(|v| v == shared_var).unwrap_or(0);
+        let left_key = left_schema
+            .iter()
+            .position(|v| v == shared_var)
+            .unwrap_or(0);
+        let right_key = right_schema
+            .iter()
+            .position(|v| v == shared_var)
+            .unwrap_or(0);
 
         let mut output_schema = left_schema.clone();
         for var in &right_schema {

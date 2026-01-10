@@ -1,32 +1,32 @@
-// Test: Reaching Definitions Analysis (Simplified)
-// Category: 18_advanced_patterns
-// Description: Dataflow analysis showing which definitions reach which points
+% Test: Reaching Definitions Analysis (Simplified)
+% Category: 18_advanced_patterns
+% Description: Dataflow analysis showing which definitions reach which points
 
-.db create test_reaching
-.db use test_reaching
+.kg create test_reaching
+.kg use test_reaching
 
-// Control Flow Graph:
-// Stmt 1 -> Stmt 2 -> Stmt 3 -> Stmt 4
+% Control Flow Graph:
+% Stmt 1 -> Stmt 2 -> Stmt 3 -> Stmt 4
 +cfg[(1, 2), (2, 3), (3, 4)].
 
-// def(stmt, var) - which variable each stmt defines
-// Stmt 1 defines var 1, Stmt 2 defines var 2, Stmt 3 defines var 1
+% def(stmt, var) - which variable each stmt defines
+% Stmt 1 defines var 1, Stmt 2 defines var 2, Stmt 3 defines var 1
 +def[(1, 1), (2, 2), (3, 1)].
 
-// A definition reaches itself
+% A definition reaches itself
 +reaches(D, D) :- def(D, _).
 
-// Definition D reaches Q if it reaches predecessor P and there's an edge P->Q
+% Definition D reaches Q if it reaches predecessor P and there's an edge P->Q
 +reaches(D, Q) :- reaches(D, P), cfg(P, Q).
 
-// Query which definitions reach which points
-// All definitions flow forward: def 1 reaches {1,2,3,4}, def 2 reaches {2,3,4}, def 3 reaches {3,4}
+% Query which definitions reach which points
+% All definitions flow forward: def 1 reaches {1,2,3,4}, def 2 reaches {2,3,4}, def 3 reaches {3,4}
 ?- reaches(X, Y).
 
-// Also query the kills relation for verification
+% Also query the kills relation for verification
 +kills(S, D) :- def(S, V), def(D, V), S != D.
 ?- kills(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_reaching
+% Cleanup
+.kg use default
+.kg drop test_reaching

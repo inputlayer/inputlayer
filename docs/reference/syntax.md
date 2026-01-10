@@ -44,24 +44,24 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 
 #### Integers
 ```datalog
-42        // Decimal
--17       // Negative
-0         // Zero
+42        % Decimal
+-17       % Negative
+0         % Zero
 ```
 
 #### Floats
 ```datalog
-3.14      // Decimal float
--0.5      // Negative float
-1.0e10    // Scientific notation
+3.14      % Decimal float
+-0.5      % Negative float
+1.0e10    % Scientific notation
 ```
 
 #### Strings
 ```datalog
-"hello"           // Basic string
-"hello world"     // With spaces
-"line1\nline2"    // Escape sequences
-"say \"hi\""      // Escaped quotes
+"hello"           % Basic string
+"hello world"     % With spaces
+"line1\nline2"    % Escape sequences
+"say \"hi\""      % Escaped quotes
 ```
 
 **Escape sequences:**
@@ -74,19 +74,19 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 
 #### Vectors
 ```datalog
-[1.0, 2.0, 3.0]           // Float vector
-[0.1, 0.2, 0.3, 0.4]      // Embedding
+[1.0, 2.0, 3.0]           % Float vector
+[0.1, 0.2, 0.3, 0.4]      % Embedding
 ```
 
 ### Comments
 
 ```datalog
-// Single line comment
+% Single line comment (Prolog style - preferred)
 
 /* Multi-line
-   comment */
+   block comment */
 
-+edge(1, 2).  // Inline comment
++edge(1, 2).  % Inline comment
 ```
 
 ## Statements
@@ -119,10 +119,10 @@ Remove base data.
 
 **Conditional delete:**
 ```datalog
-// Delete all edges from node 1
+% Delete all edges from node 1
 -edge(1, Y) :- edge(1, Y).
 
-// Delete all edges
+% Delete all edges
 -edge(X, Y) :- edge(X, Y).
 ```
 
@@ -131,22 +131,22 @@ Remove base data.
 Define derived relations that persist across sessions.
 
 ```datalog
-// Simple derivation
+% Simple derivation
 +adult(Name, Age) :- person(Name, Age), Age >= 18.
 
-// Join
+% Join
 +works_in(Name, Building) :-
   employee(Name, Dept),
   department(Dept, Building).
 
-// Recursive
+% Recursive
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// With negation
+% With negation
 +orphan(X) :- person(X), !parent(_, X).
 
-// With aggregation
+% With aggregation
 +dept_size(Dept, count<Emp>) :- employee(Emp, Dept).
 ```
 
@@ -155,7 +155,7 @@ Define derived relations that persist across sessions.
 Transient rules that exist only for the current session.
 
 ```datalog
-// Not persisted
+% Not persisted
 temp(X, Y) :- edge(X, Y), X < Y.
 debug(X) :- some_complex_condition(X).
 ```
@@ -165,16 +165,16 @@ debug(X) :- some_complex_condition(X).
 Ask questions about the data.
 
 ```datalog
-// Simple query
+% Simple query
 ?- edge(X, Y).
 
-// With constants
+% With constants
 ?- edge(1, X).
 
-// With constraints
+% With constraints
 ?- person(Name, Age), Age > 25.
 
-// Join query
+% Join query
 ?- person(Id, Name, _, _), purchase(Id, Item, _).
 ```
 
@@ -183,13 +183,13 @@ Ask questions about the data.
 Define typed schemas for relations.
 
 ```datalog
-// Basic schema
+% Basic schema
 +employee(id: int, name: string, dept: string).
 
-// With constraints
+% With constraints
 +user(id: int @key, email: string @unique).
 
-// All types
+% All types
 +example(
   a: int,
   b: float,
@@ -250,11 +250,11 @@ Define typed schemas for relations.
 InputLayer provides built-in vector distance and similarity functions:
 
 ```datalog
-// Compute cosine similarity between embeddings
+% Compute cosine similarity between embeddings
 ?- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2,
    Sim = cosine(V1, V2), Sim > 0.9.
 
-// Compute Euclidean distance between points
+% Compute Euclidean distance between points
 ?- point(Id1, V1), point(Id2, V2), Id1 < Id2,
    Dist = euclidean(V1, V2), Dist < 1.0.
 ```
@@ -294,17 +294,17 @@ Variables in the head that are not aggregated become group-by columns.
 ### Examples
 
 ```datalog
-// Count per group
+% Count per group
 +city_count(City, count<Id>) :- person(Id, _, _, City).
 
-// Sum
+% Sum
 +total_sales(Product, sum<Amount>) :- sale(_, Product, Amount).
 
-// Multiple aggregates (separate rules)
+% Multiple aggregates (separate rules)
 +stats_min(min<Age>) :- person(_, _, Age, _).
 +stats_max(max<Age>) :- person(_, _, Age, _).
 
-// Global aggregate (no group-by)
+% Global aggregate (no group-by)
 +total(sum<Amount>) :- purchase(_, _, Amount).
 ```
 
@@ -315,8 +315,8 @@ Express "does not exist" conditions.
 ### Syntax
 
 ```datalog
-!atom(args)     // Negated atom
-not atom(args)  // Alternative syntax
+!atom(args)     % Negated atom
+not atom(args)  % Alternative syntax
 ```
 
 ### Rules
@@ -327,25 +327,25 @@ not atom(args)  // Alternative syntax
 ### Examples
 
 ```datalog
-// People without purchases
+% People without purchases
 +non_buyer(Id, Name) :-
   person(Id, Name, _, _),
   !purchase(Id, _, _).
 
-// Nodes with no outgoing edges
+% Nodes with no outgoing edges
 +sink(X) :- node(X), !edge(X, _).
 
-// Set difference
+% Set difference
 +only_in_a(X) :- a(X), !b(X).
 ```
 
 ### Invalid (Unsafe)
 
 ```datalog
-// WRONG - X only appears in negation
+% WRONG - X only appears in negation
 +bad(X) :- !some_rel(X).
 
-// CORRECT - X appears positively
+% CORRECT - X appears positively
 +good(X) :- domain(X), !some_rel(X).
 ```
 
@@ -353,58 +353,58 @@ not atom(args)  // Alternative syntax
 
 Commands that control the REPL environment.
 
-### Database Commands
+### Knowledge Graph Commands
 
 ```datalog
-.db                     // Show current database
-.db list                // List all databases
-.db create <name>       // Create database
-.db use <name>          // Switch to database
-.db drop <name>         // Delete database
+.kg                     % Show current knowledge graph
+.kg list                % List all knowledge graphs
+.kg create <name>       % Create knowledge graph
+.kg use <name>          % Switch to knowledge graph
+.kg drop <name>         % Delete knowledge graph
 ```
 
 ### Relation Commands
 
 ```datalog
-.rel                    // List relations with data
-.rel <name>             // Show schema and sample data
+.rel                    % List relations with data
+.rel <name>             % Show schema and sample data
 ```
 
 ### Rule Commands
 
 ```datalog
-.rule                   // List all rules
-.rule <name>            // Query a rule
-.rule def <name>        // Show rule definition
-.rule drop <name>       // Delete a rule
-.rule clear <name>      // Clear for re-registration
-.rule edit <name> <n> <clause>  // Edit clause
+.rule                   % List all rules
+.rule <name>            % Query a rule
+.rule def <name>        % Show rule definition
+.rule drop <name>       % Delete a rule
+.rule clear <name>      % Clear for re-registration
+.rule edit <name> <n> <clause>  % Edit clause
 ```
 
 ### Session Commands
 
 ```datalog
-.session                // List session rules
-.session clear          // Clear all session rules
-.session drop <n>       // Remove session rule #n
+.session                % List session rules
+.session clear          % Clear all session rules
+.session drop <n>       % Remove session rule #n
 ```
 
 ### File Commands
 
 ```datalog
-.load <file>            // Execute a .dl file
-.load <file> --replace  // Replace existing rules
-.load <file> --merge    // Merge with existing
+.load <file>            % Execute a .dl file
+.load <file> --replace  % Replace existing rules
+.load <file> --merge    % Merge with existing
 ```
 
 ### System Commands
 
 ```datalog
-.status                 // System status
-.compact                // Compact storage
-.help                   // Help message
-.quit                   // Exit REPL
-.exit                   // Exit REPL (alias)
+.status                 % System status
+.compact                % Compact storage
+.help                   % Help message
+.quit                   % Exit REPL
+.exit                   % Exit REPL (alias)
 ```
 
 ## Recursion
@@ -412,10 +412,10 @@ Commands that control the REPL environment.
 ### Basic Pattern
 
 ```datalog
-// Base case
+% Base case
 +derived(X, Y) :- base(X, Y).
 
-// Recursive case
+% Recursive case
 +derived(X, Z) :- derived(X, Y), base(Y, Z).
 ```
 
@@ -444,15 +444,15 @@ Commands that control the REPL environment.
 ### Social Network
 
 ```datalog
-// Schema
+% Schema
 +person(id: int, name: string, age: int).
 +follows(follower: int, followed: int).
 
-// Data
+% Data
 +person[(1, "alice", 30), (2, "bob", 25), (3, "carol", 35)].
 +follows[(1, 2), (2, 3), (1, 3)].
 
-// Rules
+% Rules
 +mutual_follow(A, B) :-
   follows(A, B),
   follows(B, A),
@@ -461,46 +461,46 @@ Commands that control the REPL environment.
 +influencer(Id, count<Follower>) :-
   follows(Follower, Id).
 
-// Query
+% Query
 ?- influencer(Id, Count), Count > 10.
 ```
 
 ### Graph Analysis
 
 ```datalog
-// Transitive closure
+% Transitive closure
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// Cycle detection
+% Cycle detection
 +in_cycle(X) :- path(X, X).
 
-// Connected components (undirected)
+% Connected components (undirected)
 +bidir(X, Y) :- edge(X, Y).
 +bidir(X, Y) :- edge(Y, X).
 +connected(X, Y) :- bidir(X, Y).
 +connected(X, Z) :- connected(X, Y), bidir(Y, Z).
 
-// Sink nodes (no outgoing)
+% Sink nodes (no outgoing)
 +sink(X) :- node(X), !edge(X, _).
 
-// Source nodes (no incoming)
+% Source nodes (no incoming)
 +source(X) :- node(X), !edge(_, X).
 ```
 
 ### Bill of Materials
 
 ```datalog
-// Part hierarchy
+% Part hierarchy
 +contains(assembly: int, part: int, qty: int).
 
-// All parts needed (recursive)
+% All parts needed (recursive)
 +requires(Asm, Part) :- contains(Asm, Part, _).
 +requires(Asm, Part) :-
   contains(Asm, Sub, _),
   requires(Sub, Part).
 
-// Total quantity calculation
+% Total quantity calculation
 +total_qty(Asm, Part, sum<Qty>) :-
   contains(Asm, Part, Qty).
 ```
@@ -520,17 +520,17 @@ int, float, string, vector
 InputLayer files use the `.dl` extension and contain valid Datalog statements:
 
 ```datalog
-// my_program.dl
+% my_program.dl
 
-// Schema declarations
+% Schema declarations
 +node(id: int, label: string).
 +edge(src: int, dst: int, weight: float).
 
-// Data
+% Data
 +node[(1, "a"), (2, "b"), (3, "c")].
 +edge[(1, 2, 1.0), (2, 3, 2.0)].
 
-// Rules
+% Rules
 +path(X, Y, W) :- edge(X, Y, W).
 +path(X, Z, W) :- path(X, Y, W1), edge(Y, Z, W2), W = W1 + W2.
 ```

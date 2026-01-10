@@ -1,34 +1,34 @@
-// Test: Session Rules
-// Category: 04_session
-// Description: Tests transient session rules that accumulate and execute together
+% Test: Session Rules
+% Category: 04_session
+% Description: Tests transient session rules that accumulate and execute together
 
-.db create test_sess
-.db use test_sess
+.kg create test_sess
+.kg use test_sess
 
-// Insert base data
+% Insert base data
 +edge[(1,2), (2,3), (3,4)].
 
-// Add session rules one by one
-// Note: Session rules are transient, not persisted
+% Add session rules one by one
+% Note: Session rules are transient, not persisted
 
-// First session rule (base case)
+% First session rule (base case)
 path(X, Y) :- edge(X, Y).
 
-// Second session rule (recursive case)
+% Second session rule (recursive case)
 path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// List session rules
+% List session rules
 .session
 
-// Query using accumulated session rules
+% Query using accumulated session rules
 ?- path(1, X).
 
-// Clear session
+% Clear session
 .session clear
 
-// Verify session is empty
+% Verify session is empty
 .session
 
-// Cleanup
-.db use default
-.db drop test_sess
+% Cleanup
+.kg use default
+.kg drop test_sess

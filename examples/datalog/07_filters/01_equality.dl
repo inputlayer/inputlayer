@@ -1,18 +1,18 @@
-// Test: Equality Constraint
-// Category: 07_filters
-// Description: Tests X = Y constraint (self-loops)
+% Test: Equality Constraint
+% Category: 07_filters
+% Description: Tests X = Y constraint (self-loops)
 
-.db create test_eq
-.db use test_eq
+.kg create test_eq
+.kg use test_eq
 
-// Insert edges including self-loops
+% Insert edges including self-loops
 +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
 
-// Find self-loops (X = Y)
+% Find self-loops (X = Y)
 +self_loop(X, Y) :- edge(X, Y), X = Y.
 
 ?- self_loop(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_eq
+% Cleanup
+.kg use default
+.kg drop test_eq

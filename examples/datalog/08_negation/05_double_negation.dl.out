@@ -1,23 +1,27 @@
-Executing script: examples/datalog/08_negation/05_double_negation.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_double_neg
-Database 'test_double_neg' created.
-Switched to database: test_double_neg
-> .db use test_double_neg
-Switched to database: test_double_neg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_double_neg
+Knowledge graph 'test_double_neg' created.
+Switched to knowledge graph: test_double_neg
+> .kg use test_double_neg
+Switched to knowledge graph: test_double_neg
 > +candidate[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
-Inserted 5 facts into 'candidate'.
+Inserted 5 fact(s) into 'candidate'.
 > +blacklist[(2, 0), (4, 0)].
-Inserted 2 facts into 'blacklist'.
+Inserted 2 fact(s) into 'blacklist'.
 > +already_hired[(3, 0)].
-Inserted 1 fact into 'already_hired'.
+Inserted 1 fact(s) into 'already_hired'.
 > +eligible(X, Y) :- candidate(X, Y), !blacklist(X, _), !already_hired(X, _).
 Rule 'eligible' registered.
 > ?- eligible(X, Y).
 2 rows:
   (1, 0)
   (5, 0)
-> .db use default
-Switched to database: default
-> .db drop test_double_neg
-Database 'test_double_neg' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_double_neg
+Knowledge graph 'test_double_neg' dropped.

@@ -1,39 +1,39 @@
-// Test: Set Difference (via Negation)
-// Category: 22_set_operations
-// Description: Tests set difference using negation
+% Test: Set Difference (via Negation)
+% Category: 22_set_operations
+% Description: Tests set difference using negation
 
-.db create test_diff
-.db use test_diff
+.kg create test_diff
+.kg use test_diff
 
-// Two sets
+% Two sets
 +set_a[(1), (2), (3), (4), (5)].
 +set_b[(2), (4)].
 
-// A - B (elements in A but not in B)
+% A - B (elements in A but not in B)
 +diff_a_minus_b(X) :- set_a(X), !set_b(X).
 ?- diff_a_minus_b(X).
-// Should show: 1, 3, 5
+% Should show: 1, 3, 5
 
-// B - A (elements in B but not in A)
-// Since B is a subset of A, this should be empty
+% B - A (elements in B but not in A)
+% Since B is a subset of A, this should be empty
 +diff_b_minus_a(X) :- set_b(X), !set_a(X).
 ?- diff_b_minus_a(X).
-// Should be empty
+% Should be empty
 
-// With larger second set
+% With larger second set
 +set_c[(3), (4), (5), (6), (7)].
 +diff_a_minus_c(X) :- set_a(X), !set_c(X).
 ?- diff_a_minus_c(X).
-// Should show: 1, 2
+% Should show: 1, 2
 
-// Symmetric difference: (A - B) ∪ (B - A)
+% Symmetric difference: (A - B) ∪ (B - A)
 +set_p[(1), (2), (3)].
 +set_q[(2), (3), (4)].
 +sym_diff(X) :- set_p(X), !set_q(X).
 +sym_diff(X) :- set_q(X), !set_p(X).
 ?- sym_diff(X).
-// Should show: 1, 4
+% Should show: 1, 4
 
-// Cleanup
-.db use default
-.db drop test_diff
+% Cleanup
+.kg use default
+.kg drop test_diff

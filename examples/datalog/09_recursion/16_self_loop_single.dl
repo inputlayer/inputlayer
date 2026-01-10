@@ -1,30 +1,30 @@
-// Test: Self-Loop Single Node
-// Category: Recursion
-// Description: Tests recursive query with a single self-loop edge
+% Test: Self-Loop Single Node
+% Category: Recursion
+% Description: Tests recursive query with a single self-loop edge
 
-.db create test_self_loop
-.db use test_self_loop
+.kg create test_self_loop
+.kg use test_self_loop
 
-// Single self-loop
+% Single self-loop
 +edge(1, 1).
 
-// Transitive closure on self-loop
+% Transitive closure on self-loop
 path(X, Y) :- edge(X, Y).
 path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// Should only produce (1, 1)
+% Should only produce (1, 1)
 ?- path(X, Y).
 
-// Add another self-loop
+% Add another self-loop
 +edge(2, 2).
 
 ?- path(X, Y).
 
-// Add a regular edge connecting them
+% Add a regular edge connecting them
 +edge(1, 2).
 
 ?- path(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_self_loop
+% Cleanup
+.kg use default
+.kg drop test_self_loop

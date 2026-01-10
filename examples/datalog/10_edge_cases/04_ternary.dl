@@ -1,20 +1,20 @@
-// Test: Ternary (3-column) Relations
-// Category: 10_edge_cases
-// Description: Tests support for relations with 3 or more columns
+% Test: Ternary (3-column) Relations
+% Category: 10_edge_cases
+% Description: Tests support for relations with 3 or more columns
 
-.db create test_ternary
-.db use test_ternary
+.kg create test_ternary
+.kg use test_ternary
 
-// Insert binary edge data
+% Insert binary edge data
 +edge[(1,2), (2,3), (3,1)].
 
-// Ternary relation: path2 has 3 columns (A, B, C)
+% Ternary relation: path2 has 3 columns (A, B, C)
 +path2(A, B, C) :- edge(A, B), edge(B, C).
 ?- path2(X, Y, Z).
 
-// Another example: find all 2-hop paths starting from node 1
+% Another example: find all 2-hop paths starting from node 1
 ?- path2(1, Y, Z).
 
-// Cleanup
-.db use default
-.db drop test_ternary
+% Cleanup
+.kg use default
+.kg drop test_ternary

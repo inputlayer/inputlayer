@@ -1,28 +1,28 @@
-// Test: Integer Data Types
-// Category: 11_types
-// Description: Tests various integer operations and ranges
+% Test: Integer Data Types
+% Category: 11_types
+% Description: Tests various integer operations and ranges
 
-.db create test_int
-.db use test_int
+.kg create test_int
+.kg use test_int
 
-// Positive integers
+% Positive integers
 +positive[(1, 100), (2, 200), (3, 300)].
 
-// Negative integers
+% Negative integers
 +negative[(-1, -100), (-2, -200), (-3, -300)].
 
-// Zero values
+% Zero values
 +zeros[(0, 0), (0, 1), (1, 0)].
 
-// Query all
+% Query all
 ?- positive(X, Y).
 ?- negative(X, Y).
 ?- zeros(X, Y).
 
-// Arithmetic filter with negative numbers
+% Arithmetic filter with negative numbers
 +neg_large(X, Y) :- negative(X, Y), Y < -150.
 ?- neg_large(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_int
+% Cleanup
+.kg use default
+.kg drop test_int

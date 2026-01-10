@@ -1,11 +1,15 @@
-Executing script: examples/datalog/14_aggregations/07_top_k.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_top_k
-Database 'test_top_k' created.
-Switched to database: test_top_k
-> .db use test_top_k
-Switched to database: test_top_k
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_top_k
+Knowledge graph 'test_top_k' created.
+Switched to knowledge graph: test_top_k
+> .kg use test_top_k
+Switched to knowledge graph: test_top_k
 > +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
-Inserted 6 facts into 'score'.
+Inserted 6 fact(s) into 'score'.
 > +top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).
-Script error: Line 12: Parse error: Invalid term: 'top_k<3'
+Script error: Parse error: Invalid term: 'top_k<3'

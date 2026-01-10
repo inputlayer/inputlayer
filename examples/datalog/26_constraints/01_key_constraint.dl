@@ -1,24 +1,24 @@
-// Test: Key Constraint Declaration
-// Category: constraints
-// Description: Tests @key constraint parsing and schema declaration
+% Test: Key Constraint Declaration
+% Category: constraints
+% Description: Tests @key constraint parsing and schema declaration
 
-.db create constraint_key_test
-.db use constraint_key_test
+.kg create constraint_key_test
+.kg use constraint_key_test
 
-// Schema with @key constraint
+% Schema with @key constraint
 +user(id: int @key, name: string, email: string).
 
-// Insert data
+% Insert data
 +user(1, "alice", "alice@example.com").
 +user(2, "bob", "bob@example.com").
 +user(3, "carol", "carol@example.com").
 
-// Query all users
+% Query all users
 ?- user(Id, Name, Email).
 
-// Show schema
+% Show schema
 .rel user
 
-// Cleanup
-.db use default
-.db drop constraint_key_test
+% Cleanup
+.kg use default
+.kg drop constraint_key_test

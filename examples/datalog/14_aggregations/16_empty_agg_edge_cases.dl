@@ -1,36 +1,36 @@
-// Test: Empty Aggregation Edge Cases
-// Category: Aggregation
-// Verifies: Correct behavior when aggregating over empty sets
-// CRITICAL: AVG over empty may cause division by zero (Infinity)
+% Test: Empty Aggregation Edge Cases
+% Category: Aggregation
+% Verifies: Correct behavior when aggregating over empty sets
+% CRITICAL: AVG over empty may cause division by zero (Infinity)
 
-.db create test_empty_agg
-.db use test_empty_agg
+.kg create test_empty_agg
+.kg use test_empty_agg
 
-// Some data
+% Some data
 +data[(1, 10), (2, 20), (3, 30)].
 
-// Filter that produces empty result
+% Filter that produces empty result
 +filtered(X, V) :- data(X, V), V > 1000.
 
-// Test 1: SUM over empty result
+% Test 1: SUM over empty result
 +empty_sum(sum<V>) :- filtered(_, V).
 ?- empty_sum(S).
-// Expected: 0 or no results
+% Expected: 0 or no results
 
-// Test 3: AVG over empty result - CRITICAL TEST
-// This may produce Infinity (division by zero) if not handled
+% Test 3: AVG over empty result - CRITICAL TEST
+% This may produce Infinity (division by zero) if not handled
 +empty_avg(avg<V>) :- filtered(_, V).
 ?- empty_avg(A).
-// Expected: NULL or no results, NOT Infinity
+% Expected: NULL or no results, NOT Infinity
 
-// Test 4: MIN/MAX over empty result
+% Test 4: MIN/MAX over empty result
 +empty_min(min<V>) :- filtered(_, V).
 +empty_max(max<V>) :- filtered(_, V).
 ?- empty_min(M).
 ?- empty_max(M).
-// Expected: NULL or no results
+% Expected: NULL or no results
 
-// Test 5: Normal aggregation (for comparison)
+% Test 5: Normal aggregation (for comparison)
 +normal_count(count<X>) :- data(X, _).
 +normal_sum(sum<V>) :- data(_, V).
 +normal_avg(avg<V>) :- data(_, V).
@@ -38,15 +38,15 @@
 ?- normal_sum(S).
 ?- normal_avg(A).
 
-// Test 6: Groupby where some groups are empty
+% Test 6: Groupby where some groups are empty
 +groups[(1), (2), (3), (4), (5)].
 +group_data[(1, 100), (1, 200), (3, 300)].
 
-// Groups 2, 4, 5 have no data - do they appear with count 0?
+% Groups 2, 4, 5 have no data - do they appear with count 0?
 +group_count(G, count<V>) :- groups(G), group_data(G, V).
 ?- group_count(G, C).
-// Note: Groups without data may not appear at all
+% Note: Groups without data may not appear at all
 
-// Cleanup
-.db use default
-.db drop test_empty_agg
+% Cleanup
+.kg use default
+.kg drop test_empty_agg

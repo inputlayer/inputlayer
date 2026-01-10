@@ -47,9 +47,9 @@
 //! ```
 
 use crate::ir::IRNode;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 /// Statistics about subplan sharing
 #[derive(Debug, Clone, Default)]
@@ -67,11 +67,17 @@ pub struct SharingStats {
 /// Canonical form of an IR subtree with normalized variable names
 #[derive(Debug, Clone)]
 struct CanonicalSubtree {
-    /// The canonicalized IR
+    // TODO: Implement variable remapping for shared subplan reconstruction.
+    // Reserved for completing subplan sharing optimization:
+    // - `ir`: Canonical IR form of the shared subplan for reconstruction
+    // - `var_mapping`: Maps canonical variable names back to query-specific names
+    // Currently only hash-based duplicate detection is implemented. These fields
+    // will enable extracting shared computations and reusing them across rules.
+    #[allow(dead_code)]
     ir: IRNode,
     /// Hash of the canonical form
     hash: u64,
-    /// Original variable name mapping (canonical → original)
+    #[allow(dead_code)]
     var_mapping: HashMap<String, String>,
 }
 
@@ -223,7 +229,12 @@ impl SubplanSharer {
                     .collect(),
             },
 
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => IRNode::Aggregate {
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => IRNode::Aggregate {
                 input: Box::new(self.rewrite_with_shared_views(input, hash_to_view)),
                 group_by: group_by.clone(),
                 aggregations: aggregations.clone(),
@@ -350,8 +361,7 @@ impl SubplanSharer {
                 projection,
                 output_schema,
             } => {
-                let canonical_input =
-                    self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
                 let canonical_output: Vec<String> = output_schema
                     .iter()
                     .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
@@ -365,8 +375,7 @@ impl SubplanSharer {
             }
 
             IRNode::Filter { input, predicate } => {
-                let canonical_input =
-                    self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
 
                 IRNode::Filter {
                     input: Box::new(canonical_input),
@@ -381,10 +390,8 @@ impl SubplanSharer {
                 right_keys,
                 output_schema,
             } => {
-                let canonical_left =
-                    self.canonicalize_recursive(left, var_counter, var_mapping);
-                let canonical_right =
-                    self.canonicalize_recursive(right, var_counter, var_mapping);
+                let canonical_left = self.canonicalize_recursive(left, var_counter, var_mapping);
+                let canonical_right = self.canonicalize_recursive(right, var_counter, var_mapping);
                 let canonical_output: Vec<String> = output_schema
                     .iter()
                     .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
@@ -400,8 +407,7 @@ impl SubplanSharer {
             }
 
             IRNode::Distinct { input } => {
-                let canonical_input =
-                    self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
 
                 IRNode::Distinct {
                     input: Box::new(canonical_input),
@@ -419,9 +425,13 @@ impl SubplanSharer {
                 }
             }
 
-            IRNode::Aggregate { input, group_by, aggregations, output_schema } => {
-                let canonical_input =
-                    self.canonicalize_recursive(input, var_counter, var_mapping);
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                output_schema,
+            } => {
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
                 let canonical_output: Vec<String> = output_schema
                     .iter()
                     .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
@@ -442,10 +452,8 @@ impl SubplanSharer {
                 right_keys,
                 output_schema,
             } => {
-                let canonical_left =
-                    self.canonicalize_recursive(left, var_counter, var_mapping);
-                let canonical_right =
-                    self.canonicalize_recursive(right, var_counter, var_mapping);
+                let canonical_left = self.canonicalize_recursive(left, var_counter, var_mapping);
+                let canonical_right = self.canonicalize_recursive(right, var_counter, var_mapping);
                 let canonical_output: Vec<String> = output_schema
                     .iter()
                     .map(|var| self.get_canonical_var(var, var_counter, var_mapping))
@@ -461,8 +469,7 @@ impl SubplanSharer {
             }
 
             IRNode::Compute { input, expressions } => {
-                let canonical_input =
-                    self.canonicalize_recursive(input, var_counter, var_mapping);
+                let canonical_input = self.canonicalize_recursive(input, var_counter, var_mapping);
 
                 IRNode::Compute {
                     input: Box::new(canonical_input),
@@ -545,7 +552,12 @@ impl SubplanSharer {
                 }
             }
 
-            IRNode::Aggregate { input, group_by, aggregations, .. } => {
+            IRNode::Aggregate {
+                input,
+                group_by,
+                aggregations,
+                ..
+            } => {
                 group_by.hash(hasher);
                 for (func, col) in aggregations {
                     format!("{:?}", func).hash(hasher);
@@ -719,10 +731,7 @@ mod tests {
 
         // Should detect the common join pattern
         // Note: exact count depends on depth threshold
-        assert!(
-            shared_views.len() >= 0,
-            "Should handle duplicate detection"
-        );
+        assert!(shared_views.len() >= 0, "Should handle duplicate detection");
     }
 
     #[test]

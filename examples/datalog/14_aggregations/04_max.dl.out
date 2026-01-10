@@ -1,11 +1,24 @@
-Executing script: examples/datalog/14_aggregations/04_max.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_agg_max
-Database 'test_agg_max' created.
-Switched to database: test_agg_max
-> .db use test_agg_max
-Switched to database: test_agg_max
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_max
+Knowledge graph 'test_agg_max' created.
+Switched to knowledge graph: test_agg_max
+> .kg use test_agg_max
+Switched to knowledge graph: test_agg_max
 > +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)].
-Inserted 6 facts into 'reading'.
+Inserted 6 fact(s) into 'reading'.
 > +max_temp(Sensor, max<Temp>) :- reading(Sensor, Temp).
-Script error: Line 12: Parse error: Invalid term: 'max<Temp>'
+Rule 'max_temp' registered.
+> ?- max_temp(X, Y).
+3 rows:
+  (1, 28)
+  (2, 35)
+  (3, 18)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_max
+Knowledge graph 'test_agg_max' dropped.

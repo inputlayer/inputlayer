@@ -1,19 +1,23 @@
-Executing script: examples/datalog/08_negation/03_negation_empty_result.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_empty
-Database 'test_neg_empty' created.
-Switched to database: test_neg_empty
-> .db use test_neg_empty
-Switched to database: test_neg_empty
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_empty
+Knowledge graph 'test_neg_empty' created.
+Switched to knowledge graph: test_neg_empty
+> .kg use test_neg_empty
+Switched to knowledge graph: test_neg_empty
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +blocked[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'blocked'.
+Inserted 3 fact(s) into 'blocked'.
 > +allowed(X, Y) :- edge(X, Y), !blocked(X, Y).
 Rule 'allowed' registered.
 > ?- allowed(X, Y).
 No results.
-> .db use default
-Switched to database: default
-> .db drop test_neg_empty
-Database 'test_neg_empty' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_empty
+Knowledge graph 'test_neg_empty' dropped.

@@ -58,7 +58,7 @@
 //! 5. Test with transitive closure and reachability queries
 //!
 //! Example pattern for recursive code generation:
-//! ```rust,ignore
+//! ```text
 //! scope.iterative::<u32, _, _>(|inner| {
 //!     // Create SemigroupVariable for recursive relation
 //!     let variable = SemigroupVariable::new(inner, Product::new((), 1));
@@ -88,7 +88,7 @@ pub mod rel;
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use differential_dataflow::operators::iterate::SemigroupVariable;
 use differential_dataflow::operators::join::Join;
-use differential_dataflow::operators::{Consolidate, Count, Iterate, Reduce, Threshold};
+use differential_dataflow::operators::{Reduce, Threshold};
 use differential_dataflow::Collection;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -97,10 +97,9 @@ use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
 use timely::order::Product;
 
+use crate::temporal_ops;
 use crate::value::{Tuple, Value};
 use crate::vector_ops;
-use crate::temporal_ops;
-use timely::Config;
 
 /// Iteration counter type for recursive scopes
 pub type Iter = u32;
@@ -114,9 +113,7 @@ pub struct ExecutionConfig {
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        ExecutionConfig {
-            num_workers: 1,
-        }
+        ExecutionConfig { num_workers: 1 }
     }
 }
 
@@ -198,8 +195,7 @@ impl CodeGenerator {
 
             worker.dataflow(|scope| {
                 // Generate collection from IR
-                let collection =
-                    Self::generate_collection_tuples(scope, &ir_clone, &input_data);
+                let collection = Self::generate_collection_tuples(scope, &ir_clone, &input_data);
 
                 // Use distinct() to get set semantics (only keep tuples with positive count)
                 // This properly handles antijoin which produces negative diffs
@@ -238,36 +234,56 @@ impl CodeGenerator {
     /// This uses Differential Dataflow's native `.iterative()` scope for efficient
     /// semi-naive evaluation. The previous naive while-loop implementation was O(n²)
     /// for chain graphs; this implementation is O(n) using DD's built-in fixpoint.
-    pub fn execute_recursive_fixpoint_tuples(&self, ir: &IRNode, recursive_rel: &str) -> Result<Vec<Tuple>, String> {
+    pub fn execute_recursive_fixpoint_tuples(
+        &self,
+        ir: &IRNode,
+        recursive_rel: &str,
+    ) -> Result<Vec<Tuple>, String> {
         let inputs = match ir {
             IRNode::Union { inputs } => inputs,
             _ => return self.execute_single_pass(ir),
         };
 
         // Partition inputs into base cases and recursive cases
-        let (base_indices, recursive_indices) = match Self::detect_recursive_union_for_relation(inputs, Some(recursive_rel)) {
+        let (base_indices, recursive_indices) = match Self::detect_recursive_union_for_relation(
+            inputs,
+            Some(recursive_rel),
+        ) {
             Some((_, base, rec)) => {
                 if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG: recursive fixpoint: base_indices={:?}, recursive_indices={:?}", base, rec);
+                    eprintln!(
+                        "DEBUG: recursive fixpoint: base_indices={:?}, recursive_indices={:?}",
+                        base, rec
+                    );
                 }
                 (base, rec)
             }
             None => {
                 if std::env::var("DATALOG_DEBUG").is_ok() {
-                    eprintln!("DEBUG: falling back to single_pass - detect_recursive_union returned None");
+                    eprintln!(
+                        "DEBUG: falling back to single_pass - detect_recursive_union returned None"
+                    );
                 }
                 return self.execute_single_pass(ir);
             }
         };
 
         let base_inputs: Vec<IRNode> = base_indices.iter().map(|&i| inputs[i].clone()).collect();
-        let recursive_inputs: Vec<IRNode> = recursive_indices.iter().map(|&i| inputs[i].clone()).collect();
+        let recursive_inputs: Vec<IRNode> = recursive_indices
+            .iter()
+            .map(|&i| inputs[i].clone())
+            .collect();
 
         // Try to detect if this is a simple transitive closure pattern
         // If so, use the optimized DD iterative implementation
-        if let Some(edge_relation) = Self::detect_transitive_closure_pattern(&base_inputs, &recursive_inputs, recursive_rel) {
+        if let Some(edge_relation) =
+            Self::detect_transitive_closure_pattern(&base_inputs, &recursive_inputs, recursive_rel)
+        {
             if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG: detected transitive closure pattern with edge relation '{}'", edge_relation);
+                eprintln!(
+                    "DEBUG: detected transitive closure pattern with edge relation '{}'",
+                    edge_relation
+                );
             }
             return self.execute_transitive_closure_optimized(&edge_relation, recursive_rel);
         }
@@ -300,7 +316,9 @@ impl CodeGenerator {
 
         let (edge_relation, schema_len) = match &base_inputs[0] {
             IRNode::Scan { relation, schema } => (relation.clone(), schema.len()),
-            IRNode::Map { input, projection, .. } => {
+            IRNode::Map {
+                input, projection, ..
+            } => {
                 // For Map, check if output is binary
                 if projection.len() != 2 {
                     return None;
@@ -327,7 +345,13 @@ impl CodeGenerator {
         // - Left side scans edge relation, keyed by column 1
         // - Right side scans recursive relation, keyed by column 0
         match &recursive_inputs[0] {
-            IRNode::Join { left, right, left_keys, right_keys, .. } => {
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                ..
+            } => {
                 // Check left side scans edge relation
                 let left_scans_edge = match left.as_ref() {
                     IRNode::Scan { relation, .. } => relation == &edge_relation,
@@ -358,28 +382,32 @@ impl CodeGenerator {
                 }
             }
             // Also handle Map over Join (for projections)
-            IRNode::Map { input, .. } => {
-                match input.as_ref() {
-                    IRNode::Join { left, right, left_keys, right_keys, .. } => {
-                        let left_scans_edge = match left.as_ref() {
-                            IRNode::Scan { relation, .. } => relation == &edge_relation,
-                            _ => false,
-                        };
-                        let right_scans_recursive = match right.as_ref() {
-                            IRNode::Scan { relation, .. } => relation == recursive_rel,
-                            _ => false,
-                        };
-                        let correct_keys = left_keys == &[1] && right_keys == &[0];
+            IRNode::Map { input, .. } => match input.as_ref() {
+                IRNode::Join {
+                    left,
+                    right,
+                    left_keys,
+                    right_keys,
+                    ..
+                } => {
+                    let left_scans_edge = match left.as_ref() {
+                        IRNode::Scan { relation, .. } => relation == &edge_relation,
+                        _ => false,
+                    };
+                    let right_scans_recursive = match right.as_ref() {
+                        IRNode::Scan { relation, .. } => relation == recursive_rel,
+                        _ => false,
+                    };
+                    let correct_keys = left_keys == &[1] && right_keys == &[0];
 
-                        if left_scans_edge && right_scans_recursive && correct_keys {
-                            Some(edge_relation)
-                        } else {
-                            None
-                        }
+                    if left_scans_edge && right_scans_recursive && correct_keys {
+                        Some(edge_relation)
+                    } else {
+                        None
                     }
-                    _ => None,
                 }
-            }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -388,7 +416,11 @@ impl CodeGenerator {
     ///
     /// This is O(n) for chain graphs vs O(n²) for naive iteration.
     /// Uses SemigroupVariable for proper semi-naive evaluation.
-    fn execute_transitive_closure_optimized(&self, edge_relation: &str, _recursive_rel: &str) -> Result<Vec<Tuple>, String> {
+    fn execute_transitive_closure_optimized(
+        &self,
+        edge_relation: &str,
+        _recursive_rel: &str,
+    ) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
 
@@ -439,9 +471,9 @@ impl CodeGenerator {
                     });
 
                     // Join: tc(x, y) ⋈ edge(y, z) → tc(x, z)
-                    let recursive = tc_keyed.join(&edges_keyed).map(|(_y_key, (x, z))| {
-                        Tuple::new(vec![x, z])
-                    });
+                    let recursive = tc_keyed
+                        .join(&edges_keyed)
+                        .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
                     // Combine base case and recursive case
                     let next = edges_in_scope.concat(&recursive).distinct();
@@ -491,7 +523,9 @@ impl CodeGenerator {
         let base_ir = if base_inputs.len() == 1 {
             base_inputs[0].clone()
         } else {
-            IRNode::Union { inputs: base_inputs.to_vec() }
+            IRNode::Union {
+                inputs: base_inputs.to_vec(),
+            }
         };
         let base_results = self.execute_single_pass(&base_ir)?;
 
@@ -514,20 +548,26 @@ impl CodeGenerator {
             if iteration_count > max_iterations {
                 return Err(format!(
                     "Recursion iteration limit exceeded: {} iterations with {} tuples.",
-                    iteration_count, all_results.len()
+                    iteration_count,
+                    all_results.len()
                 ));
             }
             prev_count = all_results.len();
 
             // Create input data with current recursive relation state
             let mut iter_input = base_input_data.clone();
-            iter_input.insert(recursive_rel.to_string(), all_results.iter().cloned().collect());
+            iter_input.insert(
+                recursive_rel.to_string(),
+                all_results.iter().cloned().collect(),
+            );
 
             // Execute recursive rules in a single batch
             let recursive_ir = if recursive_inputs.len() == 1 {
                 recursive_inputs[0].clone()
             } else {
-                IRNode::Union { inputs: recursive_inputs.to_vec() }
+                IRNode::Union {
+                    inputs: recursive_inputs.to_vec(),
+                }
             };
 
             // Execute with optimized single-pass using prepared input
@@ -542,7 +582,11 @@ impl CodeGenerator {
     }
 
     /// Execute a single pass with provided input data (avoids CodeGenerator recreation)
-    fn execute_with_input_data(&self, ir: &IRNode, input_data: &HashMap<String, Vec<Tuple>>) -> Result<Vec<Tuple>, String> {
+    fn execute_with_input_data(
+        &self,
+        ir: &IRNode,
+        input_data: &HashMap<String, Vec<Tuple>>,
+    ) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
 
@@ -580,7 +624,11 @@ impl CodeGenerator {
     /// Execute a recursive query using fixpoint iteration
     ///
     /// This is the public API for recursive execution from lib.rs
-    pub fn execute_recursive(&self, ir: &IRNode, recursive_rel: &str) -> Result<Vec<Tuple>, String> {
+    pub fn execute_recursive(
+        &self,
+        ir: &IRNode,
+        recursive_rel: &str,
+    ) -> Result<Vec<Tuple>, String> {
         self.execute_recursive_fixpoint_tuples(ir, recursive_rel)
     }
 
@@ -591,7 +639,7 @@ impl CodeGenerator {
     ///
     /// ## Example
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let mut codegen = CodeGenerator::new();
     /// codegen.add_input_tuples("edge".to_string(), edges);
     ///
@@ -639,7 +687,9 @@ impl CodeGenerator {
 
         // Partition input data across workers
         let partitioned_inputs: Vec<HashMap<String, Vec<Tuple>>> = (0..num_workers)
-            .map(|worker_idx| Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers))
+            .map(|worker_idx| {
+                Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers)
+            })
             .collect();
 
         let ir_clone = ir.clone();
@@ -653,7 +703,9 @@ impl CodeGenerator {
                 for (relation, tuples) in partition {
                     temp_codegen.add_input_tuples(relation, tuples);
                 }
-                temp_codegen.generate_and_execute_tuples(&ir_clone).unwrap_or_default()
+                temp_codegen
+                    .generate_and_execute_tuples(&ir_clone)
+                    .unwrap_or_default()
             })
             .collect();
 
@@ -748,16 +800,20 @@ impl CodeGenerator {
                     eprintln!("DEBUG IRNode::Join: left schema={:?} right schema={:?} left_keys={:?} right_keys={:?} output_schema={:?}",
                              left.output_schema(), right.output_schema(), left_keys, right_keys, output_schema);
                 }
-                Self::generate_join_tuples(scope, left, right, left_keys, right_keys, output_schema, input_data)
+                Self::generate_join_tuples(
+                    scope,
+                    left,
+                    right,
+                    left_keys,
+                    right_keys,
+                    output_schema,
+                    input_data,
+                )
             }
 
-            IRNode::Distinct { input } => {
-                Self::generate_distinct_tuples(scope, input, input_data)
-            }
+            IRNode::Distinct { input } => Self::generate_distinct_tuples(scope, input, input_data),
 
-            IRNode::Union { inputs } => {
-                Self::generate_union_tuples(scope, inputs, input_data)
-            }
+            IRNode::Union { inputs } => Self::generate_union_tuples(scope, inputs, input_data),
 
             IRNode::Aggregate {
                 input,
@@ -772,7 +828,9 @@ impl CodeGenerator {
                 left_keys,
                 right_keys,
                 ..
-            } => Self::generate_antijoin_tuples(scope, left, right, left_keys, right_keys, input_data),
+            } => Self::generate_antijoin_tuples(
+                scope, left, right, left_keys, right_keys, input_data,
+            ),
 
             IRNode::Compute { input, expressions } => {
                 Self::generate_compute_tuples(scope, input, expressions, input_data)
@@ -831,52 +889,108 @@ impl CodeGenerator {
     }
 
     /// Convert predicate to filter function (production: Tuple)
-    fn predicate_to_tuple_fn(predicate: &Predicate) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
+    fn predicate_to_tuple_fn(
+        predicate: &Predicate,
+    ) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
         match predicate.clone() {
             // Integer comparisons
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).map(|v| v.as_i32() == Some(val as i32)).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .map(|v| v.as_i32() == Some(val as i32))
+                    .unwrap_or(false)
             }),
             Predicate::ColumnNeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).map(|v| v.as_i32() != Some(val as i32)).unwrap_or(true)
+                tuple
+                    .get(col)
+                    .map(|v| v.as_i32() != Some(val as i32))
+                    .unwrap_or(true)
             }),
             Predicate::ColumnGtConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_i32()).map(|v| v > val as i32).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_i32())
+                    .map(|v| v > val as i32)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnLtConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_i32()).map(|v| v < val as i32).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_i32())
+                    .map(|v| v < val as i32)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnGeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_i32()).map(|v| v >= val as i32).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_i32())
+                    .map(|v| v >= val as i32)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnLeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_i32()).map(|v| v <= val as i32).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_i32())
+                    .map(|v| v <= val as i32)
+                    .unwrap_or(false)
             }),
             // String comparisons
             Predicate::ColumnEqStr(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_str()).map(|s| s == val).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == val)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnNeStr(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_str()).map(|s| s != val).unwrap_or(true)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_str())
+                    .map(|s| s != val)
+                    .unwrap_or(true)
             }),
             // Float comparisons
             Predicate::ColumnEqFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| (f - val).abs() < f64::EPSILON).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| (f - val).abs() < f64::EPSILON)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnNeFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| (f - val).abs() >= f64::EPSILON).unwrap_or(true)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| (f - val).abs() >= f64::EPSILON)
+                    .unwrap_or(true)
             }),
             Predicate::ColumnGtFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| f > val).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| f > val)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnLtFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| f < val).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| f < val)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnGeFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| f >= val).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| f >= val)
+                    .unwrap_or(false)
             }),
             Predicate::ColumnLeFloat(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple.get(col).and_then(|v| v.as_f64()).map(|f| f <= val).unwrap_or(false)
+                tuple
+                    .get(col)
+                    .and_then(|v| v.as_f64())
+                    .map(|f| f <= val)
+                    .unwrap_or(false)
             }),
             // Column comparisons
             Predicate::ColumnsEq(left, right) => Box::new(move |tuple: &Tuple| {
@@ -1128,9 +1242,12 @@ impl CodeGenerator {
             | IRNode::Aggregate { input, .. }
             | IRNode::Compute { input, .. } => Self::references_relation(input, relation),
             IRNode::Join { left, right, .. } | IRNode::Antijoin { left, right, .. } => {
-                Self::references_relation(left, relation) || Self::references_relation(right, relation)
+                Self::references_relation(left, relation)
+                    || Self::references_relation(right, relation)
             }
-            IRNode::Union { inputs } => inputs.iter().any(|inp| Self::references_relation(inp, relation)),
+            IRNode::Union { inputs } => inputs
+                .iter()
+                .any(|inp| Self::references_relation(inp, relation)),
         }
     }
 
@@ -1189,7 +1306,11 @@ impl CodeGenerator {
 
         // DEBUG: Log what we found
         if std::env::var("DATALOG_DEBUG").is_ok() {
-            eprintln!("DEBUG detect_recursive_union: {} inputs, scan_relations = {:?}", inputs.len(), scan_relations);
+            eprintln!(
+                "DEBUG detect_recursive_union: {} inputs, scan_relations = {:?}",
+                inputs.len(),
+                scan_relations
+            );
             if let Some(expected) = expected_relation {
                 eprintln!("DEBUG: expected_relation = {}", expected);
             }
@@ -1201,9 +1322,8 @@ impl CodeGenerator {
                 let appears_in = indices.len();
                 if appears_in > 0 && appears_in < inputs.len() {
                     // This is the recursive relation
-                    let base_indices: Vec<usize> = (0..inputs.len())
-                        .filter(|i| !indices.contains(i))
-                        .collect();
+                    let base_indices: Vec<usize> =
+                        (0..inputs.len()).filter(|i| !indices.contains(i)).collect();
                     let recursive_indices = indices.clone();
                     return Some((expected.to_string(), base_indices, recursive_indices));
                 }
@@ -1217,9 +1337,8 @@ impl CodeGenerator {
             let appears_in = indices.len();
             if appears_in > 0 && appears_in < inputs.len() {
                 // This might be recursive - the inputs that don't scan it are base cases
-                let base_indices: Vec<usize> = (0..inputs.len())
-                    .filter(|i| !indices.contains(i))
-                    .collect();
+                let base_indices: Vec<usize> =
+                    (0..inputs.len()).filter(|i| !indices.contains(i)).collect();
                 let recursive_indices = indices.clone();
                 return Some((rel.clone(), base_indices, recursive_indices));
             }
@@ -1287,7 +1406,7 @@ impl CodeGenerator {
             if has_ranking_agg {
                 // Handle ranking aggregates - output multiple rows per group
                 // Only one ranking aggregate should be present per query
-                for (func, col_idx) in &aggs_clone {
+                for (func, _col_idx) in &aggs_clone {
                     match func {
                         AggregateFunction::TopK { k, order_col, descending } => {
                             // O(n log k) heap-based top-k selection
@@ -1577,15 +1696,11 @@ impl CodeGenerator {
     /// Evaluate an IR expression against a tuple
     fn evaluate_expression(expr: &IRExpression, tuple: &Tuple) -> Value {
         match expr {
-            IRExpression::Column(idx) => {
-                tuple.get(*idx).cloned().unwrap_or(Value::Null)
-            }
+            IRExpression::Column(idx) => tuple.get(*idx).cloned().unwrap_or(Value::Null),
             IRExpression::IntConstant(val) => Value::Int64(*val),
             IRExpression::FloatConstant(val) => Value::Float64(*val),
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
-            IRExpression::FunctionCall(func, args) => {
-                Self::evaluate_function(func, args, tuple)
-            }
+            IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
                 let left_val = Self::evaluate_expression(left, tuple);
                 let right_val = Self::evaluate_expression(right, tuple);
@@ -1597,14 +1712,17 @@ impl CodeGenerator {
     /// Evaluate a built-in function call
     fn evaluate_function(func: &BuiltinFunction, args: &[IRExpression], tuple: &Tuple) -> Value {
         // Evaluate arguments
-        let arg_values: Vec<Value> = args.iter()
+        let arg_values: Vec<Value> = args
+            .iter()
             .map(|arg| Self::evaluate_expression(arg, tuple))
             .collect();
 
         match func {
             BuiltinFunction::Euclidean => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector(), arg_values[1].as_vector()) {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
                         let dist = vector_ops::euclidean_distance(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1613,7 +1731,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::Cosine => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector(), arg_values[1].as_vector()) {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
                         let dist = vector_ops::cosine_distance(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1622,7 +1742,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::DotProduct => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector(), arg_values[1].as_vector()) {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
                         let dot = vector_ops::dot_product(v1, v2);
                         return Value::Float64(dot);
                     }
@@ -1631,7 +1753,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::Manhattan => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector(), arg_values[1].as_vector()) {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
                         let dist = vector_ops::manhattan_distance(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1674,12 +1798,12 @@ impl CodeGenerator {
             }
             BuiltinFunction::VecAdd => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector(), arg_values[1].as_vector()) {
+                    if let (Some(v1), Some(v2)) =
+                        (arg_values[0].as_vector(), arg_values[1].as_vector())
+                    {
                         if v1.len() == v2.len() {
-                            let result: Vec<f32> = v1.iter()
-                                .zip(v2.iter())
-                                .map(|(a, b)| a + b)
-                                .collect();
+                            let result: Vec<f32> =
+                                v1.iter().zip(v2.iter()).map(|(a, b)| a + b).collect();
                             return Value::vector(result);
                         }
                     }
@@ -1735,7 +1859,10 @@ impl CodeGenerator {
             // Int8 distance functions (native, fast)
             BuiltinFunction::EuclideanInt8 => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dist = vector_ops::euclidean_distance_int8(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1744,7 +1871,10 @@ impl CodeGenerator {
             }
             BuiltinFunction::CosineInt8 => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dist = vector_ops::cosine_distance_int8(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1753,7 +1883,10 @@ impl CodeGenerator {
             }
             BuiltinFunction::DotProductInt8 => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dot = vector_ops::dot_product_int8(v1, v2);
                         return Value::Float64(dot);
                     }
@@ -1762,7 +1895,10 @@ impl CodeGenerator {
             }
             BuiltinFunction::ManhattanInt8 => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dist = vector_ops::manhattan_distance_int8(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1773,7 +1909,10 @@ impl CodeGenerator {
             // Int8 distance functions (dequantized, accurate)
             BuiltinFunction::EuclideanDequantized => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dist = vector_ops::euclidean_distance_dequantized(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1782,7 +1921,10 @@ impl CodeGenerator {
             }
             BuiltinFunction::CosineDequantized => {
                 if arg_values.len() >= 2 {
-                    if let (Some(v1), Some(v2)) = (arg_values[0].as_vector_int8(), arg_values[1].as_vector_int8()) {
+                    if let (Some(v1), Some(v2)) = (
+                        arg_values[0].as_vector_int8(),
+                        arg_values[1].as_vector_int8(),
+                    ) {
                         let dist = vector_ops::cosine_distance_dequantized(v1, v2);
                         return Value::Float64(dist);
                     }
@@ -1827,7 +1969,8 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
                         let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let (bucket, _distances) = vector_ops::lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+                        let (bucket, _distances) =
+                            vector_ops::lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
                         return Value::Int64(bucket);
                     }
                 }
@@ -1855,7 +1998,8 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let num_hyperplanes = arg_values[2].to_i64() as usize;
                         let num_probes = arg_values[3].to_i64() as usize;
-                        let probes = vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
+                        let probes =
+                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -1869,7 +2013,12 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let num_hyperplanes = arg_values[2].to_i64() as usize;
                         let num_probes = arg_values[3].to_i64() as usize;
-                        let probes = vector_ops::lsh_multi_probe_int8(v, table_idx, num_hyperplanes, num_probes);
+                        let probes = vector_ops::lsh_multi_probe_int8(
+                            v,
+                            table_idx,
+                            num_hyperplanes,
+                            num_probes,
+                        );
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -1886,12 +2035,12 @@ impl CodeGenerator {
             }
 
             // Temporal functions
-            BuiltinFunction::TimeNow => {
-                Value::Timestamp(temporal_ops::time_now())
-            }
+            BuiltinFunction::TimeNow => Value::Timestamp(temporal_ops::time_now()),
             BuiltinFunction::TimeDiff => {
                 if arg_values.len() >= 2 {
-                    if let (Some(t1), Some(t2)) = (arg_values[0].as_timestamp(), arg_values[1].as_timestamp()) {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
                         return Value::Int64(temporal_ops::time_diff(t1, t2));
                     }
                 }
@@ -1899,7 +2048,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::TimeAdd => {
                 if arg_values.len() >= 2 {
-                    if let (Some(ts), Some(dur)) = (arg_values[0].as_timestamp(), arg_values[1].as_i64()) {
+                    if let (Some(ts), Some(dur)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_i64())
+                    {
                         return Value::Timestamp(temporal_ops::time_add(ts, dur));
                     }
                 }
@@ -1907,7 +2058,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::TimeSub => {
                 if arg_values.len() >= 2 {
-                    if let (Some(ts), Some(dur)) = (arg_values[0].as_timestamp(), arg_values[1].as_i64()) {
+                    if let (Some(ts), Some(dur)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_i64())
+                    {
                         return Value::Timestamp(temporal_ops::time_sub(ts, dur));
                     }
                 }
@@ -1939,7 +2092,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::TimeBefore => {
                 if arg_values.len() >= 2 {
-                    if let (Some(t1), Some(t2)) = (arg_values[0].as_timestamp(), arg_values[1].as_timestamp()) {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
                         return Value::Bool(temporal_ops::time_before(t1, t2));
                     }
                 }
@@ -1947,7 +2102,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::TimeAfter => {
                 if arg_values.len() >= 2 {
-                    if let (Some(t1), Some(t2)) = (arg_values[0].as_timestamp(), arg_values[1].as_timestamp()) {
+                    if let (Some(t1), Some(t2)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
                         return Value::Bool(temporal_ops::time_after(t1, t2));
                     }
                 }
@@ -2005,7 +2162,9 @@ impl CodeGenerator {
             }
             BuiltinFunction::IntervalDuration => {
                 if arg_values.len() >= 2 {
-                    if let (Some(start), Some(end)) = (arg_values[0].as_timestamp(), arg_values[1].as_timestamp()) {
+                    if let (Some(start), Some(end)) =
+                        (arg_values[0].as_timestamp(), arg_values[1].as_timestamp())
+                    {
                         return Value::Int64(temporal_ops::interval_duration(start, end));
                     }
                 }
@@ -2068,7 +2227,10 @@ impl CodeGenerator {
         // Return Int64 if both inputs were integers
         if matches!(left, Value::Int32(_) | Value::Int64(_))
             && matches!(right, Value::Int32(_) | Value::Int64(_))
-            && matches!(op, ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Mod)
+            && matches!(
+                op,
+                ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Mod
+            )
         {
             Value::Int64(result as i64)
         } else {
@@ -2089,18 +2251,22 @@ impl CodeGenerator {
     /// Takes edge relation name and computes transitive closure.
     /// Uses iterative materialization for reliable fixpoint computation.
     pub fn execute_transitive_closure(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
-        use std::collections::{HashSet, HashMap as StdHashMap};
+        use std::collections::{HashMap as StdHashMap, HashSet};
 
         // Get edges from input_tuples, extract first two i64 values
-        let edges: Vec<(i64, i64)> = self.input_tuples
+        let edges: Vec<(i64, i64)> = self
+            .input_tuples
             .get(edge_relation)
-            .map(|tuples| tuples.iter()
-                .filter_map(|t| {
-                    let a = t.get(0).and_then(|v| v.as_i64())?;
-                    let b = t.get(1).and_then(|v| v.as_i64())?;
-                    Some((a, b))
-                })
-                .collect())
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| {
+                        let a = t.get(0).and_then(|v| v.as_i64())?;
+                        let b = t.get(1).and_then(|v| v.as_i64())?;
+                        Some((a, b))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -2150,26 +2316,34 @@ impl CodeGenerator {
         source_relation: &str,
         edge_relation: &str,
     ) -> Result<Vec<i64>, String> {
-        use std::collections::{HashSet, HashMap as StdHashMap, VecDeque};
+        use std::collections::{HashMap as StdHashMap, HashSet, VecDeque};
 
         // Get source nodes (first column only)
-        let sources: Vec<i64> = self.input_tuples
+        let sources: Vec<i64> = self
+            .input_tuples
             .get(source_relation)
-            .map(|tuples| tuples.iter()
-                .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
-                .collect())
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Get edges from input_tuples
-        let edges: Vec<(i64, i64)> = self.input_tuples
+        let edges: Vec<(i64, i64)> = self
+            .input_tuples
             .get(edge_relation)
-            .map(|tuples| tuples.iter()
-                .filter_map(|t| {
-                    let a = t.get(0).and_then(|v| v.as_i64())?;
-                    let b = t.get(1).and_then(|v| v.as_i64())?;
-                    Some((a, b))
-                })
-                .collect())
+            .map(|tuples| {
+                tuples
+                    .iter()
+                    .filter_map(|t| {
+                        let a = t.get(0).and_then(|v| v.as_i64())?;
+                        let b = t.get(1).and_then(|v| v.as_i64())?;
+                        Some((a, b))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         if sources.is_empty() {
@@ -2291,9 +2465,9 @@ impl CodeGenerator {
                     });
 
                     // Join: tc(x, y) ⋈ edge(y, z) → tc(x, z)
-                    let recursive = tc_keyed.join(&edges_keyed).map(|(_y_key, (x, z))| {
-                        Tuple::new(vec![x, z])
-                    });
+                    let recursive = tc_keyed
+                        .join(&edges_keyed)
+                        .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
                     // Combine base case and recursive case
                     let next = edges_in_scope.concat(&recursive).distinct();
@@ -2404,9 +2578,9 @@ impl CodeGenerator {
                     });
 
                     // Join: reach(x) ⋈ edge(x, y) → reach(y)
-                    let recursive = reach_keyed.join(&edges_keyed).map(|(_x_key, (_x, y))| {
-                        Tuple::new(vec![y])
-                    });
+                    let recursive = reach_keyed
+                        .join(&edges_keyed)
+                        .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
 
                     // Combine base case and recursive case
                     let next = sources_in_scope.concat(&recursive).distinct();
@@ -2441,7 +2615,6 @@ impl CodeGenerator {
 
         Ok(final_results)
     }
-
 }
 
 impl Default for CodeGenerator {
@@ -2462,11 +2635,10 @@ mod tests {
     #[test]
     fn test_simple_scan() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input("edge".to_string(), vec![
-            Tuple::pair(1, 2),
-            Tuple::pair(2, 3),
-            Tuple::pair(3, 4),
-        ]);
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(2, 3), Tuple::pair(3, 4)],
+        );
 
         let ir = IRNode::Scan {
             relation: "edge".to_string(),
@@ -2483,10 +2655,10 @@ mod tests {
     #[test]
     fn test_map_swap() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input("edge".to_string(), vec![
-            Tuple::pair(1, 2),
-            Tuple::pair(2, 3),
-        ]);
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(2, 3)],
+        );
 
         let ir = IRNode::Map {
             input: Box::new(IRNode::Scan {
@@ -2506,11 +2678,10 @@ mod tests {
     #[test]
     fn test_filter() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input("edge".to_string(), vec![
-            Tuple::pair(1, 2),
-            Tuple::pair(5, 10),
-            Tuple::pair(3, 4),
-        ]);
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(5, 10), Tuple::pair(3, 4)],
+        );
 
         let ir = IRNode::Filter {
             input: Box::new(IRNode::Scan {
@@ -2528,11 +2699,10 @@ mod tests {
     #[test]
     fn test_distinct() {
         let mut codegen = CodeGenerator::new();
-        codegen.add_input("edge".to_string(), vec![
-            Tuple::pair(1, 2),
-            Tuple::pair(1, 2),
-            Tuple::pair(2, 3),
-        ]);
+        codegen.add_input(
+            "edge".to_string(),
+            vec![Tuple::pair(1, 2), Tuple::pair(1, 2), Tuple::pair(2, 3)],
+        );
 
         let ir = IRNode::Distinct {
             input: Box::new(IRNode::Scan {
@@ -2555,8 +2725,16 @@ mod tests {
         codegen.add_input_tuples(
             "data".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1), Value::string("a"), Value::Float64(1.0)]),
-                Tuple::new(vec![Value::Int32(2), Value::string("b"), Value::Float64(2.0)]),
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("a"),
+                    Value::Float64(1.0),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("b"),
+                    Value::Float64(2.0),
+                ]),
             ],
         );
 
@@ -2594,13 +2772,13 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         // First tuple: (1,2,3) projected to (3,1)
-        assert!(results.iter().any(|t|
-            t.get(0) == Some(&Value::Int32(3)) && t.get(1) == Some(&Value::Int32(1))
-        ));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(3)) && t.get(1) == Some(&Value::Int32(1))));
         // Second tuple: (4,5,6) projected to (6,4)
-        assert!(results.iter().any(|t|
-            t.get(0) == Some(&Value::Int32(6)) && t.get(1) == Some(&Value::Int32(4))
-        ));
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(6)) && t.get(1) == Some(&Value::Int32(4))));
     }
 
     #[test]
@@ -2626,7 +2804,9 @@ mod tests {
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
         assert_eq!(results.len(), 2);
         // Should contain (5, 50) and (3, 30), not (1, 10)
-        assert!(results.iter().all(|t| t.get(0).and_then(|v| v.as_i32()).unwrap_or(0) > 2));
+        assert!(results
+            .iter()
+            .all(|t| t.get(0).and_then(|v| v.as_i32()).unwrap_or(0) > 2));
     }
 
     #[test]
@@ -2702,15 +2882,11 @@ mod tests {
         let mut codegen = CodeGenerator::new();
         codegen.add_input_tuples(
             "r1".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
-            ],
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
         );
         codegen.add_input_tuples(
             "r2".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
-            ],
+            vec![Tuple::new(vec![Value::Int32(3), Value::Int32(4)])],
         );
 
         let ir = IRNode::Union {
@@ -2747,13 +2923,26 @@ mod tests {
         // Direct: (1,2), (2,3), (3,4)
         // 2-hop: (1,3), (2,4)
         // 3-hop: (1,4)
-        assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
         assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
         assert!(results.contains(&Tuple::pair(2, 3)), "Missing (2,3)");
         assert!(results.contains(&Tuple::pair(3, 4)), "Missing (3,4)");
-        assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3) - 2-hop path");
-        assert!(results.contains(&Tuple::pair(2, 4)), "Missing (2,4) - 2-hop path");
-        assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4) - 3-hop path");
+        assert!(
+            results.contains(&Tuple::pair(1, 3)),
+            "Missing (1,3) - 2-hop path"
+        );
+        assert!(
+            results.contains(&Tuple::pair(2, 4)),
+            "Missing (2,4) - 2-hop path"
+        );
+        assert!(
+            results.contains(&Tuple::pair(1, 4)),
+            "Missing (1,4) - 3-hop path"
+        );
     }
 
     #[test]
@@ -2770,7 +2959,11 @@ mod tests {
         // From 2: can reach 3, 1, 2
         // From 3: can reach 1, 2, 3
         // Total should be 9 paths (or 6 if self-loops excluded from base)
-        assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
 
         // All paths should eventually exist
         assert!(results.contains(&Tuple::pair(1, 2)));
@@ -2788,13 +2981,17 @@ mod tests {
         // Source: node 1 (use Int64 to match edge data)
         codegen.add_input(
             "source".to_string(),
-            vec![Tuple::new(vec![Value::Int64(1)])]
+            vec![Tuple::new(vec![Value::Int64(1)])],
         );
 
         let results = codegen.execute_reachability("source", "edge").unwrap();
 
         // From source 1, we can reach: 1, 2, 3, 4
-        assert!(results.len() >= 4, "Expected at least 4 reachable nodes, got {}", results.len());
+        assert!(
+            results.len() >= 4,
+            "Expected at least 4 reachable nodes, got {}",
+            results.len()
+        );
 
         assert!(results.contains(&1i64), "Source 1 should be reachable");
         assert!(results.contains(&2i64), "Node 2 should be reachable from 1");
@@ -2815,7 +3012,7 @@ mod tests {
             vec![
                 Tuple::new(vec![Value::Int64(1)]),
                 Tuple::new(vec![Value::Int64(3)]),
-            ]
+            ],
         );
 
         let results = codegen.execute_reachability("source", "edge").unwrap();
@@ -2844,7 +3041,11 @@ mod tests {
         // Direct: (1,2), (2,3), (3,4)
         // 2-hop: (1,3), (2,4)
         // 3-hop: (1,4)
-        assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
 
         // Check all expected paths using Tuple
         let expected_pairs: Vec<(i64, i64)> = vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (1, 4)];
@@ -2852,7 +3053,8 @@ mod tests {
             assert!(
                 results.contains(&Tuple::pair(x, y)),
                 "Missing path ({}, {})",
-                x, y
+                x,
+                y
             );
         }
     }
@@ -2868,7 +3070,11 @@ mod tests {
 
         // Direct: (1,2), (1,3), (2,4), (3,5)
         // 2-hop: (1,4), (1,5)
-        assert!(results.len() >= 6, "Expected at least 6 paths, got {}", results.len());
+        assert!(
+            results.len() >= 6,
+            "Expected at least 6 paths, got {}",
+            results.len()
+        );
 
         // All paths from node 1
         assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
@@ -2888,12 +3094,19 @@ mod tests {
 
         // With cycle, everyone can reach everyone (including themselves via cycle)
         // All 9 pairs should be reachable
-        assert!(results.len() >= 9, "Expected at least 9 paths in cycle, got {}", results.len());
+        assert!(
+            results.len() >= 9,
+            "Expected at least 9 paths in cycle, got {}",
+            results.len()
+        );
 
         // Check that 1 can reach all nodes
         assert!(results.contains(&Tuple::pair(1, 2)), "Missing (1,2)");
         assert!(results.contains(&Tuple::pair(1, 3)), "Missing (1,3)");
-        assert!(results.contains(&Tuple::pair(1, 1)), "Missing (1,1) - cycle!");
+        assert!(
+            results.contains(&Tuple::pair(1, 1)),
+            "Missing (1,1) - cycle!"
+        );
     }
 
     #[test]
@@ -2907,7 +3120,11 @@ mod tests {
 
         // Direct: (1,2), (1,3), (2,4), (3,4)
         // 2-hop: (1,4) via both paths (but distinct)
-        assert!(results.len() >= 5, "Expected at least 5 paths, got {}", results.len());
+        assert!(
+            results.len() >= 5,
+            "Expected at least 5 paths, got {}",
+            results.len()
+        );
 
         // 1 can reach 4 (via two different paths, but result is same)
         assert!(results.contains(&Tuple::pair(1, 4)), "Missing (1,4)");
@@ -2948,22 +3165,36 @@ mod tests {
         // Source: node 1 (use Int64 to match edge data)
         codegen.add_input(
             "source".to_string(),
-            vec![Tuple::new(vec![Value::Int64(1)])]
+            vec![Tuple::new(vec![Value::Int64(1)])],
         );
 
         let results = codegen.execute_reachability_dd("source", "edge").unwrap();
 
         // From source 1, we can reach: 1, 2, 3, 4
-        assert!(results.len() >= 4, "Expected at least 4 reachable nodes, got {}", results.len());
+        assert!(
+            results.len() >= 4,
+            "Expected at least 4 reachable nodes, got {}",
+            results.len()
+        );
 
-        let reachable_ints: Vec<i64> = results.iter()
+        let reachable_ints: Vec<i64> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
             .collect();
 
         assert!(reachable_ints.contains(&1), "Source 1 should be reachable");
-        assert!(reachable_ints.contains(&2), "Node 2 should be reachable from 1");
-        assert!(reachable_ints.contains(&3), "Node 3 should be reachable from 1");
-        assert!(reachable_ints.contains(&4), "Node 4 should be reachable from 1");
+        assert!(
+            reachable_ints.contains(&2),
+            "Node 2 should be reachable from 1"
+        );
+        assert!(
+            reachable_ints.contains(&3),
+            "Node 3 should be reachable from 1"
+        );
+        assert!(
+            reachable_ints.contains(&4),
+            "Node 4 should be reachable from 1"
+        );
     }
 
     #[test]
@@ -2979,19 +3210,23 @@ mod tests {
             vec![
                 Tuple::new(vec![Value::Int64(1)]),
                 Tuple::new(vec![Value::Int64(10)]),
-            ]
+            ],
         );
 
         let results = codegen.execute_reachability_dd("source", "edge").unwrap();
 
-        let reachable_ints: Vec<i64> = results.iter()
+        let reachable_ints: Vec<i64> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
             .collect();
 
         // From sources 1 and 10, we can reach: 1, 2, 10, 20
         assert!(reachable_ints.contains(&1), "Source 1 should be reachable");
         assert!(reachable_ints.contains(&2), "Node 2 should be reachable");
-        assert!(reachable_ints.contains(&10), "Source 10 should be reachable");
+        assert!(
+            reachable_ints.contains(&10),
+            "Source 10 should be reachable"
+        );
         assert!(reachable_ints.contains(&20), "Node 20 should be reachable");
     }
 
@@ -3005,20 +3240,27 @@ mod tests {
         // Source: only node 1 (use Int64 to match edge data)
         codegen.add_input(
             "source".to_string(),
-            vec![Tuple::new(vec![Value::Int64(1)])]
+            vec![Tuple::new(vec![Value::Int64(1)])],
         );
 
         let results = codegen.execute_reachability_dd("source", "edge").unwrap();
 
-        let reachable_ints: Vec<i64> = results.iter()
+        let reachable_ints: Vec<i64> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
             .collect();
 
         // From source 1, we can reach: 1, 2 (but NOT 10, 20)
         assert!(reachable_ints.contains(&1), "Source 1 should be reachable");
         assert!(reachable_ints.contains(&2), "Node 2 should be reachable");
-        assert!(!reachable_ints.contains(&10), "Node 10 should NOT be reachable");
-        assert!(!reachable_ints.contains(&20), "Node 20 should NOT be reachable");
+        assert!(
+            !reachable_ints.contains(&10),
+            "Node 10 should NOT be reachable"
+        );
+        assert!(
+            !reachable_ints.contains(&20),
+            "Node 20 should NOT be reachable"
+        );
     }
 
     #[test]
@@ -3031,12 +3273,13 @@ mod tests {
         // Source: node 1 (use Int64 to match edge data)
         codegen.add_input(
             "source".to_string(),
-            vec![Tuple::new(vec![Value::Int64(1)])]
+            vec![Tuple::new(vec![Value::Int64(1)])],
         );
 
         let results = codegen.execute_reachability_dd("source", "edge").unwrap();
 
-        let reachable_ints: Vec<i64> = results.iter()
+        let reachable_ints: Vec<i64> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
             .collect();
 
@@ -3097,7 +3340,8 @@ mod tests {
         // Should get nodes 3, 4, 5 (not in reach)
         assert_eq!(results.len(), 3, "Expected 3 unreachable nodes");
 
-        let result_ints: Vec<i32> = results.iter()
+        let result_ints: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
 
@@ -3232,7 +3476,8 @@ mod tests {
         // Alice and Carol should remain (not banned)
         assert_eq!(results.len(), 2, "Expected 2 non-banned people");
 
-        let names: Vec<&str> = results.iter()
+        let names: Vec<&str> = results
+            .iter()
             .filter_map(|t| t.get(1).and_then(|v| v.as_str()))
             .collect();
 
@@ -3284,13 +3529,23 @@ mod tests {
         // (1,1,100) is filtered out, (1,2,200) and (2,1,300) remain
         assert_eq!(results.len(), 2, "Expected 2 rows after antijoin");
 
-        let data_values: Vec<i32> = results.iter()
+        let data_values: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(2).and_then(|v| v.as_i32()))
             .collect();
 
-        assert!(data_values.contains(&200), "Row with data 200 should remain");
-        assert!(data_values.contains(&300), "Row with data 300 should remain");
-        assert!(!data_values.contains(&100), "Row with data 100 should be filtered");
+        assert!(
+            data_values.contains(&200),
+            "Row with data 200 should remain"
+        );
+        assert!(
+            data_values.contains(&300),
+            "Row with data 300 should remain"
+        );
+        assert!(
+            !data_values.contains(&100),
+            "Row with data 100 should be filtered"
+        );
     }
 
     #[test]
@@ -3311,9 +3566,7 @@ mod tests {
 
         codegen.add_input_tuples(
             "excluded".to_string(),
-            vec![
-                Tuple::new(vec![Value::Int32(2)]),
-            ],
+            vec![Tuple::new(vec![Value::Int32(2)])],
         );
 
         // Filter: x > 1, then antijoin to remove excluded
@@ -3340,7 +3593,8 @@ mod tests {
         // After antijoin (remove 2): (3,30), (4,40)
         assert_eq!(results.len(), 2, "Expected 2 rows");
 
-        let x_values: Vec<i32> = results.iter()
+        let x_values: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
 
@@ -3427,7 +3681,8 @@ mod tests {
         // Only 1 is filtered, 2 and 3 remain
         assert_eq!(results.len(), 2, "Expected 2 rows");
 
-        let values: Vec<i32> = results.iter()
+        let values: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
 
@@ -3479,9 +3734,7 @@ mod tests {
         // New edges: (2,3) and (4,5)
         assert_eq!(results.len(), 2, "Expected 2 new edges");
 
-        let pairs: Vec<(i32, i32)> = results.iter()
-            .filter_map(|t| t.to_pair())
-            .collect();
+        let pairs: Vec<(i32, i32)> = results.iter().filter_map(|t| t.to_pair()).collect();
 
         assert!(pairs.contains(&(2, 3)), "Edge (2,3) should be new");
         assert!(pairs.contains(&(4, 5)), "Edge (4,5) should be new");
@@ -3565,7 +3818,8 @@ mod tests {
         // Should have 3 results: (4,40), (5,50), (6,60)
         assert_eq!(results.len(), 3, "Expected 3 rows where x > 3");
 
-        let x_values: Vec<i32> = results.iter()
+        let x_values: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
 
@@ -3664,12 +3918,13 @@ mod tests {
                 relation: "vectors".to_string(),
                 schema: vec!["id".to_string(), "v1".to_string(), "v2".to_string()],
             }),
-            expressions: vec![
-                ("dist".to_string(), IRExpression::FunctionCall(
+            expressions: vec![(
+                "dist".to_string(),
+                IRExpression::FunctionCall(
                     BuiltinFunction::Euclidean,
                     vec![IRExpression::Column(1), IRExpression::Column(2)],
-                )),
-            ],
+                ),
+            )],
         };
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
@@ -3679,13 +3934,22 @@ mod tests {
         let first = &results[0];
         assert_eq!(first.get(0), Some(&Value::Int32(1)));
         let dist1 = first.get(3).unwrap().to_f64();
-        assert!((dist1 - 5.0).abs() < 0.001, "Expected dist 5.0, got {}", dist1);
+        assert!(
+            (dist1 - 5.0).abs() < 0.001,
+            "Expected dist 5.0, got {}",
+            dist1
+        );
 
         // Second tuple: distance between (1,1) and (2,2) = sqrt(2)
         let second = &results[1];
         let dist2 = second.get(3).unwrap().to_f64();
         let expected = (2.0_f64).sqrt();
-        assert!((dist2 - expected).abs() < 0.001, "Expected dist {}, got {}", expected, dist2);
+        assert!(
+            (dist2 - expected).abs() < 0.001,
+            "Expected dist {}, got {}",
+            expected,
+            dist2
+        );
     }
 
     #[test]
@@ -3698,12 +3962,12 @@ mod tests {
                 Tuple::new(vec![
                     Value::Int32(1),
                     Value::vector(vec![1.0, 0.0]),
-                    Value::vector(vec![2.0, 0.0]),  // Same direction
+                    Value::vector(vec![2.0, 0.0]), // Same direction
                 ]),
                 Tuple::new(vec![
                     Value::Int32(2),
                     Value::vector(vec![1.0, 0.0]),
-                    Value::vector(vec![0.0, 1.0]),  // Orthogonal
+                    Value::vector(vec![0.0, 1.0]), // Orthogonal
                 ]),
             ],
         );
@@ -3713,12 +3977,13 @@ mod tests {
                 relation: "vectors".to_string(),
                 schema: vec!["id".to_string(), "v1".to_string(), "v2".to_string()],
             }),
-            expressions: vec![
-                ("cos_dist".to_string(), IRExpression::FunctionCall(
+            expressions: vec![(
+                "cos_dist".to_string(),
+                IRExpression::FunctionCall(
                     BuiltinFunction::Cosine,
                     vec![IRExpression::Column(1), IRExpression::Column(2)],
-                )),
-            ],
+                ),
+            )],
         };
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
@@ -3726,11 +3991,19 @@ mod tests {
 
         // Same direction: cosine distance = 0
         let dist1 = results[0].get(3).unwrap().to_f64();
-        assert!(dist1.abs() < 0.001, "Expected cosine dist ~0, got {}", dist1);
+        assert!(
+            dist1.abs() < 0.001,
+            "Expected cosine dist ~0, got {}",
+            dist1
+        );
 
         // Orthogonal: cosine distance = 1
         let dist2 = results[1].get(3).unwrap().to_f64();
-        assert!((dist2 - 1.0).abs() < 0.001, "Expected cosine dist ~1, got {}", dist2);
+        assert!(
+            (dist2 - 1.0).abs() < 0.001,
+            "Expected cosine dist ~1, got {}",
+            dist2
+        );
     }
 
     #[test]
@@ -3740,17 +4013,14 @@ mod tests {
         codegen.add_input_tuples(
             "vectors".to_string(),
             vec![
-                Tuple::new(vec![
-                    Value::Int32(1),
-                    Value::vector(vec![1.0, 0.0, 0.0]),
-                ]),
+                Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 0.0, 0.0])]),
                 Tuple::new(vec![
                     Value::Int32(2),
-                    Value::vector(vec![0.99, 0.01, 0.0]),  // Similar to first
+                    Value::vector(vec![0.99, 0.01, 0.0]), // Similar to first
                 ]),
                 Tuple::new(vec![
                     Value::Int32(3),
-                    Value::vector(vec![-1.0, 0.0, 0.0]),  // Opposite direction
+                    Value::vector(vec![-1.0, 0.0, 0.0]), // Opposite direction
                 ]),
             ],
         );
@@ -3761,16 +4031,17 @@ mod tests {
                 relation: "vectors".to_string(),
                 schema: vec!["id".to_string(), "vec".to_string()],
             }),
-            expressions: vec![
-                ("bucket".to_string(), IRExpression::FunctionCall(
+            expressions: vec![(
+                "bucket".to_string(),
+                IRExpression::FunctionCall(
                     BuiltinFunction::LshBucket,
                     vec![
                         IRExpression::Column(1),
-                        IRExpression::IntConstant(0),  // table_idx
-                        IRExpression::IntConstant(4),  // num_hyperplanes
+                        IRExpression::IntConstant(0), // table_idx
+                        IRExpression::IntConstant(4), // num_hyperplanes
                     ],
-                )),
-            ],
+                ),
+            )],
         };
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
@@ -3808,10 +4079,15 @@ mod tests {
                 relation: "items".to_string(),
                 schema: vec!["id".to_string(), "score".to_string()],
             }),
-            group_by: vec![],  // No grouping - global top-k
-            aggregations: vec![
-                (AggregateFunction::TopK { k: 3, order_col: 1, descending: true }, 0),
-            ],
+            group_by: vec![], // No grouping - global top-k
+            aggregations: vec![(
+                AggregateFunction::TopK {
+                    k: 3,
+                    order_col: 1,
+                    descending: true,
+                },
+                0,
+            )],
             output_schema: vec!["id".to_string(), "score".to_string()],
         };
 
@@ -3819,9 +4095,7 @@ mod tests {
         assert_eq!(results.len(), 3, "Expected top 3 results");
 
         // Verify we got the top 3 scores (8.0, 7.0, 5.0)
-        let scores: Vec<f64> = results.iter()
-            .map(|t| t.get(1).unwrap().to_f64())
-            .collect();
+        let scores: Vec<f64> = results.iter().map(|t| t.get(1).unwrap().to_f64()).collect();
         assert!(scores.contains(&8.0), "Missing score 8.0");
         assert!(scores.contains(&7.0), "Missing score 7.0");
         assert!(scores.contains(&5.0), "Missing score 5.0");
@@ -3834,10 +4108,10 @@ mod tests {
         codegen.add_input_tuples(
             "items".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1), Value::Float64(2.0)]),  // Below threshold
-                Tuple::new(vec![Value::Int32(2), Value::Float64(5.0)]),  // Above
-                Tuple::new(vec![Value::Int32(3), Value::Float64(8.0)]),  // Above
-                Tuple::new(vec![Value::Int32(4), Value::Float64(1.0)]),  // Below threshold
+                Tuple::new(vec![Value::Int32(1), Value::Float64(2.0)]), // Below threshold
+                Tuple::new(vec![Value::Int32(2), Value::Float64(5.0)]), // Above
+                Tuple::new(vec![Value::Int32(3), Value::Float64(8.0)]), // Above
+                Tuple::new(vec![Value::Int32(4), Value::Float64(1.0)]), // Below threshold
             ],
         );
 
@@ -3848,14 +4122,15 @@ mod tests {
                 schema: vec!["id".to_string(), "score".to_string()],
             }),
             group_by: vec![],
-            aggregations: vec![
-                (AggregateFunction::TopKThreshold {
+            aggregations: vec![(
+                AggregateFunction::TopKThreshold {
                     k: 3,
                     order_col: 1,
                     threshold: 4.0,
                     descending: true,
-                }, 0),
-            ],
+                },
+                0,
+            )],
             output_schema: vec!["id".to_string(), "score".to_string()],
         };
 
@@ -3876,10 +4151,10 @@ mod tests {
         codegen.add_input_tuples(
             "items".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1), Value::Float64(0.1)]),  // Within
-                Tuple::new(vec![Value::Int32(2), Value::Float64(0.5)]),  // Within
-                Tuple::new(vec![Value::Int32(3), Value::Float64(1.5)]),  // Outside
-                Tuple::new(vec![Value::Int32(4), Value::Float64(0.3)]),  // Within
+                Tuple::new(vec![Value::Int32(1), Value::Float64(0.1)]), // Within
+                Tuple::new(vec![Value::Int32(2), Value::Float64(0.5)]), // Within
+                Tuple::new(vec![Value::Int32(3), Value::Float64(1.5)]), // Outside
+                Tuple::new(vec![Value::Int32(4), Value::Float64(0.3)]), // Within
             ],
         );
 
@@ -3890,12 +4165,13 @@ mod tests {
                 schema: vec!["id".to_string(), "dist".to_string()],
             }),
             group_by: vec![],
-            aggregations: vec![
-                (AggregateFunction::WithinRadius {
+            aggregations: vec![(
+                AggregateFunction::WithinRadius {
                     distance_col: 1,
                     max_distance: 0.5,
-                }, 0),
-            ],
+                },
+                0,
+            )],
             output_schema: vec!["id".to_string(), "dist".to_string()],
         };
 
@@ -3923,9 +4199,9 @@ mod tests {
             "db_vectors".to_string(),
             vec![
                 Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 0.0])]),
-                Tuple::new(vec![Value::Int32(2), Value::vector(vec![0.9, 0.1])]),  // Close to query
-                Tuple::new(vec![Value::Int32(3), Value::vector(vec![0.0, 1.0])]),  // Far from query
-                Tuple::new(vec![Value::Int32(4), Value::vector(vec![0.8, 0.2])]),  // Close
+                Tuple::new(vec![Value::Int32(2), Value::vector(vec![0.9, 0.1])]), // Close to query
+                Tuple::new(vec![Value::Int32(3), Value::vector(vec![0.0, 1.0])]), // Far from query
+                Tuple::new(vec![Value::Int32(4), Value::vector(vec![0.8, 0.2])]), // Close
                 Tuple::new(vec![Value::Int32(5), Value::vector(vec![-1.0, 0.0])]), // Very far
             ],
         );
@@ -3939,24 +4215,30 @@ mod tests {
                 relation: "db_vectors".to_string(),
                 schema: vec!["id".to_string(), "vec".to_string()],
             }),
-            expressions: vec![
-                ("dist".to_string(), IRExpression::FunctionCall(
+            expressions: vec![(
+                "dist".to_string(),
+                IRExpression::FunctionCall(
                     BuiltinFunction::Euclidean,
                     vec![
                         IRExpression::Column(1),
                         IRExpression::VectorLiteral(query_vec),
                     ],
-                )),
-            ],
+                ),
+            )],
         };
 
         // Step 2: Get top 2 closest (ascending by distance)
         let ir = IRNode::Aggregate {
             input: Box::new(with_distances),
             group_by: vec![],
-            aggregations: vec![
-                (AggregateFunction::TopK { k: 2, order_col: 2, descending: false }, 0),
-            ],
+            aggregations: vec![(
+                AggregateFunction::TopK {
+                    k: 2,
+                    order_col: 2,
+                    descending: false,
+                },
+                0,
+            )],
             output_schema: vec!["id".to_string(), "vec".to_string(), "dist".to_string()],
         };
 
@@ -3964,7 +4246,8 @@ mod tests {
         assert_eq!(results.len(), 2, "Expected top 2 closest vectors");
 
         // The closest should be id=1 (distance 0) and id=2 (very close)
-        let ids: Vec<i32> = results.iter()
+        let ids: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
         assert!(ids.contains(&1), "ID 1 should be in top 2 (exact match)");
@@ -3990,21 +4273,30 @@ mod tests {
                 schema: vec!["a".to_string(), "b".to_string()],
             }),
             expressions: vec![
-                ("sum".to_string(), IRExpression::Arithmetic {
-                    op: ArithOp::Add,
-                    left: Box::new(IRExpression::Column(0)),
-                    right: Box::new(IRExpression::Column(1)),
-                }),
-                ("diff".to_string(), IRExpression::Arithmetic {
-                    op: ArithOp::Sub,
-                    left: Box::new(IRExpression::Column(0)),
-                    right: Box::new(IRExpression::Column(1)),
-                }),
-                ("prod".to_string(), IRExpression::Arithmetic {
-                    op: ArithOp::Mul,
-                    left: Box::new(IRExpression::Column(0)),
-                    right: Box::new(IRExpression::Column(1)),
-                }),
+                (
+                    "sum".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Add,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
+                (
+                    "diff".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Sub,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
+                (
+                    "prod".to_string(),
+                    IRExpression::Arithmetic {
+                        op: ArithOp::Mul,
+                        left: Box::new(IRExpression::Column(0)),
+                        right: Box::new(IRExpression::Column(1)),
+                    },
+                ),
             ],
         };
 
@@ -4014,7 +4306,7 @@ mod tests {
         // First row: 10 + 3 = 13, 10 - 3 = 7, 10 * 3 = 30
         let first = &results[0];
         assert_eq!(first.get(2).unwrap().to_i64(), 13); // sum
-        assert_eq!(first.get(3).unwrap().to_i64(), 7);  // diff
+        assert_eq!(first.get(3).unwrap().to_i64(), 7); // diff
         assert_eq!(first.get(4).unwrap().to_i64(), 30); // prod
 
         // Second row: 20 + 5 = 25, 20 - 5 = 15, 20 * 5 = 100
@@ -4272,10 +4564,26 @@ mod tests {
         codegen.add_input_tuples(
             "employee".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1), Value::string("engineering"), Value::Int32(50000)]),
-                Tuple::new(vec![Value::Int32(2), Value::string("sales"), Value::Int32(60000)]),
-                Tuple::new(vec![Value::Int32(3), Value::string("engineering"), Value::Int32(70000)]),
-                Tuple::new(vec![Value::Int32(4), Value::string("hr"), Value::Int32(55000)]),
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("engineering"),
+                    Value::Int32(50000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("sales"),
+                    Value::Int32(60000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(3),
+                    Value::string("engineering"),
+                    Value::Int32(70000),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(4),
+                    Value::string("hr"),
+                    Value::Int32(55000),
+                ]),
             ],
         );
 
@@ -4292,7 +4600,11 @@ mod tests {
         };
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
-        assert_eq!(results.len(), 1, "Expected 1 engineering employee with salary > 60000");
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected 1 engineering employee with salary > 60000"
+        );
         assert_eq!(results[0].get(0).and_then(|v| v.as_i32()), Some(3));
     }
 
@@ -4302,10 +4614,26 @@ mod tests {
         codegen.add_input_tuples(
             "product".to_string(),
             vec![
-                Tuple::new(vec![Value::Int32(1), Value::string("electronics"), Value::Float64(99.99)]),
-                Tuple::new(vec![Value::Int32(2), Value::string("electronics"), Value::Float64(199.99)]),
-                Tuple::new(vec![Value::Int32(3), Value::string("clothing"), Value::Float64(49.99)]),
-                Tuple::new(vec![Value::Int32(4), Value::string("electronics"), Value::Float64(149.99)]),
+                Tuple::new(vec![
+                    Value::Int32(1),
+                    Value::string("electronics"),
+                    Value::Float64(99.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(2),
+                    Value::string("electronics"),
+                    Value::Float64(199.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(3),
+                    Value::string("clothing"),
+                    Value::Float64(49.99),
+                ]),
+                Tuple::new(vec![
+                    Value::Int32(4),
+                    Value::string("electronics"),
+                    Value::Float64(149.99),
+                ]),
             ],
         );
 
@@ -4313,7 +4641,11 @@ mod tests {
         let ir = IRNode::Filter {
             input: Box::new(IRNode::Scan {
                 relation: "product".to_string(),
-                schema: vec!["id".to_string(), "category".to_string(), "price".to_string()],
+                schema: vec![
+                    "id".to_string(),
+                    "category".to_string(),
+                    "price".to_string(),
+                ],
             }),
             predicate: Predicate::And(
                 Box::new(Predicate::ColumnEqStr(1, "electronics".to_string())),
@@ -4322,10 +4654,15 @@ mod tests {
         };
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
-        assert_eq!(results.len(), 2, "Expected 2 electronics products with price < 150.0");
+        assert_eq!(
+            results.len(),
+            2,
+            "Expected 2 electronics products with price < 150.0"
+        );
 
         // Should be products 1 (99.99) and 4 (149.99)
-        let ids: Vec<i32> = results.iter()
+        let ids: Vec<i32> = results
+            .iter()
             .filter_map(|t| t.get(0).and_then(|v| v.as_i32()))
             .collect();
         assert!(ids.contains(&1), "Product 1 should be in results");

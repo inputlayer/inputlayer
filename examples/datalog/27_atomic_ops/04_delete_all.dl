@@ -1,30 +1,30 @@
-// Test: Delete All Pattern
-// Category: atomic_ops
-// Description: Tests deleting all tuples from a relation
+% Test: Delete All Pattern
+% Category: atomic_ops
+% Description: Tests deleting all tuples from a relation
 
-.db create delete_all_test
-.db use delete_all_test
+.kg create delete_all_test
+.kg use delete_all_test
 
-// Initial data (integer pairs)
+% Initial data (integer pairs)
 +temp_data(1, 100).
 +temp_data(2, 200).
 +temp_data(3, 300).
 
-// Query initial state
+% Query initial state
 ?- temp_data(Id, Value).
 
-// Delete all: conditional delete matching everything
+% Delete all: conditional delete matching everything
 -temp_data(Id, Value) :- temp_data(Id, Value).
 
-// Query after delete all (should be empty)
+% Query after delete all (should be empty)
 ?- temp_data(Id, Value).
 
-// Re-insert some data
+% Re-insert some data
 +temp_data(10, 999).
 
-// Query after re-insert
+% Query after re-insert
 ?- temp_data(Id, Value).
 
-// Cleanup
-.db use default
-.db drop delete_all_test
+% Cleanup
+.kg use default
+.kg drop delete_all_test

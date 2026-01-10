@@ -2,12 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::ir_builder::IRBuilder;
-    use crate::code_generator::CodeGenerator;
-    use crate::parser::parse_rule;
     use crate::catalog::Catalog;
-    use std::collections::HashMap;
+    use crate::code_generator::CodeGenerator;
+    use crate::ir_builder::IRBuilder;
+    use crate::parser::parse_rule;
     use crate::value::{Tuple, Value};
+    use std::collections::HashMap;
 
     #[test]
     fn test_shortest_path_arithmetic() {
@@ -55,7 +55,9 @@ mod tests {
         let result = &results[0];
 
         // Check values
-        let values: Vec<i32> = result.values().iter()
+        let values: Vec<i32> = result
+            .values()
+            .iter()
             .map(|v| v.as_i32().unwrap_or(-999))
             .collect();
 
@@ -102,7 +104,9 @@ mod tests {
         eprintln!("Join results: {:?}", results);
 
         assert_eq!(results.len(), 1);
-        let values: Vec<i32> = results[0].values().iter()
+        let values: Vec<i32> = results[0]
+            .values()
+            .iter()
             .map(|v| v.as_i32().unwrap_or(-999))
             .collect();
 

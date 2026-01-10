@@ -1,42 +1,42 @@
-// Test: Comparison Operations
-// Category: 11_types
-// Description: Tests all comparison operators
+% Test: Comparison Operations
+% Category: 11_types
+% Description: Tests all comparison operators
 
-.db create test_compare
-.db use test_compare
+.kg create test_compare
+.kg use test_compare
 
-// Test data
+% Test data
 +vals[(1, 10), (2, 20), (3, 30), (4, 20), (5, 40)].
 
-// Less than
+% Less than
 +less_than_25(Id, V) :- vals(Id, V), V < 25.
 ?- less_than_25(X, Y).
 
-// Less than or equal
+% Less than or equal
 +less_eq_20(Id, V) :- vals(Id, V), V <= 20.
 ?- less_eq_20(X, Y).
 
-// Greater than
+% Greater than
 +greater_than_25(Id, V) :- vals(Id, V), V > 25.
 ?- greater_than_25(X, Y).
 
-// Greater than or equal
+% Greater than or equal
 +greater_eq_20(Id, V) :- vals(Id, V), V >= 20.
 ?- greater_eq_20(X, Y).
 
-// Equal (via join)
+% Equal (via join)
 +targets[(20)].
 +equals_target(Id, V) :- vals(Id, V), targets(V).
 ?- equals_target(X, Y).
 
-// Not equal via negation
+% Not equal via negation
 +not_twenty(Id, V) :- vals(Id, V), !targets(V).
 ?- not_twenty(X, Y).
 
-// Chained comparisons: 15 < V < 35
+% Chained comparisons: 15 < V < 35
 +in_range(Id, V) :- vals(Id, V), V > 15, V < 35.
 ?- in_range(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_compare
+% Cleanup
+.kg use default
+.kg drop test_compare

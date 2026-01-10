@@ -1,12 +1,16 @@
-Executing script: examples/datalog/15_arithmetic/02_multiply.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arith_mul
-Database 'test_arith_mul' created.
-Switched to database: test_arith_mul
-> .db use test_arith_mul
-Switched to database: test_arith_mul
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arith_mul
+Knowledge graph 'test_arith_mul' created.
+Switched to knowledge graph: test_arith_mul
+> .kg use test_arith_mul
+Switched to knowledge graph: test_arith_mul
 > +item[(1, 10), (2, 25), (3, 15)].
-Inserted 3 facts into 'item'.
+Inserted 3 fact(s) into 'item'.
 > double_price(Id, Price*2) :- item(Id, Price).
 3 rows:
   (1, 20)
@@ -18,8 +22,8 @@ Inserted 3 facts into 'item'.
   (1, 20)
   (2, 50)
   (3, 30)
-> .db use default
-Switched to database: default
-(Cleared 1 session rule(s))
-> .db drop test_arith_mul
-Database 'test_arith_mul' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_arith_mul
+Knowledge graph 'test_arith_mul' dropped.

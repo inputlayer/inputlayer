@@ -87,9 +87,22 @@ impl SerializableRule {
     pub fn from_rule(rule: &Rule) -> Self {
         SerializableRule {
             head_relation: rule.head.relation.clone(),
-            head_args: rule.head.args.iter().map(SerializableTerm::from_term).collect(),
-            body: rule.body.iter().map(SerializableBodyPred::from_body_pred).collect(),
-            constraints: rule.constraints.iter().map(SerializableConstraint::from_constraint).collect(),
+            head_args: rule
+                .head
+                .args
+                .iter()
+                .map(SerializableTerm::from_term)
+                .collect(),
+            body: rule
+                .body
+                .iter()
+                .map(SerializableBodyPred::from_body_pred)
+                .collect(),
+            constraints: rule
+                .constraints
+                .iter()
+                .map(SerializableConstraint::from_constraint)
+                .collect(),
         }
     }
 
@@ -113,13 +126,10 @@ impl SerializableTerm {
             Term::StringConstant(s) => SerializableTerm::StringConstant(s.clone()),
             Term::FloatConstant(f) => SerializableTerm::FloatConstant(*f),
             Term::Placeholder => SerializableTerm::Placeholder,
-            Term::Aggregate(func, var) => SerializableTerm::Aggregate(
-                func.clone(),
-                var.clone(),
-            ),
-            Term::Arithmetic(expr) => SerializableTerm::Arithmetic(
-                SerializableArithExpr::from_arith_expr(expr),
-            ),
+            Term::Aggregate(func, var) => SerializableTerm::Aggregate(func.clone(), var.clone()),
+            Term::Arithmetic(expr) => {
+                SerializableTerm::Arithmetic(SerializableArithExpr::from_arith_expr(expr))
+            }
             // For other complex terms (FunctionCall, VectorLiteral),
             // we simplify to placeholder as they're not typically used in view definitions
             _ => SerializableTerm::Placeholder,
@@ -133,13 +143,8 @@ impl SerializableTerm {
             SerializableTerm::StringConstant(s) => Term::StringConstant(s.clone()),
             SerializableTerm::FloatConstant(f) => Term::FloatConstant(*f),
             SerializableTerm::Placeholder => Term::Placeholder,
-            SerializableTerm::Aggregate(func, var) => Term::Aggregate(
-                func.clone(),
-                var.clone(),
-            ),
-            SerializableTerm::Arithmetic(expr) => Term::Arithmetic(
-                expr.to_arith_expr(),
-            ),
+            SerializableTerm::Aggregate(func, var) => Term::Aggregate(func.clone(), var.clone()),
+            SerializableTerm::Arithmetic(expr) => Term::Arithmetic(expr.to_arith_expr()),
         }
     }
 }
@@ -255,11 +260,21 @@ impl SerializableConstraint {
     pub fn to_constraint(&self) -> Constraint {
         match self {
             SerializableConstraint::Equal(l, r) => Constraint::Equal(l.to_term(), r.to_term()),
-            SerializableConstraint::NotEqual(l, r) => Constraint::NotEqual(l.to_term(), r.to_term()),
-            SerializableConstraint::LessThan(l, r) => Constraint::LessThan(l.to_term(), r.to_term()),
-            SerializableConstraint::LessOrEqual(l, r) => Constraint::LessOrEqual(l.to_term(), r.to_term()),
-            SerializableConstraint::GreaterThan(l, r) => Constraint::GreaterThan(l.to_term(), r.to_term()),
-            SerializableConstraint::GreaterOrEqual(l, r) => Constraint::GreaterOrEqual(l.to_term(), r.to_term()),
+            SerializableConstraint::NotEqual(l, r) => {
+                Constraint::NotEqual(l.to_term(), r.to_term())
+            }
+            SerializableConstraint::LessThan(l, r) => {
+                Constraint::LessThan(l.to_term(), r.to_term())
+            }
+            SerializableConstraint::LessOrEqual(l, r) => {
+                Constraint::LessOrEqual(l.to_term(), r.to_term())
+            }
+            SerializableConstraint::GreaterThan(l, r) => {
+                Constraint::GreaterThan(l.to_term(), r.to_term())
+            }
+            SerializableConstraint::GreaterOrEqual(l, r) => {
+                Constraint::GreaterOrEqual(l.to_term(), r.to_term())
+            }
         }
     }
 }

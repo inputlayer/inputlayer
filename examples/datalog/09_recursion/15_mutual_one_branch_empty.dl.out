@@ -1,23 +1,33 @@
-Executing script: examples/datalog/09_recursion/15_mutual_one_branch_empty.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_mutual_empty
-Database 'test_mutual_empty' created.
-Switched to database: test_mutual_empty
-> .db use test_mutual_empty
-Switched to database: test_mutual_empty
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mutual_empty
+Knowledge graph 'test_mutual_empty' created.
+Switched to knowledge graph: test_mutual_empty
+> .kg use test_mutual_empty
+Switched to knowledge graph: test_mutual_empty
 > +a_base[(1), (2), (3)].
-Inserted 3 facts into 'a_base'.
+Inserted 3 fact(s) into 'a_base'.
 > a_derived(X) :- a_base(X).
-No results for 'a_derived'.
+3 rows:
+  (1)
+  (2)
+  (3)
 (session: 1 rule(s))
 > a_derived(X) :- b_derived(X).
-No results for 'a_derived'.
+3 rows:
+  (1)
+  (2)
+  (3)
 (session: 2 rule(s))
 > b_derived(X) :- b_base(X).
-No results for 'b_derived'.
+No results.
 (session: 3 rule(s))
 > b_derived(X) :- a_derived(X), X > 10.
-No results for 'b_derived'.
+No results.
 (session: 4 rule(s))
 > ?- a_derived(X).
 3 rows:
@@ -27,7 +37,7 @@ No results for 'b_derived'.
 > ?- b_derived(X).
 No results.
 > +b_base[(10), (20)].
-Inserted 2 facts into 'b_base'.
+Inserted 2 fact(s) into 'b_base'.
 > ?- a_derived(X).
 3 rows:
   (1)
@@ -37,8 +47,8 @@ Inserted 2 facts into 'b_base'.
 2 rows:
   (10)
   (20)
-> .db use default
-Switched to database: default
-(Cleared 4 session rule(s))
-> .db drop test_mutual_empty
-Database 'test_mutual_empty' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_mutual_empty
+Knowledge graph 'test_mutual_empty' dropped.

@@ -1,20 +1,20 @@
-// Test: Rule Definition Command
-// Category: 17_rule_commands
-// Description: Tests .rule def <name> to show only the definition
+% Test: Rule Definition Command
+% Category: 17_rule_commands
+% Description: Tests .rule def <name> to show only the definition
 
-.db create test_rule_def
-.db use test_rule_def
+.kg create test_rule_def
+.kg use test_rule_def
 
-// Insert base data
+% Insert base data
 +edge[(1,2), (2,3)].
 
-// Define a rule
+% Define a rule
 +reach(X, Y) :- edge(X, Y).
 +reach(X, Z) :- reach(X, Y), edge(Y, Z).
 
-// Show definition only (no results)
+% Show definition only (no results)
 .rule def reach
 
-// Cleanup
-.db use default
-.db drop test_rule_def
+% Cleanup
+.kg use default
+.kg drop test_rule_def

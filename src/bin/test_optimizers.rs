@@ -3,7 +3,7 @@ use inputlayer::{DatalogEngine, OptimizationConfig};
 fn main() {
     let base_query = "path2(x, z) :- edge(x, y), edge(y, z).";
     let edges: Vec<(i32, i32)> = vec![(1, 2), (2, 3), (3, 4), (4, 5)];
-    
+
     // Test with NO optimizations
     println!("Testing with NO optimizations...");
     let config_none = OptimizationConfig {
@@ -16,7 +16,7 @@ fn main() {
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).unwrap();
     println!("  Results: {:?}", results);
-    
+
     // Test with ONLY join planning
     println!("\nTesting with ONLY join planning...");
     let config_jp = OptimizationConfig {
@@ -29,7 +29,7 @@ fn main() {
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).unwrap();
     println!("  Results: {:?}", results);
-    
+
     // Test with ONLY SIP
     println!("\nTesting with ONLY SIP rewriting...");
     let config_sip = OptimizationConfig {
@@ -42,7 +42,7 @@ fn main() {
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).unwrap();
     println!("  Results: {:?}", results);
-    
+
     // Test with ONLY subplan sharing
     println!("\nTesting with ONLY subplan sharing...");
     let config_ss = OptimizationConfig {
@@ -55,7 +55,7 @@ fn main() {
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).unwrap();
     println!("  Results: {:?}", results);
-    
+
     // Test with ONLY boolean specialization
     println!("\nTesting with ONLY boolean specialization...");
     let config_bs = OptimizationConfig {

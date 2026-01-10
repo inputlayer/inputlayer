@@ -67,10 +67,10 @@ Schemas can include constraints:
 ### 3.1 Inserting Facts
 
 ```datalog
-// Single fact
+% Single fact
 +user(1, "Alice", "alice@example.com").
 
-// Bulk insert
+% Bulk insert
 +user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
 ```
 
@@ -100,7 +100,7 @@ The following features are documented for future implementation:
 ```datalog
 type User: { id: int, name: string, email: string }.
 
-// Would desugar to: +user(id: int, name: string, email: string).
+% Would desugar to: +user(id: int, name: string, email: string).
 +user: User.
 ```
 
@@ -145,12 +145,12 @@ admin_email(e) :-
 For now, use explicit positional schemas and facts:
 
 ```datalog
-// Declare schema
+% Declare schema
 +user(id: int, name: string, email: string).
 
-// Insert facts positionally
+% Insert facts positionally
 +user[(1, "Alice", "alice@example.com")].
 
-// Query with positional variables
+% Query with positional variables
 ?- user(Id, Name, Email).
 ```

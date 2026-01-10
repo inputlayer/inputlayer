@@ -1,34 +1,34 @@
-// Self-Checking Tests Demo
-// Tests arithmetic operations and result verification
+% Self-Checking Tests Demo
+% Tests arithmetic operations and result verification
 
-.db create test_assertion_demo
-.db use test_assertion_demo
+.kg create test_assertion_demo
+.kg use test_assertion_demo
 
-// Simple 2-column source
+% Simple 2-column source
 +data[(1, 5), (2, 10), (3, 15)].
 +link[(1, 100), (2, 200), (3, 300)].
 
-// Test 1: Basic increment with join
+% Test 1: Basic increment with join
 result1(Y, D+1) :- data(X, D), link(X, Y).
 
 ?- result1(A, B).
 
-// Test 2: Self-join with variable binding
+% Test 2: Self-join with variable binding
 result2(X, D+10) :- data(X, D).
 
 ?- result2(A, B).
 
-// Test 3: Empty result check (filter returns nothing)
+% Test 3: Empty result check (filter returns nothing)
 empty_result(X) :- data(X, Y), Y > 100.
 
 ?- empty_result(X).
 
-// Test 4: 3-column source with wildcard
+% Test 4: 3-column source with wildcard
 +src3[(1, 5, 999), (2, 10, 888)].
 
 result3(Y, D+1) :- src3(X, D, _), link(X, Y).
 
 ?- result3(A, B).
 
-.db use default
-.db drop test_assertion_demo
+.kg use default
+.kg drop test_assertion_demo

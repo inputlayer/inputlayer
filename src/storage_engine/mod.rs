@@ -1,44 +1,45 @@
-//! Storage Engine - Multi-Database Persistent Storage
+//! Storage Engine - Multi-Knowledge-Graph Persistent Storage
 //!
 //! Provides:
-//! - Multiple isolated databases (namespace isolation like PostgreSQL/MySQL)
+//! - Multiple isolated knowledge graphs (namespace isolation like PostgreSQL/MySQL)
 //! - Filesystem persistence with configurable path
-//! - Database lifecycle management (create, drop, list, switch)
-//! - Database-scoped CRUD operations
+//! - Knowledge graph lifecycle management (create, drop, list, switch)
+//! - Knowledge-graph-scoped CRUD operations
 //! - Parquet-based storage for efficiency
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use datalog_engine::{StorageEngine, Config};
+//! ```rust,no_run
+//! use inputlayer::{StorageEngine, Config};
 //!
-//! let config = Config::load()?;
-//! let mut storage = StorageEngine::new(config)?;
+//! let config = Config::default();
+//! let mut storage = StorageEngine::new(config).unwrap();
 //!
-//! // Create and use database
-//! storage.create_database("analytics")?;
-//! storage.use_database("analytics")?;
+//! // Create and use knowledge graph
+//! storage.create_knowledge_graph("analytics").unwrap();
+//! storage.use_knowledge_graph("analytics").unwrap();
 //!
 //! // Insert data
-//! storage.insert("edge", vec![(1, 2), (2, 3)])?;
+//! storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 //!
-//! // Execute query
-//! let results = storage.execute_query("path(x,y) :- edge(x,y).")?;
+//! // Execute query (variables must be uppercase)
+//! let results = storage.execute_query("path(X,Y) :- edge(X,Y).").unwrap();
 //!
 //! // Persist to disk
-//! storage.save_database("analytics")?;
+//! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
 use crate::config::Config;
-use crate::storage::{DatabaseMetadata, DatabasesMetadata, StorageError, StorageResult};
-use crate::storage::parquet::{load_from_parquet, save_to_parquet};
-use crate::storage::persist::{
-    consolidate_to_current, to_tuples, to_tuple2s, FilePersist, PersistBackend, PersistConfig, Update,
-};
-use crate::value::Tuple2;
-use crate::value::Tuple;
 use crate::rule_catalog::RuleCatalog;
 use crate::statement::RuleDef;
+use crate::storage::persist::{
+    consolidate_to_current, to_tuple2s, FilePersist, PersistBackend, PersistConfig, Update,
+};
+use crate::storage::{
+    KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
+};
+use crate::value::Tuple;
+use crate::value::Tuple2;
 use crate::DatalogEngine;
 use chrono::Utc;
 use rayon::prelude::*;
@@ -48,22 +49,29 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-/// Storage Engine - manages multiple databases
+/// Storage Engine - manages multiple knowledge graphs
 pub struct StorageEngine {
     config: Config,
-    databases: HashMap<String, Arc<RwLock<Database>>>,
-    current_db: Option<String>,
+    knowledge_graphs: HashMap<String, Arc<RwLock<KnowledgeGraph>>>,
+    current_kg: Option<String>,
     /// DD-native persist backend
     persist: Arc<FilePersist>,
     /// Logical timestamp for DD updates (monotonically increasing)
     logical_time: AtomicU64,
 }
 
-/// Single database instance
-pub struct Database {
+/// Single knowledge graph instance
+pub struct KnowledgeGraph {
     name: String,
     engine: DatalogEngine,
-    metadata: DatabaseMetadata,
+    metadata: KnowledgeGraphMetadata,
+    // TODO: Implement knowledge graph backup, migration, and multi-knowledge-graph management.
+    // Reserved for future storage operations:
+    // - Knowledge graph export/import to different locations
+    // - Knowledge graph migration between storage formats
+    // - Diagnostic tools that report knowledge graph location
+    // Currently the path is only used during initialization for RuleCatalog.
+    #[allow(dead_code)]
     data_dir: PathBuf,
     /// Rule catalog for persistent derived relations
     rule_catalog: RuleCatalog,
@@ -95,76 +103,77 @@ impl StorageEngine {
 
         let mut engine = StorageEngine {
             config,
-            databases: HashMap::new(),
-            current_db: None,
+            knowledge_graphs: HashMap::new(),
+            current_kg: None,
             persist,
             logical_time: AtomicU64::new(1),
         };
 
-        // Load existing databases from persist layer
-        engine.load_all_databases()?;
+        // Load existing knowledge graphs from persist layer
+        engine.load_all_knowledge_graphs()?;
 
-        // Create default database if it doesn't exist
-        let default_db = engine.config.storage.default_database.clone();
-        if !engine.databases.contains_key(&default_db) {
-            engine.create_database(&default_db)?;
+        // Create default knowledge graph if it doesn't exist
+        let default_db = engine.config.storage.default_knowledge_graph.clone();
+        if !engine.knowledge_graphs.contains_key(&default_db) {
+            engine.create_knowledge_graph(&default_db)?;
         }
 
-        // Set current database to default
-        engine.current_db = Some(default_db);
+        // Set current knowledge graph to default
+        engine.current_kg = Some(default_db);
 
         Ok(engine)
     }
 
-    /// Create a new database
-    pub fn create_database(&mut self, name: &str) -> StorageResult<()> {
-        if self.databases.contains_key(name) {
-            return Err(StorageError::DatabaseExists(name.to_string()));
+    /// Create a new knowledge graph
+    pub fn create_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        if self.knowledge_graphs.contains_key(name) {
+            return Err(StorageError::KnowledgeGraphExists(name.to_string()));
         }
 
-        // Validate database name
+        // Validate knowledge graph name
         if name.is_empty() || name.contains('/') || name.contains('\\') {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
 
-        // Create database directory structure
+        // Create knowledge graph directory structure
         let db_dir = self.config.storage.data_dir.join(name);
         fs::create_dir_all(&db_dir)?;
         fs::create_dir_all(db_dir.join("relations"))?;
 
-        // Create database instance (uses persist layer for durability)
-        let database = Database::new(name.to_string(), db_dir);
+        // Create knowledge graph instance (uses persist layer for durability)
+        let kg = KnowledgeGraph::new(name.to_string(), db_dir);
 
         // Store in memory
-        self.databases.insert(name.to_string(), Arc::new(RwLock::new(database)));
+        self.knowledge_graphs
+            .insert(name.to_string(), Arc::new(RwLock::new(kg)));
 
         // Update system metadata
-        self.save_databases_metadata()?;
+        self.save_knowledge_graphs_metadata()?;
 
         Ok(())
     }
 
-    /// Drop a database (delete all data)
-    pub fn drop_database(&mut self, name: &str) -> StorageResult<()> {
-        // Cannot drop default database
-        if name == self.config.storage.default_database {
+    /// Drop a knowledge graph (delete all data)
+    pub fn drop_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        // Cannot drop default knowledge graph
+        if name == self.config.storage.default_knowledge_graph {
             return Err(StorageError::CannotDropDefault);
         }
 
-        // Cannot drop current database
-        if let Some(current) = &self.current_db {
+        // Cannot drop current knowledge graph
+        if let Some(current) = &self.current_kg {
             if current == name {
-                return Err(StorageError::CannotDropCurrentDatabase);
+                return Err(StorageError::CannotDropCurrentKnowledgeGraph);
             }
         }
 
-        // Check if database exists
-        if !self.databases.contains_key(name) {
-            return Err(StorageError::DatabaseNotFound(name.to_string()));
+        // Check if knowledge graph exists
+        if !self.knowledge_graphs.contains_key(name) {
+            return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
         }
 
         // Remove from memory
-        self.databases.remove(name);
+        self.knowledge_graphs.remove(name);
 
         // Delete from disk
         let db_dir = self.config.storage.data_dir.join(name);
@@ -173,67 +182,86 @@ impl StorageEngine {
         }
 
         // Update system metadata
-        self.save_databases_metadata()?;
+        self.save_knowledge_graphs_metadata()?;
 
         Ok(())
     }
 
-    /// Switch to a different database
-    pub fn use_database(&mut self, name: &str) -> StorageResult<()> {
-        if !self.databases.contains_key(name) {
-            if self.config.storage.auto_create_databases {
-                self.create_database(name)?;
+    /// Switch to a different knowledge graph
+    pub fn use_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        if !self.knowledge_graphs.contains_key(name) {
+            if self.config.storage.auto_create_knowledge_graphs {
+                self.create_knowledge_graph(name)?;
             } else {
-                return Err(StorageError::DatabaseNotFound(name.to_string()));
+                return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
             }
         }
 
         // Note: Could add last_accessed field to DatabaseMetadata for tracking
         // For now, we reuse created_at field (simplified implementation)
-        if let Some(db) = self.databases.get(name) {
+        if let Some(db) = self.knowledge_graphs.get(name) {
             let mut db = db.write().unwrap();
             db.metadata.created_at = Utc::now().to_rfc3339();
         }
 
-        self.current_db = Some(name.to_string());
+        self.current_kg = Some(name.to_string());
         Ok(())
     }
 
-    /// List all databases
-    pub fn list_databases(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.databases.keys().cloned().collect();
+    /// List all knowledge graphs
+    pub fn list_knowledge_graphs(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.knowledge_graphs.keys().cloned().collect();
         names.sort();
         names
     }
 
-    /// Get current database name
-    pub fn current_database(&self) -> Option<&str> {
-        self.current_db.as_deref()
+    /// Get current knowledge graph name
+    pub fn current_knowledge_graph(&self) -> Option<&str> {
+        self.current_kg.as_deref()
     }
 
-    /// Insert tuples into a relation in the current database
+    /// Insert tuples into a relation in the current knowledge graph
     /// Returns (new_count, duplicate_count) for reporting to user
     pub fn insert(&mut self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<(usize, usize)> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.insert_into(&db_name, relation, tuples)
     }
 
-    /// Insert tuples into a specific database (explicit API)
+    /// Insert tuples into a specific knowledge graph (explicit API)
     /// Returns (new_count, duplicate_count) for reporting to user
-    pub fn insert_into(&mut self, database: &str, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<(usize, usize)> {
+    pub fn insert_into(
+        &mut self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple2>,
+    ) -> StorageResult<(usize, usize)> {
         if tuples.is_empty() {
             return Ok((0, 0));
         }
 
+        // Tuple2 is always arity 2 - check if relation exists with different arity
+        if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
+            let existing_arity = existing_schema.len();
+            if existing_arity != 2 {
+                return Err(StorageError::Other(format!(
+                    "Arity mismatch for relation '{}': existing arity is {}, but trying to insert tuples with arity 2",
+                    relation, existing_arity
+                )));
+            }
+        }
+
         // Generate shard name and logical time
-        let shard = format!("{}:{}", database, relation);
+        let shard = format!("{}:{}", kg, relation);
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
 
         // Create DD-style updates (+1 diff for insert)
-        let updates: Vec<Update> = tuples.iter()
+        let updates: Vec<Update> = tuples
+            .iter()
             .map(|&data| Update::insert_tuple2(data, time))
             .collect();
 
@@ -242,8 +270,10 @@ impl StorageEngine {
         self.persist.append(&shard, &updates)?;
 
         // Update in-memory state
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         let (new_count, dup_count) = db.insert_in_memory(relation, tuples);
@@ -251,30 +281,67 @@ impl StorageEngine {
         Ok((new_count, dup_count))
     }
 
-    /// Insert arbitrary-arity tuples into a relation in the current database
+    /// Insert arbitrary-arity tuples into a relation in the current knowledge graph
     /// This is the production API that supports vectors and mixed types.
     /// Returns (new_count, duplicate_count) for reporting to user
-    pub fn insert_tuples(&mut self, relation: &str, tuples: Vec<Tuple>) -> StorageResult<(usize, usize)> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+    pub fn insert_tuples(
+        &mut self,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> StorageResult<(usize, usize)> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.insert_tuples_into(&db_name, relation, tuples)
     }
 
-    /// Insert arbitrary-arity tuples into a specific database (explicit API)
+    /// Insert arbitrary-arity tuples into a specific knowledge graph (explicit API)
     /// Returns (new_count, duplicate_count) for reporting to user
-    pub fn insert_tuples_into(&mut self, database: &str, relation: &str, tuples: Vec<Tuple>) -> StorageResult<(usize, usize)> {
+    pub fn insert_tuples_into(
+        &mut self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> StorageResult<(usize, usize)> {
         if tuples.is_empty() {
             return Ok((0, 0));
         }
 
+        // Check arity consistency
+        let new_arity = tuples.first().map(|t| t.arity()).unwrap_or(0);
+
+        // Verify all tuples in this batch have the same arity
+        for tuple in &tuples {
+            if tuple.arity() != new_arity {
+                return Err(StorageError::Other(format!(
+                    "Arity mismatch in insert batch: expected {}, got {}",
+                    new_arity,
+                    tuple.arity()
+                )));
+            }
+        }
+
+        // Check if relation already exists with a different arity
+        if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
+            let existing_arity = existing_schema.len();
+            if existing_arity != new_arity {
+                return Err(StorageError::Other(format!(
+                    "Arity mismatch for relation '{}': existing arity is {}, but trying to insert tuples with arity {}",
+                    relation, existing_arity, new_arity
+                )));
+            }
+        }
+
         // Generate shard name and logical time
-        let shard = format!("{}:{}", database, relation);
+        let shard = format!("{}:{}", kg, relation);
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
 
         // Create DD-style updates (+1 diff for insert)
-        let updates: Vec<Update> = tuples.iter()
+        let updates: Vec<Update> = tuples
+            .iter()
             .map(|data| Update::insert(data.clone(), time))
             .collect();
 
@@ -283,8 +350,10 @@ impl StorageEngine {
         self.persist.append(&shard, &updates)?;
 
         // Update in-memory state
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         let (new_count, dup_count) = db.insert_tuples_in_memory(relation, tuples);
@@ -292,27 +361,35 @@ impl StorageEngine {
         Ok((new_count, dup_count))
     }
 
-    /// Delete tuples from a relation in the current database
+    /// Delete tuples from a relation in the current knowledge graph
     pub fn delete(&mut self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<()> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.delete_from(&db_name, relation, tuples)
     }
 
-    /// Delete tuples from a specific database (explicit API)
-    pub fn delete_from(&mut self, database: &str, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<()> {
+    /// Delete tuples from a specific knowledge graph (explicit API)
+    pub fn delete_from(
+        &mut self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple2>,
+    ) -> StorageResult<()> {
         if tuples.is_empty() {
             return Ok(());
         }
 
         // Generate shard name and logical time
-        let shard = format!("{}:{}", database, relation);
+        let shard = format!("{}:{}", kg, relation);
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
 
         // Create DD-style updates (-1 diff for delete)
-        let updates: Vec<Update> = tuples.iter()
+        let updates: Vec<Update> = tuples
+            .iter()
             .map(|&data| Update::delete_tuple2(data, time))
             .collect();
 
@@ -321,8 +398,10 @@ impl StorageEngine {
         self.persist.append(&shard, &updates)?;
 
         // Update in-memory state
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.delete_in_memory(relation, &tuples);
@@ -330,35 +409,92 @@ impl StorageEngine {
         Ok(())
     }
 
-    /// Execute a Datalog query on the current database
+    /// Delete a single tuple (Tuple type) from a relation in the current knowledge graph
+    ///
+    /// This is the production API that supports arbitrary-arity tuples.
+    pub fn delete_tuple(&mut self, relation: &str, tuple: &Tuple) -> StorageResult<()> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .to_string();
+
+        self.delete_tuples_from(&db_name, relation, vec![tuple.clone()])
+    }
+
+    /// Delete tuples (Tuple type) from a specific knowledge graph
+    ///
+    /// This is the production API that supports arbitrary-arity tuples.
+    pub fn delete_tuples_from(
+        &mut self,
+        kg: &str,
+        relation: &str,
+        tuples: Vec<Tuple>,
+    ) -> StorageResult<()> {
+        if tuples.is_empty() {
+            return Ok(());
+        }
+
+        // Generate shard name and logical time
+        let shard = format!("{}:{}", kg, relation);
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+
+        // Create DD-style updates (-1 diff for delete)
+        let updates: Vec<Update> = tuples
+            .iter()
+            .map(|data| Update::delete(data.clone(), time))
+            .collect();
+
+        // Persist first (durability guarantee via WAL + batches)
+        self.persist.ensure_shard(&shard)?;
+        self.persist.append(&shard, &updates)?;
+
+        // Update in-memory state
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write().unwrap();
+        db.delete_tuples_in_memory(relation, &tuples);
+
+        Ok(())
+    }
+
+    /// Execute a Datalog query on the current knowledge graph
     pub fn execute_query(&mut self, program: &str) -> StorageResult<Vec<Tuple2>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.execute_query_on(&db_name, program)
     }
 
-    /// Execute a Datalog query on a specific database (explicit API)
-    pub fn execute_query_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Execute a Datalog query on a specific knowledge graph (explicit API)
+    pub fn execute_query_on(&mut self, kg: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
-        let results = db.execute(program)
+        let results = db
+            .execute(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))?;
 
         Ok(results)
     }
 
-    /// Save a specific database to disk (flush persist buffers)
-    pub fn save_database(&self, name: &str) -> StorageResult<()> {
-        // Check database exists
-        if !self.databases.contains_key(name) {
-            return Err(StorageError::DatabaseNotFound(name.to_string()));
+    /// Save a specific knowledge graph to disk (flush persist buffers)
+    pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        // Check knowledge graph exists
+        if !self.knowledge_graphs.contains_key(name) {
+            return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
         }
 
-        // Flush all shards for this database
+        // Flush all shards for this knowledge graph
         let prefix = format!("{}:", name);
         for shard_name in self.persist.list_shards()? {
             if shard_name.starts_with(&prefix) {
@@ -389,7 +525,7 @@ impl StorageEngine {
         self.persist.sync()?;
 
         // Save metadata
-        self.save_databases_metadata()?;
+        self.save_knowledge_graphs_metadata()?;
 
         Ok(())
     }
@@ -404,7 +540,7 @@ impl StorageEngine {
         // Sync to disk
         self.persist.sync()?;
 
-        self.save_databases_metadata()?;
+        self.save_knowledge_graphs_metadata()?;
 
         Ok(())
     }
@@ -413,210 +549,278 @@ impl StorageEngine {
     // Rule Management (Persistent Derived Relations)
     // ========================================================================
 
-    /// Register a persistent rule in the current database
-    pub fn register_rule(&mut self, rule_def: &RuleDef) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+    /// Register a persistent rule in the current knowledge graph
+    pub fn register_rule(
+        &mut self,
+        rule_def: &RuleDef,
+    ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.register_rule_in(&db_name, rule_def)
     }
 
-    /// Register a persistent rule in a specific database
-    pub fn register_rule_in(&mut self, database: &str, rule_def: &RuleDef) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Register a persistent rule in a specific knowledge graph
+    pub fn register_rule_in(
+        &mut self,
+        kg: &str,
+        rule_def: &RuleDef,
+    ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.register_rule(rule_def)
             .map_err(|e| StorageError::Other(format!("Failed to register rule: {}", e)))
     }
 
-    /// Drop a rule from the current database
+    /// Drop a rule from the current knowledge graph
     pub fn drop_rule(&mut self, name: &str) -> StorageResult<()> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.drop_rule_in(&db_name, name)
     }
 
-    /// Drop a rule from a specific database
-    pub fn drop_rule_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Drop a rule from a specific knowledge graph
+    pub fn drop_rule_in(&mut self, kg: &str, name: &str) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.drop_rule(name)
             .map_err(|e| StorageError::Other(format!("Failed to drop rule: {}", e)))
     }
 
-    /// List all rules in the current database
+    /// List all rules in the current knowledge graph
     pub fn list_rules(&self) -> StorageResult<Vec<String>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?;
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
 
         self.list_rules_in(db_name)
     }
 
-    /// List all rules in a specific database
-    pub fn list_rules_in(&self, database: &str) -> StorageResult<Vec<String>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// List all rules in a specific knowledge graph
+    pub fn list_rules_in(&self, kg: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read().unwrap();
         Ok(db.list_rules())
     }
 
-    /// Describe a rule in the current database
+    /// Describe a rule in the current knowledge graph
     pub fn describe_rule(&self, name: &str) -> StorageResult<Option<String>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?;
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
 
         self.describe_rule_in(db_name, name)
     }
 
-    /// Describe a rule in a specific database
-    pub fn describe_rule_in(&self, database: &str, name: &str) -> StorageResult<Option<String>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Describe a rule in a specific knowledge graph
+    pub fn describe_rule_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read().unwrap();
         Ok(db.describe_rule(name))
     }
 
-    /// Clear all clauses from a rule for editing/redefining (current database)
+    /// Clear all clauses from a rule for editing/redefining (current knowledge graph)
     /// The rule remains registered but with no clauses, ready for new clause registration
     pub fn clear_rule(&mut self, name: &str) -> StorageResult<()> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.clear_rule_in(&db_name, name)
     }
 
-    /// Clear all clauses from a rule for editing/redefining (specific database)
-    pub fn clear_rule_in(&mut self, database: &str, name: &str) -> StorageResult<()> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Clear all clauses from a rule for editing/redefining (specific knowledge graph)
+    pub fn clear_rule_in(&mut self, kg: &str, name: &str) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.clear_rule(name)
             .map_err(|e| StorageError::Other(format!("Failed to clear rule: {}", e)))
     }
 
-    /// Replace a specific clause in a rule (current database)
-    pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+    /// Replace a specific clause in a rule (current knowledge graph)
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> StorageResult<()> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.replace_rule_in(&db_name, name, index, new_rule)
     }
 
-    /// Replace a specific clause in a rule (specific database)
-    pub fn replace_rule_in(&mut self, database: &str, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> StorageResult<()> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Replace a specific clause in a rule (specific knowledge graph)
+    pub fn replace_rule_in(
+        &mut self,
+        kg: &str,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.replace_rule(name, index, new_rule)
             .map_err(|e| StorageError::Other(format!("Failed to replace rule clause: {}", e)))
     }
 
-    /// Get the number of clauses in a rule (current database)
+    /// Get the number of clauses in a rule (current knowledge graph)
     pub fn rule_count(&self, name: &str) -> StorageResult<Option<usize>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?;
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
 
         self.rule_count_in(db_name, name)
     }
 
-    /// Get the number of clauses in a rule (specific database)
-    pub fn rule_count_in(&self, database: &str, name: &str) -> StorageResult<Option<usize>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Get the number of clauses in a rule (specific knowledge graph)
+    pub fn rule_count_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read().unwrap();
         Ok(db.rule_count(name))
     }
 
-    /// Execute a query with rules prepended (current database)
+    /// Execute a query with rules prepended (current knowledge graph)
     pub fn execute_query_with_rules(&mut self, program: &str) -> StorageResult<Vec<Tuple2>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.execute_query_with_rules_on(&db_name, program)
     }
 
-    /// Execute a query with rules prepended (specific database)
-    pub fn execute_query_with_rules_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Execute a query with rules prepended (specific knowledge graph)
+    pub fn execute_query_with_rules_on(
+        &mut self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<Vec<Tuple2>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.execute_with_rules(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
-    /// Execute a query with rules prepended, returning tuples of arbitrary arity (current database)
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (current knowledge graph)
     pub fn execute_query_with_rules_tuples(&mut self, program: &str) -> StorageResult<Vec<Tuple>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
             .to_string();
 
         self.execute_query_with_rules_tuples_on(&db_name, program)
     }
 
-    /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific database)
-    pub fn execute_query_with_rules_tuples_on(&mut self, database: &str, program: &str) -> StorageResult<Vec<Tuple>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific knowledge graph)
+    pub fn execute_query_with_rules_tuples_on(
+        &mut self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<Vec<Tuple>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write().unwrap();
         db.execute_with_rules_tuples(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
-    /// List all relations (base facts) in the current database
+    /// List all relations (base facts) in the current knowledge graph
     pub fn list_relations(&self) -> StorageResult<Vec<String>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?;
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
 
         self.list_relations_in(db_name)
     }
 
-    /// List all relations in a specific database
-    pub fn list_relations_in(&self, database: &str) -> StorageResult<Vec<String>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// List all relations in a specific knowledge graph
+    pub fn list_relations_in(&self, kg: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read().unwrap();
         let relations: Vec<String> = db.metadata.relations.keys().cloned().collect();
         Ok(relations)
     }
 
-    /// Describe a relation in the current database
+    /// Describe a relation in the current knowledge graph
     pub fn describe_relation(&self, name: &str) -> StorageResult<Option<String>> {
-        let db_name = self.current_db.as_ref()
-            .ok_or(StorageError::NoCurrentDatabase)?;
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
 
         self.describe_relation_in(db_name, name)
     }
 
-    /// Describe a relation in a specific database
-    pub fn describe_relation_in(&self, database: &str, name: &str) -> StorageResult<Option<String>> {
-        let db = self.databases.get(database)
-            .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+    /// Describe a relation in a specific knowledge graph
+    pub fn describe_relation_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let db = db.read().unwrap();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
             let desc = format!(
                 "Relation: {}\nSchema: {:?}\nTuple count: {}",
-                name,
-                rel_meta.schema,
-                rel_meta.tuple_count
+                name, rel_meta.schema, rel_meta.tuple_count
             );
             Ok(Some(desc))
         } else {
@@ -624,41 +828,95 @@ impl StorageEngine {
         }
     }
 
-    /// Load all databases from persist layer
+    /// Get relation metadata (schema, tuple count) for the current knowledge graph
+    pub fn get_relation_metadata(&self, name: &str) -> StorageResult<Option<(Vec<String>, usize)>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?;
+
+        self.get_relation_metadata_in(db_name, name)
+    }
+
+    /// Get relation metadata for a specific knowledge graph
+    pub fn get_relation_metadata_in(
+        &self,
+        kg: &str,
+        name: &str,
+    ) -> StorageResult<Option<(Vec<String>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read().unwrap();
+        if let Some(rel_meta) = db.metadata.relations.get(name) {
+            Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// List relations with metadata for a specific knowledge graph
+    pub fn list_relations_with_metadata(
+        &self,
+        kg: &str,
+    ) -> StorageResult<Vec<(String, Vec<String>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read().unwrap();
+        let relations: Vec<(String, Vec<String>, usize)> = db
+            .metadata
+            .relations
+            .iter()
+            .map(|(name, meta)| (name.clone(), meta.schema.clone(), meta.tuple_count))
+            .collect();
+        Ok(relations)
+    }
+
+    /// Load all knowledge graphs from persist layer
     ///
     /// Recovery process:
-    /// 1. Discover databases from persist shards
-    /// 2. For each database, read all shards
+    /// 1. Discover knowledge graphs from persist shards
+    /// 2. For each knowledge graph, read all shards
     /// 3. Consolidate updates to get current state
     /// 4. Populate in-memory DatalogEngine
-    fn load_all_databases(&mut self) -> StorageResult<()> {
-        // Discover databases from persist shards
+    fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
+        // Discover knowledge graphs from persist shards
         let shard_names = self.persist.list_shards()?;
-        let mut db_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut kg_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for shard in &shard_names {
-            if let Some(db_name) = shard.split(':').next() {
-                db_names.insert(db_name.to_string());
+            if let Some(kg_name) = shard.split(':').next() {
+                kg_names.insert(kg_name.to_string());
             }
         }
 
-        // Also check metadata file for databases without data yet
-        let metadata_path = self.config.storage.data_dir.join("metadata/databases.json");
+        // Also check metadata file for knowledge graphs without data yet
+        let metadata_path = self
+            .config
+            .storage
+            .data_dir
+            .join("metadata/knowledge_graphs.json");
         if metadata_path.exists() {
-            if let Ok(metadata) = DatabasesMetadata::load(&metadata_path) {
-                for db_info in metadata.databases {
-                    db_names.insert(db_info.name);
+            if let Ok(metadata) = KnowledgeGraphsMetadata::load(&metadata_path) {
+                for kg_info in metadata.knowledge_graphs {
+                    kg_names.insert(kg_info.name);
                 }
             }
         }
 
-        // Load each database
-        for db_name in db_names {
-            let db_dir = self.config.storage.data_dir.join(&db_name);
-            fs::create_dir_all(&db_dir)?;
+        // Load each knowledge graph
+        for kg_name in kg_names {
+            let kg_dir = self.config.storage.data_dir.join(&kg_name);
+            fs::create_dir_all(&kg_dir)?;
 
-            let database = self.load_database_from_persist(&db_name, db_dir)?;
-            self.databases.insert(db_name, Arc::new(RwLock::new(database)));
+            let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir)?;
+            self.knowledge_graphs
+                .insert(kg_name, Arc::new(RwLock::new(kg)));
         }
 
         // Update logical time to be after all loaded data
@@ -668,12 +926,17 @@ impl StorageEngine {
         Ok(())
     }
 
-    /// Load a single database from persist layer
-    fn load_database_from_persist(&self, name: &str, data_dir: PathBuf) -> StorageResult<Database> {
+    /// Load a single knowledge graph from persist layer
+    fn load_knowledge_graph_from_persist(
+        &self,
+        name: &str,
+        data_dir: PathBuf,
+    ) -> StorageResult<KnowledgeGraph> {
         let prefix = format!("{}:", name);
         let mut engine = DatalogEngine::new();
+        let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
 
-        // Find all shards for this database
+        // Find all shards for this knowledge graph
         for shard_name in self.persist.list_shards()? {
             if shard_name.starts_with(&prefix) {
                 let relation = shard_name.strip_prefix(&prefix).unwrap();
@@ -690,18 +953,23 @@ impl StorageEngine {
                 let tuples = to_tuple2s(&updates);
 
                 if !tuples.is_empty() {
+                    // Infer schema from tuples (Tuple2 is always arity 2)
+                    let schema = vec!["col0".to_string(), "col1".to_string()];
+                    let tuple_count = tuples.len();
+
+                    // Update metadata with relation info
+                    metadata.add_relation(relation.to_string(), schema, tuple_count);
+
                     engine.add_fact(relation, tuples);
                 }
             }
         }
 
-        let metadata = DatabaseMetadata::new(name.to_string());
-
         // Load view catalog (will load existing views if present)
         let rule_catalog = RuleCatalog::new(data_dir.clone())
             .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {}", e)))?;
 
-        Ok(Database {
+        Ok(KnowledgeGraph {
             name: name.to_string(),
             engine,
             metadata,
@@ -724,30 +992,32 @@ impl StorageEngine {
         Ok(max_time)
     }
 
-    /// Save system-wide databases metadata
-    fn save_databases_metadata(&self) -> StorageResult<()> {
+    /// Save system-wide knowledge graphs metadata
+    fn save_knowledge_graphs_metadata(&self) -> StorageResult<()> {
         let metadata_dir = self.config.storage.data_dir.join("metadata");
         fs::create_dir_all(&metadata_dir)?;
 
-        let databases: Vec<_> = self.databases.iter()
-            .map(|(name, db)| {
-                let db = db.read().unwrap();
-                crate::storage::metadata::DatabaseInfo {
+        let knowledge_graphs: Vec<_> = self
+            .knowledge_graphs
+            .iter()
+            .map(|(name, kg)| {
+                let kg = kg.read().unwrap();
+                crate::storage::metadata::KnowledgeGraphInfo {
                     name: name.clone(),
-                    created_at: db.metadata.created_at.clone(),
+                    created_at: kg.metadata.created_at.clone(),
                     last_accessed: Utc::now().to_rfc3339(),
-                    relations_count: db.metadata.relations.len(),
-                    total_tuples: db.metadata.total_tuples(),
+                    relations_count: kg.metadata.relations.len(),
+                    total_tuples: kg.metadata.total_tuples(),
                 }
             })
             .collect();
 
-        let metadata = DatabasesMetadata {
+        let metadata = KnowledgeGraphsMetadata {
             version: "1.0".to_string(),
-            databases,
+            knowledge_graphs,
         };
 
-        metadata.save(&metadata_dir.join("databases.json"))?;
+        metadata.save(&metadata_dir.join("knowledge_graphs.json"))?;
 
         Ok(())
     }
@@ -761,101 +1031,103 @@ impl StorageEngine {
     // Parallel Query Execution API
     // ========================================================================
 
-    /// Execute multiple queries in parallel across different databases
+    /// Execute multiple queries in parallel across different knowledge graphs
     ///
     /// This method leverages Rayon's thread pool to execute queries concurrently,
     /// utilizing all available CPU cores efficiently.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let queries = vec![
-    ///     ("db1", "result(x,y) :- edge(x,y)."),
-    ///     ("db2", "result(x,y) :- person(x,y)."),
-    ///     ("db3", "result(x,y) :- data(x,y)."),
+    ///     ("kg1", "result(X,Y) :- edge(X,Y)."),
+    ///     ("kg2", "result(X,Y) :- person(X,Y)."),
+    ///     ("kg3", "result(X,Y) :- data(X,Y)."),
     /// ];
     ///
-    /// let results = storage.execute_parallel_queries_on_databases(queries)?;
+    /// let results = storage.execute_parallel_queries_on_knowledge_graphs(queries)?;
     /// ```
-    pub fn execute_parallel_queries_on_databases(
+    pub fn execute_parallel_queries_on_knowledge_graphs(
         &self,
         queries: Vec<(&str, &str)>,
     ) -> StorageResult<Vec<(String, Vec<Tuple2>)>> {
         // Use Rayon to execute queries in parallel
         let results: Result<Vec<_>, StorageError> = queries
             .par_iter()
-            .map(|(database, program)| {
-                // Get database with read lock
-                let db = self.databases.get(*database)
-                    .ok_or_else(|| StorageError::DatabaseNotFound(database.to_string()))?;
+            .map(|(kg, program)| {
+                // Get knowledge graph with read lock
+                let kg_lock = self
+                    .knowledge_graphs
+                    .get(*kg)
+                    .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
                 // Execute query (RwLock allows multiple concurrent readers)
-                let mut db = db.write().unwrap();
-                let results = db.execute(program)
+                let mut kg_guard = kg_lock.write().unwrap();
+                let results = kg_guard
+                    .execute(program)
                     .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))?;
 
-                Ok((database.to_string(), results))
+                Ok((kg.to_string(), results))
             })
             .collect();
 
         results
     }
 
-    /// Execute the same query on multiple databases in parallel
+    /// Execute the same query on multiple knowledge graphs in parallel
     ///
-    /// Useful for federated queries or comparing results across databases.
+    /// Useful for federated queries or comparing results across knowledge graphs.
     ///
     /// # Example
-    /// ```rust,ignore
-    /// let databases = vec!["db1", "db2", "db3"];
-    /// let query = "result(x,y) :- edge(x,y), x > 5.";
+    /// ```text
+    /// let knowledge_graphs = vec!["kg1", "kg2", "kg3"];
+    /// let query = "result(X,Y) :- edge(X,Y), X > 5.";
     ///
-    /// let results = storage.execute_query_on_multiple_databases(databases, query)?;
+    /// let results = storage.execute_query_on_multiple_knowledge_graphs(knowledge_graphs, query)?;
     /// ```
-    pub fn execute_query_on_multiple_databases(
+    pub fn execute_query_on_multiple_knowledge_graphs(
         &self,
-        databases: Vec<&str>,
+        knowledge_graphs: Vec<&str>,
         program: &str,
     ) -> StorageResult<Vec<(String, Vec<Tuple2>)>> {
-        let queries: Vec<(&str, &str)> = databases.iter()
-            .map(|db| (*db, program))
-            .collect();
+        let queries: Vec<(&str, &str)> = knowledge_graphs.iter().map(|kg| (*kg, program)).collect();
 
-        self.execute_parallel_queries_on_databases(queries)
+        self.execute_parallel_queries_on_knowledge_graphs(queries)
     }
 
-    /// Execute multiple queries on the same database in parallel
+    /// Execute multiple queries on the same knowledge graph in parallel
     ///
-    /// Note: Since Datalog queries read from the same database, this uses
+    /// Note: Since Datalog queries read from the same knowledge graph, this uses
     /// RwLock::read() to allow concurrent read access.
     ///
     /// # Example
-    /// ```rust,ignore
+    /// ```text
     /// let queries = vec![
-    ///     "q1(x,y) :- edge(x,y).",
-    ///     "q2(x,z) :- path(x,y), path(y,z).",
-    ///     "q3(x) :- person(x,_), edge(x,_).",
+    ///     "q1(X,Y) :- edge(X,Y).",
+    ///     "q2(X,Z) :- path(X,Y), path(Y,Z).",
+    ///     "q3(X) :- person(X,_), edge(X,_).",
     /// ];
     ///
-    /// let results = storage.execute_parallel_queries_on_database("db1", queries)?;
+    /// let results = storage.execute_parallel_queries_on_knowledge_graph("kg1", queries)?;
     /// ```
-    pub fn execute_parallel_queries_on_database(
+    pub fn execute_parallel_queries_on_knowledge_graph(
         &self,
-        database: &str,
+        kg: &str,
         programs: Vec<&str>,
     ) -> StorageResult<Vec<Vec<Tuple2>>> {
-        // Verify database exists
-        if !self.databases.contains_key(database) {
-            return Err(StorageError::DatabaseNotFound(database.to_string()));
+        // Verify knowledge graph exists
+        if !self.knowledge_graphs.contains_key(kg) {
+            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
 
         // Execute queries in parallel
         let results: Result<Vec<_>, StorageError> = programs
             .par_iter()
             .map(|program| {
-                let db = self.databases.get(database).unwrap();
-                let mut db = db.write().unwrap();
+                let kg_lock = self.knowledge_graphs.get(kg).unwrap();
+                let mut kg_guard = kg_lock.write().unwrap();
 
-                db.execute(program)
+                kg_guard
+                    .execute(program)
                     .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
             })
             .collect();
@@ -879,20 +1151,19 @@ impl StorageEngine {
     }
 }
 
-impl Database {
-    /// Create a new empty database
+impl KnowledgeGraph {
+    /// Create a new empty knowledge graph
     fn new(name: String, data_dir: PathBuf) -> Self {
         // Create view catalog (will load existing views if present)
-        let rule_catalog = RuleCatalog::new(data_dir.clone())
-            .unwrap_or_else(|_| {
-                // If loading fails, create empty catalog
-                RuleCatalog::new(data_dir.clone()).unwrap()
-            });
+        let rule_catalog = RuleCatalog::new(data_dir.clone()).unwrap_or_else(|_| {
+            // If loading fails, create empty catalog
+            RuleCatalog::new(data_dir.clone()).unwrap()
+        });
 
-        Database {
+        KnowledgeGraph {
             name: name.clone(),
             engine: DatalogEngine::new(),
-            metadata: DatabaseMetadata::new(name),
+            metadata: KnowledgeGraphMetadata::new(name),
             data_dir,
             rule_catalog,
         }
@@ -904,7 +1175,9 @@ impl Database {
     /// Returns (new_count, duplicate_count) for caller to report.
     fn insert_in_memory(&mut self, relation: &str, tuples: Vec<Tuple2>) -> (usize, usize) {
         // Get schema (immutable borrow)
-        let schema = self.engine.catalog()
+        let schema = self
+            .engine
+            .catalog()
             .get_schema(relation)
             .map(|s| s.to_vec())
             .unwrap_or_else(|| vec!["col0".to_string(), "col1".to_string()]);
@@ -912,7 +1185,11 @@ impl Database {
         // Update in-memory state, tracking new vs duplicate
         let mut new_count = 0;
         let mut dup_count = 0;
-        let existing = self.engine.input_data.entry(relation.to_string()).or_insert_with(Vec::new);
+        let existing = self
+            .engine
+            .input_data
+            .entry(relation.to_string())
+            .or_insert_with(Vec::new);
         for tuple in tuples {
             if !existing.contains(&tuple) {
                 existing.push(tuple);
@@ -924,7 +1201,8 @@ impl Database {
         let tuple_count = existing.len();
 
         // Update metadata
-        self.metadata.add_relation(relation.to_string(), schema, tuple_count);
+        self.metadata
+            .add_relation(relation.to_string(), schema, tuple_count);
 
         (new_count, dup_count)
     }
@@ -948,7 +1226,9 @@ impl Database {
         let mut dup_count = 0;
 
         // Get or create the relation's tuple storage
-        let existing_tuples = self.engine.input_tuples
+        let existing_tuples = self
+            .engine
+            .input_tuples
             .entry(relation.to_string())
             .or_insert_with(Vec::new);
 
@@ -963,7 +1243,8 @@ impl Database {
         let tuple_count = existing_tuples.len();
 
         // Update metadata
-        self.metadata.add_relation(relation.to_string(), schema, tuple_count);
+        self.metadata
+            .add_relation(relation.to_string(), schema, tuple_count);
 
         (new_count, dup_count)
     }
@@ -973,19 +1254,89 @@ impl Database {
     /// Persistence is handled by StorageEngine via the persist layer.
     fn delete_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple2]) {
         // Get schema (immutable borrow)
-        let schema = self.engine.catalog()
+        let schema = self
+            .engine
+            .catalog()
             .get_schema(relation)
             .map(|s| s.to_vec())
             .unwrap_or_else(|| vec!["col0".to_string(), "col1".to_string()]);
 
-        // Update in-memory state
+        let mut found = false;
+        let mut final_count = 0;
+
+        // Update in-memory state (legacy format - input_data)
         if let Some(existing) = self.engine.input_data.get_mut(relation) {
             // Remove tuples
             existing.retain(|tuple| !tuples_to_remove.contains(tuple));
-            let tuple_count = existing.len();
+            final_count = existing.len();
+            found = true;
+        }
 
-            // Update metadata
-            self.metadata.add_relation(relation.to_string(), schema, tuple_count);
+        // Also update production format (input_tuples)
+        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
+            // Convert Tuple2 to Tuple for comparison
+            let tuples_as_tuple: Vec<crate::value::Tuple> = tuples_to_remove
+                .iter()
+                .map(|&(a, b)| crate::value::Tuple::from_pair(a, b))
+                .collect();
+
+            // Remove tuples
+            existing.retain(|tuple| !tuples_as_tuple.contains(tuple));
+            final_count = existing.len();
+            found = true;
+        }
+
+        // Update metadata if we found and modified data
+        if found {
+            self.metadata
+                .add_relation(relation.to_string(), schema, final_count);
+        }
+    }
+
+    /// Delete tuples (Tuple type) from in-memory state only
+    ///
+    /// This is the production API for deleting arbitrary-arity tuples.
+    /// Persistence is handled by StorageEngine via the persist layer.
+    fn delete_tuples_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple]) {
+        // Get schema (immutable borrow)
+        let schema = self
+            .engine
+            .catalog()
+            .get_schema(relation)
+            .map(|s| s.to_vec())
+            .unwrap_or_else(|| vec!["col0".to_string(), "col1".to_string()]);
+
+        let mut found = false;
+        let mut final_count = 0;
+
+        // Update production format (input_tuples)
+        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
+            // Remove tuples
+            existing.retain(|tuple| !tuples_to_remove.contains(tuple));
+            final_count = existing.len();
+            found = true;
+        }
+
+        // Also update legacy format (input_data) if tuples are convertible
+        if let Some(existing) = self.engine.input_data.get_mut(relation) {
+            // Convert Tuple to Tuple2 for comparison where possible
+            let tuples_as_tuple2: Vec<Tuple2> = tuples_to_remove
+                .iter()
+                .filter_map(|t| t.to_pair())
+                .collect();
+
+            if !tuples_as_tuple2.is_empty() {
+                // Remove tuples
+                existing.retain(|tuple| !tuples_as_tuple2.contains(tuple));
+                final_count = existing.len();
+                found = true;
+            }
+        }
+
+        // Update metadata if we found and modified data
+        if found {
+            self.metadata
+                .add_relation(relation.to_string(), schema, final_count);
         }
     }
 
@@ -994,13 +1345,13 @@ impl Database {
         self.engine.execute(program)
     }
 
-    /// Get database name
+    /// Get knowledge graph name
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Get database metadata
-    pub fn metadata(&self) -> &DatabaseMetadata {
+    /// Get knowledge graph metadata
+    pub fn metadata(&self) -> &KnowledgeGraphMetadata {
         &self.metadata
     }
 
@@ -1010,7 +1361,10 @@ impl Database {
 
     /// Register a persistent view
     /// Returns whether view was created or rule was added
-    pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
+    pub fn register_rule(
+        &mut self,
+        rule_def: &RuleDef,
+    ) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
         self.rule_catalog.register_rule(rule_def)
     }
 
@@ -1041,7 +1395,12 @@ impl Database {
     }
 
     /// Replace a specific rule in a view by index (0-based)
-    pub fn replace_rule(&mut self, name: &str, index: usize, new_rule: crate::statement::SerializableRule) -> Result<(), String> {
+    pub fn replace_rule(
+        &mut self,
+        name: &str,
+        index: usize,
+        new_rule: crate::statement::SerializableRule,
+    ) -> Result<(), String> {
         self.rule_catalog.replace_rule(name, index, new_rule)
     }
 
@@ -1105,7 +1464,11 @@ impl Database {
         combined.push_str(program);
 
         if std::env::var("DATALOG_DEBUG").is_ok() {
-            eprintln!("DEBUG execute_with_rules_tuples: {} view rules, program = {}", rule_defs.len(), combined.replace('\n', " | "));
+            eprintln!(
+                "DEBUG execute_with_rules_tuples: {} view rules, program = {}",
+                rule_defs.len(),
+                combined.replace('\n', " | ")
+            );
         }
 
         // Execute combined program
@@ -1194,7 +1557,12 @@ fn format_arith_expr(expr: &crate::ast::ArithExpr) -> String {
         crate::ast::ArithExpr::Variable(name) => name.clone(),
         crate::ast::ArithExpr::Constant(val) => val.to_string(),
         crate::ast::ArithExpr::Binary { op, left, right } => {
-            format!("{}{}{}", format_arith_expr(left), op.as_str(), format_arith_expr(right))
+            format!(
+                "{}{}{}",
+                format_arith_expr(left),
+                op.as_str(),
+                format_arith_expr(right)
+            )
         }
     }
 }
@@ -1207,21 +1575,33 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
         crate::ast::AggregateFunc::Min => format!("min<{}>", var),
         crate::ast::AggregateFunc::Max => format!("max<{}>", var),
         crate::ast::AggregateFunc::Avg => format!("avg<{}>", var),
-        crate::ast::AggregateFunc::TopK { k, order_var, descending } => {
+        crate::ast::AggregateFunc::TopK {
+            k,
+            order_var,
+            descending,
+        } => {
             if *descending {
                 format!("top_k<{}, {}, desc>", k, order_var)
             } else {
                 format!("top_k<{}, {}>", k, order_var)
             }
         }
-        crate::ast::AggregateFunc::TopKThreshold { k, order_var, threshold, descending } => {
+        crate::ast::AggregateFunc::TopKThreshold {
+            k,
+            order_var,
+            threshold,
+            descending,
+        } => {
             if *descending {
                 format!("top_k_threshold<{}, {}, {}, desc>", k, order_var, threshold)
             } else {
                 format!("top_k_threshold<{}, {}, {}>", k, order_var, threshold)
             }
         }
-        crate::ast::AggregateFunc::WithinRadius { distance_var, max_distance } => {
+        crate::ast::AggregateFunc::WithinRadius {
+            distance_var,
+            max_distance,
+        } => {
             format!("within_radius<{}, {}>", distance_var, max_distance)
         }
     }
@@ -1231,19 +1611,29 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
 fn format_constraint(constraint: &crate::ast::Constraint) -> String {
     match constraint {
         crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::NotEqual(l, r) => format!("{} != {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::LessThan(l, r) => format!("{} < {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::LessOrEqual(l, r) => format!("{} <= {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::GreaterThan(l, r) => format!("{} > {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::GreaterOrEqual(l, r) => format!("{} >= {}", format_term(l), format_term(r)),
+        crate::ast::Constraint::NotEqual(l, r) => {
+            format!("{} != {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::LessThan(l, r) => {
+            format!("{} < {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::LessOrEqual(l, r) => {
+            format!("{} <= {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::GreaterThan(l, r) => {
+            format!("{} > {}", format_term(l), format_term(r))
+        }
+        crate::ast::Constraint::GreaterOrEqual(l, r) => {
+            format!("{} >= {}", format_term(l), format_term(r))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::config::Config;
+    use tempfile::TempDir;
 
     fn create_test_config(data_dir: PathBuf) -> Config {
         let mut config = Config::default();
@@ -1252,58 +1642,60 @@ mod tests {
     }
 
     #[test]
-    fn test_create_and_list_databases() {
+    fn test_create_and_list_knowledge_graphs() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
 
         let mut storage = StorageEngine::new(config).unwrap();
 
-        // Should have default database
-        assert!(storage.list_databases().contains(&"default".to_string()));
+        // Should have default knowledge graph
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"default".to_string()));
 
-        // Create new databases
-        storage.create_database("db1").unwrap();
-        storage.create_database("db2").unwrap();
+        // Create new knowledge graphs
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.create_knowledge_graph("kg2").unwrap();
 
-        let databases = storage.list_databases();
-        assert_eq!(databases.len(), 3);
-        assert!(databases.contains(&"default".to_string()));
-        assert!(databases.contains(&"db1".to_string()));
-        assert!(databases.contains(&"db2".to_string()));
+        let knowledge_graphs = storage.list_knowledge_graphs();
+        assert_eq!(knowledge_graphs.len(), 3);
+        assert!(knowledge_graphs.contains(&"default".to_string()));
+        assert!(knowledge_graphs.contains(&"kg1".to_string()));
+        assert!(knowledge_graphs.contains(&"kg2".to_string()));
     }
 
     #[test]
-    fn test_use_database() {
+    fn test_use_knowledge_graph() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
 
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("test_db").unwrap();
-        storage.use_database("test_db").unwrap();
+        storage.create_knowledge_graph("test_kg").unwrap();
+        storage.use_knowledge_graph("test_kg").unwrap();
 
-        assert_eq!(storage.current_database(), Some("test_db"));
+        assert_eq!(storage.current_knowledge_graph(), Some("test_kg"));
     }
 
     #[test]
-    fn test_database_isolation() {
+    fn test_knowledge_graph_isolation() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
 
         let mut storage = StorageEngine::new(config).unwrap();
 
-        // DB1: Insert edge data
-        storage.create_database("db1").unwrap();
-        storage.use_database("db1").unwrap();
+        // KG1: Insert edge data
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.use_knowledge_graph("kg1").unwrap();
         storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
-        // DB2: Should not see edge data
-        storage.create_database("db2").unwrap();
-        storage.use_database("db2").unwrap();
+        // KG2: Should not see edge data
+        storage.create_knowledge_graph("kg2").unwrap();
+        storage.use_knowledge_graph("kg2").unwrap();
 
-        // Query for edge in db2 - should return empty results (database isolation)
+        // Query for edge in kg2 - should return empty results (knowledge graph isolation)
         let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-        assert_eq!(result.len(), 0); // No edge relation in db2 - empty result
+        assert_eq!(result.len(), 0); // No edge relation in kg2 - empty result
     }
 
     #[test]
@@ -1315,9 +1707,11 @@ mod tests {
             let config = create_test_config(temp.path().to_path_buf());
             let mut storage = StorageEngine::new(config).unwrap();
 
-            storage.create_database("persist_test").unwrap();
-            storage.use_database("persist_test").unwrap();
-            storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+            storage.create_knowledge_graph("persist_test").unwrap();
+            storage.use_knowledge_graph("persist_test").unwrap();
+            storage
+                .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+                .unwrap();
             storage.save_all().unwrap();
         }
 
@@ -1326,7 +1720,7 @@ mod tests {
             let config = create_test_config(temp.path().to_path_buf());
             let mut storage = StorageEngine::new(config).unwrap();
 
-            storage.use_database("persist_test").unwrap();
+            storage.use_knowledge_graph("persist_test").unwrap();
 
             let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
             assert_eq!(result.len(), 3);
@@ -1343,7 +1737,7 @@ mod tests {
 
         let mut storage = StorageEngine::new(config).unwrap();
 
-        let result = storage.drop_database("default");
+        let result = storage.drop_knowledge_graph("default");
         assert!(matches!(result, Err(StorageError::CannotDropDefault)));
     }
 
@@ -1354,36 +1748,47 @@ mod tests {
 
         let mut storage = StorageEngine::new(config).unwrap();
 
-        storage.create_database("test").unwrap();
-        storage.use_database("test").unwrap();
+        storage.create_knowledge_graph("test").unwrap();
+        storage.use_knowledge_graph("test").unwrap();
 
-        let result = storage.drop_database("test");
-        assert!(matches!(result, Err(StorageError::CannotDropCurrentDatabase)));
+        let result = storage.drop_knowledge_graph("test");
+        assert!(matches!(
+            result,
+            Err(StorageError::CannotDropCurrentKnowledgeGraph)
+        ));
     }
 
     #[test]
     fn test_recursive_view_transitive_closure() {
-        use crate::statement::RuleDef;
         use crate::ast::{Atom, BodyPredicate, Rule, Term};
+        use crate::statement::RuleDef;
 
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
 
         let mut storage = StorageEngine::new(config).unwrap();
-        storage.use_database("default").unwrap();
+        storage.use_knowledge_graph("default").unwrap();
 
         // Insert edge data: 1->2->3->4
-        storage.insert("edge", vec![(1, 2), (2, 3), (3, 4)]).unwrap();
+        storage
+            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+            .unwrap();
 
         // Define first rule: connected(X, Y) :- edge(X, Y).
         let rule1 = Rule::new(
             Atom::new(
                 "connected".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             ),
             vec![BodyPredicate::Positive(Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
             ))],
             vec![],
         );
@@ -1397,16 +1802,25 @@ mod tests {
         let rule2 = Rule::new(
             Atom::new(
                 "connected".to_string(),
-                vec![Term::Variable("X".to_string()), Term::Variable("Z".to_string())],
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
             ),
             vec![
                 BodyPredicate::Positive(Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("X".to_string()), Term::Variable("Y".to_string())],
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
                 )),
                 BodyPredicate::Positive(Atom::new(
                     "connected".to_string(),
-                    vec![Term::Variable("Y".to_string()), Term::Variable("Z".to_string())],
+                    vec![
+                        Term::Variable("Y".to_string()),
+                        Term::Variable("Z".to_string()),
+                    ],
                 )),
             ],
             vec![],
@@ -1420,7 +1834,10 @@ mod tests {
         // Check views are registered
         let views = storage.list_rules().unwrap();
         println!("Views: {:?}", views);
-        assert!(views.contains(&"connected".to_string()), "View 'connected' should exist");
+        assert!(
+            views.contains(&"connected".to_string()),
+            "View 'connected' should exist"
+        );
 
         // Check describe_rule shows both rules
         let desc = storage.describe_rule("connected").unwrap();
@@ -1428,9 +1845,9 @@ mod tests {
 
         // Debug: print the combined program
         {
-            let db = storage.databases.get("default").unwrap();
-            let db = db.read().unwrap();
-            let rule_defs = db.rule_catalog.all_rules();
+            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = kg.read().unwrap();
+            let rule_defs = kg.rule_catalog.all_rules();
             println!("Number of view rules: {}", rule_defs.len());
             for (i, rule) in rule_defs.iter().enumerate() {
                 println!("Rule {}: {}", i, format_rule(rule));
@@ -1439,24 +1856,43 @@ mod tests {
 
         // Query all connected pairs
         eprintln!("\n=== Executing query with views ===");
-        let result = storage.execute_query_with_rules("result(X,Y) :- connected(X,Y).").unwrap();
+        let result = storage
+            .execute_query_with_rules("result(X,Y) :- connected(X,Y).")
+            .unwrap();
         println!("All connected pairs: {:?}", result);
 
         // Expected transitive closure: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
-        assert!(result.len() >= 6, "Should have at least 6 connected pairs, got {}", result.len());
+        assert!(
+            result.len() >= 6,
+            "Should have at least 6 connected pairs, got {}",
+            result.len()
+        );
         assert!(result.contains(&(1, 2)), "Should contain (1, 2)");
         assert!(result.contains(&(2, 3)), "Should contain (2, 3)");
         assert!(result.contains(&(3, 4)), "Should contain (3, 4)");
-        assert!(result.contains(&(1, 3)), "Should contain (1, 3) - transitive");
-        assert!(result.contains(&(2, 4)), "Should contain (2, 4) - transitive");
-        assert!(result.contains(&(1, 4)), "Should contain (1, 4) - transitive");
+        assert!(
+            result.contains(&(1, 3)),
+            "Should contain (1, 3) - transitive"
+        );
+        assert!(
+            result.contains(&(2, 4)),
+            "Should contain (2, 4) - transitive"
+        );
+        assert!(
+            result.contains(&(1, 4)),
+            "Should contain (1, 4) - transitive"
+        );
 
         // Query specific: connected(1, 3) - should return 1 row
-        let specific_result = storage.execute_query_with_rules(
-            "result(X,Y) :- connected(X,Y), X = 1, Y = 3."
-        ).unwrap();
+        let specific_result = storage
+            .execute_query_with_rules("result(X,Y) :- connected(X,Y), X = 1, Y = 3.")
+            .unwrap();
         println!("connected(1, 3): {:?}", specific_result);
-        assert_eq!(specific_result.len(), 1, "Should find exactly one (1, 3) connection");
+        assert_eq!(
+            specific_result.len(),
+            1,
+            "Should find exactly one (1, 3) connection"
+        );
         assert_eq!(specific_result[0], (1, 3));
     }
 }

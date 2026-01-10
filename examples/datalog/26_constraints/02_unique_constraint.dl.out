@@ -1,18 +1,22 @@
-Executing script: examples/datalog/26_constraints/02_unique_constraint.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create constraint_unique_test
-Database 'constraint_unique_test' created.
-Switched to database: constraint_unique_test
-> .db use constraint_unique_test
-Switched to database: constraint_unique_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create constraint_unique_test
+Knowledge graph 'constraint_unique_test' created.
+Switched to knowledge graph: constraint_unique_test
+> .kg use constraint_unique_test
+Switched to knowledge graph: constraint_unique_test
 > +account(id: int @key, email: string @unique, username: string).
-Persistent schema 'account' declared: (id: Base(Int) @primary, email: Base(String) @unique, username: Base(String))
+Schema 'account' declared (persistent).
 > +account(1, "alice@example.com", "alice").
-Inserted 1 fact into 'account'.
+Inserted 1 fact(s) into 'account'.
 > +account(2, "bob@example.com", "bob").
-Inserted 1 fact into 'account'.
+Inserted 1 fact(s) into 'account'.
 > +account(3, "carol@example.com", "carol").
-Inserted 1 fact into 'account'.
+Inserted 1 fact(s) into 'account'.
 > ?- account(Id, Email, Username).
 3 rows:
   (1, "alice@example.com", "alice")
@@ -20,9 +24,13 @@ Inserted 1 fact into 'account'.
   (3, "carol@example.com", "carol")
 > .rel account
 Relation: account
-Schema: ["col0", "col1", "col2"]
-Tuple count: 3
-> .db use default
-Switched to database: default
-> .db drop constraint_unique_test
-Database 'constraint_unique_test' dropped.
+  Columns: ["col0", "col1", "col2"]
+  Total rows: 3
+  Preview (first 3):
+    (1, "alice@example.com", "alice")
+    (2, "bob@example.com", "bob")
+    (3, "carol@example.com", "carol")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop constraint_unique_test
+Knowledge graph 'constraint_unique_test' dropped.

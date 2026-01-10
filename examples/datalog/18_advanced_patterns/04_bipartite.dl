@@ -1,30 +1,30 @@
-// Test: Bipartite Graph Check (Positive Case)
-// Category: 18_advanced_patterns
-// Description: 4-cycle is bipartite - can be 2-colored without conflicts
+% Test: Bipartite Graph Check (Positive Case)
+% Category: 18_advanced_patterns
+% Description: 4-cycle is bipartite - can be 2-colored without conflicts
 
-.db create test_bipartite
-.db use test_bipartite
+.kg create test_bipartite
+.kg use test_bipartite
 
-// 4-cycle graph (is bipartite):
-// 1 - 2
-// |   |
-// 4 - 3
+% 4-cycle graph (is bipartite):
+% 1 - 2
+% |   |
+% 4 - 3
 +edge[(1, 2), (2, 3), (3, 4), (4, 1)].
 +start[(1, 0)].
 
-// 2-coloring propagation (undirected - check both directions)
+% 2-coloring propagation (undirected - check both directions)
 +color(X, C) :- start(X, C).
 +color(Y, 1) :- color(X, 0), edge(X, Y).
 +color(Y, 1) :- color(X, 0), edge(Y, X).
 +color(Y, 0) :- color(X, 1), edge(X, Y).
 +color(Y, 0) :- color(X, 1), edge(Y, X).
 
-// Query all colorings - 4-cycle should be: (1,0), (2,1), (3,0), (4,1)
+% Query all colorings - 4-cycle should be: (1,0), (2,1), (3,0), (4,1)
 ?- color(X, C).
 
-// Note: Conflict detection via self-join has a known bug - skipping for now
-// Expected: A bipartite graph can be 2-colored without conflicts
+% Note: Conflict detection via self-join has a known bug - skipping for now
+% Expected: A bipartite graph can be 2-colored without conflicts
 
-// Cleanup
-.db use default
-.db drop test_bipartite
+% Cleanup
+.kg use default
+.kg drop test_bipartite

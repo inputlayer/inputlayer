@@ -29,10 +29,10 @@
 //! This module provides the abstraction layer for potential future use
 //! in more complex stratified execution.
 
+use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::SemigroupVariable;
 use differential_dataflow::operators::Threshold;
 use differential_dataflow::Collection;
-use differential_dataflow::lattice::Lattice;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::Scope;
 use timely::order::TotalOrder;
@@ -168,8 +168,8 @@ where
 mod tests {
     use super::*;
     use crate::value::Value;
-    use timely::dataflow::operators::ToStream;
     use timely::dataflow::operators::Map;
+    use timely::dataflow::operators::ToStream;
 
     #[test]
     fn test_rel_from_collection() {

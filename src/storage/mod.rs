@@ -27,14 +27,18 @@ pub mod persist;
 pub mod wal;
 
 // Re-export commonly used types
+pub use csv::{
+    load_from_csv, load_from_csv_with_options, save_to_csv, save_to_csv_with_options, CsvOptions,
+};
 pub use error::{StorageError, StorageResult};
-pub use metadata::{DatabaseMetadata, DatabasesMetadata, RelationMetadata};
+pub use metadata::{
+    KnowledgeGraphInfo, KnowledgeGraphMetadata, KnowledgeGraphsMetadata, RelationMetadata,
+};
 pub use parquet::{load_from_parquet, save_to_parquet};
-pub use csv::{load_from_csv, save_to_csv, load_from_csv_with_options, save_to_csv_with_options, CsvOptions};
-pub use wal::{Wal, WalEntry, WalOp, replay_wal};
+pub use wal::{replay_wal, Wal, WalEntry, WalOp};
 
 // Re-export persist types
 pub use persist::{
-    Batch, BatchRef, FilePersist, PersistBackend, PersistConfig, PersistWal,
-    ShardInfo, ShardMeta, Update, consolidate, consolidate_to_current, to_tuples,
+    consolidate, consolidate_to_current, to_tuples, Batch, BatchRef, FilePersist, PersistBackend,
+    PersistConfig, PersistWal, ShardInfo, ShardMeta, Update,
 };

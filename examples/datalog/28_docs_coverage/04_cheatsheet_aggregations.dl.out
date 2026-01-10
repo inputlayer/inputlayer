@@ -1,17 +1,50 @@
-Executing script: examples/datalog/28_docs_coverage/04_cheatsheet_aggregations.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create cheatsheet_agg
-Database 'cheatsheet_agg' created.
-Switched to database: cheatsheet_agg
-> .db use cheatsheet_agg
-Switched to database: cheatsheet_agg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create cheatsheet_agg
+Knowledge graph 'cheatsheet_agg' created.
+Switched to knowledge graph: cheatsheet_agg
+> .kg use cheatsheet_agg
+Switched to knowledge graph: cheatsheet_agg
 > +sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)].
-Inserted 3 facts into 'sales'.
+Inserted 3 fact(s) into 'sales'.
 > +employee[(1, "engineering"), (2, "engineering"), (3, "sales"), (4, "engineering")].
-Inserted 4 facts into 'employee'.
+Inserted 4 fact(s) into 'employee'.
 > +person[("alice", 30), ("bob", 25), ("carol", 35), ("dave", 28)].
-Inserted 4 facts into 'person'.
+Inserted 4 fact(s) into 'person'.
 > +test_results[("alice", 85), ("bob", 90), ("carol", 78)].
-Inserted 3 facts into 'test_results'.
+Inserted 3 fact(s) into 'test_results'.
 > +total_sales(Dept, sum<Amount>) :- sales(Dept, _, Amount).
-Script error: Line 17: Parse error: Invalid term: 'sum<Amount>'
+Rule 'total_sales' registered.
+> ?- total_sales(Dept, Total).
+2 rows:
+  ("clothing", 200)
+  ("electronics", 800)
+> +employee_count(Dept, count<Id>) :- employee(Id, Dept).
+Rule 'employee_count' registered.
+> ?- employee_count(Dept, Count).
+2 rows:
+  ("engineering", 3)
+  ("sales", 1)
+> +max_age(max<Age>) :- person(_, Age).
+Rule 'max_age' registered.
+> ?- max_age(M).
+1 rows:
+  (35)
+> +min_age(min<Age>) :- person(_, Age).
+Rule 'min_age' registered.
+> ?- min_age(M).
+1 rows:
+  (25)
+> +avg_score(avg<Score>) :- test_results(_, Score).
+Rule 'avg_score' registered.
+> ?- avg_score(A).
+1 rows:
+  (84.33333333333333)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop cheatsheet_agg
+Knowledge graph 'cheatsheet_agg' dropped.

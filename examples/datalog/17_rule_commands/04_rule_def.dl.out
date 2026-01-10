@@ -1,23 +1,23 @@
-Executing script: examples/datalog/17_rule_commands/04_rule_def.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rule_def
-Database 'test_rule_def' created.
-Switched to database: test_rule_def
-> .db use test_rule_def
-Switched to database: test_rule_def
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_def
+Knowledge graph 'test_rule_def' created.
+Switched to knowledge graph: test_rule_def
+> .kg use test_rule_def
+Switched to knowledge graph: test_rule_def
 > +edge[(1,2), (2,3)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +reach(X, Y) :- edge(X, Y).
 Rule 'reach' registered.
 > +reach(X, Z) :- reach(X, Y), edge(Y, Z).
-Rule added to 'reach' (2 rules total).
+Rule 'reach' registered.
 > .rule def reach
-Rule: reach
-Clauses:
-  1. reach(X, Y) :- edge(X, Y).
-  2. reach(X, Z) :- reach(X, Y), edge(Y, Z).
-
-> .db use default
-Switched to database: default
-> .db drop test_rule_def
-Database 'test_rule_def' dropped.
+This command is not yet implemented over HTTP.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_def
+Knowledge graph 'test_rule_def' dropped.

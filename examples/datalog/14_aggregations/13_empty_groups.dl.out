@@ -1,11 +1,59 @@
-Executing script: examples/datalog/14_aggregations/13_empty_groups.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_empty_agg
-Database 'test_empty_agg' created.
-Switched to database: test_empty_agg
-> .db use test_empty_agg
-Switched to database: test_empty_agg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_groups
+Knowledge graph 'test_empty_groups' created.
+Switched to knowledge graph: test_empty_groups
+> .kg use test_empty_groups
+Switched to knowledge graph: test_empty_groups
 > +data[(1, 10), (2, 20), (3, 30)].
-Inserted 3 facts into 'data'.
+Inserted 3 fact(s) into 'data'.
 > +normal_count(count<X>) :- data(X, _).
-Script error: Line 14: Parse error: Invalid term: 'count<X>'
+Rule 'normal_count' registered.
+> ?- normal_count(C).
+1 rows:
+  (3)
+> +normal_sum(sum<V>) :- data(_, V).
+Rule 'normal_sum' registered.
+> ?- normal_sum(S).
+1 rows:
+  (60)
+> +empty_count(count<X>) :- empty(X, _).
+Rule 'empty_count' registered.
+> ?- empty_count(C).
+No results.
+> +filtered(X, V) :- data(X, V), V > 100.
+Rule 'filtered' registered.
+> +filtered_count(count<X>) :- filtered(X, _).
+Rule 'filtered_count' registered.
+> ?- filtered(X, V).
+No results.
+> ?- filtered_count(C).
+No results.
+> +group_empty(K, count<V>) :- empty(K, V).
+Rule 'group_empty' registered.
+> ?- group_empty(K, C).
+No results.
+> +empty_min(min<X>) :- empty(X, _).
+Rule 'empty_min' registered.
+> +empty_max(max<X>) :- empty(X, _).
+Rule 'empty_max' registered.
+> ?- empty_min(M).
+No results.
+> ?- empty_max(M).
+No results.
+> +mixed[(1, 10), (1, 20), (3, 30)].
+Inserted 3 fact(s) into 'mixed'.
+> +mixed_count(K, count<V>) :- mixed(K, V).
+Rule 'mixed_count' registered.
+> ?- mixed_count(K, C).
+2 rows:
+  (1, 2)
+  (3, 1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_groups
+Knowledge graph 'test_empty_groups' dropped.

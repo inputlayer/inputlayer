@@ -1,22 +1,26 @@
-Executing script: examples/datalog/17_rule_commands/06_drop_multi_clause.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_drop_multi
-Database 'test_drop_multi' created.
-Switched to database: test_drop_multi
-> .db use test_drop_multi
-Switched to database: test_drop_multi
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_multi
+Knowledge graph 'test_drop_multi' created.
+Switched to knowledge graph: test_drop_multi
+> .kg use test_drop_multi
+Switched to knowledge graph: test_drop_multi
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +simple(X, Y) :- edge(Y, X).
 Rule 'simple' registered.
 > +reachable(X, Y) :- edge(X, Y).
 Rule 'reachable' registered.
 > +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
-Rule added to 'reachable' (2 rules total).
+Rule 'reachable' registered.
 > .rule list
 Rules:
-  reachable
-  simple
+  reachable (2 clause(s))
+  simple (1 clause(s))
 > ?- reachable(1, Y).
 3 rows:
   (1, 2)
@@ -26,10 +30,10 @@ Rules:
 Rule 'reachable' dropped.
 > .rule list
 Rules:
-  simple
+  simple (1 clause(s))
 > ?- reachable(1, Y).
 No results.
-> .db use default
-Switched to database: default
-> .db drop test_drop_multi
-Database 'test_drop_multi' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_multi
+Knowledge graph 'test_drop_multi' dropped.

@@ -1,36 +1,36 @@
-// Test: Join with One Side Empty
-// Category: Edge Cases
-// Description: Tests join behavior when one relation is empty
+% Test: Join with One Side Empty
+% Category: Edge Cases
+% Description: Tests join behavior when one relation is empty
 
-.db create test_join_empty
-.db use test_join_empty
+.kg create test_join_empty
+.kg use test_join_empty
 
-// Only populate one relation
+% Only populate one relation
 +left[(1), (2), (3)].
-// 'right' is empty
+% 'right' is empty
 
-// Join with empty right side - should produce no results
+% Join with empty right side - should produce no results
 +joined(X, Y) :- left(X), right(Y), X = Y.
 ?- joined(X, Y).
 
-// Another join pattern
+% Another join pattern
 +matched(X) :- left(X), right(X).
 ?- matched(X).
 
-// Now add some data to right
+% Now add some data to right
 +right[(2), (4)].
 
-// Join should work now
+% Join should work now
 ?- joined(X, Y).
 ?- matched(X).
 
-// Empty the left side
+% Empty the left side
 -left(X) :- left(X).
 
-// Join with empty left side
+% Join with empty left side
 ?- joined(X, Y).
 ?- matched(X).
 
-// Cleanup
-.db use default
-.db drop test_join_empty
+% Cleanup
+.kg use default
+.kg drop test_join_empty

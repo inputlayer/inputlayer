@@ -9,10 +9,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Missing period at end of statement.
 
 ```datalog
-// Wrong
+% Wrong
 +edge(1, 2)
 
-// Correct
+% Correct
 +edge(1, 2).
 ```
 
@@ -21,10 +21,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Relation names must start with lowercase.
 
 ```datalog
-// Wrong
+% Wrong
 +Edge(1, 2).
 
-// Correct
+% Correct
 +edge(1, 2).
 ```
 
@@ -33,10 +33,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Rule syntax error.
 
 ```datalog
-// Wrong - missing :-
+% Wrong - missing :-
 +path(X, Y) edge(X, Y).
 
-// Correct
+% Correct
 +path(X, Y) :- edge(X, Y).
 ```
 
@@ -45,10 +45,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Mismatched parentheses.
 
 ```datalog
-// Wrong
+% Wrong
 +edge((1, 2).
 
-// Correct
+% Correct
 +edge(1, 2).
 ```
 
@@ -59,12 +59,12 @@ This guide covers common errors and how to resolve them.
 **Cause**: Value doesn't match schema.
 
 ```datalog
-// If schema is: +person(id: int, name: string)
+% If schema is: +person(id: int, name: string)
 
-// Wrong
+% Wrong
 +person("alice", 1).
 
-// Correct
+% Correct
 +person(1, "alice").
 ```
 
@@ -73,10 +73,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Using 1.0 where 1 is expected.
 
 ```datalog
-// Wrong (if relation expects int)
+% Wrong (if relation expects int)
 +score(1.0).
 
-// Correct
+% Correct
 +score(1).
 ```
 
@@ -88,7 +88,7 @@ This guide covers common errors and how to resolve them.
 
 ```datalog
 ?- nonexistent(X).
-// Error: Unknown relation 'nonexistent'
+% Error: Unknown relation 'nonexistent'
 ```
 
 **Solutions**:
@@ -101,10 +101,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Variable in rule head not used in body.
 
 ```datalog
-// Wrong - Z is not in the body
+% Wrong - Z is not in the body
 +path(X, Z) :- edge(X, Y).
 
-// Correct
+% Correct
 +path(X, Y) :- edge(X, Y).
 ```
 
@@ -113,10 +113,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Variable only appears in negation or constraint.
 
 ```datalog
-// Wrong - X only appears in negation
+% Wrong - X only appears in negation
 +orphan(X) :- !parent(_, X).
 
-// Correct - X must appear positively
+% Correct - X must appear positively
 +orphan(X) :- person(X), !parent(_, X).
 ```
 
@@ -127,9 +127,9 @@ This guide covers common errors and how to resolve them.
 **Cause**: Negation through recursion.
 
 ```datalog
-// Wrong - circular negation
+% Wrong - circular negation
 +a(X) :- b(X).
-+b(X) :- !a(X).  // Error: a depends on not-a
++b(X) :- !a(X).  % Error: a depends on not-a
 ```
 
 **Solution**: Restructure to avoid negation in recursive cycles.
@@ -139,52 +139,52 @@ This guide covers common errors and how to resolve them.
 **Cause**: Infinite recursion or very deep recursion.
 
 ```datalog
-// Potential issue - unbounded generation
+% Potential issue - unbounded generation
 +nums(0).
-+nums(N) :- nums(M), N = M + 1.  // Never terminates!
++nums(N) :- nums(M), N = M + 1.  % Never terminates!
 ```
 
 **Solution**: Add termination conditions.
 
 ```datalog
 +nums(0).
-+nums(N) :- nums(M), N = M + 1, N < 100.  // Bounded
++nums(N) :- nums(M), N = M + 1, N < 100.  % Bounded
 ```
 
-## Database Errors
+## Knowledge Graph Errors
 
-### "Database not found"
+### "Knowledge graph not found"
 
-**Cause**: Trying to use a non-existent database.
+**Cause**: Trying to use a non-existent knowledge graph.
 
 ```datalog
-.db use nonexistent
-// Error: Database 'nonexistent' not found
+.kg use nonexistent
+% Error: Knowledge graph 'nonexistent' not found
 ```
 
 **Solution**: Create it first.
 
 ```datalog
-.db create mydb
-.db use mydb
+.kg create mykg
+.kg use mykg
 ```
 
-### "Cannot drop current database"
+### "Cannot drop current knowledge graph"
 
-**Cause**: Trying to drop the database you're in.
+**Cause**: Trying to drop the knowledge graph you're in.
 
-**Solution**: Switch to another database first.
+**Solution**: Switch to another knowledge graph first.
 
 ```datalog
-.db use default
-.db drop mydb
+.kg use default
+.kg drop mykg
 ```
 
-### "No current database"
+### "No current knowledge graph"
 
-**Cause**: Operating without selecting a database.
+**Cause**: Operating without selecting a knowledge graph.
 
-**Solution**: Use `.db use <name>` first.
+**Solution**: Use `.kg use <name>` first.
 
 ## Rule Errors
 
@@ -194,7 +194,7 @@ This guide covers common errors and how to resolve them.
 
 ```datalog
 .rule drop nonexistent
-// Error: Rule 'nonexistent' not found
+% Error: Rule 'nonexistent' not found
 ```
 
 **Solution**: Check `.rule` to list existing rules.
@@ -212,10 +212,10 @@ This guide covers common errors and how to resolve them.
 **Cause**: Using a variable in the head without aggregating or grouping.
 
 ```datalog
-// Wrong - Name appears but isn't grouped
+% Wrong - Name appears but isn't grouped
 +total(Name, sum<Amount>) :- purchase(_, Amount).
 
-// Correct - Name is in the body
+% Correct - Name is in the body
 +total(Name, sum<Amount>) :- purchase(Name, Amount).
 ```
 
@@ -268,25 +268,25 @@ chmod 755 ~/.inputlayer/data
 
 1. **Add constraints early**:
    ```datalog
-   // Slow - filters after join
+   % Slow - filters after join
    ?- huge_table1(X, Y), huge_table2(Y, Z), X < 10.
 
-   // Fast - filter first
+   % Fast - filter first
    ?- huge_table1(X, Y), X < 10, huge_table2(Y, Z).
    ```
 
 2. **Check for Cartesian products**:
    ```datalog
-   // Bad - no shared variables = cross product
+   % Bad - no shared variables = cross product
    ?- table1(X), table2(Y).
 
-   // Good - joined on Y
+   % Good - joined on Y
    ?- table1(X, Y), table2(Y, Z).
    ```
 
 3. **Limit results**:
    ```datalog
-   // For exploration, check small sample first
+   % For exploration, check small sample first
    ?- huge_relation(X, Y), X < 10.
    ```
 
@@ -335,7 +335,7 @@ tail -f ~/.inputlayer/logs/inputlayer.log
 | "Type mismatch" | Wrong value type | Check schema |
 | "Unbound variable" | Variable not in body | Add to body predicate |
 | "Non-stratifiable" | Negation cycle | Restructure rules |
-| "Database not found" | Wrong name | `.db list` to check |
+| "Knowledge graph not found" | Wrong name | `.kg list` to check |
 | "Permission denied" | File permissions | Check data dir |
 
 ## Still Stuck?

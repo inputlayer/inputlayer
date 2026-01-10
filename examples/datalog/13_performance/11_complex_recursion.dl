@@ -1,15 +1,15 @@
-// Test: Complex Recursion Patterns
-// Category: Performance
-// Verifies: Multiple recursive rules interacting
+% Test: Complex Recursion Patterns
+% Category: Performance
+% Verifies: Multiple recursive rules interacting
 
-.db create test_complex_rec
-.db use test_complex_rec
+.kg create test_complex_rec
+.kg use test_complex_rec
 
-// Graph with multiple edge types
+% Graph with multiple edge types
 +direct[(1, 2), (2, 3), (3, 4), (4, 5)].
 +indirect[(1, 3), (2, 4), (3, 5), (1, 4), (2, 5)].
 
-// Reachability through either edge type
+% Reachability through either edge type
 +reach(X, Y) :- direct(X, Y).
 +reach(X, Y) :- indirect(X, Y).
 +reach(X, Z) :- reach(X, Y), direct(Y, Z).
@@ -17,11 +17,11 @@
 
 ?- reach(X, Y).
 
-// Count reachability
+% Count reachability
 +reach_count(X, count<Y>) :- reach(X, Y).
 ?- reach_count(X, C).
 
-// Bidirectional reachability
+% Bidirectional reachability
 +bidir[(1, 2), (2, 3), (3, 4)].
 +bi_reach(X, Y) :- bidir(X, Y).
 +bi_reach(X, Y) :- bidir(Y, X).
@@ -30,13 +30,13 @@
 
 ?- bi_reach(X, Y).
 
-// Path with distance
+% Path with distance
 +dist(X, Y, 1) :- direct(X, Y).
 +dist(X, Z, D+1) :- dist(X, Y, D), direct(Y, Z), D < 5.
 
 +min_dist(X, Y, min<D>) :- dist(X, Y, D).
 ?- min_dist(X, Y, D).
 
-// Cleanup
-.db use default
-.db drop test_complex_rec
+% Cleanup
+.kg use default
+.kg drop test_complex_rec

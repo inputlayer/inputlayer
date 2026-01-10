@@ -1,18 +1,22 @@
-Executing script: examples/datalog/25_unified_prefix/01_schema_declarations.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_unified_schema
-Database 'test_unified_schema' created.
-Switched to database: test_unified_schema
-> .db use test_unified_schema
-Switched to database: test_unified_schema
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unified_schema
+Knowledge graph 'test_unified_schema' created.
+Switched to knowledge graph: test_unified_schema
+> .kg use test_unified_schema
+Switched to knowledge graph: test_unified_schema
 > +employee(id: int, name: string, dept: int).
-Persistent schema 'employee' declared: (id: Base(Int), name: Base(String), dept: Base(Int))
+Schema 'employee' declared (persistent).
 > +department(id: int, name: string).
-Persistent schema 'department' declared: (id: Base(Int), name: Base(String))
+Schema 'department' declared (persistent).
 > +employee[(1, "Alice", 10), (2, "Bob", 20), (3, "Charlie", 10)].
-Inserted 3 facts into 'employee'.
+Inserted 3 fact(s) into 'employee'.
 > +department[(10, "Engineering"), (20, "Sales")].
-Inserted 2 facts into 'department'.
+Inserted 2 fact(s) into 'department'.
 > ?- employee(Id, Name, Dept).
 3 rows:
   (1, "Alice", 10)
@@ -22,7 +26,7 @@ Inserted 2 facts into 'department'.
 2 rows:
   (10, "Engineering")
   (20, "Sales")
-> .db use default
-Switched to database: default
-> .db drop test_unified_schema
-Database 'test_unified_schema' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unified_schema
+Knowledge graph 'test_unified_schema' dropped.

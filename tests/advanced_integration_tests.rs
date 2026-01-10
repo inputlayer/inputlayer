@@ -119,9 +119,16 @@ fn test_variable_reuse_in_body() {
     let result_set = to_set(results);
     // (1,2) and (2,1) form a cycle (both directions exist)
     // (4,4) is self-loop
-    assert!(result_set.contains(&(1, 2)) || result_set.contains(&(2, 1)),
-        "Expected (1,2) or (2,1) cycle but got {:?}", result_set);
-    assert!(result_set.contains(&(4, 4)), "Expected self-loop (4,4) but got {:?}", result_set);
+    assert!(
+        result_set.contains(&(1, 2)) || result_set.contains(&(2, 1)),
+        "Expected (1,2) or (2,1) cycle but got {:?}",
+        result_set
+    );
+    assert!(
+        result_set.contains(&(4, 4)),
+        "Expected self-loop (4,4) but got {:?}",
+        result_set
+    );
 }
 
 #[test]
@@ -246,10 +253,10 @@ fn test_all_comparison_operators_comprehensive() {
 
     // Test each operator
     let tests = vec![
-        ("result(X, Y) :- data(X, Y), X = 3.", 1), // Equal
+        ("result(X, Y) :- data(X, Y), X = 3.", 1),  // Equal
         ("result(X, Y) :- data(X, Y), X != 3.", 4), // Not equal
-        ("result(X, Y) :- data(X, Y), X < 3.", 2), // Less than
-        ("result(X, Y) :- data(X, Y), X > 3.", 2), // Greater than
+        ("result(X, Y) :- data(X, Y), X < 3.", 2),  // Less than
+        ("result(X, Y) :- data(X, Y), X > 3.", 2),  // Greater than
         ("result(X, Y) :- data(X, Y), X <= 3.", 3), // Less or equal
         ("result(X, Y) :- data(X, Y), X >= 3.", 3), // Greater or equal
     ];
@@ -278,11 +285,15 @@ fn test_safety_violation_detection() {
 
     assert!(result.is_err(), "Expected safety violation error");
     let err = result.unwrap_err();
-    assert!(err.contains("Unsafe") || err.contains("not found"), "Error should mention safety: {}", err);
+    assert!(
+        err.contains("Unsafe") || err.contains("not found"),
+        "Error should mention safety: {}",
+        err
+    );
 }
 
 #[test]
-fn test_empty_database_query() {
+fn test_empty_knowledge_graph_query() {
     let mut engine = DatalogEngine::new();
     // No facts added
 
@@ -415,7 +426,7 @@ fn test_comment_handling() {
 
     let program = "
         % This is a comment
-        // This is also a comment
+        % This is also a comment (Prolog-style)
         result(X, Y) :- edge(X, Y).
     ";
 
@@ -536,8 +547,8 @@ fn test_multiple_atoms_in_body() {
 #[test]
 fn test_aggregation_count() {
     use inputlayer::code_generator::CodeGenerator;
-    use inputlayer::value::{Tuple, Value};
     use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
 
     let mut generator = CodeGenerator::new();
 
@@ -559,7 +570,7 @@ fn test_aggregation_count() {
             relation: "sales".to_string(),
             schema: vec!["category".to_string(), "amount".to_string()],
         }),
-        group_by: vec![0], // group by category
+        group_by: vec![0],                                 // group by category
         aggregations: vec![(AggregateFunction::Count, 1)], // count items
         output_schema: vec!["category".to_string(), "count".to_string()],
     };
@@ -584,8 +595,8 @@ fn test_aggregation_count() {
 #[test]
 fn test_aggregation_sum() {
     use inputlayer::code_generator::CodeGenerator;
-    use inputlayer::value::{Tuple, Value};
     use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
 
     let mut generator = CodeGenerator::new();
 
@@ -606,7 +617,7 @@ fn test_aggregation_sum() {
             relation: "sales".to_string(),
             schema: vec!["category".to_string(), "amount".to_string()],
         }),
-        group_by: vec![0], // group by category
+        group_by: vec![0],                               // group by category
         aggregations: vec![(AggregateFunction::Sum, 1)], // sum amount
         output_schema: vec!["category".to_string(), "total".to_string()],
     };
@@ -629,8 +640,8 @@ fn test_aggregation_sum() {
 #[test]
 fn test_aggregation_min_max() {
     use inputlayer::code_generator::CodeGenerator;
-    use inputlayer::value::{Tuple, Value};
     use inputlayer::ir::{AggregateFunction, IRNode};
+    use inputlayer::value::{Tuple, Value};
 
     let mut generator = CodeGenerator::new();
 
@@ -762,7 +773,7 @@ fn test_sip_with_dangling_tuples() {
 
     // R has tuples that won't match S, S has tuples that won't match T
     engine.add_fact("r", vec![(1, 2), (100, 200), (300, 400)]); // 100,300 won't join
-    engine.add_fact("s", vec![(2, 3), (999, 888)]);              // 999 won't join
+    engine.add_fact("s", vec![(2, 3), (999, 888)]); // 999 won't join
     engine.add_fact("t", vec![(3, 4)]);
 
     let query = "result(A, D) :- r(A, B), s(B, C), t(C, D).";

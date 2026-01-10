@@ -1,35 +1,35 @@
-// Test: Multiple Aggregates in Same Query Context
-// Category: Aggregation
-// Verifies: Using COUNT + SUM + AVG + MIN + MAX together
+% Test: Multiple Aggregates in Same Query Context
+% Category: Aggregation
+% Verifies: Using COUNT + SUM + AVG + MIN + MAX together
 
-.db create test_multi_agg
-.db use test_multi_agg
+.kg create test_multi_agg
+.kg use test_multi_agg
 
-// Employee data: dept_id, employee_id, salary
+% Employee data: dept_id, employee_id, salary
 +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000),
            (2, 201, 70000), (2, 202, 80000),
            (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)].
 
-// Multiple aggregates per department
+% Multiple aggregates per department
 +dept_count(Dept, count<Emp>) :- employees(Dept, Emp, _).
 +dept_sum(Dept, sum<Sal>) :- employees(Dept, _, Sal).
 +dept_avg(Dept, avg<Sal>) :- employees(Dept, _, Sal).
 +dept_min(Dept, min<Sal>) :- employees(Dept, _, Sal).
 +dept_max(Dept, max<Sal>) :- employees(Dept, _, Sal).
 
-// Query all aggregates
+% Query all aggregates
 ?- dept_count(D, C).
 ?- dept_sum(D, S).
 ?- dept_avg(D, A).
 ?- dept_min(D, M).
 ?- dept_max(D, M).
 
-// Expected dept_count: (1,3), (2,2), (3,4)
-// Expected dept_sum: (1,165000), (2,150000), (3,192000)
-// Expected dept_min: (1,50000), (2,70000), (3,45000)
-// Expected dept_max: (1,60000), (2,80000), (3,52000)
+% Expected dept_count: (1,3), (2,2), (3,4)
+% Expected dept_sum: (1,165000), (2,150000), (3,192000)
+% Expected dept_min: (1,50000), (2,70000), (3,45000)
+% Expected dept_max: (1,60000), (2,80000), (3,52000)
 
-// Global aggregates (no grouping)
+% Global aggregates (no grouping)
 +total_employees(count<E>) :- employees(_, E, _).
 +total_payroll(sum<S>) :- employees(_, _, S).
 +avg_salary(avg<S>) :- employees(_, _, S).
@@ -42,8 +42,8 @@
 ?- min_salary(M).
 ?- max_salary(M).
 
-// Expected: 9 employees, 507000 total, avg ~56333, min 45000, max 80000
+% Expected: 9 employees, 507000 total, avg ~56333, min 45000, max 80000
 
-// Cleanup
-.db use default
-.db drop test_multi_agg
+% Cleanup
+.kg use default
+.kg drop test_multi_agg

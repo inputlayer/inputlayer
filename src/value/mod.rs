@@ -13,8 +13,8 @@
 //!
 //! ## Usage
 //!
-//! ```rust,ignore
-//! use datalog_engine::value::{Value, Tuple, TupleSchema, DataType};
+//! ```rust
+//! use inputlayer::value::{Value, Tuple, TupleSchema, DataType};
 //!
 //! // Create a 3-tuple with mixed types
 //! let tuple = Tuple::new(vec![
@@ -34,17 +34,17 @@
 pub mod arrow_convert;
 
 pub use arrow_convert::{
-    tuples_to_record_batch, record_batch_to_tuples, ArrowConvertError,
-    tuple2_to_tuple, tuple2_vec_to_tuples, tuples_to_tuple2_vec, infer_schema_from_tuples,
+    infer_schema_from_tuples, record_batch_to_tuples, tuple2_to_tuple, tuple2_vec_to_tuples,
+    tuples_to_record_batch, tuples_to_tuple2_vec, ArrowConvertError,
 };
 
+use abomonation::Abomonation;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use std::io::Write;
-use abomonation::Abomonation;
-use serde::{Deserialize, Serialize, Serializer, Deserializer};
+use std::sync::Arc;
 
 // Re-export Arrow's DataType for schema definitions
 pub use arrow::datatypes::DataType as ArrowDataType;
@@ -66,10 +66,14 @@ pub enum DataType {
     /// Optional dimension for schema validation:
     /// - `None` = any dimension (backward compatible)
     /// - `Some(n)` = strict validation, only n-dimensional vectors
-    Vector { dim: Option<usize> },
+    Vector {
+        dim: Option<usize>,
+    },
     /// Vector of i8 values (quantized embeddings for 75% memory savings)
     /// Same dimension semantics as Vector
-    VectorInt8 { dim: Option<usize> },
+    VectorInt8 {
+        dim: Option<usize>,
+    },
     /// Unix timestamp in milliseconds (for temporal operations)
     Timestamp,
 }
@@ -98,9 +102,19 @@ impl DataType {
     /// Check if a value matches this type, including dimension validation for vectors
     pub fn matches(&self, value: &Value) -> bool {
         match (self, value) {
-            (DataType::Vector { dim: Some(expected) }, Value::Vector(v)) => v.len() == *expected,
+            (
+                DataType::Vector {
+                    dim: Some(expected),
+                },
+                Value::Vector(v),
+            ) => v.len() == *expected,
             (DataType::Vector { dim: None }, Value::Vector(_)) => true,
-            (DataType::VectorInt8 { dim: Some(expected) }, Value::VectorInt8(v)) => v.len() == *expected,
+            (
+                DataType::VectorInt8 {
+                    dim: Some(expected),
+                },
+                Value::VectorInt8(v),
+            ) => v.len() == *expected,
             (DataType::VectorInt8 { dim: None }, Value::VectorInt8(_)) => true,
             (DataType::Int32, Value::Int32(_)) => true,
             (DataType::Int64, Value::Int64(_)) => true,
@@ -126,21 +140,29 @@ impl DataType {
             DataType::Null => ArrowDataType::Null,
             // Vectors with known dimension use FixedSizeList (preserves dimension info)
             DataType::Vector { dim: Some(n) } => ArrowDataType::FixedSizeList(
-                Arc::new(arrow::datatypes::Field::new("item", ArrowDataType::Float32, false)),
+                Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    ArrowDataType::Float32,
+                    false,
+                )),
                 *n as i32,
             ),
             // Vectors with unknown dimension use LargeList (variable length)
             DataType::Vector { dim: None } => ArrowDataType::LargeList(Arc::new(
-                arrow::datatypes::Field::new("item", ArrowDataType::Float32, false)
+                arrow::datatypes::Field::new("item", ArrowDataType::Float32, false),
             )),
             // Int8 vectors with known dimension use FixedSizeList
             DataType::VectorInt8 { dim: Some(n) } => ArrowDataType::FixedSizeList(
-                Arc::new(arrow::datatypes::Field::new("item", ArrowDataType::Int8, false)),
+                Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    ArrowDataType::Int8,
+                    false,
+                )),
                 *n as i32,
             ),
             // Int8 vectors with unknown dimension use LargeList
             DataType::VectorInt8 { dim: None } => ArrowDataType::LargeList(Arc::new(
-                arrow::datatypes::Field::new("item", ArrowDataType::Int8, false)
+                arrow::datatypes::Field::new("item", ArrowDataType::Int8, false),
             )),
             // Timestamps stored as Int64 (milliseconds since Unix epoch)
             DataType::Timestamp => ArrowDataType::Int64,
@@ -158,22 +180,30 @@ impl DataType {
             ArrowDataType::Null => Some(DataType::Null),
             // FixedSizeList preserves dimension information
             ArrowDataType::FixedSizeList(field, size)
-                if matches!(field.data_type(), ArrowDataType::Float32) => {
-                Some(DataType::Vector { dim: Some(*size as usize) })
+                if matches!(field.data_type(), ArrowDataType::Float32) =>
+            {
+                Some(DataType::Vector {
+                    dim: Some(*size as usize),
+                })
             }
             // Variable-length lists have unknown dimension
             ArrowDataType::LargeList(field) | ArrowDataType::List(field)
-                if matches!(field.data_type(), ArrowDataType::Float32) => {
+                if matches!(field.data_type(), ArrowDataType::Float32) =>
+            {
                 Some(DataType::Vector { dim: None })
             }
             // Int8 FixedSizeList preserves dimension information
             ArrowDataType::FixedSizeList(field, size)
-                if matches!(field.data_type(), ArrowDataType::Int8) => {
-                Some(DataType::VectorInt8 { dim: Some(*size as usize) })
+                if matches!(field.data_type(), ArrowDataType::Int8) =>
+            {
+                Some(DataType::VectorInt8 {
+                    dim: Some(*size as usize),
+                })
             }
             // Int8 variable-length lists have unknown dimension
             ArrowDataType::LargeList(field) | ArrowDataType::List(field)
-                if matches!(field.data_type(), ArrowDataType::Int8) => {
+                if matches!(field.data_type(), ArrowDataType::Int8) =>
+            {
                 Some(DataType::VectorInt8 { dim: None })
             }
             _ => None,
@@ -337,7 +367,13 @@ impl Value {
             Value::Int32(v) => *v as i64,
             Value::Int64(v) => *v,
             Value::Float64(v) => *v as i64,
-            Value::Bool(b) => if *b { 1 } else { 0 },
+            Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
+            }
             Value::Timestamp(t) => *t,
             _ => 0,
         }
@@ -350,7 +386,13 @@ impl Value {
             Value::Int32(v) => *v as f64,
             Value::Int64(v) => *v as f64,
             Value::Float64(v) => *v,
-            Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+            Value::Bool(b) => {
+                if *b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             Value::Timestamp(t) => *t as f64,
             _ => 0.0,
         }
@@ -463,9 +505,7 @@ impl Ord for Value {
         match (self, other) {
             (Value::Int32(a), Value::Int32(b)) => a.cmp(b),
             (Value::Int64(a), Value::Int64(b)) => a.cmp(b),
-            (Value::Float64(a), Value::Float64(b)) => {
-                a.partial_cmp(b).unwrap_or(Ordering::Equal)
-            }
+            (Value::Float64(a), Value::Float64(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
             (Value::String(a), Value::String(b)) => a.cmp(b),
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             (Value::Null, Value::Null) => Ordering::Equal,
@@ -659,53 +699,64 @@ impl<'de> Deserialize<'de> for Value {
                 }
 
                 let type_str = type_str.ok_or_else(|| serde::de::Error::missing_field("type"))?;
-                let raw_value = raw_value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
+                let raw_value =
+                    raw_value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
 
                 match type_str.as_str() {
                     "Int32" => {
-                        let v: i32 = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: i32 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Int32(v))
                     }
                     "Int64" => {
-                        let v: i64 = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: i64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Int64(v))
                     }
                     "Float64" => {
-                        let v: f64 = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: f64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Float64(v))
                     }
                     "String" => {
-                        let v: String = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: String =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::String(Arc::from(v.as_str())))
                     }
                     "Bool" => {
-                        let v: bool = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: bool =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Bool(v))
                     }
                     "Null" => Ok(Value::Null),
                     "Vector" => {
-                        let v: Vec<f32> = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: Vec<f32> =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Vector(Arc::new(v)))
                     }
                     "VectorInt8" => {
-                        let v: Vec<i8> = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: Vec<i8> =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::VectorInt8(Arc::new(v)))
                     }
                     "Timestamp" => {
-                        let v: i64 = serde_json::from_value(raw_value)
-                            .map_err(serde::de::Error::custom)?;
+                        let v: i64 =
+                            serde_json::from_value(raw_value).map_err(serde::de::Error::custom)?;
                         Ok(Value::Timestamp(v))
                     }
                     _ => Err(serde::de::Error::unknown_variant(
                         &type_str,
-                        &["Int32", "Int64", "Float64", "String", "Bool", "Null", "Vector", "VectorInt8", "Timestamp"],
+                        &[
+                            "Int32",
+                            "Int64",
+                            "Float64",
+                            "String",
+                            "Bool",
+                            "Null",
+                            "Vector",
+                            "VectorInt8",
+                            "Timestamp",
+                        ],
                     )),
                 }
             }
@@ -744,11 +795,9 @@ impl Abomonation for Value {
                 write.write_all(&[4u8])?;
                 write.write_all(&[if *b { 1u8 } else { 0u8 }])
             }
-            Value::Null => {
-                write.write_all(&[5u8])
-            }
+            Value::Null => write.write_all(&[5u8]),
             Value::Vector(v) => {
-                write.write_all(&[6u8])?;  // Tag 6 for Vector
+                write.write_all(&[6u8])?; // Tag 6 for Vector
                 let len = v.len() as u64;
                 write.write_all(&len.to_le_bytes())?;
                 for &f in v.iter() {
@@ -757,17 +806,16 @@ impl Abomonation for Value {
                 Ok(())
             }
             Value::VectorInt8(v) => {
-                write.write_all(&[8u8])?;  // Tag 8 for VectorInt8
+                write.write_all(&[8u8])?; // Tag 8 for VectorInt8
                 let len = v.len() as u64;
                 write.write_all(&len.to_le_bytes())?;
                 // i8 values can be written directly as bytes
-                let bytes: &[u8] = unsafe {
-                    std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len())
-                };
+                let bytes: &[u8] =
+                    unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len()) };
                 write.write_all(bytes)
             }
             Value::Timestamp(t) => {
-                write.write_all(&[7u8])?;  // Tag 7 for Timestamp
+                write.write_all(&[7u8])?; // Tag 7 for Timestamp
                 write.write_all(&t.to_le_bytes())
             }
         }
@@ -790,9 +838,9 @@ impl Abomonation for Value {
             Value::String(s) => 1 + 8 + s.len(),
             Value::Bool(_) => 1 + 1,
             Value::Null => 1,
-            Value::Vector(v) => 1 + 8 + v.len() * 4,  // tag + len + floats
-            Value::VectorInt8(v) => 1 + 8 + v.len(),  // tag + len + bytes
-            Value::Timestamp(_) => 1 + 8,  // tag + i64
+            Value::Vector(v) => 1 + 8 + v.len() * 4, // tag + len + floats
+            Value::VectorInt8(v) => 1 + 8 + v.len(), // tag + len + bytes
+            Value::Timestamp(_) => 1 + 8,            // tag + i64
         }
     }
 }
@@ -999,13 +1047,27 @@ pub enum SchemaValidationError {
     ArityMismatch { expected: usize, got: usize },
     /// Column has wrong type
     #[error("Type mismatch in column '{column}': expected {expected:?}, got {got:?}")]
-    TypeMismatch { column: String, expected: DataType, got: DataType },
+    TypeMismatch {
+        column: String,
+        expected: DataType,
+        got: DataType,
+    },
     /// Vector column has wrong dimension
-    #[error("Vector dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim")]
-    VectorDimensionMismatch { column: String, expected: usize, got: usize },
+    #[error(
+        "Vector dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim"
+    )]
+    VectorDimensionMismatch {
+        column: String,
+        expected: usize,
+        got: usize,
+    },
     /// VectorInt8 column has wrong dimension
     #[error("VectorInt8 dimension mismatch in column '{column}': expected {expected}-dim, got {got}-dim")]
-    VectorInt8DimensionMismatch { column: String, expected: usize, got: usize },
+    VectorInt8DimensionMismatch {
+        column: String,
+        expected: usize,
+        got: usize,
+    },
 }
 
 /// Schema definition for a relation's tuples
@@ -1079,10 +1141,7 @@ impl TupleSchema {
         let fields: Option<Vec<_>> = schema
             .fields()
             .iter()
-            .map(|f| {
-                DataType::from_arrow(f.data_type())
-                    .map(|ty| (f.name().clone(), ty))
-            })
+            .map(|f| DataType::from_arrow(f.data_type()).map(|ty| (f.name().clone(), ty)))
             .collect();
         fields.map(TupleSchema::new)
     }
@@ -1115,7 +1174,13 @@ impl TupleSchema {
         for (i, (name, dtype)) in self.fields.iter().enumerate() {
             if let Some(value) = tuple.get(i) {
                 // Specific vector dimension check with clear error message
-                if let (DataType::Vector { dim: Some(expected) }, Value::Vector(v)) = (dtype, value) {
+                if let (
+                    DataType::Vector {
+                        dim: Some(expected),
+                    },
+                    Value::Vector(v),
+                ) = (dtype, value)
+                {
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorDimensionMismatch {
                             column: name.clone(),
@@ -1125,7 +1190,13 @@ impl TupleSchema {
                     }
                 }
                 // VectorInt8 dimension check
-                if let (DataType::VectorInt8 { dim: Some(expected) }, Value::VectorInt8(v)) = (dtype, value) {
+                if let (
+                    DataType::VectorInt8 {
+                        dim: Some(expected),
+                    },
+                    Value::VectorInt8(v),
+                ) = (dtype, value)
+                {
                     if v.len() != *expected {
                         return Err(SchemaValidationError::VectorInt8DimensionMismatch {
                             column: name.clone(),
@@ -1205,11 +1276,7 @@ mod tests {
 
     #[test]
     fn test_tuple_project() {
-        let tuple = Tuple::new(vec![
-            Value::Int32(1),
-            Value::Int32(2),
-            Value::Int32(3),
-        ]);
+        let tuple = Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]);
 
         let projected = tuple.project(&[2, 0]);
         assert_eq!(projected.arity(), 2);
@@ -1323,9 +1390,9 @@ mod tests {
         let v2 = Value::vector(vec![1.0, 3.0]);
         let v3 = Value::vector(vec![1.0, 2.0, 3.0]);
 
-        assert!(v1 < v2);  // Same length, second element differs
-        assert!(v1 < v3);  // Shorter length comes first
-        assert!(Value::string("a") < v1);  // String < Vector in type ordering
+        assert!(v1 < v2); // Same length, second element differs
+        assert!(v1 < v3); // Shorter length comes first
+        assert!(Value::string("a") < v1); // String < Vector in type ordering
     }
 
     #[test]
@@ -1350,7 +1417,10 @@ mod tests {
         ]);
 
         assert_eq!(tuple.arity(), 3);
-        assert_eq!(tuple.get(1).and_then(|v| v.as_vector()), Some([1.0f32, 2.0, 3.0].as_slice()));
+        assert_eq!(
+            tuple.get(1).and_then(|v| v.as_vector()),
+            Some([1.0f32, 2.0, 3.0].as_slice())
+        );
     }
 
     #[test]
@@ -1521,10 +1591,7 @@ mod tests {
             ("embedding".to_string(), DataType::vector_with_dim(3)),
         ]);
 
-        let tuple = Tuple::new(vec![
-            Value::Int32(1),
-            Value::vector(vec![1.0, 2.0, 3.0]),
-        ]);
+        let tuple = Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]);
 
         assert!(schema.validate(&tuple).is_ok());
     }
@@ -1541,7 +1608,10 @@ mod tests {
         let result = schema.validate(&tuple);
         assert!(matches!(
             result,
-            Err(SchemaValidationError::ArityMismatch { expected: 2, got: 1 })
+            Err(SchemaValidationError::ArityMismatch {
+                expected: 2,
+                got: 1
+            })
         ));
     }
 
@@ -1575,15 +1645,9 @@ mod tests {
             ("embedding".to_string(), DataType::vector_any()), // Any dimension
         ]);
 
-        let tuple_3d = Tuple::new(vec![
-            Value::Int32(1),
-            Value::vector(vec![1.0, 2.0, 3.0]),
-        ]);
+        let tuple_3d = Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]);
 
-        let tuple_1536d = Tuple::new(vec![
-            Value::Int32(2),
-            Value::vector(vec![0.0; 1536]),
-        ]);
+        let tuple_1536d = Tuple::new(vec![Value::Int32(2), Value::vector(vec![0.0; 1536])]);
 
         assert!(schema.validate(&tuple_3d).is_ok());
         assert!(schema.validate(&tuple_1536d).is_ok());
@@ -1612,7 +1676,10 @@ mod tests {
 
     #[test]
     fn test_schema_validation_error_display() {
-        let err = SchemaValidationError::ArityMismatch { expected: 3, got: 2 };
+        let err = SchemaValidationError::ArityMismatch {
+            expected: 3,
+            got: 2,
+        };
         assert!(err.to_string().contains("3"));
         assert!(err.to_string().contains("2"));
 
@@ -1669,9 +1736,10 @@ mod tests {
     #[test]
     fn test_empty_vector_validation() {
         // Empty vectors have dimension 0
-        let schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::Vector { dim: Some(0) }),
-        ]);
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::Vector { dim: Some(0) },
+        )]);
 
         let tuple = Tuple::new(vec![Value::vector(vec![])]);
         assert!(schema.validate(&tuple).is_ok());
@@ -1680,16 +1748,21 @@ mod tests {
         let tuple_nonempty = Tuple::new(vec![Value::vector(vec![1.0])]);
         assert!(matches!(
             schema.validate(&tuple_nonempty),
-            Err(SchemaValidationError::VectorDimensionMismatch { expected: 0, got: 1, .. })
+            Err(SchemaValidationError::VectorDimensionMismatch {
+                expected: 0,
+                got: 1,
+                ..
+            })
         ));
     }
 
     #[test]
     fn test_large_dimension_vectors() {
         // Test OpenAI embedding dimension (1536)
-        let schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::vector_with_dim(1536)),
-        ]);
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::vector_with_dim(1536),
+        )]);
 
         let large_vec = Value::vector(vec![0.0f32; 1536]);
         let tuple = Tuple::new(vec![large_vec]);
@@ -1700,7 +1773,11 @@ mod tests {
         let wrong_tuple = Tuple::new(vec![wrong_vec]);
         assert!(matches!(
             schema.validate(&wrong_tuple),
-            Err(SchemaValidationError::VectorDimensionMismatch { expected: 1536, got: 768, .. })
+            Err(SchemaValidationError::VectorDimensionMismatch {
+                expected: 1536,
+                got: 768,
+                ..
+            })
         ));
     }
 
@@ -1712,13 +1789,11 @@ mod tests {
             ("embedding".to_string(), DataType::vector_any()),
         ]);
 
-        let tuples = vec![
-            Tuple::new(vec![
-                Value::Int32(1),
-                Value::string("test"),
-                Value::vector(vec![1.0, 2.0, 3.0]),
-            ]),
-        ];
+        let tuples = vec![Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("test"),
+            Value::vector(vec![1.0, 2.0, 3.0]),
+        ])];
 
         schema.infer_vector_dimensions(&tuples);
 
@@ -1726,14 +1801,15 @@ mod tests {
         assert_eq!(schema.field_type(0), Some(&DataType::Int32));
         assert_eq!(schema.field_type(1), Some(&DataType::String));
         // Vector dimension should be inferred
-        assert_eq!(schema.field_type(2), Some(&DataType::Vector { dim: Some(3) }));
+        assert_eq!(
+            schema.field_type(2),
+            Some(&DataType::Vector { dim: Some(3) })
+        );
     }
 
     #[test]
     fn test_infer_vector_dimensions_empty_tuples() {
-        let mut schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::vector_any()),
-        ]);
+        let mut schema = TupleSchema::new(vec![("embedding".to_string(), DataType::vector_any())]);
 
         // Empty tuples should not change schema
         schema.infer_vector_dimensions(&[]);
@@ -1742,9 +1818,10 @@ mod tests {
 
     #[test]
     fn test_infer_dimensions_does_not_override_known() {
-        let mut schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::vector_with_dim(1536)),
-        ]);
+        let mut schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::vector_with_dim(1536),
+        )]);
 
         let tuples = vec![
             Tuple::new(vec![Value::vector(vec![1.0, 2.0, 3.0])]), // Different dim
@@ -1752,7 +1829,10 @@ mod tests {
 
         // Should NOT change already-known dimension
         schema.infer_vector_dimensions(&tuples);
-        assert_eq!(schema.field_type(0), Some(&DataType::Vector { dim: Some(1536) }));
+        assert_eq!(
+            schema.field_type(0),
+            Some(&DataType::Vector { dim: Some(1536) })
+        );
     }
 
     #[test]
@@ -1767,7 +1847,10 @@ mod tests {
         let non_empty = Tuple::new(vec![Value::Int32(1)]);
         assert!(matches!(
             schema.validate(&non_empty),
-            Err(SchemaValidationError::ArityMismatch { expected: 0, got: 1 })
+            Err(SchemaValidationError::ArityMismatch {
+                expected: 0,
+                got: 1
+            })
         ));
     }
 
@@ -1787,19 +1870,23 @@ mod tests {
 
         // First wrong dimension
         let bad_first = Tuple::new(vec![
-            Value::vector(vec![1.0, 2.0]),  // 2-dim instead of 3
+            Value::vector(vec![1.0, 2.0]), // 2-dim instead of 3
             Value::vector(vec![4.0, 5.0, 6.0]),
         ]);
         let err = schema.validate(&bad_first).unwrap_err();
-        assert!(matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "query"));
+        assert!(
+            matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "query")
+        );
 
         // Second wrong dimension
         let bad_second = Tuple::new(vec![
             Value::vector(vec![1.0, 2.0, 3.0]),
-            Value::vector(vec![4.0, 5.0, 6.0, 7.0]),  // 4-dim instead of 3
+            Value::vector(vec![4.0, 5.0, 6.0, 7.0]), // 4-dim instead of 3
         ]);
         let err = schema.validate(&bad_second).unwrap_err();
-        assert!(matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "doc"));
+        assert!(
+            matches!(err, SchemaValidationError::VectorDimensionMismatch { ref column, .. } if column == "doc")
+        );
     }
 
     #[test]

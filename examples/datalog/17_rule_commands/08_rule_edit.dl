@@ -1,29 +1,29 @@
-// Test: Rule Edit Command
-// Category: 17_rule_commands
-// Description: Tests .rule edit to modify a specific clause
+% Test: Rule Edit Command
+% Category: 17_rule_commands
+% Description: Tests .rule edit to modify a specific clause
 
-.db create test_rule_edit
-.db use test_rule_edit
+.kg create test_rule_edit
+.kg use test_rule_edit
 
-// Insert base data
+% Insert base data
 +edge[(1,2), (2,3), (3,4)].
 
-// Define a multi-clause rule
+% Define a multi-clause rule
 +reachable(X, Y) :- edge(X, Y).
 +reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
 
-// Show original definition
+% Show original definition
 .rule def reachable
 
-// Edit clause 2 to swap the join order
+% Edit clause 2 to swap the join order
 .rule edit reachable 2 +reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
 
-// Show modified definition
+% Show modified definition
 .rule def reachable
 
-// Verify results are the same
+% Verify results are the same
 ?- reachable(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_rule_edit
+% Cleanup
+.kg use default
+.kg drop test_rule_edit

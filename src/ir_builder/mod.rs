@@ -73,7 +73,10 @@ impl IRBuilder {
         }
         for scan in scans {
             if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG IR build: joining with scan = {:?}", scan.output_schema());
+                eprintln!(
+                    "DEBUG IR build: joining with scan = {:?}",
+                    scan.output_schema()
+                );
             }
             current = self.build_join(current, scan)?;
             if std::env::var("DATALOG_DEBUG").is_ok() {
@@ -126,7 +129,8 @@ impl IRBuilder {
     fn build_scan(&self, atom: &Atom) -> Result<IRNode, String> {
         // Schema comes from the atom's arguments (variable bindings)
         // Each occurrence of the same relation can have different variable names
-        let schema: Vec<String> = atom.args
+        let schema: Vec<String> = atom
+            .args
             .iter()
             .enumerate()
             .map(|(i, term)| match term {
@@ -139,7 +143,9 @@ impl IRBuilder {
                 Term::Arithmetic(expr) => {
                     // Use the first variable referenced, or generate a name
                     let vars = expr.variables();
-                    vars.into_iter().next().unwrap_or_else(|| format!("expr{}", i))
+                    vars.into_iter()
+                        .next()
+                        .unwrap_or_else(|| format!("expr{}", i))
                 }
                 // Function calls - generate a name
                 Term::FunctionCall(_, _) => format!("func{}", i),
@@ -175,11 +181,9 @@ impl IRBuilder {
             .map(|s| s.to_string())
             .collect();
 
-        let (left_keys, right_keys) = self.catalog.infer_join_keys(
-            &left_schema,
-            &right_schema,
-            &shared,
-        );
+        let (left_keys, right_keys) =
+            self.catalog
+                .infer_join_keys(&left_schema, &right_schema, &shared);
 
         // Output schema: all columns from left, then non-key columns from right
         let mut output_schema = left_schema;
@@ -242,7 +246,12 @@ impl IRBuilder {
     }
 
     /// Build a single antijoin node for a negated predicate
-    fn build_antijoin(&self, left: IRNode, negated_atom: &Atom, _rule: &Rule) -> Result<IRNode, String> {
+    fn build_antijoin(
+        &self,
+        left: IRNode,
+        negated_atom: &Atom,
+        _rule: &Rule,
+    ) -> Result<IRNode, String> {
         // 1. Build scan for the negated relation
         let mut right = self.build_scan(negated_atom)?;
 
@@ -294,9 +303,13 @@ impl IRBuilder {
         // For each column in right schema, check if it matches a column in left schema
         for (right_idx, right_col) in right_schema.iter().enumerate() {
             // Skip generated column names (col0, col1, etc.)
-            if right_col.starts_with("col") || right_col.starts_with("expr") ||
-               right_col.starts_with("func") || right_col.starts_with("vec") ||
-               right_col.starts_with("float") || right_col.starts_with("str") {
+            if right_col.starts_with("col")
+                || right_col.starts_with("expr")
+                || right_col.starts_with("func")
+                || right_col.starts_with("vec")
+                || right_col.starts_with("float")
+                || right_col.starts_with("str")
+            {
                 continue;
             }
 
@@ -335,7 +348,10 @@ impl IRBuilder {
                 .map(|term| self.term_to_ir_expr(term, &schema))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            expressions.push((var_name.clone(), IRExpression::FunctionCall(ir_func, ir_args)));
+            expressions.push((
+                var_name.clone(),
+                IRExpression::FunctionCall(ir_func, ir_args),
+            ));
         }
 
         if expressions.is_empty() {
@@ -366,15 +382,31 @@ impl IRBuilder {
             BuiltinFunc::TimeAdd => Err("TimeAdd function not yet supported in IR".to_string()),
             BuiltinFunc::TimeSub => Err("TimeSub function not yet supported in IR".to_string()),
             BuiltinFunc::TimeDecay => Err("TimeDecay function not yet supported in IR".to_string()),
-            BuiltinFunc::TimeDecayLinear => Err("TimeDecayLinear function not yet supported in IR".to_string()),
-            BuiltinFunc::TimeBefore => Err("TimeBefore function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeDecayLinear => {
+                Err("TimeDecayLinear function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::TimeBefore => {
+                Err("TimeBefore function not yet supported in IR".to_string())
+            }
             BuiltinFunc::TimeAfter => Err("TimeAfter function not yet supported in IR".to_string()),
-            BuiltinFunc::TimeBetween => Err("TimeBetween function not yet supported in IR".to_string()),
-            BuiltinFunc::WithinLast => Err("WithinLast function not yet supported in IR".to_string()),
-            BuiltinFunc::IntervalsOverlap => Err("IntervalsOverlap function not yet supported in IR".to_string()),
-            BuiltinFunc::IntervalContains => Err("IntervalContains function not yet supported in IR".to_string()),
-            BuiltinFunc::IntervalDuration => Err("IntervalDuration function not yet supported in IR".to_string()),
-            BuiltinFunc::PointInInterval => Err("PointInInterval function not yet supported in IR".to_string()),
+            BuiltinFunc::TimeBetween => {
+                Err("TimeBetween function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::WithinLast => {
+                Err("WithinLast function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::IntervalsOverlap => {
+                Err("IntervalsOverlap function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::IntervalContains => {
+                Err("IntervalContains function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::IntervalDuration => {
+                Err("IntervalDuration function not yet supported in IR".to_string())
+            }
+            BuiltinFunc::PointInInterval => {
+                Err("PointInInterval function not yet supported in IR".to_string())
+            }
         }
     }
 
@@ -403,12 +435,20 @@ impl IRBuilder {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(IRExpression::FunctionCall(ir_func, ir_args))
             }
-            Term::StringConstant(_) => Err("String constants not supported in expressions".to_string()),
+            Term::StringConstant(_) => {
+                Err("String constants not supported in expressions".to_string())
+            }
             Term::Placeholder => Err("Placeholders not supported in expressions".to_string()),
-            Term::Arithmetic(_) => Err("Arithmetic expressions should use build_projection_with_computed".to_string()),
+            Term::Arithmetic(_) => {
+                Err("Arithmetic expressions should use build_projection_with_computed".to_string())
+            }
             Term::Aggregate(_, _) => Err("Aggregates should use build_aggregation".to_string()),
-            Term::FieldAccess(_, _) => Err("Field access not yet supported in expressions".to_string()),
-            Term::RecordPattern(_) => Err("Record patterns not yet supported in expressions".to_string()),
+            Term::FieldAccess(_, _) => {
+                Err("Field access not yet supported in expressions".to_string())
+            }
+            Term::RecordPattern(_) => {
+                Err("Record patterns not yet supported in expressions".to_string())
+            }
         }
     }
 
@@ -422,34 +462,34 @@ impl IRBuilder {
             Constraint::NotEqual(left, right) => {
                 self.build_equality_predicate(left, right, schema, false)
             }
-            Constraint::LessThan(left, right) => {
-                self.build_ordering_predicate(
-                    left, right, schema,
-                    |col, val| Predicate::ColumnLtConst(col, val),
-                    |col, val| Predicate::ColumnLtFloat(col, val),
-                )
-            }
-            Constraint::GreaterThan(left, right) => {
-                self.build_ordering_predicate(
-                    left, right, schema,
-                    |col, val| Predicate::ColumnGtConst(col, val),
-                    |col, val| Predicate::ColumnGtFloat(col, val),
-                )
-            }
-            Constraint::LessOrEqual(left, right) => {
-                self.build_ordering_predicate(
-                    left, right, schema,
-                    |col, val| Predicate::ColumnLeConst(col, val),
-                    |col, val| Predicate::ColumnLeFloat(col, val),
-                )
-            }
-            Constraint::GreaterOrEqual(left, right) => {
-                self.build_ordering_predicate(
-                    left, right, schema,
-                    |col, val| Predicate::ColumnGeConst(col, val),
-                    |col, val| Predicate::ColumnGeFloat(col, val),
-                )
-            }
+            Constraint::LessThan(left, right) => self.build_ordering_predicate(
+                left,
+                right,
+                schema,
+                |col, val| Predicate::ColumnLtConst(col, val),
+                |col, val| Predicate::ColumnLtFloat(col, val),
+            ),
+            Constraint::GreaterThan(left, right) => self.build_ordering_predicate(
+                left,
+                right,
+                schema,
+                |col, val| Predicate::ColumnGtConst(col, val),
+                |col, val| Predicate::ColumnGtFloat(col, val),
+            ),
+            Constraint::LessOrEqual(left, right) => self.build_ordering_predicate(
+                left,
+                right,
+                schema,
+                |col, val| Predicate::ColumnLeConst(col, val),
+                |col, val| Predicate::ColumnLeFloat(col, val),
+            ),
+            Constraint::GreaterOrEqual(left, right) => self.build_ordering_predicate(
+                left,
+                right,
+                schema,
+                |col, val| Predicate::ColumnGeConst(col, val),
+                |col, val| Predicate::ColumnGeFloat(col, val),
+            ),
             Constraint::Equal(left, right) => {
                 self.build_equality_predicate(left, right, schema, true)
             }
@@ -475,40 +515,86 @@ impl IRBuilder {
         };
 
         // Extract constants of various types
-        let left_int = match left { Term::Constant(c) => Some(*c), _ => None };
-        let right_int = match right { Term::Constant(c) => Some(*c), _ => None };
-        let left_str = match left { Term::StringConstant(s) => Some(s.clone()), _ => None };
-        let right_str = match right { Term::StringConstant(s) => Some(s.clone()), _ => None };
-        let left_float = match left { Term::FloatConstant(f) => Some(*f), _ => None };
-        let right_float = match right { Term::FloatConstant(f) => Some(*f), _ => None };
+        let left_int = match left {
+            Term::Constant(c) => Some(*c),
+            _ => None,
+        };
+        let right_int = match right {
+            Term::Constant(c) => Some(*c),
+            _ => None,
+        };
+        let left_str = match left {
+            Term::StringConstant(s) => Some(s.clone()),
+            _ => None,
+        };
+        let right_str = match right {
+            Term::StringConstant(s) => Some(s.clone()),
+            _ => None,
+        };
+        let left_float = match left {
+            Term::FloatConstant(f) => Some(*f),
+            _ => None,
+        };
+        let right_float = match right {
+            Term::FloatConstant(f) => Some(*f),
+            _ => None,
+        };
 
         // Try variable vs string constant
         if let (Some(col), Some(s)) = (left_col, right_str.clone()) {
-            return Ok(if is_equal { Predicate::ColumnEqStr(col, s) } else { Predicate::ColumnNeStr(col, s) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqStr(col, s)
+            } else {
+                Predicate::ColumnNeStr(col, s)
+            });
         }
         if let (Some(col), Some(s)) = (right_col, left_str.clone()) {
-            return Ok(if is_equal { Predicate::ColumnEqStr(col, s) } else { Predicate::ColumnNeStr(col, s) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqStr(col, s)
+            } else {
+                Predicate::ColumnNeStr(col, s)
+            });
         }
 
         // Try variable vs float constant
         if let (Some(col), Some(f)) = (left_col, right_float) {
-            return Ok(if is_equal { Predicate::ColumnEqFloat(col, f) } else { Predicate::ColumnNeFloat(col, f) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqFloat(col, f)
+            } else {
+                Predicate::ColumnNeFloat(col, f)
+            });
         }
         if let (Some(col), Some(f)) = (right_col, left_float) {
-            return Ok(if is_equal { Predicate::ColumnEqFloat(col, f) } else { Predicate::ColumnNeFloat(col, f) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqFloat(col, f)
+            } else {
+                Predicate::ColumnNeFloat(col, f)
+            });
         }
 
         // Try variable vs int constant
         if let (Some(col), Some(val)) = (left_col, right_int) {
-            return Ok(if is_equal { Predicate::ColumnEqConst(col, val) } else { Predicate::ColumnNeConst(col, val) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqConst(col, val)
+            } else {
+                Predicate::ColumnNeConst(col, val)
+            });
         }
         if let (Some(col), Some(val)) = (right_col, left_int) {
-            return Ok(if is_equal { Predicate::ColumnEqConst(col, val) } else { Predicate::ColumnNeConst(col, val) });
+            return Ok(if is_equal {
+                Predicate::ColumnEqConst(col, val)
+            } else {
+                Predicate::ColumnNeConst(col, val)
+            });
         }
 
         // Try variable vs variable
         if let (Some(l_col), Some(r_col)) = (left_col, right_col) {
-            return Ok(if is_equal { Predicate::ColumnsEq(l_col, r_col) } else { Predicate::ColumnsNe(l_col, r_col) });
+            return Ok(if is_equal {
+                Predicate::ColumnsEq(l_col, r_col)
+            } else {
+                Predicate::ColumnsNe(l_col, r_col)
+            });
         }
 
         Err("Unsupported equality constraint pattern".to_string())
@@ -538,10 +624,22 @@ impl IRBuilder {
         };
 
         // Extract constants
-        let left_int = match left { Term::Constant(c) => Some(*c), _ => None };
-        let right_int = match right { Term::Constant(c) => Some(*c), _ => None };
-        let left_float = match left { Term::FloatConstant(f) => Some(*f), _ => None };
-        let right_float = match right { Term::FloatConstant(f) => Some(*f), _ => None };
+        let left_int = match left {
+            Term::Constant(c) => Some(*c),
+            _ => None,
+        };
+        let right_int = match right {
+            Term::Constant(c) => Some(*c),
+            _ => None,
+        };
+        let left_float = match left {
+            Term::FloatConstant(f) => Some(*f),
+            _ => None,
+        };
+        let right_float = match right {
+            Term::FloatConstant(f) => Some(*f),
+            _ => None,
+        };
 
         // Try variable vs float constant
         if let (Some(col), Some(f)) = (left_col, right_float) {
@@ -577,14 +675,12 @@ impl IRBuilder {
 
         match expr {
             ArithExpr::Variable(name) => {
-                let col_idx = schema.iter()
-                    .position(|s| s == name)
-                    .ok_or_else(|| format!("Variable '{}' not found in schema for arithmetic", name))?;
+                let col_idx = schema.iter().position(|s| s == name).ok_or_else(|| {
+                    format!("Variable '{}' not found in schema for arithmetic", name)
+                })?;
                 Ok(IRExpression::Column(col_idx))
             }
-            ArithExpr::Constant(val) => {
-                Ok(IRExpression::IntConstant(*val))
-            }
+            ArithExpr::Constant(val) => Ok(IRExpression::IntConstant(*val)),
             ArithExpr::Binary { op, left, right } => {
                 let left_ir = Self::arith_expr_to_ir_expression(left, schema)?;
                 let right_ir = Self::arith_expr_to_ir_expression(right, schema)?;
@@ -729,14 +825,16 @@ impl IRBuilder {
             match term {
                 Term::Variable(v) => {
                     // Find in input schema - project this column
-                    let pos = input_schema
-                        .iter()
-                        .position(|s| s == v)
-                        .ok_or_else(|| format!("Variable '{}' not found in schema {:?}", v, input_schema))?;
+                    let pos = input_schema.iter().position(|s| s == v).ok_or_else(|| {
+                        format!("Variable '{}' not found in schema {:?}", v, input_schema)
+                    })?;
                     final_projection.push(pos);
                     final_output_schema.push(v.clone());
                     if std::env::var("DATALOG_DEBUG").is_ok() {
-                        eprintln!("  head[{}] Variable({}) -> project col {}", head_idx, v, pos);
+                        eprintln!(
+                            "  head[{}] Variable({}) -> project col {}",
+                            head_idx, v, pos
+                        );
                     }
                 }
                 Term::Arithmetic(expr) => {
@@ -753,7 +851,10 @@ impl IRBuilder {
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
                     if std::env::var("DATALOG_DEBUG").is_ok() {
-                        eprintln!("  head[{}] Arithmetic -> compute col {} ({})", head_idx, computed_col_idx, col_name);
+                        eprintln!(
+                            "  head[{}] Arithmetic -> compute col {} ({})",
+                            head_idx, computed_col_idx, col_name
+                        );
                     }
                 }
                 Term::Constant(val) => {
@@ -770,7 +871,10 @@ impl IRBuilder {
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
                     if std::env::var("DATALOG_DEBUG").is_ok() {
-                        eprintln!("  head[{}] Constant({}) -> compute col {} ({})", head_idx, val, computed_col_idx, col_name);
+                        eprintln!(
+                            "  head[{}] Constant({}) -> compute col {} ({})",
+                            head_idx, val, computed_col_idx, col_name
+                        );
                     }
                 }
                 Term::Placeholder => {
@@ -778,13 +882,19 @@ impl IRBuilder {
                     // "don't care" but the head defines output columns. For now, skip them.
                     // This is a questionable Datalog construct.
                     if std::env::var("DATALOG_DEBUG").is_ok() {
-                        eprintln!("  head[{}] Placeholder -> SKIPPED (invalid in head)", head_idx);
+                        eprintln!(
+                            "  head[{}] Placeholder -> SKIPPED (invalid in head)",
+                            head_idx
+                        );
                     }
                     // Don't add anything to projection - placeholders in head are ignored
                     continue;
                 }
                 _ => {
-                    return Err(format!("Unsupported term type in head with computed expressions: {:?}", term));
+                    return Err(format!(
+                        "Unsupported term type in head with computed expressions: {:?}",
+                        term
+                    ));
                 }
             }
         }
@@ -846,10 +956,13 @@ impl IRBuilder {
                 }
                 Term::Aggregate(func, var_name) => {
                     // This is an aggregate
-                    let col_pos = input_schema
-                        .iter()
-                        .position(|s| s == var_name)
-                        .ok_or_else(|| format!("Variable {} not found in schema for aggregation", var_name))?;
+                    let col_pos =
+                        input_schema
+                            .iter()
+                            .position(|s| s == var_name)
+                            .ok_or_else(|| {
+                                format!("Variable {} not found in schema for aggregation", var_name)
+                            })?;
 
                     let ir_func = match func {
                         AggregateFunc::Count => AggregateFunction::Count,
@@ -857,14 +970,27 @@ impl IRBuilder {
                         AggregateFunc::Min => AggregateFunction::Min,
                         AggregateFunc::Max => AggregateFunction::Max,
                         AggregateFunc::Avg => AggregateFunction::Avg,
-                        AggregateFunc::TopK { k, descending, .. } => {
-                            AggregateFunction::TopK { k: *k, order_col: col_pos, descending: *descending }
-                        }
-                        AggregateFunc::TopKThreshold { k, threshold, descending, .. } => {
-                            AggregateFunction::TopKThreshold { k: *k, order_col: col_pos, threshold: *threshold, descending: *descending }
-                        }
+                        AggregateFunc::TopK { k, descending, .. } => AggregateFunction::TopK {
+                            k: *k,
+                            order_col: col_pos,
+                            descending: *descending,
+                        },
+                        AggregateFunc::TopKThreshold {
+                            k,
+                            threshold,
+                            descending,
+                            ..
+                        } => AggregateFunction::TopKThreshold {
+                            k: *k,
+                            order_col: col_pos,
+                            threshold: *threshold,
+                            descending: *descending,
+                        },
                         AggregateFunc::WithinRadius { max_distance, .. } => {
-                            AggregateFunction::WithinRadius { distance_col: col_pos, max_distance: *max_distance }
+                            AggregateFunction::WithinRadius {
+                                distance_col: col_pos,
+                                max_distance: *max_distance,
+                            }
                         }
                     };
 
@@ -879,7 +1005,9 @@ impl IRBuilder {
                     return Err("Placeholders in aggregation head not supported".to_string());
                 }
                 Term::Arithmetic(_) => {
-                    return Err("Arithmetic expressions in aggregation head not yet supported".to_string());
+                    return Err(
+                        "Arithmetic expressions in aggregation head not yet supported".to_string(),
+                    );
                 }
                 Term::FunctionCall(_, _) => {
                     return Err("Function calls in aggregation head not yet supported".to_string());
@@ -933,14 +1061,8 @@ mod tests {
 
     fn make_catalog() -> Catalog {
         let mut catalog = Catalog::new();
-        catalog.register_relation(
-            "edge".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
-        catalog.register_relation(
-            "path".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
+        catalog.register_relation("edge".to_string(), vec!["x".to_string(), "y".to_string()]);
+        catalog.register_relation("path".to_string(), vec!["x".to_string(), "y".to_string()]);
         catalog
     }
 
@@ -951,7 +1073,10 @@ mod tests {
 
         let atom = Atom::new(
             "edge".to_string(),
-            vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Variable("y".to_string()),
+            ],
         );
 
         let ir = builder.build_scan(&atom).unwrap();
@@ -973,11 +1098,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "edge".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![],
         );
@@ -997,16 +1128,25 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("z".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("z".to_string()),
+                ],
             ),
             vec![
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
                 ),
                 Atom::new(
                     "edge".to_string(),
-                    vec![Term::Variable("y".to_string()), Term::Variable("z".to_string())],
+                    vec![
+                        Term::Variable("y".to_string()),
+                        Term::Variable("z".to_string()),
+                    ],
                 ),
             ],
             vec![],
@@ -1033,21 +1173,24 @@ mod tests {
     #[test]
     fn test_build_rule_with_ge_constraint() {
         let mut catalog = Catalog::new();
-        catalog.register_relation(
-            "data".to_string(),
-            vec!["x".to_string(), "y".to_string()],
-        );
+        catalog.register_relation("data".to_string(), vec!["x".to_string(), "y".to_string()]);
         let builder = IRBuilder::new(catalog);
 
         // result(x, y) :- data(x, y), x >= 2
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "data".to_string(),
-                vec![Term::Variable("x".to_string()), Term::Variable("y".to_string())],
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
             )],
             vec![Constraint::GreaterOrEqual(
                 Term::Variable("x".to_string()),
@@ -1072,11 +1215,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "person".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             )],
             vec![Constraint::Equal(
                 Term::Variable("name".to_string()),
@@ -1085,7 +1234,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for string equality: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for string equality: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnEqStr predicate
         let ir = ir.unwrap();
@@ -1114,11 +1267,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "person".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             )],
             vec![Constraint::NotEqual(
                 Term::Variable("name".to_string()),
@@ -1127,7 +1286,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for string inequality: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for string inequality: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnNeStr predicate
         let ir = ir.unwrap();
@@ -1156,11 +1319,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "measurement".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             )],
             vec![Constraint::Equal(
                 Term::Variable("value".to_string()),
@@ -1169,7 +1338,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for float equality: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float equality: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnEqFloat predicate
         let ir = ir.unwrap();
@@ -1198,11 +1371,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "measurement".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             )],
             vec![Constraint::GreaterThan(
                 Term::Variable("value".to_string()),
@@ -1211,7 +1390,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for float > comparison: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float > comparison: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnGtFloat predicate
         let ir = ir.unwrap();
@@ -1240,11 +1423,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "measurement".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             )],
             vec![Constraint::LessThan(
                 Term::Variable("value".to_string()),
@@ -1253,7 +1442,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for float < comparison: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float < comparison: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnLtFloat predicate
         let ir = ir.unwrap();
@@ -1282,11 +1475,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "measurement".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             )],
             vec![Constraint::GreaterOrEqual(
                 Term::Variable("value".to_string()),
@@ -1295,7 +1494,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for float >= comparison: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float >= comparison: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnGeFloat predicate
         let ir = ir.unwrap();
@@ -1324,11 +1527,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "measurement".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("value".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("value".to_string()),
+                ],
             )],
             vec![Constraint::LessOrEqual(
                 Term::Variable("value".to_string()),
@@ -1337,7 +1546,11 @@ mod tests {
         );
 
         let ir = builder.build_ir(&rule);
-        assert!(ir.is_ok(), "Expected successful IR build for float <= comparison: {:?}", ir);
+        assert!(
+            ir.is_ok(),
+            "Expected successful IR build for float <= comparison: {:?}",
+            ir
+        );
 
         // Verify it creates a Filter with ColumnLeFloat predicate
         let ir = ir.unwrap();
@@ -1367,11 +1580,17 @@ mod tests {
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             ),
             vec![Atom::new(
                 "person".to_string(),
-                vec![Term::Variable("id".to_string()), Term::Variable("name".to_string())],
+                vec![
+                    Term::Variable("id".to_string()),
+                    Term::Variable("name".to_string()),
+                ],
             )],
             vec![Constraint::GreaterThan(
                 Term::Variable("name".to_string()),

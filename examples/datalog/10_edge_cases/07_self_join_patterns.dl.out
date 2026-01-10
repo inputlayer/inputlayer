@@ -1,12 +1,16 @@
-Executing script: examples/datalog/10_edge_cases/07_self_join_patterns.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_self_join
-Database 'test_self_join' created.
-Switched to database: test_self_join
-> .db use test_self_join
-Switched to database: test_self_join
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_join
+Knowledge graph 'test_self_join' created.
+Switched to knowledge graph: test_self_join
+> .kg use test_self_join
+Switched to knowledge graph: test_self_join
 > +edge[(1, 2), (2, 3), (3, 4), (1, 3), (2, 4), (4, 1)].
-Inserted 6 facts into 'edge'.
+Inserted 6 fact(s) into 'edge'.
 > +two_hop(X, Z) :- edge(X, Y), edge(Y, Z).
 Rule 'two_hop' registered.
 > ?- two_hop(X, Z).
@@ -27,7 +31,7 @@ Rule 'self_loop' registered.
   (3)
   (4)
 > +self_edge[(5, 5), (1, 2)].
-Inserted 2 facts into 'self_edge'.
+Inserted 2 fact(s) into 'self_edge'.
 > +actual_self_loop(X) :- self_edge(X, X).
 Rule 'actual_self_loop' registered.
 > ?- actual_self_loop(X).
@@ -37,4 +41,20 @@ Rule 'actual_self_loop' registered.
 > +triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
 Rule 'triangle' registered.
 > ?- triangle(A, B, C).
-Script error: Line 31: Query execution failed: Unsupported ordering constraint pattern
+No results.
+> +symmetric(A, B) :- edge(A, B), edge(B, A), A < B.
+Rule 'symmetric' registered.
+> ?- symmetric(A, B).
+No results.
+> +three_hop(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
+Rule 'three_hop' registered.
+> ?- three_hop(X, W).
+No results.
+> +hop_count(X, count<Z>) :- two_hop(X, Z).
+Rule 'hop_count' registered.
+> ?- hop_count(X, C).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_join
+Knowledge graph 'test_self_join' dropped.

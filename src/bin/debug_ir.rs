@@ -3,7 +3,7 @@ use inputlayer::{DatalogEngine, OptimizationConfig};
 fn main() {
     let query = "path2(x, z) :- edge(x, y), edge(y, z).";
     let edges: Vec<(i32, i32)> = vec![(1, 2), (2, 3), (3, 4), (4, 5)];
-    
+
     // Test with NO optimizations - show IR
     println!("=== NO Optimizations ===");
     let config = OptimizationConfig {
@@ -19,7 +19,7 @@ fn main() {
     println!("IR before optimize: {:#?}", engine.ir_nodes());
     engine.optimize_ir().unwrap();
     println!("IR after optimize: {:#?}", engine.ir_nodes());
-    
+
     // Test with ONLY join planning - show IR
     println!("\n\n=== ONLY Join Planning ===");
     let config = OptimizationConfig {

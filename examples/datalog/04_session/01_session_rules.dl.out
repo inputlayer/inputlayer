@@ -1,12 +1,16 @@
-Executing script: examples/datalog/04_session/01_session_rules.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_sess
-Database 'test_sess' created.
-Switched to database: test_sess
-> .db use test_sess
-Switched to database: test_sess
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess
+Knowledge graph 'test_sess' created.
+Switched to knowledge graph: test_sess
+> .kg use test_sess
+Switched to knowledge graph: test_sess
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > path(X, Y) :- edge(X, Y).
 3 rows:
   (1, 2)
@@ -26,19 +30,16 @@ Inserted 3 facts into 'edge'.
 Session rules (2):
   1. path(X, Y) :- edge(X, Y).
   2. path(X, Z) :- path(X, Y), edge(Y, Z).
-
-Use .session clear to clear all, .session drop <n> to remove one.
 > ?- path(1, X).
 3 rows:
   (1, 2)
   (1, 3)
   (1, 4)
 > .session clear
-Cleared 2 session rule(s).
+Cleared 0 session fact(s), 2 session rule(s).
 > .session
-No session rules defined.
-Use :- to define transient rules (e.g., foo(X, Y) :- bar(X, Y).)
-> .db use default
-Switched to database: default
-> .db drop test_sess
-Database 'test_sess' dropped.
+No session data defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess
+Knowledge graph 'test_sess' dropped.

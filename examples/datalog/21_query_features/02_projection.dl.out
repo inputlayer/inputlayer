@@ -1,12 +1,16 @@
-Executing script: examples/datalog/21_query_features/02_projection.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_projection
-Database 'test_projection' created.
-Switched to database: test_projection
-> .db use test_projection
-Switched to database: test_projection
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_projection
+Knowledge graph 'test_projection' created.
+Switched to knowledge graph: test_projection
+> .kg use test_projection
+Switched to knowledge graph: test_projection
 > +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)].
-Inserted 4 facts into 'employees'.
+Inserted 4 fact(s) into 'employees'.
 > +departments(D) :- employees(_, _, D).
 Rule 'departments' registered.
 > ?- departments(D).
@@ -36,7 +40,7 @@ Rule 'high_earners' registered.
 2 rows:
   (2, 60000)
   (4, 70000)
-> .db use default
-Switched to database: default
-> .db drop test_projection
-Database 'test_projection' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_projection
+Knowledge graph 'test_projection' dropped.

@@ -1,13 +1,17 @@
-Executing script: examples/datalog/12_errors/04_arity_mismatch_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arity_err
-Database 'test_arity_err' created.
-Switched to database: test_arity_err
-> .db use test_arity_err
-Switched to database: test_arity_err
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_err
+Knowledge graph 'test_arity_err' created.
+Switched to knowledge graph: test_arity_err
+> .kg use test_arity_err
+Switched to knowledge graph: test_arity_err
 > +single[(1), (2), (3)].
-Inserted 3 facts into 'single'.
-> .db use default
-Switched to database: default
-> .db drop test_arity_err
-Database 'test_arity_err' dropped.
+Inserted 3 fact(s) into 'single'.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arity_err
+Knowledge graph 'test_arity_err' dropped.

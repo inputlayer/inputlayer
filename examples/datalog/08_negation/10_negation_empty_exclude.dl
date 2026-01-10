@@ -1,23 +1,23 @@
-// Test: Negation with Empty Exclusion Set
-// Category: 08_negation
-// Description: Tests negation when the exclusion relation is empty
+% Test: Negation with Empty Exclusion Set
+% Category: 08_negation
+% Description: Tests negation when the exclusion relation is empty
 
-.db create test_neg_empty_excl
-.db use test_neg_empty_excl
+.kg create test_neg_empty_excl
+.kg use test_neg_empty_excl
 
-// Data to filter
+% Data to filter
 +data[(1, 10), (2, 20), (3, 30)].
 
-// Empty exclusion set (no facts)
+% Empty exclusion set (no facts)
 +empty_exclude[(999, 999)].
 -empty_exclude(999, 999).
 
-// All data should pass through since nothing to exclude
+% All data should pass through since nothing to exclude
 +result(X, Y) :- data(X, Y), !empty_exclude(X, _).
 ?- result(X, Y).
 
-// Should return all 3 tuples
+% Should return all 3 tuples
 
-// Cleanup
-.db use default
-.db drop test_neg_empty_excl
+% Cleanup
+.kg use default
+.kg drop test_neg_empty_excl

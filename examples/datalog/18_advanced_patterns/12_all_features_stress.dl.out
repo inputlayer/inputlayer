@@ -1,14 +1,18 @@
-Executing script: examples/datalog/18_advanced_patterns/12_all_features_stress.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_all_features
-Database 'test_all_features' created.
-Switched to database: test_all_features
-> .db use test_all_features
-Switched to database: test_all_features
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_features
+Knowledge graph 'test_all_features' created.
+Switched to knowledge graph: test_all_features
+> .kg use test_all_features
+Switched to knowledge graph: test_all_features
 > +link[(1, 2, 10), (2, 3, 20), (3, 4, 15), (4, 5, 25), (1, 3, 35), (2, 4, 30), (3, 5, 40), (1, 5, 100)].
-Inserted 8 facts into 'link'.
+Inserted 8 fact(s) into 'link'.
 > +blocked[(3, 5), (1, 5)].
-Inserted 2 facts into 'blocked'.
+Inserted 2 fact(s) into 'blocked'.
 > +active_link(X, Y, C) :- link(X, Y, C), !blocked(X, Y).
 Rule 'active_link' registered.
 > ?- active_link(X, Y, C).
@@ -22,4 +26,4 @@ Rule 'active_link' registered.
 > +path_cost(X, Y, C) :- active_link(X, Y, C).
 Rule 'path_cost' registered.
 > +path_cost(X, Z, C1+C2) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
-Script error: Line 23: Parse error: Invalid term: 'C1+C2'
+Script error: Parse error: Invalid term: 'C1+C2'

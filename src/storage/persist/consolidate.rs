@@ -4,9 +4,9 @@
 //! updates into the current state. It sums up the diffs for identical data points
 //! and removes entries with zero multiplicity.
 
-use crate::value::Tuple2;
-use crate::value::Tuple;
 use super::batch::Update;
+use crate::value::Tuple;
+use crate::value::Tuple2;
 
 /// Consolidate updates in place: sum diffs for identical (data, time) pairs.
 ///
@@ -15,12 +15,16 @@ use super::batch::Update;
 /// - Updates with zero diff are removed (they cancel out)
 ///
 /// # Example
-/// ```ignore
+/// ```rust
+/// use inputlayer::storage::persist::{Update, consolidate};
+/// use inputlayer::value::Tuple;
+///
 /// // Insert (1,2) twice, delete once = net +1
+/// let tuple = Tuple::from_pair(1, 2);
 /// let mut updates = vec![
-///     Update::insert((1, 2), 10),
-///     Update::insert((1, 2), 10),  // Same data and time
-///     Update::delete((1, 2), 10),   // Cancels one insert
+///     Update::insert(tuple.clone(), 10),
+///     Update::insert(tuple.clone(), 10),  // Same data and time
+///     Update::delete(tuple.clone(), 10),   // Cancels one insert
 /// ];
 /// consolidate(&mut updates);
 /// assert_eq!(updates.len(), 1);
@@ -32,11 +36,9 @@ pub fn consolidate(updates: &mut Vec<Update>) {
     }
 
     // Sort by (data, time) to group identical updates together
-    updates.sort_by(|a, b| {
-        match a.data.cmp(&b.data) {
-            std::cmp::Ordering::Equal => a.time.cmp(&b.time),
-            other => other,
-        }
+    updates.sort_by(|a, b| match a.data.cmp(&b.data) {
+        std::cmp::Ordering::Equal => a.time.cmp(&b.time),
+        other => other,
     });
 
     // Merge adjacent updates with same (data, time) by summing diffs
@@ -241,8 +243,8 @@ mod tests {
     fn test_consolidate_to_current() {
         let mut updates = vec![
             Update::insert(Tuple::from_pair(1, 2), 10),
-            Update::insert(Tuple::from_pair(1, 2), 20),  // Same data, different time
-            Update::delete(Tuple::from_pair(1, 2), 30),  // Delete at yet another time
+            Update::insert(Tuple::from_pair(1, 2), 20), // Same data, different time
+            Update::delete(Tuple::from_pair(1, 2), 30), // Delete at yet another time
         ];
         consolidate_to_current(&mut updates);
 
@@ -255,9 +257,21 @@ mod tests {
     #[test]
     fn test_to_tuples() {
         let updates = vec![
-            Update { data: Tuple::from_pair(1, 2), time: 10, diff: 1 },
-            Update { data: Tuple::from_pair(3, 4), time: 10, diff: -1 },  // Negative = deleted
-            Update { data: Tuple::from_pair(5, 6), time: 10, diff: 2 },
+            Update {
+                data: Tuple::from_pair(1, 2),
+                time: 10,
+                diff: 1,
+            },
+            Update {
+                data: Tuple::from_pair(3, 4),
+                time: 10,
+                diff: -1,
+            }, // Negative = deleted
+            Update {
+                data: Tuple::from_pair(5, 6),
+                time: 10,
+                diff: 2,
+            },
         ];
         let tuples = to_tuple2s(&updates);
         assert_eq!(tuples.len(), 2);
@@ -281,8 +295,16 @@ mod tests {
     #[test]
     fn test_to_tuples_returns_tuple_type() {
         let updates = vec![
-            Update { data: Tuple::from_pair(1, 2), time: 10, diff: 1 },
-            Update { data: Tuple::from_pair(5, 6), time: 10, diff: 2 },
+            Update {
+                data: Tuple::from_pair(1, 2),
+                time: 10,
+                diff: 1,
+            },
+            Update {
+                data: Tuple::from_pair(5, 6),
+                time: 10,
+                diff: 2,
+            },
         ];
         let tuples: Vec<Tuple> = to_tuples(&updates);
         assert_eq!(tuples.len(), 2);

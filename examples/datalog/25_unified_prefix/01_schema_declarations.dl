@@ -1,24 +1,24 @@
-// Test: Unified Prefix Schema Declarations
-// Category: Unified Prefix Syntax
-// Description: Tests persistent and transient schema declarations using + prefix
+% Test: Unified Prefix Schema Declarations
+% Category: Unified Prefix Syntax
+% Description: Tests persistent and transient schema declarations using + prefix
 
-.db create test_unified_schema
-.db use test_unified_schema
+.kg create test_unified_schema
+.kg use test_unified_schema
 
-// Persistent schema declaration (new syntax - replaces 'rel')
+% Persistent schema declaration (new syntax - replaces 'rel')
 +employee(id: int, name: string, dept: int).
 +department(id: int, name: string).
 
-// Insert data using persistent inserts
+% Insert data using persistent inserts
 +employee[(1, "Alice", 10), (2, "Bob", 20), (3, "Charlie", 10)].
 +department[(10, "Engineering"), (20, "Sales")].
 
-// Query employees
+% Query employees
 ?- employee(Id, Name, Dept).
 
-// Query departments
+% Query departments
 ?- department(Id, Name).
 
-// Cleanup
-.db use default
-.db drop test_unified_schema
+% Cleanup
+.kg use default
+.kg drop test_unified_schema

@@ -1,29 +1,29 @@
-// Test: Projection (Column Selection)
-// Category: 21_query_features
-// Description: Tests selecting specific columns in views
+% Test: Projection (Column Selection)
+% Category: 21_query_features
+% Description: Tests selecting specific columns in views
 
-.db create test_projection
-.db use test_projection
+.kg create test_projection
+.kg use test_projection
 
-// Multi-column data
+% Multi-column data
 +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)].
 
-// Project to single column (dept)
+% Project to single column (dept)
 +departments(D) :- employees(_, _, D).
 ?- departments(D).
 
-// Project to two columns (id, salary)
+% Project to two columns (id, salary)
 +id_salary(Id, Sal) :- employees(Id, Sal, _).
 ?- id_salary(X, Y).
 
-// Project to first and last column
+% Project to first and last column
 +id_dept(Id, D) :- employees(Id, _, D).
 ?- id_dept(X, Y).
 
-// Project with rename (via view)
+% Project with rename (via view)
 +high_earners(Emp, Pay) :- employees(Emp, Pay, _), Pay > 55000.
 ?- high_earners(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_projection
+% Cleanup
+.kg use default
+.kg drop test_projection

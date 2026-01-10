@@ -1,11 +1,15 @@
-Executing script: examples/datalog/12_errors/09_arithmetic_overflow_error.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_overflow
-Database 'test_overflow' created.
-Switched to database: test_overflow
-> .db use test_overflow
-Switched to database: test_overflow
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_overflow
+Knowledge graph 'test_overflow' created.
+Switched to knowledge graph: test_overflow
+> .kg use test_overflow
+Switched to knowledge graph: test_overflow
 > +large_nums[(1000000000), (2000000000), (3000000000)].
-Inserted 3 facts into 'large_nums'.
+Inserted 3 fact(s) into 'large_nums'.
 > +mult_result(X, Y, X*Y) :- large_nums(X), large_nums(Y), X != Y.
-Script error: Line 14: Parse error: Invalid term: 'X*Y'
+Script error: Parse error: Invalid term: 'X*Y'

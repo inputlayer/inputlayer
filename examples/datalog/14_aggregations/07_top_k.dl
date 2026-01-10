@@ -1,19 +1,19 @@
-// Test: Top-K Aggregation
-// Category: 14_aggregations
-// Description: Tests top_k aggregation to get top results ordered by score
+% Test: Top-K Aggregation
+% Category: 14_aggregations
+% Description: Tests top_k aggregation to get top results ordered by score
 
-.db create test_top_k
-.db use test_top_k
+.kg create test_top_k
+.kg use test_top_k
 
-// Insert scores: score(player_id, points)
+% Insert scores: score(player_id, points)
 +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
 
-// Get top 3 players by score (descending)
+% Get top 3 players by score (descending)
 +top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).
 
-// Query the result
+% Query the result
 ?- top_players(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_top_k
+% Cleanup
+.kg use default
+.kg drop test_top_k

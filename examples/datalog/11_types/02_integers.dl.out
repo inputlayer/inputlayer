@@ -1,16 +1,20 @@
-Executing script: examples/datalog/11_types/02_integers.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_int
-Database 'test_int' created.
-Switched to database: test_int
-> .db use test_int
-Switched to database: test_int
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int
+Knowledge graph 'test_int' created.
+Switched to knowledge graph: test_int
+> .kg use test_int
+Switched to knowledge graph: test_int
 > +positive[(1, 100), (2, 200), (3, 300)].
-Inserted 3 facts into 'positive'.
+Inserted 3 fact(s) into 'positive'.
 > +negative[(-1, -100), (-2, -200), (-3, -300)].
-Inserted 3 facts into 'negative'.
+Inserted 3 fact(s) into 'negative'.
 > +zeros[(0, 0), (0, 1), (1, 0)].
-Inserted 3 facts into 'zeros'.
+Inserted 3 fact(s) into 'zeros'.
 > ?- positive(X, Y).
 3 rows:
   (1, 100)
@@ -32,7 +36,7 @@ Rule 'neg_large' registered.
 2 rows:
   (-3, -300)
   (-2, -200)
-> .db use default
-Switched to database: default
-> .db drop test_int
-Database 'test_int' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int
+Knowledge graph 'test_int' dropped.

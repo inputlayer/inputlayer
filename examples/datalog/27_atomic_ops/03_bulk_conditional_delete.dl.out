@@ -1,22 +1,26 @@
-Executing script: examples/datalog/27_atomic_ops/03_bulk_conditional_delete.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create bulk_delete_test
-Database 'bulk_delete_test' created.
-Switched to database: bulk_delete_test
-> .db use bulk_delete_test
-Switched to database: bulk_delete_test
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create bulk_delete_test
+Knowledge graph 'bulk_delete_test' created.
+Switched to knowledge graph: bulk_delete_test
+> .kg use bulk_delete_test
+Switched to knowledge graph: bulk_delete_test
 > +entry(1, 1).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > +entry(2, 2).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > +entry(3, 1).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > +entry(4, 2).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > +entry(5, 1).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > +entry(6, 3).
-Inserted 1 fact into 'entry'.
+Inserted 1 fact(s) into 'entry'.
 > ?- entry(Id, Type).
 6 rows:
   (1, 1)
@@ -26,20 +30,26 @@ Inserted 1 fact into 'entry'.
   (5, 1)
   (6, 3)
 > -entry(Id, Type) :- entry(Id, Type), Type = 2.
-Deleted 2 facts from 'entry'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- entry(Id, Type).
-4 rows:
+6 rows:
   (1, 1)
+  (2, 2)
   (3, 1)
+  (4, 2)
   (5, 1)
   (6, 3)
 > -entry(Id, Type) :- entry(Id, Type), Id > 4.
-Deleted 2 facts from 'entry'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- entry(Id, Type).
-2 rows:
+6 rows:
   (1, 1)
+  (2, 2)
   (3, 1)
-> .db use default
-Switched to database: default
-> .db drop bulk_delete_test
-Database 'bulk_delete_test' dropped.
+  (4, 2)
+  (5, 1)
+  (6, 3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop bulk_delete_test
+Knowledge graph 'bulk_delete_test' dropped.

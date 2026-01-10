@@ -1,12 +1,16 @@
-Executing script: examples/datalog/11_types/05_mixed_type_tuples.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_mixed
-Database 'test_mixed' created.
-Switched to database: test_mixed
-> .db use test_mixed
-Switched to database: test_mixed
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed
+Knowledge graph 'test_mixed' created.
+Switched to knowledge graph: test_mixed
+> .kg use test_mixed
+Switched to knowledge graph: test_mixed
 > +mixed[(1, 100, 10000), (2, 200, 20000), (3, 300, 30000)].
-Inserted 3 facts into 'mixed'.
+Inserted 3 fact(s) into 'mixed'.
 > ?- mixed(Id, Mid, Large).
 3 rows:
   (1, 100, 10000)
@@ -20,4 +24,4 @@ Rule 'small_ids' registered.
   (2, 200, 20000)
   (3, 300, 30000)
 > +combined(Id, M+L) :- mixed(Id, M, L).
-Script error: Line 20: Parse error: Invalid term: 'M+L'
+Script error: Parse error: Invalid term: 'M+L'

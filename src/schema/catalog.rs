@@ -2,9 +2,9 @@
 //!
 //! Storage and lookup for relation schemas with validation constraints.
 
-use std::collections::HashMap;
+use super::{ColumnAnnotation, ColumnSchema, RelationSchema, SchemaType, ValidationConfig};
 use serde::{Deserialize, Serialize};
-use super::{RelationSchema, ColumnSchema, SchemaType, ColumnAnnotation, ValidationConfig};
+use std::collections::HashMap;
 
 /// Error types for schema operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -108,13 +108,16 @@ impl SchemaCatalog {
     fn validate_schema(&self, schema: &RelationSchema) -> Result<(), SchemaError> {
         // Check for empty name
         if schema.name.is_empty() {
-            return Err(SchemaError::InvalidSchema("Relation name cannot be empty".to_string()));
+            return Err(SchemaError::InvalidSchema(
+                "Relation name cannot be empty".to_string(),
+            ));
         }
 
         // Check for reserved prefixes
         if schema.name.starts_with("_invalid_") {
             return Err(SchemaError::InvalidSchema(
-                "Relation name cannot start with '_invalid_' (reserved for quarantine tables)".to_string(),
+                "Relation name cannot start with '_invalid_' (reserved for quarantine tables)"
+                    .to_string(),
             ));
         }
 
@@ -122,7 +125,9 @@ impl SchemaCatalog {
         let mut seen_columns = std::collections::HashSet::new();
         for col in &schema.columns {
             if col.name.is_empty() {
-                return Err(SchemaError::InvalidSchema("Column name cannot be empty".to_string()));
+                return Err(SchemaError::InvalidSchema(
+                    "Column name cannot be empty".to_string(),
+                ));
             }
             if !seen_columns.insert(&col.name) {
                 return Err(SchemaError::DuplicateColumn(col.name.clone()));
@@ -292,8 +297,8 @@ mod tests {
     fn test_catalog_get() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("User")
-            .with_column(ColumnSchema::new("id", SchemaType::Symbol));
+        let schema =
+            RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Symbol));
 
         catalog.register(schema).unwrap();
 
@@ -306,8 +311,8 @@ mod tests {
     fn test_catalog_remove() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("User")
-            .with_column(ColumnSchema::new("id", SchemaType::Symbol));
+        let schema =
+            RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Symbol));
 
         catalog.register(schema).unwrap();
         assert!(catalog.has_schema("User"));
@@ -324,12 +329,13 @@ mod tests {
         SchemaCatalog::define("User")
             .primary("id", SchemaType::Symbol)
             .column("name", SchemaType::Symbol)
-            .column_with("age", SchemaType::Int, vec![
-                ColumnAnnotation::Range { min: 0, max: 120 },
-            ])
+            .column_with(
+                "age",
+                SchemaType::Int,
+                vec![ColumnAnnotation::Range { min: 0, max: 120 }],
+            )
             .validation(
-                ValidationConfig::new()
-                    .with_check(CheckConstraint::NamedRule("rule1".to_string())),
+                ValidationConfig::new().with_check(CheckConstraint::NamedRule("rule1".to_string())),
             )
             .register_in(&mut catalog)
             .unwrap();
@@ -344,8 +350,8 @@ mod tests {
     fn test_validate_empty_name() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("")
-            .with_column(ColumnSchema::new("id", SchemaType::Symbol));
+        let schema =
+            RelationSchema::new("").with_column(ColumnSchema::new("id", SchemaType::Symbol));
 
         assert!(catalog.register(schema).is_err());
     }
@@ -378,11 +384,10 @@ mod tests {
     fn test_validate_range_invalid() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("Test")
-            .with_column(
-                ColumnSchema::new("age", SchemaType::Int)
-                    .with_annotation(ColumnAnnotation::Range { min: 100, max: 0 }), // Invalid!
-            );
+        let schema = RelationSchema::new("Test").with_column(
+            ColumnSchema::new("age", SchemaType::Int)
+                .with_annotation(ColumnAnnotation::Range { min: 100, max: 0 }), // Invalid!
+        );
 
         let result = catalog.register(schema);
         assert!(result.is_err());
@@ -392,11 +397,10 @@ mod tests {
     fn test_validate_range_wrong_type() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("Test")
-            .with_column(
-                ColumnSchema::new("name", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Range { min: 0, max: 100 }), // Wrong type!
-            );
+        let schema = RelationSchema::new("Test").with_column(
+            ColumnSchema::new("name", SchemaType::Symbol)
+                .with_annotation(ColumnAnnotation::Range { min: 0, max: 100 }), // Wrong type!
+        );
 
         let result = catalog.register(schema);
         assert!(result.is_err());
@@ -406,11 +410,13 @@ mod tests {
     fn test_validate_pattern_invalid_regex() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("Test")
-            .with_column(
-                ColumnSchema::new("email", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Pattern { regex: "[invalid".to_string() }),
-            );
+        let schema = RelationSchema::new("Test").with_column(
+            ColumnSchema::new("email", SchemaType::Symbol).with_annotation(
+                ColumnAnnotation::Pattern {
+                    regex: "[invalid".to_string(),
+                },
+            ),
+        );
 
         let result = catalog.register(schema);
         assert!(result.is_err());
@@ -420,11 +426,11 @@ mod tests {
     fn test_validate_pattern_wrong_type() {
         let mut catalog = SchemaCatalog::new();
 
-        let schema = RelationSchema::new("Test")
-            .with_column(
-                ColumnSchema::new("age", SchemaType::Int)
-                    .with_annotation(ColumnAnnotation::Pattern { regex: ".*".to_string() }),
-            );
+        let schema = RelationSchema::new("Test").with_column(
+            ColumnSchema::new("age", SchemaType::Int).with_annotation(ColumnAnnotation::Pattern {
+                regex: ".*".to_string(),
+            }),
+        );
 
         let result = catalog.register(schema);
         assert!(result.is_err());
@@ -437,7 +443,9 @@ mod tests {
         assert_eq!(catalog.len(), 0);
 
         catalog
-            .register(RelationSchema::new("R1").with_column(ColumnSchema::new("x", SchemaType::Int)))
+            .register(
+                RelationSchema::new("R1").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
             .unwrap();
 
         assert!(!catalog.is_empty());

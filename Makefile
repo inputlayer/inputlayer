@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-release doc doc-check check build clean release snapshot-test test-all
+.PHONY: all ci fmt fmt-check lint test test-release doc doc-check check build clean release snapshot-test test-all flush-dev
 
 # Default target
 all: ci
@@ -130,3 +130,10 @@ endif
 	@echo "Next steps:"
 	@echo "  1. Create a PR from release/$(VERSION) to main"
 	@echo "  2. After merge, create and push tag: git tag v$(VERSION) && git push origin v$(VERSION)"
+
+# Flush development data - removes data folder to reset to empty state
+# The default knowledge graph will be recreated on next server start
+flush-dev:
+	@echo "Flushing development data..."
+	@rm -rf ./data
+	@echo "Data folder removed. Server will recreate default knowledge graph on next start."

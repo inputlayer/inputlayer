@@ -1,40 +1,40 @@
-// Self-checking arithmetic operations test
-// Tests multiple operations with embedded expected values
-// Using 2-column relations to avoid the 3+ column bug
+% Self-checking arithmetic operations test
+% Tests multiple operations with embedded expected values
+% Using 2-column relations to avoid the 3+ column bug
 
-.db create test_self_check_ops
-.db use test_self_check_ops
+.kg create test_self_check_ops
+.kg use test_self_check_ops
 
-// Test addition: input values and their sums
+% Test addition: input values and their sums
 +add_left[(1, 10), (2, 25), (3, 0), (4, -5)].
 +add_right[(1, 5), (2, 15), (3, 0), (4, 10)].
-// Expected sums: 15, 40, 0, 5
+% Expected sums: 15, 40, 0, 5
 +expected_sum[(1, 15), (2, 40), (3, 0), (4, 5)].
 
-// Compute addition
+% Compute addition
 computed_sum(X, A+B) :- add_left(X, A), add_right(X, B).
 ?- computed_sum(X, Y).
 ?- expected_sum(X, Y).
 
-// Test subtraction: A - B
+% Test subtraction: A - B
 +sub_left[(1, 100), (2, 50), (3, 10), (4, 0)].
 +sub_right[(1, 30), (2, 25), (3, 10), (4, 5)].
-// Expected differences: 70, 25, 0, -5
+% Expected differences: 70, 25, 0, -5
 +expected_diff[(1, 70), (2, 25), (3, 0), (4, -5)].
 
 computed_diff(X, A-B) :- sub_left(X, A), sub_right(X, B).
 ?- computed_diff(X, Y).
 ?- expected_diff(X, Y).
 
-// Test multiplication: A * constant
+% Test multiplication: A * constant
 +mul_input[(1, 5), (2, 10), (3, 0), (4, -3)].
 +mul_link[(1, 100), (2, 200), (3, 300), (4, 400)].
-// Expected A*2: 10, 20, 0, -6
+% Expected A*2: 10, 20, 0, -6
 +expected_mul[(1, 10), (2, 20), (3, 0), (4, -6)].
 
 computed_mul(Y, A*2) :- mul_input(X, A), mul_link(X, Y).
 ?- computed_mul(X, Y).
 ?- expected_mul(X, Y).
 
-.db use default
-.db drop test_self_check_ops
+.kg use default
+.kg drop test_self_check_ops

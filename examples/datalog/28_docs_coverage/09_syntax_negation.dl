@@ -1,11 +1,11 @@
-// Test: Syntax Negation
-// Category: docs_coverage
-// Description: Tests negation examples from docs/reference/syntax.md
+% Test: Syntax Negation
+% Category: docs_coverage
+% Description: Tests negation examples from docs/reference/syntax.md
 
-.db create syntax_negation
-.db use syntax_negation
+.kg create syntax_negation
+.kg use syntax_negation
 
-// === Setup data ===
+% === Setup data ===
 +person[(1, "alice"), (2, "bob"), (3, "carol")].
 +purchase[(1, "laptop"), (1, "phone")].
 +node[(1), (2), (3), (4), (5)].
@@ -13,29 +13,29 @@
 +a[(1), (2), (3)].
 +b[(2), (3), (4)].
 
-// === People without purchases (negation with !) ===
+% === People without purchases (negation with !) ===
 +non_buyer(Id, Name) :-
   person(Id, Name),
   !purchase(Id, _).
 
 ?- non_buyer(Id, Name).
 
-// === Nodes with no outgoing edges (sink nodes) ===
+% === Nodes with no outgoing edges (sink nodes) ===
 +sink(X) :- node(X), !edge(X, _).
 
 ?- sink(X).
 
-// === Nodes with no incoming edges (source nodes) ===
+% === Nodes with no incoming edges (source nodes) ===
 +source(X) :- node(X), !edge(_, X).
 
 ?- source(X).
 
-// === Set difference ===
+% === Set difference ===
 +only_in_a(X) :- a(X), !b(X).
 
 ?- only_in_a(X).
 
-// Cleanup
-.db use default
-.db drop syntax_negation
+% Cleanup
+.kg use default
+.kg drop syntax_negation
 

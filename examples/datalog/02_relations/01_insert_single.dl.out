@@ -1,16 +1,20 @@
-Executing script: examples/datalog/02_relations/01_insert_single.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_insert
-Database 'test_insert' created.
-Switched to database: test_insert
-> .db use test_insert
-Switched to database: test_insert
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_insert
+Knowledge graph 'test_insert' created.
+Switched to knowledge graph: test_insert
+> .kg use test_insert
+Switched to knowledge graph: test_insert
 > +edge(1, 2).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > +edge(3, 4).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > +edge(5, 6).
-Inserted 1 fact into 'edge'.
+Inserted 1 fact(s) into 'edge'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)
@@ -18,12 +22,16 @@ Inserted 1 fact into 'edge'.
   (5, 6)
 > .rel
 Relations:
-  edge
+  edge (arity: 2)
 > .rel edge
 Relation: edge
-Schema: ["col0", "col1"]
-Tuple count: 3
-> .db use default
-Switched to database: default
-> .db drop test_insert
-Database 'test_insert' dropped.
+  Columns: ["col0", "col1"]
+  Total rows: 3
+  Preview (first 3):
+    (1, 2)
+    (3, 4)
+    (5, 6)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_insert
+Knowledge graph 'test_insert' dropped.

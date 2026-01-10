@@ -1,11 +1,15 @@
-Executing script: examples/datalog/11_types/06_int_arithmetic.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_int_arith
-Database 'test_int_arith' created.
-Switched to database: test_int_arith
-> .db use test_int_arith
-Switched to database: test_int_arith
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_arith
+Knowledge graph 'test_int_arith' created.
+Switched to knowledge graph: test_int_arith
+> .kg use test_int_arith
+Switched to knowledge graph: test_int_arith
 > +nums[(1, 10), (2, 20), (3, 30), (4, 0), (5, -10)].
-Inserted 5 facts into 'nums'.
+Inserted 5 fact(s) into 'nums'.
 > +added(Id, V+5) :- nums(Id, V).
-Script error: Line 12: Parse error: Invalid term: 'V+5'
+Script error: Parse error: Invalid term: 'V+5'

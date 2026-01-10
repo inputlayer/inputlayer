@@ -18,20 +18,16 @@ use std::sync::Arc;
 pub enum ResourceError {
     /// Memory limit exceeded
     #[error("Memory limit exceeded: used {used} bytes, limit {limit} bytes")]
-    MemoryLimitExceeded {
-        limit: usize,
-        used: usize,
-    },
+    MemoryLimitExceeded { limit: usize, used: usize },
 
     /// Result size limit exceeded
     #[error("Result size limit exceeded: {actual} tuples, limit {limit} tuples")]
-    ResultSizeLimitExceeded {
-        limit: usize,
-        actual: usize,
-    },
+    ResultSizeLimitExceeded { limit: usize, actual: usize },
 
     /// Intermediate result size exceeded
-    #[error("Intermediate result limit exceeded at '{stage}': {actual} tuples, limit {limit} tuples")]
+    #[error(
+        "Intermediate result limit exceeded at '{stage}': {actual} tuples, limit {limit} tuples"
+    )]
     IntermediateResultExceeded {
         limit: usize,
         actual: usize,
@@ -40,10 +36,7 @@ pub enum ResourceError {
 
     /// Row width (tuple arity) exceeded
     #[error("Row width limit exceeded: {actual} columns, limit {limit} columns")]
-    RowWidthExceeded {
-        limit: usize,
-        actual: usize,
-    },
+    RowWidthExceeded { limit: usize, actual: usize },
 }
 
 /// Resource limits configuration
@@ -93,10 +86,10 @@ impl ResourceLimits {
     pub fn strict() -> Self {
         ResourceLimits {
             max_memory_bytes: Some(100 * 1024 * 1024), // 100 MB
-            max_result_size: Some(100_000),             // 100K tuples
-            max_intermediate_size: Some(1_000_000),     // 1M tuples
-            max_row_width: Some(20),                    // 20 columns
-            max_recursion_depth: Some(100),             // 100 iterations
+            max_result_size: Some(100_000),            // 100K tuples
+            max_intermediate_size: Some(1_000_000),    // 1M tuples
+            max_row_width: Some(20),                   // 20 columns
+            max_recursion_depth: Some(100),            // 100 iterations
         }
     }
 
@@ -269,12 +262,18 @@ impl Default for MemoryTracker {
     }
 }
 
-/// Resource guard that automatically releases memory when dropped
+// TODO: Consider adopting RAII pattern for automatic memory tracking cleanup.
+// Reserved as a guard-based memory management alternative. Currently the code
+// uses explicit allocate()/release() calls on MemoryTracker. This RAII guard
+// would automatically release memory when dropped, preventing leaks in complex
+// control flow. May be useful for future execution paths with early returns.
+#[allow(dead_code)]
 pub struct MemoryGuard<'a> {
     tracker: &'a MemoryTracker,
     bytes: usize,
 }
 
+#[allow(dead_code)]
 impl<'a> MemoryGuard<'a> {
     /// Create a new guard that will release the given bytes when dropped
     pub fn new(tracker: &'a MemoryTracker, bytes: usize) -> Result<Self, ResourceError> {

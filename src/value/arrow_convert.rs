@@ -9,7 +9,7 @@ use arrow::array::{
     Int64Array, Int8Array, LargeListArray, ListArray, StringArray,
 };
 use arrow::buffer::OffsetBuffer;
-use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
+use arrow::datatypes::{DataType as ArrowDataType, Field};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
 
@@ -82,9 +82,12 @@ pub fn tuples_to_record_batch(
 ///
 /// # Returns
 /// A vector of tuples and the inferred schema
-pub fn record_batch_to_tuples(batch: &RecordBatch) -> Result<(Vec<Tuple>, TupleSchema), ArrowConvertError> {
-    let schema = TupleSchema::from_arrow(batch.schema().as_ref())
-        .ok_or_else(|| ArrowConvertError::UnsupportedType("Cannot convert Arrow schema".to_string()))?;
+pub fn record_batch_to_tuples(
+    batch: &RecordBatch,
+) -> Result<(Vec<Tuple>, TupleSchema), ArrowConvertError> {
+    let schema = TupleSchema::from_arrow(batch.schema().as_ref()).ok_or_else(|| {
+        ArrowConvertError::UnsupportedType("Cannot convert Arrow schema".to_string())
+    })?;
 
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
@@ -192,7 +195,8 @@ fn build_column_array(
                     }
                     let values_array = Float32Array::from(all_values);
                     let offset_buffer = OffsetBuffer::new(offsets.into());
-                    let list_array = LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
+                    let list_array =
+                        LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
                     Ok(Arc::new(list_array))
                 }
             }
@@ -244,7 +248,8 @@ fn build_column_array(
                     }
                     let values_array = Int8Array::from(all_values);
                     let offset_buffer = OffsetBuffer::new(offsets.into());
-                    let list_array = LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
+                    let list_array =
+                        LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
                     Ok(Arc::new(list_array))
                 }
             }
@@ -350,7 +355,12 @@ fn empty_array_for_type(dt: &DataType) -> ArrayRef {
                 None => {
                     let values_array = Float32Array::from(Vec::<f32>::new());
                     let offset_buffer = OffsetBuffer::new(vec![0i64].into());
-                    Arc::new(LargeListArray::new(field, offset_buffer, Arc::new(values_array), None))
+                    Arc::new(LargeListArray::new(
+                        field,
+                        offset_buffer,
+                        Arc::new(values_array),
+                        None,
+                    ))
                 }
             }
         }
@@ -369,7 +379,12 @@ fn empty_array_for_type(dt: &DataType) -> ArrayRef {
                 None => {
                     let values_array = Int8Array::from(Vec::<i8>::new());
                     let offset_buffer = OffsetBuffer::new(vec![0i64].into());
-                    Arc::new(LargeListArray::new(field, offset_buffer, Arc::new(values_array), None))
+                    Arc::new(LargeListArray::new(
+                        field,
+                        offset_buffer,
+                        Arc::new(values_array),
+                        None,
+                    ))
                 }
             }
         }
@@ -384,15 +399,15 @@ pub fn tuple2_to_tuple(pair: (i32, i32)) -> Tuple {
 
 /// Convert legacy Vec<Tuple2> to Vec<Tuple>
 pub fn tuple2_vec_to_tuples(pairs: Vec<(i32, i32)>) -> Vec<Tuple> {
-    pairs.into_iter().map(|(a, b)| Tuple::from_pair(a, b)).collect()
+    pairs
+        .into_iter()
+        .map(|(a, b)| Tuple::from_pair(a, b))
+        .collect()
 }
 
 /// Convert Vec<Tuple> back to Vec<Tuple2> (for backward compatibility)
 pub fn tuples_to_tuple2_vec(tuples: Vec<Tuple>) -> Vec<(i32, i32)> {
-    tuples
-        .into_iter()
-        .filter_map(|t| t.to_pair())
-        .collect()
+    tuples.into_iter().filter_map(|t| t.to_pair()).collect()
 }
 
 /// Infer schema from a vector of tuples
@@ -423,6 +438,7 @@ pub fn infer_schema_from_tuples(tuples: &[Tuple], column_names: &[String]) -> Tu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::datatypes::Schema;
 
     #[test]
     fn test_tuples_to_record_batch_int32() {
@@ -442,7 +458,11 @@ mod tests {
         assert_eq!(batch.num_rows(), 3);
         assert_eq!(batch.num_columns(), 2);
 
-        let col0 = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+        let col0 = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
         assert_eq!(col0.value(0), 1);
         assert_eq!(col0.value(1), 3);
         assert_eq!(col0.value(2), 5);
@@ -525,9 +545,7 @@ mod tests {
 
     #[test]
     fn test_infer_schema() {
-        let tuples = vec![
-            Tuple::new(vec![Value::Int32(1), Value::string("test")]),
-        ];
+        let tuples = vec![Tuple::new(vec![Value::Int32(1), Value::string("test")])];
 
         let schema = infer_schema_from_tuples(&tuples, &["id".to_string(), "name".to_string()]);
 
@@ -540,14 +558,8 @@ mod tests {
     fn test_vector_fixed_size_roundtrip() {
         // Test that vectors with known dimensions use FixedSizeList and preserve dimension
         let tuples = vec![
-            Tuple::new(vec![
-                Value::Int32(1),
-                Value::vector(vec![1.0, 2.0, 3.0]),
-            ]),
-            Tuple::new(vec![
-                Value::Int32(2),
-                Value::vector(vec![4.0, 5.0, 6.0]),
-            ]),
+            Tuple::new(vec![Value::Int32(1), Value::vector(vec![1.0, 2.0, 3.0])]),
+            Tuple::new(vec![Value::Int32(2), Value::vector(vec![4.0, 5.0, 6.0])]),
         ];
 
         let schema = TupleSchema::new(vec![
@@ -589,9 +601,10 @@ mod tests {
             Tuple::new(vec![Value::vector(vec![3.0, 4.0, 5.0])]), // Different size
         ];
 
-        let schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::Vector { dim: None }),
-        ]);
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::Vector { dim: None },
+        )]);
 
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
         let (result, recovered_schema) = record_batch_to_tuples(&batch).unwrap();
@@ -619,7 +632,10 @@ mod tests {
         let tuples: Vec<Tuple> = vec![];
         let schema = TupleSchema::new(vec![
             ("id".to_string(), DataType::Int32),
-            ("embedding".to_string(), DataType::Vector { dim: Some(1536) }),
+            (
+                "embedding".to_string(),
+                DataType::Vector { dim: Some(1536) },
+            ),
         ]);
 
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
@@ -631,19 +647,16 @@ mod tests {
     fn test_vector_int8_fixed_size_roundtrip() {
         // Test that int8 vectors with known dimensions use FixedSizeList and preserve dimension
         let tuples = vec![
-            Tuple::new(vec![
-                Value::Int32(1),
-                Value::vector_int8(vec![10, 20, 30]),
-            ]),
-            Tuple::new(vec![
-                Value::Int32(2),
-                Value::vector_int8(vec![40, 50, 60]),
-            ]),
+            Tuple::new(vec![Value::Int32(1), Value::vector_int8(vec![10, 20, 30])]),
+            Tuple::new(vec![Value::Int32(2), Value::vector_int8(vec![40, 50, 60])]),
         ];
 
         let schema = TupleSchema::new(vec![
             ("id".to_string(), DataType::Int32),
-            ("embedding".to_string(), DataType::VectorInt8 { dim: Some(3) }),
+            (
+                "embedding".to_string(),
+                DataType::VectorInt8 { dim: Some(3) },
+            ),
         ]);
 
         // Convert to Arrow
@@ -680,9 +693,10 @@ mod tests {
             Tuple::new(vec![Value::vector_int8(vec![3, 4, 5])]), // Different size
         ];
 
-        let schema = TupleSchema::new(vec![
-            ("embedding".to_string(), DataType::VectorInt8 { dim: None }),
-        ]);
+        let schema = TupleSchema::new(vec![(
+            "embedding".to_string(),
+            DataType::VectorInt8 { dim: None },
+        )]);
 
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
         let (result, recovered_schema) = record_batch_to_tuples(&batch).unwrap();
@@ -710,7 +724,10 @@ mod tests {
         let tuples: Vec<Tuple> = vec![];
         let schema = TupleSchema::new(vec![
             ("id".to_string(), DataType::Int32),
-            ("embedding".to_string(), DataType::VectorInt8 { dim: Some(256) }),
+            (
+                "embedding".to_string(),
+                DataType::VectorInt8 { dim: Some(256) },
+            ),
         ]);
 
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();

@@ -1,14 +1,18 @@
-Executing script: examples/datalog/15_arithmetic/13_arity_4col.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arity_4col
-Database 'test_arity_4col' created.
-Switched to database: test_arity_4col
-> .db use test_arity_4col
-Switched to database: test_arity_4col
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_4col
+Knowledge graph 'test_arity_4col' created.
+Switched to knowledge graph: test_arity_4col
+> .kg use test_arity_4col
+Switched to knowledge graph: test_arity_4col
 > +src4[(1, 5, 100, 1000), (2, 10, 200, 2000), (3, 0, 300, 3000)].
-Inserted 3 facts into 'src4'.
+Inserted 3 fact(s) into 'src4'.
 > +link[(1, 10), (2, 20), (3, 30)].
-Inserted 3 facts into 'link'.
+Inserted 3 fact(s) into 'link'.
 > inc_col1(Y, A+1) :- src4(X, A, _, _), link(X, Y).
 3 rows:
   (10, 6)
@@ -54,7 +58,10 @@ Inserted 3 facts into 'link'.
   (20, 11)
   (30, 1)
 > multi_arith(Y, A+1, B+2, C+3) :- src4(X, A, B, C), link(X, Y).
-No results for 'multi_arith'.
+3 rows:
+  (10, 6, 102, 1003)
+  (20, 11, 202, 2003)
+  (30, 1, 302, 3003)
 (session: 5 rule(s))
 > ?- multi_arith(A, B, C, D).
 3 rows:
@@ -62,24 +69,29 @@ No results for 'multi_arith'.
   (20, 11, 202, 2003)
   (30, 1, 302, 3003)
 > +src4b[(1, 5, 100, 1000), (2, 10, 200, 2000)].
-Inserted 2 facts into 'src4b'.
+Inserted 2 fact(s) into 'src4b'.
 > inc_key(Y, X+1, A) :- src4b(X, A, _, _), link(X, Y).
-No results for 'inc_key'.
+2 rows:
+  (10, 2, 5)
+  (20, 3, 10)
 (session: 6 rule(s))
 > ?- inc_key(A, B, C).
 2 rows:
   (10, 2, 5)
   (20, 3, 10)
 > only_arith(A+1) :- src4(_, A, _, _).
-No results for 'only_arith'.
+3 rows:
+  (1)
+  (6)
+  (11)
 (session: 7 rule(s))
 > ?- only_arith(A).
 3 rows:
   (1)
   (6)
   (11)
-> .db use default
-Switched to database: default
-(Cleared 7 session rule(s))
-> .db drop test_arity_4col
-Database 'test_arity_4col' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 7 session rule(s), 0 session fact(s))
+> .kg drop test_arity_4col
+Knowledge graph 'test_arity_4col' dropped.

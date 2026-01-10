@@ -1,12 +1,12 @@
-// Test: Deep Recursion - 500 Node Chain
-// Category: Recursion (Heavy Stress)
-// Verifies: Engine can handle very deep recursion (500 levels)
+% Test: Deep Recursion - 500 Node Chain
+% Category: Recursion (Heavy Stress)
+% Verifies: Engine can handle very deep recursion (500 levels)
 
-.db create test_deep_500
-.db use test_deep_500
+.kg create test_deep_500
+.kg use test_deep_500
 
-// Generate edges 1->2, 2->3, ..., 499->500 programmatically
-// For brevity, we'll create them in blocks of 50
+% Generate edges 1->2, 2->3, ..., 499->500 programmatically
+% For brevity, we'll create them in blocks of 50
 +edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10),
       (10, 11), (11, 12), (12, 13), (13, 14), (14, 15), (15, 16), (16, 17), (17, 18), (18, 19), (19, 20),
       (20, 21), (21, 22), (22, 23), (23, 24), (24, 25), (25, 26), (26, 27), (27, 28), (28, 29), (29, 30),
@@ -67,22 +67,22 @@
       (480, 481), (481, 482), (482, 483), (483, 484), (484, 485), (485, 486), (486, 487), (487, 488), (488, 489), (489, 490),
       (490, 491), (491, 492), (492, 493), (493, 494), (494, 495), (495, 496), (496, 497), (497, 498), (498, 499), (499, 500)].
 
-// Transitive closure
+% Transitive closure
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- edge(X, Y), path(Y, Z).
 
-// Query: can we reach from node 1 to node 500?
+% Query: can we reach from node 1 to node 500?
 +reachable_500(X) :- path(1, X), X = 500.
 ?- reachable_500(X).
 
-// Count how many nodes are reachable from node 1
+% Count how many nodes are reachable from node 1
 +from_one(Y) :- path(1, Y).
 +count_from_one(count<Y>) :- from_one(Y).
 ?- count_from_one(C).
 
-// Expected:
-// - reachable_500: (500)
-// - count_from_one: 499 (nodes 2-500)
+% Expected:
+% - reachable_500: (500)
+% - count_from_one: 499 (nodes 2-500)
 
-.db use default
-.db drop test_deep_500
+.kg use default
+.kg drop test_deep_500

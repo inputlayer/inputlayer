@@ -24,7 +24,7 @@ use crate::value::Tuple2;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{StorageError, StorageResult};
 
@@ -162,11 +162,13 @@ impl Wal {
 
         // Archive the old WAL (optional - for debugging)
         if self.current_file.exists() {
-            let archive_name = format!("wal_{}.archived",
+            let archive_name = format!(
+                "wal_{}.archived",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_secs());
+                    .as_secs()
+            );
             let archive_path = self.wal_dir.join(archive_name);
             fs::rename(&self.current_file, archive_path)?;
         }
@@ -200,10 +202,7 @@ impl Wal {
 }
 
 /// Replay WAL entries into a data structure
-pub fn replay_wal(
-    entries: &[WalEntry],
-    data: &mut std::collections::HashMap<String, Vec<Tuple2>>,
-) {
+pub fn replay_wal(entries: &[WalEntry], data: &mut std::collections::HashMap<String, Vec<Tuple2>>) {
     for entry in entries {
         match entry.op {
             WalOp::Insert => {

@@ -2,7 +2,7 @@
 //!
 //! This module provides shared parsing functions used across other statement modules.
 
-use crate::ast::{Atom, BodyPredicate, Constraint, Rule, Term};
+use crate::ast::{AggregateFunc, Atom, BodyPredicate, Constraint, Rule, Term};
 use crate::parser::parse_rule;
 
 /// Query goal: ?- atom.
@@ -21,7 +21,7 @@ pub struct QueryGoal {
 // ============================================================================
 
 /// Strip inline comments from input.
-/// Handles // comments while respecting string literals.
+/// Handles % comments (Prolog style) while respecting string literals.
 pub fn strip_inline_comment(input: &str) -> &str {
     let mut in_string = false;
     let mut escape_next = false;
@@ -45,13 +45,38 @@ pub fn strip_inline_comment(input: &str) -> &str {
             continue;
         }
 
-        // Check for // outside of string
-        if !in_string && c == '/' && i + 1 < bytes.len() && bytes[i + 1] as char == '/' {
+        // Check for % comment outside of string (Prolog style)
+        if !in_string && c == '%' {
             return input[..i].trim_end();
         }
     }
 
     input
+}
+
+/// Strip block comments (/* ... */) from input.
+/// Returns the input with block comments replaced by spaces.
+pub fn strip_block_comments(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut depth = 0;
+
+    while let Some(c) = chars.next() {
+        if c == '/' && chars.peek() == Some(&'*') {
+            chars.next(); // consume '*'
+            depth += 1;
+        } else if c == '*' && chars.peek() == Some(&'/') && depth > 0 {
+            chars.next(); // consume '/'
+            depth -= 1;
+            if depth == 0 {
+                result.push(' '); // Replace comment with space
+            }
+        } else if depth == 0 {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 /// Check if argument content looks like typed arguments (schema declaration)
@@ -106,7 +131,7 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
                 let type_part = after.split_whitespace().next().unwrap_or("");
                 let base_types = ["int", "string", "bool", "float", "list"];
                 if base_types.iter().any(|t| type_part.starts_with(t))
-                   || type_part.chars().next().map_or(false, |c| c.is_uppercase())
+                    || type_part.chars().next().map_or(false, |c| c.is_uppercase())
                 {
                     return true;
                 }
@@ -125,7 +150,7 @@ pub fn extract_args_content(input: &str) -> Option<&str> {
     if paren_end > paren_start + 1 {
         Some(&input[paren_start + 1..paren_end])
     } else {
-        Some("")  // Empty parens
+        Some("") // Empty parens
     }
 }
 
@@ -171,7 +196,10 @@ pub fn parse_atom_args(input: &str) -> Result<Vec<Term>, String> {
     }
 
     let parts = split_by_comma(inner);
-    parts.into_iter().map(|p| parse_single_term(p.trim())).collect()
+    parts
+        .into_iter()
+        .map(|p| parse_single_term(p.trim()))
+        .collect()
 }
 
 /// Parse a single term
@@ -215,6 +243,11 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
         }
     }
 
+    // Aggregate functions: count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>
+    if let Some(agg) = parse_aggregate(input) {
+        return Ok(agg);
+    }
+
     // Check if valid identifier (alphanumeric + underscore)
     if input.chars().all(|c| c.is_alphanumeric() || c == '_') && !input.is_empty() {
         let first_char = input.chars().next().unwrap();
@@ -238,7 +271,7 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
 
 /// Parse a vector literal like [1.0, 2.0, 3.0]
 fn parse_vector_literal(input: &str) -> Result<Term, String> {
-    let inner = input[1..input.len()-1].trim();
+    let inner = input[1..input.len() - 1].trim();
     if inner.is_empty() {
         return Ok(Term::VectorLiteral(vec![]));
     }
@@ -255,12 +288,45 @@ fn parse_vector_literal(input: &str) -> Result<Term, String> {
     Ok(Term::VectorLiteral(values?))
 }
 
+/// Parse an aggregate function like count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>
+fn parse_aggregate(input: &str) -> Option<Term> {
+    // Check for pattern: func<var> where func is count/sum/min/max/avg
+    if let Some(lt_pos) = input.find('<') {
+        if let Some(gt_pos) = input.find('>') {
+            if gt_pos > lt_pos && gt_pos == input.len() - 1 {
+                let func_name = &input[..lt_pos];
+                let var_name = &input[lt_pos + 1..gt_pos].trim();
+
+                // Variable name must start with uppercase or underscore
+                if !var_name.is_empty() {
+                    let first_char = var_name.chars().next().unwrap();
+                    if first_char.is_uppercase() || first_char == '_' {
+                        let agg_func = match func_name.to_lowercase().as_str() {
+                            "count" => Some(AggregateFunc::Count),
+                            "sum" => Some(AggregateFunc::Sum),
+                            "min" => Some(AggregateFunc::Min),
+                            "max" => Some(AggregateFunc::Max),
+                            "avg" => Some(AggregateFunc::Avg),
+                            _ => None,
+                        };
+
+                        if let Some(func) = agg_func {
+                            return Some(Term::Aggregate(func, var_name.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Split by comma, respecting parentheses and square brackets
 pub fn split_by_comma(input: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut paren_depth = 0;
-    let mut bracket_depth = 0;  // Track square brackets for vectors
+    let mut bracket_depth = 0; // Track square brackets for vectors
     let mut in_string = false;
 
     for ch in input.chars() {
@@ -332,7 +398,9 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     }
 
     // The first positive atom is the main goal
-    let goal = rule.body.iter()
+    let goal = rule
+        .body
+        .iter()
         .filter_map(|p| match p {
             BodyPredicate::Positive(atom) => Some(atom.clone()),
             _ => None,

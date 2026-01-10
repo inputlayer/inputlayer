@@ -1,14 +1,18 @@
-Executing script: examples/datalog/19_self_checking/04_bug_verification.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_bug_verification
-Database 'test_bug_verification' created.
-Switched to database: test_bug_verification
-> .db use test_bug_verification
-Switched to database: test_bug_verification
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bug_verification
+Knowledge graph 'test_bug_verification' created.
+Switched to knowledge graph: test_bug_verification
+> .kg use test_bug_verification
+Switched to knowledge graph: test_bug_verification
 > +src3[(1, 7777, 999), (2, 8888, 888)].
-Inserted 2 facts into 'src3'.
+Inserted 2 fact(s) into 'src3'.
 > +link[(1, 1001), (2, 1002)].
-Inserted 2 facts into 'link'.
+Inserted 2 fact(s) into 'link'.
 > result(Y, D+1) :- src3(X, D, _), link(X, Y).
 2 rows:
   (1001, 7778)
@@ -18,8 +22,8 @@ Inserted 2 facts into 'link'.
 2 rows:
   (1001, 7778)
   (1002, 8889)
-> .db use default
-Switched to database: default
-(Cleared 1 session rule(s))
-> .db drop test_bug_verification
-Database 'test_bug_verification' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_bug_verification
+Knowledge graph 'test_bug_verification' dropped.

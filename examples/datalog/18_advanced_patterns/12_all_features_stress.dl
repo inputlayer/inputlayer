@@ -1,59 +1,59 @@
-// Test: All Features Combined Stress Test
-// Category: Advanced Patterns
-// Verifies: Negation + Recursion + Arithmetic + Aggregation together
-// CRITICAL: Ultimate integration test
+% Test: All Features Combined Stress Test
+% Category: Advanced Patterns
+% Verifies: Negation + Recursion + Arithmetic + Aggregation together
+% CRITICAL: Ultimate integration test
 
-.db create test_all_features
-.db use test_all_features
+.kg create test_all_features
+.kg use test_all_features
 
-// Network topology with costs
+% Network topology with costs
 +link[(1, 2, 10), (2, 3, 20), (3, 4, 15), (4, 5, 25),
       (1, 3, 35), (2, 4, 30), (3, 5, 40),
       (1, 5, 100)].
 
-// Blocked links (maintenance, etc.)
+% Blocked links (maintenance, etc.)
 +blocked[(3, 5), (1, 5)].
 
-// Step 1: Filter out blocked links (NEGATION)
+% Step 1: Filter out blocked links (NEGATION)
 +active_link(X, Y, C) :- link(X, Y, C), !blocked(X, Y).
 ?- active_link(X, Y, C).
 
-// Step 2: Compute all path costs (RECURSION + ARITHMETIC)
+% Step 2: Compute all path costs (RECURSION + ARITHMETIC)
 +path_cost(X, Y, C) :- active_link(X, Y, C).
 +path_cost(X, Z, C1+C2) :- path_cost(X, Y, C1), active_link(Y, Z, C2).
 
 ?- path_cost(X, Y, C).
 
-// Step 3: Find minimum cost path (AGGREGATION)
+% Step 3: Find minimum cost path (AGGREGATION)
 +min_cost(X, Y, min<C>) :- path_cost(X, Y, C).
 ?- min_cost(X, Y, C).
 
-// Step 4: More complex aggregations on paths
-// Count paths between each pair
+% Step 4: More complex aggregations on paths
+% Count paths between each pair
 +path_count(X, Y, count<C>) :- path_cost(X, Y, C).
 ?- path_count(X, Y, N).
 
-// Average path cost from node 1
+% Average path cost from node 1
 +avg_cost_from_1(avg<C>) :- path_cost(1, _, C).
 ?- avg_cost_from_1(A).
 
-// Total cost of all paths from node 1
+% Total cost of all paths from node 1
 +total_cost_from_1(sum<C>) :- path_cost(1, _, C).
 ?- total_cost_from_1(T).
 
-// Step 5: Find cheapest destination from node 1
+% Step 5: Find cheapest destination from node 1
 +reachable_cost(Y, min<C>) :- path_cost(1, Y, C).
 ?- reachable_cost(Y, C).
 
-// Step 6: Nodes reachable within budget (ARITHMETIC + FILTER)
+% Step 6: Nodes reachable within budget (ARITHMETIC + FILTER)
 +budget[(50)].
 +within_budget(Y) :- min_cost(1, Y, C), budget(B), C <= B.
 ?- within_budget(Y).
 
-// Step 7: Count nodes within budget (AGGREGATION on filtered result)
+% Step 7: Count nodes within budget (AGGREGATION on filtered result)
 +budget_count(count<Y>) :- within_budget(Y).
 ?- budget_count(C).
 
-// Cleanup
-.db use default
-.db drop test_all_features
+% Cleanup
+.kg use default
+.kg drop test_all_features

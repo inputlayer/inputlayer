@@ -1,19 +1,23 @@
-Executing script: examples/datalog/07_filters/02_inequality.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neq
-Database 'test_neq' created.
-Switched to database: test_neq
-> .db use test_neq
-Switched to database: test_neq
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neq
+Knowledge graph 'test_neq' created.
+Switched to knowledge graph: test_neq
+> .kg use test_neq
+Switched to knowledge graph: test_neq
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > +non_loop(X, Y) :- edge(X, Y), X != Y.
 Rule 'non_loop' registered.
 > ?- non_loop(X, Y).
 2 rows:
   (1, 2)
   (2, 3)
-> .db use default
-Switched to database: default
-> .db drop test_neq
-Database 'test_neq' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neq
+Knowledge graph 'test_neq' dropped.

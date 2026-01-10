@@ -1,14 +1,18 @@
-Executing script: examples/datalog/15_arithmetic/09_increment_reversed_join.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_inc_rev
-Database 'test_inc_rev' created.
-Switched to database: test_inc_rev
-> .db use test_inc_rev
-Switched to database: test_inc_rev
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inc_rev
+Knowledge graph 'test_inc_rev' created.
+Switched to knowledge graph: test_inc_rev
+> .kg use test_inc_rev
+Switched to knowledge graph: test_inc_rev
 > +edge[(1, 2), (2, 3)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +dist[(1, 0)].
-Inserted 1 fact into 'dist'.
+Inserted 1 fact(s) into 'dist'.
 > normal_order(Y, D+1) :- dist(X, D), edge(X, Y).
 1 rows:
   (2, 1)
@@ -24,21 +28,23 @@ Inserted 1 fact into 'dist'.
 1 rows:
   (2, 1)
 > +weight[(1, 100), (2, 200)].
-Inserted 2 facts into 'weight'.
+Inserted 2 fact(s) into 'weight'.
 > order_a(Y, W, D+1) :- dist(X, D), edge(X, Y), weight(Y, W).
-No results for 'order_a'.
+1 rows:
+  (2, 200, 1)
 (session: 3 rule(s))
 > ?- order_a(A, B, C).
 1 rows:
   (2, 200, 1)
 > order_b(Y, W, D+1) :- edge(X, Y), dist(X, D), weight(Y, W).
-No results for 'order_b'.
+1 rows:
+  (2, 200, 1)
 (session: 4 rule(s))
 > ?- order_b(A, B, C).
 1 rows:
   (2, 200, 1)
-> .db use default
-Switched to database: default
-(Cleared 4 session rule(s))
-> .db drop test_inc_rev
-Database 'test_inc_rev' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_inc_rev
+Knowledge graph 'test_inc_rev' dropped.

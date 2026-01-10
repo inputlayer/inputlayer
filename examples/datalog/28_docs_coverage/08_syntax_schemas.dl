@@ -1,19 +1,19 @@
-// Test: Syntax Schema Declarations
-// Category: docs_coverage
-// Description: Tests schema declarations from docs/reference/syntax.md
+% Test: Syntax Schema Declarations
+% Category: docs_coverage
+% Description: Tests schema declarations from docs/reference/syntax.md
 
-.db create syntax_schemas
-.db use syntax_schemas
+.kg create syntax_schemas
+.kg use syntax_schemas
 
-// === Basic schema ===
+% === Basic schema ===
 +employee(id: int, name: string, dept: string).
 
-// Insert data matching schema
+% Insert data matching schema
 +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
 
 ?- employee(Id, Name, Dept).
 
-// === Schema with all types ===
+% === Schema with all types ===
 +example(
   a: int,
   b: float,
@@ -25,7 +25,7 @@
 
 ?- example(A, B, C, D).
 
-// Cleanup
-.db use default
-.db drop syntax_schemas
+% Cleanup
+.kg use default
+.kg drop syntax_schemas
 

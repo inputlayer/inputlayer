@@ -1,24 +1,25 @@
-Executing script: examples/datalog/16_vectors/01_euclidean_distance.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_vec_euclidean
-Database 'test_vec_euclidean' created.
-Switched to database: test_vec_euclidean
-> .db use test_vec_euclidean
-Switched to database: test_vec_euclidean
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_euclidean
+Knowledge graph 'test_vec_euclidean' created.
+Switched to knowledge graph: test_vec_euclidean
+> .kg use test_vec_euclidean
+Switched to knowledge graph: test_vec_euclidean
 > +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
-Inserted 3 facts into 'vectors'.
+No facts inserted (3 duplicate skipped).
 > +query[([0.0, 0.0, 0.0])].
-Inserted 1 fact into 'query'.
+No facts inserted (1 duplicate skipped).
 > nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).
-No results for 'nearest'.
+No results.
 (session: 1 rule(s))
 > ?- nearest(X, Y).
-3 rows:
-  (1, 1)
-  (2, 1)
-  (3, 1.4142135623730951)
-> .db use default
-Switched to database: default
-(Cleared 1 session rule(s))
-> .db drop test_vec_euclidean
-Database 'test_vec_euclidean' dropped.
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_euclidean
+Knowledge graph 'test_vec_euclidean' dropped.

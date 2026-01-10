@@ -1,23 +1,23 @@
-// Test: Transitive Closure (2-Rule Recursion)
-// Category: 09_recursion
-// Description: Tests linear recursion for transitive closure
+% Test: Transitive Closure (2-Rule Recursion)
+% Category: 09_recursion
+% Description: Tests linear recursion for transitive closure
 
-.db create test_tc
-.db use test_tc
+.kg create test_tc
+.kg use test_tc
 
-// Graph: 1->2->3->4->5
+% Graph: 1->2->3->4->5
 +edge[(1,2), (2,3), (3,4), (4,5)].
 
-// Transitive closure with 2 rules
+% Transitive closure with 2 rules
 +connected(X, Y) :- edge(X, Y).
 +connected(X, Z) :- edge(X, Y), connected(Y, Z).
 
-// Query all connected pairs
+% Query all connected pairs
 ?- connected(X, Y).
 
-// Specific query: Can 1 reach 5?
+% Specific query: Can 1 reach 5?
 ?- connected(1, 5).
 
-// Cleanup
-.db use default
-.db drop test_tc
+% Cleanup
+.kg use default
+.kg drop test_tc

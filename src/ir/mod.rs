@@ -749,9 +749,21 @@ mod tests {
         assert_ne!(count1, sum);
 
         // Test new variants
-        let topk = AggregateFunction::TopK { k: 5, order_col: 1, descending: true };
-        let topk2 = AggregateFunction::TopK { k: 5, order_col: 1, descending: true };
-        let topk3 = AggregateFunction::TopK { k: 10, order_col: 1, descending: true };
+        let topk = AggregateFunction::TopK {
+            k: 5,
+            order_col: 1,
+            descending: true,
+        };
+        let topk2 = AggregateFunction::TopK {
+            k: 5,
+            order_col: 1,
+            descending: true,
+        };
+        let topk3 = AggregateFunction::TopK {
+            k: 10,
+            order_col: 1,
+            descending: true,
+        };
         assert_eq!(topk, topk2);
         assert_ne!(topk, topk3);
     }

@@ -1,24 +1,24 @@
-// Test: Triple Negation
-// Category: 08_negation
-// Description: Tests using negation on three different relations
+% Test: Triple Negation
+% Category: 08_negation
+% Description: Tests using negation on three different relations
 
-.db create test_triple_neg
-.db use test_triple_neg
+.kg create test_triple_neg
+.kg use test_triple_neg
 
-// All items
+% All items
 +item[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0)].
 
-// Various exclusion criteria
+% Various exclusion criteria
 +sold[(1, 0), (3, 0)].
 +reserved[(2, 0), (5, 0)].
 +damaged[(4, 0), (7, 0)].
 
-// Available items: not sold, not reserved, not damaged
+% Available items: not sold, not reserved, not damaged
 +available(X, Y) :- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _).
 ?- available(X, Y).
 
-// Should return: (6, 0), (8, 0)
+% Should return: (6, 0), (8, 0)
 
-// Cleanup
-.db use default
-.db drop test_triple_neg
+% Cleanup
+.kg use default
+.kg drop test_triple_neg

@@ -11,8 +11,8 @@ InputLayer uses **pure multiset semantics** by default, where the **entire tuple
 Without an explicit schema, tuples are identified by all their values:
 
 ```datalog
-+person("alice", 30).     // Insert tuple ("alice", 30)
-+person("alice", 31).     // Insert different tuple ("alice", 31)
++person("alice", 30).     % Insert tuple ("alice", 30)
++person("alice", 31).     % Insert different tuple ("alice", 31)
 ```
 
 Both tuples coexist because they are different values. There is no concept of "alice" as an entity with a mutable "age" attribute.
@@ -67,7 +67,7 @@ Multiple columns can form a key:
 +enrollment(student_id: int @key, course_id: int @key, grade: float).
 
 +enrollment(1, 101, 3.5).
-+enrollment(1, 101, 4.0).      // UPSERT: updates grade (composite key match)
++enrollment(1, 101, 4.0).      % UPSERT: updates grade (composite key match)
 ```
 
 ## How `@key` Changes Semantics
@@ -82,15 +82,15 @@ Multiple columns can form a key:
 ### Example Comparison
 
 ```datalog
-// WITHOUT @key (pure multiset)
+% WITHOUT @key (pure multiset)
 +person("alice", 30).
-+person("alice", 31).          // Two tuples exist
--person("alice", 30).          // Must know exact age to delete
++person("alice", 31).          % Two tuples exist
+-person("alice", 30).          % Must know exact age to delete
 
-// WITH @key
+% WITH @key
 +person(name: string @key, age: int).
 +person("alice", 30).
-+person("alice", 31).          // UPSERT: one tuple, age = 31
++person("alice", 31).          % UPSERT: one tuple, age = 31
 ```
 
 ## Update Patterns
@@ -109,7 +109,7 @@ When you know the exact tuple to delete:
 When you don't know all column values, use a conditional delete:
 
 ```datalog
-// Delete alice regardless of age
+% Delete alice regardless of age
 -person("alice", Age) :- person("alice", Age).
 +person("alice", 31).
 ```
@@ -134,7 +134,7 @@ With a key defined, simply insert to upsert:
 ```datalog
 +person(id: int @key, name: string, age: int).
 +person(1, "alice", 30).
-+person(1, "alice", 31).  // Automatically replaces previous value
++person(1, "alice", 31).  % Automatically replaces previous value
 ```
 
 ## Deletion Patterns
@@ -148,10 +148,10 @@ With a key defined, simply insert to upsert:
 ### Delete All Matching Tuples
 
 ```datalog
-// Delete all edges from node 5
+% Delete all edges from node 5
 -edge(5, Y) :- edge(5, Y).
 
-// Delete all high earners
+% Delete all high earners
 -employee(Name, Dept, Salary) :-
   employee(Name, Dept, Salary),
   Salary > 100000.
@@ -168,8 +168,8 @@ To delete a relation (schema + all data):
 **Note**: This only works for relations without data. To delete all data first:
 
 ```datalog
--person(X, Y, Z) :- person(X, Y, Z).  // Delete all tuples
--person.                               // Delete relation
+-person(X, Y, Z) :- person(X, Y, Z).  % Delete all tuples
+-person.                               % Delete relation
 ```
 
 ## Schema Inference
@@ -177,9 +177,9 @@ To delete a relation (schema + all data):
 When no schema is declared, it's inferred from the first insert:
 
 ```datalog
-+person("alice", 30).          // Inferred: person(string, int)
-+person("bob", 25).            // OK: matches inferred schema
-+person("charlie", "young").   // ERROR: type mismatch (string vs int)
++person("alice", 30).          % Inferred: person(string, int)
++person("bob", 25).            % OK: matches inferred schema
++person("charlie", "young").   % ERROR: type mismatch (string vs int)
 ```
 
 ## Transient vs Persistent
@@ -200,7 +200,7 @@ Session-only, cleared on database switch:
 temp(x: int, y: int).
 temp(1, 2).
 temp(3, 4).
-// Cleared when switching databases
+% Cleared when switching databases
 ```
 
 Use transient schemas for:
@@ -215,8 +215,8 @@ Use transient schemas for:
 A **view** (derived relation) is identified by its **head predicate name**. A view contains one or more rules:
 
 ```datalog
-+reachable(X, Y) :- edge(X, Y).                   // Creates view, adds rule 1
-+reachable(X, Y) :- reachable(X, Z), edge(Z, Y).  // Adds rule 2 to same view
++reachable(X, Y) :- edge(X, Y).                   % Creates view, adds rule 1
++reachable(X, Y) :- reachable(X, Z), edge(Z, Y).  % Adds rule 2 to same view
 ```
 
 ### Deleting Views
@@ -256,7 +256,7 @@ Session rules:
 For complex views with many rules, use `.dl` script files:
 
 ```datalog
-// views/reachable.dl
+% views/reachable.dl
 +reachable(X, Y) :- edge(X, Y).
 +reachable(X, Y) :- reachable(X, Z), edge(Z, Y).
 ```
@@ -272,10 +272,10 @@ For complex views with many rules, use `.dl` script files:
 ### Example Workflow
 
 ```datalog
-// Initial load
+% Initial load
 .load views/access_control.dl
 
-// After modifying the file, reload with replace
+% After modifying the file, reload with replace
 .load views/access_control.dl --replace
 ```
 
@@ -300,7 +300,7 @@ When modeling entities with mutable attributes:
 ### 3. Use Conditional Deletes for Unknown Values
 
 ```datalog
-// Update all employees in a department
+% Update all employees in a department
 -employee(Id, OldDept, Name), +employee(Id, "Engineering", Name) :-
   employee(Id, OldDept, Name),
   OldDept = "Legacy".
@@ -322,11 +322,11 @@ views/
 Session rules don't support fixed-point iteration:
 
 ```datalog
-// This WON'T compute transitive closure (transient, no fixed-point):
+% This WON'T compute transitive closure (transient, no fixed-point):
 reachable(X, Y) :- edge(X, Y).
 reachable(X, Y) :- reachable(X, Z), edge(Z, Y).
 
-// Use persistent rules instead:
+% Use persistent rules instead:
 +reachable(X, Y) :- edge(X, Y).
 +reachable(X, Y) :- reachable(X, Z), edge(Z, Y).
 ```

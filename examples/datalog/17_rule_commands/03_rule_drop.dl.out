@@ -1,26 +1,30 @@
-Executing script: examples/datalog/17_rule_commands/03_rule_drop.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rule_drop
-Database 'test_rule_drop' created.
-Switched to database: test_rule_drop
-> .db use test_rule_drop
-Switched to database: test_rule_drop
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_drop
+Knowledge graph 'test_rule_drop' created.
+Switched to knowledge graph: test_rule_drop
+> .kg use test_rule_drop
+Switched to knowledge graph: test_rule_drop
 > +edge[(1,2), (2,3)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +reverse(X, Y) :- edge(Y, X).
 Rule 'reverse' registered.
 > +paths(X, Y) :- edge(X, Y).
 Rule 'paths' registered.
 > .rule
 Rules:
-  paths
-  reverse
+  paths (1 clause(s))
+  reverse (1 clause(s))
 > .rule drop reverse
 Rule 'reverse' dropped.
 > .rule
 Rules:
-  paths
-> .db use default
-Switched to database: default
-> .db drop test_rule_drop
-Database 'test_rule_drop' dropped.
+  paths (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_drop
+Knowledge graph 'test_rule_drop' dropped.

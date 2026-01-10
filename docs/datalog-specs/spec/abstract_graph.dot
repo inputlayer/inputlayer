@@ -1,0 +1,100 @@
+digraph G {
+    rankdir=LR;
+    pad=0.1;
+    splines=true;
+
+    program [group="program"; label=<<i>P</i>: program>; root=true];
+    edb [group="program"; label=<<i>D<sub>E</sub></i>>];
+    idb [group="program"; label=<<i>D<sub>I</sub></i>>];
+    query [group="program"; label=<<i>q</i>: query>];
+
+    relation [group="relation"; label=<<i>R</i>: relation>];
+    atom [group="relation"; label=<<i>A</i>: atom>];
+    comparison [group="relation"; label=<<i>L<sub>θ</sub></i>: arithmetic<br/>literal>; style=filled];
+    operator [style=filled; label=<<i>θ</i>: operator>];
+
+    schema [group="schema"; label=<<i>S</i>: schema>];
+    functdep [group="schema"; label=<<i>𝜑</i>: functional<br/>dependency>; style=filled];
+    attribute [group="schema"; label=<<i>α</i>: atttribute>];
+
+    rule [group="rule"; label=<<i>λ</i>: rule>];
+    head [group="rule"];
+    body [group="rule"];
+
+    literal [group="literal"; label=<<i>L</i>: literal>];
+    literal_xor [group="literal"; shape=diamond; style=filled; label=""; height=.1; width=.1];
+    negated [group="literal"; label="negated?"; shape=box; width=0.1; height=0.1; style=filled];
+
+    term [group="term"; label=<<i>t</i>: term>];
+    term_xor [group="term"; shape=diamond; style=filled; label=""; height=.1; width=.1];
+    constant [group="term"; label=<<i>c</i>∊<i>C</i>: constant>];
+    variable [group="term"; label=<<i>v</i>∊<i>V</i>: variable>; shape=box; width=0.1; height=0.1];
+    anonymous [group="term"; label=<_: anonymous>; shape=box; width=0.1; height=0.1];
+
+    constant_xor [group="constant"; shape=diamond; style=filled; label=""; height=.1; width=.1];
+    string [group="constant"];
+    integer [group="constant"; label=<ℤ: integer>];
+    decimal [group="constant"];
+    float [group="constant"; label=<ℝ: float>];
+    boolean [group="constant"; label=<𝔹: boolean>];
+    type [group="constant"; label=<<i>γ</i>∊<i>Γ</i>: type>; shape=box; width=0.1; height=0.1;];
+
+    negated [label="negated"; shape=box; width=0.1; height=0.1; style=filled];
+    boolean [shape=box; width=0.1; height=0.1];
+    string [shape=box; width=0.1; height=0.1];
+    integer [shape=box; width=0.1; height=0.1];
+    decimal [shape=box; width=0.1; height=0.1; style=filled];
+    float [shape=box; width=0.1; height=0.1; style=filled];
+    predicate [label=<<i>p</i>∊<i>P</i>: predicate>; shape=box; width=0.1; height=0.1;];
+
+
+    program -> edb;
+    program -> idb;
+    program -> query [label=<<i>Q</i> *>];
+    query -> atom;
+    edb -> relation [label="*"];
+    idb -> relation [label="*"];
+    idb -> rule [label=<<i>Λ</i> *>];
+    rule -> relation [label="infers"; style=dashed]
+    rule -> head [label="?/*"];
+    head -> atom [label=<<i>A<sub>i</sub></i> +>];
+    rule -> body [label="?"];
+    body -> literal [label=<<i>L<sub>i</sub></i> +>];
+
+    head -> body [label="|head|+|tail|>=1"; arrowhead=none; style=dashed];
+
+    literal -> literal_xor;
+    literal -> negated [label="?"];
+    literal_xor -> atom;
+    literal_xor -> comparison [label="?"];
+
+    comparison -> term [label=<<i>t<sub>lhs</sub></i>>];
+    comparison -> term [label=<<i>t<sub>rhs</sub></i>>];
+    comparison -> operator [headport=w; tailport=se];
+
+    relation -> predicate [label="derived"; arrowhead=none; style=dashed];
+    relation -> atom [label="facts *"];
+    atom -> term [label=<t<sub><i>i</i></sub> +>];
+    atom -> predicate;
+
+    relation -> schema ;
+    schema -> attribute [label=<<i>α<sub>i</sub></i> +>];
+    attribute -> predicate [label="?"];
+    attribute -> type;
+    schema -> functdep [label="*"];
+    functdep -> attribute [label=<<i>α</i> *>];
+    functdep -> attribute [label=<<i>β</i> *>];
+
+    term -> term_xor;
+    term_xor -> constant;
+    term_xor -> variable;
+    term_xor -> anonymous;
+
+    constant -> type;
+    constant -> constant_xor;
+    constant_xor -> integer;
+    constant_xor -> decimal;
+    constant_xor -> float;
+    constant_xor -> string;
+    constant_xor -> boolean;
+}

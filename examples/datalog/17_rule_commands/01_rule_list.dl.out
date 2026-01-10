@@ -1,23 +1,27 @@
-Executing script: examples/datalog/17_rule_commands/01_rule_list.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rule_list
-Database 'test_rule_list' created.
-Switched to database: test_rule_list
-> .db use test_rule_list
-Switched to database: test_rule_list
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_list
+Knowledge graph 'test_rule_list' created.
+Switched to knowledge graph: test_rule_list
+> .kg use test_rule_list
+Switched to knowledge graph: test_rule_list
 > +edge[(1,2), (2,3)].
-Inserted 2 facts into 'edge'.
+Inserted 2 fact(s) into 'edge'.
 > +reverse(X, Y) :- edge(Y, X).
 Rule 'reverse' registered.
 > +paths(X, Y) :- edge(X, Y).
 Rule 'paths' registered.
 > +paths(X, Z) :- paths(X, Y), edge(Y, Z).
-Rule added to 'paths' (2 rules total).
+Rule 'paths' registered.
 > .rule
 Rules:
-  paths
-  reverse
-> .db use default
-Switched to database: default
-> .db drop test_rule_list
-Database 'test_rule_list' dropped.
+  paths (2 clause(s))
+  reverse (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_list
+Knowledge graph 'test_rule_list' dropped.

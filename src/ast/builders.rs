@@ -4,7 +4,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust
 //! use inputlayer::ast::builders::{AtomBuilder, RuleBuilder};
 //!
 //! // Build an atom: path(x, y)

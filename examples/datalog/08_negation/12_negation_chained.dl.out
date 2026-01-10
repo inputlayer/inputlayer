@@ -1,23 +1,27 @@
-Executing script: examples/datalog/08_negation/12_negation_chained.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_neg_chain
-Database 'test_neg_chain' created.
-Switched to database: test_neg_chain
-> .db use test_neg_chain
-Switched to database: test_neg_chain
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_chain
+Knowledge graph 'test_neg_chain' created.
+Switched to knowledge graph: test_neg_chain
+> .kg use test_neg_chain
+Switched to knowledge graph: test_neg_chain
 > +all_users[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)].
-Inserted 5 facts into 'all_users'.
+Inserted 5 fact(s) into 'all_users'.
 > +banned[(2, 0)].
-Inserted 1 fact into 'banned'.
+Inserted 1 fact(s) into 'banned'.
 > +premium[(1, 0), (3, 0)].
-Inserted 2 facts into 'premium'.
+Inserted 2 fact(s) into 'premium'.
 > +basic_user(X, Y) :- all_users(X, Y), !banned(X, _), !premium(X, _).
 Rule 'basic_user' registered.
 > ?- basic_user(X, Y).
 2 rows:
   (4, 0)
   (5, 0)
-> .db use default
-Switched to database: default
-> .db drop test_neg_chain
-Database 'test_neg_chain' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_chain
+Knowledge graph 'test_neg_chain' dropped.

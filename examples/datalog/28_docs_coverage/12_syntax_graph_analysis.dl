@@ -1,26 +1,26 @@
-// Test: Syntax Graph Analysis Example
-// Category: docs_coverage
-// Description: Tests the complete graph analysis example from docs/reference/syntax.md
+% Test: Syntax Graph Analysis Example
+% Category: docs_coverage
+% Description: Tests the complete graph analysis example from docs/reference/syntax.md
 
-.db create syntax_graph
-.db use syntax_graph
+.kg create syntax_graph
+.kg use syntax_graph
 
-// === Setup graph data ===
+% === Setup graph data ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 2)].
 +node[(1), (2), (3), (4), (5)].
 
-// === Transitive closure ===
+% === Transitive closure ===
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
 ?- path(X, Y).
 
-// === Cycle detection ===
+% === Cycle detection ===
 +in_cycle(X) :- path(X, X).
 
 ?- in_cycle(X).
 
-// === Connected components (undirected) ===
+% === Connected components (undirected) ===
 +bidir(X, Y) :- edge(X, Y).
 +bidir(X, Y) :- edge(Y, X).
 +connected(X, Y) :- bidir(X, Y).
@@ -28,17 +28,17 @@
 
 ?- connected(1, X).
 
-// === Sink nodes (no outgoing) ===
+% === Sink nodes (no outgoing) ===
 +sink(X) :- node(X), !edge(X, _).
 
 ?- sink(X).
 
-// === Source nodes (no incoming) ===
+% === Source nodes (no incoming) ===
 +source(X) :- node(X), !edge(_, X).
 
 ?- source(X).
 
-// Cleanup
-.db use default
-.db drop syntax_graph
+% Cleanup
+.kg use default
+.kg drop syntax_graph
 

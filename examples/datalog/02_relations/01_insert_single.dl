@@ -1,22 +1,22 @@
-// Test: Single Fact Insert
-// Category: 02_relations
-// Description: Tests inserting individual facts
+% Test: Single Fact Insert
+% Category: 02_relations
+% Description: Tests inserting individual facts
 
-.db create test_insert
-.db use test_insert
+.kg create test_insert
+.kg use test_insert
 
-// Insert single facts
+% Insert single facts
 +edge(1, 2).
 +edge(3, 4).
 +edge(5, 6).
 
-// Verify all were inserted
+% Verify all were inserted
 ?- edge(X, Y).
 
-// Check relation info
+% Check relation info
 .rel
 .rel edge
 
-// Cleanup
-.db use default
-.db drop test_insert
+% Cleanup
+.kg use default
+.kg drop test_insert

@@ -48,7 +48,11 @@ fn main() {
 
             for (i, rule) in parsed.rules.iter().enumerate() {
                 println!("\n  Rule {}:", i);
-                println!("    Head: {} with {} args", rule.head.relation, rule.head.args.len());
+                println!(
+                    "    Head: {} with {} args",
+                    rule.head.relation,
+                    rule.head.args.len()
+                );
                 println!("    Body: {} predicates", rule.body.len());
                 println!("    Constraints: {} filters", rule.constraints.len());
 
@@ -218,8 +222,16 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
                 print_ir_structure(input, indent + 4);
             }
         }
-        IRNode::Aggregate { input, group_by, aggregations, .. } => {
-            println!("{}Aggregate group_by={:?} aggs={:?}", prefix, group_by, aggregations);
+        IRNode::Aggregate {
+            input,
+            group_by,
+            aggregations,
+            ..
+        } => {
+            println!(
+                "{}Aggregate group_by={:?} aggs={:?}",
+                prefix, group_by, aggregations
+            );
             println!("{}  input:", prefix);
             print_ir_structure(input, indent + 4);
         }
@@ -241,7 +253,11 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
         }
         IRNode::Compute { input, expressions } => {
             println!("{}Compute", prefix);
-            println!("{}  expressions: {:?}", prefix, expressions.iter().map(|(n, _)| n).collect::<Vec<_>>());
+            println!(
+                "{}  expressions: {:?}",
+                prefix,
+                expressions.iter().map(|(n, _)| n).collect::<Vec<_>>()
+            );
             println!("{}  input:", prefix);
             print_ir_structure(input, indent + 4);
         }

@@ -1,12 +1,16 @@
-Executing script: examples/datalog/10_edge_cases/10_empty_after_delete.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_empty_del
-Database 'test_empty_del' created.
-Switched to database: test_empty_del
-> .db use test_empty_del
-Switched to database: test_empty_del
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_del
+Knowledge graph 'test_empty_del' created.
+Switched to knowledge graph: test_empty_del
+> .kg use test_empty_del
+Switched to knowledge graph: test_empty_del
 > +items[(1), (2), (3), (4), (5)].
-Inserted 5 facts into 'items'.
+Inserted 5 fact(s) into 'items'.
 > ?- items(X).
 5 rows:
   (1)
@@ -21,7 +25,7 @@ Rule 'big_items' registered.
   (4)
   (5)
 > -items(X) :- items(X).
-No matching tuples to delete.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- items(X).
 5 rows:
   (1)
@@ -34,7 +38,7 @@ No matching tuples to delete.
   (4)
   (5)
 > +items[(10), (20)].
-Inserted 2 facts into 'items'.
+Inserted 2 fact(s) into 'items'.
 > ?- items(X).
 7 rows:
   (1)
@@ -50,7 +54,7 @@ Inserted 2 facts into 'items'.
   (5)
   (10)
   (20)
-> .db use default
-Switched to database: default
-> .db drop test_empty_del
-Database 'test_empty_del' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_del
+Knowledge graph 'test_empty_del' dropped.

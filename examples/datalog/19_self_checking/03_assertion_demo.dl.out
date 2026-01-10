@@ -1,14 +1,18 @@
-Executing script: examples/datalog/19_self_checking/03_assertion_demo.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_assertion_demo
-Database 'test_assertion_demo' created.
-Switched to database: test_assertion_demo
-> .db use test_assertion_demo
-Switched to database: test_assertion_demo
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_assertion_demo
+Knowledge graph 'test_assertion_demo' created.
+Switched to knowledge graph: test_assertion_demo
+> .kg use test_assertion_demo
+Switched to knowledge graph: test_assertion_demo
 > +data[(1, 5), (2, 10), (3, 15)].
-Inserted 3 facts into 'data'.
+Inserted 3 fact(s) into 'data'.
 > +link[(1, 100), (2, 200), (3, 300)].
-Inserted 3 facts into 'link'.
+Inserted 3 fact(s) into 'link'.
 > result1(Y, D+1) :- data(X, D), link(X, Y).
 3 rows:
   (100, 6)
@@ -32,12 +36,12 @@ Inserted 3 facts into 'link'.
   (2, 20)
   (3, 25)
 > empty_result(X) :- data(X, Y), Y > 100.
-No results for 'empty_result'.
+No results.
 (session: 3 rule(s))
 > ?- empty_result(X).
 No results.
 > +src3[(1, 5, 999), (2, 10, 888)].
-Inserted 2 facts into 'src3'.
+Inserted 2 fact(s) into 'src3'.
 > result3(Y, D+1) :- src3(X, D, _), link(X, Y).
 2 rows:
   (100, 6)
@@ -47,8 +51,8 @@ Inserted 2 facts into 'src3'.
 2 rows:
   (100, 6)
   (200, 11)
-> .db use default
-Switched to database: default
-(Cleared 4 session rule(s))
-> .db drop test_assertion_demo
-Database 'test_assertion_demo' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_assertion_demo
+Knowledge graph 'test_assertion_demo' dropped.

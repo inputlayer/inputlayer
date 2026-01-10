@@ -6,13 +6,7 @@
 use proptest::prelude::*;
 use std::collections::HashMap;
 
-use inputlayer::{
-    IRBuilder,
-    CodeGenerator,
-    parser::parse_rule,
-    Catalog,
-    Tuple, Value,
-};
+use inputlayer::{parser::parse_rule, Catalog, CodeGenerator, IRBuilder, Tuple, Value};
 
 /// Helper function to execute a Datalog rule with 2-column input relations
 fn execute_two_column_rule(
@@ -36,14 +30,16 @@ fn execute_two_column_rule(
 
     input_data.insert(
         "data".to_string(),
-        data_values.iter()
+        data_values
+            .iter()
             .map(|(x, d)| Tuple::new(vec![Value::Int32(*x), Value::Int32(*d)]))
             .collect(),
     );
 
     input_data.insert(
         "link".to_string(),
-        link_values.iter()
+        link_values
+            .iter()
             .map(|(x, y)| Tuple::new(vec![Value::Int32(*x), Value::Int32(*y)]))
             .collect(),
     );
@@ -77,7 +73,8 @@ fn execute_simple_arithmetic(
 
     input_data.insert(
         "input".to_string(),
-        input_values.iter()
+        input_values
+            .iter()
             .map(|(x, v)| Tuple::new(vec![Value::Int32(*x), Value::Int32(*v)]))
             .collect(),
     );
@@ -255,7 +252,8 @@ mod deterministic_tests {
             vec![(1, 5)],
             vec![(1, 100)],
             "result(Y, D+1) :- data(X, D), link(X, Y).",
-        ).expect("Should succeed");
+        )
+        .expect("Should succeed");
 
         assert_eq!(results.len(), 1);
         let values = results[0].values();
@@ -269,7 +267,8 @@ mod deterministic_tests {
             vec![(1, -5)],
             vec![(1, 100)],
             "result(Y, D+1) :- data(X, D), link(X, Y).",
-        ).expect("Should succeed");
+        )
+        .expect("Should succeed");
 
         assert_eq!(results.len(), 1);
         let values = results[0].values();
@@ -282,7 +281,8 @@ mod deterministic_tests {
             vec![(1, 0)],
             vec![(1, 100)],
             "result(Y, D+1) :- data(X, D), link(X, Y).",
-        ).expect("Should succeed");
+        )
+        .expect("Should succeed");
 
         assert_eq!(results.len(), 1);
         let values = results[0].values();
@@ -316,12 +316,14 @@ mod deterministic_tests {
             codegen.add_input_tuples(rel.clone(), tuples.clone());
         }
 
-        let results = codegen.generate_and_execute_tuples(&ir).expect("Should execute");
+        let results = codegen
+            .generate_and_execute_tuples(&ir)
+            .expect("Should execute");
 
         assert_eq!(results.len(), 1);
         let values = results[0].values();
         assert_eq!(values.len(), 2);
-        assert_eq!(values[0].as_i32().unwrap(), 1);  // X
+        assert_eq!(values[0].as_i32().unwrap(), 1); // X
         assert_eq!(values[1].as_i32().unwrap(), 70); // A-B = 100-30 = 70
     }
 }

@@ -1,11 +1,11 @@
-// Test: Organization Chart with Levels
-// Category: Applications
-// Verifies: Hierarchical level computation
+% Test: Organization Chart with Levels
+% Category: Applications
+% Verifies: Hierarchical level computation
 
-.db create test_org
-.db use test_org
+.kg create test_org
+.kg use test_org
 
-// Organization hierarchy: reports_to(employee, manager)
+% Organization hierarchy: reports_to(employee, manager)
 +reports_to[(2, 1), (3, 1), (4, 1),      // CEO (1) has 3 direct reports
             (5, 2), (6, 2),              // VP1 (2) has 2 reports
             (7, 3), (8, 3), (9, 3),      // VP2 (3) has 3 reports
@@ -13,32 +13,32 @@
             (11, 5), (12, 6),            // Managers under VP1
             (13, 7), (14, 8)].           // Managers under VP2
 
-// CEO has no manager
+% CEO has no manager
 +ceo[(1)].
 
-// Compute level in hierarchy (CEO = level 0)
+% Compute level in hierarchy (CEO = level 0)
 +level(E, 0) :- ceo(E).
 +level(E, L+1) :- reports_to(E, M), level(M, L).
 
-// Query all levels
+% Query all levels
 ?- level(E, L).
 
-// Count employees per level
+% Count employees per level
 +level_count(L, count<E>) :- level(E, L).
 ?- level_count(L, C).
 
-// All subordinates (direct and indirect)
+% All subordinates (direct and indirect)
 +subordinate(Mgr, Emp) :- reports_to(Emp, Mgr).
 +subordinate(Mgr, Emp) :- reports_to(Emp, Mid), subordinate(Mgr, Mid).
 
-// Count subordinates per manager
+% Count subordinates per manager
 +sub_count(Mgr, count<E>) :- subordinate(Mgr, E).
 ?- sub_count(M, C).
 
-// Find managers with 3+ subordinates
+% Find managers with 3+ subordinates
 +large_team(Mgr) :- sub_count(Mgr, C), C >= 3.
 ?- large_team(M).
 
-// Cleanup
-.db use default
-.db drop test_org
+% Cleanup
+.kg use default
+.kg drop test_org

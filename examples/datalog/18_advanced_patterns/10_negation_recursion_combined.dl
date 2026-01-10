@@ -1,35 +1,35 @@
-// Test: Negation Combined with Recursion
-// Category: Advanced Patterns
-// Verifies: Negation filtering within recursive path computation
-// CRITICAL: Tests stratification and negation in recursive context
+% Test: Negation Combined with Recursion
+% Category: Advanced Patterns
+% Verifies: Negation filtering within recursive path computation
+% CRITICAL: Tests stratification and negation in recursive context
 
-.db create test_neg_rec_combined
-.db use test_neg_rec_combined
+.kg create test_neg_rec_combined
+.kg use test_neg_rec_combined
 
-// Graph edges
+% Graph edges
 +edge[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4)].
 
-// Blocked edges (should be avoided in safe paths)
+% Blocked edges (should be avoided in safe paths)
 +blocked[(2, 3), (4, 5)].
 
-// Base case: direct unblocked edges
+% Base case: direct unblocked edges
 +safe_edge(X, Y) :- edge(X, Y), !blocked(X, Y).
 ?- safe_edge(X, Y).
 
-// Recursive safe path (using only unblocked edges)
+% Recursive safe path (using only unblocked edges)
 +safe_path(X, Y) :- safe_edge(X, Y).
 +safe_path(X, Z) :- safe_edge(X, Y), safe_path(Y, Z).
 
 ?- safe_path(X, Y).
 
-// Expected safe_edge: (1,2), (3,4), (1,3), (2,4) - NOT (2,3), (4,5)
-// Expected safe_path from 1: can reach 2, 3, 4 but NOT 5 (blocked)
+% Expected safe_edge: (1,2), (3,4), (1,3), (2,4) - NOT (2,3), (4,5)
+% Expected safe_path from 1: can reach 2, 3, 4 but NOT 5 (blocked)
 
-// Count reachable from node 1
+% Count reachable from node 1
 +reachable_from_1(Y) :- safe_path(1, Y).
 +reach_count(count<Y>) :- reachable_from_1(Y).
 ?- reach_count(C).
 
-// Cleanup
-.db use default
-.db drop test_neg_rec_combined
+% Cleanup
+.kg use default
+.kg drop test_neg_rec_combined

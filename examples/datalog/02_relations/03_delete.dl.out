@@ -1,12 +1,16 @@
-Executing script: examples/datalog/02_relations/03_delete.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_del
-Database 'test_del' created.
-Switched to database: test_del
-> .db use test_del
-Switched to database: test_del
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del
+Knowledge graph 'test_del' created.
+Switched to knowledge graph: test_del
+> .kg use test_del
+Switched to knowledge graph: test_del
 > +edge[(1,2), (2,3), (3,4), (4,5), (5,6)].
-Inserted 5 facts into 'edge'.
+Inserted 5 fact(s) into 'edge'.
 > ?- edge(X, Y).
 5 rows:
   (1, 2)
@@ -15,7 +19,7 @@ Inserted 5 facts into 'edge'.
   (4, 5)
   (5, 6)
 > -edge(3, 4).
-Deleted fact from 'edge'.
+Deleted 1 facts from 'edge'.
 > ?- edge(X, Y).
 4 rows:
   (1, 2)
@@ -23,12 +27,14 @@ Deleted fact from 'edge'.
   (4, 5)
   (5, 6)
 > -edge(X, Y) :- edge(X, Y), X > 3.
-Deleted 2 facts from 'edge'.
+Conditional delete not yet supported over HTTP. Use query API.
 > ?- edge(X, Y).
-2 rows:
+4 rows:
   (1, 2)
   (2, 3)
-> .db use default
-Switched to database: default
-> .db drop test_del
-Database 'test_del' dropped.
+  (4, 5)
+  (5, 6)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del
+Knowledge graph 'test_del' dropped.

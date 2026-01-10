@@ -20,33 +20,33 @@ Type .help for commands, .quit to exit
 inputlayer>
 ```
 
-## Step 2: Create a Database
+## Step 2: Create a Knowledge Graph
 
-Every InputLayer program runs in a database. Let's create one:
+Every InputLayer program runs in a knowledge graph. Let's create one:
 
 ```datalog
-.db create social
+.kg create social
 ```
 
 Output:
 ```
-Database 'social' created.
-Switched to database: social
+Knowledge graph 'social' created.
+Switched to knowledge graph: social
 ```
 
 You can verify with:
 ```datalog
-.db
+.kg
 ```
 
 Output:
 ```
-Current database: social
+Current knowledge graph: social
 ```
 
 ## Step 3: Add Facts
 
-Facts are the base data in your database. Let's add some "follows" relationships:
+Facts are the base data in your knowledge graph. Let's add some "follows" relationships:
 
 ```datalog
 +follows(1, 2).
@@ -189,18 +189,18 @@ User 1 can now reach user 5! InputLayer automatically recomputed the derived rel
 Here's everything we did in one script:
 
 ```datalog
-// Create and use database
-.db create social
-.db use social
+% Create and use knowledge graph
+.kg create social
+.kg use social
 
-// Add base facts
+% Add base facts
 +follows[(1, 2), (2, 3), (3, 4), (1, 3)].
 
-// Define transitive reachability
+% Define transitive reachability
 +reachable(X, Y) :- follows(X, Y).
 +reachable(X, Z) :- follows(X, Y), reachable(Y, Z).
 
-// Query: who can user 1 reach?
+% Query: who can user 1 reach?
 ?- reachable(1, X).
 ```
 

@@ -1,14 +1,18 @@
-Executing script: examples/datalog/15_arithmetic/14_arity_5col.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_arity_5col
-Database 'test_arity_5col' created.
-Switched to database: test_arity_5col
-> .db use test_arity_5col
-Switched to database: test_arity_5col
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_5col
+Knowledge graph 'test_arity_5col' created.
+Switched to knowledge graph: test_arity_5col
+> .kg use test_arity_5col
+Switched to knowledge graph: test_arity_5col
 > +src5[(1, 10, 20, 30, 40), (2, 100, 200, 300, 400)].
-Inserted 2 facts into 'src5'.
+Inserted 2 fact(s) into 'src5'.
 > +link[(1, 1000), (2, 2000)].
-Inserted 2 facts into 'link'.
+Inserted 2 fact(s) into 'link'.
 > inc_a(Y, A+1) :- src5(X, A, _, _, _), link(X, Y).
 2 rows:
   (1000, 11)
@@ -73,19 +77,23 @@ Inserted 2 facts into 'link'.
   (1000, 40)
   (2000, 400)
 > all_bound(Y, A+1, B, C, D) :- src5(X, A, B, C, D), link(X, Y).
-No results for 'all_bound'.
+2 rows:
+  (1000, 11, 20, 30, 40)
+  (2000, 101, 200, 300, 400)
 (session: 8 rule(s))
 > ?- all_bound(R, V1, V2, V3, V4).
 2 rows:
   (1000, 11, 20, 30, 40)
   (2000, 101, 200, 300, 400)
 > multi_ops(Y, A+1, B*2, C-10, D/2) :- src5(X, A, B, C, D), link(X, Y).
-No results for 'multi_ops'.
+2 rows:
+  (1000, 11, 40, 20, 20.0)
+  (2000, 101, 400, 290, 200.0)
 (session: 9 rule(s))
 > ?- multi_ops(R, V1, V2, V3, V4).
 2 rows:
-  (1000, 11, 40, 20, 20)
-  (2000, 101, 400, 290, 200)
+  (1000, 11, 40, 20, 20.0)
+  (2000, 101, 400, 290, 200.0)
 > sum_all(X, A+B+C+D) :- src5(X, A, B, C, D).
 2 rows:
   (1, 100)
@@ -95,8 +103,8 @@ No results for 'multi_ops'.
 2 rows:
   (1, 100)
   (2, 1000)
-> .db use default
-Switched to database: default
-(Cleared 10 session rule(s))
-> .db drop test_arity_5col
-Database 'test_arity_5col' dropped.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 10 session rule(s), 0 session fact(s))
+> .kg drop test_arity_5col
+Knowledge graph 'test_arity_5col' dropped.

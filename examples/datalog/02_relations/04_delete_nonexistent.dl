@@ -1,28 +1,28 @@
-// Test: Delete Nonexistent Facts
-// Category: 02_relations
-// Description: Tests deleting facts that don't exist
+% Test: Delete Nonexistent Facts
+% Category: 02_relations
+% Description: Tests deleting facts that don't exist
 
-.db create test_del_nonexist
-.db use test_del_nonexist
+.kg create test_del_nonexist
+.kg use test_del_nonexist
 
-// Insert initial data
+% Insert initial data
 +edge[(1,2), (2,3), (3,4)].
 
-// Show initial state
+% Show initial state
 ?- edge(X, Y).
 
-// Try to delete a fact that doesn't exist
+% Try to delete a fact that doesn't exist
 -edge(99, 100).
 
-// Show state after - should be unchanged
+% Show state after - should be unchanged
 ?- edge(X, Y).
 
-// Try conditional delete that matches nothing
+% Try conditional delete that matches nothing
 -edge(X, Y) :- edge(X, Y), X > 100.
 
-// Show final state - should still be unchanged
+% Show final state - should still be unchanged
 ?- edge(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_del_nonexist
+% Cleanup
+.kg use default
+.kg drop test_del_nonexist

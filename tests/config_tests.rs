@@ -49,15 +49,15 @@ fn test_config_default_storage_path() {
 }
 
 #[test]
-fn test_config_default_database_name() {
+fn test_config_default_knowledge_graph_name() {
     let config = Config::default();
-    assert_eq!(config.storage.default_database, "default");
+    assert_eq!(config.storage.default_knowledge_graph, "default");
 }
 
 #[test]
-fn test_config_default_auto_create_databases() {
+fn test_config_default_auto_create_knowledge_graphs() {
     let config = Config::default();
-    assert!(!config.storage.auto_create_databases);
+    assert!(!config.storage.auto_create_knowledge_graphs);
 }
 
 #[test]
@@ -120,8 +120,8 @@ fn test_load_config_from_toml() {
     let config_content = r#"
 [storage]
 data_dir = "/tmp/test_data"
-default_database = "test_db"
-auto_create_databases = true
+default_knowledge_graph = "test_db"
+auto_create_knowledge_graphs = true
 
 [storage.persistence]
 format = "csv"
@@ -156,8 +156,8 @@ format = "json"
 
     // Verify loaded values
     assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/test_data"));
-    assert_eq!(config.storage.default_database, "test_db");
-    assert!(config.storage.auto_create_databases);
+    assert_eq!(config.storage.default_knowledge_graph, "test_db");
+    assert!(config.storage.auto_create_knowledge_graphs);
     // Check format and compression via Debug string
     assert!(format!("{:?}", config.storage.persistence.format).contains("Csv"));
     assert!(format!("{:?}", config.storage.persistence.compression).contains("Gzip"));
@@ -200,7 +200,7 @@ fn test_config_local_overrides_base() {
     let base_config = r#"
 [storage]
 data_dir = "./base_data"
-default_database = "base_db"
+default_knowledge_graph = "base_db"
 
 [storage.persistence]
 format = "parquet"
@@ -229,7 +229,7 @@ format = "text"
     let local_config = r#"
 [storage]
 data_dir = "./local_data"
-default_database = "base_db"
+default_knowledge_graph = "base_db"
 
 [storage.persistence]
 format = "parquet"
@@ -261,8 +261,8 @@ format = "text"
 
     // data_dir should be from config.local.toml
     assert_eq!(config.storage.data_dir, PathBuf::from("./local_data"));
-    // default_database should be from both (same value)
-    assert_eq!(config.storage.default_database, "base_db");
+    // default_knowledge_graph should be from both (same value)
+    assert_eq!(config.storage.default_knowledge_graph, "base_db");
 }
 
 // ============================================================================
@@ -342,7 +342,9 @@ fn test_config_valid_formats() {
 
     // Should be one of the valid formats
     assert!(
-        format_str.contains("Parquet") || format_str.contains("Csv") || format_str.contains("Bincode"),
+        format_str.contains("Parquet")
+            || format_str.contains("Csv")
+            || format_str.contains("Bincode"),
         "Invalid format: {}",
         format_str
     );
@@ -355,7 +357,9 @@ fn test_config_valid_compression() {
 
     // Should be one of the valid compression types
     assert!(
-        compression_str.contains("Snappy") || compression_str.contains("Gzip") || compression_str.contains("None"),
+        compression_str.contains("Snappy")
+            || compression_str.contains("Gzip")
+            || compression_str.contains("None"),
         "Invalid compression: {}",
         compression_str
     );
@@ -368,8 +372,11 @@ fn test_config_valid_log_level() {
 
     // Should be one of the valid log levels
     assert!(
-        level == "trace" || level == "debug" || level == "info" ||
-        level == "warn" || level == "error",
+        level == "trace"
+            || level == "debug"
+            || level == "info"
+            || level == "warn"
+            || level == "error",
         "Invalid log level: {}",
         level
     );
@@ -398,8 +405,9 @@ fn test_config_relative_path() {
     config.storage.data_dir = PathBuf::from("./data");
 
     // Should preserve relative path
-    assert!(config.storage.data_dir.starts_with("./") ||
-            config.storage.data_dir.starts_with("data"));
+    assert!(
+        config.storage.data_dir.starts_with("./") || config.storage.data_dir.starts_with("data")
+    );
 }
 
 #[test]
@@ -421,7 +429,10 @@ fn test_config_can_be_cloned() {
     let config2 = config1.clone();
 
     assert_eq!(config1.storage.data_dir, config2.storage.data_dir);
-    assert_eq!(config1.storage.default_database, config2.storage.default_database);
+    assert_eq!(
+        config1.storage.default_knowledge_graph,
+        config2.storage.default_knowledge_graph
+    );
 }
 
 #[test]

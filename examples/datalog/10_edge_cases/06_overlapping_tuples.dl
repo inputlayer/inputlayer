@@ -1,27 +1,27 @@
-// Test: Overlapping Tuples Between Relations
-// Category: 10_edge_cases
-// Description: Tests behavior when same tuples exist in different relations
+% Test: Overlapping Tuples Between Relations
+% Category: 10_edge_cases
+% Description: Tests behavior when same tuples exist in different relations
 
-.db create test_overlap
-.db use test_overlap
+.kg create test_overlap
+.kg use test_overlap
 
-// Two relations with overlapping tuples
+% Two relations with overlapping tuples
 +rel_a[(1, 2), (2, 3), (3, 4), (4, 5)].
 +rel_b[(2, 3), (3, 4), (5, 6), (6, 7)].
 
-// Union-like behavior via separate rules
+% Union-like behavior via separate rules
 +combined(X, Y) :- rel_a(X, Y).
 +combined(X, Y) :- rel_b(X, Y).
 ?- combined(X, Y).
 
-// Intersection via join on same variables
+% Intersection via join on same variables
 +intersection(X, Y) :- rel_a(X, Y), rel_b(X, Y).
 ?- intersection(X, Y).
 
-// Difference via negation
+% Difference via negation
 +only_in_a(X, Y) :- rel_a(X, Y), !rel_b(X, Y).
 ?- only_in_a(X, Y).
 
-// Cleanup
-.db use default
-.db drop test_overlap
+% Cleanup
+.kg use default
+.kg drop test_overlap

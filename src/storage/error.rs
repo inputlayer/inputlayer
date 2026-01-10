@@ -22,28 +22,28 @@ pub enum StorageError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// Database not found
-    #[error("Database not found: {0}")]
-    DatabaseNotFound(String),
+    /// Knowledge graph not found
+    #[error("Knowledge graph not found: {0}")]
+    KnowledgeGraphNotFound(String),
 
-    /// Database already exists
-    #[error("Database already exists: {0}")]
-    DatabaseExists(String),
+    /// Knowledge graph already exists
+    #[error("Knowledge graph already exists: {0}")]
+    KnowledgeGraphExists(String),
 
-    /// No current database selected
-    #[error("No current database selected. Use use_database() first.")]
-    NoCurrentDatabase,
+    /// No current knowledge graph selected
+    #[error("No current knowledge graph selected. Use use_knowledge_graph() first.")]
+    NoCurrentKnowledgeGraph,
 
-    /// Cannot drop default database
-    #[error("Cannot drop the default database")]
+    /// Cannot drop default knowledge graph
+    #[error("Cannot drop the default knowledge graph")]
     CannotDropDefault,
 
-    /// Cannot drop current database
-    #[error("Cannot drop the current database. Switch to another database first.")]
-    CannotDropCurrentDatabase,
+    /// Cannot drop current knowledge graph
+    #[error("Cannot drop the current knowledge graph. Switch to another knowledge graph first.")]
+    CannotDropCurrentKnowledgeGraph,
 
     /// Relation not found
-    #[error("Relation '{0}' not found in database '{1}'")]
+    #[error("Relation '{0}' not found in knowledge graph '{1}'")]
     RelationNotFound(String, String),
 
     /// Invalid relation name

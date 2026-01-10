@@ -1,14 +1,18 @@
-Executing script: examples/datalog/21_query_features/00_scan_all.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_scan
-Database 'test_scan' created.
-Switched to database: test_scan
-> .db use test_scan
-Switched to database: test_scan
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_scan
+Knowledge graph 'test_scan' created.
+Switched to knowledge graph: test_scan
+> .kg use test_scan
+Switched to knowledge graph: test_scan
 > +edge[(1,2), (2,3), (3,4)].
-Inserted 3 facts into 'edge'.
+Inserted 3 fact(s) into 'edge'.
 > +node[(1,10), (2,20), (3,30)].
-Inserted 3 facts into 'node'.
+Inserted 3 fact(s) into 'node'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)
@@ -19,7 +23,7 @@ Inserted 3 facts into 'node'.
   (1, 10)
   (2, 20)
   (3, 30)
-> .db use default
-Switched to database: default
-> .db drop test_scan
-Database 'test_scan' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_scan
+Knowledge graph 'test_scan' dropped.

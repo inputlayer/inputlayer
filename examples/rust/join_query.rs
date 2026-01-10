@@ -71,7 +71,11 @@ fn main() {
         println!("  path2({}, {}) where x < 3", x, z);
     }
     // Expected: (1,3), (2,4) - only paths starting from x < 3
-    assert_eq!(results.len(), 2, "Filtered 2-hop paths should return 2 tuples");
+    assert_eq!(
+        results.len(),
+        2,
+        "Filtered 2-hop paths should return 2 tuples"
+    );
     let result_set = to_set(results);
     assert!(result_set.contains(&(1, 3)), "Should contain path 1→3");
     assert!(result_set.contains(&(2, 4)), "Should contain path 2→4");
@@ -122,7 +126,10 @@ fn main() {
     }
     // Triangle 1-2-3 should be detected. Due to the self-join structure,
     // we should get results representing triangle participation.
-    assert!(results.len() >= 1, "Triangle detection should find triangle edges");
+    assert!(
+        results.len() >= 1,
+        "Triangle detection should find triangle edges"
+    );
 
     println!("\n=== Example Complete - All assertions passed! ===");
 }

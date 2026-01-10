@@ -1,16 +1,20 @@
-Executing script: examples/datalog/20_applications/02_rbac_deny.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_rbac_deny
-Database 'test_rbac_deny' created.
-Switched to database: test_rbac_deny
-> .db use test_rbac_deny
-Switched to database: test_rbac_deny
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rbac_deny
+Knowledge graph 'test_rbac_deny' created.
+Switched to knowledge graph: test_rbac_deny
+> .kg use test_rbac_deny
+Switched to knowledge graph: test_rbac_deny
 > +user_role[(1, 100), (2, 100), (3, 101), (4, 102)].
-Inserted 4 facts into 'user_role'.
+Inserted 4 fact(s) into 'user_role'.
 > +role_allow[(100, 1), (100, 2), (100, 3), (101, 1), (101, 2), (102, 1)].
-Inserted 6 facts into 'role_allow'.
+Inserted 6 fact(s) into 'role_allow'.
 > +user_deny[(2, 3), (3, 2)].
-Inserted 2 facts into 'user_deny'.
+Inserted 2 fact(s) into 'user_deny'.
 > +base_permission(User, Perm) :- user_role(User, Role), role_allow(Role, Perm).
 Rule 'base_permission' registered.
 > +effective_permission(User, Perm) :- base_permission(User, Perm), !user_deny(User, Perm).
@@ -41,7 +45,7 @@ Rule 'denied' registered.
 2 rows:
   (2, 3)
   (3, 2)
-> .db use default
-Switched to database: default
-> .db drop test_rbac_deny
-Database 'test_rbac_deny' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rbac_deny
+Knowledge graph 'test_rbac_deny' dropped.

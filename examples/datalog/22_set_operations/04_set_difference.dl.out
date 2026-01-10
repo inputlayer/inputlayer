@@ -1,14 +1,18 @@
-Executing script: examples/datalog/22_set_operations/04_set_difference.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_diff
-Database 'test_diff' created.
-Switched to database: test_diff
-> .db use test_diff
-Switched to database: test_diff
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diff
+Knowledge graph 'test_diff' created.
+Switched to knowledge graph: test_diff
+> .kg use test_diff
+Switched to knowledge graph: test_diff
 > +set_a[(1), (2), (3), (4), (5)].
-Inserted 5 facts into 'set_a'.
+Inserted 5 fact(s) into 'set_a'.
 > +set_b[(2), (4)].
-Inserted 2 facts into 'set_b'.
+Inserted 2 fact(s) into 'set_b'.
 > +diff_a_minus_b(X) :- set_a(X), !set_b(X).
 Rule 'diff_a_minus_b' registered.
 > ?- diff_a_minus_b(X).
@@ -21,7 +25,7 @@ Rule 'diff_b_minus_a' registered.
 > ?- diff_b_minus_a(X).
 No results.
 > +set_c[(3), (4), (5), (6), (7)].
-Inserted 5 facts into 'set_c'.
+Inserted 5 fact(s) into 'set_c'.
 > +diff_a_minus_c(X) :- set_a(X), !set_c(X).
 Rule 'diff_a_minus_c' registered.
 > ?- diff_a_minus_c(X).
@@ -29,18 +33,18 @@ Rule 'diff_a_minus_c' registered.
   (1)
   (2)
 > +set_p[(1), (2), (3)].
-Inserted 3 facts into 'set_p'.
+Inserted 3 fact(s) into 'set_p'.
 > +set_q[(2), (3), (4)].
-Inserted 3 facts into 'set_q'.
+Inserted 3 fact(s) into 'set_q'.
 > +sym_diff(X) :- set_p(X), !set_q(X).
 Rule 'sym_diff' registered.
 > +sym_diff(X) :- set_q(X), !set_p(X).
-Rule added to 'sym_diff' (2 rules total).
+Rule 'sym_diff' registered.
 > ?- sym_diff(X).
 2 rows:
   (1)
   (4)
-> .db use default
-Switched to database: default
-> .db drop test_diff
-Database 'test_diff' dropped.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_diff
+Knowledge graph 'test_diff' dropped.

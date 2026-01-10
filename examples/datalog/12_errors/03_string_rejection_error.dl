@@ -1,13 +1,13 @@
-// Test: String Values Rejection
-// Category: 12_errors
-// Description: Tests that string values are rejected (integer-only engine)
+% Test: String Values Rejection
+% Category: 12_errors
+% Description: Tests that string values are rejected (integer-only engine)
 
-.db create test_str_err
-.db use test_str_err
+.kg create test_str_err
+.kg use test_str_err
 
-// Attempt to insert string values - should fail
+% Attempt to insert string values - should fail
 +person[("alice", 25), ("bob", 30)].
 
-// Cleanup
-.db use default
-.db drop test_str_err
+% Cleanup
+.kg use default
+.kg drop test_str_err

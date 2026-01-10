@@ -18,24 +18,24 @@ inputlayer>
 
 ## Command Categories
 
-### Database Commands (`.db`)
+### Knowledge Graph Commands (`.kg`)
 
-Manage your databases:
+Manage your knowledge graphs:
 
 | Command | Description |
 |---------|-------------|
-| `.db` | Show current database |
-| `.db list` | List all databases |
-| `.db create <name>` | Create a new database |
-| `.db use <name>` | Switch to a database |
-| `.db drop <name>` | Delete a database (cannot drop current) |
+| `.kg` | Show current knowledge graph |
+| `.kg list` | List all knowledge graphs |
+| `.kg create <name>` | Create a new knowledge graph |
+| `.kg use <name>` | Switch to a knowledge graph |
+| `.kg drop <name>` | Delete a knowledge graph (cannot drop current) |
 
 **Examples:**
 ```datalog
-.db create myproject
-.db use myproject
-.db list
-.db
+.kg create myproject
+.kg use myproject
+.kg list
+.kg
 ```
 
 ### Relation Commands (`.rel`)
@@ -69,12 +69,12 @@ Manage persistent rules:
 
 **Examples:**
 ```datalog
-.rule                           // List all rules
-.rule path                      // Query the 'path' rule
-.rule def path                  // Show path's definition
-.rule drop path                 // Delete the path rule
-.rule clear path                // Clear for re-definition
-.rule edit path 1 +path(X,Y) :- edge(X,Y).  // Edit clause 1
+.rule                           % List all rules
+.rule path                      % Query the 'path' rule
+.rule def path                  % Show path's definition
+.rule drop path                 % Delete the path rule
+.rule clear path                % Clear for re-definition
+.rule edit path 1 +path(X,Y) :- edge(X,Y).  % Edit clause 1
 ```
 
 ### Session Commands (`.session`)
@@ -89,10 +89,10 @@ Manage transient session rules:
 
 **Examples:**
 ```datalog
-temp(X) :- edge(1, X).    // Add session rule
-.session                   // List session rules
-.session drop 1            // Remove first rule
-.session clear             // Clear all
+temp(X) :- edge(1, X).    % Add session rule
+.session                   % List session rules
+.session drop 1            % Remove first rule
+.session clear             % Clear all
 ```
 
 ### File Commands (`.load`)
@@ -126,79 +126,79 @@ Load and execute Datalog files:
 ### Insert Facts (`+`)
 
 ```datalog
-// Single fact
+% Single fact
 +edge(1, 2).
 
-// Bulk insert
+% Bulk insert
 +edge[(1, 2), (2, 3), (3, 4)].
 
-// With different types
+% With different types
 +person("alice", 30, "engineering").
 ```
 
 ### Delete Facts (`-`)
 
 ```datalog
-// Single fact
+% Single fact
 -edge(1, 2).
 
-// Conditional delete (must reference relation in body)
+% Conditional delete (must reference relation in body)
 -edge(X, Y) :- edge(X, Y), X > 10.
 
-// Delete all from a relation
+% Delete all from a relation
 -edge(X, Y) :- edge(X, Y).
 ```
 
 ### Updates (Delete then Insert)
 
 ```datalog
-// First delete old value
+% First delete old value
 -counter(1, 0).
-// Then insert new value
+% Then insert new value
 +counter(1, 5).
 ```
 
 ### Persistent Rules (`+head :- body`)
 
 ```datalog
-// Simple rule
+% Simple rule
 +adult(Name, Age) :- person(Name, Age), Age >= 18.
 
-// Recursive rule
+% Recursive rule
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// With aggregation
+% With aggregation
 +dept_count(Dept, count<Id>) :- employee(Id, Dept).
 ```
 
 ### Session Rules (`head :- body`)
 
 ```datalog
-// Transient rule (no + prefix)
+% Transient rule (no + prefix)
 temp_result(X, Y) :- edge(X, Y), X < Y.
 ```
 
 ### Queries (`?-`)
 
 ```datalog
-// Simple query
+% Simple query
 ?- edge(1, X).
 
-// With constraints
+% With constraints
 ?- person(Name, Age), Age > 25.
 
-// Query derived data
+% Query derived data
 ?- path(1, X).
 ```
 
 ### Schema Declarations
 
 ```datalog
-// Typed schema
+% Typed schema
 +employee(id: int, name: string, dept: string).
 
-// With constraints
+% With constraints
 +user(id: int @key, email: string @unique).
 ```
 
@@ -220,12 +220,12 @@ Statements can span multiple lines. They're executed when you type the final `.`
 ### Comments
 
 ```datalog
-// Single line comment
-+edge(1, 2).  // Inline comment
+% Single line comment (Prolog style - preferred)
++edge(1, 2).  % Inline comment
 
 /*
    Multi-line
-   comment
+   block comment
 */
 ```
 
@@ -248,10 +248,10 @@ Results: 5 rows
 Use `_` to ignore columns:
 
 ```datalog
-// Get all source nodes (ignore target)
+% Get all source nodes (ignore target)
 ?- edge(X, _).
 
-// Count unique sources
+% Count unique sources
 temp(count<X>) :- edge(X, _).
 ```
 
@@ -260,30 +260,30 @@ temp(count<X>) :- edge(X, _).
 ### 1. Exploratory Analysis
 
 ```datalog
-.db create exploration
-.db use exploration
+.kg create exploration
+.kg use exploration
 .load data.dl
-.rel                          // See what data exists
-?- some_relation(X, Y).       // Explore
-temp(X) :- complex_query...   // Session rule for analysis
-.session clear                // Clean up when done
+.rel                          % See what data exists
+?- some_relation(X, Y).       % Explore
+temp(X) :- complex_query...   % Session rule for analysis
+.session clear                % Clean up when done
 ```
 
 ### 2. Building a Schema
 
 ```datalog
-.db create production
-.db use production
+.kg create production
+.kg use production
 
-// Define schemas first
+% Define schemas first
 +user(id: int @key, name: string, email: string @unique).
 +order(id: int @key, user_id: int, amount: float).
 
-// Load data
+% Load data
 .load users.dl
 .load orders.dl
 
-// Verify
+% Verify
 .rel user
 .rel order
 ```
@@ -291,40 +291,40 @@ temp(X) :- complex_query...   // Session rule for analysis
 ### 3. Defining Business Rules
 
 ```datalog
-// Define persistent rules
+% Define persistent rules
 +high_value_customer(UserId) :-
   order(_, UserId, Amount),
   Amount > 1000.
 
-// Aggregate total spend per customer
+% Aggregate total spend per customer
 +customer_spend(UserId, sum<Amount>) :-
   order(_, UserId, Amount).
 
-// VIPs have high total spend
+% VIPs have high total spend
 +vip(UserId, Total) :-
   high_value_customer(UserId),
   customer_spend(UserId, Total),
   Total > 5000.
 
-// Query
+% Query
 ?- vip(User, Spend).
 ```
 
 ### 4. Iterating on Rules
 
 ```datalog
-// First attempt
+% First attempt
 +path(X, Y) :- edge(X, Y).
 
-// Check results
+% Check results
 .rule path
 
-// Not right? Clear and redefine
+% Not right? Clear and redefine
 .rule clear path
 +path(X, Y) :- edge(X, Y).
 +path(X, Z) :- path(X, Y), edge(Y, Z).
 
-// Verify
+% Verify
 .rule def path
 .rule path
 ```

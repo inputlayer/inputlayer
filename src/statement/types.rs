@@ -74,10 +74,14 @@ pub enum RefinementArg {
 /// Parse a type declaration: `type Name: TypeExpr.`
 pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
     // Remove "type " prefix and trailing period
-    let input = input.trim_start_matches("type ").trim().trim_end_matches('.');
+    let input = input
+        .trim_start_matches("type ")
+        .trim()
+        .trim_end_matches('.');
 
     // Split on first ':' to get name and type expression
-    let colon_pos = input.find(':')
+    let colon_pos = input
+        .find(':')
         .ok_or("Type declaration must contain ':' (e.g., 'type Email: string.')")?;
 
     let name = input[..colon_pos].trim().to_string();
@@ -88,7 +92,10 @@ pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
         return Err("Type name cannot be empty".to_string());
     }
     if !name.chars().next().unwrap().is_uppercase() {
-        return Err(format!("Type name '{}' must start with uppercase letter", name));
+        return Err(format!(
+            "Type name '{}' must start with uppercase letter",
+            name
+        ));
     }
 
     // Parse the type expression
@@ -144,7 +151,10 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
             if input.chars().next().unwrap().is_uppercase() {
                 Ok(TypeExpr::TypeRef(input.to_string()))
             } else {
-                Err(format!("Unknown base type: '{}'. Use int, string, bool, float, or a type name.", input))
+                Err(format!(
+                    "Unknown base type: '{}'. Use int, string, bool, float, or a type name.",
+                    input
+                ))
             }
         }
     }
@@ -152,7 +162,8 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
 
 /// Parse a record type: { field: type, ... }
 fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
-    let content = input.strip_prefix('{')
+    let content = input
+        .strip_prefix('{')
         .and_then(|s| s.strip_suffix('}'))
         .ok_or("Invalid record type syntax")?
         .trim();
@@ -170,7 +181,8 @@ fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
             continue;
         }
 
-        let colon_pos = part.find(':')
+        let colon_pos = part
+            .find(':')
             .ok_or_else(|| format!("Record field '{}' must have type: 'name: type'", part))?;
 
         let field_name = part[..colon_pos].trim().to_string();
@@ -181,7 +193,10 @@ fn parse_record_type(input: &str) -> Result<TypeExpr, String> {
         }
 
         let field_type = parse_type_expr(type_str)?;
-        fields.push(RecordField { name: field_name, field_type });
+        fields.push(RecordField {
+            name: field_name,
+            field_type,
+        });
     }
 
     Ok(TypeExpr::Record(fields))
@@ -238,7 +253,7 @@ fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
 
         // String argument
         if part.starts_with('"') && part.ends_with('"') && part.len() >= 2 {
-            args.push(RefinementArg::String(part[1..part.len()-1].to_string()));
+            args.push(RefinementArg::String(part[1..part.len() - 1].to_string()));
             continue;
         }
 

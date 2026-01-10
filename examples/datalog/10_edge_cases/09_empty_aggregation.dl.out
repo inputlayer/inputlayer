@@ -1,9 +1,13 @@
-Executing script: examples/datalog/10_edge_cases/09_empty_aggregation.dl
+Connecting to server at http://127.0.0.1:8080...
+Connected!
 
-> .db create test_empty_agg
-Database 'test_empty_agg' created.
-Switched to database: test_empty_agg
-> .db use test_empty_agg
-Switched to database: test_empty_agg
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_agg
+Knowledge graph 'test_empty_agg' created.
+Switched to knowledge graph: test_empty_agg
+> .kg use test_empty_agg
+Switched to knowledge graph: test_empty_agg
 > +total(count<x>) :- sales(X, _).
-Script error: Line 12: Parse error: Invalid term: 'count<x>'
+Script error: Parse error: Invalid term: 'count<x>'
