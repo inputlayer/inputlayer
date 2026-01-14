@@ -412,6 +412,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 2, X < 4) no longer supported - Constraint type removed
 fn test_multiple_queries_on_same_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 

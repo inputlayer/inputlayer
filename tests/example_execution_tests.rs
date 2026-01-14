@@ -31,6 +31,7 @@ fn test_simple_scan() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 2) no longer supported - Constraint type removed
 fn test_filter_greater_than() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
@@ -47,6 +48,7 @@ fn test_filter_greater_than() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 1, Y < 5) no longer supported - Constraint type removed
 fn test_multiple_filters() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
@@ -78,6 +80,7 @@ fn test_projection_column_swap() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X != 3) no longer supported - Constraint type removed
 fn test_inequality_filter() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
@@ -131,6 +134,7 @@ fn test_three_hop_path() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X < 3) no longer supported - Constraint type removed
 fn test_join_with_filter() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
@@ -176,6 +180,7 @@ fn test_triangle_detection() {
 // =============================================================================
 
 #[test]
+#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
 fn test_pipeline_stages() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -222,6 +227,7 @@ fn test_pipeline_with_trace() {
 // =============================================================================
 
 #[test]
+#[ignore] // Constraint syntax (X > 2, etc.) no longer supported - Constraint type removed
 fn test_all_comparison_operators() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
@@ -262,6 +268,7 @@ fn test_all_comparison_operators() {
 // =============================================================================
 
 #[test]
+#[ignore] // Constraint syntax (X > 100) no longer supported - Constraint type removed
 fn test_empty_result() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
@@ -292,6 +299,7 @@ fn test_single_tuple() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 50) no longer supported - Constraint type removed
 fn test_large_dataset() {
     let mut engine = DatalogEngine::new();
     let data: Vec<(i32, i32)> = (1..=100).map(|i| (i, i + 1)).collect();

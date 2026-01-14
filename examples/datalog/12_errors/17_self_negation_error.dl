@@ -1,0 +1,21 @@
+% Test: Self-Negation Error (Unstratified)
+% Category: Errors
+% Description: Direct self-negation must be rejected as unstratified
+% EXPECTED ERROR: "Unstratified negation" or similar
+% BUG: Currently NOT rejected - engine should reject at rule registration
+
+.kg create test_self_neg_err
+.kg use test_self_neg_err
+
++base[(1), (2), (3)].
+
+% Self-negation: a depends negatively on itself
+% This forms a neg-cycle and is NOT stratifiable
+% MUST BE REJECTED with error about unstratified negation
++a(X) :- base(X), !a(X).
+
+% If we get here, the bug exists - should have errored above
+?- a(X).
+
+.kg use default
+.kg drop test_self_neg_err

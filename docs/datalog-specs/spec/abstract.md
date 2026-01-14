@@ -24,7 +24,7 @@ InputLayer extends Datalog with features for real-world applications:
 | **Session rules** | Temporary rules for ad-hoc analysis |
 | **Aggregations** | `count<X>`, `sum<X>`, `min<X>`, `max<X>`, `avg<X>` |
 | **Vector operations** | Distance and similarity functions for embeddings |
-| **Schema constraints** | `@key`, `@unique`, `@not_empty`, `@range` |
+| **Typed schemas** | `+user(id: int, name: string).` |
 | **Knowledge graphs** | Multiple isolated databases in one instance |
 
 ## Quick Example

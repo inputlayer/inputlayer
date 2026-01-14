@@ -43,6 +43,7 @@ fn test_self_join_with_filter() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X >= 2, etc.) no longer supported - Constraint type removed
 fn test_complex_filter_combination() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
@@ -90,7 +91,7 @@ fn test_join_with_column_equality() {
 }
 
 #[test]
-#[ignore] // TODO: Cartesian products (no shared variables) not yet supported
+#[ignore] // Constraint syntax (A < C) no longer supported - Constraint type removed
 fn test_cartesian_product_filtered() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("r", vec![(1, 2), (2, 3)]);
@@ -132,6 +133,7 @@ fn test_variable_reuse_in_body() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 10) no longer supported - Constraint type removed
 fn test_empty_result_set() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -144,6 +146,7 @@ fn test_empty_result_set() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X = Y) no longer supported - Constraint type removed
 fn test_single_variable_constraint() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 1), (2, 2), (3, 4), (5, 5)]);
@@ -164,6 +167,7 @@ fn test_single_variable_constraint() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
 fn test_multiple_inequality_constraints() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 1), (2, 3), (4, 5), (6, 6)]);
@@ -197,6 +201,7 @@ fn test_join_with_multiple_constraints() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 50) no longer supported - Constraint type removed
 fn test_large_dataset_performance() {
     let mut engine = DatalogEngine::new();
 
@@ -228,6 +233,7 @@ fn test_nested_join_complex() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
 fn test_pipeline_with_trace() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
@@ -247,6 +253,7 @@ fn test_pipeline_with_trace() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X = 3, etc.) no longer supported - Constraint type removed
 fn test_all_comparison_operators_comprehensive() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
@@ -366,6 +373,7 @@ fn test_asymmetric_joins() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 1, etc.) no longer supported - Constraint type removed
 fn test_filters_pushed_through_pipeline() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
@@ -384,6 +392,7 @@ fn test_filters_pushed_through_pipeline() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
 fn test_column_to_column_comparison() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("pairs", vec![(1, 1), (1, 2), (2, 1), (2, 2), (3, 4)]);

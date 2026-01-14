@@ -1,0 +1,18 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_current
+Knowledge graph 'test_drop_current' created.
+Switched to knowledge graph: test_drop_current
+> .kg use test_drop_current
+Switched to knowledge graph: test_drop_current
+> +test_data[(1, "data")].
+Inserted 1 fact(s) into 'test_data'.
+> ?- test_data(X, Y).
+1 rows:
+  (1, "data")
+> .kg drop test_drop_current
+Script error: Cannot drop current knowledge graph. Switch to another first.

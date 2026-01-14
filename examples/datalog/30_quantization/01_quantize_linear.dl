@@ -1,0 +1,19 @@
+% Test: quantize_linear function
+% Quantizes a float32 vector to int8 using linear scaling
+.kg create test_quantize_linear
+.kg use test_quantize_linear
+
+% Create some float vectors to quantize
++embedding[(1, [1.0, 0.5, -0.5, -1.0])].
++embedding[(2, [0.0, 0.0, 0.0, 0.0])].
++embedding[(3, [0.25, 0.75, -0.25, -0.75])].
+
+% Apply quantize_linear function
+?- embedding(Id, V), Q = quantize_linear(V).
+
+% Use in a rule
+quantized(Id, Q) :- embedding(Id, V), Q = quantize_linear(V).
+?- quantized(Id, Q).
+
+.kg use default
+.kg drop test_quantize_linear

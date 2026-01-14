@@ -1,0 +1,18 @@
+% Test: Drop Current Knowledge Graph Error
+% Category: 01_knowledge_graph
+% Description: Tests that dropping the currently active KG produces an error
+
+% Create and switch to a new KG
+.kg create test_drop_current
+.kg use test_drop_current
+
+% Add some data
++test_data[(1, "data")].
+?- test_data(X, Y).
+
+% Try to drop the current KG - should error
+.kg drop test_drop_current
+
+% Cleanup (switch away first)
+.kg use default
+.kg drop test_drop_current

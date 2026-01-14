@@ -1,0 +1,22 @@
+% Test: Cross Product (Cartesian Join)
+% Category: Joins
+% Description: Tests joining relations with no shared variables (cross product)
+
+.kg create test_cross
+.kg use test_cross
+
++colors[("red"), ("blue")].
++shapes[("circle"), ("square")].
+
+% Cross product - all combinations
+combinations(C, S) :- colors(C), shapes(S).
+?- combinations(C, S).
+
+% Three-way cross product
++sizes[("small"), ("large")].
+all_combos(C, S, Z) :- colors(C), shapes(S), sizes(Z).
+?- all_combos(C, S, Z).
+
+% Cleanup
+.kg use default
+.kg drop test_cross

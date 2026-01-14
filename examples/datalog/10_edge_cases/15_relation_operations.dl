@@ -1,0 +1,33 @@
+% Test: Relation Operation Sequences
+% Category: 10_edge_cases
+% Description: Tests various sequences of operations on relations
+
+.kg create test_rel_ops
+.kg use test_rel_ops
+
+% Insert initial data
++data[(1, 100), (2, 200), (3, 300)].
+?- data(X, Y).
+
+% Delete one row
+-data[(2, 200)].
+?- data(X, Y).
+
+% Insert back and add new
++data[(2, 200), (4, 400)].
+?- data(X, Y).
+
+% Delete multiple
+-data[(1, 100), (4, 400)].
+?- data(X, Y).
+
+% Insert with duplicate detection (should only appear once)
++data[(2, 200)].
+?- data(X, Y).
+
+% Delete all remaining
+-data[(2, 200), (3, 300)].
+?- data(X, Y).
+
+.kg use default
+.kg drop test_rel_ops

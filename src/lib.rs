@@ -105,7 +105,7 @@ pub mod ir;
 // Re-export types from internal modules
 pub use crate::ast::builders::{fact, simple_rule, AtomBuilder, RuleBuilder};
 pub use crate::ast::{
-    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Constraint, Program, Rule,
+    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, Program, Rule,
     Term,
 };
 pub use crate::ir::{IRNode, Predicate};
@@ -144,9 +144,8 @@ pub mod schema;
 
 // Re-export schema types for convenience
 pub use schema::{
-    CheckConstraint, ColumnAnnotation, ColumnSchema, FailureAction, RelationSchema, SchemaCatalog,
-    SchemaType, TypeAlias, ValidationConfig, ValidationEngine, ValidationError, ValidationTiming,
-    Violation,
+    catalog::SchemaError, ColumnSchema, RelationSchema, SchemaCatalog, SchemaType,
+    ValidationEngine, ValidationError, Violation,
 };
 
 // Vector operations (distance functions, LSH, top-k)
@@ -231,7 +230,7 @@ pub use statement::{
     parse_rule_definition, parse_statement, BaseType, ColumnDef, DeleteOp, DeletePattern,
     DeleteTarget, InsertOp, InsertTarget, LoadMode, MetaCommand, QueryGoal, RecordField,
     Refinement, RefinementArg, RuleDef, SchemaDecl, SerializableArithExpr, SerializableArithOp,
-    SerializableBodyPred, SerializableConstraint, SerializableRule, SerializableTerm, Statement,
+    SerializableBodyPred, SerializableRule, SerializableTerm, Statement,
     TypeDecl, TypeExpr, UpdateOp,
 };
 
@@ -533,20 +532,21 @@ impl DatalogEngine {
 
             // Register body relations
             for pred in &rule.body {
-                let atom = pred.atom();
-                let body_schema: Vec<_> = atom
-                    .args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, term)| match term {
-                        Term::Variable(v) => v.clone(),
-                        _ => format!("col{}", i),
-                    })
-                    .collect();
+                if let Some(atom) = pred.atom() {
+                    let body_schema: Vec<_> = atom
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, term)| match term {
+                            Term::Variable(v) => v.clone(),
+                            _ => format!("col{}", i),
+                        })
+                        .collect();
 
-                if !self.catalog.has_relation(&atom.relation) {
-                    self.catalog
-                        .register_relation(atom.relation.clone(), body_schema);
+                    if !self.catalog.has_relation(&atom.relation) {
+                        self.catalog
+                            .register_relation(atom.relation.clone(), body_schema);
+                    }
                 }
             }
         }

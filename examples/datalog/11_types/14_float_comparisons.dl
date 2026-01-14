@@ -1,0 +1,40 @@
+% Test: Float Comparisons in Rules and Queries
+% Category: 11_types
+% Description: Tests comparing Float64 values with integer and float constants
+
+.kg create test_float_cmp
+.kg use test_float_cmp
+
+% Create test data with float values
++nums[(1, 0.5), (2, 1.5), (3, 2.5), (4, 3.0)].
+
+% Test: less than integer constant (float data vs int constant)
+?- nums(X, Y), Y < 2.
+
+% Test: greater than or equal to float constant
+?- nums(X, Y), Y >= 1.5.
+
+% Test: equality with float constant
+?- nums(X, Y), Y == 1.5.
+
+% Test: not equal to float constant
+?- nums(X, Y), Y != 0.5.
+
+% Test: rules with float comparisons
++small(X, Y) :- nums(X, Y), Y < 2.
+?- small(X, Y).
+
++medium(X, Y) :- nums(X, Y), Y >= 1.5, Y <= 2.5.
+?- medium(X, Y).
+
+% Test: greater than float constant
++large(X, Y) :- nums(X, Y), Y > 2.0.
+?- large(X, Y).
+
+% Test: combined constraints
++in_range(X, Y) :- nums(X, Y), Y >= 1.0, Y < 3.0.
+?- in_range(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_float_cmp

@@ -108,6 +108,38 @@ pub enum BuiltinFunc {
     IntervalDuration,
     /// Check if point is in interval: point_in_interval(ts, start, end) -> Bool
     PointInInterval,
+
+    // Int8 quantization functions
+    /// Linear quantization: quantize_linear(v) -> VectorInt8
+    QuantizeLinear,
+    /// Symmetric quantization: quantize_symmetric(v) -> VectorInt8
+    QuantizeSymmetric,
+    /// Dequantize int8 to f32: dequantize(v) -> Vector
+    Dequantize,
+    /// Dequantize with scale: dequantize_scaled(v, scale) -> Vector
+    DequantizeScaled,
+
+    // Int8 distance functions
+    /// Euclidean distance for int8: euclidean_int8(v1, v2) -> Float64
+    EuclideanInt8,
+    /// Cosine distance for int8: cosine_int8(v1, v2) -> Float64
+    CosineInt8,
+    /// Dot product for int8: dot_int8(v1, v2) -> Float64
+    DotProductInt8,
+    /// Manhattan distance for int8: manhattan_int8(v1, v2) -> Float64
+    ManhattanInt8,
+
+    // Multi-probe LSH functions
+    /// Generate probe sequence: lsh_probes(bucket, num_hp, num_probes) -> [Int64]
+    LshProbes,
+    /// Multi-probe in one call: lsh_multi_probe(v, table_idx, num_hp, num_probes) -> [Int64]
+    LshMultiProbe,
+
+    // Math utility functions
+    /// Absolute value of integer: abs_int64(x) -> Int64
+    AbsInt64,
+    /// Absolute value of float: abs_float64(x) -> Float64
+    AbsFloat64,
 }
 
 impl BuiltinFunc {
@@ -138,6 +170,22 @@ impl BuiltinFunc {
             "interval_contains" => Some(BuiltinFunc::IntervalContains),
             "interval_duration" => Some(BuiltinFunc::IntervalDuration),
             "point_in_interval" => Some(BuiltinFunc::PointInInterval),
+            // Quantization functions
+            "quantize_linear" => Some(BuiltinFunc::QuantizeLinear),
+            "quantize_symmetric" => Some(BuiltinFunc::QuantizeSymmetric),
+            "dequantize" => Some(BuiltinFunc::Dequantize),
+            "dequantize_scaled" => Some(BuiltinFunc::DequantizeScaled),
+            // Int8 distance functions
+            "euclidean_int8" => Some(BuiltinFunc::EuclideanInt8),
+            "cosine_int8" => Some(BuiltinFunc::CosineInt8),
+            "dot_int8" => Some(BuiltinFunc::DotProductInt8),
+            "manhattan_int8" => Some(BuiltinFunc::ManhattanInt8),
+            // Multi-probe LSH
+            "lsh_probes" => Some(BuiltinFunc::LshProbes),
+            "lsh_multi_probe" => Some(BuiltinFunc::LshMultiProbe),
+            // Math utilities
+            "abs_int64" | "abs_i64" => Some(BuiltinFunc::AbsInt64),
+            "abs_float64" | "abs_f64" => Some(BuiltinFunc::AbsFloat64),
             _ => None,
         }
     }
@@ -167,6 +215,19 @@ impl BuiltinFunc {
             | BuiltinFunc::WithinLast
             | BuiltinFunc::PointInInterval => 3,
             BuiltinFunc::IntervalsOverlap | BuiltinFunc::IntervalContains => 4,
+            // Quantization functions
+            BuiltinFunc::QuantizeLinear | BuiltinFunc::QuantizeSymmetric | BuiltinFunc::Dequantize => 1,
+            BuiltinFunc::DequantizeScaled => 2,
+            // Int8 distance functions
+            BuiltinFunc::EuclideanInt8
+            | BuiltinFunc::CosineInt8
+            | BuiltinFunc::DotProductInt8
+            | BuiltinFunc::ManhattanInt8 => 2,
+            // Multi-probe LSH
+            BuiltinFunc::LshProbes => 3,        // (bucket, num_hp, num_probes)
+            BuiltinFunc::LshMultiProbe => 4,    // (v, table_idx, num_hp, num_probes)
+            // Math utilities
+            BuiltinFunc::AbsInt64 | BuiltinFunc::AbsFloat64 => 1,
         }
     }
 
@@ -197,6 +258,22 @@ impl BuiltinFunc {
             BuiltinFunc::IntervalContains => "interval_contains",
             BuiltinFunc::IntervalDuration => "interval_duration",
             BuiltinFunc::PointInInterval => "point_in_interval",
+            // Quantization functions
+            BuiltinFunc::QuantizeLinear => "quantize_linear",
+            BuiltinFunc::QuantizeSymmetric => "quantize_symmetric",
+            BuiltinFunc::Dequantize => "dequantize",
+            BuiltinFunc::DequantizeScaled => "dequantize_scaled",
+            // Int8 distance functions
+            BuiltinFunc::EuclideanInt8 => "euclidean_int8",
+            BuiltinFunc::CosineInt8 => "cosine_int8",
+            BuiltinFunc::DotProductInt8 => "dot_int8",
+            BuiltinFunc::ManhattanInt8 => "manhattan_int8",
+            // Multi-probe LSH
+            BuiltinFunc::LshProbes => "lsh_probes",
+            BuiltinFunc::LshMultiProbe => "lsh_multi_probe",
+            // Math utilities
+            BuiltinFunc::AbsInt64 => "abs_int64",
+            BuiltinFunc::AbsFloat64 => "abs_float64",
         }
     }
 }
@@ -617,53 +694,33 @@ impl Atom {
     }
 }
 
-/// Represents a comparison constraint (x != y, x < 10, etc.)
+/// Comparison operators for filter predicates in rule bodies
 #[derive(Debug, Clone, PartialEq)]
-pub enum Constraint {
-    NotEqual(Term, Term),
-    LessThan(Term, Term),
-    LessOrEqual(Term, Term),
-    GreaterThan(Term, Term),
-    GreaterOrEqual(Term, Term),
-    Equal(Term, Term), // For completeness
+pub enum ComparisonOp {
+    Equal,        // =
+    NotEqual,     // !=
+    LessThan,     // <
+    LessOrEqual,  // <=
+    GreaterThan,  // >
+    GreaterOrEqual, // >=
 }
 
-impl Constraint {
-    /// Get all variables in this constraint
-    pub fn variables(&self) -> HashSet<String> {
-        let (left, right) = match self {
-            Constraint::NotEqual(l, r)
-            | Constraint::LessThan(l, r)
-            | Constraint::LessOrEqual(l, r)
-            | Constraint::GreaterThan(l, r)
-            | Constraint::GreaterOrEqual(l, r)
-            | Constraint::Equal(l, r) => (l, r),
-        };
-
-        let mut vars = HashSet::new();
-        if let Term::Variable(name) = left {
-            vars.insert(name.clone());
-        }
-        if let Term::Variable(name) = right {
-            vars.insert(name.clone());
-        }
-        vars
-    }
-}
-
-/// Represents a body predicate (positive or negated atom)
-/// Used in rule bodies to support stratified negation
+/// Represents a body predicate (positive atom, negated atom, or comparison)
+/// Used in rule bodies to support stratified negation and filtering
 #[derive(Debug, Clone, PartialEq)]
 pub enum BodyPredicate {
     Positive(Atom),
     Negated(Atom),
+    /// Comparison predicate: left op right (e.g., X = Y, X < 5)
+    Comparison(Term, ComparisonOp, Term),
 }
 
 impl BodyPredicate {
-    /// Get the underlying atom
-    pub fn atom(&self) -> &Atom {
+    /// Get the underlying atom (returns None for Comparison predicates)
+    pub fn atom(&self) -> Option<&Atom> {
         match self {
-            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => atom,
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => Some(atom),
+            BodyPredicate::Comparison(_, _, _) => None,
         }
     }
 
@@ -677,9 +734,26 @@ impl BodyPredicate {
         matches!(self, BodyPredicate::Negated(_))
     }
 
+    /// Check if this is a comparison predicate
+    pub fn is_comparison(&self) -> bool {
+        matches!(self, BodyPredicate::Comparison(_, _, _))
+    }
+
     /// Get all variables in this predicate
     pub fn variables(&self) -> HashSet<String> {
-        self.atom().variables()
+        match self {
+            BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => atom.variables(),
+            BodyPredicate::Comparison(left, _, right) => {
+                let mut vars = HashSet::new();
+                if let Term::Variable(v) = left {
+                    vars.insert(v.clone());
+                }
+                if let Term::Variable(v) = right {
+                    vars.insert(v.clone());
+                }
+                vars
+            }
+        }
     }
 }
 
@@ -688,65 +762,84 @@ impl BodyPredicate {
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<BodyPredicate>,
-    pub constraints: Vec<Constraint>,
 }
 
 impl Rule {
     /// Create a new rule
-    pub fn new(head: Atom, body: Vec<BodyPredicate>, constraints: Vec<Constraint>) -> Self {
-        Rule {
-            head,
-            body,
-            constraints,
-        }
+    pub fn new(head: Atom, body: Vec<BodyPredicate>) -> Self {
+        Rule { head, body }
     }
 
     /// Create a rule with only positive body atoms (no negation)
-    pub fn new_simple(head: Atom, body: Vec<Atom>, constraints: Vec<Constraint>) -> Self {
+    pub fn new_simple(head: Atom, body: Vec<Atom>) -> Self {
         Rule {
             head,
             body: body.into_iter().map(BodyPredicate::Positive).collect(),
-            constraints,
         }
     }
 
-    /// Check if this rule is safe (all head variables appear in positive body atoms or are bound by function calls)
+    /// Check if this rule is safe (range-restricted)
+    ///
+    /// A rule is safe if:
+    /// 1. All head variables appear in positive body atoms
+    /// 2. All variables in negated atoms appear in positive body atoms (range restriction)
     pub fn is_safe(&self) -> bool {
         let head_vars = self.head.variables();
-        let mut safe_vars = self.positive_body_variables();
+        let safe_vars = self.positive_body_variables();
 
-        // Also include variables bound by function calls in constraints
-        // e.g., Dist = euclidean(V, Q) binds Dist
-        safe_vars.extend(self.function_bound_variables());
+        // Check 1: Head variables must be bound by positive atoms
+        if !head_vars.is_subset(&safe_vars) {
+            return false;
+        }
 
-        head_vars.is_subset(&safe_vars)
-    }
-
-    /// Get variables that are bound by function calls in constraints
-    /// e.g., Dist = euclidean(V, Q) binds the variable Dist
-    pub fn function_bound_variables(&self) -> HashSet<String> {
-        let mut bound_vars = HashSet::new();
-
-        for constraint in &self.constraints {
-            if let Constraint::Equal(Term::Variable(var), Term::FunctionCall(_, _)) = constraint {
-                bound_vars.insert(var.clone());
-            }
-            // Also handle the reverse: FunctionCall = Variable
-            if let Constraint::Equal(Term::FunctionCall(_, _), Term::Variable(var)) = constraint {
-                bound_vars.insert(var.clone());
+        // Check 2: Variables in negated atoms must be bound by positive atoms
+        // This is the "range restriction" requirement for negation
+        for pred in &self.body {
+            if let BodyPredicate::Negated(atom) = pred {
+                let neg_vars = atom.variables();
+                if !neg_vars.is_subset(&safe_vars) {
+                    return false;
+                }
             }
         }
 
-        bound_vars
+        true
     }
 
-    /// Get all variables in positive body atoms
+    /// Get all variables in positive body atoms and function call assignments
+    ///
+    /// This includes:
+    /// 1. Variables from positive body atoms (e.g., test_data(Id, X) -> {Id, X})
+    /// 2. Variables bound by function call assignments (e.g., Y = abs_int64(X) -> {Y})
+    ///
+    /// Variables bound by function calls are considered "safe" because they get
+    /// their values from the function result, similar to how variables in positive
+    /// atoms get their values from the relation.
     pub fn positive_body_variables(&self) -> HashSet<String> {
-        self.body
+        let mut vars: HashSet<String> = self
+            .body
             .iter()
             .filter(|pred| pred.is_positive())
             .flat_map(BodyPredicate::variables)
-            .collect()
+            .collect();
+
+        // Also include variables bound by function call assignments
+        for pred in &self.body {
+            if let BodyPredicate::Comparison(left, op, right) = pred {
+                if matches!(op, ComparisonOp::Equal) {
+                    // Y = func(X) - Y is bound by the function result
+                    if let (Term::Variable(v), Term::FunctionCall(_, _)) = (left, right) {
+                        vars.insert(v.clone());
+                    }
+                    // func(X) = Y - Y is bound by the function result
+                    if let (Term::FunctionCall(_, _), Term::Variable(v)) = (left, right) {
+                        vars.insert(v.clone());
+                    }
+                }
+            }
+        }
+
+        vars
     }
 
     /// Get all variables in this rule
@@ -757,18 +850,16 @@ impl Rule {
             vars.extend(pred.variables());
         }
 
-        for constraint in &self.constraints {
-            vars.extend(constraint.variables());
-        }
-
         vars
     }
 
     /// Check if this rule is recursive (head relation appears in body)
     pub fn is_recursive(&self) -> bool {
-        self.body
-            .iter()
-            .any(|pred| pred.atom().relation == self.head.relation)
+        self.body.iter().any(|pred| {
+            pred.atom()
+                .map(|a| a.relation == self.head.relation)
+                .unwrap_or(false)
+        })
     }
 
     /// Get all positive body atoms
@@ -777,7 +868,7 @@ impl Rule {
             .iter()
             .filter_map(|pred| match pred {
                 BodyPredicate::Positive(atom) => Some(atom),
-                BodyPredicate::Negated(_) => None,
+                BodyPredicate::Negated(_) | BodyPredicate::Comparison(_, _, _) => None,
             })
             .collect()
     }
@@ -788,7 +879,7 @@ impl Rule {
             .iter()
             .filter_map(|pred| match pred {
                 BodyPredicate::Negated(atom) => Some(atom),
-                BodyPredicate::Positive(_) => None,
+                BodyPredicate::Positive(_) | BodyPredicate::Comparison(_, _, _) => None,
             })
             .collect()
     }
@@ -832,7 +923,9 @@ impl Program {
         let mut body_relations: HashSet<String> = HashSet::new();
         for rule in &self.rules {
             for pred in &rule.body {
-                body_relations.insert(pred.atom().relation.clone());
+                if let Some(atom) = pred.atom() {
+                    body_relations.insert(atom.relation.clone());
+                }
             }
         }
 
@@ -939,7 +1032,7 @@ mod tests {
             )),
         ];
 
-        let rule = Rule::new(head, body, vec![]);
+        let rule = Rule::new(head, body);
         assert!(rule.is_safe());
         assert!(rule.is_recursive());
     }
@@ -954,7 +1047,6 @@ mod tests {
                 "source".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         program.add_rule(Rule::new_simple(
@@ -969,7 +1061,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         ));
 
         let idbs = program.idbs();

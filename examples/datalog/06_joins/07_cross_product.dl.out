@@ -1,0 +1,56 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cross
+Knowledge graph 'test_cross' created.
+Switched to knowledge graph: test_cross
+> .kg use test_cross
+Switched to knowledge graph: test_cross
+> +colors[("red"), ("blue")].
+Inserted 2 fact(s) into 'colors'.
+> +shapes[("circle"), ("square")].
+Inserted 2 fact(s) into 'shapes'.
+> combinations(C, S) :- colors(C), shapes(S).
+4 rows:
+  ("blue", "circle")
+  ("blue", "square")
+  ("red", "circle")
+  ("red", "square")
+(session: 1 rule(s))
+> ?- combinations(C, S).
+4 rows:
+  ("blue", "circle")
+  ("blue", "square")
+  ("red", "circle")
+  ("red", "square")
+> +sizes[("small"), ("large")].
+Inserted 2 fact(s) into 'sizes'.
+> all_combos(C, S, Z) :- colors(C), shapes(S), sizes(Z).
+8 rows:
+  ("blue", "circle", "large")
+  ("blue", "circle", "small")
+  ("blue", "square", "large")
+  ("blue", "square", "small")
+  ("red", "circle", "large")
+  ("red", "circle", "small")
+  ("red", "square", "large")
+  ("red", "square", "small")
+(session: 2 rule(s))
+> ?- all_combos(C, S, Z).
+8 rows:
+  ("blue", "circle", "large")
+  ("blue", "circle", "small")
+  ("blue", "square", "large")
+  ("blue", "square", "small")
+  ("red", "circle", "large")
+  ("red", "circle", "small")
+  ("red", "square", "large")
+  ("red", "square", "small")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_cross
+Knowledge graph 'test_cross' dropped.

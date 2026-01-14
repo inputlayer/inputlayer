@@ -12,4 +12,13 @@ Switched to knowledge graph: test_top_k
 > +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
 Inserted 6 fact(s) into 'score'.
 > +top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).
-Script error: Parse error: Invalid term: 'top_k<3'
+Rule 'top_players' registered.
+> ?- top_players(X, Y).
+3 rows:
+  (2, 250)
+  (4, 300)
+  (6, 200)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_top_k
+Knowledge graph 'test_top_k' dropped.

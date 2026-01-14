@@ -7,6 +7,7 @@
 //! and AtomicU64 for lock-free statistics counters.
 
 use crate::ast::Term;
+use crate::schema::{ColumnSchema, RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement;
 use crate::storage_engine::StorageEngine;
 use crate::value::{Tuple, Value};
@@ -60,6 +61,7 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
 /// - Uses AtomicU64 for counters (lock-free statistics)
 pub struct Handler {
     storage: Arc<RwLock<StorageEngine>>,
+    schema_catalog: Arc<RwLock<SchemaCatalog>>,
     start_time: Instant,
     query_count: AtomicU64,
     insert_count: AtomicU64,
@@ -70,6 +72,7 @@ impl Handler {
     pub fn new(storage: StorageEngine) -> Self {
         Self {
             storage: Arc::new(RwLock::new(storage)),
+            schema_catalog: Arc::new(RwLock::new(SchemaCatalog::new())),
             start_time: Instant::now(),
             query_count: AtomicU64::new(0),
             insert_count: AtomicU64::new(0),
@@ -164,16 +167,44 @@ impl Handler {
                     if let Ok(stmt) = statement::parse_statement(stmt_text) {
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
-                                messages.push(format!(
-                                    "Schema for '{}' declared with {} columns{}",
-                                    decl.name,
-                                    decl.columns.len(),
-                                    if decl.persistent {
-                                        " (persistent)"
-                                    } else {
-                                        " (session)"
+                                // Build RelationSchema from SchemaDecl
+                                let mut relation_schema = RelationSchema::new(&decl.name);
+                                for col in &decl.columns {
+                                    let schema_type = col.col_type.to_schema_type();
+                                    relation_schema = relation_schema
+                                        .with_column(ColumnSchema::new(&col.name, schema_type));
+                                }
+
+                                // Register schema in catalog
+                                // Note: For schema-first workflow, register before inserting data.
+                                // For data-first workflow, ensure existing data is compatible.
+                                let mut catalog = self.schema_catalog.write();
+                                let result = if decl.persistent {
+                                    catalog.register_or_update(relation_schema)
+                                } else {
+                                    catalog.register_or_update_session(relation_schema)
+                                };
+
+                                match result {
+                                    Ok(()) => {
+                                        messages.push(format!(
+                                            "Schema for '{}' registered with {} columns{}",
+                                            decl.name,
+                                            decl.columns.len(),
+                                            if decl.persistent {
+                                                " (persistent)"
+                                            } else {
+                                                " (session)"
+                                            }
+                                        ));
                                     }
-                                ));
+                                    Err(e) => {
+                                        messages.push(format!(
+                                            "Failed to register schema for '{}': {}",
+                                            decl.name, e
+                                        ));
+                                    }
+                                }
                             }
                             statement::Statement::Insert(op) => {
                                 // Convert all terms to Values and create Tuples
@@ -203,6 +234,22 @@ impl Handler {
                                 if let Some(err) = conversion_error {
                                     messages.push(err);
                                     continue;
+                                }
+
+                                // Validate against schema if one exists
+                                {
+                                    let catalog = self.schema_catalog.read();
+                                    if let Some(schema) = catalog.get(&op.relation) {
+                                        let mut engine = ValidationEngine::new();
+                                        if let Err(e) = engine.validate_batch(schema, &tuples) {
+                                            messages.push(format!(
+                                                "Insert rejected for '{}': {}",
+                                                op.relation, e
+                                            ));
+                                            current_stmt.clear();
+                                            continue;
+                                        }
+                                    }
                                 }
 
                                 let count = tuples.len();
@@ -505,6 +552,15 @@ impl Handler {
 
             let body_atom = format!("{}({})", goal.goal.relation, transformed_args.join(", "));
             let mut body_parts = vec![body_atom];
+
+            // Add additional body predicates (for complex queries like ?- foo(X), bar(Y).)
+            // ALSO extract variables from additional body atoms for Cartesian product queries
+            for pred in &goal.body {
+                body_parts.push(format_body_pred(pred));
+                // Extract variables from this predicate to add to head
+                extract_predicate_vars(pred, &mut head_vars);
+            }
+
             body_parts.extend(extra_constraints);
 
             format!(
@@ -646,18 +702,11 @@ impl Handler {
 fn format_rule_text(rule: &crate::ast::Rule) -> String {
     let head = format_atom(&rule.head);
 
-    if rule.body.is_empty() && rule.constraints.is_empty() {
+    if rule.body.is_empty() {
         return format!("{}.", head);
     }
 
-    let mut parts = Vec::new();
-    for pred in &rule.body {
-        parts.push(format_body_pred(pred));
-    }
-    for constraint in &rule.constraints {
-        parts.push(format_constraint(constraint));
-    }
-
+    let parts: Vec<String> = rule.body.iter().map(format_body_pred).collect();
     format!("{} :- {}.", head, parts.join(", "))
 }
 
@@ -735,26 +784,45 @@ fn format_body_pred(pred: &crate::ast::BodyPredicate) -> String {
     match pred {
         crate::ast::BodyPredicate::Positive(atom) => format_atom(atom),
         crate::ast::BodyPredicate::Negated(atom) => format!("!{}", format_atom(atom)),
+        crate::ast::BodyPredicate::Comparison(left, op, right) => {
+            let op_str = match op {
+                crate::ast::ComparisonOp::Equal => "=",
+                crate::ast::ComparisonOp::NotEqual => "!=",
+                crate::ast::ComparisonOp::LessThan => "<",
+                crate::ast::ComparisonOp::LessOrEqual => "<=",
+                crate::ast::ComparisonOp::GreaterThan => ">",
+                crate::ast::ComparisonOp::GreaterOrEqual => ">=",
+            };
+            format!("{} {} {}", format_term(left), op_str, format_term(right))
+        }
     }
 }
 
-fn format_constraint(constraint: &crate::ast::Constraint) -> String {
-    match constraint {
-        crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::NotEqual(l, r) => {
-            format!("{} != {}", format_term(l), format_term(r))
+/// Extract variables from a body predicate and add to head_vars
+/// Used for Cartesian product queries like ?- foo(X), bar(Y).
+fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<String>) {
+    match pred {
+        crate::ast::BodyPredicate::Positive(atom) | crate::ast::BodyPredicate::Negated(atom) => {
+            for term in &atom.args {
+                if let Term::Variable(v) = term {
+                    if !head_vars.contains(v) {
+                        head_vars.push(v.clone());
+                    }
+                }
+            }
         }
-        crate::ast::Constraint::LessThan(l, r) => {
-            format!("{} < {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::LessOrEqual(l, r) => {
-            format!("{} <= {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterThan(l, r) => {
-            format!("{} > {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterOrEqual(l, r) => {
-            format!("{} >= {}", format_term(l), format_term(r))
+        crate::ast::BodyPredicate::Comparison(left, _, right) => {
+            if let Term::Variable(v) = left {
+                if !head_vars.contains(v) {
+                    head_vars.push(v.clone());
+                }
+            }
+            if let Term::Variable(v) = right {
+                if !head_vars.contains(v) {
+                    head_vars.push(v.clone());
+                }
+            }
         }
     }
 }
+

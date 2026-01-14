@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_math_sign
+Knowledge graph 'test_math_sign' created.
+Switched to knowledge graph: test_math_sign
+> .kg use test_math_sign
+Switched to knowledge graph: test_math_sign
+> +nums[(-5), (-1), (0), (1), (5)].
+Inserted 5 fact(s) into 'nums'.
+> with_abs(X, A) :- nums(X), A = abs_int64(X).
+5 rows:
+  (-5, 5)
+  (-1, 1)
+  (0, 0)
+  (1, 1)
+  (5, 5)
+(session: 1 rule(s))
+> ?- with_abs(X, A).
+5 rows:
+  (-5, 5)
+  (-1, 1)
+  (0, 0)
+  (1, 1)
+  (5, 5)
+> positive(X) :- nums(X), X > 0.
+2 rows:
+  (1)
+  (5)
+(session: 2 rule(s))
+> negative(X) :- nums(X), X < 0.
+2 rows:
+  (-5)
+  (-1)
+(session: 3 rule(s))
+> zero(X) :- nums(X), X = 0.
+1 rows:
+  (0)
+(session: 4 rule(s))
+> ?- positive(X).
+2 rows:
+  (1)
+  (5)
+> ?- negative(X).
+2 rows:
+  (-5)
+  (-1)
+> ?- zero(X).
+1 rows:
+  (0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_math_sign
+Knowledge graph 'test_math_sign' dropped.

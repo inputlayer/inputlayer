@@ -1,0 +1,22 @@
+% Test: Case sensitivity rules
+% Category: 38_syntax_gaps
+% Description: Tests that relations are lowercase and variables are uppercase
+
+.kg create test_case
+.kg use test_case
+
+% Valid: lowercase relation, uppercase variable
++edge(1, 2).
++edge(2, 3).
+?- edge(X, Y).
+
+% Variables must start uppercase
++derived(A, B) :- edge(A, B).
+?- derived(X, Y).
+
+% Multiple uppercase variables
++triple(A, B, C) :- edge(A, B), edge(B, C).
+?- triple(X, Y, Z).
+
+.kg use default
+.kg drop test_case

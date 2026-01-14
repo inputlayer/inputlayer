@@ -1,0 +1,26 @@
+% Test: Session Clear Command
+% Category: 33_meta
+% Description: Tests .session clear to remove all session rules
+
+.kg create test_session_clear
+.kg use test_session_clear
+
+% Insert some data
++edge[(1, 2), (2, 3)].
+
+% Create session rules
+connected(X, Y) :- edge(X, Y).
+path(X, Y) :- edge(X, Y).
+
+% Show current rules
+.session
+
+% Clear all session rules
+.session clear
+
+% Show empty session
+.session
+
+% Cleanup
+.kg use default
+.kg drop test_session_clear

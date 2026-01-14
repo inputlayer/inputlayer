@@ -31,11 +31,10 @@ A negative literal excludes matching facts:
 
 ### Syntax
 
-Use `!` or `NOT`:
+Use `!` for negation:
 
 ```datalog
 alive(X) :- person(X), !dead(X).
-alive(X) :- person(X), NOT dead(X).
 ```
 
 ### Safety Rule

@@ -1,0 +1,14 @@
+% Test: .kg show command
+% Shows the current knowledge graph
+.kg create test_kg_show
+.kg use test_kg_show
+
+% Show current KG (should be test_kg_show)
+.kg show
+
+% Switch to default and show
+.kg use default
+.kg show
+
+% Switch back for cleanup
+.kg drop test_kg_show

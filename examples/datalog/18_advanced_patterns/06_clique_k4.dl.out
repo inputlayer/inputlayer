@@ -18,7 +18,10 @@ Rule 'conn' registered.
 > +in_k4(A, B) :- conn(A, B), conn(A, C), conn(A, D), conn(B, C), conn(B, D), conn(C, D), A < B, B < C, C < D.
 Rule 'in_k4' registered.
 > ?- in_k4(X, Y).
-No results.
+3 rows:
+  (1, 2)
+  (1, 3)
+  (2, 3)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_clique

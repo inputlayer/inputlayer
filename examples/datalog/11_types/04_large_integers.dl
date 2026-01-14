@@ -19,9 +19,9 @@
 ?- large_neg(X, Y).
 ?- mixed(X, Y).
 
-% Arithmetic with large values
-+sum_large(X, Y) :- large_pos(X, Y), X + Y > 2500000.
-?- sum_large(X, Y).
+% Filter large values using simple comparison
++big_first(X, Y) :- large_pos(X, Y), X > 999999.
+?- big_first(X, Y).
 
 % Cleanup
 .kg use default

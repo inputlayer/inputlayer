@@ -1,0 +1,21 @@
+% Test: Float Absolute Value
+% Category: Math
+% Description: Tests absolute value on floating point numbers
+
+.kg create test_float_abs
+.kg use test_float_abs
+
++floats[(-3.14), (-1.5), (0.0), (1.5), (3.14)].
+
+% Test absolute value on floats
+with_abs(X, A) :- floats(X), A = abs_float64(X).
+?- with_abs(X, A).
+
+% Test with very small values
++tiny[(-0.001), (0.001)].
+tiny_abs(X, A) :- tiny(X), A = abs_float64(X).
+?- tiny_abs(X, A).
+
+% Cleanup
+.kg use default
+.kg drop test_float_abs

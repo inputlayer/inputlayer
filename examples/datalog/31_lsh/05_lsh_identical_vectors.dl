@@ -1,0 +1,23 @@
+% Test: LSH with Identical Vectors
+% Category: LSH
+% Description: Tests that identical vectors get same bucket
+
+.kg create test_lsh_identical
+.kg use test_lsh_identical
+
++vectors[(1, [1.0, 2.0, 3.0]), (2, [1.0, 2.0, 3.0]), (3, [4.0, 5.0, 6.0])].
+
+% Compute buckets for all vectors
+with_bucket(Id, Vec, B) :- vectors(Id, Vec), B = lsh_bucket(Vec, 4, 42).
+?- with_bucket(Id, Vec, B).
+
+% Identical vectors should have same bucket
+same_bucket(Id1, Id2, B) :-
+    vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
+    B = lsh_bucket(V1, 4, 42),
+    B = lsh_bucket(V2, 4, 42).
+?- same_bucket(Id1, Id2, B).
+
+% Cleanup
+.kg use default
+.kg drop test_lsh_identical

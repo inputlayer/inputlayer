@@ -893,46 +893,84 @@ impl CodeGenerator {
         predicate: &Predicate,
     ) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
         match predicate.clone() {
-            // Integer comparisons
+            // Integer comparisons (with float fallback for mixed numeric types)
             Predicate::ColumnEqConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .map(|v| v.as_i32() == Some(val as i32))
-                    .unwrap_or(false)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i == val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return (f - (val as f64)).abs() < f64::EPSILON;
+                    }
+                }
+                false
             }),
             Predicate::ColumnNeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .map(|v| v.as_i32() != Some(val as i32))
-                    .unwrap_or(true)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i != val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return (f - (val as f64)).abs() >= f64::EPSILON;
+                    }
+                }
+                true
             }),
             Predicate::ColumnGtConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .and_then(|v| v.as_i32())
-                    .map(|v| v > val as i32)
-                    .unwrap_or(false)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i > val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f > (val as f64);
+                    }
+                }
+                false
             }),
             Predicate::ColumnLtConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .and_then(|v| v.as_i32())
-                    .map(|v| v < val as i32)
-                    .unwrap_or(false)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i < val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f < (val as f64);
+                    }
+                }
+                false
             }),
             Predicate::ColumnGeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .and_then(|v| v.as_i32())
-                    .map(|v| v >= val as i32)
-                    .unwrap_or(false)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i >= val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f >= (val as f64);
+                    }
+                }
+                false
             }),
             Predicate::ColumnLeConst(col, val) => Box::new(move |tuple: &Tuple| {
-                tuple
-                    .get(col)
-                    .and_then(|v| v.as_i32())
-                    .map(|v| v <= val as i32)
-                    .unwrap_or(false)
+                if let Some(v) = tuple.get(col) {
+                    // Try integer first
+                    if let Some(i) = v.as_i64() {
+                        return i <= val;
+                    }
+                    // Fall back to float comparison for Float64 values
+                    if let Some(f) = v.as_f64() {
+                        return f <= (val as f64);
+                    }
+                }
+                false
             }),
             // String comparisons
             Predicate::ColumnEqStr(col, val) => Box::new(move |tuple: &Tuple| {
@@ -1003,6 +1041,65 @@ impl CodeGenerator {
                 let rv = tuple.get(right);
                 lv != rv
             }),
+            // Column-to-column ordering comparisons
+            Predicate::ColumnsLt(left, right) => Box::new(move |tuple: &Tuple| {
+                match (tuple.get(left), tuple.get(right)) {
+                    (Some(lv), Some(rv)) => {
+                        // Try integer comparison first
+                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                            return li < ri;
+                        }
+                        // Fall back to float comparison
+                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                            return lf < rf;
+                        }
+                        false
+                    }
+                    _ => false,
+                }
+            }),
+            Predicate::ColumnsGt(left, right) => Box::new(move |tuple: &Tuple| {
+                match (tuple.get(left), tuple.get(right)) {
+                    (Some(lv), Some(rv)) => {
+                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                            return li > ri;
+                        }
+                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                            return lf > rf;
+                        }
+                        false
+                    }
+                    _ => false,
+                }
+            }),
+            Predicate::ColumnsLe(left, right) => Box::new(move |tuple: &Tuple| {
+                match (tuple.get(left), tuple.get(right)) {
+                    (Some(lv), Some(rv)) => {
+                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                            return li <= ri;
+                        }
+                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                            return lf <= rf;
+                        }
+                        false
+                    }
+                    _ => false,
+                }
+            }),
+            Predicate::ColumnsGe(left, right) => Box::new(move |tuple: &Tuple| {
+                match (tuple.get(left), tuple.get(right)) {
+                    (Some(lv), Some(rv)) => {
+                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
+                            return li >= ri;
+                        }
+                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
+                            return lf >= rf;
+                        }
+                        false
+                    }
+                    _ => false,
+                }
+            }),
             // Logical combinations
             Predicate::And(p1, p2) => {
                 let f1 = Self::predicate_to_tuple_fn(&p1);
@@ -1039,30 +1136,51 @@ impl CodeGenerator {
         let left_coll = Self::generate_collection_tuples(scope, left, input_data);
         let right_coll = Self::generate_collection_tuples(scope, right, input_data);
 
-        let left_keys = left_keys.to_vec();
-        let right_keys = right_keys.to_vec();
-        let right_keys_clone = right_keys.clone();
+        // CARTESIAN PRODUCT FIX: When both key arrays are empty, we need a
+        // Cartesian product (cross join). Using empty tuples as keys causes
+        // issues in Differential Dataflow, so we use a sentinel value instead.
+        let is_cartesian = left_keys.is_empty() && right_keys.is_empty();
 
-        // Map to (key, full_tuple) format - keep full tuples for correct reconstruction
-        let left_keyed = left_coll.map(move |tuple| {
-            let key = tuple.from_indices(&left_keys);
-            (key, tuple)
-        });
+        if is_cartesian {
+            // All tuples keyed by the same constant = full Cartesian product
+            let sentinel = Tuple::new(vec![Value::Int64(0)]);
 
-        let right_keyed = right_coll.map(move |tuple| {
-            let key = tuple.from_indices(&right_keys_clone);
-            (key, tuple)
-        });
+            let left_keyed = left_coll.map(move |tuple| (sentinel.clone(), tuple));
 
-        // Join and reconstruct: all of left + non-key columns of right
-        let right_keys_for_map = right_keys.clone();
-        left_keyed
-            .join(&right_keyed)
-            .map(move |(_key, (left_tuple, right_tuple))| {
-                // Output schema: all columns from left, then non-key columns from right
-                let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
-                left_tuple.concat(&right_non_keys)
-            })
+            let sentinel2 = Tuple::new(vec![Value::Int64(0)]);
+            let right_keyed = right_coll.map(move |tuple| (sentinel2.clone(), tuple));
+
+            // For Cartesian product, concatenate ALL columns from both sides
+            left_keyed
+                .join(&right_keyed)
+                .map(|(_key, (left_tuple, right_tuple))| left_tuple.concat(&right_tuple))
+        } else {
+            // Normal join with actual keys
+            let left_keys = left_keys.to_vec();
+            let right_keys = right_keys.to_vec();
+            let right_keys_clone = right_keys.clone();
+
+            // Map to (key, full_tuple) format - keep full tuples for correct reconstruction
+            let left_keyed = left_coll.map(move |tuple| {
+                let key = tuple.from_indices(&left_keys);
+                (key, tuple)
+            });
+
+            let right_keyed = right_coll.map(move |tuple| {
+                let key = tuple.from_indices(&right_keys_clone);
+                (key, tuple)
+            });
+
+            // Join and reconstruct: all of left + non-key columns of right
+            let right_keys_for_map = right_keys.clone();
+            left_keyed
+                .join(&right_keyed)
+                .map(move |(_key, (left_tuple, right_tuple))| {
+                    // Output schema: all columns from left, then non-key columns from right
+                    let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
+                    left_tuple.concat(&right_non_keys)
+                })
+        }
     }
 
     /// Generate antijoin node (negation): Left - (Left ⋈ Right)
@@ -1671,25 +1789,31 @@ impl CodeGenerator {
 
         input_coll.map(move |tuple| {
             // Evaluate each expression and append to tuple
-            let mut result_values: Vec<Value> = tuple.values().iter().cloned().collect();
+            // Use a growing tuple so chained computed columns work:
+            // e.g., Q = quantize(V), D = dequantize(Q) - D needs to see Q
+            let mut current_tuple = tuple.clone();
 
             if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG Compute: input tuple = {:?}", tuple.values());
+                eprintln!("DEBUG Compute: input tuple = {:?}", current_tuple.values());
             }
 
             for (name, expr) in &expressions {
-                let value = Self::evaluate_expression(expr, &tuple);
+                let value = Self::evaluate_expression(expr, &current_tuple);
                 if std::env::var("DATALOG_DEBUG").is_ok() {
                     eprintln!("DEBUG Compute: expr='{}' => {:?}", name, value);
                 }
-                result_values.push(value);
+                // Extend the current tuple with the computed value
+                // so subsequent expressions can reference it
+                let mut values: Vec<Value> = current_tuple.values().iter().cloned().collect();
+                values.push(value);
+                current_tuple = Tuple::new(values);
             }
 
             if std::env::var("DATALOG_DEBUG").is_ok() {
-                eprintln!("DEBUG Compute: output = {:?}", result_values);
+                eprintln!("DEBUG Compute: output = {:?}", current_tuple.values());
             }
 
-            Tuple::new(result_values)
+            current_tuple
         })
     }
 
@@ -1699,6 +1823,7 @@ impl CodeGenerator {
             IRExpression::Column(idx) => tuple.get(*idx).cloned().unwrap_or(Value::Null),
             IRExpression::IntConstant(val) => Value::Int64(*val),
             IRExpression::FloatConstant(val) => Value::Float64(*val),
+            IRExpression::StringConstant(s) => Value::String(s.clone().into()),
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
@@ -2848,6 +2973,250 @@ mod tests {
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    // =========================================================================
+    // Cartesian Product (Cross Join) Tests
+    // =========================================================================
+
+    #[test]
+    fn test_cartesian_product_basic() {
+        // Test: 2x2 Cartesian product (no shared join keys)
+        let mut codegen = CodeGenerator::new();
+
+        // Relation A(x)
+        codegen.add_input_tuples(
+            "a".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        // Relation B(y)
+        codegen.add_input_tuples(
+            "b".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(20)]),
+            ],
+        );
+
+        // Join with empty keys = Cartesian product
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            }),
+            left_keys: vec![],  // Empty keys
+            right_keys: vec![], // Empty keys
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // 2 * 2 = 4 results
+        assert_eq!(results.len(), 4, "Expected 4 results from 2x2 Cartesian product");
+
+        // Check all combinations are present
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int32(1)) && t.get(1) == Some(&Value::Int32(10))));
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int32(1)) && t.get(1) == Some(&Value::Int32(20))));
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(10))));
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int32(2)) && t.get(1) == Some(&Value::Int32(20))));
+    }
+
+    #[test]
+    fn test_cartesian_product_self_join() {
+        // Test: Self Cartesian product (3x3 = 9 results)
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+
+        // Self-join with empty keys = all pairs
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["a".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "items".to_string(),
+                schema: vec!["b".to_string()],
+            }),
+            left_keys: vec![],
+            right_keys: vec![],
+            output_schema: vec!["a".to_string(), "b".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // 3 * 3 = 9 results (including self-pairs)
+        assert_eq!(results.len(), 9, "Expected 9 results from 3x3 self Cartesian product");
+    }
+
+    #[test]
+    fn test_cartesian_product_with_filter() {
+        // Test: Cartesian product followed by filter (A < B)
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "items".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(3)]),
+            ],
+        );
+
+        // Self Cartesian product, then filter for A < B
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "items".to_string(),
+                    schema: vec!["a".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "items".to_string(),
+                    schema: vec!["b".to_string()],
+                }),
+                left_keys: vec![],
+                right_keys: vec![],
+                output_schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            predicate: Predicate::ColumnsLt(0, 1), // a < b
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Pairs where a < b: (1,2), (1,3), (2,3) = 3 results
+        assert_eq!(results.len(), 3, "Expected 3 results where a < b");
+
+        // Verify the pairs
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int64(1)) && t.get(1) == Some(&Value::Int64(2))));
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int64(1)) && t.get(1) == Some(&Value::Int64(3))));
+        assert!(results.iter().any(|t| t.get(0) == Some(&Value::Int64(2)) && t.get(1) == Some(&Value::Int64(3))));
+    }
+
+    #[test]
+    fn test_cartesian_product_empty_relation() {
+        // Test: Cartesian product with empty relation = empty result
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "a".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        codegen.add_input_tuples("b".to_string(), vec![]); // Empty relation
+
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            }),
+            left_keys: vec![],
+            right_keys: vec![],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 0, "Cartesian product with empty relation should be empty");
+    }
+
+    #[test]
+    fn test_cartesian_product_single_elements() {
+        // Test: 1x1 Cartesian product
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "a".to_string(),
+            vec![Tuple::new(vec![Value::Int32(42)])],
+        );
+
+        codegen.add_input_tuples(
+            "b".to_string(),
+            vec![Tuple::new(vec![Value::Int32(99)])],
+        );
+
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            }),
+            left_keys: vec![],
+            right_keys: vec![],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1, "1x1 Cartesian product should have 1 result");
+        assert_eq!(results[0].get(0), Some(&Value::Int32(42)));
+        assert_eq!(results[0].get(1), Some(&Value::Int32(99)));
+    }
+
+    #[test]
+    fn test_cartesian_product_with_vectors() {
+        // Test: Cartesian product with vector columns (for pairwise similarity)
+        let mut codegen = CodeGenerator::new();
+
+        codegen.add_input_tuples(
+            "embedding".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Vector(std::sync::Arc::new(vec![1.0f32, 0.0, 0.0]))]),
+                Tuple::new(vec![Value::Int32(2), Value::Vector(std::sync::Arc::new(vec![0.0f32, 1.0, 0.0]))]),
+            ],
+        );
+
+        // Self Cartesian product with filter Id1 < Id2
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "embedding".to_string(),
+                    schema: vec!["id1".to_string(), "v1".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "embedding".to_string(),
+                    schema: vec!["id2".to_string(), "v2".to_string()],
+                }),
+                left_keys: vec![],
+                right_keys: vec![],
+                output_schema: vec!["id1".to_string(), "v1".to_string(), "id2".to_string(), "v2".to_string()],
+            }),
+            predicate: Predicate::ColumnsLt(0, 2), // id1 < id2
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+
+        // Only 1 pair: (1, v1, 2, v2)
+        assert_eq!(results.len(), 1, "Expected 1 result for pairs where id1 < id2");
+
+        // Verify the pair has vectors
+        let result = &results[0];
+        assert_eq!(result.get(0), Some(&Value::Int32(1)));
+        assert!(matches!(result.get(1), Some(Value::Vector(_))));
+        assert_eq!(result.get(2), Some(&Value::Int32(2)));
+        assert!(matches!(result.get(3), Some(Value::Vector(_))));
     }
 
     #[test]

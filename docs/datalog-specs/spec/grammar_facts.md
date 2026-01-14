@@ -80,66 +80,42 @@ Declare a relation's structure before inserting data:
 | `float` | 64-bit floating point | `3.14`, `-0.5` |
 | `string` | UTF-8 text | `"hello"`, `"alice"` |
 | `bool` | Boolean | `true`, `false` |
+| `vector[N]` | N-dimensional vector | `[0.1, 0.2, 0.3]` |
 
-### Constraints
-
-Add constraints after the type:
-
-```datalog
-+user(
-    id: int @key,
-    email: string @unique,
-    name: string @not_empty,
-    age: int @range(0, 150)
-).
-```
-
-| Constraint | Effect |
-|------------|--------|
-| `@key` | Primary key. Enables upsert (insert or update). |
-| `@unique` | Values must be unique across all facts. |
-| `@not_empty` | String cannot be empty. |
-| `@range(min, max)` | Numeric value must be within range. |
-
-### Composite Keys
-
-Mark multiple columns as `@key` for a composite key:
+### Session vs Persistent Schemas
 
 ```datalog
-+enrollment(student_id: int @key, course_id: int @key, grade: float).
+% Persistent schema - saved with knowledge graph
++user(id: int, name: string).
+
+% Session schema - only for current connection
+user(id: int, name: string).
 ```
 
 ## Type Inference
 
-If you don't declare a schema, InputLayer infers types from the first fact:
+If you don't declare a schema, InputLayer allows any types (schema-less mode):
 
 ```datalog
-+person("alice", 30).     % Inferred: person(string, int)
++person("alice", 30).     % OK - no schema
 +person("bob", 25).       % OK
-+person(123, "charlie").  % ERROR: wrong types
+```
+
+Once a schema is declared, types are enforced:
+
+```datalog
++person(name: string, age: int).
++person("alice", 30).     % OK - matches schema
++person(123, "charlie").  % ERROR: expected (string, int), got (int, string)
 ```
 
 ## Updates
 
-InputLayer doesn't have an UPDATE command. Instead:
-
-### Manual Update (No Key)
-
-Delete the old fact, insert the new one:
+InputLayer doesn't have an UPDATE command. Delete the old fact and insert the new one:
 
 ```datalog
 -employee(1, "Alice", 75000).
 +employee(1, "Alice", 80000).
-```
-
-### Automatic Update (With Key)
-
-With `@key` constraint, inserting an existing key updates the row:
-
-```datalog
-+employee(id: int @key, name: string, salary: int).
-+employee(1, "Alice", 75000).
-+employee(1, "Alice", 80000).  % Updates Alice's salary
 ```
 
 ## Common Errors
@@ -184,7 +160,7 @@ Can't insert facts into a derived relation:
 ### Typed Relation
 
 ```datalog
-+employee(id: int @key, name: string, salary: float).
++employee(id: int, name: string, salary: float).
 +employee[(1, "Alice", 75000.0), (2, "Bob", 65000.0)].
 ?- employee(Id, Name, Salary), Salary > 70000.
 ```

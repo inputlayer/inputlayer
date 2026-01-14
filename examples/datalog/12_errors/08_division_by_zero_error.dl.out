@@ -13,5 +13,32 @@ Switched to knowledge graph: test_div_zero
 Inserted 4 fact(s) into 'numbers'.
 > +pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
 Inserted 4 fact(s) into 'pairs'.
-> +safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
-Script error: Parse error: Invalid term: 'X/Y'
+> safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
+3 rows:
+  (8, 2, 4.0)
+  (10, 2, 5.0)
+  (20, 4, 5.0)
+(session: 1 rule(s))
+> ?- safe_div(A, B, C).
+3 rows:
+  (8, 2, 4.0)
+  (10, 2, 5.0)
+  (20, 4, 5.0)
+> all_div(X, Y, X/Y) :- pairs(X, Y).
+4 rows:
+  (8, 2, 4.0)
+  (10, 2, 5.0)
+  (15, 0, null)
+  (20, 4, 5.0)
+(session: 2 rule(s))
+> ?- all_div(A, B, C).
+4 rows:
+  (8, 2, 4.0)
+  (10, 2, 5.0)
+  (15, 0, null)
+  (20, 4, 5.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_div_zero
+Knowledge graph 'test_div_zero' dropped.

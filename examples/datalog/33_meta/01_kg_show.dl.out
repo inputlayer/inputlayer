@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_kg_show
+Knowledge graph 'test_kg_show' created.
+Switched to knowledge graph: test_kg_show
+> .kg use test_kg_show
+Switched to knowledge graph: test_kg_show
+> .kg show
+Script error: Parse error: Unknown kg subcommand: show

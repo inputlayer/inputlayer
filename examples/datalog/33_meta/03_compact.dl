@@ -1,0 +1,17 @@
+% Test: .compact command
+% Compacts storage (optimization)
+.kg create test_compact
+.kg use test_compact
+
+% Add and delete data to create compaction opportunity
++data[(1, "a"), (2, "b"), (3, "c")].
+-data[(2, "b")].
+
+% Compact storage
+.compact
+
+% Verify data is still intact
+?- data(Id, Val).
+
+.kg use default
+.kg drop test_compact

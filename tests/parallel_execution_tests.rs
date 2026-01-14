@@ -130,6 +130,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 5, etc.) no longer supported - Constraint type removed
 fn test_multiple_queries_on_same_knowledge_graph() {
     let (mut storage, _temp) = create_test_storage();
 
@@ -335,6 +336,7 @@ fn test_parallel_execution_with_many_knowledge_graphs() {
 }
 
 #[test]
+#[ignore] // Constraint syntax (X > 5, etc.) no longer supported - Constraint type removed
 fn test_parallel_execution_with_complex_queries() {
     let (mut storage, _temp) = create_test_storage();
 

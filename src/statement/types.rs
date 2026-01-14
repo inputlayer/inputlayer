@@ -5,6 +5,7 @@
 //! - Type expressions: base types, lists, records, refined types
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Type declaration: type Name: TypeExpr.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +34,23 @@ pub enum TypeExpr {
     },
 }
 
+impl TypeExpr {
+    /// Convert to SchemaType for validation
+    pub fn to_schema_type(&self) -> crate::schema::SchemaType {
+        use crate::schema::SchemaType;
+        match self {
+            TypeExpr::Base(BaseType::Int) => SchemaType::Int,
+            TypeExpr::Base(BaseType::Float) => SchemaType::Float,
+            TypeExpr::Base(BaseType::String) => SchemaType::String,
+            TypeExpr::Base(BaseType::Bool) => SchemaType::Bool,
+            TypeExpr::TypeRef(name) => SchemaType::Named(name.clone()),
+            TypeExpr::List(_) => SchemaType::Any, // Lists not directly supported yet
+            TypeExpr::Record(_) => SchemaType::Any, // Records not directly supported yet
+            TypeExpr::Refined { base, .. } => base.to_schema_type(), // Ignore refinements
+        }
+    }
+}
+
 /// Base types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BaseType {
@@ -40,6 +58,62 @@ pub enum BaseType {
     String,
     Bool,
     Float,
+}
+
+impl fmt::Display for BaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BaseType::Int => write!(f, "int"),
+            BaseType::String => write!(f, "string"),
+            BaseType::Bool => write!(f, "bool"),
+            BaseType::Float => write!(f, "float"),
+        }
+    }
+}
+
+impl fmt::Display for TypeExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeExpr::Base(base) => write!(f, "{}", base),
+            TypeExpr::TypeRef(name) => write!(f, "{}", name),
+            TypeExpr::List(inner) => write!(f, "list[{}]", inner),
+            TypeExpr::Record(fields) => {
+                write!(f, "{{ ")?;
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", field.name, field.field_type)?;
+                }
+                write!(f, " }}")
+            }
+            TypeExpr::Refined { base, refinements } => {
+                write!(f, "{}(", base)?;
+                for (i, r) in refinements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", r.name)?;
+                    if !r.args.is_empty() {
+                        write!(f, "(")?;
+                        for (j, arg) in r.args.iter().enumerate() {
+                            if j > 0 {
+                                write!(f, ", ")?;
+                            }
+                            match arg {
+                                RefinementArg::Int(n) => write!(f, "{}", n)?,
+                                RefinementArg::Float(n) => write!(f, "{}", n)?,
+                                RefinementArg::String(s) => write!(f, "\"{}\"", s)?,
+                                RefinementArg::Bool(b) => write!(f, "{}", b)?,
+                            }
+                        }
+                        write!(f, ")")?;
+                    }
+                }
+                write!(f, ")")
+            }
+        }
+    }
 }
 
 /// A field in a record type

@@ -1,0 +1,38 @@
+% Test: Very Long Rule Bodies
+% Category: Performance
+% Description: Tests system handles rules with many predicates in the body
+
+.kg create test_long_rules
+.kg use test_long_rules
+
+% Create chain of relations for testing long joins
++r1[(1, 2), (2, 3)].
++r2[(2, 20), (3, 30)].
++r3[(20, 200), (30, 300)].
++r4[(200, 2000), (300, 3000)].
++r5[(2000, "a"), (3000, "b")].
+
+% 5-way join
++join5(A, E) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E).
+?- join5(A, E).
+
+% Rule with multiple conditions on same relation
++data[(1, 10, 100), (2, 20, 200), (3, 30, 300), (1, 11, 110)].
+
++multi_cond(X) :- data(X, Y, Z), Y > 5, Z > 50, Y < 25, Z < 250.
+?- multi_cond(X).
+
+% Rule combining joins and filters
++complex_rule(A, E) :- r1(A, B), r2(B, C), r3(C, D), r4(D, E),
+                       A > 0, B > 1, C > 10, D > 100, E > 1000.
+?- complex_rule(A, E).
+
+% Chain with self-reference pattern
++chain[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)].
++path8(A, H) :- chain(A, B), chain(B, C), chain(C, D), chain(D, E),
+               chain(E, F), chain(F, G), chain(G, H).
+?- path8(A, H).
+
+% Cleanup
+.kg use default
+.kg drop test_long_rules

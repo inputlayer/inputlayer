@@ -72,7 +72,7 @@ InputLayer supports these Datalog features:
 | **Arithmetic** | `Total = Price * Qty` |
 | **Aggregations** | `count<X>`, `sum<Amount>`, `min<Age>` |
 | **Vectors** | `[1.0, 2.0, 3.0]` with distance functions |
-| **Schemas** | `+user(id: int @key, name: string).` |
+| **Schemas** | `+user(id: int, name: string).` |
 
 ## Architecture
 

@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_within_radius
+Knowledge graph 'test_within_radius' created.
+Switched to knowledge graph: test_within_radius
+> .kg use test_within_radius
+Switched to knowledge graph: test_within_radius
+> +dist[(1, 0.1), (2, 0.5), (3, 1.2), (4, 0.3), (5, 2.0), (6, 0.45)].
+Inserted 6 fact(s) into 'dist'.
+> +nearby(Id, within_radius<D, 0.5>) :- dist(Id, D).
+Rule 'nearby' registered.
+> ?- nearby(X, Y).
+4 rows:
+  (1, 0.1)
+  (2, 0.5)
+  (4, 0.3)
+  (6, 0.45)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_within_radius
+Knowledge graph 'test_within_radius' dropped.

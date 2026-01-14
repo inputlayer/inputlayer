@@ -1,0 +1,23 @@
+% Test: Combined temporal operations
+% Category: 29_temporal
+% Description: Tests realistic use case combining multiple temporal functions
+
+.kg create test_combined_temporal
+.kg use test_combined_temporal
+
+% Insert events with timestamps
++events[(1, 9500), (2, 8000), (3, 5000), (4, 10000)].
+
+% Define "now" and "half_life" as reference points
++config[(10000, 2000)].
+
+% Rule to find recent events (within last 3000ms) and compute their decay weight
+recent_weighted(Id, Weight) :- events(Id, Ts), config(Now, HalfLife), within_last(Ts, Now, 3000), Weight = time_decay(Ts, Now, HalfLife).
+?- recent_weighted(Id, Weight).
+
+% Rule to compute age of events
+event_age(Id, Age) :- events(Id, Ts), config(Now, _), Age = time_diff(Now, Ts).
+?- event_age(Id, Age).
+
+.kg use default
+.kg drop test_combined_temporal

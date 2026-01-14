@@ -1,0 +1,18 @@
+% Test: interval_contains(s1, e1, s2, e2) function
+% Category: 29_temporal
+% Description: Tests checking if interval 1 contains interval 2
+
+.kg create test_interval_contains
+.kg use test_interval_contains
+
+% Insert interval pairs (id, outer_start, outer_end, inner_start, inner_end)
++intervals[(1, 100, 300, 150, 250), (2, 100, 200, 150, 250), (3, 100, 300, 100, 300), (4, 100, 300, 50, 150)].
+
+% Rule to find containing intervals
+containing(Id) :- intervals(Id, S1, E1, S2, E2), interval_contains(S1, E1, S2, E2).
+
+% Query interval_contains - interval 1 should fully contain interval 2
+?- containing(Id).
+
+.kg use default
+.kg drop test_interval_contains

@@ -1490,7 +1490,7 @@ impl KnowledgeGraph {
 fn format_rule(rule: &crate::ast::Rule) -> String {
     let head = format_atom(&rule.head);
 
-    if rule.body.is_empty() && rule.constraints.is_empty() {
+    if rule.body.is_empty() {
         return format!("{}.", head);
     }
 
@@ -1504,11 +1504,18 @@ fn format_rule(rule: &crate::ast::Rule) -> String {
             crate::ast::BodyPredicate::Negated(atom) => {
                 body_parts.push(format!("!{}", format_atom(atom)));
             }
+            crate::ast::BodyPredicate::Comparison(left, op, right) => {
+                let op_str = match op {
+                    crate::ast::ComparisonOp::Equal => "=",
+                    crate::ast::ComparisonOp::NotEqual => "!=",
+                    crate::ast::ComparisonOp::LessThan => "<",
+                    crate::ast::ComparisonOp::LessOrEqual => "<=",
+                    crate::ast::ComparisonOp::GreaterThan => ">",
+                    crate::ast::ComparisonOp::GreaterOrEqual => ">=",
+                };
+                body_parts.push(format!("{} {} {}", format_term(left), op_str, format_term(right)));
+            }
         }
-    }
-
-    for constraint in &rule.constraints {
-        body_parts.push(format_constraint(constraint));
     }
 
     format!("{} :- {}.", head, body_parts.join(", "))
@@ -1603,28 +1610,6 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
             max_distance,
         } => {
             format!("within_radius<{}, {}>", distance_var, max_distance)
-        }
-    }
-}
-
-/// Format a Constraint as a Datalog string
-fn format_constraint(constraint: &crate::ast::Constraint) -> String {
-    match constraint {
-        crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::NotEqual(l, r) => {
-            format!("{} != {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::LessThan(l, r) => {
-            format!("{} < {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::LessOrEqual(l, r) => {
-            format!("{} <= {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterThan(l, r) => {
-            format!("{} > {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterOrEqual(l, r) => {
-            format!("{} >= {}", format_term(l), format_term(r))
         }
     }
 }
@@ -1790,7 +1775,6 @@ mod tests {
                     Term::Variable("Y".to_string()),
                 ],
             ))],
-            vec![],
         );
         let rule_def1 = RuleDef {
             name: "connected".to_string(),
@@ -1823,7 +1807,6 @@ mod tests {
                     ],
                 )),
             ],
-            vec![],
         );
         let rule_def2 = RuleDef {
             name: "connected".to_string(),
@@ -1884,8 +1867,9 @@ mod tests {
         );
 
         // Query specific: connected(1, 3) - should return 1 row
+        // Use constants directly in the atom instead of constraint syntax
         let specific_result = storage
-            .execute_query_with_rules("result(X,Y) :- connected(X,Y), X = 1, Y = 3.")
+            .execute_query_with_rules("result(1, 3) :- connected(1, 3).")
             .unwrap();
         println!("connected(1, 3): {:?}", specific_result);
         assert_eq!(

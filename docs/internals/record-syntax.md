@@ -54,14 +54,6 @@ type UserId: int.
 +user(id: UserId, name: string, email: Email).
 ```
 
-### 2.2 Schema with Constraints
-
-Schemas can include constraints:
-
-```datalog
-+user(id: int @key, email: string @unique, name: string @not_empty).
-```
-
 ## 3. Working with Data
 
 ### 3.1 Inserting Facts

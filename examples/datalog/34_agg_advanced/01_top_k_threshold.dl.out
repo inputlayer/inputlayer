@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_top_k_threshold
+Knowledge graph 'test_top_k_threshold' created.
+Switched to knowledge graph: test_top_k_threshold
+> .kg use test_top_k_threshold
+Switched to knowledge graph: test_top_k_threshold
+> +score[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 200)].
+Inserted 6 fact(s) into 'score'.
+> +top_high(Player, top_k_threshold<3, Points, 100, desc>) :- score(Player, Points).
+Rule 'top_high' registered.
+> ?- top_high(X, Y).
+3 rows:
+  (2, 250)
+  (4, 300)
+  (6, 200)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_top_k_threshold
+Knowledge graph 'test_top_k_threshold' dropped.

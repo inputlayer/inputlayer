@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compact
+Knowledge graph 'test_compact' created.
+Switched to knowledge graph: test_compact
+> .kg use test_compact
+Switched to knowledge graph: test_compact
+> +data[(1, "a"), (2, "b"), (3, "c")].
+Inserted 3 fact(s) into 'data'.
+> -data[(2, "b")].
+Script error: Parse error: Expected parentheses: (2, "b")]

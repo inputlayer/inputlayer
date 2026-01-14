@@ -1,0 +1,21 @@
+% Test: Unsafe Negation Error (Range Restriction)
+% Category: Errors
+% Description: Variables in negated literals must be range-restricted
+% EXPECTED ERROR: "Unsafe negation" or "variable not range-restricted"
+% BUG: Currently NOT rejected - engine should reject at rule registration
+
+.kg create test_unsafe_neg_err
+.kg use test_unsafe_neg_err
+
++banned[(1), (2)].
+
+% Unsafe negation: X is not bound by any positive literal
+% X appears only in the negated literal !banned(X)
+% This has infinite/unknown domain and MUST BE REJECTED
++unsafe_rule(X) :- !banned(X).
+
+% If we get here, the bug exists - should have errored above
+?- unsafe_rule(X).
+
+.kg use default
+.kg drop test_unsafe_neg_err

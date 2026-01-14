@@ -1,0 +1,54 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_iso1
+Knowledge graph 'test_sess_iso1' created.
+Switched to knowledge graph: test_sess_iso1
+> .kg use test_sess_iso1
+Switched to knowledge graph: test_sess_iso1
+> +data1[(1), (2)].
+Inserted 2 fact(s) into 'data1'.
+> sess_rule1(X) :- data1(X).
+2 rows:
+  (1)
+  (2)
+(session: 1 rule(s))
+> ?- sess_rule1(X).
+2 rows:
+  (1)
+  (2)
+> .kg create test_sess_iso2
+Knowledge graph 'test_sess_iso2' created.
+Switched to knowledge graph: test_sess_iso2
+> .kg use test_sess_iso2
+Switched to knowledge graph: test_sess_iso2
+(Cleared 1 session rule(s), 0 session fact(s))
+> +data2[(3), (4)].
+Inserted 2 fact(s) into 'data2'.
+> ?- sess_rule1(X).
+No results.
+> sess_rule2(X) :- data2(X).
+2 rows:
+  (3)
+  (4)
+(session: 1 rule(s))
+> ?- sess_rule2(X).
+2 rows:
+  (3)
+  (4)
+> .kg use test_sess_iso1
+Switched to knowledge graph: test_sess_iso1
+(Cleared 1 session rule(s), 0 session fact(s))
+> .session
+No session data defined.
+> ?- sess_rule1(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_iso1
+Knowledge graph 'test_sess_iso1' dropped.
+> .kg drop test_sess_iso2
+Knowledge graph 'test_sess_iso2' dropped.

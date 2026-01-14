@@ -29,9 +29,11 @@ Inserted 2 fact(s) into 'string_values'.
   ("hello")
   ("hello world")
 > +vectors[([1.0, 2.0, 3.0]), ([0.1, 0.2, 0.3, 0.4])].
-No facts inserted (2 duplicate skipped).
+Inserted 2 fact(s) into 'vectors'.
 > ?- vectors(X).
-No results.
+2 rows:
+  ([Number(1.0), Number(2.0), Number(3.0)])
+  ([Number(0.10000000149011612), Number(0.20000000298023224), Number(0.30000001192092896), Number(0.4000000059604645)])
 > +location[("NYC", 40.7, -74.0), ("LA", 34.0, -118.2)].
 Inserted 2 fact(s) into 'location'.
 > ?- location(Name, Lat, Lon).

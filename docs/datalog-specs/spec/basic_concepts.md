@@ -123,24 +123,17 @@ You can declare a relation's schema before inserting data:
 
 Schema declarations are optional. If you don't declare a schema, InputLayer infers types from the first fact.
 
-### Constraints
+### Session vs Persistent Schemas
 
-Schemas can include constraints:
+Like rules, schemas can be session or persistent:
 
 ```datalog
-+user(
-    id: int @key,           % Primary key (unique, required)
-    email: string @unique,  % Must be unique
-    name: string @not_empty % Cannot be empty string
-).
-```
+% Persistent schema - saved with knowledge graph
++user(id: int, email: string, name: string).
 
-| Constraint | Meaning |
-|------------|---------|
-| `@key` | Primary key - unique and required |
-| `@unique` | Values must be unique |
-| `@not_empty` | String cannot be empty |
-| `@range(min, max)` | Numeric value must be in range |
+% Session schema - only for current connection
+user(id: int, email: string, name: string).
+```
 
 ## Program Structure
 

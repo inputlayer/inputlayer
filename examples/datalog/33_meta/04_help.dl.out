@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .help
+InputLayer Datalog Client (HTTP)
+================================
+
+Meta Commands:
+  .kg                  Show current knowledge graph
+  .kg list             List all knowledge graphs
+  .kg create <name>    Create knowledge graph
+  .kg use <name>       Switch to knowledge graph
+  .kg drop <name>      Drop knowledge graph
+  .rel                 List relations
+  .rel <name>          Describe relation
+  .rule                List rules
+  .rule <name>         Query rule
+  .rule drop <name>    Drop rule
+  .session             List session rules
+  .session clear       Clear session rules
+  .status              Server status
+  .help                Show this help
+  .quit                Exit
+
+Data Manipulation:
+  edge(1, 2).          Insert fact
+  -edge(1, 2).         Delete fact
+
+Rules:
+  +path(X, Y) :- edge(X, Y).   Persistent rule
+  foo(X, Y) :- bar(X, Y).      Session rule
+
+Queries:
+  ?- path(1, X).       Query

@@ -27,7 +27,7 @@
 //!     .build();
 //! ```
 
-use super::{Atom, BodyPredicate, Constraint, Rule, Term};
+use super::{Atom, BodyPredicate, Rule, Term};
 
 // ============================================================================
 // AtomBuilder
@@ -101,7 +101,6 @@ pub struct RuleBuilder {
     head_relation: String,
     head_args: Vec<Term>,
     body: Vec<BodyPredicate>,
-    constraints: Vec<Constraint>,
 }
 
 impl RuleBuilder {
@@ -111,7 +110,6 @@ impl RuleBuilder {
             head_relation: head_relation.into(),
             head_args: Vec::new(),
             body: Vec::new(),
-            constraints: Vec::new(),
         }
     }
 
@@ -168,70 +166,10 @@ impl RuleBuilder {
         self
     }
 
-    /// Add a constraint
-    pub fn constraint(mut self, c: Constraint) -> Self {
-        self.constraints.push(c);
-        self
-    }
-
-    /// Add an equality constraint: var = value
-    pub fn eq(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::Equal(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
-    /// Add a not-equal constraint: var != value
-    pub fn neq(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::NotEqual(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
-    /// Add a less-than constraint: var < value
-    pub fn lt(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::LessThan(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
-    /// Add a greater-than constraint: var > value
-    pub fn gt(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::GreaterThan(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
-    /// Add a less-than-or-equal constraint: var <= value
-    pub fn le(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::LessOrEqual(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
-    /// Add a greater-than-or-equal constraint: var >= value
-    pub fn ge(mut self, var: impl Into<String>, value: i64) -> Self {
-        self.constraints.push(Constraint::GreaterOrEqual(
-            Term::Variable(var.into()),
-            Term::Constant(value),
-        ));
-        self
-    }
-
     /// Build the rule
     pub fn build(self) -> Rule {
         let head = Atom::new(self.head_relation, self.head_args);
-        Rule::new(head, self.body, self.constraints)
+        Rule::new(head, self.body)
     }
 }
 
@@ -314,7 +252,6 @@ mod tests {
         assert_eq!(rule.head.relation, "path");
         assert_eq!(rule.head.args.len(), 2);
         assert_eq!(rule.body.len(), 1);
-        assert!(rule.constraints.is_empty());
     }
 
     #[test]
@@ -341,19 +278,6 @@ mod tests {
         assert_eq!(rule.body.len(), 2);
         assert!(matches!(&rule.body[0], BodyPredicate::Positive(_)));
         assert!(matches!(&rule.body[1], BodyPredicate::Negated(_)));
-    }
-
-    #[test]
-    fn test_rule_builder_with_constraints() {
-        // result(x) :- data(x, val), val > 10, val < 100.
-        let rule = RuleBuilder::new("result")
-            .head_vars(["x"])
-            .body_atom("data", ["x", "val"])
-            .gt("val", 10)
-            .lt("val", 100)
-            .build();
-
-        assert_eq!(rule.constraints.len(), 2);
     }
 
     #[test]

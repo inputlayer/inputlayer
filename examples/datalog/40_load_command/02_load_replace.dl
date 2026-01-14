@@ -1,0 +1,24 @@
+% Test: .load with --replace Mode
+% Category: Load Command
+% Description: Tests loading a file with --replace flag to clear existing data first
+
+.kg create test_load_replace
+.kg use test_load_replace
+
+% Insert some initial data
++existing_data[(1, "original"), (2, "also_original")].
+?- existing_data(X, Y).
+
+% Load with replace mode - should clear existing rules/data first
+.load examples/datalog/40_load_command/_helper_data.dl --replace
+
+% Verify loaded data
+?- loaded_relation(X, Y).
+?- loaded_rule(X, Y).
+
+% Check if existing_data was affected (depends on implementation)
+?- existing_data(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_load_replace

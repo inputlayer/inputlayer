@@ -23,7 +23,7 @@ pub use parser::{parse_query, parse_transient_rule, QueryGoal};
 pub use schema::{ColumnDef, SchemaDecl};
 pub use serialize::{
     RuleDef, SerializableArithExpr, SerializableArithOp, SerializableBodyPred,
-    SerializableConstraint, SerializableRule, SerializableTerm,
+    SerializableRule, SerializableTerm,
 };
 pub use types::{BaseType, RecordField, Refinement, RefinementArg, TypeDecl, TypeExpr};
 
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_parse_conditional_delete() {
-        let stmt = parse_statement("-edge(X, Y) :- X > 5.").unwrap();
+        let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -253,7 +253,7 @@ mod tests {
     // Session rule tests
     #[test]
     fn test_parse_session_rule() {
-        let stmt = parse_statement("result(X, Y) :- edge(X, Y), X < Y.").unwrap();
+        let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert_eq!(rule.head.relation, "result");
         } else {
@@ -510,6 +510,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_persistent_rule_with_top_k() {
+        // This is the exact statement from the failing snapshot test
+        let stmt =
+            parse_statement("+top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).")
+                .unwrap();
+        if let Statement::PersistentRule(rule) = stmt {
+            assert_eq!(rule.head.relation, "top_players");
+            assert_eq!(rule.head.args.len(), 2);
+            assert!(rule.head.has_aggregates());
+        } else {
+            panic!("Expected PersistentRule, got {:?}", stmt);
+        }
+    }
+
+    #[test]
     fn test_parse_delete_relation_or_rule() {
         let stmt = parse_statement("-reachable.").unwrap();
         if let Statement::DeleteRelationOrRule(name) = stmt {
@@ -571,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_conditional_delete_not_view_delete() {
-        let stmt = parse_statement("-person(X, Y) :- person(X, Y), X > 5.").unwrap();
+        let stmt = parse_statement("-person(X, Y) :- person(X, Y), filter(X).").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "person");
             assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -581,34 +596,31 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_schema_with_key_annotation() {
-        let stmt = parse_statement("+user(id: int @key, name: string).").unwrap();
+    fn test_parse_schema_ignores_annotations() {
+        // Annotations are silently ignored for backwards compatibility
+        let stmt = parse_statement("+user(id: int @foo, name: string).").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "user");
             assert!(decl.persistent);
             assert_eq!(decl.columns.len(), 2);
             assert_eq!(decl.columns[0].name, "id");
-            assert_eq!(decl.columns[0].annotations.len(), 1);
-            assert!(matches!(
-                decl.columns[0].annotations[0],
-                crate::schema::ColumnAnnotation::Primary
-            ));
+            assert_eq!(decl.columns[1].name, "name");
+            // Annotations are ignored, not stored
         } else {
             panic!("Expected SchemaDecl, got {:?}", stmt);
         }
     }
 
     #[test]
-    fn test_parse_schema_with_multiple_annotations() {
+    fn test_parse_schema_with_multiple_types() {
         let stmt =
-            parse_statement("+user(id: int @key, email: string @unique @not_empty).").unwrap();
+            parse_statement("+user(id: int, email: string, active: bool).").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "user");
-            assert_eq!(decl.columns.len(), 2);
-            // First column has @key
-            assert_eq!(decl.columns[0].annotations.len(), 1);
-            // Second column has @unique and @not_empty
-            assert_eq!(decl.columns[1].annotations.len(), 2);
+            assert_eq!(decl.columns.len(), 3);
+            assert_eq!(decl.columns[0].name, "id");
+            assert_eq!(decl.columns[1].name, "email");
+            assert_eq!(decl.columns[2].name, "active");
         } else {
             panic!("Expected SchemaDecl, got {:?}", stmt);
         }

@@ -1,0 +1,22 @@
+% Test: time_decay_linear(ts, now, max_age) function
+% Category: 29_temporal
+% Description: Tests linear time decay function with hard cutoff
+
+.kg create test_decay_linear
+.kg use test_decay_linear
+
+% Insert timestamps at different ages from "now"
+% now = 10000, max_age = 10000
++events[(1, 10000, 10000, 10000), (2, 5000, 10000, 10000), (3, 0, 10000, 10000)].
+
+% Rule to compute linear decay
+linear_result(Id, Weight) :- events(Id, Ts, Now, MaxAge), Weight = time_decay_linear(Ts, Now, MaxAge).
+
+% Test time_decay_linear
+% Event at now should have weight 1.0
+% Event at half max_age ago should have weight 0.5
+% Event at max_age ago should have weight 0.0
+?- linear_result(Id, Weight).
+
+.kg use default
+.kg drop test_decay_linear

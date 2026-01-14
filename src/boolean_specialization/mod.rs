@@ -532,6 +532,10 @@ impl BooleanSpecializer {
             | Predicate::ColumnLeFloat(_, _)
             | Predicate::ColumnsEq(_, _)
             | Predicate::ColumnsNe(_, _)
+            | Predicate::ColumnsLt(_, _)
+            | Predicate::ColumnsGt(_, _)
+            | Predicate::ColumnsLe(_, _)
+            | Predicate::ColumnsGe(_, _)
             | Predicate::True
             | Predicate::False => false,
 

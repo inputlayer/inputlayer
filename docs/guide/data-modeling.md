@@ -37,62 +37,6 @@ Declare a schema using typed arguments:
 +person(id: int, name: string, age: int).
 ```
 
-### Schema with Constraints
-
-Add constraints to enforce data quality:
-
-```datalog
-+user(
-  id: int @key,
-  email: string @unique,
-  name: string @not_empty,
-  age: int @range(0, 150)
-).
-```
-
-### Available Constraints
-
-| Constraint | Syntax | Effect |
-|------------|--------|--------|
-| `@key` | `id: int @key` | Column(s) form primary key; enables upsert |
-| `@unique` | `email: string @unique` | Values must be unique across tuples |
-| `@not_empty` | `name: string @not_empty` | String cannot be empty |
-| `@range` | `age: int @range(0, 150)` | Numeric value must be in range |
-
-### Composite Keys
-
-Multiple columns can form a key:
-
-```datalog
-+enrollment(student_id: int @key, course_id: int @key, grade: float).
-
-+enrollment(1, 101, 3.5).
-+enrollment(1, 101, 4.0).      % UPSERT: updates grade (composite key match)
-```
-
-## How `@key` Changes Semantics
-
-| Without `@key` | With `@key` |
-|----------------|-------------|
-| Entire tuple is identity | Key columns are identity |
-| `+` always adds | `+` upserts if key exists |
-| Must delete exact tuple | Can delete by key |
-| Pure multiset | Entity semantics |
-
-### Example Comparison
-
-```datalog
-% WITHOUT @key (pure multiset)
-+person("alice", 30).
-+person("alice", 31).          % Two tuples exist
--person("alice", 30).          % Must know exact age to delete
-
-% WITH @key
-+person(name: string @key, age: int).
-+person("alice", 30).
-+person("alice", 31).          % UPSERT: one tuple, age = 31
-```
-
 ## Update Patterns
 
 ### Pattern 1: Exact Delete (Know All Values)
@@ -126,16 +70,6 @@ Combine delete and insert in one atomic operation:
 ```
 
 This executes at the same logical timestamp, ensuring atomicity.
-
-### Pattern 4: Update with @key
-
-With a key defined, simply insert to upsert:
-
-```datalog
-+person(id: int @key, name: string, age: int).
-+person(1, "alice", 30).
-+person(1, "alice", 31).  % Automatically replaces previous value
-```
 
 ## Deletion Patterns
 
@@ -286,18 +220,10 @@ For complex views with many rules, use `.dl` script files:
 Explicit schemas catch type errors early:
 
 ```datalog
-+employee(id: int @key, name: string @not_empty, salary: float).
++employee(id: int, name: string, salary: float).
 ```
 
-### 2. Use `@key` for Entity Data
-
-When modeling entities with mutable attributes:
-
-```datalog
-+user(id: int @key, email: string, status: string).
-```
-
-### 3. Use Conditional Deletes for Unknown Values
+### 2. Use Conditional Deletes for Unknown Values
 
 ```datalog
 % Update all employees in a department
@@ -306,7 +232,7 @@ When modeling entities with mutable attributes:
   OldDept = "Legacy".
 ```
 
-### 4. Use File-Based Workflow for Complex Rules
+### 3. Use File-Based Workflow for Complex Rules
 
 Keep rule definitions in version-controlled files:
 
@@ -317,7 +243,7 @@ views/
   reporting.dl
 ```
 
-### 5. Prefer Persistent Rules for Recursion
+### 4. Prefer Persistent Rules for Recursion
 
 Session rules don't support fixed-point iteration:
 

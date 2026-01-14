@@ -1,0 +1,20 @@
+% Test: lsh_bucket function
+% Locality-sensitive hashing bucket computation
+.kg create test_lsh_bucket
+.kg use test_lsh_bucket
+
+% Create vectors
++vectors[(1, [1.0, 0.0, 0.0, 0.0])].
++vectors[(2, [0.0, 1.0, 0.0, 0.0])].
++vectors[(3, [1.0, 1.0, 0.0, 0.0])].
++vectors[(4, [-1.0, 0.0, 0.0, 0.0])].
+
+% Compute LSH bucket for each vector (table 0, 4 hyperplanes)
+bucket_result(Id, Bucket) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4).
+?- bucket_result(Id, Bucket).
+
+% Same vectors should have same bucket
+% Opposite vectors should have different buckets
+
+.kg use default
+.kg drop test_lsh_bucket

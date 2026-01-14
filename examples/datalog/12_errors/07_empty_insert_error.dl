@@ -5,11 +5,10 @@
 .kg create test_empty
 .kg use test_empty
 
-% Empty bulk insert (invalid syntax - should error)
-% Note: The correct behavior is to reject empty bulk inserts
-% +empty[].  -- This is invalid syntax
+% Empty bulk insert - should error or be rejected
++empty[].
 
-% Query the relation (should report undefined relation)
+% If that didn't error, try querying
 ?- empty(X, Y).
 
 % Cleanup

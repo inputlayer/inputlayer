@@ -10,14 +10,22 @@ Switched to knowledge graph: test_vec_manhattan
 > .kg use test_vec_manhattan
 Switched to knowledge graph: test_vec_manhattan
 > +vectors[(1, [0.0, 0.0]), (2, [1.0, 1.0]), (3, [2.0, 2.0]), (4, [3.0, 0.0])].
-No facts inserted (4 duplicate skipped).
+Inserted 4 fact(s) into 'vectors'.
 > +query[([0.0, 0.0])].
-No facts inserted (1 duplicate skipped).
+Inserted 1 fact(s) into 'query'.
 > l1_dist(Id, Dist) :- vectors(Id, V), query(Q), Dist = manhattan(V, Q).
-No results.
+4 rows:
+  (1, 0.0)
+  (2, 2.0)
+  (3, 4.0)
+  (4, 3.0)
 (session: 1 rule(s))
 > ?- l1_dist(X, Y).
-No results.
+4 rows:
+  (1, 0.0)
+  (2, 2.0)
+  (3, 4.0)
+  (4, 3.0)
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

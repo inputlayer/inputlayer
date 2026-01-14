@@ -138,4 +138,4 @@ InputLayer extends standard Datalog with:
 - **[Aggregations](extensions.md#aggregations)** - count, sum, min, max, avg
 - **[Vectors](extensions.md#vectors)** - Array literals and distance functions
 - **[Meta Commands](extensions.md#meta-commands)** - System operations (.kg, .rel, .rule)
-- **[Schema Constraints](extensions.md#schemas)** - @key, @unique, @not_empty, @range
+- **[Typed Schemas](extensions.md#schema-declarations)** - Type declarations for relations

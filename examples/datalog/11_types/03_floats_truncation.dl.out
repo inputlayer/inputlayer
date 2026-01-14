@@ -25,7 +25,8 @@ Inserted 2 fact(s) into 'negfloat'.
 > +large(X, Y) :- values(X, Y), X > 2.
 Rule 'large' registered.
 > ?- large(X, Y).
-No results.
+1 rows:
+  (3.7, 4.9)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_float

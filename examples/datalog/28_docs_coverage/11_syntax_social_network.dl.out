@@ -20,13 +20,18 @@ Inserted 4 fact(s) into 'follows'.
 > +mutual_follow(A, B) :- follows(A, B), follows(B, A), A < B.
 Rule 'mutual_follow' registered.
 > ?- mutual_follow(A, B).
-No results.
+1 rows:
+  (2, 1)
 > +influencer(Id, count<Follower>) :- follows(Follower, Id).
 Rule 'influencer' registered.
 > ?- influencer(Id, Count).
-No results.
+3 rows:
+  (1, 1)
+  (2, 1)
+  (3, 2)
 > ?- influencer(Id, Count), Count > 1.
-No results.
+1 rows:
+  (3, 2)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop syntax_social

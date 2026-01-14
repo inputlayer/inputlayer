@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_circular_neg
+Knowledge graph 'test_circular_neg' created.
+Switched to knowledge graph: test_circular_neg
+> .kg use test_circular_neg
+Switched to knowledge graph: test_circular_neg
+> +base[(1), (2), (3)].
+Inserted 3 fact(s) into 'base'.
+> +valid_neg(X) :- base(X), !base(2).
+Rule 'valid_neg' registered.
+> ?- valid_neg(X).
+Script error: Query execution failed: Negated predicate !base(...) shares no variables with positive predicates. Negation requires at least one shared variable.

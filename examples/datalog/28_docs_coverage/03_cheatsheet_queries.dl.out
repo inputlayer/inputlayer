@@ -21,9 +21,7 @@ Rule 'path' registered.
 1 rows:
   (1, 2)
 > ?- person(Name, Age), Age > 30.
-3 rows:
-  ("alice", 30)
-  ("bob", 25)
+1 rows:
   ("carol", 35)
 > ?- path(1, X).
 3 rows:

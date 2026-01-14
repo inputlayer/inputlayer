@@ -2,7 +2,7 @@
 //!
 //! These types are used to persist rule definitions to disk.
 
-use crate::ast::{AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, Constraint, Rule, Term};
+use crate::ast::{AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, ComparisonOp, Rule, Term};
 use serde::{Deserialize, Serialize};
 
 /// Rule definition for storage and serialization
@@ -20,7 +20,6 @@ pub struct SerializableRule {
     pub head_relation: String,
     pub head_args: Vec<SerializableTerm>,
     pub body: Vec<SerializableBodyPred>,
-    pub constraints: Vec<SerializableConstraint>,
 }
 
 /// Serializable term for JSON storage
@@ -61,21 +60,31 @@ pub enum SerializableArithOp {
 
 /// Serializable body predicate for JSON storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableBodyPred {
-    pub relation: String,
-    pub args: Vec<SerializableTerm>,
-    pub negated: bool,
+#[serde(tag = "type")]
+pub enum SerializableBodyPred {
+    /// Atom predicate (positive or negated)
+    Atom {
+        relation: String,
+        args: Vec<SerializableTerm>,
+        negated: bool,
+    },
+    /// Comparison predicate (X = Y, X < 5, etc.)
+    Comparison {
+        left: SerializableTerm,
+        op: SerializableComparisonOp,
+        right: SerializableTerm,
+    },
 }
 
-/// Serializable constraint for JSON storage
+/// Serializable comparison operator for JSON storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SerializableConstraint {
-    Equal(SerializableTerm, SerializableTerm),
-    NotEqual(SerializableTerm, SerializableTerm),
-    LessThan(SerializableTerm, SerializableTerm),
-    LessOrEqual(SerializableTerm, SerializableTerm),
-    GreaterThan(SerializableTerm, SerializableTerm),
-    GreaterOrEqual(SerializableTerm, SerializableTerm),
+pub enum SerializableComparisonOp {
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
 }
 
 // ============================================================================
@@ -98,11 +107,6 @@ impl SerializableRule {
                 .iter()
                 .map(SerializableBodyPred::from_body_pred)
                 .collect(),
-            constraints: rule
-                .constraints
-                .iter()
-                .map(SerializableConstraint::from_constraint)
-                .collect(),
         }
     }
 
@@ -113,8 +117,7 @@ impl SerializableRule {
             self.head_args.iter().map(|t| t.to_term()).collect(),
         );
         let body = self.body.iter().map(|b| b.to_body_pred()).collect();
-        let constraints = self.constraints.iter().map(|c| c.to_constraint()).collect();
-        Rule::new(head, body, constraints)
+        Rule::new(head, body)
     }
 }
 
@@ -203,78 +206,69 @@ impl SerializableArithOp {
 
 impl SerializableBodyPred {
     pub fn from_body_pred(pred: &BodyPredicate) -> Self {
-        let (atom, negated) = match pred {
-            BodyPredicate::Positive(atom) => (atom, false),
-            BodyPredicate::Negated(atom) => (atom, true),
-        };
-        SerializableBodyPred {
-            relation: atom.relation.clone(),
-            args: atom.args.iter().map(SerializableTerm::from_term).collect(),
-            negated,
+        match pred {
+            BodyPredicate::Positive(atom) => SerializableBodyPred::Atom {
+                relation: atom.relation.clone(),
+                args: atom.args.iter().map(SerializableTerm::from_term).collect(),
+                negated: false,
+            },
+            BodyPredicate::Negated(atom) => SerializableBodyPred::Atom {
+                relation: atom.relation.clone(),
+                args: atom.args.iter().map(SerializableTerm::from_term).collect(),
+                negated: true,
+            },
+            BodyPredicate::Comparison(left, op, right) => SerializableBodyPred::Comparison {
+                left: SerializableTerm::from_term(left),
+                op: SerializableComparisonOp::from_op(op),
+                right: SerializableTerm::from_term(right),
+            },
         }
     }
 
     pub fn to_body_pred(&self) -> BodyPredicate {
-        let atom = Atom::new(
-            self.relation.clone(),
-            self.args.iter().map(|t| t.to_term()).collect(),
-        );
-        if self.negated {
-            BodyPredicate::Negated(atom)
-        } else {
-            BodyPredicate::Positive(atom)
+        match self {
+            SerializableBodyPred::Atom { relation, args, negated } => {
+                let atom = Atom::new(
+                    relation.clone(),
+                    args.iter().map(|t| t.to_term()).collect(),
+                );
+                if *negated {
+                    BodyPredicate::Negated(atom)
+                } else {
+                    BodyPredicate::Positive(atom)
+                }
+            }
+            SerializableBodyPred::Comparison { left, op, right } => {
+                BodyPredicate::Comparison(
+                    left.to_term(),
+                    op.to_op(),
+                    right.to_term(),
+                )
+            }
         }
     }
 }
 
-impl SerializableConstraint {
-    pub fn from_constraint(constraint: &Constraint) -> Self {
-        match constraint {
-            Constraint::Equal(l, r) => SerializableConstraint::Equal(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
-            Constraint::NotEqual(l, r) => SerializableConstraint::NotEqual(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
-            Constraint::LessThan(l, r) => SerializableConstraint::LessThan(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
-            Constraint::LessOrEqual(l, r) => SerializableConstraint::LessOrEqual(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
-            Constraint::GreaterThan(l, r) => SerializableConstraint::GreaterThan(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
-            Constraint::GreaterOrEqual(l, r) => SerializableConstraint::GreaterOrEqual(
-                SerializableTerm::from_term(l),
-                SerializableTerm::from_term(r),
-            ),
+impl SerializableComparisonOp {
+    pub fn from_op(op: &ComparisonOp) -> Self {
+        match op {
+            ComparisonOp::Equal => SerializableComparisonOp::Equal,
+            ComparisonOp::NotEqual => SerializableComparisonOp::NotEqual,
+            ComparisonOp::LessThan => SerializableComparisonOp::LessThan,
+            ComparisonOp::LessOrEqual => SerializableComparisonOp::LessOrEqual,
+            ComparisonOp::GreaterThan => SerializableComparisonOp::GreaterThan,
+            ComparisonOp::GreaterOrEqual => SerializableComparisonOp::GreaterOrEqual,
         }
     }
 
-    pub fn to_constraint(&self) -> Constraint {
+    pub fn to_op(&self) -> ComparisonOp {
         match self {
-            SerializableConstraint::Equal(l, r) => Constraint::Equal(l.to_term(), r.to_term()),
-            SerializableConstraint::NotEqual(l, r) => {
-                Constraint::NotEqual(l.to_term(), r.to_term())
-            }
-            SerializableConstraint::LessThan(l, r) => {
-                Constraint::LessThan(l.to_term(), r.to_term())
-            }
-            SerializableConstraint::LessOrEqual(l, r) => {
-                Constraint::LessOrEqual(l.to_term(), r.to_term())
-            }
-            SerializableConstraint::GreaterThan(l, r) => {
-                Constraint::GreaterThan(l.to_term(), r.to_term())
-            }
-            SerializableConstraint::GreaterOrEqual(l, r) => {
-                Constraint::GreaterOrEqual(l.to_term(), r.to_term())
-            }
+            SerializableComparisonOp::Equal => ComparisonOp::Equal,
+            SerializableComparisonOp::NotEqual => ComparisonOp::NotEqual,
+            SerializableComparisonOp::LessThan => ComparisonOp::LessThan,
+            SerializableComparisonOp::LessOrEqual => ComparisonOp::LessOrEqual,
+            SerializableComparisonOp::GreaterThan => ComparisonOp::GreaterThan,
+            SerializableComparisonOp::GreaterOrEqual => ComparisonOp::GreaterOrEqual,
         }
     }
 }

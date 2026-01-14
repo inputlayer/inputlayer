@@ -1,0 +1,17 @@
+% Test: Backslash escape sequence
+% Category: 38_syntax_gaps
+% Description: Tests \\ escape produces literal backslash in strings
+
+.kg create test_backslash
+.kg use test_backslash
+
+% Insert strings with backslash escapes
++paths[(1, "C:\\Users\\test"), (2, "path\\to\\file"), (3, "\\\\network\\share")].
+?- paths(Id, P).
+
+% Single backslash
++single[(1, "before\\after")].
+?- single(Id, S).
+
+.kg use default
+.kg drop test_backslash

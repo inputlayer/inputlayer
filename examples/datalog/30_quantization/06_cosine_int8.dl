@@ -1,0 +1,21 @@
+% Test: cosine_int8 function
+% Cosine distance for int8 quantized vectors
+.kg create test_cosine_int8
+.kg use test_cosine_int8
+
+% Create vectors
++embedding[(1, [1.0, 0.0, 0.0, 0.0])].
++embedding[(2, [0.0, 1.0, 0.0, 0.0])].
++embedding[(3, [0.707, 0.707, 0.0, 0.0])].
+
+% Quantize and compute cosine_int8 distance
+int8_cosine(Id1, Id2, Dist) :-
+    embedding(Id1, V1), embedding(Id2, V2),
+    Id1 < Id2,
+    Q1 = quantize_linear(V1),
+    Q2 = quantize_linear(V2),
+    Dist = cosine_int8(Q1, Q2).
+?- int8_cosine(Id1, Id2, Dist).
+
+.kg use default
+.kg drop test_cosine_int8

@@ -1,13 +1,15 @@
-% Test: Comparison Operators (Variable vs Constant)
+% Test: Comparison Operators
 % Category: 07_filters
-% Description: Tests <, <=, >, >= with variable vs constant
-% NOTE: Variable vs Variable comparisons (X < Y) not yet supported
+% Description: Tests all comparison operators (<, <=, >, >=, =, !=)
+%              including both variable vs constant AND variable vs variable
 
 .kg create test_cmp
 .kg use test_cmp
 
 % Insert data: (value, id)
 +data[(1, 100), (3, 101), (5, 102), (7, 103), (9, 104)].
+
+% === Variable vs Constant tests ===
 
 % Less than constant: X < 5
 +lt_five(X, Y) :- data(X, Y), X < 5.
@@ -24,6 +26,34 @@
 % Greater or equal: X >= 5
 +ge_five(X, Y) :- data(X, Y), X >= 5.
 ?- ge_five(X, Y).
+
+% === Variable vs Variable tests ===
+
++pairs[(1, 5), (3, 3), (7, 2), (9, 10)].
+
+% A < B (variable vs variable)
++a_lt_b(A, B) :- pairs(A, B), A < B.
+?- a_lt_b(X, Y).
+
+% A > B (variable vs variable)
++a_gt_b(A, B) :- pairs(A, B), A > B.
+?- a_gt_b(X, Y).
+
+% A = B (variable vs variable - equality)
++a_eq_b(A, B) :- pairs(A, B), A = B.
+?- a_eq_b(X, Y).
+
+% A != B (variable vs variable - inequality)
++a_neq_b(A, B) :- pairs(A, B), A != B.
+?- a_neq_b(X, Y).
+
+% A <= B (variable vs variable)
++a_le_b(A, B) :- pairs(A, B), A <= B.
+?- a_le_b(X, Y).
+
+% A >= B (variable vs variable)
++a_ge_b(A, B) :- pairs(A, B), A >= B.
+?- a_ge_b(X, Y).
 
 % Cleanup
 .kg use default

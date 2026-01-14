@@ -12,18 +12,15 @@
 % This tests what happens when we divide by a zero value
 +pairs[(10, 2), (20, 4), (15, 0), (8, 2)].
 
-% Safe division (no zero divisors)
-+safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
+% Safe division (no zero divisors) - arithmetic in head
+safe_div(X, Y, X/Y) :- pairs(X, Y), Y != 0.
 ?- safe_div(A, B, C).
 
-% Attempt division including zero (may error or return special value)
-% Uncomment to test actual behavior:
-% +all_div(X, Y, X/Y) :- pairs(X, Y).
-% ?- all_div(A, B, C).
+% Attempt division including zero - should produce error
+all_div(X, Y, X/Y) :- pairs(X, Y).
+?- all_div(A, B, C).
 
-% Modulo by zero test
-+safe_mod(X, Y, X%Y) :- pairs(X, Y), Y != 0.
-?- safe_mod(A, B, C).
+% Note: Modulo tests removed because % is the comment character in Datalog
 
 % Cleanup
 .kg use default

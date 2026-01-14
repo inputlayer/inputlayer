@@ -7,7 +7,7 @@
 //! - `-relation(X, Y) :- condition.` - conditional delete
 //! - `-old, +new :- condition.` - atomic update
 
-use crate::ast::{Atom, BodyPredicate, Constraint, Rule, Term};
+use crate::ast::{Atom, BodyPredicate, Rule, Term};
 use crate::parser::parse_rule;
 
 /// Insert operation: +relation(args).
@@ -33,14 +33,12 @@ pub struct DeleteOp {
 pub enum DeletePattern {
     /// Single tuple: -edge(1, 2).
     SingleTuple(Vec<Term>),
-    /// Conditional delete: -edge(X, Y) :- X > 5.
+    /// Conditional delete: -edge(X, Y) :- condition.
     Conditional {
         /// Variables in the head
         head_args: Vec<Term>,
         /// Body predicates (conditions)
         body: Vec<BodyPredicate>,
-        /// Constraints
-        constraints: Vec<Constraint>,
     },
 }
 
@@ -53,8 +51,6 @@ pub struct UpdateOp {
     pub inserts: Vec<InsertTarget>,
     /// Condition body (what to match)
     pub body: Vec<BodyPredicate>,
-    /// Constraints
-    pub constraints: Vec<Constraint>,
 }
 
 /// A single delete target in an update
@@ -188,7 +184,6 @@ pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
             pattern: DeletePattern::Conditional {
                 head_args,
                 body: rule.body,
-                constraints: rule.constraints,
             },
         });
     }
@@ -251,7 +246,6 @@ pub fn try_parse_update(input: &str) -> Result<Option<UpdateOp>, String> {
         deletes,
         inserts,
         body: rule.body,
-        constraints: rule.constraints,
     }))
 }
 
@@ -273,7 +267,7 @@ pub fn parse_fact(input: &str) -> Result<Rule, String> {
 
     // Parse as an atom and create a rule with empty body
     let head = parse_atom_for_fact(input)?;
-    Ok(Rule::new(head, vec![], vec![]))
+    Ok(Rule::new(head, vec![]))
 }
 
 /// Parse an atom for a fact (similar to parse_head_atom but returns Atom)
@@ -325,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_parse_conditional_delete() {
-        let op = parse_delete("edge(X, Y) :- X > 5").unwrap();
+        let op = parse_delete("edge(X, Y) :- source(X)").unwrap();
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
     }

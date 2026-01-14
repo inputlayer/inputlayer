@@ -15,6 +15,7 @@ Current knowledge graph: test_db
 Knowledge Graphs:
   default
   test_db *
+  test_load_error
 > +edge(1, 2).
 Inserted 1 fact(s) into 'edge'.
 > ?- edge(X, Y).
@@ -27,3 +28,4 @@ Knowledge graph 'test_db' dropped.
 > .kg list
 Knowledge Graphs:
   default *
+  test_load_error

@@ -1,0 +1,13 @@
+% Test: Duplicate Knowledge Graph Error
+% Category: 12_errors
+% Description: Tests that creating a knowledge graph that already exists produces an error
+
+.kg create test_dup_err
+.kg use test_dup_err
+
+% Try to create the same knowledge graph again - should fail
+.kg create test_dup_err
+
+% Cleanup
+.kg use default
+.kg drop test_dup_err

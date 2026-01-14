@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_backslash
+Knowledge graph 'test_backslash' created.
+Switched to knowledge graph: test_backslash
+> .kg use test_backslash
+Switched to knowledge graph: test_backslash
+> +paths[(1, "C:\\Users\\test"), (2, "path\\to\\file"), (3, "\\\\network\\share")].
+Inserted 3 fact(s) into 'paths'.
+> ?- paths(Id, P).
+3 rows:
+  (1, "C:\\Users\\test")
+  (2, "path\\to\\file")
+  (3, "\\\\network\\share")
+> +single[(1, "before\\after")].
+Inserted 1 fact(s) into 'single'.
+> ?- single(Id, S).
+1 rows:
+  (1, "before\\after")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_backslash
+Knowledge graph 'test_backslash' dropped.

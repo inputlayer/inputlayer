@@ -1,12 +1,20 @@
 % Test: Query Undefined Relation
 % Category: 12_errors
-% Description: Tests error handling when querying a non-existent relation
+% Description: Tests behavior when querying a non-existent relation
+% NOTE: System returns "No results" for undefined relations (treats as empty)
 
 .kg create test_err
 .kg use test_err
 
-% Query a relation that doesn't exist
+% Query a relation that doesn't exist - returns empty result
 ?- nonexistent(X, Y).
+
+% Verify that we can still create the relation after querying
++nonexistent[(1, 2)].
+?- nonexistent(X, Y).
+
+% Try querying with wrong arity after relation exists
+?- nonexistent(X, Y, Z).
 
 % Cleanup
 .kg use default

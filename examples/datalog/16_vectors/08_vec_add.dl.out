@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_add
+Knowledge graph 'test_vec_add' created.
+Switched to knowledge graph: test_vec_add
+> .kg use test_vec_add
+Switched to knowledge graph: test_vec_add
+> +vec_pairs[(1, [1.0, 2.0, 3.0], [4.0, 5.0, 6.0])].
+Inserted 1 fact(s) into 'vec_pairs'.
+> +vec_pairs[(2, [0.0, 0.0], [1.0, 1.0])].
+Inserted 1 fact(s) into 'vec_pairs'.
+> added(Id, Sum) :- vec_pairs(Id, V1, V2), Sum = vec_add(V1, V2).
+2 rows:
+  (1, [Number(5.0), Number(7.0), Number(9.0)])
+  (2, [Number(1.0), Number(1.0)])
+(session: 1 rule(s))
+> ?- added(Id, Sum).
+2 rows:
+  (1, [Number(5.0), Number(7.0), Number(9.0)])
+  (2, [Number(1.0), Number(1.0)])
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_add
+Knowledge graph 'test_vec_add' dropped.

@@ -23,7 +23,8 @@
 //! catalog.drop("path").unwrap();
 //! ```
 
-use crate::ast::Rule;
+use crate::ast::{BodyPredicate, Program, Rule};
+use crate::recursion::{build_extended_dependency_graph, find_sccs};
 use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -102,7 +103,7 @@ impl RuleDefinition {
 fn format_rule(rule: &Rule) -> String {
     let head = format_atom(&rule.head);
 
-    if rule.body.is_empty() && rule.constraints.is_empty() {
+    if rule.body.is_empty() {
         return format!("{}.", head);
     }
 
@@ -116,11 +117,18 @@ fn format_rule(rule: &Rule) -> String {
             crate::ast::BodyPredicate::Negated(atom) => {
                 body_parts.push(format!("!{}", format_atom(atom)));
             }
+            crate::ast::BodyPredicate::Comparison(left, op, right) => {
+                let op_str = match op {
+                    crate::ast::ComparisonOp::Equal => "=",
+                    crate::ast::ComparisonOp::NotEqual => "!=",
+                    crate::ast::ComparisonOp::LessThan => "<",
+                    crate::ast::ComparisonOp::LessOrEqual => "<=",
+                    crate::ast::ComparisonOp::GreaterThan => ">",
+                    crate::ast::ComparisonOp::GreaterOrEqual => ">=",
+                };
+                body_parts.push(format!("{} {} {}", format_term(left), op_str, format_term(right)));
+            }
         }
-    }
-
-    for constraint in &rule.constraints {
-        body_parts.push(format_constraint(constraint));
     }
 
     format!("{} :- {}.", head, body_parts.join(", "))
@@ -154,49 +162,28 @@ fn format_aggregate(func: &crate::ast::AggregateFunc, var: &str) -> String {
         AggregateFunc::Min => format!("min<{}>", var),
         AggregateFunc::Max => format!("max<{}>", var),
         AggregateFunc::Avg => format!("avg<{}>", var),
-        AggregateFunc::TopK { k, descending, .. } => {
+        // Ranking aggregates use their internal order_var, not the (empty) var parameter
+        AggregateFunc::TopK { k, order_var, descending } => {
             if *descending {
-                format!("top_k<{}, {}, desc>", k, var)
+                format!("top_k<{}, {}, desc>", k, order_var)
             } else {
-                format!("top_k<{}, {}>", k, var)
+                format!("top_k<{}, {}>", k, order_var)
             }
         }
         AggregateFunc::TopKThreshold {
             k,
+            order_var,
             threshold,
             descending,
-            ..
         } => {
             if *descending {
-                format!("top_k_threshold<{}, {}, {}, desc>", k, var, threshold)
+                format!("top_k_threshold<{}, {}, {}, desc>", k, order_var, threshold)
             } else {
-                format!("top_k_threshold<{}, {}, {}>", k, var, threshold)
+                format!("top_k_threshold<{}, {}, {}>", k, order_var, threshold)
             }
         }
-        AggregateFunc::WithinRadius { max_distance, .. } => {
-            format!("within_radius<{}, {}>", var, max_distance)
-        }
-    }
-}
-
-/// Format a Constraint as a Datalog string
-fn format_constraint(constraint: &crate::ast::Constraint) -> String {
-    match constraint {
-        crate::ast::Constraint::Equal(l, r) => format!("{} = {}", format_term(l), format_term(r)),
-        crate::ast::Constraint::NotEqual(l, r) => {
-            format!("{} != {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::LessThan(l, r) => {
-            format!("{} < {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::LessOrEqual(l, r) => {
-            format!("{} <= {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterThan(l, r) => {
-            format!("{} > {}", format_term(l), format_term(r))
-        }
-        crate::ast::Constraint::GreaterOrEqual(l, r) => {
-            format!("{} >= {}", format_term(l), format_term(r))
+        AggregateFunc::WithinRadius { distance_var, max_distance } => {
+            format!("within_radius<{}, {}>", distance_var, max_distance)
         }
     }
 }
@@ -250,10 +237,87 @@ impl RuleCatalog {
 
     /// Register a rule from a RuleDef
     /// Returns information about whether rule was created or updated
+    ///
+    /// This function performs stratification checking to reject:
+    /// - Self-negation: a(X) :- !a(X)
+    /// - Mutual negation cycles: a(X) :- !b(X), b(X) :- !a(X)
+    /// - Any recursion through negation
     pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<RuleRegisterResult, String> {
         let name = &rule_def.name;
         let rule = rule_def.rule.clone();
+        let ast_rule = rule.to_rule();
 
+        // Check 1: Direct self-negation (quick check before full stratification)
+        for pred in &ast_rule.body {
+            if let BodyPredicate::Negated(atom) = pred {
+                if atom.relation == ast_rule.head.relation {
+                    return Err(format!(
+                        "Unstratified negation: Rule '{}' negates itself (!{} in body). \
+                         Self-negation is not supported.",
+                        name, atom.relation
+                    ));
+                }
+            }
+        }
+
+        // Check 2: Range restriction for negated atoms
+        // Variables in negated atoms must be bound by positive atoms
+        let positive_vars = ast_rule.positive_body_variables();
+        for pred in &ast_rule.body {
+            if let BodyPredicate::Negated(atom) = pred {
+                let neg_vars = atom.variables();
+                let unbound: Vec<_> = neg_vars.difference(&positive_vars).cloned().collect();
+                if !unbound.is_empty() {
+                    let mut sorted_unbound = unbound;
+                    sorted_unbound.sort();
+                    return Err(format!(
+                        "Unsafe negation in rule '{}': Variable(s) {} in negated atom !{}(...) \
+                         must be bound by a positive body atom. Range restriction violation.",
+                        name,
+                        sorted_unbound.join(", "),
+                        atom.relation
+                    ));
+                }
+            }
+        }
+
+        // Check 3: Full stratification check against all existing rules
+        // Build a program with all existing rules plus the new one
+        let mut all_rules: Vec<Rule> = Vec::new();
+        for rule_def in self.rules.values() {
+            all_rules.extend(rule_def.to_rules());
+        }
+        all_rules.push(ast_rule.clone());
+
+        let program = Program { rules: all_rules };
+
+        // Use the stratification checker from recursion module
+        let extended_graph = build_extended_dependency_graph(&program);
+        let simple_graph = extended_graph.to_simple_graph();
+        let sccs = find_sccs(&simple_graph);
+
+        // Check for any negative edge within any SCC
+        for scc in &sccs {
+            if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
+                let reason = if from == to {
+                    format!(
+                        "Unstratified negation: '{}' negates itself. Self-negation is not supported.",
+                        from
+                    )
+                } else {
+                    format!(
+                        "Unstratified negation: '{}' negates '{}' within a recursive cycle. \
+                         Negation through recursion is not supported. Cycle: [{}]",
+                        from,
+                        to,
+                        scc.join(", ")
+                    )
+                };
+                return Err(reason);
+            }
+        }
+
+        // Stratification passed, proceed with registration
         let result = if let Some(existing) = self.rules.get_mut(name) {
             // Check if this is a new clause for an existing rule (recursive case)
             existing.add_rule(rule);
@@ -386,13 +450,15 @@ impl RuleCatalog {
 
         for (i, rule) in rules.iter().enumerate() {
             for pred in &rule.body {
-                let body_relation = &pred.atom().relation;
-                // If this body relation is defined by another rule, add dependency
-                if let Some(def_rule_indices) = head_to_rules.get(body_relation) {
-                    for &def_idx in def_rule_indices {
-                        if def_idx != i {
-                            dependencies[i].insert(def_idx);
-                            dependents[def_idx].insert(i);
+                if let Some(atom) = pred.atom() {
+                    let body_relation = &atom.relation;
+                    // If this body relation is defined by another rule, add dependency
+                    if let Some(def_rule_indices) = head_to_rules.get(body_relation) {
+                        for &def_idx in def_rule_indices {
+                            if def_idx != i {
+                                dependencies[i].insert(def_idx);
+                                dependents[def_idx].insert(i);
+                            }
                         }
                     }
                 }
@@ -547,7 +613,7 @@ mod tests {
                 Term::Variable("Y".to_string()),
             ],
         ))];
-        Rule::new(head, body, vec![])
+        Rule::new(head, body)
     }
 
     #[test]
@@ -627,7 +693,7 @@ mod tests {
                 ],
             )),
         ];
-        let rule2 = Rule::new(head, body, vec![]);
+        let rule2 = Rule::new(head, body);
         catalog.register("path", &rule2).unwrap();
 
         // Should still be one view with two rules
@@ -757,7 +823,7 @@ mod tests {
                 ],
             )),
         ];
-        let rule2 = Rule::new(head, body, vec![]);
+        let rule2 = Rule::new(head, body);
         catalog.register("path", &rule2).unwrap();
 
         assert_eq!(catalog.len(), 1);
@@ -817,7 +883,7 @@ mod tests {
                 ],
             )),
         ];
-        let rule2 = Rule::new(head, body, vec![]);
+        let rule2 = Rule::new(head, body);
         catalog.register("path", &rule2).unwrap();
 
         assert_eq!(catalog.all_rules().len(), 2);
@@ -924,7 +990,7 @@ mod tests {
                 ],
             )),
         ];
-        let rule2 = Rule::new(head, body, vec![]);
+        let rule2 = Rule::new(head, body);
         let rule_def2 = RuleDef {
             name: "connected".to_string(),
             rule: SerializableRule::from_rule(&rule2),
@@ -992,7 +1058,7 @@ mod tests {
                     ],
                 )),
             ];
-            let rule2 = Rule::new(head, body, vec![]);
+            let rule2 = Rule::new(head, body);
             let rule_def2 = RuleDef {
                 name: "connected".to_string(),
                 rule: SerializableRule::from_rule(&rule2),
@@ -1021,5 +1087,115 @@ mod tests {
             let view = catalog.get("connected").expect("View should exist");
             assert_eq!(view.rules.len(), 2, "View should have 2 rules after reload");
         }
+    }
+
+    #[test]
+    fn test_self_negation_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Self-negation: a(X) :- base(X), !a(X).
+        // This should be rejected as unstratified
+        let head = Atom::new(
+            "a".to_string(),
+            vec![Term::Variable("X".to_string())],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Negated(Atom::new(
+                "a".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+        ];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "a".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(result.is_err(), "Self-negation should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unstratified") || err.contains("negates itself"),
+            "Error message should mention unstratified negation: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_unsafe_negation_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Unsafe negation: unsafe_rule(X) :- !banned(X).
+        // X only appears in the negated atom, not in any positive atom
+        // This should be rejected as unsafe (range restriction violation)
+        let head = Atom::new(
+            "unsafe_rule".to_string(),
+            vec![Term::Variable("X".to_string())],
+        );
+        let body = vec![BodyPredicate::Negated(Atom::new(
+            "banned".to_string(),
+            vec![Term::Variable("X".to_string())],
+        ))];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "unsafe_rule".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(result.is_err(), "Unsafe negation should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unsafe negation") || err.contains("range") || err.contains("Range"),
+            "Error message should mention unsafe negation or range restriction: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_safe_negation_with_bound_variables() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Safe negation: not_banned(X) :- person(X), !banned(X).
+        // X is bound by positive atom person(X), so !banned(X) is safe
+        let head = Atom::new(
+            "not_banned".to_string(),
+            vec![Term::Variable("X".to_string())],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "person".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Negated(Atom::new(
+                "banned".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+        ];
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "not_banned".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(
+            result.is_ok(),
+            "Safe negation with bound variables should be accepted: {:?}",
+            result
+        );
     }
 }

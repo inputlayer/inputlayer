@@ -11,6 +11,14 @@ Switched to knowledge graph: test_err
 Switched to knowledge graph: test_err
 > ?- nonexistent(X, Y).
 No results.
+> +nonexistent[(1, 2)].
+Inserted 1 fact(s) into 'nonexistent'.
+> ?- nonexistent(X, Y).
+1 rows:
+  (1, 2)
+> ?- nonexistent(X, Y, Z).
+1 rows:
+  (1, 2)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_err

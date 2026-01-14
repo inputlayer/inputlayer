@@ -196,10 +196,10 @@ Switched to knowledge graph: myproject
 
 ## Schema Declarations
 
-Declare relation schemas with types and constraints:
+Declare relation schemas with types:
 
 ```datalog
-+employee(id: int @key, name: string, dept: string).
++employee(id: int, name: string, dept: string).
 ```
 
 ### Type Keywords
@@ -210,15 +210,17 @@ Declare relation schemas with types and constraints:
 | `float` | 64-bit floating point |
 | `string` | UTF-8 text |
 | `bool` | Boolean |
+| `vector[N]` | N-dimensional vector |
 
-### Constraints
+### Session vs Persistent Schemas
 
-| Constraint | Effect |
-|------------|--------|
-| `@key` | Primary key (enables upsert) |
-| `@unique` | Values must be unique |
-| `@not_empty` | String cannot be empty |
-| `@range(min, max)` | Numeric range constraint |
+```datalog
+% Persistent schema - saved with knowledge graph
++user(id: int, name: string).
+
+% Session schema - only for current connection
+user(id: int, name: string).
+```
 
 ### Examples
 
@@ -226,18 +228,11 @@ Declare relation schemas with types and constraints:
 % Simple typed schema
 +person(name: string, age: int).
 
-% With primary key
-+user(id: int @key, email: string @unique).
+% With vectors
++embedding(id: int, vec: vector[128]).
 
-% With multiple constraints
-+product(
-    sku: string @key,
-    name: string @not_empty,
-    price: float @range(0, 10000)
-).
-
-% Composite key
-+order_item(order_id: int @key, item_id: int @key, quantity: int).
+% Multiple columns
++order_item(order_id: int, item_id: int, quantity: int).
 ```
 
 ## Bulk Operations

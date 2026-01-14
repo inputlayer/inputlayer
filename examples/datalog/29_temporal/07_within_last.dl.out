@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_within_last
+Knowledge graph 'test_within_last' created.
+Switched to knowledge graph: test_within_last
+> .kg use test_within_last
+Switched to knowledge graph: test_within_last
+> +events[(1, 9000, 10000, 5000), (2, 5000, 10000, 5000), (3, 4000, 10000, 5000), (4, 10000, 10000, 5000)].
+Inserted 4 fact(s) into 'events'.
+> recent(Id) :- events(Id, Ts, Now, Duration), within_last(Ts, Now, Duration).
+No results.
+(session: 1 rule(s))
+> ?- recent(Id).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_within_last
+Knowledge graph 'test_within_last' dropped.

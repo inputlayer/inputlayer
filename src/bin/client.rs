@@ -790,7 +790,9 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             let result: ApiResponse<RelationListResponse> =
                 resp.json().await.map_err(|e| format!("{}", e))?;
 
-            let relations = result.data.map(|d| d.relations).unwrap_or_default();
+            let mut relations = result.data.map(|d| d.relations).unwrap_or_default();
+            // Sort relations alphabetically for deterministic output
+            relations.sort_by(|a, b| a.name.cmp(&b.name));
             if relations.is_empty() {
                 println!("No relations in current knowledge graph.");
             } else {
@@ -1035,12 +1037,20 @@ async fn execute_query(state: &ReplState, query: String) -> Result<QueryResponse
 
     let result: ApiResponse<QueryResponse> = resp.json().await.map_err(|e| format!("{}", e))?;
 
-    result.data.ok_or_else(|| {
+    // First check for API-level error
+    let query_response = result.data.ok_or_else(|| {
         result
             .error
             .map(|e| e.message)
             .unwrap_or("Unknown error".to_string())
-    })
+    })?;
+
+    // Then check for query-level error (e.g., stratification errors)
+    if let Some(error) = &query_response.error {
+        return Err(error.clone());
+    }
+
+    Ok(query_response)
 }
 
 async fn handle_insert(
@@ -1164,11 +1174,18 @@ async fn handle_query(
 
     // Add the query
     let query_args: Vec<String> = goal.goal.args.iter().map(format_term).collect();
-    program.push_str(&format!(
-        "?- {}({}).",
+    let mut body_parts: Vec<String> = vec![format!(
+        "{}({})",
         goal.goal.relation,
         query_args.join(", ")
-    ));
+    )];
+
+    // Add additional body predicates (for complex queries like ?- foo(X), bar(Y).)
+    for pred in &goal.body {
+        body_parts.push(format_body_pred(pred));
+    }
+
+    program.push_str(&format!("?- {}.", body_parts.join(", ")));
 
     let response = execute_query(state, program).await?;
 
@@ -1202,7 +1219,6 @@ async fn handle_session_rule(
             ],
         },
         body: vec![],
-        constraints: vec![],
     };
 
     handle_query(state, goal).await?;
@@ -1271,7 +1287,7 @@ async fn handle_schema_decl(
     let cols: Vec<String> = decl
         .columns
         .iter()
-        .map(|col| format!("{}: {:?}", col.name, col.col_type))
+        .map(|col| format!("{}: {}", col.name, col.col_type))
         .collect();
     let schema_text = format!("{}{}({}).", prefix, decl.name, cols.join(", "));
 
@@ -1314,9 +1330,6 @@ async fn handle_update(
     for pred in &update.body {
         condition_parts.push(format_body_pred(pred));
     }
-    for constraint in &update.constraints {
-        condition_parts.push(format_constraint(constraint));
-    }
     update_text.push_str(&condition_parts.join(", "));
     update_text.push('.');
 
@@ -1346,8 +1359,16 @@ fn term_to_json(term: &Term) -> serde_json::Value {
         Term::Constant(n) => serde_json::Value::Number((*n).into()),
         Term::FloatConstant(f) => serde_json::json!(*f),
         Term::StringConstant(s) => serde_json::Value::String(s.clone()),
+        Term::VectorLiteral(v) => {
+            serde_json::Value::Array(v.iter().map(|x| serde_json::json!(*x)).collect())
+        }
         Term::Variable(_) => serde_json::Value::Null,
-        _ => serde_json::Value::Null,
+        Term::Placeholder => serde_json::Value::Null,
+        Term::Arithmetic(_) => serde_json::Value::Null,
+        Term::Aggregate(_, _) => serde_json::Value::Null,
+        Term::FunctionCall(_, _) => serde_json::Value::Null,
+        Term::FieldAccess(_, _) => serde_json::Value::Null,
+        Term::RecordPattern(_) => serde_json::Value::Null,
     }
 }
 
@@ -1381,16 +1402,13 @@ fn format_wire_value(value: &WireValue) -> String {
 fn format_rule(rule: &inputlayer::ast::Rule) -> String {
     let head = format_atom(&rule.head);
 
-    if rule.body.is_empty() && rule.constraints.is_empty() {
+    if rule.body.is_empty() {
         return format!("{}.", head);
     }
 
     let mut parts = Vec::new();
     for pred in &rule.body {
         parts.push(format_body_pred(pred));
-    }
-    for constraint in &rule.constraints {
-        parts.push(format_constraint(constraint));
     }
 
     format!("{} :- {}.", head, parts.join(", "))
@@ -1460,6 +1478,22 @@ fn format_term(term: &Term) -> String {
                 inputlayer::ast::BuiltinFunc::IntervalContains => "interval_contains",
                 inputlayer::ast::BuiltinFunc::IntervalDuration => "interval_duration",
                 inputlayer::ast::BuiltinFunc::PointInInterval => "point_in_interval",
+                // Int8 quantization functions
+                inputlayer::ast::BuiltinFunc::QuantizeLinear => "quantize_linear",
+                inputlayer::ast::BuiltinFunc::QuantizeSymmetric => "quantize_symmetric",
+                inputlayer::ast::BuiltinFunc::Dequantize => "dequantize",
+                inputlayer::ast::BuiltinFunc::DequantizeScaled => "dequantize_scaled",
+                // Int8 distance functions
+                inputlayer::ast::BuiltinFunc::EuclideanInt8 => "euclidean_int8",
+                inputlayer::ast::BuiltinFunc::CosineInt8 => "cosine_int8",
+                inputlayer::ast::BuiltinFunc::DotProductInt8 => "dot_int8",
+                inputlayer::ast::BuiltinFunc::ManhattanInt8 => "manhattan_int8",
+                // Multi-probe LSH functions
+                inputlayer::ast::BuiltinFunc::LshProbes => "lsh_probes",
+                inputlayer::ast::BuiltinFunc::LshMultiProbe => "lsh_multi_probe",
+                // Math utility functions
+                inputlayer::ast::BuiltinFunc::AbsInt64 => "abs_int64",
+                inputlayer::ast::BuiltinFunc::AbsFloat64 => "abs_float64",
             };
             format!("{}({})", func_name, args_str.join(", "))
         }
@@ -1495,28 +1529,16 @@ fn format_body_pred(pred: &inputlayer::ast::BodyPredicate) -> String {
     match pred {
         inputlayer::ast::BodyPredicate::Positive(atom) => format_atom(atom),
         inputlayer::ast::BodyPredicate::Negated(atom) => format!("!{}", format_atom(atom)),
-    }
-}
-
-fn format_constraint(constraint: &inputlayer::ast::Constraint) -> String {
-    match constraint {
-        inputlayer::ast::Constraint::Equal(l, r) => {
-            format!("{} = {}", format_term(l), format_term(r))
-        }
-        inputlayer::ast::Constraint::NotEqual(l, r) => {
-            format!("{} != {}", format_term(l), format_term(r))
-        }
-        inputlayer::ast::Constraint::LessThan(l, r) => {
-            format!("{} < {}", format_term(l), format_term(r))
-        }
-        inputlayer::ast::Constraint::LessOrEqual(l, r) => {
-            format!("{} <= {}", format_term(l), format_term(r))
-        }
-        inputlayer::ast::Constraint::GreaterThan(l, r) => {
-            format!("{} > {}", format_term(l), format_term(r))
-        }
-        inputlayer::ast::Constraint::GreaterOrEqual(l, r) => {
-            format!("{} >= {}", format_term(l), format_term(r))
+        inputlayer::ast::BodyPredicate::Comparison(left, op, right) => {
+            let op_str = match op {
+                inputlayer::ast::ComparisonOp::Equal => "=",
+                inputlayer::ast::ComparisonOp::NotEqual => "!=",
+                inputlayer::ast::ComparisonOp::LessThan => "<",
+                inputlayer::ast::ComparisonOp::LessOrEqual => "<=",
+                inputlayer::ast::ComparisonOp::GreaterThan => ">",
+                inputlayer::ast::ComparisonOp::GreaterOrEqual => ">=",
+            };
+            format!("{} {} {}", format_term(left), op_str, format_term(right))
         }
     }
 }

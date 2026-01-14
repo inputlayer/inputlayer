@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_escapes
+Knowledge graph 'test_escapes' created.
+Switched to knowledge graph: test_escapes
+> .kg use test_escapes
+Switched to knowledge graph: test_escapes
+> +quote_strings[(1, "He said \"hello\""), (2, "Contains \"quotes\" inside")].
+Inserted 2 fact(s) into 'quote_strings'.
+> ?- quote_strings(Id, S).
+2 rows:
+  (1, "He said \"hello\"")
+  (2, "Contains \"quotes\" inside")
+> +newline_strings[(1, "line1\nline2"), (2, "first\nsecond\nthird")].
+Inserted 2 fact(s) into 'newline_strings'.
+> ?- newline_strings(Id, S).
+2 rows:
+  (1, "line1\nline2")
+  (2, "first\nsecond\nthird")
+> +tab_strings[(1, "col1\tcol2"), (2, "name\tage\tcity")].
+Inserted 2 fact(s) into 'tab_strings'.
+> ?- tab_strings(Id, S).
+2 rows:
+  (1, "col1\tcol2")
+  (2, "name\tage\tcity")
+> +cr_strings[(1, "windows\r\nstyle"), (2, "old\rmac")].
+Inserted 2 fact(s) into 'cr_strings'.
+> ?- cr_strings(Id, S).
+2 rows:
+  (1, "windows\r\nstyle")
+  (2, "old\rmac")
+> +mixed_escapes[(1, "path\\to\\file\twith \"tabs\""), (2, "line1\nline2\twith\ttabs")].
+Inserted 2 fact(s) into 'mixed_escapes'.
+> ?- mixed_escapes(Id, S).
+2 rows:
+  (1, "path\\to\\file\twith \"tabs\"")
+  (2, "line1\nline2\twith\ttabs")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_escapes
+Knowledge graph 'test_escapes' dropped.

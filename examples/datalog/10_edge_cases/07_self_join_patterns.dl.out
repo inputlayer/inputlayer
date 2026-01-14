@@ -41,7 +41,9 @@ Rule 'actual_self_loop' registered.
 > +triangle(A, B, C) :- edge(A, B), edge(B, C), edge(C, A), A < B, B < C.
 Rule 'triangle' registered.
 > ?- triangle(A, B, C).
-No results.
+2 rows:
+  (4, 1, 2)
+  (4, 1, 3)
 > +symmetric(A, B) :- edge(A, B), edge(B, A), A < B.
 Rule 'symmetric' registered.
 > ?- symmetric(A, B).
@@ -49,11 +51,24 @@ No results.
 > +three_hop(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
 Rule 'three_hop' registered.
 > ?- three_hop(X, W).
-No results.
+9 rows:
+  (1, 1)
+  (1, 4)
+  (2, 1)
+  (2, 2)
+  (2, 3)
+  (3, 2)
+  (3, 3)
+  (4, 3)
+  (4, 4)
 > +hop_count(X, count<Z>) :- two_hop(X, Z).
 Rule 'hop_count' registered.
 > ?- hop_count(X, C).
-No results.
+4 rows:
+  (1, 2)
+  (2, 2)
+  (3, 1)
+  (4, 2)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_self_join

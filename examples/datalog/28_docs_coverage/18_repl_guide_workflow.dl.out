@@ -20,7 +20,8 @@ Inserted 4 fact(s) into 'order'.
 > +high_value_customer(UserId) :- order(_, UserId, Amount), Amount > 1000.
 Rule 'high_value_customer' registered.
 > ?- high_value_customer(UserId).
-No results.
+1 rows:
+  (1)
 > +customer_spend(UserId, sum<Amount>) :- order(_, UserId, Amount).
 Rule 'customer_spend' registered.
 > ?- customer_spend(UserId, Total).
@@ -30,7 +31,8 @@ Rule 'customer_spend' registered.
 > +vip(UserId, Total) :- high_value_customer(UserId), customer_spend(UserId, Total), Total > 3000.
 Rule 'vip' registered.
 > ?- vip(User, Spend).
-No results.
+1 rows:
+  (1, 4300)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop repl_workflow

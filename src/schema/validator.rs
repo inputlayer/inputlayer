@@ -2,14 +2,12 @@
 //!
 //! Validates tuples against schema definitions with support for:
 //! - Type checking
-//! - Column-level constraints (@not_empty, @range, @pattern)
+//! - Arity checking (correct number of columns)
 //! - All-or-nothing batch semantics
 //! - Violation reporting
 
-use super::{ColumnAnnotation, RelationSchema};
-use crate::value::{Tuple, Value};
-use regex::Regex;
-use std::collections::HashSet;
+use super::RelationSchema;
+use crate::value::Tuple;
 
 /// Represents a validation violation
 #[derive(Debug, Clone)]
@@ -69,20 +67,6 @@ pub enum ViolationType {
     ArityMismatch,
     /// Column value has wrong type
     TypeMismatch,
-    /// Column is NULL or empty when @not_empty
-    EmptyValue,
-    /// Numeric value outside @range bounds
-    RangeViolation,
-    /// String doesn't match @pattern regex
-    PatternViolation,
-    /// Duplicate value in @unique column
-    UniqueViolation,
-    /// Duplicate primary key
-    PrimaryKeyViolation,
-    /// Referenced value doesn't exist (@foreign_key)
-    ForeignKeyViolation,
-    /// @check constraint failed
-    CheckViolation,
 }
 
 impl std::fmt::Display for ViolationType {
@@ -90,13 +74,6 @@ impl std::fmt::Display for ViolationType {
         match self {
             ViolationType::ArityMismatch => write!(f, "ARITY_MISMATCH"),
             ViolationType::TypeMismatch => write!(f, "TYPE_MISMATCH"),
-            ViolationType::EmptyValue => write!(f, "NOT_EMPTY_VIOLATION"),
-            ViolationType::RangeViolation => write!(f, "RANGE_VIOLATION"),
-            ViolationType::PatternViolation => write!(f, "PATTERN_VIOLATION"),
-            ViolationType::UniqueViolation => write!(f, "UNIQUE_VIOLATION"),
-            ViolationType::PrimaryKeyViolation => write!(f, "PRIMARY_KEY_VIOLATION"),
-            ViolationType::ForeignKeyViolation => write!(f, "FOREIGN_KEY_VIOLATION"),
-            ViolationType::CheckViolation => write!(f, "CHECK_VIOLATION"),
         }
     }
 }
@@ -109,7 +86,7 @@ pub enum ValidationError {
     NoSchema(String),
     /// All-or-nothing: batch rejected due to violations
     #[error(
-        "Insert rejected for '{relation}': batch of {total_tuples} tuples violated constraints"
+        "Insert rejected for '{relation}': batch of {total_tuples} tuples had type/arity errors"
     )]
     BatchRejected {
         relation: String,
@@ -140,6 +117,7 @@ impl ValidationResult {
     }
 
     /// Add a warning
+    #[allow(dead_code)]
     pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
         self.warnings.push(warning.into());
         self
@@ -147,17 +125,13 @@ impl ValidationResult {
 }
 
 /// Validation engine for checking tuples against schemas
-pub struct ValidationEngine {
-    /// Compiled regex patterns (cached for performance)
-    compiled_patterns: std::collections::HashMap<String, Regex>,
-}
+#[derive(Default)]
+pub struct ValidationEngine;
 
 impl ValidationEngine {
     /// Create a new validation engine
     pub fn new() -> Self {
-        ValidationEngine {
-            compiled_patterns: std::collections::HashMap::new(),
-        }
+        ValidationEngine
     }
 
     /// Validate a batch of tuples against a schema
@@ -210,7 +184,7 @@ impl ValidationEngine {
             return Err(violations);
         }
 
-        // Validate each column
+        // Validate each column's type
         for (col_idx, col_schema) in schema.columns.iter().enumerate() {
             if let Some(value) = tuple.get(col_idx) {
                 // Type check
@@ -226,12 +200,6 @@ impl ValidationEngine {
                             value.data_type()
                         ),
                     ));
-                    continue; // Skip other checks for this column
-                }
-
-                // Check column annotations
-                for violation in self.check_annotations(col_schema, value, tuple_index, tuple) {
-                    violations.push(violation);
                 }
             }
         }
@@ -243,252 +211,15 @@ impl ValidationEngine {
         }
     }
 
-    /// Check column annotations against a value
-    fn check_annotations(
-        &mut self,
-        col_schema: &super::ColumnSchema,
-        value: &Value,
-        tuple_index: usize,
-        tuple: &Tuple,
-    ) -> Vec<Violation> {
-        let mut violations = Vec::new();
-
-        for annotation in &col_schema.annotations {
-            match annotation {
-                ColumnAnnotation::NotEmpty => {
-                    if self.is_empty_value(value) {
-                        violations.push(Violation::new(
-                            tuple_index,
-                            tuple.clone(),
-                            Some(col_schema.name.clone()),
-                            ViolationType::EmptyValue,
-                            "Value cannot be empty or null",
-                        ));
-                    }
-                }
-                ColumnAnnotation::Range { min, max } => {
-                    if let Some(v) = self.value_to_i64(value) {
-                        if v < *min || v > *max {
-                            violations.push(Violation::new(
-                                tuple_index,
-                                tuple.clone(),
-                                Some(col_schema.name.clone()),
-                                ViolationType::RangeViolation,
-                                format!("Value {} not in range [{}, {}]", v, min, max),
-                            ));
-                        }
-                    }
-                }
-                ColumnAnnotation::Pattern { regex } => {
-                    if let Some(s) = value.as_str() {
-                        let re = self.get_or_compile_regex(regex);
-                        if let Some(re) = re {
-                            if !re.is_match(s) {
-                                violations.push(Violation::new(
-                                    tuple_index,
-                                    tuple.clone(),
-                                    Some(col_schema.name.clone()),
-                                    ViolationType::PatternViolation,
-                                    format!("Value '{}' doesn't match pattern '{}'", s, regex),
-                                ));
-                            }
-                        }
-                    }
-                }
-                // Primary, Unique, ForeignKey require cross-tuple checks
-                // These are handled separately in validate_batch_with_existing_data
-                _ => {}
-            }
-        }
-
-        violations
-    }
-
-    /// Check if a value is "empty" (NULL or empty string)
-    fn is_empty_value(&self, value: &Value) -> bool {
-        match value {
-            Value::Null => true,
-            Value::String(s) => s.is_empty(),
-            _ => false,
-        }
-    }
-
-    /// Convert a value to i64 for range checks
-    fn value_to_i64(&self, value: &Value) -> Option<i64> {
-        match value {
-            Value::Int32(v) => Some(*v as i64),
-            Value::Int64(v) => Some(*v),
-            Value::Float64(v) => Some(*v as i64),
-            _ => None,
-        }
-    }
-
-    /// Get or compile a regex pattern
-    fn get_or_compile_regex(&mut self, pattern: &str) -> Option<&Regex> {
-        if !self.compiled_patterns.contains_key(pattern) {
-            if let Ok(re) = Regex::new(pattern) {
-                self.compiled_patterns.insert(pattern.to_string(), re);
-            }
-        }
-        self.compiled_patterns.get(pattern)
-    }
-
-    /// Validate with uniqueness checks (requires existing data)
-    pub fn validate_batch_with_uniqueness(
+    /// Validate with existing data (for data-first schema registration)
+    /// This validates existing tuples when a schema is registered after data exists
+    #[allow(unused_variables)]
+    pub fn validate_existing_data(
         &mut self,
         schema: &RelationSchema,
-        tuples: &[Tuple],
         existing_data: &[Tuple],
     ) -> Result<ValidationResult, ValidationError> {
-        // First do basic validation
-        let mut violations = match self.validate_batch(schema, tuples) {
-            Ok(_) => Vec::new(),
-            Err(ValidationError::BatchRejected { violations, .. }) => violations,
-            Err(e) => return Err(e),
-        };
-
-        // Check primary key uniqueness
-        let pk_indices = schema.primary_key_indices();
-        if !pk_indices.is_empty() {
-            let pk_violations =
-                self.check_primary_key_uniqueness(schema, tuples, existing_data, &pk_indices);
-            violations.extend(pk_violations);
-        }
-
-        // Check @unique columns
-        for (col_idx, col_schema) in schema.columns.iter().enumerate() {
-            if col_schema.is_unique() {
-                let unique_violations =
-                    self.check_unique_column(schema, tuples, existing_data, col_idx);
-                violations.extend(unique_violations);
-            }
-        }
-
-        if violations.is_empty() {
-            Ok(ValidationResult::success(tuples.len()))
-        } else {
-            Err(ValidationError::BatchRejected {
-                relation: schema.name.clone(),
-                total_tuples: tuples.len(),
-                violations,
-            })
-        }
-    }
-
-    /// Check primary key uniqueness
-    fn check_primary_key_uniqueness(
-        &self,
-        schema: &RelationSchema,
-        tuples: &[Tuple],
-        existing_data: &[Tuple],
-        pk_indices: &[usize],
-    ) -> Vec<Violation> {
-        let mut violations = Vec::new();
-        let mut seen_keys: HashSet<Vec<Value>> = HashSet::new();
-
-        // Add existing primary keys
-        for existing in existing_data {
-            let key: Vec<Value> = pk_indices
-                .iter()
-                .filter_map(|&i| existing.get(i).cloned())
-                .collect();
-            seen_keys.insert(key);
-        }
-
-        // Check new tuples
-        for (idx, tuple) in tuples.iter().enumerate() {
-            let key: Vec<Value> = pk_indices
-                .iter()
-                .filter_map(|&i| tuple.get(i).cloned())
-                .collect();
-            if !seen_keys.insert(key.clone()) {
-                let pk_names: Vec<_> = pk_indices
-                    .iter()
-                    .filter_map(|&i| schema.columns.get(i))
-                    .map(|c| c.name.as_str())
-                    .collect();
-                violations.push(Violation::new(
-                    idx,
-                    tuple.clone(),
-                    Some(pk_names.join(", ")),
-                    ViolationType::PrimaryKeyViolation,
-                    format!("Duplicate primary key: {:?}", key),
-                ));
-            }
-        }
-
-        violations
-    }
-
-    /// Check @unique column
-    fn check_unique_column(
-        &self,
-        schema: &RelationSchema,
-        tuples: &[Tuple],
-        existing_data: &[Tuple],
-        col_idx: usize,
-    ) -> Vec<Violation> {
-        let mut violations = Vec::new();
-        let mut seen_values: HashSet<Value> = HashSet::new();
-        let col_name = schema.columns.get(col_idx).map(|c| c.name.clone());
-
-        // Add existing values
-        for existing in existing_data {
-            if let Some(value) = existing.get(col_idx) {
-                seen_values.insert(value.clone());
-            }
-        }
-
-        // Check new tuples
-        for (idx, tuple) in tuples.iter().enumerate() {
-            if let Some(value) = tuple.get(col_idx) {
-                if !seen_values.insert(value.clone()) {
-                    violations.push(Violation::new(
-                        idx,
-                        tuple.clone(),
-                        col_name.clone(),
-                        ViolationType::UniqueViolation,
-                        format!("Duplicate value: {}", value),
-                    ));
-                }
-            }
-        }
-
-        violations
-    }
-
-    /// Validate with foreign key checks (requires access to referenced data)
-    pub fn validate_foreign_key(
-        &self,
-        schema: &RelationSchema,
-        tuples: &[Tuple],
-        col_idx: usize,
-        referenced_values: &HashSet<Value>,
-    ) -> Vec<Violation> {
-        let mut violations = Vec::new();
-        let col_name = schema.columns.get(col_idx).map(|c| c.name.clone());
-
-        for (idx, tuple) in tuples.iter().enumerate() {
-            if let Some(value) = tuple.get(col_idx) {
-                if !value.is_null() && !referenced_values.contains(value) {
-                    violations.push(Violation::new(
-                        idx,
-                        tuple.clone(),
-                        col_name.clone(),
-                        ViolationType::ForeignKeyViolation,
-                        format!("Referenced value not found: {}", value),
-                    ));
-                }
-            }
-        }
-
-        violations
-    }
-}
-
-impl Default for ValidationEngine {
-    fn default() -> Self {
-        Self::new()
+        self.validate_batch(schema, existing_data)
     }
 }
 
@@ -498,30 +229,18 @@ mod tests {
     use crate::schema::{ColumnSchema, SchemaType};
     use crate::value::Value;
 
-    fn make_user_schema() -> RelationSchema {
+    /// Simple schema for testing type/arity validation only
+    fn make_simple_schema() -> RelationSchema {
         RelationSchema::new("User")
-            .with_column(
-                ColumnSchema::new("id", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Primary)
-                    .with_annotation(ColumnAnnotation::NotEmpty),
-            )
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
             .with_column(ColumnSchema::new("name", SchemaType::Symbol))
-            .with_column(
-                ColumnSchema::new("age", SchemaType::Int)
-                    .with_annotation(ColumnAnnotation::Range { min: 0, max: 120 }),
-            )
-            .with_column(
-                ColumnSchema::new("email", SchemaType::Symbol).with_annotation(
-                    ColumnAnnotation::Pattern {
-                        regex: r"^[^@]+@[^@]+\.[^@]+$".to_string(),
-                    },
-                ),
-            )
+            .with_column(ColumnSchema::new("age", SchemaType::Int))
+            .with_column(ColumnSchema::new("email", SchemaType::Symbol))
     }
 
     #[test]
     fn test_validate_valid_tuple() {
-        let schema = make_user_schema();
+        let schema = make_simple_schema();
         let mut engine = ValidationEngine::new();
 
         let tuple = Tuple::new(vec![
@@ -537,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_validate_arity_mismatch() {
-        let schema = make_user_schema();
+        let schema = make_simple_schema();
         let mut engine = ValidationEngine::new();
 
         let tuple = Tuple::new(vec![Value::string("u1"), Value::string("Alice")]); // Missing columns
@@ -551,13 +270,13 @@ mod tests {
 
     #[test]
     fn test_validate_type_mismatch() {
-        let schema = make_user_schema();
+        let schema = make_simple_schema();
         let mut engine = ValidationEngine::new();
 
         let tuple = Tuple::new(vec![
             Value::string("u1"),
             Value::string("Alice"),
-            Value::string("not a number"), // Wrong type
+            Value::string("not a number"), // Wrong type - expected Int
             Value::string("alice@example.com"),
         ]);
 
@@ -571,129 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_not_empty() {
-        let schema = make_user_schema();
-        let mut engine = ValidationEngine::new();
-
-        let tuple = Tuple::new(vec![
-            Value::string(""), // Empty primary key
-            Value::string("Alice"),
-            Value::Int64(30),
-            Value::string("alice@example.com"),
-        ]);
-
-        let result = engine.validate_batch(&schema, &[tuple]);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert!(violations
-                .iter()
-                .any(|v| v.violation_type == ViolationType::EmptyValue));
-        }
-    }
-
-    #[test]
-    fn test_validate_range() {
-        let schema = make_user_schema();
-        let mut engine = ValidationEngine::new();
-
-        let tuple = Tuple::new(vec![
-            Value::string("u1"),
-            Value::string("Alice"),
-            Value::Int64(150), // Out of range
-            Value::string("alice@example.com"),
-        ]);
-
-        let result = engine.validate_batch(&schema, &[tuple]);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert!(violations
-                .iter()
-                .any(|v| v.violation_type == ViolationType::RangeViolation));
-        }
-    }
-
-    #[test]
-    fn test_validate_pattern() {
-        let schema = make_user_schema();
-        let mut engine = ValidationEngine::new();
-
-        let tuple = Tuple::new(vec![
-            Value::string("u1"),
-            Value::string("Alice"),
-            Value::Int64(30),
-            Value::string("invalid-email"), // Doesn't match pattern
-        ]);
-
-        let result = engine.validate_batch(&schema, &[tuple]);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert!(violations
-                .iter()
-                .any(|v| v.violation_type == ViolationType::PatternViolation));
-        }
-    }
-
-    #[test]
-    fn test_validate_primary_key_uniqueness() {
-        let schema = make_user_schema();
-        let mut engine = ValidationEngine::new();
-
-        let existing = vec![Tuple::new(vec![
-            Value::string("u1"),
-            Value::string("Alice"),
-            Value::Int64(30),
-            Value::string("alice@example.com"),
-        ])];
-
-        let new_tuples = vec![Tuple::new(vec![
-            Value::string("u1"), // Duplicate PK
-            Value::string("Bob"),
-            Value::Int64(25),
-            Value::string("bob@example.com"),
-        ])];
-
-        let result = engine.validate_batch_with_uniqueness(&schema, &new_tuples, &existing);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert!(violations
-                .iter()
-                .any(|v| v.violation_type == ViolationType::PrimaryKeyViolation));
-        }
-    }
-
-    #[test]
-    fn test_validate_multiple_violations() {
-        let schema = make_user_schema();
-        let mut engine = ValidationEngine::new();
-
-        // Tuple 1: valid
-        let t1 = Tuple::new(vec![
-            Value::string("u1"),
-            Value::string("Alice"),
-            Value::Int64(30),
-            Value::string("alice@example.com"),
-        ]);
-
-        // Tuple 2: multiple violations
-        let t2 = Tuple::new(vec![
-            Value::string(""), // Empty PK
-            Value::string("Bob"),
-            Value::Int64(-5),     // Negative age
-            Value::string("bad"), // Bad email
-        ]);
-
-        let result = engine.validate_batch(&schema, &[t1, t2]);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            // Should have multiple violations for t2
-            assert!(violations.len() >= 3);
-            assert!(violations.iter().all(|v| v.tuple_index == 1));
-        }
-    }
-
-    #[test]
-    fn test_batch_all_or_nothing() {
-        let schema = make_user_schema();
+    fn test_validate_batch_success() {
+        let schema = make_simple_schema();
         let mut engine = ValidationEngine::new();
 
         let tuples = vec![
@@ -706,7 +304,33 @@ mod tests {
             Tuple::new(vec![
                 Value::string("u2"),
                 Value::string("Bob"),
-                Value::Int64(200), // Invalid age - rejects entire batch
+                Value::Int64(25),
+                Value::string("bob@example.com"),
+            ]),
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.validated_count, 2);
+    }
+
+    #[test]
+    fn test_validate_batch_type_error_rejects_all() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::string("u1"),
+                Value::string("Alice"),
+                Value::Int64(30),
+                Value::string("alice@example.com"),
+            ]),
+            Tuple::new(vec![
+                Value::string("u2"),
+                Value::string("Bob"),
+                Value::string("not an int"), // Type error
                 Value::string("bob@example.com"),
             ]),
         ];
@@ -714,74 +338,16 @@ mod tests {
         let result = engine.validate_batch(&schema, &tuples);
         assert!(result.is_err());
 
-        // Both tuples should be rejected (all-or-nothing)
-        if let Err(ValidationError::BatchRejected { total_tuples, .. }) = result {
+        // Batch rejected due to type error in second tuple
+        if let Err(ValidationError::BatchRejected {
+            total_tuples,
+            violations,
+            ..
+        }) = result
+        {
             assert_eq!(total_tuples, 2);
+            assert_eq!(violations.len(), 1);
+            assert_eq!(violations[0].tuple_index, 1);
         }
-    }
-
-    #[test]
-    fn test_unique_column() {
-        let schema = RelationSchema::new("Data")
-            .with_column(
-                ColumnSchema::new("id", SchemaType::Int).with_annotation(ColumnAnnotation::Primary),
-            )
-            .with_column(
-                ColumnSchema::new("email", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Unique),
-            );
-
-        let mut engine = ValidationEngine::new();
-
-        let existing = vec![Tuple::new(vec![
-            Value::Int64(1),
-            Value::string("alice@example.com"),
-        ])];
-
-        let new_tuples = vec![Tuple::new(vec![
-            Value::Int64(2),
-            Value::string("alice@example.com"), // Duplicate email
-        ])];
-
-        let result = engine.validate_batch_with_uniqueness(&schema, &new_tuples, &existing);
-        assert!(result.is_err());
-        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
-            assert!(violations
-                .iter()
-                .any(|v| v.violation_type == ViolationType::UniqueViolation));
-        }
-    }
-
-    #[test]
-    fn test_foreign_key_validation() {
-        let schema = RelationSchema::new("Order")
-            .with_column(ColumnSchema::new("id", SchemaType::Int))
-            .with_column(
-                ColumnSchema::new("user_id", SchemaType::Symbol).with_annotation(
-                    ColumnAnnotation::ForeignKey {
-                        relation: "User".to_string(),
-                        column: "id".to_string(),
-                    },
-                ),
-            );
-
-        let engine = ValidationEngine::new();
-
-        let mut referenced_values = HashSet::new();
-        referenced_values.insert(Value::string("u1"));
-        referenced_values.insert(Value::string("u2"));
-
-        let tuples = vec![
-            Tuple::new(vec![Value::Int64(1), Value::string("u1")]), // Valid
-            Tuple::new(vec![Value::Int64(2), Value::string("u99")]), // Invalid
-        ];
-
-        let violations = engine.validate_foreign_key(&schema, &tuples, 1, &referenced_values);
-        assert_eq!(violations.len(), 1);
-        assert_eq!(violations[0].tuple_index, 1);
-        assert_eq!(
-            violations[0].violation_type,
-            ViolationType::ForeignKeyViolation
-        );
     }
 }

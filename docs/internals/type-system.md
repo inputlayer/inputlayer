@@ -134,17 +134,6 @@ type Email: string.
 +user(id: Id, name: string, email: Email).
 ```
 
-### 2.4 Schema with Constraints
-
-```datalog
-+user(id: int @key, email: string @unique, name: string @not_empty).
-```
-
-Available annotations:
-- `@key` - Primary key (unique, not null)
-- `@unique` - Unique constraint
-- `@not_empty` - Cannot be empty string/list
-
 ## 3. Terms and Expressions
 
 ### 3.1 Grammar

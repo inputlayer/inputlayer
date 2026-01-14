@@ -161,6 +161,8 @@ pub enum IRExpression {
     IntConstant(i64),
     /// Float constant
     FloatConstant(f64),
+    /// String constant
+    StringConstant(String),
     /// Vector literal (list of f32 values)
     VectorLiteral(Vec<f32>),
     /// Function call with arguments
@@ -506,6 +508,14 @@ pub enum Predicate {
     ColumnsEq(usize, usize),
     /// Two columns are not equal
     ColumnsNe(usize, usize),
+    /// Column less than column (for variable comparisons like A < B)
+    ColumnsLt(usize, usize),
+    /// Column greater than column
+    ColumnsGt(usize, usize),
+    /// Column less or equal to column
+    ColumnsLe(usize, usize),
+    /// Column greater or equal to column
+    ColumnsGe(usize, usize),
     /// Logical AND
     And(Box<Predicate>, Box<Predicate>),
     /// Logical OR
@@ -542,7 +552,12 @@ impl Predicate {
             | Predicate::ColumnLeFloat(col, _) => {
                 cols.insert(*col);
             }
-            Predicate::ColumnsEq(left, right) | Predicate::ColumnsNe(left, right) => {
+            Predicate::ColumnsEq(left, right)
+            | Predicate::ColumnsNe(left, right)
+            | Predicate::ColumnsLt(left, right)
+            | Predicate::ColumnsGt(left, right)
+            | Predicate::ColumnsLe(left, right)
+            | Predicate::ColumnsGe(left, right) => {
                 cols.insert(*left);
                 cols.insert(*right);
             }
@@ -665,6 +680,38 @@ impl Predicate {
                 match (find_new_index(*left), find_new_index(*right)) {
                     (Some(new_left), Some(new_right)) => {
                         Some(Predicate::ColumnsNe(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsLt(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsLt(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsGt(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsGt(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsLe(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsLe(new_left, new_right))
+                    }
+                    _ => None,
+                }
+            }
+            Predicate::ColumnsGe(left, right) => {
+                match (find_new_index(*left), find_new_index(*right)) {
+                    (Some(new_left), Some(new_right)) => {
+                        Some(Predicate::ColumnsGe(new_left, new_right))
                     }
                     _ => None,
                 }

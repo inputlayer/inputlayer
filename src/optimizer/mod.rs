@@ -478,7 +478,12 @@ impl Optimizer {
             | Predicate::ColumnLeFloat(col, _) => {
                 vec![*col]
             }
-            Predicate::ColumnsEq(col1, col2) | Predicate::ColumnsNe(col1, col2) => {
+            Predicate::ColumnsEq(col1, col2)
+            | Predicate::ColumnsNe(col1, col2)
+            | Predicate::ColumnsLt(col1, col2)
+            | Predicate::ColumnsGt(col1, col2)
+            | Predicate::ColumnsLe(col1, col2)
+            | Predicate::ColumnsGe(col1, col2) => {
                 vec![*col1, *col2]
             }
             Predicate::And(left, right) | Predicate::Or(left, right) => {
@@ -513,6 +518,10 @@ impl Optimizer {
             Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(adjust(*col), *val),
             Predicate::ColumnsEq(col1, col2) => Predicate::ColumnsEq(adjust(*col1), adjust(*col2)),
             Predicate::ColumnsNe(col1, col2) => Predicate::ColumnsNe(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsLt(col1, col2) => Predicate::ColumnsLt(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsGt(col1, col2) => Predicate::ColumnsGt(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsLe(col1, col2) => Predicate::ColumnsLe(adjust(*col1), adjust(*col2)),
+            Predicate::ColumnsGe(col1, col2) => Predicate::ColumnsGe(adjust(*col1), adjust(*col2)),
             Predicate::And(left, right) => Predicate::And(
                 Box::new(Self::adjust_predicate_columns(left, offset)),
                 Box::new(Self::adjust_predicate_columns(right, offset)),

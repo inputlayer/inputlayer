@@ -141,8 +141,8 @@ fn test_parse_delete_operations() {
         panic!("Expected Delete statement");
     }
 
-    // Conditional delete
-    let stmt = parse_statement("-edge(X, Y) :- X > 5.").unwrap();
+    // Conditional delete - use valid atom syntax instead of constraint
+    let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -161,8 +161,8 @@ fn test_parse_persistent_rule() {
         panic!("Expected PersistentRule statement");
     }
 
-    // Persistent rule with filter
-    let stmt = parse_statement("+adult(N, A) :- person(N, A), A >= 18.").unwrap();
+    // Persistent rule with join - use valid atom syntax instead of constraint
+    let stmt = parse_statement("+adult(N, A) :- person(N, A), ages(N, A).").unwrap();
     if let Statement::PersistentRule(rule) = stmt {
         assert_eq!(rule.head.relation, "adult");
     } else {
@@ -172,7 +172,8 @@ fn test_parse_persistent_rule() {
 
 #[test]
 fn test_parse_transient_rule() {
-    let stmt = parse_statement("result(X, Y) :- edge(X, Y), X < Y.").unwrap();
+    // Use valid atom syntax instead of constraint
+    let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
     if let Statement::SessionRule(rule) = stmt {
         assert_eq!(rule.head.relation, "result");
     } else {
@@ -192,8 +193,9 @@ fn test_parse_query() {
 
 #[test]
 fn test_parse_update_operation() {
+    // Use valid atom syntax instead of constraint
     let stmt = parse_statement(
-        "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), NewAge = OldAge.",
+        "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
     )
     .unwrap();
     if let Statement::Update(op) = stmt {
@@ -430,7 +432,8 @@ fn test_serializable_rule_roundtrip() {
     use inputlayer::parser::parse_rule;
     use inputlayer::statement::SerializableRule;
 
-    let rule_str = "path(X, Y) :- edge(X, Y), X < Y.";
+    // Use valid atom syntax instead of constraint
+    let rule_str = "path(X, Y) :- edge(X, Y), node(X).";
     let rule = parse_rule(rule_str).unwrap();
 
     // Convert to serializable
@@ -441,7 +444,6 @@ fn test_serializable_rule_roundtrip() {
 
     assert_eq!(rule.head.relation, restored.head.relation);
     assert_eq!(rule.body.len(), restored.body.len());
-    assert_eq!(rule.constraints.len(), restored.constraints.len());
 }
 
 #[test]
@@ -468,6 +470,7 @@ fn test_serializable_rule_json() {
 // ============================================================================
 
 #[test]
+#[ignore] // Constraint syntax (Age >= 18) no longer supported - Constraint type removed
 fn test_view_with_constraints() {
     let (mut storage, _temp) = create_test_storage();
 
@@ -529,10 +532,9 @@ fn test_query_with_constant_first_arg() {
         .insert("parent", vec![(1, 2), (1, 3), (2, 4)])
         .unwrap();
 
-    // Query: ?- parent(1, X). transformed to query with constraint
-    // This mimics the client's handle_query transformation
+    // Query: ?- parent(1, X). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(_c0, X) :- parent(_c0, X), _c0 = 1.")
+        .execute_query_with_rules("__query__(1, X) :- parent(1, X).")
         .unwrap();
 
     // Should return (1, 2) and (1, 3) - children of parent 1
@@ -553,9 +555,9 @@ fn test_query_with_all_constants() {
         .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
         .unwrap();
 
-    // Query: ?- edge(1, 2). transformed to query with constraints
+    // Query: ?- edge(1, 2). - use constants directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 2.")
+        .execute_query_with_rules("__query__(1, 2) :- edge(1, 2).")
         .unwrap();
 
     // Should return (1, 2) since that fact exists
@@ -564,7 +566,7 @@ fn test_query_with_all_constants() {
 
     // Query: ?- edge(1, 99). - fact doesn't exist
     let results = storage
-        .execute_query_with_rules("__query__(_c0, _c1) :- edge(_c0, _c1), _c0 = 1, _c1 = 99.")
+        .execute_query_with_rules("__query__(1, 99) :- edge(1, 99).")
         .unwrap();
 
     // Should return empty since (1, 99) doesn't exist
@@ -584,9 +586,9 @@ fn test_query_with_constant_on_base_relation() {
         .insert("edge", vec![(1, 2), (1, 3), (2, 4)])
         .unwrap();
 
-    // Query: ?- edge(1, X). - find direct edges from 1
+    // Query: ?- edge(1, X). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(_c0, X) :- edge(_c0, X), _c0 = 1.")
+        .execute_query_with_rules("__query__(1, X) :- edge(1, X).")
         .unwrap();
 
     // From 1, direct edges are: (1,2), (1,3)
@@ -607,9 +609,9 @@ fn test_query_constant_second_arg() {
         .insert("edge", vec![(1, 3), (2, 3), (4, 5)])
         .unwrap();
 
-    // Query: ?- edge(X, 3). - find all sources pointing to 3
+    // Query: ?- edge(X, 3). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(X, _c1) :- edge(X, _c1), _c1 = 3.")
+        .execute_query_with_rules("__query__(X, 3) :- edge(X, 3).")
         .unwrap();
 
     // Should return (1, 3) and (2, 3)

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_intervals_overlap
+Knowledge graph 'test_intervals_overlap' created.
+Switched to knowledge graph: test_intervals_overlap
+> .kg use test_intervals_overlap
+Switched to knowledge graph: test_intervals_overlap
+> +intervals[(1, 100, 200, 150, 250), (2, 100, 200, 200, 300), (3, 100, 200, 300, 400), (4, 100, 300, 150, 200)].
+Inserted 4 fact(s) into 'intervals'.
+> overlapping(Id) :- intervals(Id, S1, E1, S2, E2), intervals_overlap(S1, E1, S2, E2).
+No results.
+(session: 1 rule(s))
+> ?- overlapping(Id).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_intervals_overlap
+Knowledge graph 'test_intervals_overlap' dropped.

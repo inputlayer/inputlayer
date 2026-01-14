@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_elem
+Knowledge graph 'test_single_elem' created.
+Switched to knowledge graph: test_single_elem
+> .kg use test_single_elem
+Switched to knowledge graph: test_single_elem
+> +scalar[(1, [5.0]), (2, [3.0]), (3, [-2.0])].
+Inserted 3 fact(s) into 'scalar'.
+> dist(Id1, Id2, D) :- scalar(Id1, V1), scalar(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).
+3 rows:
+  (1, 2, 2.0)
+  (1, 3, 7.0)
+  (2, 3, 5.0)
+(session: 1 rule(s))
+> ?- dist(Id1, Id2, D).
+3 rows:
+  (1, 2, 2.0)
+  (1, 3, 7.0)
+  (2, 3, 5.0)
+> cos(Id1, Id2, S) :- scalar(Id1, V1), scalar(Id2, V2), Id1 < Id2, S = cosine(V1, V2).
+3 rows:
+  (1, 2, 0.0)
+  (1, 3, 2.0)
+  (2, 3, 2.0)
+(session: 2 rule(s))
+> ?- cos(Id1, Id2, S).
+3 rows:
+  (1, 2, 0.0)
+  (1, 3, 2.0)
+  (2, 3, 2.0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_single_elem
+Knowledge graph 'test_single_elem' dropped.

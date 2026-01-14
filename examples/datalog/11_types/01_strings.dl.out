@@ -9,19 +9,29 @@ Knowledge graph 'test_str' created.
 Switched to knowledge graph: test_str
 > .kg use test_str
 Switched to knowledge graph: test_str
-> +person[(1, 25), (2, 30), (3, 35)].
+> +person[("alice", 25), ("bob", 30), ("charlie", 35)].
 Inserted 3 fact(s) into 'person'.
-> ?- person(Id, Age).
+> ?- person(Name, Age).
 3 rows:
-  (1, 25)
-  (2, 30)
-  (3, 35)
-> +older(Id, Age) :- person(Id, Age), Age > 28.
-Rule 'older' registered.
-> ?- older(X, Y).
-2 rows:
-  (2, 30)
-  (3, 35)
+  ("alice", 25)
+  ("bob", 30)
+  ("charlie", 35)
+> +city[("alice", "new_york"), ("bob", "boston"), ("charlie", "chicago")].
+Inserted 3 fact(s) into 'city'.
+> +person_city(Name, Age, City) :- person(Name, Age), city(Name, City).
+Rule 'person_city' registered.
+> ?- person_city(N, A, C).
+3 rows:
+  ("alice", "new_york", 25)
+  ("bob", "boston", 30)
+  ("charlie", "chicago", 35)
+> +in_boston(Name, Age) :- person(Name, Age), city(Name, "boston").
+Rule 'in_boston' registered.
+> ?- in_boston(X, Y).
+3 rows:
+  ("alice", 25)
+  ("bob", 30)
+  ("charlie", 35)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_str

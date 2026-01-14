@@ -151,6 +151,37 @@ impl DependencyGraph {
     pub fn has_negative_deps(&self, relation: &str) -> bool {
         !self.negative_deps(relation).is_empty()
     }
+
+    /// Convert to simple graph format for SCC detection (all edges, ignoring type)
+    /// This is needed because cycles can form through BOTH positive and negative edges
+    pub fn to_simple_graph(&self) -> HashMap<String, HashSet<String>> {
+        let mut simple = HashMap::new();
+        for (from, edges) in &self.edges {
+            let deps: HashSet<String> = edges.iter().map(|(to, _)| to.clone()).collect();
+            simple.insert(from.clone(), deps);
+        }
+        // Ensure all relations are in the graph even if they have no outgoing edges
+        for rel in &self.relations {
+            simple.entry(rel.clone()).or_insert_with(HashSet::new);
+        }
+        simple
+    }
+
+    /// Check if there's a negative edge within an SCC
+    /// Returns the first negative edge found within the SCC, if any
+    pub fn has_negative_edge_in_scc(&self, scc: &[String]) -> Option<(String, String)> {
+        let scc_set: HashSet<&String> = scc.iter().collect();
+        for from in scc {
+            if let Some(edges) = self.edges.get(from) {
+                for (to, dep_type) in edges {
+                    if *dep_type == DependencyType::Negative && scc_set.contains(to) {
+                        return Some((from.clone(), to.clone()));
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 impl Default for DependencyGraph {
@@ -202,6 +233,9 @@ pub fn build_extended_dependency_graph(program: &Program) -> DependencyGraph {
                 }
                 BodyPredicate::Negated(atom) => {
                     graph.add_edge(head_relation, &atom.relation, DependencyType::Negative);
+                }
+                BodyPredicate::Comparison(_, _, _) => {
+                    // Comparisons don't add relation dependencies
                 }
             }
         }
@@ -423,11 +457,15 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
         return StratificationResult::Success(vec![]);
     }
 
-    // Build positive-only graph for SCC detection
-    let positive_graph = build_dependency_graph(program);
+    // Build extended graph with BOTH positive and negative edges
+    // Negative edges are critical for detecting self-negation and mutual negation cycles
+    let extended_graph = build_extended_dependency_graph(program);
 
-    // Find SCCs in the positive dependency graph
-    let sccs = find_sccs(&positive_graph);
+    // Convert to simple graph for SCC detection (includes ALL edges)
+    let simple_graph = extended_graph.to_simple_graph();
+
+    // Find SCCs considering ALL dependencies (both positive and negative)
+    let sccs = find_sccs(&simple_graph);
 
     // Create mapping from relation to SCC
     let mut relation_to_scc: HashMap<String, usize> = HashMap::new();
@@ -442,25 +480,28 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
         }
     }
 
-    // Check for negation within SCCs (not stratifiable)
-    for rule in &program.rules {
-        let head_relation = &rule.head.relation;
-        let head_scc = relation_to_scc.get(head_relation);
-
-        for negated_atom in rule.negated_body_atoms() {
-            let negated_relation = &negated_atom.relation;
-            let negated_scc = relation_to_scc.get(negated_relation);
-
-            // If head and negated relation are in the same SCC, not stratifiable
-            if head_scc == negated_scc && head_scc.is_some() {
-                return StratificationResult::NotStratifiable {
-                    relation: head_relation.clone(),
-                    reason: format!(
-                        "Negation of '{}' within same SCC as '{}' (negation through recursion)",
-                        negated_relation, head_relation
-                    ),
-                };
-            }
+    // Check for ANY negative edge within ANY SCC (not stratifiable)
+    // This catches: self-negation, mutual negation, and any cycle through negation
+    for scc in &sccs {
+        if let Some((from, to)) = extended_graph.has_negative_edge_in_scc(scc) {
+            let reason = if from == to {
+                format!(
+                    "Self-negation: '{}' negates itself (!{} in body)",
+                    from, from
+                )
+            } else {
+                format!(
+                    "Unstratified negation: '{}' negates '{}' within same recursive cycle. \
+                     Cycle members: [{}]",
+                    from,
+                    to,
+                    scc.join(", ")
+                )
+            };
+            return StratificationResult::NotStratifiable {
+                relation: from,
+                reason,
+            };
         }
     }
 
@@ -656,7 +697,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         );
 
         assert!(is_recursive_rule(&rule));
@@ -680,7 +720,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         );
 
         assert!(!is_recursive_rule(&rule));
@@ -706,7 +745,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         ));
 
         assert!(!has_recursion(&program));
@@ -736,7 +774,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         ));
 
         assert!(has_recursion(&program));
@@ -762,7 +799,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         ));
 
         // tc(x, z) :- tc(x, y), edge(y, z).
@@ -790,7 +826,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         ));
 
         let graph = build_dependency_graph(&program);
@@ -855,7 +890,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         ));
 
         let strata = stratify(&program);
@@ -886,7 +920,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         ));
 
         // tc(x, z) :- tc(x, y), edge(y, z). [RECURSIVE]
@@ -914,7 +947,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         ));
 
         let strata = stratify(&program);
@@ -949,7 +981,6 @@ mod tests {
                 "source".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         // unreachable(x) :- node(x), !reach(x).
@@ -968,7 +999,6 @@ mod tests {
                     vec![Term::Variable("x".to_string())],
                 )),
             ],
-            vec![],
         ));
 
         let result = stratify_with_negation(&program);
@@ -1002,7 +1032,6 @@ mod tests {
                     vec![Term::Variable("x".to_string())],
                 )),
             ],
-            vec![],
         ));
 
         let result = stratify_with_negation(&program);
@@ -1031,7 +1060,6 @@ mod tests {
                 "base".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         // b(x) :- a(x), !c(x).
@@ -1047,7 +1075,6 @@ mod tests {
                     vec![Term::Variable("x".to_string())],
                 )),
             ],
-            vec![],
         ));
 
         // c(x) :- base(x).
@@ -1057,7 +1084,6 @@ mod tests {
                 "base".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         let result = stratify_with_negation(&program);
@@ -1095,7 +1121,6 @@ mod tests {
                     Term::Variable("y".to_string()),
                 ],
             )],
-            vec![],
         ));
 
         // tc(x, z) :- tc(x, y), edge(y, z).
@@ -1123,7 +1148,6 @@ mod tests {
                     ],
                 ),
             ],
-            vec![],
         ));
 
         // not_connected(x, y) :- node(x), node(y), !tc(x, y).
@@ -1152,7 +1176,6 @@ mod tests {
                     ],
                 )),
             ],
-            vec![],
         ));
 
         let result = stratify_with_negation(&program);
@@ -1189,7 +1212,6 @@ mod tests {
                     vec![Term::Variable("x".to_string())],
                 )),
             ],
-            vec![],
         ));
 
         let graph = build_extended_dependency_graph(&program);
@@ -1219,7 +1241,6 @@ mod tests {
                 "base".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         // b(x) :- base(x).
@@ -1229,7 +1250,6 @@ mod tests {
                 "base".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         // c(x) :- base(x).
@@ -1239,7 +1259,6 @@ mod tests {
                 "base".to_string(),
                 vec![Term::Variable("x".to_string())],
             )],
-            vec![],
         ));
 
         // d(x) :- a(x), !b(x), !c(x).
@@ -1259,7 +1278,6 @@ mod tests {
                     vec![Term::Variable("x".to_string())],
                 )),
             ],
-            vec![],
         ));
 
         let result = stratify_with_negation(&program);

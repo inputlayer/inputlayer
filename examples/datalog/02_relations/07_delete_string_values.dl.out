@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_str
+Knowledge graph 'test_del_str' created.
+Switched to knowledge graph: test_del_str
+> .kg use test_del_str
+Switched to knowledge graph: test_del_str
+> +person[("alice", 25), ("bob", 30), ("charlie", 35)].
+Inserted 3 fact(s) into 'person'.
+> ?- person(X, Y).
+3 rows:
+  ("alice", 25)
+  ("bob", 30)
+  ("charlie", 35)
+> -person[("bob", 30)].
+Script error: Parse error: Expected parentheses: ("bob", 30)]

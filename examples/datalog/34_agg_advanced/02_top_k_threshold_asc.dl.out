@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_top_k_threshold_asc
+Knowledge graph 'test_top_k_threshold_asc' created.
+Switched to knowledge graph: test_top_k_threshold_asc
+> .kg use test_top_k_threshold_asc
+Switched to knowledge graph: test_top_k_threshold_asc
+> +latency[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 30)].
+Inserted 6 fact(s) into 'latency'.
+> +fast_requests(ReqId, top_k_threshold<3, Ms, 100>) :- latency(ReqId, Ms).
+Rule 'fast_requests' registered.
+> ?- fast_requests(X, Y).
+3 rows:
+  (1, 50)
+  (5, 80)
+  (6, 30)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_top_k_threshold_asc
+Knowledge graph 'test_top_k_threshold_asc' dropped.

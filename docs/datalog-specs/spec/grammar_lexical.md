@@ -1,34 +1,45 @@
-# Terminal/Lexical
+# Lexical Elements
 
-The following are lexical rules that can be assumed by the non-terminal rules in previous sections.
+Basic character classes used throughout the grammar.
+
+## Character Classes
 
 ```ebnf
-EOL     ::= "\n" | "\r" "\n"? ;
+WHITESPACE  ::= " " | "\t" | "\n" | "\r" ;
+LC_ALPHA    ::= [a-z] ;
+UC_ALPHA    ::= [A-Z] ;
+ALPHA       ::= LC_ALPHA | UC_ALPHA ;
+DIGIT       ::= [0-9] ;
+```
 
-DQUOTE  ::= #x22 ;
+## Identifiers
 
-UNDERSCORE
-        ::= "_" ;
+**Predicate names** start with a lowercase letter:
 
-SPACE_SEP
-        ::= ? corresponds to the Unicode category 'Zs' ? ;
+```ebnf
+predicate   ::= LC_ALPHA ( ALPHA | DIGIT | "_" )* ;
+```
 
-WHITESPACE
-        ::= SPACE_SEP | "\t" | EOL ;
+Examples: `edge`, `my_relation`, `user123`
 
-LC_ALPHA
-        ::= ? corresponds to the Unicode category 'Ll' ? ;
+**Variable names** start with an uppercase letter:
 
-UC_ALPHA
-        ::= ? corresponds to the Unicode category 'Lu' ? ;
+```ebnf
+variable    ::= UC_ALPHA ( ALPHA | DIGIT | "_" )* ;
+```
 
-TC_ALPHA
-        ::= ? corresponds to the Unicode category 'Lt' ? ;
+Examples: `X`, `Name`, `User_Id`
 
-ALPHA   ::= LC_ALPHA | UC_ALPHA | TC_ALPHA ;
+## Comments
 
-DIGIT   ::= ? corresponds to the Unicode category 'Nd' (decimal number) ? ;
+```ebnf
+line_comment  ::= "%" [^\n]* ;
+block_comment ::= "/*" .* "*/" ;
+```
 
-HEXDIGIT
-        ::= [0-9a-fA-F] ;
+Example:
+```datalog
+% This is a line comment
+/* This is a
+   block comment */
 ```

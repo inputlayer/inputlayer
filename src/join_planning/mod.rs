@@ -730,6 +730,10 @@ impl JoinPlanner {
             // Column to column comparisons
             Predicate::ColumnsEq(l, r) => Predicate::ColumnsEq(remap_idx(*l), remap_idx(*r)),
             Predicate::ColumnsNe(l, r) => Predicate::ColumnsNe(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsLt(l, r) => Predicate::ColumnsLt(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsGt(l, r) => Predicate::ColumnsGt(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsLe(l, r) => Predicate::ColumnsLe(remap_idx(*l), remap_idx(*r)),
+            Predicate::ColumnsGe(l, r) => Predicate::ColumnsGe(remap_idx(*l), remap_idx(*r)),
             // Logical combinators
             Predicate::And(p1, p2) => Predicate::And(
                 Box::new(Self::remap_predicate(p1, old_schema, new_schema)),
@@ -768,6 +772,7 @@ impl JoinPlanner {
             IRExpression::Column(idx) => IRExpression::Column(remap_idx(*idx)),
             IRExpression::IntConstant(val) => IRExpression::IntConstant(*val),
             IRExpression::FloatConstant(val) => IRExpression::FloatConstant(*val),
+            IRExpression::StringConstant(s) => IRExpression::StringConstant(s.clone()),
             IRExpression::VectorLiteral(vals) => IRExpression::VectorLiteral(vals.clone()),
             IRExpression::FunctionCall(func, args) => {
                 let remapped_args: Vec<IRExpression> = args

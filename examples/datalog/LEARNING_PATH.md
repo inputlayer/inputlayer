@@ -327,12 +327,11 @@ Or use the snapshot test runner:
 | `24_rel_schemas/02_schema_with_data.dl` | Schema then data |
 | `25_unified_prefix/01_schema_declarations.dl` | Schema syntax |
 | `25_unified_prefix/03_schema_vs_data.dl` | Schema vs data distinction |
-| `25_unified_prefix/04_schema_with_constraints.dl` | Adding constraints |
 
 **Key Concepts**:
 ```datalog
 +person(id: int, name: string, age: int).
-+user(id: int @key, email: string @unique).
++user(id: int, name: string, email: string).
 ```
 
 ### 8.3 Type Declarations

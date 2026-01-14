@@ -1,0 +1,65 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcard
+Knowledge graph 'test_wildcard' created.
+Switched to knowledge graph: test_wildcard
+> .kg use test_wildcard
+Switched to knowledge graph: test_wildcard
+> +people[(1, "alice", 25), (2, "bob", 30), (3, "charlie", 25), (4, "diana", 35)].
+Inserted 4 fact(s) into 'people'.
+> ?- people(Id, _, 25).
+2 rows:
+  (1, "alice", 25)
+  (3, "charlie", 25)
+> ?- people(Id, _, _).
+4 rows:
+  (1, "alice", 25)
+  (2, "bob", 30)
+  (3, "charlie", 25)
+  (4, "diana", 35)
+> ?- people(_, Name, 30).
+1 rows:
+  (2, "bob", 30)
+> +just_names(Name) :- people(_, Name, _).
+Rule 'just_names' registered.
+> ?- just_names(N).
+4 rows:
+  ("alice")
+  ("bob")
+  ("charlie")
+  ("diana")
+> +departments[(1, "engineering"), (2, "sales"), (3, "marketing")].
+Inserted 3 fact(s) into 'departments'.
+> dept_for_person(Name, Dept) :- people(Id, Name, _), departments(Id, Dept).
+3 rows:
+  ("alice", "engineering")
+  ("bob", "sales")
+  ("charlie", "marketing")
+(session: 1 rule(s))
+> ?- dept_for_person(Name, Dept).
+3 rows:
+  ("alice", "engineering")
+  ("bob", "sales")
+  ("charlie", "marketing")
+> +matrix[(1, 1, 10), (1, 2, 20), (2, 1, 30), (2, 2, 40)].
+Inserted 4 fact(s) into 'matrix'.
+> row_values(Row, Val) :- matrix(Row, _, Val).
+4 rows:
+  (1, 10)
+  (1, 20)
+  (2, 30)
+  (2, 40)
+(session: 2 rule(s))
+> ?- row_values(1, V).
+2 rows:
+  (1, 10)
+  (1, 20)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_wildcard
+Knowledge graph 'test_wildcard' dropped.

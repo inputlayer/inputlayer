@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_add_sub
+Knowledge graph 'test_time_add_sub' created.
+Switched to knowledge graph: test_time_add_sub
+> .kg use test_time_add_sub
+Switched to knowledge graph: test_time_add_sub
+> +base_times[(1, 1000000, 500), (2, 2000000, 1000), (3, 5000000, 2500)].
+Inserted 3 fact(s) into 'base_times'.
+> add_result(Id, Result) :- base_times(Id, Ts, Dur), Result = time_add(Ts, Dur).
+3 rows:
+  (1, 1000500)
+  (2, 2001000)
+  (3, 5002500)
+(session: 1 rule(s))
+> sub_result(Id, Result) :- base_times(Id, Ts, Dur), Result = time_sub(Ts, Dur).
+3 rows:
+  (1, 999500)
+  (2, 1999000)
+  (3, 4997500)
+(session: 2 rule(s))
+> ?- add_result(Id, Result).
+3 rows:
+  (1, 1000500)
+  (2, 2001000)
+  (3, 5002500)
+> ?- sub_result(Id, Result).
+3 rows:
+  (1, 999500)
+  (2, 1999000)
+  (3, 4997500)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_time_add_sub
+Knowledge graph 'test_time_add_sub' dropped.

@@ -1,0 +1,21 @@
+% Test: List Relations Command
+% Category: 02_relations
+% Description: Tests listing all relations in a knowledge graph
+
+.kg create test_list_rel
+.kg use test_list_rel
+
+% Initially no relations
+.rel list
+
+% Add some relations
++users[(1, "alice"), (2, "bob")].
++products[(100, "widget"), (200, "gadget")].
++orders[(1, 100, 5), (2, 200, 3)].
+
+% List relations after adding data
+.rel list
+
+% Cleanup
+.kg use default
+.kg drop test_list_rel

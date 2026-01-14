@@ -1,0 +1,17 @@
+% Test: time_now() function
+% Category: 29_temporal
+% Description: Tests time_now() returns current Unix timestamp in milliseconds
+
+.kg create test_time_now
+.kg use test_time_now
+
+% Insert a reference timestamp (roughly current time - Jan 2025)
++ref[(1, 1736640000000)].
+
+% Use a rule to verify time_now() works without including the dynamic value in output
+% The rule filters to only include refs where current time > ref time
+valid_ref(Id, RefTime) :- ref(Id, RefTime), Now = time_now(), Now > RefTime.
+?- valid_ref(Id, RefTime).
+
+.kg use default
+.kg drop test_time_now

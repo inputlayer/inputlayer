@@ -54,7 +54,6 @@ fn main() {
                     rule.head.args.len()
                 );
                 println!("    Body: {} predicates", rule.body.len());
-                println!("    Constraints: {} filters", rule.constraints.len());
 
                 // Show rule is safe
                 if rule.is_safe() {

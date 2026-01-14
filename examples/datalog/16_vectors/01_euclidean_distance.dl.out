@@ -10,14 +10,20 @@ Switched to knowledge graph: test_vec_euclidean
 > .kg use test_vec_euclidean
 Switched to knowledge graph: test_vec_euclidean
 > +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
-No facts inserted (3 duplicate skipped).
+Inserted 3 fact(s) into 'vectors'.
 > +query[([0.0, 0.0, 0.0])].
-No facts inserted (1 duplicate skipped).
+Inserted 1 fact(s) into 'query'.
 > nearest(Id, Dist) :- vectors(Id, V), query(Q), Dist = euclidean(V, Q).
-No results.
+3 rows:
+  (1, 1.0)
+  (2, 1.0)
+  (3, 1.4142135623730951)
 (session: 1 rule(s))
 > ?- nearest(X, Y).
-No results.
+3 rows:
+  (1, 1.0)
+  (2, 1.0)
+  (3, 1.4142135623730951)
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_ops
+Knowledge graph 'test_rel_ops' created.
+Switched to knowledge graph: test_rel_ops
+> .kg use test_rel_ops
+Switched to knowledge graph: test_rel_ops
+> +data[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'data'.
+> ?- data(X, Y).
+3 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
+> -data[(2, 200)].
+Script error: Parse error: Expected parentheses: (2, 200)]

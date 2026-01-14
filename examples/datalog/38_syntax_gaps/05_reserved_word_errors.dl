@@ -1,0 +1,18 @@
+% Test: Reserved words as relation names
+% Category: 38_syntax_gaps
+% Description: Tests behavior when reserved words are used as relation names
+% Note: Some systems reject these, others allow. This test documents behavior.
+
+.kg create test_reserved
+.kg use test_reserved
+
+% Test using 'count' as relation name - may error or succeed
++count_rel(1, 2).
+?- count_rel(X, Y).
+
+% Test using 'sum_data' as relation name (not exactly reserved)
++sum_data(1, 100).
+?- sum_data(X, Y).
+
+.kg use default
+.kg drop test_reserved

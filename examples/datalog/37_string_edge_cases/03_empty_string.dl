@@ -1,0 +1,24 @@
+% Test: Empty String Handling
+% Category: 37_string_edge_cases
+% Description: Tests handling of empty strings ""
+
+.kg create test_empty_string
+.kg use test_empty_string
+
+% Insert empty and non-empty strings
++name[(1, "alice"), (2, ""), (3, "bob"), (4, "")].
+
+% Query all names
+?- name(Id, N).
+
+% Filter for empty strings
+empty(Id) :- name(Id, N), N = "".
+?- empty(Id).
+
+% Filter for non-empty strings
+nonempty(Id, N) :- name(Id, N), N != "".
+?- nonempty(Id, N).
+
+% Cleanup
+.kg use default
+.kg drop test_empty_string

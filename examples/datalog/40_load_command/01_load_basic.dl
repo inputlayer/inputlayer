@@ -1,0 +1,19 @@
+% Test: Basic .load Command
+% Category: Load Command
+% Description: Tests loading a datalog file with .load
+
+.kg create test_load_basic
+.kg use test_load_basic
+
+% Load the helper file
+.load examples/datalog/40_load_command/_helper_data.dl
+
+% Verify data was loaded
+?- loaded_relation(X, Y).
+
+% Verify rule was loaded and works
+?- loaded_rule(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_load_basic

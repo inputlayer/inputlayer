@@ -1,0 +1,48 @@
+% Test: Comparison Operators in Isolation
+% Category: Filters
+% Description: Tests each comparison operator individually
+
+.kg create test_cmp_isolated
+.kg use test_cmp_isolated
+
++nums[(1), (2), (3), (4), (5)].
+
+% Less than (<)
+lt_result(X) :- nums(X), X < 3.
+?- lt_result(X).
+
+% Less than or equal (<=)
+le_result(X) :- nums(X), X <= 3.
+?- le_result(X).
+
+% Greater than (>)
+gt_result(X) :- nums(X), X > 3.
+?- gt_result(X).
+
+% Greater than or equal (>=)
+ge_result(X) :- nums(X), X >= 3.
+?- ge_result(X).
+
+% Equal (=)
+eq_result(X) :- nums(X), X = 3.
+?- eq_result(X).
+
+% Not equal (!=)
+ne_result(X) :- nums(X), X != 3.
+?- ne_result(X).
+
+% Variable-to-variable comparison
++pairs[(1, 2), (3, 3), (5, 4), (2, 2)].
+
+var_lt(X, Y) :- pairs(X, Y), X < Y.
+?- var_lt(X, Y).
+
+var_eq(X, Y) :- pairs(X, Y), X = Y.
+?- var_eq(X, Y).
+
+var_gt(X, Y) :- pairs(X, Y), X > Y.
+?- var_gt(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_cmp_isolated

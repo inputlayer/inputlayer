@@ -84,9 +84,7 @@ This directory contains 186 snapshot tests for the InputLayer Datalog engine. Ea
 ```datalog
 // Persistent schema with typed columns
 +employee(id: int, name: string, dept_id: int).
-
-// Schema with constraints
-+user(id: int @key, email: string @unique, name: string @not_empty).
++user(id: int, name: string, email: string).
 ```
 
 #### Fact Operations

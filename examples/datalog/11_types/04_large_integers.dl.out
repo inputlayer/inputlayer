@@ -27,10 +27,11 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows:
   (-999999, 999999)
   (1000000, -1000000)
-> +sum_large(X, Y) :- large_pos(X, Y), X + Y > 2500000.
-Rule 'sum_large' registered.
-> ?- sum_large(X, Y).
-No results.
+> +big_first(X, Y) :- large_pos(X, Y), X > 999999.
+Rule 'big_first' registered.
+> ?- big_first(X, Y).
+1 rows:
+  (1000000, 2000000)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_large_int

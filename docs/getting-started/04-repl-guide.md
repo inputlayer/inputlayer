@@ -197,9 +197,7 @@ temp_result(X, Y) :- edge(X, Y), X < Y.
 ```datalog
 % Typed schema
 +employee(id: int, name: string, dept: string).
-
-% With constraints
-+user(id: int @key, email: string @unique).
++user(id: int, name: string, email: string).
 ```
 
 ## Tips and Tricks
@@ -276,8 +274,8 @@ temp(X) :- complex_query...   % Session rule for analysis
 .kg use production
 
 % Define schemas first
-+user(id: int @key, name: string, email: string @unique).
-+order(id: int @key, user_id: int, amount: float).
++user(id: int, name: string, email: string).
++order(id: int, user_id: int, amount: float).
 
 % Load data
 .load users.dl

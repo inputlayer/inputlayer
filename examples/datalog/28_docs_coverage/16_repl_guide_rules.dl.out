@@ -37,10 +37,16 @@ Rule 'dept_count' registered.
   ("engineering", 2)
   ("sales", 1)
 > temp_result(X, Y) :- edge(X, Y), X < Y.
-No results.
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
 (session: 1 rule(s))
 > ?- temp_result(X, Y).
-No results.
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

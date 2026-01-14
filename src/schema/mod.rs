@@ -1,18 +1,15 @@
 //! # Schema Validation Module
 //!
 //! This module provides schema validation for Datalog relations, enabling:
-//! - Declarative schema definitions with typed columns and constraint annotations
-//! - Datalog-based validation rules via @check constraints
+//! - Declarative schema definitions with typed columns
+//! - Type checking (int, float, string, symbol, bool, vector)
+//! - Arity checking (correct number of columns)
 //! - All-or-nothing insert semantics (reject entire batch if any tuple fails)
-//! - Quarantine tables for non-compliant legacy data
 //!
 //! ## Example Schema Declaration
 //!
 //! ```datalog
-//! +User(id: symbol @primary @not_empty,
-//!       name: symbol @not_empty,
-//!       age: int @range(0, 120),
-//!       email: symbol @pattern("^[^@]+@[^@]+$")).
+//! +User(id: symbol, name: string, age: int).
 //! ```
 
 pub mod catalog;
@@ -35,9 +32,8 @@ pub enum SchemaType {
     /// Floating-point type (maps to Float64)
     Float,
     /// Symbol type - interned atoms (lowercase identifiers like `alice`, `bob`)
-    /// Cannot have @pattern constraint
     Symbol,
-    /// String type - variable-length text that can have @pattern constraints
+    /// String type - variable-length text
     String,
     /// Boolean type
     Bool,
@@ -134,65 +130,13 @@ impl fmt::Display for SchemaType {
     }
 }
 
-/// Column-level annotation
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ColumnAnnotation {
-    /// Column is part of primary key (uniqueness enforced)
-    Primary,
-    /// Column cannot be NULL or empty string
-    NotEmpty,
-    /// Column values must be unique across all tuples
-    Unique,
-    /// Numeric value must be in [min, max]
-    Range { min: i64, max: i64 },
-    /// String must match regex pattern
-    Pattern { regex: String },
-    /// Value must exist in referenced relation.column
-    ForeignKey { relation: String, column: String },
-    /// Default value if not provided
-    Default { value: Value },
-}
-
-impl ColumnAnnotation {
-    /// Get the annotation name for display
-    pub fn name(&self) -> &'static str {
-        match self {
-            ColumnAnnotation::Primary => "primary",
-            ColumnAnnotation::NotEmpty => "not_empty",
-            ColumnAnnotation::Unique => "unique",
-            ColumnAnnotation::Range { .. } => "range",
-            ColumnAnnotation::Pattern { .. } => "pattern",
-            ColumnAnnotation::ForeignKey { .. } => "foreign_key",
-            ColumnAnnotation::Default { .. } => "default",
-        }
-    }
-}
-
-impl fmt::Display for ColumnAnnotation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ColumnAnnotation::Primary => write!(f, "@primary"),
-            ColumnAnnotation::NotEmpty => write!(f, "@not_empty"),
-            ColumnAnnotation::Unique => write!(f, "@unique"),
-            ColumnAnnotation::Range { min, max } => write!(f, "@range({}, {})", min, max),
-            ColumnAnnotation::Pattern { regex } => write!(f, "@pattern(\"{}\")", regex),
-            ColumnAnnotation::ForeignKey { relation, column } => {
-                write!(f, "@foreign_key({}.{})", relation, column)
-            }
-            ColumnAnnotation::Default { value } => write!(f, "@default({})", value),
-        }
-    }
-}
-
-/// Column definition with name, type, and annotations
+/// Column definition with name and type
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColumnSchema {
     /// Column name
     pub name: String,
     /// Column type
     pub data_type: SchemaType,
-    /// Column-level annotations (constraints)
-    pub annotations: Vec<ColumnAnnotation>,
 }
 
 impl ColumnSchema {
@@ -201,177 +145,13 @@ impl ColumnSchema {
         ColumnSchema {
             name: name.into(),
             data_type,
-            annotations: Vec::new(),
         }
-    }
-
-    /// Add an annotation to this column
-    pub fn with_annotation(mut self, annotation: ColumnAnnotation) -> Self {
-        self.annotations.push(annotation);
-        self
-    }
-
-    /// Check if this column has the @primary annotation
-    pub fn is_primary(&self) -> bool {
-        self.annotations
-            .iter()
-            .any(|a| matches!(a, ColumnAnnotation::Primary))
-    }
-
-    /// Check if this column has the @not_empty annotation
-    pub fn is_not_empty(&self) -> bool {
-        self.annotations
-            .iter()
-            .any(|a| matches!(a, ColumnAnnotation::NotEmpty))
-    }
-
-    /// Check if this column has the @unique annotation
-    pub fn is_unique(&self) -> bool {
-        self.annotations
-            .iter()
-            .any(|a| matches!(a, ColumnAnnotation::Unique))
-    }
-
-    /// Get the @range constraint if present
-    pub fn range(&self) -> Option<(i64, i64)> {
-        for ann in &self.annotations {
-            if let ColumnAnnotation::Range { min, max } = ann {
-                return Some((*min, *max));
-            }
-        }
-        None
-    }
-
-    /// Get the @pattern constraint if present
-    pub fn pattern(&self) -> Option<&str> {
-        for ann in &self.annotations {
-            if let ColumnAnnotation::Pattern { regex } = ann {
-                return Some(regex);
-            }
-        }
-        None
-    }
-
-    /// Get the @foreign_key constraint if present
-    pub fn foreign_key(&self) -> Option<(&str, &str)> {
-        for ann in &self.annotations {
-            if let ColumnAnnotation::ForeignKey { relation, column } = ann {
-                return Some((relation, column));
-            }
-        }
-        None
-    }
-
-    /// Get the @default value if present
-    pub fn default_value(&self) -> Option<&Value> {
-        for ann in &self.annotations {
-            if let ColumnAnnotation::Default { value } = ann {
-                return Some(value);
-            }
-        }
-        None
     }
 }
 
 impl fmt::Display for ColumnSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.name, self.data_type)?;
-        for ann in &self.annotations {
-            write!(f, " {}", ann)?;
-        }
-        Ok(())
-    }
-}
-
-/// Check constraint (named rule or inline expression)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum CheckConstraint {
-    /// Reference to a named rule (e.g., @check(no_minors_in_admin))
-    NamedRule(String),
-    /// Inline expression (e.g., @check(age >= 18 OR !admin_group(id)))
-    InlineExpr(String),
-}
-
-impl fmt::Display for CheckConstraint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CheckConstraint::NamedRule(name) => write!(f, "@check({})", name),
-            CheckConstraint::InlineExpr(expr) => write!(f, "@check({})", expr),
-        }
-    }
-}
-
-/// When validation runs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ValidationTiming {
-    /// Validate synchronously during insert (default)
-    #[default]
-    Sync,
-    /// Defer validation (useful for bulk loads)
-    Deferred,
-}
-
-impl fmt::Display for ValidationTiming {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ValidationTiming::Sync => write!(f, "sync"),
-            ValidationTiming::Deferred => write!(f, "deferred"),
-        }
-    }
-}
-
-/// Action on validation failure
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum FailureAction {
-    /// Reject the insert (default)
-    #[default]
-    Reject,
-    /// Move invalid tuples to quarantine table
-    Quarantine,
-}
-
-impl fmt::Display for FailureAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FailureAction::Reject => write!(f, "reject"),
-            FailureAction::Quarantine => write!(f, "quarantine"),
-        }
-    }
-}
-
-/// Relation-level validation configuration
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ValidationConfig {
-    /// @check constraints (named rules or inline expressions)
-    pub checks: Vec<CheckConstraint>,
-    /// When validation runs
-    pub timing: ValidationTiming,
-    /// What to do on failure
-    pub on_fail: FailureAction,
-}
-
-impl ValidationConfig {
-    /// Create a new empty validation config
-    pub fn new() -> Self {
-        ValidationConfig::default()
-    }
-
-    /// Add a check constraint
-    pub fn with_check(mut self, check: CheckConstraint) -> Self {
-        self.checks.push(check);
-        self
-    }
-
-    /// Set the timing mode
-    pub fn with_timing(mut self, timing: ValidationTiming) -> Self {
-        self.timing = timing;
-        self
-    }
-
-    /// Set the failure action
-    pub fn with_on_fail(mut self, action: FailureAction) -> Self {
-        self.on_fail = action;
-        self
+        write!(f, "{}: {}", self.name, self.data_type)
     }
 }
 
@@ -382,8 +162,6 @@ pub struct RelationSchema {
     pub name: String,
     /// Column definitions
     pub columns: Vec<ColumnSchema>,
-    /// Validation configuration
-    pub validation: ValidationConfig,
 }
 
 impl RelationSchema {
@@ -392,19 +170,12 @@ impl RelationSchema {
         RelationSchema {
             name: name.into(),
             columns: Vec::new(),
-            validation: ValidationConfig::default(),
         }
     }
 
     /// Add a column to the schema
     pub fn with_column(mut self, column: ColumnSchema) -> Self {
         self.columns.push(column);
-        self
-    }
-
-    /// Set the validation config
-    pub fn with_validation(mut self, validation: ValidationConfig) -> Self {
-        self.validation = validation;
         self
     }
 
@@ -433,31 +204,6 @@ impl RelationSchema {
         self.columns.iter().map(|c| c.name.as_str()).collect()
     }
 
-    /// Get primary key columns
-    pub fn primary_key_columns(&self) -> Vec<&ColumnSchema> {
-        self.columns.iter().filter(|c| c.is_primary()).collect()
-    }
-
-    /// Get primary key column indices
-    pub fn primary_key_indices(&self) -> Vec<usize> {
-        self.columns
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.is_primary())
-            .map(|(i, _)| i)
-            .collect()
-    }
-
-    /// Get the quarantine table name for this relation
-    pub fn quarantine_table_name(&self) -> String {
-        format!("_invalid_{}", self.name)
-    }
-
-    /// Check if this schema has any @check constraints
-    pub fn has_checks(&self) -> bool {
-        !self.validation.checks.is_empty()
-    }
-
     /// Convert to TupleSchema (for compatibility with existing code)
     pub fn to_tuple_schema(&self) -> crate::value::TupleSchema {
         let fields: Vec<(String, DataType)> = self
@@ -469,89 +215,16 @@ impl RelationSchema {
     }
 }
 
-/// Type alias definition: `type Email = string pattern("^[^@]+@[^@]+$")`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TypeAlias {
-    /// Name of the type alias (e.g., "Email", "Age")
-    pub name: String,
-    /// Base type this alias refers to
-    pub base_type: SchemaType,
-    /// Constraints applied to this type
-    pub annotations: Vec<ColumnAnnotation>,
-}
-
-impl TypeAlias {
-    /// Create a new type alias
-    pub fn new(name: impl Into<String>, base_type: SchemaType) -> Self {
-        TypeAlias {
-            name: name.into(),
-            base_type,
-            annotations: Vec::new(),
-        }
-    }
-
-    /// Add an annotation to this type
-    pub fn with_annotation(mut self, annotation: ColumnAnnotation) -> Self {
-        self.annotations.push(annotation);
-        self
-    }
-}
-
-impl fmt::Display for TypeAlias {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "type {} = {}", self.name, self.base_type)?;
-        for ann in &self.annotations {
-            write!(f, " {}", ann)?;
-        }
-        Ok(())
-    }
-}
-
 impl fmt::Display for RelationSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{} = schema(", self.name)?;
+        write!(f, "{}(", self.name)?;
         for (i, col) in self.columns.iter().enumerate() {
             if i > 0 {
-                writeln!(f, ",")?;
+                write!(f, ", ")?;
             }
-            write!(f, "  {}", col)?;
+            write!(f, "{}", col)?;
         }
-        write!(f, "\n)")?;
-
-        if !self.validation.checks.is_empty()
-            || self.validation.timing != ValidationTiming::Sync
-            || self.validation.on_fail != FailureAction::Reject
-        {
-            write!(f, " @validate(")?;
-            let mut first = true;
-
-            for check in &self.validation.checks {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", check)?;
-                first = false;
-            }
-
-            if self.validation.timing != ValidationTiming::Sync {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "@timing({})", self.validation.timing)?;
-                first = false;
-            }
-
-            if self.validation.on_fail != FailureAction::Reject {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "@on_fail({})", self.validation.on_fail)?;
-            }
-
-            write!(f, ")")?;
-        }
-
-        Ok(())
+        write!(f, ")")
     }
 }
 
@@ -597,98 +270,30 @@ mod tests {
 
     #[test]
     fn test_column_schema() {
-        let col = ColumnSchema::new("age", SchemaType::Int)
-            .with_annotation(ColumnAnnotation::NotEmpty)
-            .with_annotation(ColumnAnnotation::Range { min: 0, max: 120 });
-
+        let col = ColumnSchema::new("age", SchemaType::Int);
         assert_eq!(col.name, "age");
-        assert!(col.is_not_empty());
-        assert!(!col.is_primary());
-        assert_eq!(col.range(), Some((0, 120)));
+        assert_eq!(col.data_type, SchemaType::Int);
     }
 
     #[test]
     fn test_relation_schema() {
         let schema = RelationSchema::new("User")
-            .with_column(
-                ColumnSchema::new("id", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Primary)
-                    .with_annotation(ColumnAnnotation::NotEmpty),
-            )
-            .with_column(
-                ColumnSchema::new("age", SchemaType::Int)
-                    .with_annotation(ColumnAnnotation::Range { min: 0, max: 120 }),
-            )
-            .with_validation(
-                ValidationConfig::new()
-                    .with_check(CheckConstraint::NamedRule("no_minors_in_admin".to_string())),
-            );
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
 
         assert_eq!(schema.name, "User");
         assert_eq!(schema.arity(), 2);
-        assert_eq!(schema.primary_key_indices(), vec![0]);
-        assert!(schema.has_checks());
-        assert_eq!(schema.quarantine_table_name(), "_invalid_User");
+        assert_eq!(schema.column_names(), vec!["id", "age"]);
     }
 
     #[test]
     fn test_relation_schema_display() {
         let schema = RelationSchema::new("User")
-            .with_column(
-                ColumnSchema::new("id", SchemaType::Symbol)
-                    .with_annotation(ColumnAnnotation::Primary),
-            )
-            .with_column(
-                ColumnSchema::new("age", SchemaType::Int)
-                    .with_annotation(ColumnAnnotation::Range { min: 0, max: 120 }),
-            );
+            .with_column(ColumnSchema::new("id", SchemaType::Symbol))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
 
         let display = format!("{}", schema);
-        assert!(display.contains("User"));
-        assert!(display.contains("id: symbol @primary"));
-        assert!(display.contains("age: int @range(0, 120)"));
-    }
-
-    #[test]
-    fn test_validation_config() {
-        let config = ValidationConfig::new()
-            .with_check(CheckConstraint::NamedRule("rule1".to_string()))
-            .with_check(CheckConstraint::InlineExpr("age >= 18".to_string()))
-            .with_timing(ValidationTiming::Deferred)
-            .with_on_fail(FailureAction::Quarantine);
-
-        assert_eq!(config.checks.len(), 2);
-        assert_eq!(config.timing, ValidationTiming::Deferred);
-        assert_eq!(config.on_fail, FailureAction::Quarantine);
-    }
-
-    #[test]
-    fn test_column_annotation_display() {
-        assert_eq!(format!("{}", ColumnAnnotation::Primary), "@primary");
-        assert_eq!(format!("{}", ColumnAnnotation::NotEmpty), "@not_empty");
-        assert_eq!(
-            format!("{}", ColumnAnnotation::Range { min: 0, max: 100 }),
-            "@range(0, 100)"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                ColumnAnnotation::Pattern {
-                    regex: "^a.*".to_string()
-                }
-            ),
-            "@pattern(\"^a.*\")"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                ColumnAnnotation::ForeignKey {
-                    relation: "User".to_string(),
-                    column: "id".to_string()
-                }
-            ),
-            "@foreign_key(User.id)"
-        );
+        assert_eq!(display, "User(id: symbol, age: int)");
     }
 
     #[test]

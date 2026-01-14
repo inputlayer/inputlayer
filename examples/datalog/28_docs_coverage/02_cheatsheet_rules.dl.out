@@ -36,15 +36,31 @@ Rule 'adult' registered.
   ("alice", 30)
   ("carol", 25)
 > result(X, Y) :- edge(X, Y), X < Y.
-No results.
+4 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
 (session: 1 rule(s))
 > ?- result(X, Y).
-No results.
+4 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
 > reachable_from_one(X) :- path(1, X).
-No results.
+4 rows:
+  (2)
+  (3)
+  (4)
+  (5)
 (session: 2 rule(s))
 > ?- reachable_from_one(X).
-No results.
+4 rows:
+  (2)
+  (3)
+  (4)
+  (5)
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 2 session rule(s), 0 session fact(s))

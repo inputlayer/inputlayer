@@ -179,15 +179,21 @@ impl PipelineTrace {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),
+                        crate::ast::BodyPredicate::Comparison(left, op, right) => {
+                            let op_str = match op {
+                                crate::ast::ComparisonOp::Equal => "=",
+                                crate::ast::ComparisonOp::NotEqual => "!=",
+                                crate::ast::ComparisonOp::LessThan => "<",
+                                crate::ast::ComparisonOp::LessOrEqual => "<=",
+                                crate::ast::ComparisonOp::GreaterThan => ">",
+                                crate::ast::ComparisonOp::GreaterOrEqual => ">=",
+                            };
+                            format!("{:?} {} {:?}", left, op_str, right)
+                        }
                     })
                     .collect();
 
                 output.push_str(&body_str.join(", "));
-
-                if !rule.constraints.is_empty() {
-                    output.push_str(&format!(", {} constraints", rule.constraints.len()));
-                }
-
                 output.push_str(".\n");
             }
             output.push_str("\n");

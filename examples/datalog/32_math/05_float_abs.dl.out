@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_abs
+Knowledge graph 'test_float_abs' created.
+Switched to knowledge graph: test_float_abs
+> .kg use test_float_abs
+Switched to knowledge graph: test_float_abs
+> +floats[(-3.14), (-1.5), (0.0), (1.5), (3.14)].
+Inserted 5 fact(s) into 'floats'.
+> with_abs(X, A) :- floats(X), A = abs_float64(X).
+5 rows:
+  (-3.14, 3.14)
+  (-1.5, 1.5)
+  (0.0, 0.0)
+  (1.5, 1.5)
+  (3.14, 3.14)
+(session: 1 rule(s))
+> ?- with_abs(X, A).
+5 rows:
+  (-3.14, 3.14)
+  (-1.5, 1.5)
+  (0.0, 0.0)
+  (1.5, 1.5)
+  (3.14, 3.14)
+> +tiny[(-0.001), (0.001)].
+Inserted 2 fact(s) into 'tiny'.
+> tiny_abs(X, A) :- tiny(X), A = abs_float64(X).
+2 rows:
+  (-0.001, 0.001)
+  (0.001, 0.001)
+(session: 2 rule(s))
+> ?- tiny_abs(X, A).
+2 rows:
+  (-0.001, 0.001)
+  (0.001, 0.001)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_float_abs
+Knowledge graph 'test_float_abs' dropped.

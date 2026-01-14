@@ -1,0 +1,34 @@
+% Test: Session Isolation Between KGs
+% Category: 04_session
+% Description: Tests that sessions are isolated between different knowledge graphs
+
+% Create first KG with session rule
+.kg create test_sess_iso1
+.kg use test_sess_iso1
++data1[(1), (2)].
+sess_rule1(X) :- data1(X).
+?- sess_rule1(X).
+
+% Create second KG - session should be separate
+.kg create test_sess_iso2
+.kg use test_sess_iso2
++data2[(3), (4)].
+
+% Check that first session rule is NOT available
+?- sess_rule1(X).
+
+% Add a session rule here
+sess_rule2(X) :- data2(X).
+?- sess_rule2(X).
+
+% Switch back to first KG
+.kg use test_sess_iso1
+
+% Session should still have sess_rule1
+.session
+?- sess_rule1(X).
+
+% Cleanup
+.kg use default
+.kg drop test_sess_iso1
+.kg drop test_sess_iso2

@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lsh_multi_probe
+Knowledge graph 'test_lsh_multi_probe' created.
+Switched to knowledge graph: test_lsh_multi_probe
+> .kg use test_lsh_multi_probe
+Switched to knowledge graph: test_lsh_multi_probe
+> +vectors[(1, [1.0, 0.5, 0.0, -0.5])].
+Inserted 1 fact(s) into 'vectors'.
+> +vectors[(2, [0.0, 1.0, 0.5, 0.0])].
+Inserted 1 fact(s) into 'vectors'.
+> multi_probe_result(Id, Probes) :- vectors(Id, V), Probes = lsh_multi_probe(V, 0, 4, 5).
+2 rows:
+  (1, [Number(8.0), Number(12.0), Number(9.0), Number(10.0), Number(0.0)])
+  (2, [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)])
+(session: 1 rule(s))
+> ?- multi_probe_result(Id, Probes).
+2 rows:
+  (1, [Number(8.0), Number(12.0), Number(9.0), Number(10.0), Number(0.0)])
+  (2, [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)])
+> compare_result(Id, Bucket, SeparateProbes, MultiProbes) :- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4), SeparateProbes = lsh_probes(Bucket, 4, 5), MultiProbes = lsh_multi_probe(V, 0, 4, 5).
+2 rows:
+  (1, 8, [Number(8.0), Number(9.0), Number(10.0), Number(12.0), Number(0.0)], [Number(8.0), Number(12.0), Number(9.0), Number(10.0), Number(0.0)])
+  (2, 11, [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)], [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)])
+(session: 2 rule(s))
+> ?- compare_result(Id, Bucket, SeparateProbes, MultiProbes).
+2 rows:
+  (1, 8, [Number(8.0), Number(9.0), Number(10.0), Number(12.0), Number(0.0)], [Number(8.0), Number(12.0), Number(9.0), Number(10.0), Number(0.0)])
+  (2, 11, [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)], [Number(11.0), Number(10.0), Number(9.0), Number(15.0), Number(3.0)])
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_multi_probe
+Knowledge graph 'test_lsh_multi_probe' dropped.

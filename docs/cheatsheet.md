@@ -150,11 +150,11 @@ Query a derived relation:
 
 ## Schema Declarations
 
-Define typed relations with optional constraints:
+Define typed relations:
 
 ```datalog
 +employee(id: int, name: string, dept_id: int).
-+user(id: int @key, email: string @unique, name: string @not_empty).
++user(id: int, email: string, name: string).
 ```
 
 ## Aggregations

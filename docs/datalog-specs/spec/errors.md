@@ -181,65 +181,6 @@ Switch to a different knowledge graph first:
 .kg drop target   % Now drop works
 ```
 
-## Constraint Errors
-
-### Key Violation
-
-```
-Error: Duplicate key for 'user'
-```
-
-With `@key` constraint, each key must be unique:
-
-```datalog
-+user(id: int @key, name: string).
-+user(1, "alice").
-+user(1, "bob").    % ERROR: key 1 already exists
-```
-
-Note: With `@key`, duplicate key insertions update the existing row instead of error.
-
-### Unique Violation
-
-```
-Error: Unique constraint violation for column 'email'
-```
-
-With `@unique` constraint, values must be unique:
-
-```datalog
-+user(id: int, email: string @unique).
-+user(1, "alice@example.com").
-+user(2, "alice@example.com").  % ERROR: email not unique
-```
-
-### Not Empty Violation
-
-```
-Error: Value cannot be empty for column 'name'
-```
-
-With `@not_empty` constraint, strings can't be empty:
-
-```datalog
-+person(name: string @not_empty).
-+person("").   % ERROR: empty string
-```
-
-### Range Violation
-
-```
-Error: Value out of range for column 'age'
-```
-
-With `@range` constraint, values must be in range:
-
-```datalog
-+person(age: int @range(0, 150)).
-+person(-1).   % ERROR: below minimum
-+person(200).  % ERROR: above maximum
-```
-
 ## Aggregation Errors
 
 ### Invalid Aggregation Variable

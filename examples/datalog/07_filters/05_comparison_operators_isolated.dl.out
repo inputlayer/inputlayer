@@ -1,0 +1,103 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cmp_isolated
+Knowledge graph 'test_cmp_isolated' created.
+Switched to knowledge graph: test_cmp_isolated
+> .kg use test_cmp_isolated
+Switched to knowledge graph: test_cmp_isolated
+> +nums[(1), (2), (3), (4), (5)].
+Inserted 5 fact(s) into 'nums'.
+> lt_result(X) :- nums(X), X < 3.
+2 rows:
+  (1)
+  (2)
+(session: 1 rule(s))
+> ?- lt_result(X).
+2 rows:
+  (1)
+  (2)
+> le_result(X) :- nums(X), X <= 3.
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 2 rule(s))
+> ?- le_result(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> gt_result(X) :- nums(X), X > 3.
+2 rows:
+  (4)
+  (5)
+(session: 3 rule(s))
+> ?- gt_result(X).
+2 rows:
+  (4)
+  (5)
+> ge_result(X) :- nums(X), X >= 3.
+3 rows:
+  (3)
+  (4)
+  (5)
+(session: 4 rule(s))
+> ?- ge_result(X).
+3 rows:
+  (3)
+  (4)
+  (5)
+> eq_result(X) :- nums(X), X = 3.
+1 rows:
+  (3)
+(session: 5 rule(s))
+> ?- eq_result(X).
+1 rows:
+  (3)
+> ne_result(X) :- nums(X), X != 3.
+4 rows:
+  (1)
+  (2)
+  (4)
+  (5)
+(session: 6 rule(s))
+> ?- ne_result(X).
+4 rows:
+  (1)
+  (2)
+  (4)
+  (5)
+> +pairs[(1, 2), (3, 3), (5, 4), (2, 2)].
+Inserted 4 fact(s) into 'pairs'.
+> var_lt(X, Y) :- pairs(X, Y), X < Y.
+1 rows:
+  (1, 2)
+(session: 7 rule(s))
+> ?- var_lt(X, Y).
+1 rows:
+  (1, 2)
+> var_eq(X, Y) :- pairs(X, Y), X = Y.
+2 rows:
+  (2, 2)
+  (3, 3)
+(session: 8 rule(s))
+> ?- var_eq(X, Y).
+2 rows:
+  (2, 2)
+  (3, 3)
+> var_gt(X, Y) :- pairs(X, Y), X > Y.
+1 rows:
+  (5, 4)
+(session: 9 rule(s))
+> ?- var_gt(X, Y).
+1 rows:
+  (5, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 9 session rule(s), 0 session fact(s))
+> .kg drop test_cmp_isolated
+Knowledge graph 'test_cmp_isolated' dropped.

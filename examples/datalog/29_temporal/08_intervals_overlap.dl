@@ -1,0 +1,18 @@
+% Test: intervals_overlap(s1, e1, s2, e2) function
+% Category: 29_temporal
+% Description: Tests checking if two intervals overlap
+
+.kg create test_intervals_overlap
+.kg use test_intervals_overlap
+
+% Insert interval pairs (id, start1, end1, start2, end2)
++intervals[(1, 100, 200, 150, 250), (2, 100, 200, 200, 300), (3, 100, 200, 300, 400), (4, 100, 300, 150, 200)].
+
+% Rule to find overlapping intervals
+overlapping(Id) :- intervals(Id, S1, E1, S2, E2), intervals_overlap(S1, E1, S2, E2).
+
+% Query intervals_overlap - should match overlapping pairs
+?- overlapping(Id).
+
+.kg use default
+.kg drop test_intervals_overlap

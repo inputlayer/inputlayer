@@ -21,7 +21,7 @@ body        ::= goal (',' goal)*
 goal        ::= atom | constraint | negated_atom
 
 atom        ::= relation '(' term_list ')'
-negated_atom::= '!' atom | 'not' atom
+negated_atom::= '!' atom
 
 term        ::= variable | constant | expression
 term_list   ::= term (',' term)*
@@ -186,9 +186,6 @@ Define typed schemas for relations.
 % Basic schema
 +employee(id: int, name: string, dept: string).
 
-% With constraints
-+user(id: int @key, email: string @unique).
-
 % All types
 +example(
   a: int,
@@ -205,12 +202,6 @@ Define typed schemas for relations.
 | `float` | 64-bit float | `3.14`, `-0.5` |
 | `string` | UTF-8 string | `"hello"`, `"world"` |
 | `vector` | Float array | `[0.1, 0.2, 0.3]` |
-
-**Annotations:**
-| Annotation | Meaning |
-|------------|---------|
-| `@key` | Primary key (unique, not null) |
-| `@unique` | Unique constraint |
 
 ## Expressions
 
@@ -316,7 +307,6 @@ Express "does not exist" conditions.
 
 ```datalog
 !atom(args)     % Negated atom
-not atom(args)  % Alternative syntax
 ```
 
 ### Rules
@@ -510,7 +500,7 @@ Commands that control the REPL environment.
 The following are reserved and cannot be used as relation names:
 
 ```
-not, true, false, null
+true, false, null
 count, sum, min, max, avg
 int, float, string, vector
 ```

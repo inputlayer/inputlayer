@@ -10,14 +10,20 @@ Switched to knowledge graph: test_vec_dot
 > .kg use test_vec_dot
 Switched to knowledge graph: test_vec_dot
 > +vectors[(1, [1.0, 2.0, 3.0]), (2, [2.0, 0.0, 1.0]), (3, [1.0, 1.0, 1.0])].
-No facts inserted (3 duplicate skipped).
+Inserted 3 fact(s) into 'vectors'.
 > +query[([1.0, 1.0, 1.0])].
-No facts inserted (1 duplicate skipped).
+Inserted 1 fact(s) into 'query'.
 > dot_result(Id, Score) :- vectors(Id, V), query(Q), Score = dot(V, Q).
-No results.
+3 rows:
+  (1, 6.0)
+  (2, 3.0)
+  (3, 3.0)
 (session: 1 rule(s))
 > ?- dot_result(X, Y).
-No results.
+3 rows:
+  (1, 6.0)
+  (2, 3.0)
+  (3, 3.0)
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_decay
+Knowledge graph 'test_time_decay' created.
+Switched to knowledge graph: test_time_decay
+> .kg use test_time_decay
+Switched to knowledge graph: test_time_decay
+> +events[(1, 1000000, 1000000, 1000), (2, 999000, 1000000, 1000), (3, 998000, 1000000, 1000)].
+Inserted 3 fact(s) into 'events'.
+> decay_result(Id, Weight) :- events(Id, Ts, Now, HalfLife), Weight = time_decay(Ts, Now, HalfLife).
+3 rows:
+  (1, 1.0)
+  (2, 0.5)
+  (3, 0.25)
+(session: 1 rule(s))
+> ?- decay_result(Id, Weight).
+3 rows:
+  (1, 1.0)
+  (2, 0.5)
+  (3, 0.25)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_time_decay
+Knowledge graph 'test_time_decay' dropped.

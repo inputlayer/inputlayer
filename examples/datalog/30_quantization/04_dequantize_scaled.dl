@@ -1,0 +1,22 @@
+% Test: dequantize_scaled function
+% Converts int8 vector to float32 with custom scale factor
+.kg create test_dequantize_scaled
+.kg use test_dequantize_scaled
+
+% Create float vectors
++embedding[(1, [1.0, 0.5, -0.5, -1.0])].
++embedding[(2, [2.0, -2.0, 1.0, -1.0])].
+
+% Quantize and dequantize with scale
+?- embedding(Id, V), Q = quantize_linear(V), D = dequantize_scaled(Q, 0.5).
+
+% Test different scale factors
+scaled_output(Id, Q, D1, D2) :-
+    embedding(Id, V),
+    Q = quantize_linear(V),
+    D1 = dequantize_scaled(Q, 0.5),
+    D2 = dequantize_scaled(Q, 2.0).
+?- scaled_output(Id, Q, D1, D2).
+
+.kg use default
+.kg drop test_dequantize_scaled

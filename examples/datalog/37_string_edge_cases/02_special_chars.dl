@@ -1,0 +1,16 @@
+% Test: Special Characters in Strings
+% Category: 37_string_edge_cases
+% Description: Tests handling of escape sequences and special characters
+
+.kg create test_special_chars
+.kg use test_special_chars
+
+% Insert strings with special characters
++text[(1, "line1\nline2"), (2, "tab\there"), (3, "quote: \"hello\"")].
+
+% Query all text
+?- text(Id, T).
+
+% Cleanup
+.kg use default
+.kg drop test_special_chars

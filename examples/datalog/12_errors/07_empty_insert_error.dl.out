@@ -9,6 +9,8 @@ Knowledge graph 'test_empty' created.
 Switched to knowledge graph: test_empty
 > .kg use test_empty
 Switched to knowledge graph: test_empty
+> +empty[].
+Inserted 0 fact(s) into 'empty'.
 > ?- empty(X, Y).
 No results.
 > .kg use default

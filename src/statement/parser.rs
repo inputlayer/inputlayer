@@ -2,7 +2,7 @@
 //!
 //! This module provides shared parsing functions used across other statement modules.
 
-use crate::ast::{AggregateFunc, Atom, BodyPredicate, Constraint, Rule, Term};
+use crate::ast::{AggregateFunc, Atom, BodyPredicate, Rule, Term};
 use crate::parser::parse_rule;
 
 /// Query goal: ?- atom.
@@ -12,8 +12,6 @@ pub struct QueryGoal {
     pub goal: Atom,
     /// Additional body predicates (for complex queries)
     pub body: Vec<BodyPredicate>,
-    /// Constraints
-    pub constraints: Vec<Constraint>,
 }
 
 // ============================================================================
@@ -290,18 +288,39 @@ fn parse_vector_literal(input: &str) -> Result<Term, String> {
 
 /// Parse an aggregate function like count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>
 fn parse_aggregate(input: &str) -> Option<Term> {
-    // Check for pattern: func<var> where func is count/sum/min/max/avg
+    // Check for pattern: func<params> where func is an aggregate
     if let Some(lt_pos) = input.find('<') {
-        if let Some(gt_pos) = input.find('>') {
+        if let Some(gt_pos) = input.rfind('>') {
             if gt_pos > lt_pos && gt_pos == input.len() - 1 {
                 let func_name = &input[..lt_pos];
-                let var_name = &input[lt_pos + 1..gt_pos].trim();
+                let params = &input[lt_pos + 1..gt_pos].trim();
+                let func_lower = func_name.to_lowercase();
 
-                // Variable name must start with uppercase or underscore
-                if !var_name.is_empty() {
-                    let first_char = var_name.chars().next().unwrap();
+                // Check for ranking aggregates: top_k, top_k_threshold, within_radius
+                match func_lower.as_str() {
+                    "top_k" => {
+                        if let Some(func) = AggregateFunc::parse_top_k(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+                    }
+                    "top_k_threshold" => {
+                        if let Some(func) = AggregateFunc::parse_top_k_threshold(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+                    }
+                    "within_radius" => {
+                        if let Some(func) = AggregateFunc::parse_within_radius(params) {
+                            return Some(Term::Aggregate(func, String::new()));
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Standard aggregates with single variable parameter
+                if !params.is_empty() {
+                    let first_char = params.chars().next().unwrap();
                     if first_char.is_uppercase() || first_char == '_' {
-                        let agg_func = match func_name.to_lowercase().as_str() {
+                        let agg_func = match func_lower.as_str() {
                             "count" => Some(AggregateFunc::Count),
                             "sum" => Some(AggregateFunc::Sum),
                             "min" => Some(AggregateFunc::Min),
@@ -311,7 +330,7 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                         };
 
                         if let Some(func) = agg_func {
-                            return Some(Term::Aggregate(func, var_name.to_string()));
+                            return Some(Term::Aggregate(func, params.to_string()));
                         }
                     }
                 }
@@ -321,12 +340,13 @@ fn parse_aggregate(input: &str) -> Option<Term> {
     None
 }
 
-/// Split by comma, respecting parentheses and square brackets
+/// Split by comma, respecting parentheses, square brackets, and angle brackets
 pub fn split_by_comma(input: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut paren_depth = 0;
     let mut bracket_depth = 0; // Track square brackets for vectors
+    let mut angle_depth = 0; // Track angle brackets for aggregates like top_k<3, Points, desc>
     let mut in_string = false;
 
     for ch in input.chars() {
@@ -351,7 +371,15 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
                 bracket_depth -= 1;
                 current.push(ch);
             }
-            ',' if paren_depth == 0 && bracket_depth == 0 && !in_string => {
+            '<' if !in_string => {
+                angle_depth += 1;
+                current.push(ch);
+            }
+            '>' if !in_string => {
+                angle_depth -= 1;
+                current.push(ch);
+            }
+            ',' if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 && !in_string => {
                 result.push(current.clone());
                 current.clear();
             }
@@ -386,9 +414,6 @@ pub fn term_to_string(term: &Term) -> String {
 pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     let input = input.trim().trim_end_matches('.');
 
-    // Simple query: just an atom
-    // Complex query: atom with constraints
-
     // Try to parse as a simple rule body
     let dummy_rule_str = format!("__query__(X) :- {}.", input);
     let rule = parse_rule(&dummy_rule_str)?;
@@ -414,7 +439,6 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     Ok(QueryGoal {
         goal,
         body,
-        constraints: rule.constraints,
     })
 }
 

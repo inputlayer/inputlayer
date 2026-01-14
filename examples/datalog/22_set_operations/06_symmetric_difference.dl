@@ -1,0 +1,22 @@
+% Test: Symmetric Difference
+% Category: Set Operations
+% Description: Tests symmetric difference (XOR) of two sets
+
+.kg create test_sym_diff
+.kg use test_sym_diff
+
++set_a[(1), (2), (3), (4)].
++set_b[(3), (4), (5), (6)].
+
+% Symmetric difference: elements in A or B but not both
+% (A - B) union (B - A)
+sym_diff(X) :- set_a(X), !set_b(X).
+sym_diff(X) :- set_b(X), !set_a(X).
+
+?- sym_diff(X).
+
+% Verify: should contain 1, 2, 5, 6 (not 3, 4)
+
+% Cleanup
+.kg use default
+.kg drop test_sym_diff
