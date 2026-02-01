@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_ops
+Knowledge graph 'test_int_ops' created.
+Switched to knowledge graph: test_int_ops
+> .kg use test_int_ops
+Switched to knowledge graph: test_int_ops
+> +nums[(10,), (20,), (30,)].
+Inserted 3 fact(s) into 'nums'.
+> computed(X, Add, Sub, Mul, Div, Mod) :- nums(X), Add = X + 5, Sub = X - 5, Mul = X * 2, Div = X / 5, Mod = X ?- computed(X, A, S, M, D, R).
+Script error: Parse error: Invalid term: 'X - 5'

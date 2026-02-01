@@ -1,0 +1,23 @@
+% Test: String lexicographic comparison
+% Expected: Strings compared lexicographically
+% Category: 11_types
+% Priority: P2 - Type operations
+
+.kg create test_string_lex
+.kg use test_string_lex
+
++words[("apple",), ("banana",), ("cherry",), ("apricot",)].
+
+% Lexicographic order
+ordered(A, B) :- words(A), words(B), A < B.
+
+?- ordered(A, B).
+
++min_word(<MIN:W>) :- words(W).
++max_word(<MAX:W>) :- words(W).
+
+?- min_word(M).
+?- max_word(M).
+
+.kg use default
+.kg drop test_string_lex

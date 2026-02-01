@@ -27,13 +27,11 @@ Deleted 1 facts from 'edge'.
   (4, 5)
   (5, 6)
 > -edge(X, Y) :- edge(X, Y), X > 3.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'edge'.
 > ?- edge(X, Y).
-4 rows:
+2 rows:
   (1, 2)
   (2, 3)
-  (4, 5)
-  (5, 6)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_del

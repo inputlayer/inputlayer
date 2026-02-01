@@ -1,0 +1,18 @@
+% Test: Describe relation
+% Expected: .rel shows relation info
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_rel_desc
+.kg use test_rel_desc
+
++users[(1, "Alice", 30), (2, "Bob", 25), (3, "Carol", 35)].
+
+.rel
+
+.rel users
+
+?- users(Id, Name, Age).
+
+.kg use default
+.kg drop test_rel_desc

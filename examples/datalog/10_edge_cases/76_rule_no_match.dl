@@ -1,0 +1,17 @@
+% Test: Rule with no matching facts
+% Expected: Derived relation is empty
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_rule_no_match
+.kg use test_rule_no_match
+
++items[(1, "a"), (2, "b")].
+
+% Rule that won't match anything
+impossible(X, Y) :- items(X, Y), X = "string".
+
+?- impossible(X, Y).
+
+.kg use default
+.kg drop test_rule_no_match

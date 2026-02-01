@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_special
+Knowledge graph 'test_float_special' created.
+Switched to knowledge graph: test_float_special
+> .kg use test_float_special
+Switched to knowledge graph: test_float_special
+> +small_floats[(0.000001), (0.0000001), (0.00000001)].
+Inserted 3 fact(s) into 'small_floats'.
+> ?- small_floats(X).
+3 rows:
+  (1e-8)
+  (1e-7)
+  (1e-6)
+> +large_floats[(1e10), (1e15), (1e20)].
+Inserted 3 fact(s) into 'large_floats'.
+> ?- large_floats(X).
+3 rows:
+  (10000000000.0)
+  (1000000000000000.0)
+  (1e20)
+> +precise_floats[(3.14159265358979), (2.71828182845905)].
+Inserted 2 fact(s) into 'precise_floats'.
+> ?- precise_floats(X).
+2 rows:
+  (2.71828182845905)
+  (3.14159265358979)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_float_special
+Knowledge graph 'test_float_special' dropped.

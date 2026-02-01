@@ -1,0 +1,17 @@
+% Test: Arithmetic precedence
+% Expected: * binds tighter than +
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_prec
+.kg use test_prec
+
++val[(5,)].
+
+% 5 + 3 * 2 should be 11, not 16
+result(V, R) :- val(V), R = V + 3 * 2.
+
+?- result(V, R).
+
+.kg use default
+.kg drop test_prec

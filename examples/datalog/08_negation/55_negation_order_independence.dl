@@ -1,0 +1,22 @@
+% Test: Negation order independence
+% Expected: Same result regardless of body order
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_order
+.kg use test_neg_order
+
++all[(1,), (2,), (3,), (4,)].
++exclude[(2,), (4,)].
+
+% Negation before positive
+result1(X) :- !exclude(X), all(X).
+
+% Negation after positive
+result2(X) :- all(X), !exclude(X).
+
+?- result1(X).
+?- result2(X).
+
+.kg use default
+.kg drop test_neg_order

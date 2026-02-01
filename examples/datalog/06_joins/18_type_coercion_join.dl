@@ -1,0 +1,26 @@
+% Test: Join with type considerations
+% Expected: Join on compatible types works
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_type_join
+.kg use test_type_join
+
++int_ids[(1, "a"), (2, "b"), (3, "c")].
++int_vals[(1, 100), (2, 200), (3, 300)].
+
+% Join on integer keys
+joined(Id, Name, Val) :- int_ids(Id, Name), int_vals(Id, Val).
+
+?- joined(Id, Name, Val).
+
+% Join with float values
++float_keys[(1.0, "x"), (2.0, "y")].
++float_data[(1.0, 10.5), (2.0, 20.5)].
+
+float_joined(K, Name, Val) :- float_keys(K, Name), float_data(K, Val).
+
+?- float_joined(K, Name, Val).
+
+.kg use default
+.kg drop test_type_join

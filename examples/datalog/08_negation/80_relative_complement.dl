@@ -1,0 +1,18 @@
+% Test: Relative complement
+% Expected: Elements in A relative to B
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_rel_comp
+.kg use test_rel_comp
+
++universe[(1,), (2,), (3,), (4,), (5,)].
++subset[(2,), (4,)].
+
+% Relative complement of subset in universe
++complement(X) :- universe(X), !subset(X).
+
+?- complement(X).
+
+.kg use default
+.kg drop test_rel_comp

@@ -1,0 +1,28 @@
+% Test: Complex filter conditions
+% Expected: Multiple filter types combined
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_complex_filt
+.kg use test_complex_filt
+
++data[(1, 100, "active"), (2, 50, "inactive"), (3, 200, "active"), (4, 75, "active"), (5, 150, "inactive")].
+
+% Complex: status = active AND value > 60 AND id < 5
+complex(Id, Val, Status) :-
+    data(Id, Val, Status),
+    Status = "active",
+    Val > 60,
+    Id < 5.
+
+?- complex(Id, Val, Status).
+
+% Alternative conditions combined
+alt(Id, Val, Status) :-
+    data(Id, Val, Status),
+    Val >= 100.
+
+?- alt(Id, Val, Status).
+
+.kg use default
+.kg drop test_complex_filt

@@ -28,6 +28,11 @@ pub enum MetaCommand {
         rule_text: String,
     },
     RuleClear(String), // .rule clear <name> - clear all rules for re-registration
+    RuleRemove {
+        // .rule remove <name> <index> - remove specific clause by index
+        name: String,
+        index: usize,
+    },
 
     // Session commands (transient rules)
     SessionList,        // .session - list session rules
@@ -152,7 +157,10 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
                 return Err("Index must be 1 or greater (1-based indexing)".to_string());
             }
             // The rule is everything after the index
-            let rule_start = input.find(parts[3]).unwrap() + parts[3].len();
+            let rule_start = input
+                .find(parts[3])
+                .ok_or_else(|| format!("Internal error: could not find '{}' in input", parts[3]))?
+                + parts[3].len();
             let rule_text = input[rule_start..].trim().to_string();
             if rule_text.is_empty() {
                 return Err("Missing rule definition".to_string());
@@ -169,6 +177,23 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
             Err("Usage: .rule clear <name>".to_string())
         } else {
             Ok(MetaCommand::RuleClear(parts[2].to_string()))
+        }
+    } else if parts[1].to_lowercase() == "remove" {
+        // .rule remove <name> <index> - remove specific clause
+        if parts.len() < 4 {
+            Err("Usage: .rule remove <name> <index>".to_string())
+        } else {
+            let name = parts[2].to_string();
+            let index: usize = parts[3]
+                .parse()
+                .map_err(|_| format!("Invalid index '{}': must be a number (1-based)", parts[3]))?;
+            if index == 0 {
+                return Err("Index must be 1 or greater (1-based indexing)".to_string());
+            }
+            Ok(MetaCommand::RuleRemove {
+                name,
+                index: index - 1,
+            }) // Convert to 0-based
         }
     } else {
         // .rule <name> - query the rule and show computed results

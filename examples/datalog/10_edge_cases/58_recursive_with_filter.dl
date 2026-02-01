@@ -1,0 +1,18 @@
+% Test: Recursion with filter
+% Expected: Filter within recursive rule
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_rec_filter
+.kg use test_rec_filter
+
++link[(1, 2, 1), (2, 3, 2), (3, 4, 1), (4, 5, 3)].
+
+% Only follow links with weight <= 2
++filtered_path(A, B) :- link(A, B, W), W <= 2.
++filtered_path(A, C) :- filtered_path(A, B), link(B, C, W), W <= 2.
+
+?- filtered_path(1, X).
+
+.kg use default
+.kg drop test_rec_filter

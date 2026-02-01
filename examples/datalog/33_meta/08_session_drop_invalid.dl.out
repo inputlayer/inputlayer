@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_invalid
+Knowledge graph 'test_sess_invalid' created.
+Switched to knowledge graph: test_sess_invalid
+> .kg use test_sess_invalid
+Switched to knowledge graph: test_sess_invalid
+> test_rule(X) :- items(X).
+No results.
+(session: 1 rule(s))
+> .session
+Session rules (1):
+  1. test_rule(X) :- items(X).
+> .session drop 99
+Script error: Rule index 99 out of bounds.

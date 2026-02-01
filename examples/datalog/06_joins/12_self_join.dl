@@ -1,0 +1,30 @@
+% Test: Self-join (join relation with itself)
+% Expected: Correct self-referential join
+% Category: 06_joins
+% Priority: P1 - Join completeness
+
+.kg create test_self_join
+.kg use test_self_join
+
+% Employee-manager relationship (both in same table)
++employees[(1, "Alice", 3), (2, "Bob", 3), (3, "Carol", 5), (4, "Dave", 5), (5, "Eve", 0)].
+
+% Self-join: find employee-manager pairs
++reports_to(EmpName, MgrName) :-
+    employees(EmpId, EmpName, MgrId),
+    employees(MgrId, MgrName, _),
+    MgrId != 0.
+
+?- reports_to(Emp, Mgr).
+
+% Find colleagues (share same manager)
++colleagues(Name1, Name2) :-
+    employees(Id1, Name1, Mgr),
+    employees(Id2, Name2, Mgr),
+    Id1 < Id2,
+    Mgr != 0.
+
+?- colleagues(A, B).
+
+.kg use default
+.kg drop test_self_join

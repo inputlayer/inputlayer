@@ -1,0 +1,25 @@
+% Test: Grouping set pattern (simulated)
+% Expected: Multiple aggregation levels
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_grp_set
+.kg use test_grp_set
+
++sales[(1, "East", "Q1", 100), (2, "West", "Q1", 150), (3, "East", "Q2", 120), (4, "West", "Q2", 180)].
+
+% Group by region
++by_region(Region, <SUM:Amount>) :- sales(_, Region, _, Amount).
+
+% Group by quarter
++by_quarter(Quarter, <SUM:Amount>) :- sales(_, _, Quarter, Amount).
+
+% Total
++grand_total(<SUM:Amount>) :- sales(_, _, _, Amount).
+
+?- by_region(R, S).
+?- by_quarter(Q, S).
+?- grand_total(T).
+
+.kg use default
+.kg drop test_grp_set

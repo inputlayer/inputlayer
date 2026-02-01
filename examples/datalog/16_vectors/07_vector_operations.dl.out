@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_ops
+Knowledge graph 'test_vec_ops' created.
+Switched to knowledge graph: test_vec_ops
+> .kg use test_vec_ops
+Switched to knowledge graph: test_vec_ops
+> +vectors(1, [1.0, 2.0, 3.0]).
+Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]

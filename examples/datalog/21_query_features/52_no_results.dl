@@ -1,0 +1,15 @@
+% Test: Query returning no results
+% Expected: Empty result set
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_empty_result
+.kg use test_empty_result
+
++data[(1, "a"), (2, "b")].
+
+% Query for non-existent value
+?- data(999, X).
+
+.kg use default
+.kg drop test_empty_result

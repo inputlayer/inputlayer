@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bool
+Knowledge graph 'test_bool' created.
+Switched to knowledge graph: test_bool
+> .kg use test_bool
+Switched to knowledge graph: test_bool
+> +flags[("feature_a", true), ("feature_b", false), ("feature_c", true)].
+Inserted 3 fact(s) into 'flags'.
+> ?- flags(Name, Value).
+3 rows:
+  ("feature_a", "true")
+  ("feature_b", "false")
+  ("feature_c", "true")
+> enabled(Name) :- flags(Name, true).
+2 rows:
+  ("feature_a")
+  ("feature_c")
+(session: 1 rule(s))
+> ?- enabled(Name).
+2 rows:
+  ("feature_a")
+  ("feature_c")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_bool
+Knowledge graph 'test_bool' dropped.

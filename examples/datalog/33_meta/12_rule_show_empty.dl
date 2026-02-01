@@ -1,0 +1,12 @@
+% Test: .rule when no rules defined
+% Expected: Show empty rule list
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_rule_empty
+.kg use test_rule_empty
+
+.rule
+
+.kg use default
+.kg drop test_rule_empty

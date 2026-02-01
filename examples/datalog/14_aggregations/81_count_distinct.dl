@@ -1,0 +1,17 @@
+% Test: COUNT_DISTINCT basic
+% Expected: Count unique values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_dist
+.kg use test_count_dist
+
++visits[(1, "page1"), (2, "page2"), (3, "page1"), (4, "page3"), (5, "page1")].
+
+% Count distinct pages
++distinct_pages(<COUNT_DISTINCT:Page>) :- visits(_, Page).
+
+?- distinct_pages(C).
+
+.kg use default
+.kg drop test_count_dist

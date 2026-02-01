@@ -1,0 +1,17 @@
+% Test: Numeric range filter
+% Expected: Values within range
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_num_range
+.kg use test_num_range
+
++data[(1, 10), (2, 25), (3, 50), (4, 75), (5, 100)].
+
+% Values between 20 and 80
+in_range(Id, Val) :- data(Id, Val), Val >= 20, Val <= 80.
+
+?- in_range(Id, Val).
+
+.kg use default
+.kg drop test_num_range

@@ -1,0 +1,18 @@
+% Test: Negation with multiple variables
+% Expected: All variables bound before negation
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_multi_var
+.kg use test_neg_multi_var
+
++pairs[(1, 2), (2, 3), (3, 4)].
++forbidden[(1, 2)].
+
+% Filter out forbidden pairs
+allowed(X, Y) :- pairs(X, Y), !forbidden(X, Y).
+
+?- allowed(X, Y).
+
+.kg use default
+.kg drop test_neg_multi_var

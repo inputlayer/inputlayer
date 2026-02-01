@@ -1,0 +1,30 @@
+% Test: Global statistics (no grouping)
+% Expected: Global aggregates work correctly
+% Category: 14_aggregations
+% Priority: P1 - Aggregation patterns
+
+.kg create test_global_stats
+.kg use test_global_stats
+
++values[(100,), (200,), (300,), (400,), (500,)].
+
+% Global sum
++total_sum(<SUM:V>) :- values(V).
+?- total_sum(S).
+
+% Global count
++total_count(<COUNT:V>) :- values(V).
+?- total_count(C).
+
+% Global average
++total_avg(<AVG:V>) :- values(V).
+?- total_avg(A).
+
+% Global min/max
++total_min(<MIN:V>) :- values(V).
++total_max(<MAX:V>) :- values(V).
+?- total_min(M).
+?- total_max(M).
+
+.kg use default
+.kg drop test_global_stats

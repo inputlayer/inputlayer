@@ -1,0 +1,21 @@
+% Test: Large result set
+% Expected: Large results handled correctly
+% Category: 10_edge_cases
+% Priority: P1 - Boundary conditions
+
+.kg create test_large_result
+.kg use test_large_result
+
+% Create base data
++nums[(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,)].
+
+% Cartesian product creates 100 rows
++product(X, Y) :- nums(X), nums(Y).
+
+% Count the product
++prod_count(<COUNT:X>) :- product(X, _).
+
+?- prod_count(C).
+
+.kg use default
+.kg drop test_large_result

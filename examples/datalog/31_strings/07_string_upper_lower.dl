@@ -1,0 +1,18 @@
+% Test: String case conversion
+% Expected: Convert to upper/lower case
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_case
+.kg use test_case
+
++words[("Hello",), ("WORLD",), ("MiXeD",)].
+
+upper_result(S, U) :- words(S), U = UPPER(S).
+lower_result(S, L) :- words(S), L = LOWER(S).
+
+?- upper_result(S, U).
+?- lower_result(S, L).
+
+.kg use default
+.kg drop test_case

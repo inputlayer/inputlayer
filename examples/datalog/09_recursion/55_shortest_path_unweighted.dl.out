@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_shortest
+Knowledge graph 'test_shortest' created.
+Switched to knowledge graph: test_shortest
+> .kg use test_shortest
+Switched to knowledge graph: test_shortest
+> +edge[("a", "b"), ("b", "c"), ("c", "d"), ("a", "c"), ("a", "d")].
+Inserted 5 fact(s) into 'edge'.
+> +path(X, Y, 1) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z, N) :- path(X, Y, M), edge(Y, Z), N = M + 1, N < 10.
+Script error: Failed to register rule: Unsafe rule 'path': Head variable(s) N not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

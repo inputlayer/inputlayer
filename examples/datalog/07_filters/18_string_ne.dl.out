@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_ne
+Knowledge graph 'test_str_ne' created.
+Switched to knowledge graph: test_str_ne
+> .kg use test_str_ne
+Switched to knowledge graph: test_str_ne
+> +items[(1, "active"), (2, "pending"), (3, "active"), (4, "deleted")].
+Inserted 4 fact(s) into 'items'.
+> not_active(Id, Status) :- items(Id, Status), Status != "active".
+2 rows:
+  (2, "pending")
+  (4, "deleted")
+(session: 1 rule(s))
+> ?- not_active(Id, S).
+2 rows:
+  (2, "pending")
+  (4, "deleted")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_str_ne
+Knowledge graph 'test_str_ne' dropped.

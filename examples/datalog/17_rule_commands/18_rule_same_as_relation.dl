@@ -1,0 +1,20 @@
+% Test: Rule with same name as a relation
+% Expected: Rules and relations with same name work together
+% Category: 17_rule_commands
+% Priority: P1 - Rule/relation naming
+
+.kg create test_name_conflict
+.kg use test_name_conflict
+
+% Base facts (relation)
++items[(1, 10), (2, 20), (3, 30)].
+
+?- items(Id, Val).
+
+% Rule that filters items (uses same name to extend)
++items(Id, Val) :- items(Id, Val), Val > 15.
+
+?- items(Id, Val).
+
+.kg use default
+.kg drop test_name_conflict

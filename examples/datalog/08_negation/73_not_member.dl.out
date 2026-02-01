@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_not_member
+Knowledge graph 'test_not_member' created.
+Switched to knowledge graph: test_not_member
+> .kg use test_not_member
+Switched to knowledge graph: test_not_member
+> +candidates[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'candidates'.
+> +selected[(2,), (4,)].
+Inserted 2 fact(s) into 'selected'.
+> +not_selected(X) :- candidates(X), !selected(X).
+Rule 'not_selected' registered.
+> ?- not_selected(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_not_member
+Knowledge graph 'test_not_member' dropped.

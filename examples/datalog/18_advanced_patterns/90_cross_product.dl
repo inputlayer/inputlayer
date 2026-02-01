@@ -1,0 +1,18 @@
+% Test: Cross product of two relations
+% Expected: All combinations
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_cross
+.kg use test_cross
+
++colors[("red",), ("blue",)].
++sizes[("S",), ("M",), ("L",)].
+
+% Cross product
+combinations(Color, Size) :- colors(Color), sizes(Size).
+
+?- combinations(Color, Size).
+
+.kg use default
+.kg drop test_cross

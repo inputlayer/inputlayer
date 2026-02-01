@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_arith
+Knowledge graph 'test_mixed_arith' created.
+Switched to knowledge graph: test_mixed_arith
+> .kg use test_mixed_arith
+Switched to knowledge graph: test_mixed_arith
+> +ints[(10,), (20,)].
+Inserted 2 fact(s) into 'ints'.
+> +floats[(1.5,), (2.5,)].
+Inserted 2 fact(s) into 'floats'.
+> +pairs[(10, 1.5), (20, 2.5)].
+Inserted 2 fact(s) into 'pairs'.
+> mixed_add(I, F, R) :- pairs(I, F), R = I + F.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "mixed_add", args: [Variable("I"), Variable("F"), Variable("R")] }. Variables ["R"] in head do not appear in positive body atoms.

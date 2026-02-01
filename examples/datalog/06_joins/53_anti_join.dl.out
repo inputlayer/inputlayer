@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_anti_join
+Knowledge graph 'test_anti_join' created.
+Switched to knowledge graph: test_anti_join
+> .kg use test_anti_join
+Switched to knowledge graph: test_anti_join
+> +all_users[(1, "Alice"), (2, "Bob"), (3, "Carol"), (4, "Dave")].
+Inserted 4 fact(s) into 'all_users'.
+> +active_users[(1,), (3,)].
+Inserted 2 fact(s) into 'active_users'.
+> +inactive(Id, Name) :- all_users(Id, Name), !active_users(Id).
+Rule 'inactive' registered.
+> ?- inactive(Id, Name).
+2 rows:
+  (2, "Bob")
+  (4, "Dave")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_anti_join
+Knowledge graph 'test_anti_join' dropped.

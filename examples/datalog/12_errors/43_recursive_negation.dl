@@ -1,0 +1,15 @@
+% Test: Recursive negation (stratification error)
+% Expected: Error for unstratifiable negation
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_rec_neg
+.kg use test_rec_neg
+
++base[(1,), (2,)].
+
+% Recursive negation - not stratifiable
++bad(X) :- base(X), !bad(X).
+
+.kg use default
+.kg drop test_rec_neg

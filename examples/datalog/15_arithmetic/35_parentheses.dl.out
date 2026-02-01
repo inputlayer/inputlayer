@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_parens
+Knowledge graph 'test_parens' created.
+Switched to knowledge graph: test_parens
+> .kg use test_parens
+Switched to knowledge graph: test_parens
+> +val[(10,)].
+Inserted 1 fact(s) into 'val'.
+> result(V, R1, R2) :- val(V), R1 = V + 2 * 3, R2 = (V + 2) * 3.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "result", args: [Variable("V"), Variable("R1"), Variable("R2")] }. Variables ["R1", "R2"] in head do not appear in positive body atoms.

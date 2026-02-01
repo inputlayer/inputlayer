@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sum_multi_grp
+Knowledge graph 'test_sum_multi_grp' created.
+Switched to knowledge graph: test_sum_multi_grp
+> .kg use test_sum_multi_grp
+Switched to knowledge graph: test_sum_multi_grp
+> +sales[("2024", "Q1", 100), ("2024", "Q1", 150), ("2024", "Q2", 200), ("2025", "Q1", 300)].
+Inserted 4 fact(s) into 'sales'.
+> sum_by_year_qtr(Year, Qtr, <SUM:Amount>) :- sales(Year, Qtr, Amount).
+Script error: Parse error: Unknown aggregate function: 

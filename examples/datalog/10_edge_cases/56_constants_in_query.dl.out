@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_const_query
+Knowledge graph 'test_const_query' created.
+Switched to knowledge graph: test_const_query
+> .kg use test_const_query
+Switched to knowledge graph: test_const_query
+> +data[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
+Inserted 3 fact(s) into 'data'.
+> match_a(Id, Val) :- data(Id, "a", Val).
+2 rows:
+  (1, 100)
+  (3, 300)
+(session: 1 rule(s))
+> ?- match_a(Id, Val).
+2 rows:
+  (1, 100)
+  (3, 300)
+> exact(Val) :- data(1, "a", Val).
+1 rows:
+  (100)
+(session: 2 rule(s))
+> ?- exact(Val).
+1 rows:
+  (100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_const_query
+Knowledge graph 'test_const_query' dropped.

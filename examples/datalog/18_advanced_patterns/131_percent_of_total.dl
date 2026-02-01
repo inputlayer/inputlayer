@@ -1,0 +1,18 @@
+% Test: Percentage of total
+% Expected: Compute ratio to total
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_percent
+.kg use test_percent
+
++sales[(1, 100), (2, 200), (3, 300)].
+
+% Total sales
++total(<SUM:Amount>) :- sales(_, Amount).
+
+% Each sale's percentage requires total
+?- total(T).
+
+.kg use default
+.kg drop test_percent

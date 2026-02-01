@@ -1,0 +1,16 @@
+% Test: Global sum (no grouping)
+% Expected: Sum of all values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_all
+.kg use test_sum_all
+
++values[(10,), (20,), (30,), (40,), (50,)].
+
+total(<SUM:X>) :- values(X).
+
+?- total(T).
+
+.kg use default
+.kg drop test_sum_all

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_div
+Knowledge graph 'test_int_div' created.
+Switched to knowledge graph: test_int_div
+> .kg use test_int_div
+Switched to knowledge graph: test_int_div
+> +pairs[(10, 3), (7, 2), (15, 4), (20, 6)].
+Inserted 4 fact(s) into 'pairs'.
+> quot(A, B, Q) :- pairs(A, B), Q = A / B.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "quot", args: [Variable("A"), Variable("B"), Variable("Q")] }. Variables ["Q"] in head do not appear in positive body atoms.

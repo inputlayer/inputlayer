@@ -1,0 +1,36 @@
+% Test: Timing and Explain Commands
+% Category: 39_meta_complete
+% Description: Tests timing toggle and explain for queries
+
+.kg create test_timing_explain
+.kg use test_timing_explain
+
+% Insert test data
++edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)].
++node[(1,), (2,), (3,), (4,), (5,)].
+
+% Define a rule
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- edge(X, Y), path(Y, Z).
+
+% Turn on timing
+.timing on
+
+% Run a query (timing should show)
+?- edge(X, Y).
+
+% Run another query
+?- node(X).
+
+% Turn off timing
+.timing off
+
+% Run query without timing
+?- edge(X, Y).
+
+% Explain the path rule
+.explain path
+
+% Cleanup
+.kg use default
+.kg drop test_timing_explain

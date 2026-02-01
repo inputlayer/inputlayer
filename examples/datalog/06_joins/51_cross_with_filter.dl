@@ -1,0 +1,18 @@
+% Test: Cross product with filter
+% Expected: Cartesian with condition
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_cross_filter
+.kg use test_cross_filter
+
++nums[(1,), (2,), (3,)].
++letters[("a",), ("b",)].
+
+% Cross product where num is even
+cross_even(N, L) :- nums(N), letters(L), N % 2 = 0.
+
+?- cross_even(N, L).
+
+.kg use default
+.kg drop test_cross_filter

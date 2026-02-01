@@ -58,8 +58,18 @@ impl PersistWal {
         Ok(self.writer.as_mut().unwrap())
     }
 
-    /// Append an entry to the WAL
+    /// Append an entry to the WAL with immediate flush (durable)
     pub fn append(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
+        self.append_inner(shard, update, true)
+    }
+
+    /// Append an entry to the WAL without immediate flush (buffered)
+    pub fn append_buffered(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
+        self.append_inner(shard, update, false)
+    }
+
+    /// Internal append implementation
+    fn append_inner(&mut self, shard: &str, update: &Update, flush: bool) -> StorageResult<()> {
         let entry = WalEntry {
             shard: shard.to_string(),
             update: update.clone(),
@@ -70,16 +80,34 @@ impl PersistWal {
             .map_err(|e| StorageError::Other(format!("WAL serialization failed: {}", e)))?;
 
         writeln!(writer, "{}", json)?;
-        writer.flush()?;
+        if flush {
+            writer.flush()?;
+        }
         self.entries_written += 1;
 
         Ok(())
     }
 
-    /// Append multiple entries for a shard
+    /// Append multiple entries for a shard with immediate flush (durable)
     pub fn append_batch(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        self.append_batch_inner(shard, updates, true)
+    }
+
+    /// Append multiple entries for a shard without immediate flush (buffered)
+    pub fn append_batch_buffered(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        self.append_batch_inner(shard, updates, false)
+    }
+
+    /// Internal batch append implementation
+    fn append_batch_inner(&mut self, shard: &str, updates: &[Update], flush: bool) -> StorageResult<()> {
         for update in updates {
-            self.append(shard, update)?;
+            self.append_inner(shard, update, false)?; // Don't flush individual entries
+        }
+        if flush {
+            // Flush once at the end for the whole batch
+            if let Some(ref mut writer) = self.writer {
+                writer.flush()?;
+            }
         }
         Ok(())
     }

@@ -1,0 +1,17 @@
+% Test: Duplicate variable in rule head
+% Expected: Behavior for repeated variable
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_dup_head
+.kg use test_dup_head
+
++data[(1, 1), (2, 3), (3, 3)].
+
+% Same variable in head multiple times
+duplicate_head(X, X) :- data(X, X).
+
+?- duplicate_head(A, B).
+
+.kg use default
+.kg drop test_dup_head

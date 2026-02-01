@@ -1,0 +1,19 @@
+% Test: Universal quantification via double negation
+% Expected: All X satisfy condition
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_universal
+.kg use test_universal
+
++students[(1,), (2,), (3,)].
++passed_exam[(1, "math"), (2, "math"), (3, "math"), (1, "science"), (2, "science")].
+
+% Students who passed all exams they took
+% Find students who have NOT (taken an exam they did NOT pass)
++has_exam(S) :- passed_exam(S, _).
+
+?- has_exam(S).
+
+.kg use default
+.kg drop test_universal

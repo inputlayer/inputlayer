@@ -1,0 +1,19 @@
+% Test: String with embedded newline
+% Expected: Newlines in strings handled
+% Category: 37_string_edge_cases
+% Priority: P2 - String edge cases
+
+.kg create test_multiline
+.kg use test_multiline
+
++text[("line1\nline2",), ("single",)].
+
+?- text(T).
+
+% String comparison
+has_newline(T) :- text(T), T = "line1\nline2".
+
+?- has_newline(T).
+
+.kg use default
+.kg drop test_multiline

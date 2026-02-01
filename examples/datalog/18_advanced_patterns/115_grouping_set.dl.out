@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_grp_set
+Knowledge graph 'test_grp_set' created.
+Switched to knowledge graph: test_grp_set
+> .kg use test_grp_set
+Switched to knowledge graph: test_grp_set
+> +sales[(1, "East", "Q1", 100), (2, "West", "Q1", 150), (3, "East", "Q2", 120), (4, "West", "Q2", 180)].
+Inserted 4 fact(s) into 'sales'.
+> +by_region(Region, <SUM:Amount>) :- sales(_, Region, _, Amount).
+Script error: Parse error: Invalid term: '<SUM:Amount>'

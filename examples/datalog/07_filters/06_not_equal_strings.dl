@@ -1,0 +1,17 @@
+% Test: String inequality filter
+% Expected: Filter out specific string values
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_neq_str
+.kg use test_neq_str
+
++names[("Alice",), ("Bob",), ("Carol",), ("Alice",)].
+
+% All names except Alice
+not_alice(Name) :- names(Name), Name != "Alice".
+
+?- not_alice(Name).
+
+.kg use default
+.kg drop test_neq_str

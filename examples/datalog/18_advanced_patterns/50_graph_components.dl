@@ -1,0 +1,23 @@
+% Test: Graph connected components
+% Expected: Find connected components
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_components
+.kg use test_components
+
++edge[(1, 2), (2, 3), (4, 5), (6, 7), (7, 8)].
+
+% Bidirectional edges
++connected(A, B) :- edge(A, B).
++connected(A, B) :- edge(B, A).
+
+% Transitive closure
++same_component(A, B) :- connected(A, B).
++same_component(A, B) :- same_component(A, C), connected(C, B).
+
+?- same_component(1, X).
+?- same_component(4, X).
+
+.kg use default
+.kg drop test_components

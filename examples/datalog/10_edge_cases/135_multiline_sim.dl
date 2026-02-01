@@ -1,0 +1,14 @@
+% Test: Long multiline-like strings
+% Expected: Handle strings with multiple words
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_multiline
+.kg use test_multiline
+
++text[("This is a longer text string that spans multiple words",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_multiline

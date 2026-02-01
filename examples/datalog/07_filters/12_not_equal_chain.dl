@@ -1,0 +1,22 @@
+% Test: Chained not-equal conditions
+% Expected: Multiple != conditions work
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_neq_chain
+.kg use test_neq_chain
+
++values[(1,), (2,), (3,), (4,), (5,)].
+
+% Exclude multiple values
+filtered(X) :- values(X), X != 2, X != 4.
+
+?- filtered(X).
+
+% Only middle values (not first or last)
+middle(X) :- values(X), X != 1, X != 5.
+
+?- middle(X).
+
+.kg use default
+.kg drop test_neq_chain

@@ -1,0 +1,17 @@
+% Test: AVG aggregation basic
+% Expected: Compute average of values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_avg
+.kg use test_avg
+
++grades[(1, 80), (2, 90), (3, 70), (4, 85), (5, 95)].
+
+% Average grade
++avg_grade(<AVG:Grade>) :- grades(_, Grade).
+
+?- avg_grade(A).
+
+.kg use default
+.kg drop test_avg

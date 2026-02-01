@@ -1,0 +1,26 @@
+% Test: Four-way mutual recursion
+% Expected: Complex mutual recursion works
+% Category: 09_recursion
+% Priority: P2 - Advanced recursion
+
+.kg create test_four_mutual
+.kg use test_four_mutual
+
++start[(1, "a"), (5, "b")].
+
+% Four mutually recursive rules
++step_a(X, Y) :- start(X, _), Y = X.
++step_a(X, Y) :- step_d(X, Z), Y = Z + 1, Y < 10.
+
++step_b(X, Y) :- step_a(X, Z), Y = Z + 1.
+
++step_c(X, Y) :- step_b(X, Z), Y = Z + 1.
+
++step_d(X, Y) :- step_c(X, Z), Y = Z + 1.
+
+?- step_a(1, Y).
+
+?- step_d(1, Y).
+
+.kg use default
+.kg drop test_four_mutual

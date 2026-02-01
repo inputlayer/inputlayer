@@ -1,0 +1,22 @@
+% Test: Overlapping ranges join
+% Expected: Join where ranges overlap
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_overlap
+.kg use test_overlap
+
++ranges[(1, 0, 10), (2, 5, 15), (3, 20, 30)].
+
+% Find overlapping ranges
++overlaps(Id1, Id2) :-
+    ranges(Id1, S1, E1),
+    ranges(Id2, S2, E2),
+    Id1 < Id2,
+    S1 <= E2,
+    S2 <= E1.
+
+?- overlaps(A, B).
+
+.kg use default
+.kg drop test_overlap

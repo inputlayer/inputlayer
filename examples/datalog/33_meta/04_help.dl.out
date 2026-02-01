@@ -18,7 +18,8 @@ Meta Commands:
   .rel <name>          Describe relation
   .rule                List rules
   .rule <name>         Query rule
-  .rule drop <name>    Drop rule
+  .rule drop <name>    Drop all clauses of a rule
+  .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear session rules
   .status              Server status

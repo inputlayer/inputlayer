@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_cond
+Knowledge graph 'test_multi_cond' created.
+Switched to knowledge graph: test_multi_cond
+> .kg use test_multi_cond
+Switched to knowledge graph: test_multi_cond
+> +orders[(1, 100, "2024-01"), (2, 101, "2024-01"), (3, 100, "2024-02")].
+Inserted 3 fact(s) into 'orders'.
+> +customers[(100, "Alice", "VIP"), (101, "Bob", "Regular")].
+Inserted 2 fact(s) into 'customers'.
+> +vip_orders(OrderId, CustName, Month) :- orders(OrderId, CustId, Month), customers(CustId, CustName, "VIP").
+Rule 'vip_orders' registered.
+> ?- vip_orders(O, C, M).
+3 rows:
+  (1, "Alice", "2024-01")
+  (2, "Bob", "2024-01")
+  (3, "Alice", "2024-02")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_cond
+Knowledge graph 'test_multi_cond' dropped.

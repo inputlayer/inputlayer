@@ -1,0 +1,21 @@
+% Test: Find root nodes in tree
+% Expected: Nodes with no parent
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_roots
+.kg use test_roots
+
++parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)].
+
+% All nodes
++all_nodes(X) :- parent(X, _).
++all_nodes(X) :- parent(_, X).
+
+% Root nodes: nodes with no parent
+root(X) :- all_nodes(X), !parent(_, X).
+
+?- root(X).
+
+.kg use default
+.kg drop test_roots

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_avg_single
+Knowledge graph 'test_avg_single' created.
+Switched to knowledge graph: test_avg_single
+> .kg use test_avg_single
+Switched to knowledge graph: test_avg_single
+> +single[(42,)].
+Inserted 1 fact(s) into 'single'.
+> avg_result(<AVG:X>) :- single(X).
+Script error: Parse error: Unknown aggregate function: 

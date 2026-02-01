@@ -1,0 +1,23 @@
+% Test: BETWEEN pattern
+% Expected: Can filter between two values
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_between
+.kg use test_between
+
++data[(1, 5), (2, 15), (3, 25), (4, 35), (5, 45), (6, 55)].
+
+% BETWEEN 10 AND 40 (inclusive)
+between_10_40(Id, Val) :- data(Id, Val), Val >= 10, Val <= 40.
+
+?- between_10_40(Id, Val).
+
+% NOT BETWEEN (outside range)
+outside_range(Id, Val) :- data(Id, Val), Val < 10.
+outside_range(Id, Val) :- data(Id, Val), Val > 40.
+
+?- outside_range(Id, Val).
+
+.kg use default
+.kg drop test_between

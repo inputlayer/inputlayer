@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_denorm
+Knowledge graph 'test_denorm' created.
+Switched to knowledge graph: test_denorm
+> .kg use test_denorm
+Switched to knowledge graph: test_denorm
+> +orders[(1, "Alice", "alice@email.com", 100), (2, "Alice", "alice@email.com", 150), (3, "Bob", "bob@email.com", 200)].
+Inserted 3 fact(s) into 'orders'.
+> +unique_customers(Name, <MIN:Email>) :- orders(_, Name, Email, _).
+Script error: Parse error: Invalid term: '<MIN:Email>'

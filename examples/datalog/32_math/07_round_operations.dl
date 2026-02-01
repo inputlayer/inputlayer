@@ -1,0 +1,22 @@
+% Test: Rounding operations
+% Expected: Floor/ceil via integer division
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_rounding
+.kg use test_rounding
+
++vals[(7,), (10,), (15,), (23,)].
+
+% Floor division (integer division)
+floor_div5(X, Y) :- vals(X), Y = X / 5.
+
+?- floor_div5(X, Y).
+
+% Modulo
+mod5(X, Y) :- vals(X), Y = X % 5.
+
+?- mod5(X, Y).
+
+.kg use default
+.kg drop test_rounding

@@ -1,0 +1,22 @@
+% Test: Delete then insert pattern
+% Expected: Atomic delete and re-insert
+% Category: 27_atomic_ops
+% Priority: P2 - Atomic operations
+
+.kg create test_del_ins
+.kg use test_del_ins
+
++inventory[(1, "Widget", 100), (2, "Gadget", 50)].
+
+?- inventory(Id, Name, Qty).
+
+% Delete specific item
+-inventory(1, "Widget", 100).
+
+% Insert updated version
++inventory[(1, "Widget", 150)].
+
+?- inventory(Id, Name, Qty).
+
+.kg use default
+.kg drop test_del_ins

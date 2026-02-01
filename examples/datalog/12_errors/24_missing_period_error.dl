@@ -1,0 +1,14 @@
+% Test: Missing period error
+% Expected: Parse error - missing period makes next line part of statement
+% Category: 12_errors
+% Priority: P0 Critical - Basic syntax validation
+
+.kg create test_missing_period
+.kg use test_missing_period
+
+% Missing period - when followed by another statement, causes parse error
++edge(1, 2)
++edge(2, 3).
+
+.kg use default
+.kg drop test_missing_period

@@ -1,0 +1,24 @@
+% Test: Median approximation pattern
+% Expected: Approximate median using min/max
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_median
+.kg use test_median
+
++vals[(10,), (20,), (30,), (40,), (50,)].
+
+% For odd count, can find middle using count
++val_count(<COUNT:V>) :- vals(V).
+
++val_min(<MIN:V>) :- vals(V).
++val_max(<MAX:V>) :- vals(V).
++val_avg(<AVG:V>) :- vals(V).
+
+?- val_count(C).
+?- val_min(M).
+?- val_max(M).
+?- val_avg(A).
+
+.kg use default
+.kg drop test_median

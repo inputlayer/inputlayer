@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_i64_boundary
+Knowledge graph 'test_i64_boundary' created.
+Switched to knowledge graph: test_i64_boundary
+> .kg use test_i64_boundary
+Switched to knowledge graph: test_i64_boundary
+> +large_ints[(1000000000000, "trillion"), (9999999999999, "near_max")].
+Inserted 2 fact(s) into 'large_ints'.
+> ?- large_ints(Val, Name).
+2 rows:
+  (1000000000000, "trillion")
+  (9999999999999, "near_max")
+> large_compare(Val, Name) :- large_ints(Val, Name), Val > 999999999999.
+2 rows:
+  (1000000000000, "trillion")
+  (9999999999999, "near_max")
+(session: 1 rule(s))
+> ?- large_compare(Val, Name).
+2 rows:
+  (1000000000000, "trillion")
+  (9999999999999, "near_max")
+> +pair[(5000000000000, 4000000000000)].
+Inserted 1 fact(s) into 'pair'.
+> large_sum(A, B, R) :- pair(A, B), R = A + B.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "large_sum", args: [Variable("A"), Variable("B"), Variable("R")] }. Variables ["R"] in head do not appear in positive body atoms.

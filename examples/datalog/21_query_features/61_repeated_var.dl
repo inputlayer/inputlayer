@@ -1,0 +1,18 @@
+% Test: Repeated variable across relations
+% Expected: Same value in both relations
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_repeat_var
+.kg use test_repeat_var
+
++left[(1, "a"), (2, "b"), (3, "c")].
++right[(1, 100), (3, 300), (5, 500)].
+
+% Join where key matches
+joined(K, L, R) :- left(K, L), right(K, R).
+
+?- joined(K, L, R).
+
+.kg use default
+.kg drop test_repeat_var

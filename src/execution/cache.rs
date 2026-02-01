@@ -11,8 +11,10 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use parking_lot::RwLock;
 
 use crate::ir::IRNode;
 
@@ -174,24 +176,24 @@ impl QueryCache {
     /// Get compiled IR from cache
     pub fn get_compiled(&self, query: &str) -> Option<Vec<IRNode>> {
         let hash = Self::query_hash(query);
-        let mut cache = self.compiled.write().unwrap();
+        let mut cache = self.compiled.write();
 
         if let Some(entry) = cache.get_mut(&hash) {
             if entry.is_expired() {
                 cache.remove(&hash);
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.misses += 1;
                 stats.expirations += 1;
                 return None;
             }
 
             entry.touch();
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.hits += 1;
             return Some(entry.value.clone());
         }
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.misses += 1;
         None
     }
@@ -199,7 +201,7 @@ impl QueryCache {
     /// Store compiled IR in cache
     pub fn put_compiled(&self, query: &str, ir: Vec<IRNode>) {
         let hash = Self::query_hash(query);
-        let mut cache = self.compiled.write().unwrap();
+        let mut cache = self.compiled.write();
 
         // Evict if at capacity
         if cache.len() >= self.max_compiled_entries {
@@ -208,31 +210,31 @@ impl QueryCache {
 
         cache.insert(hash, CacheEntry::new(ir, None)); // Compiled queries don't expire
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.size = cache.len();
     }
 
     /// Get cached results
     pub fn get_results(&self, query: &str, data_fingerprint: u64) -> Option<Vec<(i32, i32)>> {
         let hash = Self::query_data_hash(query, data_fingerprint);
-        let mut cache = self.results.write().unwrap();
+        let mut cache = self.results.write();
 
         if let Some(entry) = cache.get_mut(&hash) {
             if entry.is_expired() {
                 cache.remove(&hash);
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.misses += 1;
                 stats.expirations += 1;
                 return None;
             }
 
             entry.touch();
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.hits += 1;
             return Some(entry.value.clone());
         }
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.misses += 1;
         None
     }
@@ -240,7 +242,7 @@ impl QueryCache {
     /// Store results in cache
     pub fn put_results(&self, query: &str, data_fingerprint: u64, results: Vec<(i32, i32)>) {
         let hash = Self::query_data_hash(query, data_fingerprint);
-        let mut cache = self.results.write().unwrap();
+        let mut cache = self.results.write();
 
         // Evict if at capacity
         if cache.len() >= self.max_result_entries {
@@ -256,7 +258,7 @@ impl QueryCache {
         if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.evictions += 1;
         }
     }
@@ -273,7 +275,7 @@ impl QueryCache {
         if !expired.is_empty() {
             for key in expired {
                 cache.remove(&key);
-                let mut stats = self.stats.write().unwrap();
+                let mut stats = self.stats.write();
                 stats.expirations += 1;
             }
             return;
@@ -283,39 +285,39 @@ impl QueryCache {
         if let Some((&key_to_remove, _)) = cache.iter().min_by_key(|(_, entry)| entry.last_accessed)
         {
             cache.remove(&key_to_remove);
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.evictions += 1;
         }
     }
 
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
-        self.stats.read().unwrap().clone()
+        self.stats.read().clone()
     }
 
     /// Reset statistics
     pub fn reset_stats(&self) {
-        self.stats.write().unwrap().reset();
+        self.stats.write().reset();
     }
 
     /// Clear all caches
     pub fn clear(&self) {
-        self.compiled.write().unwrap().clear();
-        self.results.write().unwrap().clear();
+        self.compiled.write().clear();
+        self.results.write().clear();
 
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.size = 0;
     }
 
     /// Clear only result cache (useful when data changes)
     pub fn clear_results(&self) {
-        self.results.write().unwrap().clear();
+        self.results.write().clear();
     }
 
     /// Invalidate cache entries for a specific query
     pub fn invalidate_query(&self, query: &str) {
         let hash = Self::query_hash(query);
-        self.compiled.write().unwrap().remove(&hash);
+        self.compiled.write().remove(&hash);
         // Note: Result cache entries with this query are harder to invalidate
         // since they also depend on data fingerprint. For full invalidation,
         // use clear_results().
@@ -323,12 +325,12 @@ impl QueryCache {
 
     /// Get the number of entries in compiled cache
     pub fn compiled_size(&self) -> usize {
-        self.compiled.read().unwrap().len()
+        self.compiled.read().len()
     }
 
     /// Get the number of entries in results cache
     pub fn results_size(&self) -> usize {
-        self.results.read().unwrap().len()
+        self.results.read().len()
     }
 }
 

@@ -1,0 +1,22 @@
+% Test: Integer arithmetic operations
+% Expected: All int arithmetic works
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_int_arith
+.kg use test_int_arith
+
++nums[(100,), (7,)].
+
+% Various operations with 100
+ops(N, Add, Sub, Mul, Div, Mod) :- nums(N), N = 100,
+    Add = N + 23,
+    Sub = N - 23,
+    Mul = N * 3,
+    Div = N / 7,
+    Mod = N % 7.
+
+?- ops(N, A, S, M, D, R).
+
+.kg use default
+.kg drop test_int_arith

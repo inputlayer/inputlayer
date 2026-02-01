@@ -1,0 +1,18 @@
+% Test: Non-linear recursion (tree structure)
+% Expected: Tree traversal with multiple children
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_nonlinear
+.kg use test_nonlinear
+
++tree[("root", "a"), ("root", "b"), ("a", "c"), ("a", "d"), ("b", "e")].
+
+% Tree descendant (can have multiple recursive calls)
++descendant(Anc, Desc) :- tree(Anc, Desc).
++descendant(Anc, Desc) :- tree(Anc, Mid), descendant(Mid, Desc).
+
+?- descendant("root", D).
+
+.kg use default
+.kg drop test_nonlinear

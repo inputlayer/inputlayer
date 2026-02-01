@@ -1,0 +1,18 @@
+% Test: Matrix multiplication pattern
+% Expected: Compute matrix product element
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_matrix_mult
+.kg use test_matrix_mult
+
++a[(1, 1, 1), (1, 2, 2), (2, 1, 3), (2, 2, 4)].
++b[(1, 1, 5), (1, 2, 6), (2, 1, 7), (2, 2, 8)].
+
+% Element-wise product for dot product computation
+elem_prod(I, J, K, P) :- a(I, K, AVal), b(K, J, BVal), P = AVal * BVal.
+
+?- elem_prod(I, J, K, P).
+
+.kg use default
+.kg drop test_matrix_mult

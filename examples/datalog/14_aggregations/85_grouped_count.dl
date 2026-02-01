@@ -1,0 +1,16 @@
+% Test: Grouped COUNT
+% Expected: Count per category
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_grp_count
+.kg use test_grp_count
+
++items[(1, "A"), (2, "B"), (3, "A"), (4, "A"), (5, "B")].
+
++count_by_cat(Cat, <COUNT:Id>) :- items(Id, Cat).
+
+?- count_by_cat(C, N).
+
+.kg use default
+.kg drop test_grp_count

@@ -1,0 +1,14 @@
+% Test: Strings with whitespace
+% Expected: Preserve spaces in strings
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_whitespace
+.kg use test_whitespace
+
++text[("  leading",), ("trailing  ",), ("  both  ",), ("no spaces",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_whitespace

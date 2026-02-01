@@ -1,0 +1,18 @@
+% Test: Asymmetric join (different arities)
+% Expected: Join relations with different column counts
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_asymm
+.kg use test_asymm
+
++narrow[(1,), (2,), (3,)].
++wide[(1, "a", 100), (2, "b", 200), (4, "d", 400)].
+
+% Join narrow with wide
+joined(Id, Name, Val) :- narrow(Id), wide(Id, Name, Val).
+
+?- joined(Id, Name, Val).
+
+.kg use default
+.kg drop test_asymm

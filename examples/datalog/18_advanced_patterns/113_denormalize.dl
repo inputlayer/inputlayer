@@ -1,0 +1,21 @@
+% Test: Denormalization pattern
+% Expected: Join multiple tables into single view
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_denorm
+.kg use test_denorm
+
++users[(1, "Alice"), (2, "Bob")].
++orders[(101, 1, 50.0), (102, 2, 75.0), (103, 1, 25.0)].
++products[(201, "Widget"), (202, "Gadget")].
+
+% Denormalize orders with user names
++order_details(OrderId, UserName, Amount) :-
+    orders(OrderId, UserId, Amount),
+    users(UserId, UserName).
+
+?- order_details(O, U, A).
+
+.kg use default
+.kg drop test_denorm

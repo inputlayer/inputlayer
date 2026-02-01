@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sum_filter
+Knowledge graph 'test_sum_filter' created.
+Switched to knowledge graph: test_sum_filter
+> .kg use test_sum_filter
+Switched to knowledge graph: test_sum_filter
+> +sales[("A", 100), ("B", 200), ("A", 150), ("C", 300), ("A", 50)].
+Inserted 5 fact(s) into 'sales'.
+> total_by_cat(Cat, <SUM:Amount>) :- sales(Cat, Amount).
+Script error: Parse error: Unknown aggregate function: 

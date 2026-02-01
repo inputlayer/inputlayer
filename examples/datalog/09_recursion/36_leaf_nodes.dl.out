@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_leaves
+Knowledge graph 'test_leaves' created.
+Switched to knowledge graph: test_leaves
+> .kg use test_leaves
+Switched to knowledge graph: test_leaves
+> +parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)].
+Inserted 5 fact(s) into 'parent'.
+> +all_nodes(X) :- parent(X, _).
+Rule 'all_nodes' registered.
+> +all_nodes(X) :- parent(_, X).
+Rule 'all_nodes' registered.
+> leaf(X) :- all_nodes(X), !parent(X, _).
+3 rows:
+  (4)
+  (5)
+  (6)
+(session: 1 rule(s))
+> ?- leaf(X).
+3 rows:
+  (4)
+  (5)
+  (6)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_leaves
+Knowledge graph 'test_leaves' dropped.

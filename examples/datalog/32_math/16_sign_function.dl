@@ -1,0 +1,16 @@
+% Test: Sign function
+% Expected: Return -1, 0, or 1
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_sign
+.kg use test_sign
+
++nums[(-10,), (-1,), (0,), (1,), (10,)].
+
+sign_result(X, S) :- nums(X), S = SIGN(X).
+
+?- sign_result(X, S).
+
+.kg use default
+.kg drop test_sign

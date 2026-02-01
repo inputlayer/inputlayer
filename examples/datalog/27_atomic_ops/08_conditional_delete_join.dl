@@ -1,0 +1,23 @@
+% Test: Conditional delete with join
+% Expected: Delete based on join condition
+% Category: 27_atomic_ops
+% Priority: P1 - Atomic operations
+
+.kg create test_cond_del_join
+.kg use test_cond_del_join
+
+% Main data
++products[(1, "apple", 100), (2, "banana", 50), (3, "cherry", 200)].
+
+% Categories to delete
++remove_list[(1), (3)].
+
+?- products(Id, Name, Price).
+
+% Delete products that are in remove_list
+-products(Id, Name, Price) :- remove_list(Id), products(Id, Name, Price).
+
+?- products(Id, Name, Price).
+
+.kg use default
+.kg drop test_cond_del_join

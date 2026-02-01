@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_zero
+Knowledge graph 'test_zero' created.
+Switched to knowledge graph: test_zero
+> .kg use test_zero
+Switched to knowledge graph: test_zero
+> +data[(0, 0), (1, 0), (0, 1), (1, 1)].
+Inserted 4 fact(s) into 'data'.
+> mult_zero(X, Y, R) :- data(X, Y), R = X * Y.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "mult_zero", args: [Variable("X"), Variable("Y"), Variable("R")] }. Variables ["R"] in head do not appear in positive body atoms.

@@ -6,6 +6,7 @@
 //! - Knowledge graph lifecycle management (create, drop, list, switch)
 //! - Knowledge-graph-scoped CRUD operations
 //! - Parquet-based storage for efficiency
+//! - Lock-free read path via snapshots
 //!
 //! ## Example
 //!
@@ -29,6 +30,10 @@
 //! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
+mod snapshot;
+pub use snapshot::KnowledgeGraphSnapshot;
+
+use arc_swap::ArcSwap;
 use crate::config::Config;
 use crate::rule_catalog::RuleCatalog;
 use crate::statement::RuleDef;
@@ -42,17 +47,21 @@ use crate::value::Tuple;
 use crate::value::Tuple2;
 use crate::DatalogEngine;
 use chrono::Utc;
+use dashmap::DashMap;
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 /// Storage Engine - manages multiple knowledge graphs
+///
+/// Uses DashMap for concurrent access to knowledge graphs without global locks.
 pub struct StorageEngine {
     config: Config,
-    knowledge_graphs: HashMap<String, Arc<RwLock<KnowledgeGraph>>>,
+    /// Knowledge graphs with lock-free concurrent access
+    knowledge_graphs: DashMap<String, Arc<RwLock<KnowledgeGraph>>>,
     current_kg: Option<String>,
     /// DD-native persist backend
     persist: Arc<FilePersist>,
@@ -75,6 +84,8 @@ pub struct KnowledgeGraph {
     data_dir: PathBuf,
     /// Rule catalog for persistent derived relations
     rule_catalog: RuleCatalog,
+    /// Current snapshot for lock-free reads (updated atomically on writes)
+    snapshot: ArcSwap<KnowledgeGraphSnapshot>,
 }
 
 impl StorageEngine {
@@ -98,12 +109,13 @@ impl StorageEngine {
             path: config.storage.data_dir.join("persist"),
             buffer_size: config.storage.persist.buffer_size,
             immediate_sync: config.storage.persist.immediate_sync,
+            durability_mode: config.storage.persist.durability_mode,
         };
         let persist = Arc::new(FilePersist::new(persist_config)?);
 
         let mut engine = StorageEngine {
             config,
-            knowledge_graphs: HashMap::new(),
+            knowledge_graphs: DashMap::new(),
             current_kg: None,
             persist,
             logical_time: AtomicU64::new(1),
@@ -200,7 +212,7 @@ impl StorageEngine {
         // Note: Could add last_accessed field to DatabaseMetadata for tracking
         // For now, we reuse created_at field (simplified implementation)
         if let Some(db) = self.knowledge_graphs.get(name) {
-            let mut db = db.write().unwrap();
+            let mut db = db.write();
             db.metadata.created_at = Utc::now().to_rfc3339();
         }
 
@@ -210,7 +222,11 @@ impl StorageEngine {
 
     /// List all knowledge graphs
     pub fn list_knowledge_graphs(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.knowledge_graphs.keys().cloned().collect();
+        let mut names: Vec<String> = self
+            .knowledge_graphs
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
         names.sort();
         names
     }
@@ -222,7 +238,7 @@ impl StorageEngine {
 
     /// Insert tuples into a relation in the current knowledge graph
     /// Returns (new_count, duplicate_count) for reporting to user
-    pub fn insert(&mut self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<(usize, usize)> {
+    pub fn insert(&self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<(usize, usize)> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -234,14 +250,33 @@ impl StorageEngine {
 
     /// Insert tuples into a specific knowledge graph (explicit API)
     /// Returns (new_count, duplicate_count) for reporting to user
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    /// Thread safety is ensured via internal per-KG locking.
     pub fn insert_into(
-        &mut self,
+        &self,
         kg: &str,
         relation: &str,
         tuples: Vec<Tuple2>,
     ) -> StorageResult<(usize, usize)> {
         if tuples.is_empty() {
             return Ok((0, 0));
+        }
+
+        // Check if relation is a view (derived relation) - cannot insert into views
+        {
+            let db = self
+                .knowledge_graphs
+                .get(kg)
+                .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            let db = db.read();
+            if db.rule_exists(relation) {
+                return Err(StorageError::Other(format!(
+                    "Cannot insert into '{}': it is a derived relation (view). \
+                     Use a base relation or drop the rule first with '.rule drop {}'.",
+                    relation, relation
+                )));
+            }
         }
 
         // Tuple2 is always arity 2 - check if relation exists with different arity
@@ -275,7 +310,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         let (new_count, dup_count) = db.insert_in_memory(relation, tuples);
 
         Ok((new_count, dup_count))
@@ -285,7 +320,7 @@ impl StorageEngine {
     /// This is the production API that supports vectors and mixed types.
     /// Returns (new_count, duplicate_count) for reporting to user
     pub fn insert_tuples(
-        &mut self,
+        &self,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<(usize, usize)> {
@@ -300,14 +335,32 @@ impl StorageEngine {
 
     /// Insert arbitrary-arity tuples into a specific knowledge graph (explicit API)
     /// Returns (new_count, duplicate_count) for reporting to user
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn insert_tuples_into(
-        &mut self,
+        &self,
         kg: &str,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<(usize, usize)> {
         if tuples.is_empty() {
             return Ok((0, 0));
+        }
+
+        // Check if relation is a view (derived relation) - cannot insert into views
+        {
+            let db = self
+                .knowledge_graphs
+                .get(kg)
+                .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+            let db = db.read();
+            if db.rule_exists(relation) {
+                return Err(StorageError::Other(format!(
+                    "Cannot insert into '{}': it is a derived relation (view). \
+                     Use a base relation or drop the rule first with '.rule drop {}'.",
+                    relation, relation
+                )));
+            }
         }
 
         // Check arity consistency
@@ -355,14 +408,15 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         let (new_count, dup_count) = db.insert_tuples_in_memory(relation, tuples);
 
         Ok((new_count, dup_count))
     }
 
     /// Delete tuples from a relation in the current knowledge graph
-    pub fn delete(&mut self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<()> {
+    /// Returns the count of actually deleted tuples
+    pub fn delete(&self, relation: &str, tuples: Vec<Tuple2>) -> StorageResult<usize> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -373,14 +427,17 @@ impl StorageEngine {
     }
 
     /// Delete tuples from a specific knowledge graph (explicit API)
+    /// Returns the count of actually deleted tuples
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn delete_from(
-        &mut self,
+        &self,
         kg: &str,
         relation: &str,
         tuples: Vec<Tuple2>,
-    ) -> StorageResult<()> {
+    ) -> StorageResult<usize> {
         if tuples.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
 
         // Generate shard name and logical time
@@ -403,16 +460,17 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
-        db.delete_in_memory(relation, &tuples);
+        let mut db = db.write();
+        let deleted_count = db.delete_in_memory(relation, &tuples);
 
-        Ok(())
+        Ok(deleted_count)
     }
 
     /// Delete a single tuple (Tuple type) from a relation in the current knowledge graph
     ///
     /// This is the production API that supports arbitrary-arity tuples.
-    pub fn delete_tuple(&mut self, relation: &str, tuple: &Tuple) -> StorageResult<()> {
+    /// Returns the count of actually deleted tuples (0 or 1).
+    pub fn delete_tuple(&self, relation: &str, tuple: &Tuple) -> StorageResult<usize> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -425,14 +483,17 @@ impl StorageEngine {
     /// Delete tuples (Tuple type) from a specific knowledge graph
     ///
     /// This is the production API that supports arbitrary-arity tuples.
+    /// Returns the count of actually deleted tuples.
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn delete_tuples_from(
-        &mut self,
+        &self,
         kg: &str,
         relation: &str,
         tuples: Vec<Tuple>,
-    ) -> StorageResult<()> {
+    ) -> StorageResult<usize> {
         if tuples.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
 
         // Generate shard name and logical time
@@ -455,10 +516,10 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
-        db.delete_tuples_in_memory(relation, &tuples);
+        let mut db = db.write();
+        let deleted_count = db.delete_tuples_in_memory(relation, &tuples);
 
-        Ok(())
+        Ok(deleted_count)
     }
 
     /// Execute a Datalog query on the current knowledge graph
@@ -473,18 +534,26 @@ impl StorageEngine {
     }
 
     /// Execute a Datalog query on a specific knowledge graph (explicit API)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
+    /// The snapshot is obtained atomically (O(1)) and execution proceeds
+    /// without holding any locks. Concurrent reads never block.
     pub fn execute_query_on(&mut self, kg: &str, program: &str) -> StorageResult<Vec<Tuple2>> {
         let db = self
             .knowledge_graphs
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
-        let results = db
-            .execute(program)
-            .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))?;
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
 
-        Ok(results)
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
     /// Save a specific knowledge graph to disk (flush persist buffers)
@@ -551,7 +620,7 @@ impl StorageEngine {
 
     /// Register a persistent rule in the current knowledge graph
     pub fn register_rule(
-        &mut self,
+        &self,
         rule_def: &RuleDef,
     ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
         let db_name = self
@@ -564,8 +633,10 @@ impl StorageEngine {
     }
 
     /// Register a persistent rule in a specific knowledge graph
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn register_rule_in(
-        &mut self,
+        &self,
         kg: &str,
         rule_def: &RuleDef,
     ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
@@ -574,13 +645,13 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         db.register_rule(rule_def)
             .map_err(|e| StorageError::Other(format!("Failed to register rule: {}", e)))
     }
 
     /// Drop a rule from the current knowledge graph
-    pub fn drop_rule(&mut self, name: &str) -> StorageResult<()> {
+    pub fn drop_rule(&self, name: &str) -> StorageResult<()> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -591,13 +662,15 @@ impl StorageEngine {
     }
 
     /// Drop a rule from a specific knowledge graph
-    pub fn drop_rule_in(&mut self, kg: &str, name: &str) -> StorageResult<()> {
+    ///
+    /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
+    pub fn drop_rule_in(&self, kg: &str, name: &str) -> StorageResult<()> {
         let db = self
             .knowledge_graphs
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         db.drop_rule(name)
             .map_err(|e| StorageError::Other(format!("Failed to drop rule: {}", e)))
     }
@@ -619,7 +692,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         Ok(db.list_rules())
     }
 
@@ -640,7 +713,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         Ok(db.describe_rule(name))
     }
 
@@ -663,7 +736,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         db.clear_rule(name)
             .map_err(|e| StorageError::Other(format!("Failed to clear rule: {}", e)))
     }
@@ -697,9 +770,39 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
+        let mut db = db.write();
         db.replace_rule(name, index, new_rule)
             .map_err(|e| StorageError::Other(format!("Failed to replace rule clause: {}", e)))
+    }
+
+    /// Remove a specific clause from a rule (current knowledge graph)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> StorageResult<bool> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .to_string();
+
+        self.remove_rule_clause_in(&db_name, name, index)
+    }
+
+    /// Remove a specific clause from a rule (specific knowledge graph)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause_in(
+        &mut self,
+        kg: &str,
+        name: &str,
+        index: usize,
+    ) -> StorageResult<bool> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.remove_rule_clause(name, index)
+            .map_err(|e| StorageError::Other(format!("Failed to remove rule clause: {}", e)))
     }
 
     /// Get the number of clauses in a rule (current knowledge graph)
@@ -719,8 +822,30 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         Ok(db.rule_count(name))
+    }
+
+    /// Get the arity (number of arguments) of a rule/view (current knowledge graph)
+    pub fn rule_arity(&self, name: &str) -> StorageResult<Option<usize>> {
+        let db_name = self
+            .current_kg
+            .as_ref()
+            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
+            .to_string();
+
+        self.rule_arity_in(&db_name, name)
+    }
+
+    /// Get the arity (number of arguments) of a rule/view (specific knowledge graph)
+    pub fn rule_arity_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        Ok(db.rule_arity(name))
     }
 
     /// Execute a query with rules prepended (current knowledge graph)
@@ -735,6 +860,8 @@ impl StorageEngine {
     }
 
     /// Execute a query with rules prepended (specific knowledge graph)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
     pub fn execute_query_with_rules_on(
         &mut self,
         kg: &str,
@@ -745,8 +872,15 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
-        db.execute_with_rules(program)
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute_with_rules(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
@@ -762,6 +896,8 @@ impl StorageEngine {
     }
 
     /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific knowledge graph)
+    ///
+    /// Uses a completely lock-free read path via snapshots.
     pub fn execute_query_with_rules_tuples_on(
         &mut self,
         kg: &str,
@@ -772,8 +908,15 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let mut db = db.write().unwrap();
-        db.execute_with_rules_tuples(program)
+        // Get snapshot atomically - O(1), no lock needed
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        // Execute on snapshot - completely lock-free
+        snapshot
+            .execute_with_rules_tuples(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
     }
 
@@ -794,7 +937,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         let relations: Vec<String> = db.metadata.relations.keys().cloned().collect();
         Ok(relations)
     }
@@ -816,7 +959,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
             let desc = format!(
                 "Relation: {}\nSchema: {:?}\nTuple count: {}",
@@ -849,7 +992,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
             Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
         } else {
@@ -867,7 +1010,7 @@ impl StorageEngine {
             .get(kg)
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        let db = db.read().unwrap();
+        let db = db.read();
         let relations: Vec<(String, Vec<String>, usize)> = db
             .metadata
             .relations
@@ -969,12 +1112,20 @@ impl StorageEngine {
         let rule_catalog = RuleCatalog::new(data_dir.clone())
             .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {}", e)))?;
 
+        // Create initial snapshot from loaded data
+        let snapshot = ArcSwap::from_pointee(KnowledgeGraphSnapshot::new(
+            engine.input_data.clone(),
+            engine.input_tuples.clone(),
+            rule_catalog.all_rules(),
+        ));
+
         Ok(KnowledgeGraph {
             name: name.to_string(),
             engine,
             metadata,
             data_dir,
             rule_catalog,
+            snapshot,
         })
     }
 
@@ -1000,8 +1151,10 @@ impl StorageEngine {
         let knowledge_graphs: Vec<_> = self
             .knowledge_graphs
             .iter()
-            .map(|(name, kg)| {
-                let kg = kg.read().unwrap();
+            .map(|entry| {
+                let name = entry.key();
+                let kg_lock = entry.value();
+                let kg = kg_lock.read();
                 crate::storage::metadata::KnowledgeGraphInfo {
                     name: name.clone(),
                     created_at: kg.metadata.created_at.clone(),
@@ -1050,19 +1203,24 @@ impl StorageEngine {
         &self,
         queries: Vec<(&str, &str)>,
     ) -> StorageResult<Vec<(String, Vec<Tuple2>)>> {
-        // Use Rayon to execute queries in parallel
+        // Use Rayon to execute queries in parallel with lock-free snapshot reads
         let results: Result<Vec<_>, StorageError> = queries
             .par_iter()
             .map(|(kg, program)| {
-                // Get knowledge graph with read lock
+                // Get knowledge graph
                 let kg_lock = self
                     .knowledge_graphs
                     .get(*kg)
                     .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-                // Execute query (RwLock allows multiple concurrent readers)
-                let mut kg_guard = kg_lock.write().unwrap();
-                let results = kg_guard
+                // Get snapshot atomically - O(1)
+                let snapshot = {
+                    let kg_guard = kg_lock.read();
+                    kg_guard.snapshot()
+                };
+
+                // Execute on snapshot - completely lock-free
+                let results = snapshot
                     .execute(program)
                     .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))?;
 
@@ -1096,8 +1254,8 @@ impl StorageEngine {
 
     /// Execute multiple queries on the same knowledge graph in parallel
     ///
-    /// Note: Since Datalog queries read from the same knowledge graph, this uses
-    /// RwLock::read() to allow concurrent read access.
+    /// Uses a completely lock-free read path via snapshots. Gets the snapshot once
+    /// and shares it across all parallel queries - data is already Arc-wrapped.
     ///
     /// # Example
     /// ```text
@@ -1114,19 +1272,23 @@ impl StorageEngine {
         kg: &str,
         programs: Vec<&str>,
     ) -> StorageResult<Vec<Vec<Tuple2>>> {
-        // Verify knowledge graph exists
-        if !self.knowledge_graphs.contains_key(kg) {
-            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
-        }
+        // Get knowledge graph
+        let kg_lock = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
-        // Execute queries in parallel
+        // Get snapshot atomically - O(1), data is already Arc-wrapped for sharing
+        let snapshot = {
+            let kg_guard = kg_lock.read();
+            kg_guard.snapshot()
+        };
+
+        // Execute queries in parallel on the snapshot - completely lock-free
         let results: Result<Vec<_>, StorageError> = programs
             .par_iter()
             .map(|program| {
-                let kg_lock = self.knowledge_graphs.get(kg).unwrap();
-                let mut kg_guard = kg_lock.write().unwrap();
-
-                kg_guard
+                snapshot
                     .execute(program)
                     .map_err(|e| StorageError::Other(format!("Query execution failed: {}", e)))
             })
@@ -1160,13 +1322,37 @@ impl KnowledgeGraph {
             RuleCatalog::new(data_dir.clone()).unwrap()
         });
 
+        // Create initial empty snapshot
+        let snapshot = ArcSwap::from_pointee(KnowledgeGraphSnapshot::empty());
+
         KnowledgeGraph {
             name: name.clone(),
             engine: DatalogEngine::new(),
             metadata: KnowledgeGraphMetadata::new(name),
             data_dir,
             rule_catalog,
+            snapshot,
         }
+    }
+
+    /// Publish a new snapshot atomically
+    ///
+    /// Called after data modifications to make changes visible to readers.
+    /// This is O(1) - just an atomic pointer swap.
+    fn publish_snapshot(&self) {
+        let new_snapshot = KnowledgeGraphSnapshot::new(
+            self.engine.input_data.clone(),
+            self.engine.input_tuples.clone(),
+            self.rule_catalog.all_rules(),
+        );
+        self.snapshot.store(Arc::new(new_snapshot));
+    }
+
+    /// Get the current snapshot for lock-free reads
+    ///
+    /// Returns an Arc to the current snapshot. This is O(1) and lock-free.
+    pub fn snapshot(&self) -> Arc<KnowledgeGraphSnapshot> {
+        self.snapshot.load_full()
     }
 
     /// Insert tuples into in-memory state only
@@ -1203,6 +1389,9 @@ impl KnowledgeGraph {
         // Update metadata
         self.metadata
             .add_relation(relation.to_string(), schema, tuple_count);
+
+        // Publish new snapshot for lock-free reads
+        self.publish_snapshot();
 
         (new_count, dup_count)
     }
@@ -1246,29 +1435,37 @@ impl KnowledgeGraph {
         self.metadata
             .add_relation(relation.to_string(), schema, tuple_count);
 
+        // Publish new snapshot for lock-free reads
+        self.publish_snapshot();
+
         (new_count, dup_count)
     }
 
     /// Delete tuples from in-memory state only
     ///
     /// Persistence is handled by StorageEngine via the persist layer.
-    fn delete_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple2]) {
-        // Get schema (immutable borrow)
+    /// Delete tuples from in-memory state and return the count of actually deleted tuples
+    fn delete_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple2]) -> usize {
+        // Get schema from metadata (which has the correct arity from insert time)
+        // Avoid using catalog which may not have the schema for base facts
         let schema = self
-            .engine
-            .catalog()
-            .get_schema(relation)
-            .map(|s| s.to_vec())
+            .metadata
+            .relations
+            .get(relation)
+            .map(|r| r.schema.clone())
             .unwrap_or_else(|| vec!["col0".to_string(), "col1".to_string()]);
 
         let mut found = false;
         let mut final_count = 0;
+        let mut deleted_count = 0;
 
         // Update in-memory state (legacy format - input_data)
         if let Some(existing) = self.engine.input_data.get_mut(relation) {
+            let count_before = existing.len();
             // Remove tuples
             existing.retain(|tuple| !tuples_to_remove.contains(tuple));
             final_count = existing.len();
+            deleted_count = count_before - final_count;
             found = true;
         }
 
@@ -1280,9 +1477,12 @@ impl KnowledgeGraph {
                 .map(|&(a, b)| crate::value::Tuple::from_pair(a, b))
                 .collect();
 
+            let count_before = existing.len();
             // Remove tuples
             existing.retain(|tuple| !tuples_as_tuple.contains(tuple));
             final_count = existing.len();
+            // Use the larger of the two deleted counts (in case only one format has data)
+            deleted_count = deleted_count.max(count_before - final_count);
             found = true;
         }
 
@@ -1290,30 +1490,39 @@ impl KnowledgeGraph {
         if found {
             self.metadata
                 .add_relation(relation.to_string(), schema, final_count);
+            // Publish new snapshot for lock-free reads
+            self.publish_snapshot();
         }
+
+        deleted_count
     }
 
     /// Delete tuples (Tuple type) from in-memory state only
     ///
     /// This is the production API for deleting arbitrary-arity tuples.
     /// Persistence is handled by StorageEngine via the persist layer.
-    fn delete_tuples_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple]) {
-        // Get schema (immutable borrow)
+    /// Returns the count of actually deleted tuples.
+    fn delete_tuples_in_memory(&mut self, relation: &str, tuples_to_remove: &[Tuple]) -> usize {
+        // Get schema from metadata (which has the correct arity from insert time)
+        // Avoid using catalog which may not have the schema for base facts
         let schema = self
-            .engine
-            .catalog()
-            .get_schema(relation)
-            .map(|s| s.to_vec())
+            .metadata
+            .relations
+            .get(relation)
+            .map(|r| r.schema.clone())
             .unwrap_or_else(|| vec!["col0".to_string(), "col1".to_string()]);
 
         let mut found = false;
         let mut final_count = 0;
+        let mut deleted_count = 0;
 
         // Update production format (input_tuples)
         if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
+            let count_before = existing.len();
             // Remove tuples
             existing.retain(|tuple| !tuples_to_remove.contains(tuple));
             final_count = existing.len();
+            deleted_count = count_before - final_count;
             found = true;
         }
 
@@ -1326,9 +1535,12 @@ impl KnowledgeGraph {
                 .collect();
 
             if !tuples_as_tuple2.is_empty() {
+                let count_before = existing.len();
                 // Remove tuples
                 existing.retain(|tuple| !tuples_as_tuple2.contains(tuple));
                 final_count = existing.len();
+                // Use the larger of the two deleted counts (in case only one format has data)
+                deleted_count = deleted_count.max(count_before - final_count);
                 found = true;
             }
         }
@@ -1337,12 +1549,11 @@ impl KnowledgeGraph {
         if found {
             self.metadata
                 .add_relation(relation.to_string(), schema, final_count);
+            // Publish new snapshot for lock-free reads
+            self.publish_snapshot();
         }
-    }
 
-    /// Execute a Datalog program
-    fn execute(&mut self, program: &str) -> Result<Vec<Tuple2>, String> {
-        self.engine.execute(program)
+        deleted_count
     }
 
     /// Get knowledge graph name
@@ -1365,12 +1576,16 @@ impl KnowledgeGraph {
         &mut self,
         rule_def: &RuleDef,
     ) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
-        self.rule_catalog.register_rule(rule_def)
+        let result = self.rule_catalog.register_rule(rule_def)?;
+        self.publish_snapshot();
+        Ok(result)
     }
 
     /// Drop a view
     pub fn drop_rule(&mut self, name: &str) -> Result<(), String> {
-        self.rule_catalog.drop(name)
+        self.rule_catalog.drop(name)?;
+        self.publish_snapshot();
+        Ok(())
     }
 
     /// List all views
@@ -1391,7 +1606,9 @@ impl KnowledgeGraph {
     /// Clear all rules from a view for editing/redefining
     /// The view remains registered but with no rules, ready for new rule registration
     pub fn clear_rule(&mut self, name: &str) -> Result<(), String> {
-        self.rule_catalog.clear_rules(name)
+        self.rule_catalog.clear_rules(name)?;
+        self.publish_snapshot();
+        Ok(())
     }
 
     /// Replace a specific rule in a view by index (0-based)
@@ -1401,12 +1618,27 @@ impl KnowledgeGraph {
         index: usize,
         new_rule: crate::statement::SerializableRule,
     ) -> Result<(), String> {
-        self.rule_catalog.replace_rule(name, index, new_rule)
+        self.rule_catalog.replace_rule(name, index, new_rule)?;
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// Remove a specific clause from a rule by index (0-based)
+    /// Returns true if the entire rule was deleted (last clause removed)
+    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
+        let result = self.rule_catalog.remove_rule_clause(name, index)?;
+        self.publish_snapshot();
+        Ok(result)
     }
 
     /// Get the number of rules in a view
     pub fn rule_count(&self, name: &str) -> Option<usize> {
         self.rule_catalog.rule_count(name)
+    }
+
+    /// Get the arity (number of arguments) of a rule/view
+    pub fn rule_arity(&self, name: &str) -> Option<usize> {
+        self.rule_catalog.rule_arity(name)
     }
 
     /// Execute a query with views prepended
@@ -1828,8 +2060,8 @@ mod tests {
 
         // Debug: print the combined program
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
-            let kg = kg.read().unwrap();
+            let kg = storage.knowledge_graphs.get("default").expect("default KG should exist");
+            let kg = kg.read();
             let rule_defs = kg.rule_catalog.all_rules();
             println!("Number of view rules: {}", rule_defs.len());
             for (i, rule) in rule_defs.iter().enumerate() {

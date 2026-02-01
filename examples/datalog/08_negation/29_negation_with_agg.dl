@@ -1,0 +1,21 @@
+% Test: Negation combined with aggregation
+% Expected: Negation and aggregation work together
+% Category: 08_negation
+% Priority: P1 - Advanced negation
+
+.kg create test_neg_agg
+.kg use test_neg_agg
+
+% Sales data by category
++sales[(1, "electronics", 1000), (2, "electronics", 2000), (3, "clothing", 500), (4, "clothing", 750)].
+
+% Categories to exclude
++excluded[("food")].
+
+% Total sales per category, excluding some categories
+cat_sales(Cat, <SUM:Amt>) :- sales(_, Cat, Amt), !excluded(Cat).
+
+?- cat_sales(Cat, Total).
+
+.kg use default
+.kg drop test_neg_agg

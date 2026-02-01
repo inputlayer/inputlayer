@@ -1,0 +1,21 @@
+% Test: Mixed session and persistent rules
+% Expected: Can mix session and persistent rules
+% Category: 25_unified_prefix
+% Priority: P1 - Prefix semantics
+
+.kg create test_mixed_rules
+.kg use test_mixed_rules
+
++base[(1, 10), (2, 20), (3, 30)].
+
+% Persistent intermediate
++step1(X, Y) :- base(X, Y), Y > 10.
+
+% Session uses persistent
+step2(X, Z) :- step1(X, Y), Z = Y + 5.
+
+?- step1(X, Y).
+?- step2(X, Z).
+
+.kg use default
+.kg drop test_mixed_rules

@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_join_comp
+Knowledge graph 'test_join_comp' created.
+Switched to knowledge graph: test_join_comp
+> .kg use test_join_comp
+Switched to knowledge graph: test_join_comp
+> +items[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'items'.
+> +multipliers[(10, 2), (20, 3), (30, 4)].
+Inserted 3 fact(s) into 'multipliers'.
+> joined(Id, Val, M) :- items(Id, V), multipliers(V, M).
+Script error: Query execution failed: Unsafe rule: Atom { relation: "joined", args: [Variable("Id"), Variable("Val"), Variable("M")] }. Variables ["Val"] in head do not appear in positive body atoms.

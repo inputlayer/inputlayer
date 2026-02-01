@@ -1,0 +1,14 @@
+% Test: Empty batch insert
+% Expected: Handle empty insert gracefully
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_empty_batch
+.kg use test_empty_batch
+
++data[].
+
+?- data(X).
+
+.kg use default
+.kg drop test_empty_batch

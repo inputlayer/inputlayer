@@ -155,3 +155,66 @@ pub async fn delete_rule(
         error: None,
     }))
 }
+
+/// Delete result
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DeleteClauseResult {
+    /// True if the entire rule was deleted (last clause removed)
+    pub rule_deleted: bool,
+    /// Message describing what happened
+    pub message: String,
+}
+
+/// Delete a specific clause from a rule
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/rules/{name}/{index}",
+    tag = "rules",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("name" = String, Path, description = "Rule name"),
+        ("index" = usize, Path, description = "Clause index (1-based)")
+    ),
+    responses(
+        (status = 200, description = "Clause removed", body = ApiResponse<DeleteClauseResult>),
+        (status = 404, description = "Rule or clause not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn delete_rule_clause(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path((kg, name, index)): Path<(String, String, usize)>,
+) -> Result<Json<ApiResponse<DeleteClauseResult>>, RestError> {
+    let mut storage = handler.get_storage_mut();
+
+    // Validate index (1-based from user)
+    if index == 0 {
+        return Err(RestError::bad_request(
+            "Index must be 1 or greater (1-based indexing)".to_string(),
+        ));
+    }
+    let zero_based_index = index - 1;
+
+    // Switch to target knowledge graph
+    storage
+        .use_knowledge_graph(&kg)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{}' not found: {}", kg, e)))?;
+
+    let rule_deleted = storage
+        .remove_rule_clause(&name, zero_based_index)
+        .map_err(|e| RestError::not_found(format!("{}", e)))?;
+
+    let message = if rule_deleted {
+        format!(
+            "Clause {} removed from rule '{}'. Rule completely deleted (no clauses remaining).",
+            index, name
+        )
+    } else {
+        format!("Clause {} removed from rule '{}'.", index, name)
+    };
+
+    Ok(Json(ApiResponse::success(DeleteClauseResult {
+        rule_deleted,
+        message,
+    })))
+}

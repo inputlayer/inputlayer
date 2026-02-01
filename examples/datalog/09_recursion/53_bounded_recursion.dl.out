@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bounded
+Knowledge graph 'test_bounded' created.
+Switched to knowledge graph: test_bounded
+> .kg use test_bounded
+Switched to knowledge graph: test_bounded
+> +edge[("a", "b"), ("b", "c"), ("c", "d"), ("d", "e"), ("e", "f")].
+Inserted 5 fact(s) into 'edge'.
+> +limited_path(X, Y, 1) :- edge(X, Y).
+Rule 'limited_path' registered.
+> +limited_path(X, Z, D) :- limited_path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3.
+Script error: Failed to register rule: Unsafe rule 'limited_path': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

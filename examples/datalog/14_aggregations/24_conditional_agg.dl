@@ -1,0 +1,27 @@
+% Test: Conditional aggregation
+% Expected: Can aggregate with conditions
+% Category: 14_aggregations
+% Priority: P1 - Aggregation patterns
+
+.kg create test_cond_agg
+.kg use test_cond_agg
+
++transactions[(1, "credit", 100), (2, "debit", 50), (3, "credit", 200), (4, "debit", 75), (5, "credit", 150)].
+
+% Sum credits only
+credit_sum(<SUM:Amt>) :- transactions(_, "credit", Amt).
+
+?- credit_sum(S).
+
+% Sum debits only
+debit_sum(<SUM:Amt>) :- transactions(_, "debit", Amt).
+
+?- debit_sum(S).
+
+% Count by type
+type_count(Type, <COUNT:Amt>) :- transactions(_, Type, Amt).
+
+?- type_count(Type, Count).
+
+.kg use default
+.kg drop test_cond_agg

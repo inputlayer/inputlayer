@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_rec
+Knowledge graph 'test_neg_rec' created.
+Switched to knowledge graph: test_neg_rec
+> .kg use test_neg_rec
+Switched to knowledge graph: test_neg_rec
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'edge'.
+> +reach(A, B) :- edge(A, B).
+Rule 'reach' registered.
+> +reach(A, C) :- reach(A, B), edge(B, C).
+Rule 'reach' registered.
+> +all_nodes(X) :- edge(X, _).
+Rule 'all_nodes' registered.
+> +all_nodes(X) :- edge(_, X).
+Rule 'all_nodes' registered.
+> not_from_1(X) :- all_nodes(X), !reach(1, X), X != 1.
+No results.
+(session: 1 rule(s))
+> ?- reach(1, X).
+No results.
+> ?- not_from_1(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_rec
+Knowledge graph 'test_neg_rec' dropped.

@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_asymm
+Knowledge graph 'test_asymm' created.
+Switched to knowledge graph: test_asymm
+> .kg use test_asymm
+Switched to knowledge graph: test_asymm
+> +narrow[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'narrow'.
+> +wide[(1, "a", 100), (2, "b", 200), (4, "d", 400)].
+Inserted 3 fact(s) into 'wide'.
+> joined(Id, Name, Val) :- narrow(Id), wide(Id, Name, Val).
+2 rows:
+  (1, "a", 100)
+  (2, "b", 200)
+(session: 1 rule(s))
+> ?- joined(Id, Name, Val).
+2 rows:
+  (1, "a", 100)
+  (2, "b", 200)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_asymm
+Knowledge graph 'test_asymm' dropped.

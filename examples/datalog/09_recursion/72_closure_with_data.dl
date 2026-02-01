@@ -1,0 +1,20 @@
+% Test: Transitive closure carrying data
+% Expected: Propagate data through closure
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_closure_data
+.kg use test_closure_data
+
++edge[(1, 2, "road"), (2, 3, "highway"), (3, 4, "road")].
+
+% Direct connection with type
++connected(X, Y, Type) :- edge(X, Y, Type).
+
+% Transitive (simplified - just propagates last edge type)
++connected(X, Z, Type) :- connected(X, Y, _), edge(Y, Z, Type).
+
+?- connected(X, Y, Type).
+
+.kg use default
+.kg drop test_closure_data

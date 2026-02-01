@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_not_exists
+Knowledge graph 'test_not_exists' created.
+Switched to knowledge graph: test_not_exists
+> .kg use test_not_exists
+Switched to knowledge graph: test_not_exists
+> +products[(1, "Widget"), (2, "Gadget"), (3, "Gizmo")].
+Inserted 3 fact(s) into 'products'.
+> +orders[(101, 1), (102, 1)].
+Inserted 2 fact(s) into 'orders'.
+> no_orders(ProdId, Name) :- products(ProdId, Name), !orders(_, ProdId).
+2 rows:
+  (2, "Gadget")
+  (3, "Gizmo")
+(session: 1 rule(s))
+> ?- no_orders(Id, N).
+2 rows:
+  (2, "Gadget")
+  (3, "Gizmo")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_not_exists
+Knowledge graph 'test_not_exists' dropped.

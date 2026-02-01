@@ -1,0 +1,19 @@
+% Test: Shortest path in unweighted graph
+% Expected: Find minimum hop count
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_shortest
+.kg use test_shortest
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("a", "c"), ("a", "d")].
+
+% Path with hop count
++path(X, Y, 1) :- edge(X, Y).
++path(X, Z, N) :- path(X, Y, M), edge(Y, Z), N = M + 1, N < 10.
+
+% Find all paths from a
+?- path("a", Y, N).
+
+.kg use default
+.kg drop test_shortest

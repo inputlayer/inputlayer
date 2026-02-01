@@ -1,0 +1,21 @@
+% Test: Underscore as wildcard
+% Expected: Underscore matches any value
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_wildcard
+.kg use test_wildcard
+
++data[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
+
+% Use underscore to ignore columns
+ids_only(Id) :- data(Id, _, _).
+
+% Filter on one column, ignore others
+category_a(Id) :- data(Id, "a", _).
+
+?- ids_only(Id).
+?- category_a(Id).
+
+.kg use default
+.kg drop test_wildcard

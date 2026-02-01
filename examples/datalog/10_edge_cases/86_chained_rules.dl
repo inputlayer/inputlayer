@@ -1,0 +1,19 @@
+% Test: Chain of dependent rules
+% Expected: Rules compute in correct order
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_chain
+.kg use test_chain
+
++base[(1,), (2,), (3,)].
+
+% Chain: base -> step1 -> step2 -> step3
+step1(X, Y) :- base(X), Y = X + 1.
+step2(X, Y) :- step1(X, A), Y = A * 2.
+step3(X, Y) :- step2(X, B), Y = B + 100.
+
+?- step3(X, Y).
+
+.kg use default
+.kg drop test_chain

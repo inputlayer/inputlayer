@@ -1,0 +1,20 @@
+% Test: Self-join pattern
+% Expected: Join relation with itself
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_self_join
+.kg use test_self_join
+
++friends[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave"), ("Alice", "Carol")].
+
+% Friends of friends (self-join)
+friends_of_friends(A, C) :-
+    friends(A, B),
+    friends(B, C),
+    A != C.
+
+?- friends_of_friends(A, C).
+
+.kg use default
+.kg drop test_self_join

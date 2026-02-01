@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_strlen
+Knowledge graph 'test_strlen' created.
+Switched to knowledge graph: test_strlen
+> .kg use test_strlen
+Switched to knowledge graph: test_strlen
+> +words[("",), ("a",), ("hello",), ("hello world",)].
+Inserted 4 fact(s) into 'words'.
+> len_result(S, L) :- words(S), L = LEN(S).
+Script error: Parse error: Invalid term: 'LEN(S)'

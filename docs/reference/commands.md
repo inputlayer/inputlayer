@@ -157,11 +157,33 @@ Clauses:
 
 ### `.rule drop <name>`
 
-Delete a rule entirely.
+Delete a rule entirely (removes all clauses).
 
 ```
 .rule drop reachable
 ```
+
+### `.rule remove <name> <index>`
+
+Remove a specific clause from a rule by index (1-based).
+
+```
+.rule remove reachable 2
+```
+
+**Output:**
+```
+Clause 2 removed from rule 'reachable'.
+```
+
+**Note:** If the last clause is removed, the entire rule is deleted:
+```
+Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining).
+```
+
+**Errors:**
+- If clause index is out of bounds: `Clause index 5 out of bounds. Rule 'reachable' has 2 clause(s).`
+- If rule doesn't exist: `Rule 'nonexistent' does not exist`
 
 ### `.rule clear <name>`
 

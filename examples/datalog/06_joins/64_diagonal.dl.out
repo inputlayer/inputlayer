@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diag
+Knowledge graph 'test_diag' created.
+Switched to knowledge graph: test_diag
+> .kg use test_diag
+Switched to knowledge graph: test_diag
+> +matrix[(1, 1, 10), (1, 2, 20), (2, 2, 30), (3, 3, 40), (2, 3, 50)].
+Inserted 5 fact(s) into 'matrix'.
+> diagonal(Row, Val) :- matrix(Row, Row, Val).
+5 rows:
+  (1, 10)
+  (1, 20)
+  (2, 30)
+  (2, 50)
+  (3, 40)
+(session: 1 rule(s))
+> ?- diagonal(R, V).
+5 rows:
+  (1, 10)
+  (1, 20)
+  (2, 30)
+  (2, 50)
+  (3, 40)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_diag
+Knowledge graph 'test_diag' dropped.

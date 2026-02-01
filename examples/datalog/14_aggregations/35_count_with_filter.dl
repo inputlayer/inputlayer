@@ -1,0 +1,22 @@
+% Test: COUNT with filter condition
+% Expected: Count only matching rows
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_filter
+.kg use test_count_filter
+
++items[(1, "A", 10), (2, "B", 20), (3, "A", 30), (4, "B", 40), (5, "A", 50)].
+
+% Count items by category
++count_by_cat(Cat, <COUNT:Id>) :- items(Id, Cat, _).
+
+?- count_by_cat(Cat, C).
+
+% Count items with value > 25
++count_high(<COUNT:Id>) :- items(Id, _, Val), Val > 25.
+
+?- count_high(C).
+
+.kg use default
+.kg drop test_count_filter

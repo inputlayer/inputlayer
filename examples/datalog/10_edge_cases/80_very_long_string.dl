@@ -1,0 +1,16 @@
+% Test: Very long string value
+% Expected: Handle long strings
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_long_str
+.kg use test_long_str
+
++data[(1, "this_is_a_very_long_string_that_goes_on_and_on_and_on_for_quite_some_time_to_test_handling_of_longer_values")].
+
+len_check(Id, S, L) :- data(Id, S), L = LEN(S).
+
+?- len_check(Id, S, L).
+
+.kg use default
+.kg drop test_long_str

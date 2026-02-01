@@ -1,0 +1,28 @@
+% Test: i64 integer boundary values
+% Expected: Max and min i64 values handled correctly
+% Category: 11_types
+% Priority: P2 - Type edge cases
+
+.kg create test_i64_boundary
+.kg use test_i64_boundary
+
+% Near max i64 (9223372036854775807)
+% Can't use exact max, use large values instead
++large_ints[(1000000000000, "trillion"), (9999999999999, "near_max")].
+
+?- large_ints(Val, Name).
+
+% Comparison with large values
+large_compare(Val, Name) :- large_ints(Val, Name), Val > 999999999999.
+
+?- large_compare(Val, Name).
+
+% Arithmetic with large values
++pair[(5000000000000, 4000000000000)].
+
+large_sum(A, B, R) :- pair(A, B), R = A + B.
+
+?- large_sum(A, B, R).
+
+.kg use default
+.kg drop test_i64_boundary

@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_soft_del
+Knowledge graph 'test_soft_del' created.
+Switched to knowledge graph: test_soft_del
+> .kg use test_soft_del
+Switched to knowledge graph: test_soft_del
+> +items[(1, "a"), (2, "b"), (3, "c")].
+Inserted 3 fact(s) into 'items'.
+> +deleted[].
+Inserted 0 fact(s) into 'deleted'.
+> ?- items(Id, Name).
+3 rows:
+  (1, "a")
+  (2, "b")
+  (3, "c")
+> +deleted[(1,), (2,)].
+Inserted 2 fact(s) into 'deleted'.
+> active(Id, Name) :- items(Id, Name), !deleted(Id).
+1 rows:
+  (3, "c")
+(session: 1 rule(s))
+> ?- active(Id, Name).
+1 rows:
+  (3, "c")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_soft_del
+Knowledge graph 'test_soft_del' dropped.

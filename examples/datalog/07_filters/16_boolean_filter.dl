@@ -1,0 +1,17 @@
+% Test: Boolean value filter
+% Expected: Filter on true/false
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_bool_filter
+.kg use test_bool_filter
+
++items[(1, true), (2, false), (3, true), (4, false)].
+
+% Filter enabled items
+enabled(Id) :- items(Id, true).
+
+?- enabled(Id).
+
+.kg use default
+.kg drop test_bool_filter

@@ -1,0 +1,18 @@
+% Test: Not exists filter
+% Expected: Filter by absence in another relation
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_not_exists
+.kg use test_not_exists
+
++products[(1, "Widget"), (2, "Gadget"), (3, "Gizmo")].
++orders[(101, 1), (102, 1)].
+
+% Products with no orders
+no_orders(ProdId, Name) :- products(ProdId, Name), !orders(_, ProdId).
+
+?- no_orders(Id, N).
+
+.kg use default
+.kg drop test_not_exists

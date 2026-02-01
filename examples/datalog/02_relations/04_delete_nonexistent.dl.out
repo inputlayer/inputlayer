@@ -17,14 +17,14 @@ Inserted 3 fact(s) into 'edge'.
   (2, 3)
   (3, 4)
 > -edge(99, 100).
-Deleted 1 facts from 'edge'.
+Deleted 0 facts from 'edge'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)
   (2, 3)
   (3, 4)
 > -edge(X, Y) :- edge(X, Y), X > 100.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 0 fact(s) deleted from 'edge'.
 > ?- edge(X, Y).
 3 rows:
   (1, 2)

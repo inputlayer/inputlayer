@@ -1,0 +1,21 @@
+% Test: Duplicate column in output
+% Expected: Same value can appear multiple times in result
+% Category: 21_query_features
+% Priority: P1 - Query feature completeness
+
+.kg create test_dup_col
+.kg use test_dup_col
+
+% Sample data
++pairs[(1, 10), (2, 20), (3, 30)].
+
+% Duplicate first column twice
++dup_first(X, Y, X) :- pairs(X, Y).
+?- dup_first(A, B, C).
+
+% Triple the value column
++triple_val(X, Y, Y, Y) :- pairs(X, Y).
+?- triple_val(A, B, C, D).
+
+.kg use default
+.kg drop test_dup_col

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cumulative
+Knowledge graph 'test_cumulative' created.
+Switched to knowledge graph: test_cumulative
+> .kg use test_cumulative
+Switched to knowledge graph: test_cumulative
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'data'.
+> +cumulative(Id, <SUM:Val>) :- data(Id, _), data(OtherId, Val), OtherId <= Id.
+Script error: Parse error: Invalid term: '<SUM:Val>'

@@ -1,0 +1,21 @@
+% Test: Ancestor relation
+% Expected: Transitive parent closure
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_ancestor
+.kg use test_ancestor
+
++parent[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave")].
+
+% Direct parent is ancestor
++ancestor(A, D) :- parent(A, D).
+
+% Transitive
++ancestor(A, D) :- parent(A, C), ancestor(C, D).
+
+% Ancestors of Dave
+?- ancestor(A, "Dave").
+
+.kg use default
+.kg drop test_ancestor

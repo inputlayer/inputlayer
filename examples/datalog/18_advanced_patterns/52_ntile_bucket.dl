@@ -1,0 +1,21 @@
+% Test: N-tile bucketing pattern
+% Expected: Divide data into equal buckets
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_ntile
+.kg use test_ntile
+
++scores[(1, 100), (2, 85), (3, 92), (4, 78), (5, 88)].
+
+% Categorize into high/medium/low based on score
+high(Id, Score) :- scores(Id, Score), Score >= 90.
+medium(Id, Score) :- scores(Id, Score), Score >= 80, Score < 90.
+low(Id, Score) :- scores(Id, Score), Score < 80.
+
+?- high(Id, Score).
+?- medium(Id, Score).
+?- low(Id, Score).
+
+.kg use default
+.kg drop test_ntile

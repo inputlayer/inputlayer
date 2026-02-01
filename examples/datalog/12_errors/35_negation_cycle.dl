@@ -1,0 +1,18 @@
+% Test: Negation cycle detection
+% Expected: Error for mutual negation cycle
+% Category: 12_errors
+% Priority: P1 - Error handling
+
+.kg create test_neg_cycle
+.kg use test_neg_cycle
+
++base(1).
+
+% Mutual negation cycle: a depends on !b, b depends on !a
+a(X) :- base(X), !b(X).
+b(X) :- base(X), !a(X).
+
+?- a(X).
+
+.kg use default
+.kg drop test_neg_cycle

@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_between
+Knowledge graph 'test_between' created.
+Switched to knowledge graph: test_between
+> .kg use test_between
+Switched to knowledge graph: test_between
+> +data[(1, 5), (2, 15), (3, 25), (4, 35), (5, 45), (6, 55)].
+Inserted 6 fact(s) into 'data'.
+> between_10_40(Id, Val) :- data(Id, Val), Val >= 10, Val <= 40.
+3 rows:
+  (2, 15)
+  (3, 25)
+  (4, 35)
+(session: 1 rule(s))
+> ?- between_10_40(Id, Val).
+3 rows:
+  (2, 15)
+  (3, 25)
+  (4, 35)
+> outside_range(Id, Val) :- data(Id, Val), Val < 10.
+1 rows:
+  (1, 5)
+(session: 2 rule(s))
+> outside_range(Id, Val) :- data(Id, Val), Val > 40.
+3 rows:
+  (1, 5)
+  (5, 45)
+  (6, 55)
+(session: 3 rule(s))
+> ?- outside_range(Id, Val).
+3 rows:
+  (1, 5)
+  (5, 45)
+  (6, 55)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_between
+Knowledge graph 'test_between' dropped.

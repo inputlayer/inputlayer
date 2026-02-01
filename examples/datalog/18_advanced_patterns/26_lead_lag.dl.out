@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lead_lag
+Knowledge graph 'test_lead_lag' created.
+Switched to knowledge graph: test_lead_lag
+> .kg use test_lead_lag
+Switched to knowledge graph: test_lead_lag
+> +events[(1, 100), (2, 150), (3, 120), (4, 180), (5, 90)].
+Inserted 5 fact(s) into 'events'.
+> lead_val(Id, Val, NextVal) :- events(Id, Val), events(NextId, NextVal), NextId = Id + 1.
+Script error: Query execution failed: Unsupported comparison: Variable("NextId") Equal Arithmetic(Binary { op: Add, left: Variable("Id"), right: Constant(1) })

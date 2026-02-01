@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_full_outer
+Knowledge graph 'test_full_outer' created.
+Switched to knowledge graph: test_full_outer
+> .kg use test_full_outer
+Switched to knowledge graph: test_full_outer
+> +left_t[(1, "A"), (2, "B")].
+Inserted 2 fact(s) into 'left_t'.
+> +right_t[(2, 100), (3, 200)].
+Inserted 2 fact(s) into 'right_t'.
+> +inner_matched(K, L, R) :- left_t(K, L), right_t(K, R).
+Rule 'inner_matched' registered.
+> +left_only(K, L) :- left_t(K, L), !right_t(K, _).
+Rule 'left_only' registered.
+> +right_only(K, R) :- right_t(K, R), !left_t(K, _).
+Rule 'right_only' registered.
+> ?- inner_matched(K, L, R).
+1 rows:
+  (2, 100, "B")
+> ?- left_only(K, L).
+1 rows:
+  (1, "A")
+> ?- right_only(K, R).
+1 rows:
+  (3, 200)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_full_outer
+Knowledge graph 'test_full_outer' dropped.

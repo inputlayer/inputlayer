@@ -1,0 +1,20 @@
+% Test: Percentile approximation pattern
+% Expected: Approximate percentile using counts
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_pct
+.kg use test_pct
+
++scores[(1, 50), (2, 60), (3, 70), (4, 80), (5, 90), (6, 100)].
+
+% Count scores below each score (rank-like for percentile)
+rank_position(Id, Score, <COUNT:S2>) :-
+    scores(Id, Score),
+    scores(_, S2),
+    S2 < Score.
+
+?- rank_position(Id, Score, Rank).
+
+.kg use default
+.kg drop test_pct

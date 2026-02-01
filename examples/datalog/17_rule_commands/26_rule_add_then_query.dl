@@ -1,0 +1,16 @@
+% Test: Add rule then immediately query
+% Expected: Rule results available after definition
+% Category: 17_rule_commands
+% Priority: P2 - Rule management
+
+.kg create test_add_query
+.kg use test_add_query
+
++facts[(1,), (2,), (3,)].
+
++derived(X, Y) :- facts(X), Y = X * 10.
+
+?- derived(X, Y).
+
+.kg use default
+.kg drop test_add_query

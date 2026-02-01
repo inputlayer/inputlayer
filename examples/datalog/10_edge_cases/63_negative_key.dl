@@ -1,0 +1,19 @@
+% Test: Negative number as key
+% Expected: Negative integers work as keys
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_neg_key
+.kg use test_neg_key
+
++data[(-1, "neg_one"), (0, "zero"), (1, "one")].
+
+?- data(Key, Val).
+
+% Filter negative
+negative(Key, Val) :- data(Key, Val), Key < 0.
+
+?- negative(Key, Val).
+
+.kg use default
+.kg drop test_neg_key

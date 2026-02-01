@@ -1,0 +1,17 @@
+% Test: Vector in rule body
+% Expected: Access vectors through rules
+% Category: 16_vectors
+% Priority: P2 - Vector patterns
+
+.kg create test_vec_rule
+.kg use test_vec_rule
+
++data[(1, [1, 2, 3]), (2, [4, 5, 6])].
+
+% Project out the vector
+has_vector(Id, V) :- data(Id, V).
+
+?- has_vector(Id, V).
+
+.kg use default
+.kg drop test_vec_rule

@@ -1,0 +1,30 @@
+% Test: Rule remove preserves clause order
+% Expected: After removing a clause, remaining clauses stay in order
+% Category: 17_rule_commands
+% Priority: P1 - Rule management
+
+.kg create test_remove_order
+.kg use test_remove_order
+
++nums[(1,), (2,), (3,)].
+
+% Create multi-clause rule (3 clauses)
++output(X, 10) :- nums(X), X = 1.
++output(X, 20) :- nums(X), X = 2.
++output(X, 30) :- nums(X), X = 3.
+
+?- output(X, Y).
+
+% Show rule definition
+.rule def output
+
+% Remove middle clause (clause 2)
+.rule remove output 2
+
+% Remaining clauses should be in order
+.rule def output
+
+?- output(X, Y).
+
+.kg use default
+.kg drop test_remove_order

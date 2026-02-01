@@ -1,0 +1,16 @@
+% Test: Numeric strings vs numbers
+% Expected: Distinguish "123" from 123
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_num_str
+.kg use test_num_str
+
++str_data[("123",), ("456",)].
++int_data[(123,), (456,)].
+
+?- str_data(S).
+?- int_data(I).
+
+.kg use default
+.kg drop test_num_str

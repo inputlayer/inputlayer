@@ -1,0 +1,13 @@
+% Test: Empty rule body error
+% Expected: Error - rules must have at least one body predicate
+% Category: 12_errors
+% Priority: P1 High - Safety check
+
+.kg create test_empty_body
+.kg use test_empty_body
+
+% Try to create a rule with empty body - should error
++foo(X) :- .
+
+.kg use default
+.kg drop test_empty_body

@@ -1,0 +1,27 @@
+% Test: Join combined with negation
+% Expected: Joins and negation work together
+% Category: 06_joins
+% Priority: P1 - Join patterns
+
+.kg create test_join_neg
+.kg use test_join_neg
+
++customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++orders[(1, 100), (1, 200), (2, 50)].
++vip[(1)].
+
+% Customers with orders, excluding VIP
+non_vip_with_orders(Name, Amount) :-
+    customers(Id, Name),
+    orders(Id, Amount),
+    !vip(Id).
+
+?- non_vip_with_orders(Name, Amount).
+
+% Customers without any orders
+no_orders(Name) :- customers(Id, Name), !orders(Id, _).
+
+?- no_orders(Name).
+
+.kg use default
+.kg drop test_join_neg

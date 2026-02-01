@@ -1,0 +1,17 @@
+% Test: Parentheses in expressions
+% Expected: Grouping affects result
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_parens
+.kg use test_parens
+
++val[(10,)].
+
+% Without and with parentheses
+result(V, R1, R2) :- val(V), R1 = V + 2 * 3, R2 = (V + 2) * 3.
+
+?- result(V, R1, R2).
+
+.kg use default
+.kg drop test_parens

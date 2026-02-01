@@ -1,0 +1,18 @@
+% Test: Clamp function pattern
+% Expected: Limit values to range using min/max
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_clamp
+.kg use test_clamp
+
++vals[(-5,), (0,), (5,), (15,), (25,)].
+
+% Clamp to range [0, 10] using nested min/max
+% clamp(x, lo, hi) = max(lo, min(x, hi))
+clamped(X, Y) :- vals(X), Y = max_int64(0, min_int64(X, 10)).
+
+?- clamped(X, Y).
+
+.kg use default
+.kg drop test_clamp

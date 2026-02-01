@@ -1,0 +1,18 @@
+% Test: Recursion with filter condition
+% Expected: Filter applies at each step
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_rec_filter
+.kg use test_rec_filter
+
++edge[("a", "b", 1), ("b", "c", 2), ("c", "d", 3), ("d", "e", 4)].
+
+% Path only through low-weight edges
++light_path(X, Y) :- edge(X, Y, W), W <= 2.
++light_path(X, Z) :- light_path(X, Y), edge(Y, Z, W), W <= 2.
+
+?- light_path(X, Y).
+
+.kg use default
+.kg drop test_rec_filter

@@ -1,0 +1,25 @@
+% Test: Combined multiple filters
+% Expected: All filter conditions applied correctly
+% Category: 07_filters
+% Priority: P1 - Filter completeness
+
+.kg create test_combined_filters
+.kg use test_combined_filters
+
+% Sample data
++products[(1, "Widget", 10.0, 100), (2, "Gadget", 25.0, 50), (3, "Gizmo", 15.0, 75), (4, "Thing", 30.0, 25)].
+
+% Multiple equality filters
+?- products(Id, Name, Price, Stock), Price = 10.0.
+
+% Multiple inequality filters (AND)
+?- products(Id, Name, Price, Stock), Price > 10.0, Stock > 30.
+
+% Mix of equality and inequality
+?- products(Id, Name, Price, Stock), Stock >= 50, Price < 30.0.
+
+% Range filter (between)
+?- products(Id, Name, Price, Stock), Price >= 10.0, Price <= 25.0.
+
+.kg use default
+.kg drop test_combined_filters

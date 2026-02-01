@@ -1,0 +1,25 @@
+% Test: Session vs persistent rule comparison
+% Expected: Session and persistent rules behave differently
+% Category: 25_unified_prefix
+% Priority: P1 - Prefix semantics
+
+.kg create test_sess_vs_pers
+.kg use test_sess_vs_pers
+
++data[(1,), (2,), (3,)].
+
+% Persistent rule (saved)
++persistent_doubled(X, Y) :- data(X), Y = X * 2.
+
+% Session rule (not saved)
+session_doubled(X, Y) :- data(X), Y = X * 2.
+
+% Query both
+?- persistent_doubled(X, Y).
+?- session_doubled(X, Y).
+
+% List rules (should show persistent)
+.rule
+
+.kg use default
+.kg drop test_sess_vs_pers

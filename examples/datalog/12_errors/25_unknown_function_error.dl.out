@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unknown_func
+Knowledge graph 'test_unknown_func' created.
+Switched to knowledge graph: test_unknown_func
+> .kg use test_unknown_func
+Switched to knowledge graph: test_unknown_func
+> +values[(1, 2), (3, 4)].
+Inserted 2 fact(s) into 'values'.
+> ?- values(X, Y), Z = nonexistent_func(X, Y).
+Script error: Parse error: Invalid term: 'nonexistent_func(X, Y)'

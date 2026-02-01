@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_proj_sub
+Knowledge graph 'test_proj_sub' created.
+Switched to knowledge graph: test_proj_sub
+> .kg use test_proj_sub
+Switched to knowledge graph: test_proj_sub
+> +full[(1, "a", 100, true, "x")].
+Inserted 1 fact(s) into 'full'.
+> subset(A, C, E) :- full(A, _, C, _, E).
+1 rows:
+  (1, 100, "x")
+(session: 1 rule(s))
+> ?- subset(A, C, E).
+1 rows:
+  (1, 100, "x")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_proj_sub
+Knowledge graph 'test_proj_sub' dropped.

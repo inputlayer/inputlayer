@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_semi
+Knowledge graph 'test_semi' created.
+Switched to knowledge graph: test_semi
+> .kg use test_semi
+Switched to knowledge graph: test_semi
+> +customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'customers'.
+> +orders[(1, 100), (1, 150), (3, 200)].
+Inserted 3 fact(s) into 'orders'.
+> has_orders(CustId, Name) :- customers(CustId, Name), orders(CustId, _).
+2 rows:
+  (1, "Alice")
+  (3, "Carol")
+(session: 1 rule(s))
+> ?- has_orders(CustId, Name).
+2 rows:
+  (1, "Alice")
+  (3, "Carol")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_semi
+Knowledge graph 'test_semi' dropped.

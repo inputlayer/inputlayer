@@ -1,0 +1,21 @@
+% Test: Variance preparation pattern
+% Expected: Sum of squares for variance
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_var
+.kg use test_var
+
++vals[(10,), (20,), (30,)].
+
+% Sum and sum of squares
++total(<SUM:V>) :- vals(V).
++sum_sq(<SUM:Sq>) :- vals(V), Sq = V * V.
++n(<COUNT:V>) :- vals(V).
+
+?- total(S).
+?- sum_sq(Sq).
+?- n(N).
+
+.kg use default
+.kg drop test_var

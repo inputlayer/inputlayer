@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_escaped
+Knowledge graph 'test_escaped' created.
+Switched to knowledge graph: test_escaped
+> .kg use test_escaped
+Switched to knowledge graph: test_escaped
+> +messages[("Hello World",), ("Say \"hi\"",), ("It's fine",)].
+Inserted 3 fact(s) into 'messages'.
+> ?- messages(M).
+3 rows:
+  ("Hello World")
+  ("It's fine")
+  ("Say \"hi\"")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_escaped
+Knowledge graph 'test_escaped' dropped.

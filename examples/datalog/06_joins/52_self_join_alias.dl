@@ -1,0 +1,21 @@
+% Test: Self-join with different aliases
+% Expected: Join table to itself with different variables
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_self_alias
+.kg use test_self_alias
+
++employees[(1, "Alice", 2), (2, "Bob", 3), (3, "Carol", 0), (4, "Dave", 2)].
+
+% Find employees with same manager
+same_manager(E1Name, E2Name, MgrId) :-
+    employees(E1, E1Name, MgrId),
+    employees(E2, E2Name, MgrId),
+    E1 < E2,
+    MgrId > 0.
+
+?- same_manager(E1, E2, M).
+
+.kg use default
+.kg drop test_self_alias

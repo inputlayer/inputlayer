@@ -1,0 +1,23 @@
+% Test: Union with automatic deduplication
+% Expected: Duplicates removed in union
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_union_dedup
+.kg use test_union_dedup
+
++set_a[(1,), (2,), (3,)].
++set_b[(2,), (3,), (4,)].
+
+% Union via multi-clause rule
++union_ab(X) :- set_a(X).
++union_ab(X) :- set_b(X).
+
+?- union_ab(X).
+
++count_union(<COUNT:X>) :- union_ab(X).
+
+?- count_union(N).
+
+.kg use default
+.kg drop test_union_dedup

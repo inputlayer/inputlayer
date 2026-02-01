@@ -1,0 +1,21 @@
+% Test: Query with bound variables
+% Expected: Filter query results by constants
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_bound
+.kg use test_bound
+
++data[(1, "a", 100), (2, "b", 200), (3, "a", 300), (4, "c", 100)].
+
+% Query with first column bound
+?- data(1, Y, Z).
+
+% Query with middle column bound
+?- data(X, "a", Z).
+
+% Query with last column bound
+?- data(X, Y, 100).
+
+.kg use default
+.kg drop test_bound

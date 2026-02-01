@@ -1,0 +1,22 @@
+% Test: Mutual recursion pattern
+% Expected: Two rules that call each other
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_mutual
+.kg use test_mutual
+
++start[(1,)].
++step_a[(1, 2), (3, 4)].
++step_b[(2, 3), (4, 5)].
+
+% even_reach and odd_reach mutually recurse
++even_reach(X) :- start(X).
++odd_reach(Y) :- even_reach(X), step_a(X, Y).
++even_reach(Z) :- odd_reach(Y), step_b(Y, Z).
+
+?- even_reach(X).
+?- odd_reach(Y).
+
+.kg use default
+.kg drop test_mutual

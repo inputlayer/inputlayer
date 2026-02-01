@@ -1,0 +1,21 @@
+% Test: Sum with filter condition
+% Expected: Sum only matching values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_filter
+.kg use test_sum_filter
+
++sales[("A", 100), ("B", 200), ("A", 150), ("C", 300), ("A", 50)].
+
+% Sum per category
+total_by_cat(Cat, <SUM:Amount>) :- sales(Cat, Amount).
+
+% Sum only large sales
+large_total(<SUM:Amount>) :- sales(_, Amount), Amount >= 150.
+
+?- total_by_cat(Cat, Total).
+?- large_total(Total).
+
+.kg use default
+.kg drop test_sum_filter

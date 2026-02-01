@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestor
+Knowledge graph 'test_ancestor' created.
+Switched to knowledge graph: test_ancestor
+> .kg use test_ancestor
+Switched to knowledge graph: test_ancestor
+> +parent[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave")].
+Inserted 3 fact(s) into 'parent'.
+> +ancestor(A, D) :- parent(A, D).
+Rule 'ancestor' registered.
+> +ancestor(A, D) :- parent(A, C), ancestor(C, D).
+Rule 'ancestor' registered.
+> ?- ancestor(A, "Dave").
+3 rows:
+  ("Alice", "Dave")
+  ("Bob", "Dave")
+  ("Carol", "Dave")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ancestor
+Knowledge graph 'test_ancestor' dropped.

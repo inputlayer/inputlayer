@@ -1,0 +1,20 @@
+% Test: Session drop with invalid index
+% Expected: Error for out-of-range index
+% Category: 33_meta
+% Priority: P2 - Error handling
+
+.kg create test_session_invalid
+.kg use test_session_invalid
+
+% Create some session rules
+computed(X, Y) :- X = 1, Y = 2.
+
+.session
+
+% Try to drop an invalid index (very high)
+.session drop 999
+
+.session
+
+.kg use default
+.kg drop test_session_invalid

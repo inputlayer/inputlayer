@@ -1,0 +1,18 @@
+% Test: OR condition via union of rules
+% Expected: Simulate OR with multiple rule clauses
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_or_union
+.kg use test_or_union
+
++items[(1, "A", 100), (2, "B", 200), (3, "C", 50), (4, "A", 300)].
+
+% Items that are category A OR price > 150
++selected(Id, Cat, Price) :- items(Id, Cat, Price), Cat = "A".
++selected(Id, Cat, Price) :- items(Id, Cat, Price), Price > 150.
+
+?- selected(Id, Cat, Price).
+
+.kg use default
+.kg drop test_or_union

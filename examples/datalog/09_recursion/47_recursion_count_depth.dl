@@ -1,0 +1,18 @@
+% Test: Count recursion depth
+% Expected: Track depth as we recurse
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_rec_depth
+.kg use test_rec_depth
+
++link[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")].
+
+% Path with depth tracking
++path_depth(X, X, 0).
++path_depth(X, Z, D) :- path_depth(X, Y, D1), link(Y, Z), D = D1 + 1, D < 5.
+
+?- path_depth("a", Y, D).
+
+.kg use default
+.kg drop test_rec_depth

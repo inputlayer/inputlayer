@@ -1,0 +1,19 @@
+% Test: Zero as key value
+% Expected: Zero works as key
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_zero_key
+.kg use test_zero_key
+
++data[(0, "zero"), (1, "one"), (2, "two")].
+
+?- data(Key, Val).
+
+% Filter for zero key
+zero_entry(Val) :- data(0, Val).
+
+?- zero_entry(Val).
+
+.kg use default
+.kg drop test_zero_key

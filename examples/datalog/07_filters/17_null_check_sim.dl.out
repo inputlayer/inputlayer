@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_null_sim
+Knowledge graph 'test_null_sim' created.
+Switched to knowledge graph: test_null_sim
+> .kg use test_null_sim
+Switched to knowledge graph: test_null_sim
+> +data[(1, 100), (2, 0), (3, 50), (4, 0)].
+Inserted 4 fact(s) into 'data'.
+> has_value(Id, V) :- data(Id, V), V != 0.
+2 rows:
+  (1, 100)
+  (3, 50)
+(session: 1 rule(s))
+> no_value(Id) :- data(Id, 0).
+2 rows:
+  (2)
+  (4)
+(session: 2 rule(s))
+> ?- has_value(Id, V).
+2 rows:
+  (1, 100)
+  (3, 50)
+> ?- no_value(Id).
+2 rows:
+  (2)
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_null_sim
+Knowledge graph 'test_null_sim' dropped.

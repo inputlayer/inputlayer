@@ -1,0 +1,17 @@
+% Test: Multiple equality filters
+% Expected: Multiple columns equal specific values
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_multi_eq
+.kg use test_multi_eq
+
++data[(1, "A", 100), (2, "A", 200), (3, "B", 100), (4, "A", 100)].
+
+% Match specific category AND price
+matches(Id) :- data(Id, "A", 100).
+
+?- matches(Id).
+
+.kg use default
+.kg drop test_multi_eq

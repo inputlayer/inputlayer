@@ -1,0 +1,17 @@
+% Test: Greater than filter
+% Expected: Filter by > comparison
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_gt
+.kg use test_gt
+
++scores[(1, 75), (2, 85), (3, 90), (4, 60), (5, 95)].
+
+% Scores greater than 80
+passing(Id, Score) :- scores(Id, Score), Score > 80.
+
+?- passing(Id, Score).
+
+.kg use default
+.kg drop test_gt

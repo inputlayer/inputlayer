@@ -1,0 +1,16 @@
+% Test: Power function
+% Expected: Return x^y
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_pow
+.kg use test_pow
+
++base_exp[(2, 0), (2, 1), (2, 3), (3, 2), (10, 2)].
+
+power_val(B, E, R) :- base_exp(B, E), R = POW(B, E).
+
+?- power_val(B, E, R).
+
+.kg use default
+.kg drop test_pow

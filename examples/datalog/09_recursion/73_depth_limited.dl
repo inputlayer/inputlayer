@@ -1,0 +1,19 @@
+% Test: Depth-limited recursion
+% Expected: Stop recursion at specific depth
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_depth_limit
+.kg use test_depth_limit
+
++link[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)].
+
+% Reachable within depth limit
++reach(X, Y, 1) :- link(X, Y).
++reach(X, Z, D2) :- reach(X, Y, D), link(Y, Z), D < 3, D2 = D + 1.
+
+% What can we reach from 1 within 3 hops?
+?- reach(1, Y, D).
+
+.kg use default
+.kg drop test_depth_limit

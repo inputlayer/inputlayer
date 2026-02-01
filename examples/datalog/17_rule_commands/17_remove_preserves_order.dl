@@ -1,0 +1,28 @@
+% Test: Rule remove preserves clause order
+% Expected: After removing middle clause, order is preserved
+% Category: 17_rule_commands
+% Priority: P2 - Rule management
+
+.kg create test_remove_order
+.kg use test_remove_order
+
++src[(1,), (10,), (100,)].
+
+% Three clauses for same rule
++multi(X, "small") :- src(X), X < 5.
++multi(X, "medium") :- src(X), X >= 5, X < 50.
++multi(X, "large") :- src(X), X >= 50.
+
+?- multi(X, Size).
+
+.rule def multi
+
+% Remove middle clause (index 2)
+.rule remove multi 2
+
+.rule def multi
+
+?- multi(X, Size).
+
+.kg use default
+.kg drop test_remove_order

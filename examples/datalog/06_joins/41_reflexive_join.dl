@@ -1,0 +1,17 @@
+% Test: Reflexive join (same column twice)
+% Expected: Match rows where both columns equal
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_reflexive
+.kg use test_reflexive
+
++matrix[(1, 1), (1, 2), (2, 1), (2, 2), (3, 3)].
+
+% Find diagonal elements
+diagonal(X) :- matrix(X, X).
+
+?- diagonal(X).
+
+.kg use default
+.kg drop test_reflexive

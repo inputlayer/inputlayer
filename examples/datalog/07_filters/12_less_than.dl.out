@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lt
+Knowledge graph 'test_lt' created.
+Switched to knowledge graph: test_lt
+> .kg use test_lt
+Switched to knowledge graph: test_lt
+> +temps[(1, 30), (2, 15), (3, -5), (4, 25), (5, 0)].
+Inserted 5 fact(s) into 'temps'.
+> freezing(Id, Temp) :- temps(Id, Temp), Temp < 0.
+1 rows:
+  (3, -5)
+(session: 1 rule(s))
+> cold(Id, Temp) :- temps(Id, Temp), Temp < 20.
+3 rows:
+  (2, 15)
+  (3, -5)
+  (5, 0)
+(session: 2 rule(s))
+> ?- freezing(Id, T).
+1 rows:
+  (3, -5)
+> ?- cold(Id, T).
+3 rows:
+  (2, 15)
+  (3, -5)
+  (5, 0)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_lt
+Knowledge graph 'test_lt' dropped.

@@ -1,0 +1,16 @@
+% Test: AVG of integers
+% Expected: Average of int values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_avg_int
+.kg use test_avg_int
+
++scores[(10,), (20,), (30,), (40,)].
+
++average(<AVG:S>) :- scores(S).
+
+?- average(A).
+
+.kg use default
+.kg drop test_avg_int

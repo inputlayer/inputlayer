@@ -1,0 +1,17 @@
+% Test: Cumulative sum pattern
+% Expected: Running total over ordered data
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_cumsum
+.kg use test_cumsum
+
++daily[(1, 10), (2, 20), (3, 15), (4, 25)].
+
+% Cumulative sum up to each day
++cumsum(Day, <SUM:Amt>) :- daily(D, Amt), D <= Day, daily(Day, _).
+
+?- cumsum(Day, Total).
+
+.kg use default
+.kg drop test_cumsum

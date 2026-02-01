@@ -1,0 +1,17 @@
+% Test: Projection with column reordering
+% Expected: Output columns in different order than input
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_reorder
+.kg use test_reorder
+
++records[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)].
+
+% Reorder: amount, name, id
+reordered(Amount, Name, Id) :- records(Id, Name, Amount).
+
+?- reordered(A, N, I).
+
+.kg use default
+.kg drop test_reorder

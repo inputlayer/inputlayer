@@ -1,0 +1,22 @@
+% Test: Window function simulation
+% Expected: Compute values relative to groups
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_window
+.kg use test_window
+
++sales[(1, "East", 100), (2, "East", 150), (3, "West", 200), (4, "West", 120)].
+
+% Total per region (simulating window aggregate)
++region_total(Region, <SUM:Amount>) :- sales(_, Region, Amount).
+
+% Each sale with its region total
++sale_with_total(Id, Region, Amount, Total) :-
+    sales(Id, Region, Amount),
+    region_total(Region, Total).
+
+?- sale_with_total(Id, R, A, T).
+
+.kg use default
+.kg drop test_window

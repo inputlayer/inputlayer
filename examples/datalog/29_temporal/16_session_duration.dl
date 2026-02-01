@@ -1,0 +1,19 @@
+% Test: Session duration calculation
+% Expected: Compute time between start and end
+% Category: 29_temporal
+% Priority: P2 - Temporal patterns
+
+.kg create test_session_dur
+.kg use test_session_dur
+
++sessions[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2300)].
+
+session_duration(SessId, Duration) :-
+    sessions(SessId, "start", StartTime),
+    sessions(SessId, "end", EndTime),
+    Duration = EndTime - StartTime.
+
+?- session_duration(SessId, Duration).
+
+.kg use default
+.kg drop test_session_dur

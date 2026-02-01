@@ -1,0 +1,17 @@
+% Test: COUNT DISTINCT with grouping
+% Expected: Distinct count per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_cd_group
+.kg use test_cd_group
+
++sales[(1, "North", "Widget"), (2, "North", "Gadget"), (3, "North", "Widget"), (4, "South", "Widget")].
+
+% Count distinct products per region
++distinct_by_region(Region, <COUNT_DISTINCT:Product>) :- sales(_, Region, Product).
+
+?- distinct_by_region(Region, N).
+
+.kg use default
+.kg drop test_cd_group

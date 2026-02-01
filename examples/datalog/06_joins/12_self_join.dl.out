@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_join
+Knowledge graph 'test_self_join' created.
+Switched to knowledge graph: test_self_join
+> .kg use test_self_join
+Switched to knowledge graph: test_self_join
+> +employees[(1, "Alice", 3), (2, "Bob", 3), (3, "Carol", 5), (4, "Dave", 5), (5, "Eve", 0)].
+Inserted 5 fact(s) into 'employees'.
+> +reports_to(EmpName, MgrName) :- employees(EmpId, EmpName, MgrId), employees(MgrId, MgrName, _), MgrId != 0.
+Rule 'reports_to' registered.
+> ?- reports_to(Emp, Mgr).
+4 rows:
+  ("Alice", "Carol")
+  ("Bob", "Carol")
+  ("Carol", "Eve")
+  ("Dave", "Eve")
+> +colleagues(Name1, Name2) :- employees(Id1, Name1, Mgr), employees(Id2, Name2, Mgr), Id1 < Id2, Mgr != 0.
+Rule 'colleagues' registered.
+> ?- colleagues(A, B).
+2 rows:
+  ("Alice", "Bob")
+  ("Carol", "Dave")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_join
+Knowledge graph 'test_self_join' dropped.

@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_col_join
+Knowledge graph 'test_multi_col_join' created.
+Switched to knowledge graph: test_multi_col_join
+> .kg use test_multi_col_join
+Switched to knowledge graph: test_multi_col_join
+> +orders[(1, 100, "2024-01-01"), (2, 100, "2024-01-02"), (3, 200, "2024-01-01")].
+Inserted 3 fact(s) into 'orders'.
+> +shipments[(100, "2024-01-01", "shipped"), (100, "2024-01-02", "pending"), (200, "2024-01-01", "delivered")].
+Inserted 3 fact(s) into 'shipments'.
+> +order_status(OrderId, CustId, Date, Status) :- orders(OrderId, CustId, Date), shipments(CustId, Date, Status).
+Rule 'order_status' registered.
+> ?- order_status(O, C, D, S).
+3 rows:
+  (100, "2024-01-01", "shipped", 1)
+  (100, "2024-01-02", "pending", 2)
+  (200, "2024-01-01", "delivered", 3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_col_join
+Knowledge graph 'test_multi_col_join' dropped.

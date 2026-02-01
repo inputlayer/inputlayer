@@ -1,0 +1,20 @@
+% Test: HAVING clause simulation
+% Expected: Filter aggregated results
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_having
+.kg use test_having
+
++orders[(1, "Alice", 50), (2, "Bob", 100), (3, "Alice", 75), (4, "Carol", 30), (5, "Alice", 25)].
+
+% Total per customer
++totals(Customer, <SUM:Amount>) :- orders(_, Customer, Amount).
+
+% Customers with total > 100 (HAVING simulation)
++big_customers(Customer, Total) :- totals(Customer, Total), Total > 100.
+
+?- big_customers(C, T).
+
+.kg use default
+.kg drop test_having

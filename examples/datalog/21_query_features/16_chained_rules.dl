@@ -1,0 +1,21 @@
+% Test: Chained rule evaluation
+% Expected: Rules building on other rules
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_chained
+.kg use test_chained
+
++base[(1,), (2,), (3,)].
+
+% Chain of transformations
++step1(X, Y) :- base(X), Y = X + 1.
++step2(X, Y) :- step1(X, Z), Y = Z + 1.
++step3(X, Y) :- step2(X, Z), Y = Z + 1.
+
+?- step1(X, Y).
+?- step2(X, Y).
+?- step3(X, Y).
+
+.kg use default
+.kg drop test_chained

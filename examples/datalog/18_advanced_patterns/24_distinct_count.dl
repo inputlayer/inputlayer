@@ -1,0 +1,32 @@
+% Test: Count distinct pattern
+% Expected: Can count distinct values
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_distinct
+.kg use test_distinct
+
++orders[(1, "Alice", "Widget"),
+        (2, "Bob", "Widget"),
+        (3, "Alice", "Gadget"),
+        (4, "Carol", "Widget"),
+        (5, "Alice", "Widget")].
+
+% Distinct customers
+distinct_cust(Cust) :- orders(_, Cust, _).
+
+% Count distinct customers
++cust_count(<COUNT:C>) :- distinct_cust(C).
+
+?- cust_count(Count).
+
+% Distinct products
+distinct_prod(Prod) :- orders(_, _, Prod).
+
+% Count distinct products
++prod_count(<COUNT:P>) :- distinct_prod(P).
+
+?- prod_count(Count).
+
+.kg use default
+.kg drop test_distinct

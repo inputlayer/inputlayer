@@ -1,0 +1,22 @@
+% Test: Set minus then aggregate
+% Expected: Aggregate over difference
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_minus_agg
+.kg use test_minus_agg
+
++all_values[(1,), (2,), (3,), (4,), (5,)].
++exclude_vals[(2,), (4,)].
+
+% Remaining values after exclusion
+remaining(X) :- all_values(X), !exclude_vals(X).
+
+% Sum of remaining
+sum_remaining(<SUM:X>) :- remaining(X).
+
+?- remaining(X).
+?- sum_remaining(S).
+
+.kg use default
+.kg drop test_minus_agg

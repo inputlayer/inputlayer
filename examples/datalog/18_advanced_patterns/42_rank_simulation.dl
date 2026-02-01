@@ -1,0 +1,17 @@
+% Test: Rank simulation pattern
+% Expected: Assign rank based on value
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_rank
+.kg use test_rank
+
++scores[("Alice", 90), ("Bob", 85), ("Carol", 95), ("Dave", 85)].
+
+% Count how many have higher score = rank - 1
++rank(Name, Score, <COUNT:Other>) :- scores(Name, Score), scores(Other, OtherScore), OtherScore > Score.
+
+?- rank(Name, Score, Rank).
+
+.kg use default
+.kg drop test_rank

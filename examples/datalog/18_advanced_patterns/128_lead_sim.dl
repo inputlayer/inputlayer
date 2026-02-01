@@ -1,0 +1,20 @@
+% Test: LEAD function simulation
+% Expected: Access next row value
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_lead
+.kg use test_lead
+
++data[(1, 100), (2, 150), (3, 120), (4, 180)].
+
+% Find consecutive pairs (simulates LEAD)
++with_next(Id, Val, NextVal) :-
+    data(Id, Val),
+    data(NextId, NextVal),
+    NextId = Id + 1.
+
+?- with_next(Id, Val, Next).
+
+.kg use default
+.kg drop test_lead

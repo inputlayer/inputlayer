@@ -1,0 +1,18 @@
+% Test: Negation with multiple variables
+% Expected: All negation vars bound from positive
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_multi
+.kg use test_neg_multi
+
++pairs[(1, 2), (2, 3), (3, 4)].
++exclude[(1, 2), (3, 4)].
+
+% Exclude specific pairs
+not_excluded(A, B) :- pairs(A, B), !exclude(A, B).
+
+?- not_excluded(A, B).
+
+.kg use default
+.kg drop test_neg_multi

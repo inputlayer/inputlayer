@@ -1,0 +1,18 @@
+% Test: Same generation relation
+% Expected: Find nodes at same level
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_same_gen
+.kg use test_same_gen
+
++parent[("root", "a"), ("root", "b"), ("a", "c"), ("a", "d"), ("b", "e")].
+
+% Depth of each node
++depth("root", 0).
++depth(Child, D) :- depth(Parent, PD), parent(Parent, Child), D = PD + 1.
+
+?- depth(Node, D).
+
+.kg use default
+.kg drop test_same_gen

@@ -1,0 +1,23 @@
+% Test: TOP_K with tied values
+% Expected: Ties handled consistently
+% Category: 14_aggregations
+% Priority: P1 - Aggregation edge cases
+
+.kg create test_topk_ties
+.kg use test_topk_ties
+
+% Data with duplicate scores
++scores[(1, 100), (2, 100), (3, 90), (4, 90), (5, 80)].
+
+% TOP 2 with ties - should get some of the 100s
+top2(Id, <TOP_K:Score, 2>) :- scores(Id, Score).
+
+?- top2(Id, Score).
+
+% TOP 3 with ties - should get 100s and some 90s
+top3(Id, <TOP_K:Score, 3>) :- scores(Id, Score).
+
+?- top3(Id, Score).
+
+.kg use default
+.kg drop test_topk_ties

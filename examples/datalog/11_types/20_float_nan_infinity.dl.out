@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_special
+Knowledge graph 'test_float_special' created.
+Switched to knowledge graph: test_float_special
+> .kg use test_float_special
+Switched to knowledge graph: test_float_special
+> +divs[(10.0, 0.0), (5.0, 2.0), (-10.0, 0.0)].
+Inserted 3 fact(s) into 'divs'.
+> div_result(A, B, R) :- divs(A, B), B != 0.0, R = A / B.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "div_result", args: [Variable("A"), Variable("B"), Variable("R")] }. Variables ["R"] in head do not appear in positive body atoms.

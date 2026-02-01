@@ -1,0 +1,22 @@
+% Test: Filter on computed value pattern
+% Expected: Filters work on computed values
+% Category: 21_query_features
+% Priority: P1 - Query features
+
+.kg create test_comp_filt
+.kg use test_comp_filt
+
++items[(1, 10), (2, 20), (3, 30), (4, 40)].
+
+% Filter on computed value
+doubled_above_50(Id, D) :- items(Id, Val), D = Val * 2, D > 50.
+
+?- doubled_above_50(Id, D).
+
+% Compute then filter on original
+compute_filter(Id, Val, D) :- items(Id, Val), D = Val * 2, Val > 15.
+
+?- compute_filter(Id, Val, D).
+
+.kg use default
+.kg drop test_comp_filt

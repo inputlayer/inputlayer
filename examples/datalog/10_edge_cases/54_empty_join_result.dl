@@ -1,0 +1,18 @@
+% Test: Join producing empty result
+% Expected: Empty join handled gracefully
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_join
+.kg use test_empty_join
+
++left[(1,), (2,), (3,)].
++right[(10,), (20,), (30,)].
+
+% No matching keys - empty result
+empty_join(A, B) :- left(A), right(A).
+
+?- empty_join(A, B).
+
+.kg use default
+.kg drop test_empty_join

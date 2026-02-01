@@ -1,0 +1,17 @@
+% Test: Computed filter in query
+% Expected: Filter on computed value works
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_computed_filter
+.kg use test_computed_filter
+
++items[(1, 10), (2, 20), (3, 30), (4, 40)].
+
+% Filter based on computed value
+over_threshold(Id, Val, Doubled) :- items(Id, Val), Doubled = Val * 2, Doubled > 50.
+
+?- over_threshold(Id, Val, Doubled).
+
+.kg use default
+.kg drop test_computed_filter

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_small_floats
+Knowledge graph 'test_small_floats' created.
+Switched to knowledge graph: test_small_floats
+> .kg use test_small_floats
+Switched to knowledge graph: test_small_floats
+> +tiny[(1.0e-100,), (2.0e-100,), (3.0e-100,)].
+Inserted 3 fact(s) into 'tiny'.
+> +sum_tiny(<SUM:X>) :- tiny(X).
+Script error: Parse error: Invalid term: '<SUM:X>'

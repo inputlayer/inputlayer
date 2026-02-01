@@ -1,0 +1,22 @@
+% Test: Same relation twice in body
+% Expected: Self-join works correctly
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_same_twice
+.kg use test_same_twice
+
++nums[(1,), (2,), (3,)].
+
+% All ordered pairs
+pairs(A, B) :- nums(A), nums(B), A < B.
+
+?- pairs(A, B).
+
+% Count pairs
++pair_count(<COUNT:A>) :- pairs(A, _).
+
+?- pair_count(N).
+
+.kg use default
+.kg drop test_same_twice

@@ -1,0 +1,17 @@
+% Test: COUNT_DISTINCT on multiple groups
+% Expected: Distinct count per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_cd_multi
+.kg use test_cd_multi
+
++purchases[("Alice", "Electronics", 1), ("Alice", "Electronics", 2), ("Alice", "Clothing", 1), ("Bob", "Electronics", 1), ("Bob", "Electronics", 1)].
+
+% Distinct products per customer
+distinct_products(Cust, <COUNT_DISTINCT:Cat>) :- purchases(Cust, Cat, _).
+
+?- distinct_products(Cust, N).
+
+.kg use default
+.kg drop test_cd_multi

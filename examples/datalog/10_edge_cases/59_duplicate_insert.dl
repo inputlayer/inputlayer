@@ -1,0 +1,20 @@
+% Test: Duplicate insert handling
+% Expected: Duplicates are deduplicated
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_dup_ins
+.kg use test_dup_ins
+
++data[(1, "a")].
++data[(1, "a")].
++data[(1, "a")].
+
+?- data(Id, Val).
+
++count_data(<COUNT:Id>) :- data(Id, _).
+
+?- count_data(N).
+
+.kg use default
+.kg drop test_dup_ins

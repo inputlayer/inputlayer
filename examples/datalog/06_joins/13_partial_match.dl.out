@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_partial
+Knowledge graph 'test_partial' created.
+Switched to knowledge graph: test_partial
+> .kg use test_partial
+Switched to knowledge graph: test_partial
+> +left[(1, "a"), (2, "b"), (3, "c"), (4, "d")].
+Inserted 4 fact(s) into 'left'.
+> +right[(2, 100), (3, 200), (5, 300)].
+Inserted 3 fact(s) into 'right'.
+> inner(Id, Val, Amt) :- left(Id, Val), right(Id, Amt).
+2 rows:
+  (2, 100, "b")
+  (3, 200, "c")
+(session: 1 rule(s))
+> ?- inner(Id, Val, Amt).
+2 rows:
+  (2, 100, "b")
+  (3, 200, "c")
+> +match_count(<COUNT:Id>) :- inner(Id, _, _).
+Script error: Parse error: Invalid term: '<COUNT:Id>'

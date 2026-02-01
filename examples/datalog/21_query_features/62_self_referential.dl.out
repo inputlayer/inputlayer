@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_ref_rule
+Knowledge graph 'test_self_ref_rule' created.
+Switched to knowledge graph: test_self_ref_rule
+> .kg use test_self_ref_rule
+Switched to knowledge graph: test_self_ref_rule
+> +base[(1,), (2,)].
+Inserted 2 fact(s) into 'base'.
+> +closure(X) :- base(X).
+Rule 'closure' registered.
+> ?- closure(X).
+2 rows:
+  (1)
+  (2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_ref_rule
+Knowledge graph 'test_self_ref_rule' dropped.

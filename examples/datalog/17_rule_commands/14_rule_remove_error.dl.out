@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_remove_err
+Knowledge graph 'test_rule_remove_err' created.
+Switched to knowledge graph: test_rule_remove_err
+> .kg use test_rule_remove_err
+Switched to knowledge graph: test_rule_remove_err
+> +edge[(1,2)].
+Inserted 1 fact(s) into 'edge'.
+> +simple(X, Y) :- edge(X, Y).
+Rule 'simple' registered.
+> .rule list
+Rules:
+  simple (1 clause(s))
+> .rule remove simple 5
+Script error: Failed to remove rule clause: Clause index 5 out of bounds. Rule 'simple' has 1 clause(s).

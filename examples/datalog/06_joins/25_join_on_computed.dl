@@ -1,0 +1,18 @@
+% Test: Join on computed value
+% Expected: Join using computed join key
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_join_comp
+.kg use test_join_comp
+
++items[(1, 10), (2, 20), (3, 30)].
++multipliers[(10, 2), (20, 3), (30, 4)].
+
+% Join where computed value matches
+joined(Id, Val, M) :- items(Id, V), multipliers(V, M).
+
+?- joined(Id, Val, M).
+
+.kg use default
+.kg drop test_join_comp

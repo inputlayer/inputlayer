@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_components
+Knowledge graph 'test_components' created.
+Switched to knowledge graph: test_components
+> .kg use test_components
+Switched to knowledge graph: test_components
+> +edge[("a", "b"), ("b", "c"), ("d", "e"), ("f", "f")].
+Inserted 4 fact(s) into 'edge'.
+> +connected(X, Y) :- edge(X, Y).
+Rule 'connected' registered.
+> +connected(X, Y) :- edge(Y, X).
+Rule 'connected' registered.
+> +connected(X, Z) :- connected(X, Y), connected(Y, Z).
+Rule 'connected' registered.
+> ?- connected(X, Y).
+14 rows:
+  ("a", "a")
+  ("a", "b")
+  ("a", "c")
+  ("b", "a")
+  ("b", "b")
+  ("b", "c")
+  ("c", "a")
+  ("c", "b")
+  ("c", "c")
+  ("d", "d")
+  ("d", "e")
+  ("e", "d")
+  ("e", "e")
+  ("f", "f")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_components
+Knowledge graph 'test_components' dropped.

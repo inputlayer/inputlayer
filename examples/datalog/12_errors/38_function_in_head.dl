@@ -1,0 +1,15 @@
+% Test: Function call in rule head
+% Expected: Error for function in head
+% Category: 12_errors
+% Priority: P1 - Semantic errors
+
+.kg create test_func_head
+.kg use test_func_head
+
++data[(1, 2), (3, 4)].
+
+% Try to use function in head (invalid)
+abs_result(abs_int64(X), Y) :- data(X, Y).
+
+.kg use default
+.kg drop test_func_head

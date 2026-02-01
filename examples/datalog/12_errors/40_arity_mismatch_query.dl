@@ -1,0 +1,15 @@
+% Test: Query with wrong arity
+% Expected: Error for arity mismatch
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_arity_err
+.kg use test_arity_err
+
++data[(1, "a", 100)].
+
+% Wrong arity in query
+?- data(X, Y).
+
+.kg use default
+.kg drop test_arity_err

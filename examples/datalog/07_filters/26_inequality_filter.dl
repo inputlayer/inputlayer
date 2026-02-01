@@ -1,0 +1,17 @@
+% Test: Inequality filter
+% Expected: Filter on not-equal condition
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_ineq_filter
+.kg use test_ineq_filter
+
++data[(1, "active"), (2, "inactive"), (3, "pending"), (4, "active")].
+
+% Filter out specific status
+not_pending(Id, Status) :- data(Id, Status), Status != "pending".
+
+?- not_pending(Id, Status).
+
+.kg use default
+.kg drop test_ineq_filter

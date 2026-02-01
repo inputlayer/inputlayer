@@ -1,0 +1,16 @@
+% Test: Show current knowledge graph
+% Expected: .kg shows current KG name
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_kg_current
+.kg use test_kg_current
+
+.kg
+
++marker[(1,)].
+
+.kg
+
+.kg use default
+.kg drop test_kg_current

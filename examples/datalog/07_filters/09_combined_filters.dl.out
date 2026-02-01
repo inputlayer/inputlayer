@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_combined
+Knowledge graph 'test_combined' created.
+Switched to knowledge graph: test_combined
+> .kg use test_combined
+Switched to knowledge graph: test_combined
+> +products[(1, "A", 100, 10), (2, "B", 200, 5), (3, "A", 150, 20), (4, "C", 50, 15)].
+Inserted 4 fact(s) into 'products'.
+> filtered(Id, Price, Qty) :- products(Id, "A", Price, Qty), Price > 100, Qty > 5.
+1 rows:
+  (3, 150, 20)
+(session: 1 rule(s))
+> ?- filtered(Id, P, Q).
+1 rows:
+  (3, 150, 20)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_combined
+Knowledge graph 'test_combined' dropped.

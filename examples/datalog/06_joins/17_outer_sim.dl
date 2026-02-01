@@ -1,0 +1,23 @@
+% Test: Outer join simulation
+% Expected: Can simulate left outer join
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_outer
+.kg use test_outer
+
++left_tbl[(1, "a"), (2, "b"), (3, "c")].
++right_tbl[(1, 100), (3, 300)].
+
+% Inner join result
+inner(Id, Val, Num) :- left_tbl(Id, Val), right_tbl(Id, Num).
+
+?- inner(Id, Val, Num).
+
+% Left side with no match (for outer join)
+no_match(Id, Val) :- left_tbl(Id, Val), !right_tbl(Id, _).
+
+?- no_match(Id, Val).
+
+.kg use default
+.kg drop test_outer

@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_hierarchy
+Knowledge graph 'test_hierarchy' created.
+Switched to knowledge graph: test_hierarchy
+> .kg use test_hierarchy
+Switched to knowledge graph: test_hierarchy
+> +reports_to[("Alice", "Bob"), ("Bob", "Carol"), ("Dave", "Bob"), ("Eve", "Carol")].
+Inserted 4 fact(s) into 'reports_to'.
+> direct_report(Mgr, Emp) :- reports_to(Emp, Mgr).
+4 rows:
+  ("Bob", "Alice")
+  ("Bob", "Dave")
+  ("Carol", "Bob")
+  ("Carol", "Eve")
+(session: 1 rule(s))
+> ?- direct_report(Mgr, Emp).
+4 rows:
+  ("Bob", "Alice")
+  ("Bob", "Dave")
+  ("Carol", "Bob")
+  ("Carol", "Eve")
+> +all_reports(Mgr, Emp) :- reports_to(Emp, Mgr).
+Rule 'all_reports' registered.
+> +all_reports(Mgr, Emp) :- reports_to(Emp, Mid), all_reports(Mgr, Mid).
+Rule 'all_reports' registered.
+> ?- all_reports("Carol", Emp).
+4 rows:
+  ("Carol", "Alice")
+  ("Carol", "Bob")
+  ("Carol", "Dave")
+  ("Carol", "Eve")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_hierarchy
+Knowledge graph 'test_hierarchy' dropped.

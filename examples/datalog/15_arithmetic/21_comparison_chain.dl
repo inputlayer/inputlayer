@@ -1,0 +1,17 @@
+% Test: Multiple comparison operations
+% Expected: All comparisons must be true
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_cmp_chain
+.kg use test_cmp_chain
+
++values[(1,), (5,), (10,), (15,), (20,)].
+
+% Value between 5 and 15 inclusive
+in_range(X) :- values(X), X >= 5, X <= 15.
+
+?- in_range(X).
+
+.kg use default
+.kg drop test_cmp_chain

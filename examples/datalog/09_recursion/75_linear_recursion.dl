@@ -1,0 +1,20 @@
+% Test: Linear recursion pattern
+% Expected: Simple linear recursive rule
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_linear
+.kg use test_linear
+
++succ[(1, 2), (2, 3), (3, 4), (4, 5)].
+
+% Greater than or equal via successors
++gte(X, X) :- succ(X, _).
++gte(X, X) :- succ(_, X).
++gte(X, Z) :- gte(X, Y), succ(Y, Z).
+
+?- gte(1, X).
+?- gte(3, X).
+
+.kg use default
+.kg drop test_linear

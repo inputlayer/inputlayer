@@ -1,0 +1,20 @@
+% Test: Partial key match join
+% Expected: Join on subset of columns
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_partial_match
+.kg use test_partial_match
+
++orders[(1, 100, "A"), (2, 100, "B"), (3, 101, "A")].
++customer_regions[(100, "East"), (101, "West")].
+
+% Join on customer_id only
++with_region(OrderId, CustId, Type, Region) :-
+    orders(OrderId, CustId, Type),
+    customer_regions(CustId, Region).
+
+?- with_region(O, C, T, R).
+
+.kg use default
+.kg drop test_partial_match

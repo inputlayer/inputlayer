@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mod
+Knowledge graph 'test_mod' created.
+Switched to knowledge graph: test_mod
+> .kg use test_mod
+Switched to knowledge graph: test_mod
+> +nums[(10,), (15,), (20,), (17,)].
+Inserted 4 fact(s) into 'nums'.
+> mod_result(N, R) :- nums(N), R = N ?- mod_result(N, R).
+Script error: Parse error: Invalid term: 'N ?- mod_result(N, R)'

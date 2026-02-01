@@ -1,0 +1,18 @@
+% Test: Linear recursion (single recursive call)
+% Expected: Simple chain of derivations
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_linear_rec
+.kg use test_linear_rec
+
++link[("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")].
+
+% Linear: one recursive call per rule
++chain(X, Y) :- link(X, Y).
++chain(X, Z) :- chain(X, Y), link(Y, Z).
+
+?- chain("a", Y).
+
+.kg use default
+.kg drop test_linear_rec

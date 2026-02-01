@@ -5,6 +5,6 @@ Server status: healthy
 Current knowledge graph: default
 
 > +loaded_relation[(1, "from_file"), (2, "also_loaded")].
-No facts inserted (2 duplicate skipped).
+Inserted 2 fact(s) into 'loaded_relation'.
 > +loaded_rule(X, Y) :- loaded_relation(X, Y).
 Rule 'loaded_rule' registered.

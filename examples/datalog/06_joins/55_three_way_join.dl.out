@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_three_join
+Knowledge graph 'test_three_join' created.
+Switched to knowledge graph: test_three_join
+> .kg use test_three_join
+Switched to knowledge graph: test_three_join
+> +customers[(1, "Alice"), (2, "Bob")].
+Inserted 2 fact(s) into 'customers'.
+> +orders[(101, 1, 201), (102, 2, 202), (103, 1, 203)].
+Inserted 3 fact(s) into 'orders'.
+> +products[(201, "Widget", 10.0), (202, "Gadget", 20.0), (203, "Gizmo", 15.0)].
+Inserted 3 fact(s) into 'products'.
+> +full_order(CustName, OrderId, ProdName, Price) :- customers(CustId, CustName), orders(OrderId, CustId, ProdId), products(ProdId, ProdName, Price).
+Rule 'full_order' registered.
+> ?- full_order(C, O, P, Pr).
+3 rows:
+  ("Alice", 101, "Widget", 10.0)
+  ("Alice", 103, "Gizmo", 15.0)
+  ("Bob", 102, "Gadget", 20.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_three_join
+Knowledge graph 'test_three_join' dropped.

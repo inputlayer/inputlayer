@@ -17,19 +17,13 @@ Inserted 3 fact(s) into 'edge'.
   (2, 3)
   (3, 4)
 > -edge(X, Y) :- edge(X, Y).
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 3 fact(s) deleted from 'edge'.
 > ?- edge(X, Y).
-3 rows:
-  (1, 2)
-  (2, 3)
-  (3, 4)
+No results.
 > +edge[(10,20), (20,30)].
 Inserted 2 fact(s) into 'edge'.
 > ?- edge(X, Y).
-5 rows:
-  (1, 2)
-  (2, 3)
-  (3, 4)
+2 rows:
   (10, 20)
   (20, 30)
 > .kg use default

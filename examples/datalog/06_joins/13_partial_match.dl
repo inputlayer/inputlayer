@@ -1,0 +1,23 @@
+% Test: Partial match join
+% Expected: Only matching rows returned
+% Category: 06_joins
+% Priority: P1 - Join patterns
+
+.kg create test_partial
+.kg use test_partial
+
++left[(1, "a"), (2, "b"), (3, "c"), (4, "d")].
++right[(2, 100), (3, 200), (5, 300)].
+
+% Inner join (only matching)
+inner(Id, Val, Amt) :- left(Id, Val), right(Id, Amt).
+
+?- inner(Id, Val, Amt).
+
+% Count matches
++match_count(<COUNT:Id>) :- inner(Id, _, _).
+
+?- match_count(C).
+
+.kg use default
+.kg drop test_partial

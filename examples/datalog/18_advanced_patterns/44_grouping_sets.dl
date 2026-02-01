@@ -1,0 +1,25 @@
+% Test: Grouping sets simulation
+% Expected: Multiple aggregation levels
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_grouping
+.kg use test_grouping
+
++orders[(1, "Alice", "Widget", 100), (2, "Bob", "Gadget", 200), (3, "Alice", "Widget", 150)].
+
+% By customer
++by_customer(Customer, <SUM:Amount>) :- orders(_, Customer, _, Amount).
+
+% By product
++by_product(Product, <SUM:Amount>) :- orders(_, _, Product, Amount).
+
+% By customer and product
++by_both(Customer, Product, <SUM:Amount>) :- orders(_, Customer, Product, Amount).
+
+?- by_customer(C, Sum).
+?- by_product(P, Sum).
+?- by_both(C, P, Sum).
+
+.kg use default
+.kg drop test_grouping

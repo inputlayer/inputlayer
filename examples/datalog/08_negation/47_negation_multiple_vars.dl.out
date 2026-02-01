@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_multi_var
+Knowledge graph 'test_neg_multi_var' created.
+Switched to knowledge graph: test_neg_multi_var
+> .kg use test_neg_multi_var
+Switched to knowledge graph: test_neg_multi_var
+> +pairs[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'pairs'.
+> +forbidden[(1, 2)].
+Inserted 1 fact(s) into 'forbidden'.
+> allowed(X, Y) :- pairs(X, Y), !forbidden(X, Y).
+2 rows:
+  (2, 3)
+  (3, 4)
+(session: 1 rule(s))
+> ?- allowed(X, Y).
+2 rows:
+  (2, 3)
+  (3, 4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_multi_var
+Knowledge graph 'test_neg_multi_var' dropped.

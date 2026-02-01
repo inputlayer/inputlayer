@@ -1,0 +1,20 @@
+% Test: Type mismatch with schema (KNOWN LIMITATION)
+% Expected: SHOULD error, but currently accepts due to schema catalog being global
+% Category: 12_errors
+% Priority: P0 CRITICAL - Schema enforcement must work
+%
+% KNOWN BUG: Schema validation only works within the same query_program request.
+% The REST API data endpoint doesn't validate because SchemaCatalog is global,
+% not per-knowledge-graph. TODO: Make SchemaCatalog per-KG.
+
+.kg create test_type_mismatch
+.kg use test_type_mismatch
+
+% Define schema with explicit types
++typed_rel(id: int, name: string, score: float).
+
+% Try to insert wrong types - SHOULD error but currently accepts
++typed_rel("not_an_int", 123, "not_a_float").
+
+.kg use default
+.kg drop test_type_mismatch

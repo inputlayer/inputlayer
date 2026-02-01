@@ -1,0 +1,22 @@
+% Test: Self comparison pattern
+% Expected: Compare rows in same relation
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_self_cmp
+.kg use test_self_cmp
+
++scores[(1, 85), (2, 90), (3, 75), (4, 90)].
+
+% Find pairs where first score < second
+higher(Id1, Id2, S1, S2) :- scores(Id1, S1), scores(Id2, S2), Id1 < Id2, S1 < S2.
+
+?- higher(Id1, Id2, S1, S2).
+
+% Find duplicate scores
+same_score(Id1, Id2, S) :- scores(Id1, S), scores(Id2, S), Id1 < Id2.
+
+?- same_score(Id1, Id2, S).
+
+.kg use default
+.kg drop test_self_cmp

@@ -1,0 +1,18 @@
+% Test: Count when some groups have zero
+% Expected: Groups with no matches don't appear
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_zero
+.kg use test_count_zero
+
++categories[("A",), ("B",), ("C",)].
++items[("A", 1), ("A", 2), ("C", 3)].
+
+% Count items per category (B has none)
+items_per_cat(Cat, <COUNT:Id>) :- items(Cat, Id).
+
+?- items_per_cat(Cat, N).
+
+.kg use default
+.kg drop test_count_zero

@@ -1,0 +1,18 @@
+% Test: Query derived relation
+% Expected: Query results from rules
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_derived
+.kg use test_derived
+
++base[(1, 10), (2, 20), (3, 30)].
+
+% Derived rule
++doubled(Id, D) :- base(Id, V), D = V * 2.
+
+% Query the derived relation
+?- doubled(Id, D).
+
+.kg use default
+.kg drop test_derived

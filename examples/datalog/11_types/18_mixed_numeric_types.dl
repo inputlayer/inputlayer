@@ -1,0 +1,23 @@
+% Test: Mixed numeric types in same relation
+% Expected: Integers and floats coexist correctly
+% Category: 11_types
+% Priority: P1 - Type handling
+
+.kg create test_mixed_num
+.kg use test_mixed_num
+
+% Mix of integers and floats
++values[(1, 100), (2, 200.5), (3, 300), (4, 400.75)].
+
+% Query all
+?- values(Id, Val).
+
+% Filter on float threshold
+?- values(Id, Val), Val > 200.0.
+
+% Integer-only relation for comparison
++int_vals[(1, 100), (2, 200), (3, 300)].
+?- int_vals(I, V), V > 150.
+
+.kg use default
+.kg drop test_mixed_num

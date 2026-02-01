@@ -1,0 +1,17 @@
+% Test: Less-than-or-equal filter
+% Expected: Filter by <= comparison
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_le
+.kg use test_le
+
++temps[(1, 10), (2, 20), (3, 0), (4, -5), (5, 30)].
+
+% Temps <= 10
+cold(Id, T) :- temps(Id, T), T <= 10.
+
+?- cold(Id, T).
+
+.kg use default
+.kg drop test_le

@@ -1,0 +1,16 @@
+% Test: Square root function
+% Expected: Return square root
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_sqrt
+.kg use test_sqrt
+
++nums[(0,), (1,), (4,), (9,), (16,)].
+
+sqrt_val(X, Y) :- nums(X), Y = SQRT(X).
+
+?- sqrt_val(X, Y).
+
+.kg use default
+.kg drop test_sqrt

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_running_total
+Knowledge graph 'test_running_total' created.
+Switched to knowledge graph: test_running_total
+> .kg use test_running_total
+Switched to knowledge graph: test_running_total
+> +transactions[(1, 100), (2, 50), (3, 75), (4, 25)].
+Inserted 4 fact(s) into 'transactions'.
+> running_total(Id, Val, <SUM:V2>) :- transactions(Id, Val), transactions(Id2, V2), Id2 <= Id.
+Script error: Parse error: Unknown aggregate function: 

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_agg
+Knowledge graph 'test_single_agg' created.
+Switched to knowledge graph: test_single_agg
+> .kg use test_single_agg
+Switched to knowledge graph: test_single_agg
+> +single[(42,)].
+Inserted 1 fact(s) into 'single'.
+> single_sum(<SUM:X>) :- single(X).
+Script error: Parse error: Unknown aggregate function: 

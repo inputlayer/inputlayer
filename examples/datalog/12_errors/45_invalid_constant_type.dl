@@ -1,0 +1,17 @@
+% Test: Type mismatch with constant
+% Expected: Error or unexpected result
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_inv_const
+.kg use test_inv_const
+
++nums[(1,), (2,), (3,)].
+
+% Compare int to string
+bad(X) :- nums(X), X = "one".
+
+?- bad(X).
+
+.kg use default
+.kg drop test_inv_const

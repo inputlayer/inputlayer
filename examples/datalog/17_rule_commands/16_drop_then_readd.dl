@@ -1,0 +1,27 @@
+% Test: Drop rule then add new clauses
+% Expected: Can drop rule and redefine it
+% Category: 17_rule_commands
+% Priority: P2 - Rule management
+
+.kg create test_drop_readd
+.kg use test_drop_readd
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% Define initial rule
++computed(Id, Val) :- data(Id, V), Val = V * 2.
+
+?- computed(Id, Val).
+
+% Drop the rule
+.rule drop computed
+
+.rule
+
+% Redefine with different logic
++computed(Id, Val) :- data(Id, V), Val = V + 100.
+
+?- computed(Id, Val).
+
+.kg use default
+.kg drop test_drop_readd

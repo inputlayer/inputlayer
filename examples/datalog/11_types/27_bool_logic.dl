@@ -1,0 +1,21 @@
+% Test: Boolean logic in filters
+% Expected: Use boolean values in comparisons
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_bool_logic
+.kg use test_bool_logic
+
++flags[(1, true), (2, false), (3, true), (4, false)].
+
+% Filter true values
+enabled(Id) :- flags(Id, true).
+
+% Filter false values
+disabled(Id) :- flags(Id, false).
+
+?- enabled(Id).
+?- disabled(Id).
+
+.kg use default
+.kg drop test_bool_logic

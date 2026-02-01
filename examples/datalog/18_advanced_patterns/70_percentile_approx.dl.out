@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_pct
+Knowledge graph 'test_pct' created.
+Switched to knowledge graph: test_pct
+> .kg use test_pct
+Switched to knowledge graph: test_pct
+> +scores[(1, 50), (2, 60), (3, 70), (4, 80), (5, 90), (6, 100)].
+Inserted 6 fact(s) into 'scores'.
+> rank_position(Id, Score, <COUNT:S2>) :- scores(Id, Score), scores(_, S2), S2 < Score.
+Script error: Parse error: Unknown aggregate function: 

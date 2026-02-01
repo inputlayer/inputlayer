@@ -1,0 +1,17 @@
+% Test: Same variable used multiple times
+% Expected: Variable bindings must be consistent
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_dup_var
+.kg use test_dup_var
+
++pairs[(1, 2), (2, 2), (3, 3), (4, 5)].
+
+% Same variable in both positions - must be equal
+diagonal(X) :- pairs(X, X).
+
+?- diagonal(X).
+
+.kg use default
+.kg drop test_dup_var

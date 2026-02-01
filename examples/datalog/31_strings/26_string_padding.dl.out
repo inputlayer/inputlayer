@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_padding
+Knowledge graph 'test_padding' created.
+Switched to knowledge graph: test_padding
+> .kg use test_padding
+Switched to knowledge graph: test_padding
+> +nums[(1,), (12,), (123,)].
+Inserted 3 fact(s) into 'nums'.
+> num_info(N, L) :- nums(N), L = N.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "num_info", args: [Variable("N"), Variable("L")] }. Variables ["L"] in head do not appear in positive body atoms.

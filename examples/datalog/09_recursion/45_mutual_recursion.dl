@@ -1,0 +1,20 @@
+% Test: Mutual recursion between two rules
+% Expected: Both rules compute together
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_mutual_rec
+.kg use test_mutual_rec
+
++start[(1,)].
+
+% Even and odd numbers via mutual recursion
++even(X) :- start(X).
++even(X) :- odd(Y), X = Y + 1, X < 10.
++odd(X) :- even(Y), X = Y + 1, X < 10.
+
+?- even(X).
+?- odd(X).
+
+.kg use default
+.kg drop test_mutual_rec

@@ -1,0 +1,16 @@
+% Test: Float precision handling
+% Expected: Maintain float precision
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_float_prec
+.kg use test_float_prec
+
++floats[(0.1,), (0.2,), (0.3,)].
+
+sum_float(<SUM:X>) :- floats(X).
+
+?- sum_float(S).
+
+.kg use default
+.kg drop test_float_prec

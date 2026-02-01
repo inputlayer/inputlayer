@@ -1,0 +1,16 @@
+% Test: Average with grouping
+% Expected: Average per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_avg_group
+.kg use test_avg_group
+
++scores[("Math", 80), ("Math", 90), ("Math", 70), ("Science", 85), ("Science", 95)].
+
+avg_by_subject(Subj, <AVG:Score>) :- scores(Subj, Score).
+
+?- avg_by_subject(Subj, Avg).
+
+.kg use default
+.kg drop test_avg_group

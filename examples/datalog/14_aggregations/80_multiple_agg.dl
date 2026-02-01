@@ -1,0 +1,24 @@
+% Test: Multiple aggregations
+% Expected: Different aggregations on same data
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_multi_agg
+.kg use test_multi_agg
+
++values[(10,), (20,), (30,), (40,), (50,)].
+
++stats_sum(<SUM:V>) :- values(V).
++stats_avg(<AVG:V>) :- values(V).
++stats_min(<MIN:V>) :- values(V).
++stats_max(<MAX:V>) :- values(V).
++stats_count(<COUNT:V>) :- values(V).
+
+?- stats_sum(S).
+?- stats_avg(A).
+?- stats_min(M).
+?- stats_max(X).
+?- stats_count(C).
+
+.kg use default
+.kg drop test_multi_agg

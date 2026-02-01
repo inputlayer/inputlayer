@@ -1,0 +1,20 @@
+% Test: Window count pattern
+% Expected: Count items with lower values per group
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_window_cnt
+.kg use test_window_cnt
+
++sales[("Q1", "A", 100), ("Q1", "B", 150), ("Q1", "C", 120), ("Q2", "A", 200), ("Q2", "B", 180)].
+
+% Count of items with lower value in same quarter (rank-like)
+position(Q, Name, Val, <COUNT:N2>) :-
+    sales(Q, Name, Val),
+    sales(Q, N2, V2),
+    V2 < Val.
+
+?- position(Q, Name, Val, Pos).
+
+.kg use default
+.kg drop test_window_cnt

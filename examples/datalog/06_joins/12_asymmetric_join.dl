@@ -1,0 +1,21 @@
+% Test: Asymmetric join (one side larger)
+% Expected: Joins work when relation sizes differ
+% Category: 06_joins
+% Priority: P1 - Join patterns
+
+.kg create test_asym_join
+.kg use test_asym_join
+
+% Large relation
++items[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e"), (6, "f"), (7, "g")].
+
+% Small relation
++selected[(2), (5)].
+
+% Join (small to large)
+matched(Id, Val) :- items(Id, Val), selected(Id).
+
+?- matched(Id, Val).
+
+.kg use default
+.kg drop test_asym_join

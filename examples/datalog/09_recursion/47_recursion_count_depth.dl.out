@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_depth
+Knowledge graph 'test_rec_depth' created.
+Switched to knowledge graph: test_rec_depth
+> .kg use test_rec_depth
+Switched to knowledge graph: test_rec_depth
+> +link[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")].
+Inserted 4 fact(s) into 'link'.
+> +path_depth(X, X, 0).
+No facts inserted (1 duplicate skipped).
+> +path_depth(X, Z, D) :- path_depth(X, Y, D1), link(Y, Z), D = D1 + 1, D < 5.
+Script error: Failed to register rule: Unsafe rule 'path_depth': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

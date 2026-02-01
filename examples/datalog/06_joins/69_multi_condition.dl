@@ -1,0 +1,20 @@
+% Test: Multi-condition join
+% Expected: Join with multiple conditions
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_multi_cond
+.kg use test_multi_cond
+
++orders[(1, 100, "2024-01"), (2, 101, "2024-01"), (3, 100, "2024-02")].
++customers[(100, "Alice", "VIP"), (101, "Bob", "Regular")].
+
+% Join on customer_id where customer is VIP
++vip_orders(OrderId, CustName, Month) :-
+    orders(OrderId, CustId, Month),
+    customers(CustId, CustName, "VIP").
+
+?- vip_orders(O, C, M).
+
+.kg use default
+.kg drop test_multi_cond

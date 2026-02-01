@@ -1,0 +1,17 @@
+% Test: Range check filter
+% Expected: Filter values within a range
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_range
+.kg use test_range
+
++values[(5,), (10,), (15,), (20,), (25,), (30,)].
+
+% Values between 10 and 25 (inclusive)
+in_range(X) :- values(X), X >= 10, X <= 25.
+
+?- in_range(X).
+
+.kg use default
+.kg drop test_range

@@ -1,0 +1,22 @@
+% Test: Conditional aggregation pattern
+% Expected: Aggregate only matching rows
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_cond_agg
+.kg use test_cond_agg
+
++sales[("North", 100), ("South", 200), ("North", 150), ("South", 50)].
+
+% Sum only North sales
++north_sum(<SUM:Amt>) :- sales("North", Amt).
+
+?- north_sum(S).
+
+% Count per region
++region_count(Region, <COUNT:Amt>) :- sales(Region, Amt).
+
+?- region_count(Region, C).
+
+.kg use default
+.kg drop test_cond_agg

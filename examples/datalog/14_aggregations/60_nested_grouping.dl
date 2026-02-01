@@ -1,0 +1,17 @@
+% Test: Aggregation with deep grouping
+% Expected: Group by multiple levels
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_nested_grp
+.kg use test_nested_grp
+
++sales[("2024", "Q1", "A", 100), ("2024", "Q1", "B", 150), ("2024", "Q2", "A", 200), ("2025", "Q1", "A", 300)].
+
+% Sum by year, quarter, category
+sum_by_all(Year, Qtr, Cat, <SUM:Val>) :- sales(Year, Qtr, Cat, Val).
+
+?- sum_by_all(Year, Qtr, Cat, Total).
+
+.kg use default
+.kg drop test_nested_grp

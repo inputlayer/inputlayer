@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_chained
+Knowledge graph 'test_chained' created.
+Switched to knowledge graph: test_chained
+> .kg use test_chained
+Switched to knowledge graph: test_chained
+> +values[(10,), (20,), (30,)].
+Inserted 3 fact(s) into 'values'.
+> result_add(X, Y) :- values(X), Y = X + 1 + 2 + 3.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "result_add", args: [Variable("X"), Variable("Y")] }. Variables ["Y"] in head do not appear in positive body atoms.

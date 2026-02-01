@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_key
+Knowledge graph 'test_dup_key' created.
+Switched to knowledge graph: test_dup_key
+> .kg use test_dup_key
+Switched to knowledge graph: test_dup_key
+> +data[(1, "first"), (2, "second")].
+Inserted 2 fact(s) into 'data'.
+> ?- data(X, Y).
+2 rows:
+  (1, "first")
+  (2, "second")
+> +data[(1, "updated")].
+Inserted 1 fact(s) into 'data'.
+> ?- data(X, Y).
+3 rows:
+  (1, "first")
+  (1, "updated")
+  (2, "second")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_key
+Knowledge graph 'test_dup_key' dropped.

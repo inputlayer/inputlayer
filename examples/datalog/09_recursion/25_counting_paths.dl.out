@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_paths
+Knowledge graph 'test_count_paths' created.
+Switched to knowledge graph: test_count_paths
+> .kg use test_count_paths
+Switched to knowledge graph: test_count_paths
+> +edge[(1, 2), (1, 3), (2, 4), (3, 4), (2, 5), (4, 5)].
+Inserted 6 fact(s) into 'edge'.
+> +path(X, Y) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z) :- path(X, Y), edge(Y, Z).
+Rule 'path' registered.
+> ?- path(X, Y).
+9 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+  (2, 4)
+  (2, 5)
+  (3, 4)
+  (3, 5)
+  (4, 5)
+> +incoming(Node, <COUNT:Src>) :- path(Src, Node).
+Script error: Parse error: Invalid term: '<COUNT:Src>'

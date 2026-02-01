@@ -1,0 +1,12 @@
+% Test: .rel on nonexistent relation
+% Expected: Show error or empty
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_rel_noexist
+.kg use test_rel_noexist
+
+.rel nonexistent_relation
+
+.kg use default
+.kg drop test_rel_noexist

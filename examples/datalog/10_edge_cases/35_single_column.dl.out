@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_col
+Knowledge graph 'test_single_col' created.
+Switched to knowledge graph: test_single_col
+> .kg use test_single_col
+Switched to knowledge graph: test_single_col
+> +ids[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'ids'.
+> ?- ids(X).
+5 rows:
+  (1)
+  (2)
+  (3)
+  (4)
+  (5)
+> +id_count(<COUNT:X>) :- ids(X).
+Script error: Parse error: Invalid term: '<COUNT:X>'

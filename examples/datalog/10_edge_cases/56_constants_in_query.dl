@@ -1,0 +1,22 @@
+% Test: Constants in query patterns
+% Expected: Query with literal constants
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_const_query
+.kg use test_const_query
+
++data[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
+
+% Query with constant in position
+match_a(Id, Val) :- data(Id, "a", Val).
+
+?- match_a(Id, Val).
+
+% Query with multiple constants
+exact(Val) :- data(1, "a", Val).
+
+?- exact(Val).
+
+.kg use default
+.kg drop test_const_query

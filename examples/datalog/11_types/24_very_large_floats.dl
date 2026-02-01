@@ -1,0 +1,22 @@
+% Test: Very large float values
+% Expected: Large floats handled correctly
+% Category: 11_types
+% Priority: P2 - Type edge cases
+
+.kg create test_large_floats
+.kg use test_large_floats
+
++huge[(1.0e100,), (2.0e100,), (3.0e100,)].
+
+% Arithmetic on large floats
++sum_huge(<SUM:X>) :- huge(X).
+
+?- sum_huge(S).
+
+% Comparison
+huge_cmp(A, B) :- huge(A), huge(B), A < B.
+
+?- huge_cmp(A, B).
+
+.kg use default
+.kg drop test_large_floats

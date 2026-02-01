@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_repeat
+Knowledge graph 'test_repeat' created.
+Switched to knowledge graph: test_repeat
+> .kg use test_repeat
+Switched to knowledge graph: test_repeat
+> +data[(1, "a")].
+Inserted 1 fact(s) into 'data'.
+> +data[(1, "a")].
+No facts inserted (1 duplicate skipped).
+> +data[(1, "a")].
+No facts inserted (1 duplicate skipped).
+> +data[(2, "b")].
+Inserted 1 fact(s) into 'data'.
+> +data[(2, "b")].
+No facts inserted (1 duplicate skipped).
+> ?- data(X, Y).
+2 rows:
+  (1, "a")
+  (2, "b")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_repeat
+Knowledge graph 'test_repeat' dropped.

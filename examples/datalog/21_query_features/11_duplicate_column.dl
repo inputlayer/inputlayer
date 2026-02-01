@@ -1,0 +1,22 @@
+% Test: Duplicate column in query output
+% Expected: Same column can appear multiple times
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_dup_col
+.kg use test_dup_col
+
++nums[(1, 10), (2, 20)].
+
+% Same column twice
+dup(X, X, Y) :- nums(X, Y).
+
+?- dup(A, B, C).
+
+% Same value from different columns
+same_val(X, Y, Y) :- nums(X, Y).
+
+?- same_val(A, B, C).
+
+.kg use default
+.kg drop test_dup_col

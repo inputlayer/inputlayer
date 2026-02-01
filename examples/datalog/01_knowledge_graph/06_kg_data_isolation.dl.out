@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_iso_a
+Knowledge graph 'test_iso_a' created.
+Switched to knowledge graph: test_iso_a
+> .kg use test_iso_a
+Switched to knowledge graph: test_iso_a
+> +data[(1, "a"), (2, "b")].
+Inserted 2 fact(s) into 'data'.
+> ?- data(Id, Val).
+2 rows:
+  (1, "a")
+  (2, "b")
+> .kg create test_iso_b
+Knowledge graph 'test_iso_b' created.
+Switched to knowledge graph: test_iso_b
+> .kg use test_iso_b
+Switched to knowledge graph: test_iso_b
+> ?- data(Id, Val).
+No results.
+> +data[(99, "z")].
+Inserted 1 fact(s) into 'data'.
+> ?- data(Id, Val).
+1 rows:
+  (99, "z")
+> .kg use test_iso_a
+Switched to knowledge graph: test_iso_a
+> ?- data(Id, Val).
+2 rows:
+  (1, "a")
+  (2, "b")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_iso_a
+Knowledge graph 'test_iso_a' dropped.
+> .kg drop test_iso_b
+Knowledge graph 'test_iso_b' dropped.

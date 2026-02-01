@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_islands
+Knowledge graph 'test_islands' created.
+Switched to knowledge graph: test_islands
+> .kg use test_islands
+Switched to knowledge graph: test_islands
+> +events[(1, "A"), (2, "A"), (3, "B"), (4, "B"), (5, "B"), (6, "A")].
+Inserted 6 fact(s) into 'events'.
+> island_start(T, Val) :- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal.
+Script error: Parse error: Invalid term: 'T - 1'

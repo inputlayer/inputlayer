@@ -1,0 +1,14 @@
+% Test: Strings with special characters
+% Expected: Handle quotes, newlines, etc
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_special_chars
+.kg use test_special_chars
+
++texts[(1, "hello\nworld"), (2, "tab\there"), (3, "back\\slash")].
+
+?- texts(Id, T).
+
+.kg use default
+.kg drop test_special_chars

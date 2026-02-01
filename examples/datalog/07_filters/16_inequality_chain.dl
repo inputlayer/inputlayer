@@ -1,0 +1,17 @@
+% Test: Chained inequalities
+% Expected: Multiple inequality comparisons
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_ineq_chain
+.kg use test_ineq_chain
+
++data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)].
+
+% Values where 15 < value < 45
+in_range(Id, V) :- data(Id, V), V > 15, V < 45.
+
+?- in_range(Id, V).
+
+.kg use default
+.kg drop test_ineq_chain

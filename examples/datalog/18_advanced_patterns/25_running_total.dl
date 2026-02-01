@@ -1,0 +1,22 @@
+% Test: Running total pattern
+% Expected: Can compute running totals
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_running
+.kg use test_running
+
++transactions[(1, 100), (2, 50), (3, 75), (4, 200), (5, 25)].
+
+% Running count (how many transactions up to and including this one)
+running_count(Id, <COUNT:OtherId>) :- transactions(Id, _), transactions(OtherId, _), OtherId <= Id.
+
+?- running_count(Id, Count).
+
+% Running sum (sum of all transactions up to and including this one)
+running_sum(Id, <SUM:Amt>) :- transactions(Id, _), transactions(OtherId, Amt), OtherId <= Id.
+
+?- running_sum(Id, Sum).
+
+.kg use default
+.kg drop test_running

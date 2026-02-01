@@ -72,7 +72,9 @@ impl KnowledgeGraphsMetadata {
         }
 
         let file = File::create(path)?;
-        serde_json::to_writer_pretty(file, self)?;
+        serde_json::to_writer_pretty(&file, self)?;
+        // Ensure metadata is durably written to disk
+        file.sync_all()?;
         Ok(())
     }
 }

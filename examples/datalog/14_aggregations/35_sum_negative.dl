@@ -1,0 +1,16 @@
+% Test: Sum with negative values
+% Expected: Correctly sum positive and negative
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_neg
+.kg use test_sum_neg
+
++amounts[(100,), (-50,), (200,), (-75,), (25,)].
+
+total(<SUM:X>) :- amounts(X).
+
+?- total(T).
+
+.kg use default
+.kg drop test_sum_neg

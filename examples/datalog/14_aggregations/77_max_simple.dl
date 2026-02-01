@@ -1,0 +1,17 @@
+% Test: MAX aggregation basic
+% Expected: Find maximum value
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_max
+.kg use test_max
+
++scores[(85,), (92,), (78,), (95,), (88,)].
+
+% Maximum score
++max_score(<MAX:S>) :- scores(S).
+
+?- max_score(M).
+
+.kg use default
+.kg drop test_max

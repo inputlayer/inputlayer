@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_stratified
+Knowledge graph 'test_stratified' created.
+Switched to knowledge graph: test_stratified
+> .kg use test_stratified
+Switched to knowledge graph: test_stratified
+> +items[(1, "a"), (2, "b"), (3, "c"), (4, "d")].
+Inserted 4 fact(s) into 'items'.
+> +excluded_1[(1)].
+Inserted 1 fact(s) into 'excluded_1'.
+> +excluded_2[(2)].
+Inserted 1 fact(s) into 'excluded_2'.
+> +level_1(Id, Val) :- items(Id, Val), !excluded_1(Id).
+Rule 'level_1' registered.
+> ?- level_1(Id, Val).
+3 rows:
+  (2, "b")
+  (3, "c")
+  (4, "d")
+> +level_2(Id, Val) :- level_1(Id, Val), !excluded_2(Id).
+Rule 'level_2' registered.
+> ?- level_2(Id, Val).
+2 rows:
+  (3, "c")
+  (4, "d")
+> +special[(3)].
+Inserted 1 fact(s) into 'special'.
+> +level_3(Id, Val) :- level_2(Id, Val), !special(Id).
+Rule 'level_3' registered.
+> ?- level_3(Id, Val).
+1 rows:
+  (4, "d")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_stratified
+Knowledge graph 'test_stratified' dropped.

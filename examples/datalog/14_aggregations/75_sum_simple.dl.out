@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sum
+Knowledge graph 'test_sum' created.
+Switched to knowledge graph: test_sum
+> .kg use test_sum
+Switched to knowledge graph: test_sum
+> +values[(10,), (20,), (30,), (40,)].
+Inserted 4 fact(s) into 'values'.
+> +total(<SUM:V>) :- values(V).
+Script error: Parse error: Invalid term: '<SUM:V>'

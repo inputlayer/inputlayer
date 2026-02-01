@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_gaps
+Knowledge graph 'test_gaps' created.
+Switched to knowledge graph: test_gaps
+> .kg use test_gaps
+Switched to knowledge graph: test_gaps
+> +ids[(1,), (2,), (4,), (5,), (8,)].
+Inserted 5 fact(s) into 'ids'.
+> has_gap_after(X) :- ids(X), ids(Y), Y > X, Y = X + 1.
+Script error: Query execution failed: Unsupported comparison: Variable("Y") Equal Arithmetic(Binary { op: Add, left: Variable("X"), right: Constant(1) })

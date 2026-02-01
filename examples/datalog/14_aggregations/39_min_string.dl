@@ -1,0 +1,16 @@
+% Test: Min of string values
+% Expected: Lexicographic min
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_min_str
+.kg use test_min_str
+
++names[("Carol",), ("Alice",), ("Bob",), ("Zara",)].
+
+min_name(<MIN:N>) :- names(N).
+
+?- min_name(N).
+
+.kg use default
+.kg drop test_min_str

@@ -1,0 +1,18 @@
+% Test: EXCEPT operation
+% Expected: SQL-like EXCEPT
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_except
+.kg use test_except
+
++query1[(1, "a"), (2, "b"), (3, "c")].
++query2[(2, "b"), (3, "c")].
+
+% query1 EXCEPT query2
++except_result(X, Y) :- query1(X, Y), !query2(X, Y).
+
+?- except_result(X, Y).
+
+.kg use default
+.kg drop test_except

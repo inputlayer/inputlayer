@@ -1,0 +1,16 @@
+% Test: Grouped SUM
+% Expected: Sum per category
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_grp_sum
+.kg use test_grp_sum
+
++sales[(1, "East", 100), (2, "West", 200), (3, "East", 150), (4, "West", 50)].
+
++sum_by_region(Region, <SUM:Amount>) :- sales(_, Region, Amount).
+
+?- sum_by_region(R, S).
+
+.kg use default
+.kg drop test_grp_sum

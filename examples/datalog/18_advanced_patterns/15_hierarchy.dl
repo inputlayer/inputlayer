@@ -1,0 +1,34 @@
+% Test: Hierarchical data pattern
+% Expected: Can model and query hierarchies
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_hierarchy
+.kg use test_hierarchy
+
+% Organization chart: (id, name, manager_id)
++employees[(1, "CEO", 0),
+           (2, "VP Sales", 1),
+           (3, "VP Eng", 1),
+           (4, "Sales Rep", 2),
+           (5, "Engineer", 3),
+           (6, "Sr Engineer", 3)].
+
+% Direct reports
+direct_reports(Manager, Employee) :- employees(Employee, _, Manager), Manager != 0.
+
+?- direct_reports(Manager, Employee).
+
+% All subordinates (transitive)
++subordinate(Manager, Employee) :- direct_reports(Manager, Employee).
++subordinate(Manager, Employee) :- subordinate(Manager, Mid), direct_reports(Mid, Employee).
+
+?- subordinate(Manager, Employee).
+
+% Count direct reports
+report_count(Manager, <COUNT:Emp>) :- direct_reports(Manager, Emp).
+
+?- report_count(Manager, Count).
+
+.kg use default
+.kg drop test_hierarchy

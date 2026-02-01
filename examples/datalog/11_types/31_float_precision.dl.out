@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_prec
+Knowledge graph 'test_float_prec' created.
+Switched to knowledge graph: test_float_prec
+> .kg use test_float_prec
+Switched to knowledge graph: test_float_prec
+> +floats[(0.1,), (0.2,), (0.3,)].
+Inserted 3 fact(s) into 'floats'.
+> sum_float(<SUM:X>) :- floats(X).
+Script error: Parse error: Unknown aggregate function: 

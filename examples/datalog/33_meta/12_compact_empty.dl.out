@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compact_empty
+Knowledge graph 'test_compact_empty' created.
+Switched to knowledge graph: test_compact_empty
+> .kg use test_compact_empty
+Switched to knowledge graph: test_compact_empty
+> .compact
+Compaction command not available over HTTP.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_compact_empty
+Knowledge graph 'test_compact_empty' dropped.

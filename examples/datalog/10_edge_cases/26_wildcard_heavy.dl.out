@@ -1,0 +1,47 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcards
+Knowledge graph 'test_wildcards' created.
+Switched to knowledge graph: test_wildcards
+> .kg use test_wildcards
+Switched to knowledge graph: test_wildcards
+> +wide[(1, 2, 3, 4, 5, 6)].
+Inserted 1 fact(s) into 'wide'.
+> +wide[(10, 20, 30, 40, 50, 60)].
+Inserted 1 fact(s) into 'wide'.
+> ends(First, Last) :- wide(First, _, _, _, _, Last).
+2 rows:
+  (1, 6)
+  (10, 60)
+(session: 1 rule(s))
+> ?- ends(First, Last).
+2 rows:
+  (1, 6)
+  (10, 60)
+> middle(C, D) :- wide(_, _, C, D, _, _).
+2 rows:
+  (3, 4)
+  (30, 40)
+(session: 2 rule(s))
+> ?- middle(C, D).
+2 rows:
+  (3, 4)
+  (30, 40)
+> alternate(A, C, E) :- wide(A, _, C, _, E, _).
+2 rows:
+  (1, 3, 5)
+  (10, 30, 50)
+(session: 3 rule(s))
+> ?- alternate(A, C, E).
+2 rows:
+  (1, 3, 5)
+  (10, 30, 50)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_wildcards
+Knowledge graph 'test_wildcards' dropped.

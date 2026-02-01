@@ -1,0 +1,14 @@
+% Test: .rel command after inserting data
+% Expected: Show relation with correct row count
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_rel_insert
+.kg use test_rel_insert
+
++data[(1, "a"), (2, "b"), (3, "c")].
+
+.rel data
+
+.kg use default
+.kg drop test_rel_insert

@@ -1,0 +1,17 @@
+% Test: Dense rank pattern
+% Expected: Rank without gaps
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_dense_rank
+.kg use test_dense_rank
+
++scores[(1, 100), (2, 90), (3, 100), (4, 80)].
+
+% Count distinct higher scores
++distinct_scores(S) :- scores(_, S).
+
+?- distinct_scores(S).
+
+.kg use default
+.kg drop test_dense_rank

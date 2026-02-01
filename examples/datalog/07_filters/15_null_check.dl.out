@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_null_check
+Knowledge graph 'test_null_check' created.
+Switched to knowledge graph: test_null_check
+> .kg use test_null_check
+Switched to knowledge graph: test_null_check
+> +data[(1, "value"), (2, ""), (3, "another"), (4, "")].
+Inserted 4 fact(s) into 'data'.
+> has_value(Id, V) :- data(Id, V), V != "".
+2 rows:
+  (1, "value")
+  (3, "another")
+(session: 1 rule(s))
+> ?- has_value(Id, V).
+2 rows:
+  (1, "value")
+  (3, "another")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_null_check
+Knowledge graph 'test_null_check' dropped.

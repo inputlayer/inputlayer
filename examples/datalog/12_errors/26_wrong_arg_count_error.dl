@@ -1,0 +1,15 @@
+% Test: Wrong argument count error
+% Expected: Error - euclidean expects 2 arguments, got 1
+% Category: 12_errors
+% Priority: P1 High - Function call validation
+
+.kg create test_wrong_args
+.kg use test_wrong_args
+
++embeddings[(1, [0.1, 0.2, 0.3]), (2, [0.4, 0.5, 0.6])].
+
+% Call euclidean with wrong number of arguments - should error
+?- embeddings(Id, V), Dist = euclidean(V).
+
+.kg use default
+.kg drop test_wrong_args

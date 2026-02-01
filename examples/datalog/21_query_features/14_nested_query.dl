@@ -1,0 +1,22 @@
+% Test: Nested query pattern
+% Expected: Subquery-like patterns via rules
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_nested
+.kg use test_nested
+
++sales[(1, "North", 100), (2, "South", 200), (3, "North", 150), (4, "South", 50)].
+
+% Subquery: regional totals
++regional_total(Region, <SUM:Amount>) :- sales(_, Region, Amount).
+
+% Main query: regions above average
++global_avg(<AVG:Total>) :- regional_total(_, Total).
+
+?- regional_total(Region, Total).
+
+?- global_avg(Avg).
+
+.kg use default
+.kg drop test_nested

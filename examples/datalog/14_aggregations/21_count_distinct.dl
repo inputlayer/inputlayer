@@ -1,0 +1,21 @@
+% Test: Count with distinct values
+% Expected: Counts unique values correctly
+% Category: 14_aggregations
+% Priority: P1 - Aggregation completeness
+
+.kg create test_count_distinct
+.kg use test_count_distinct
+
+% Data with duplicates in value column
++data[(1, "a"), (2, "b"), (3, "a"), (4, "c"), (5, "b"), (6, "a")].
+
+% Count all rows
++total_count(count<V>) :- data(_, V).
+?- total_count(C).
+
+% Group by value and count
++value_count(V, count<Id>) :- data(Id, V).
+?- value_count(V, C).
+
+.kg use default
+.kg drop test_count_distinct

@@ -1,0 +1,17 @@
+% Test: Materialized view pattern
+% Expected: Store derived data persistently
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_mat_view
+.kg use test_mat_view
+
++orders[(1, 100, "2024-01"), (2, 200, "2024-01"), (3, 150, "2024-02")].
+
+% Materialized summary (persistent rule)
++monthly_total(Month, <SUM:Amount>) :- orders(_, Amount, Month).
+
+?- monthly_total(M, T).
+
+.kg use default
+.kg drop test_mat_view

@@ -1,0 +1,24 @@
+% Test: Simulating outer join behavior
+% Expected: Can simulate left/outer join using negation
+% Category: 06_joins
+% Priority: P1 - Join completeness
+
+.kg create test_outer_sim
+.kg use test_outer_sim
+
+% Employees
++employees[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+
+% Departments (some employees not assigned)
++dept_assign[(1, "Engineering"), (3, "Sales")].
+
+% Inner join - only employees with departments
++emp_with_dept(Id, Name, Dept) :- employees(Id, Name), dept_assign(Id, Dept).
+?- emp_with_dept(I, N, D).
+
+% Employees without departments (left anti-join)
++emp_no_dept(Id, Name) :- employees(Id, Name), !dept_assign(Id, _).
+?- emp_no_dept(I, N).
+
+.kg use default
+.kg drop test_outer_sim

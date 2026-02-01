@@ -1,0 +1,16 @@
+% Test: TOP_K per group
+% Expected: Top K values within each group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_topk_grp
+.kg use test_topk_grp
+
++scores[("Math", 95), ("Math", 87), ("Math", 92), ("Science", 88), ("Science", 91), ("Science", 85)].
+
+top2_by_subject(Subj, <TOP_K:2:Score>) :- scores(Subj, Score).
+
+?- top2_by_subject(Subj, Scores).
+
+.kg use default
+.kg drop test_topk_grp

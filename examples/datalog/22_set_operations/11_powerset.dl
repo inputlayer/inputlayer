@@ -1,0 +1,22 @@
+% Test: Powerset-like pattern (combinations)
+% Expected: Can generate combinations
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_powerset
+.kg use test_powerset
+
++elements[(1,), (2,), (3,)].
+
+% All pairs where first < second (combinations of 2)
+pairs(A, B) :- elements(A), elements(B), A < B.
+
+?- pairs(A, B).
+
+% All ordered pairs
+ordered_pairs(A, B) :- elements(A), elements(B), A != B.
+
+?- ordered_pairs(A, B).
+
+.kg use default
+.kg drop test_powerset

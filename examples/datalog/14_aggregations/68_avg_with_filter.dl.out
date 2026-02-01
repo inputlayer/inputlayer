@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_avg_filter
+Knowledge graph 'test_avg_filter' created.
+Switched to knowledge graph: test_avg_filter
+> .kg use test_avg_filter
+Switched to knowledge graph: test_avg_filter
+> +scores[(1, "Math", 85), (2, "Math", 90), (3, "Science", 75), (4, "Science", 80), (5, "Math", 95)].
+Inserted 5 fact(s) into 'scores'.
+> +math_avg(<AVG:Score>) :- scores(_, "Math", Score).
+Script error: Parse error: Invalid term: '<AVG:Score>'

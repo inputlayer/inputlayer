@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_join
+Knowledge graph 'test_self_join' created.
+Switched to knowledge graph: test_self_join
+> .kg use test_self_join
+Switched to knowledge graph: test_self_join
+> +employees[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Carol", 50000)].
+Inserted 3 fact(s) into 'employees'.
+> same_salary(N1, N2) :- employees(Id1, N1, Sal), employees(Id2, N2, Sal), Id1 < Id2.
+1 rows:
+  ("Alice", "Carol")
+(session: 1 rule(s))
+> ?- same_salary(N1, N2).
+1 rows:
+  ("Alice", "Carol")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_self_join
+Knowledge graph 'test_self_join' dropped.

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_trig_full
+Knowledge graph 'test_trig_full' created.
+Switched to knowledge graph: test_trig_full
+> .kg use test_trig_full
+Switched to knowledge graph: test_trig_full
+> +angles[(0.0,), (1.0,), (1.5707963,)].
+Inserted 3 fact(s) into 'angles'.
+> sin_val(A, S) :- angles(A), S = SIN(A).
+Script error: Parse error: Invalid term: 'SIN(A)'

@@ -1,0 +1,17 @@
+% Test: Aggregation on wrong type
+% Expected: Type error or unexpected behavior
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_wrong_agg
+.kg use test_wrong_agg
+
++strings[("hello",), ("world",)].
+
+% SUM on strings - should error or handle gracefully
+sum_str(<SUM:S>) :- strings(S).
+
+?- sum_str(R).
+
+.kg use default
+.kg drop test_wrong_agg

@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_agg
+Knowledge graph 'test_neg_agg' created.
+Switched to knowledge graph: test_neg_agg
+> .kg use test_neg_agg
+Switched to knowledge graph: test_neg_agg
+> +scores[(1, 80), (2, 90), (3, 70), (4, 85)].
+Inserted 4 fact(s) into 'scores'.
+> +excluded[(2,)].
+Inserted 1 fact(s) into 'excluded'.
+> +avg_allowed(<AVG:Score>) :- scores(Id, Score), !excluded(Id).
+Script error: Parse error: Invalid term: '<AVG:Score>'

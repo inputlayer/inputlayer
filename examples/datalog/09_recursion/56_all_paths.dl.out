@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_paths
+Knowledge graph 'test_all_paths' created.
+Switched to knowledge graph: test_all_paths
+> .kg use test_all_paths
+Switched to knowledge graph: test_all_paths
+> +edge[("s", "a"), ("s", "b"), ("a", "t"), ("b", "t"), ("a", "b")].
+Inserted 5 fact(s) into 'edge'.
+> +reachable("s", "s", 0).
+Inserted 1 fact(s) into 'reachable'.
+> +reachable(Start, End, D) :- reachable(Start, Mid, D1), edge(Mid, End), D = D1 + 1, D < 5.
+Script error: Failed to register rule: Unsafe rule 'reachable': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

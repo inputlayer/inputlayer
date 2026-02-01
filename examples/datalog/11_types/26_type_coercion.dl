@@ -1,0 +1,18 @@
+% Test: Type coercion in comparisons
+% Expected: Handle implicit conversions
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_coerce
+.kg use test_coerce
+
++ints[(1,), (2,), (3,)].
++floats[(1.0,), (2.0,), (4.0,)].
+
+% Compare int column to float constant
+bigger_than_1_5(X) :- ints(X), X > 1.5.
+
+?- bigger_than_1_5(X).
+
+.kg use default
+.kg drop test_coerce

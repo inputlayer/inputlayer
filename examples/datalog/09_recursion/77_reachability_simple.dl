@@ -1,0 +1,22 @@
+% Test: Simple reachability
+% Expected: Basic transitive closure
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_reach
+.kg use test_reach
+
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Reachable nodes
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+% What's reachable from 1?
+?- reachable(1, X).
+
+% What's reachable from 2?
+?- reachable(2, X).
+
+.kg use default
+.kg drop test_reach

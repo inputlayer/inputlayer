@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_rule
+Knowledge graph 'test_multi_rule' created.
+Switched to knowledge graph: test_multi_rule
+> .kg use test_multi_rule
+Switched to knowledge graph: test_multi_rule
+> +numbers[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'numbers'.
+> +categorized(X, "small") :- numbers(X), X <= 2.
+Rule 'categorized' registered.
+> +categorized(X, "large") :- numbers(X), X > 2.
+Rule 'categorized' registered.
+> ?- categorized(X, Cat).
+5 rows:
+  (1, "small")
+  (2, "small")
+  (3, "large")
+  (4, "large")
+  (5, "large")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_rule
+Knowledge graph 'test_multi_rule' dropped.

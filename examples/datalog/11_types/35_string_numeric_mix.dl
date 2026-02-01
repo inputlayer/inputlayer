@@ -1,0 +1,21 @@
+% Test: Mixed string and numeric columns
+% Expected: Handle mixed types correctly
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_mixed_types
+.kg use test_mixed_types
+
++mixed[(1, "Alice", 100.5, true), (2, "Bob", 200.75, false)].
+
+% Project different types
+names(N) :- mixed(_, N, _, _).
+amounts(A) :- mixed(_, _, A, _).
+flags(F) :- mixed(_, _, _, F).
+
+?- names(N).
+?- amounts(A).
+?- flags(F).
+
+.kg use default
+.kg drop test_mixed_types

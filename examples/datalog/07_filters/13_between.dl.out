@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_between
+Knowledge graph 'test_between' created.
+Switched to knowledge graph: test_between
+> .kg use test_between
+Switched to knowledge graph: test_between
+> +ages[(1, 15), (2, 25), (3, 35), (4, 45), (5, 55)].
+Inserted 5 fact(s) into 'ages'.
+> young_adult(Id, Age) :- ages(Id, Age), Age >= 20, Age <= 40.
+2 rows:
+  (2, 25)
+  (3, 35)
+(session: 1 rule(s))
+> ?- young_adult(Id, Age).
+2 rows:
+  (2, 25)
+  (3, 35)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_between
+Knowledge graph 'test_between' dropped.

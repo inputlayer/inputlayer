@@ -1,0 +1,18 @@
+% Test: Semi-join pattern
+% Expected: Filter by existence in another table
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_semi_join
+.kg use test_semi_join
+
++orders[(1, 100, "pending"), (2, 200, "shipped"), (3, 150, "pending"), (4, 300, "delivered")].
++priority_customers[(100,), (300,)].
+
+% Get orders from priority customers (semi-join)
+priority_order(Id, Status) :- orders(Id, CustId, Status), priority_customers(CustId).
+
+?- priority_order(Id, Status).
+
+.kg use default
+.kg drop test_semi_join

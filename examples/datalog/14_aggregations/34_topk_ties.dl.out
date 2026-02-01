@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_ties
+Knowledge graph 'test_topk_ties' created.
+Switched to knowledge graph: test_topk_ties
+> .kg use test_topk_ties
+Switched to knowledge graph: test_topk_ties
+> +scores[("A", 100), ("B", 90), ("C", 90), ("D", 80), ("E", 70)].
+Inserted 5 fact(s) into 'scores'.
+> +top3(Name, <TOP_K(3):Score>) :- scores(Name, Score).
+Script error: Parse error: Invalid term: '<TOP_K(3):Score>'

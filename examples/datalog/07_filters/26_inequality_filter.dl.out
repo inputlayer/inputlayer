@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ineq_filter
+Knowledge graph 'test_ineq_filter' created.
+Switched to knowledge graph: test_ineq_filter
+> .kg use test_ineq_filter
+Switched to knowledge graph: test_ineq_filter
+> +data[(1, "active"), (2, "inactive"), (3, "pending"), (4, "active")].
+Inserted 4 fact(s) into 'data'.
+> not_pending(Id, Status) :- data(Id, Status), Status != "pending".
+3 rows:
+  (1, "active")
+  (2, "inactive")
+  (4, "active")
+(session: 1 rule(s))
+> ?- not_pending(Id, Status).
+3 rows:
+  (1, "active")
+  (2, "inactive")
+  (4, "active")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_ineq_filter
+Knowledge graph 'test_ineq_filter' dropped.

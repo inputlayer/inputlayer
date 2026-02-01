@@ -1,0 +1,19 @@
+% Test: Arithmetic with parentheses
+% Expected: Correct order of operations
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_parens
+.kg use test_parens
+
++nums[(2,), (3,), (4,)].
+
+% Different expressions
+expr1(X, Y) :- nums(X), Y = X + 2 * 3.
+expr2(X, Y) :- nums(X), Y = (X + 2) * 3.
+
+?- expr1(X, Y).
+?- expr2(X, Y).
+
+.kg use default
+.kg drop test_parens

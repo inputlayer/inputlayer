@@ -1,0 +1,17 @@
+% Test: Multiple queries in sequence
+% Expected: Each query returns separate results
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_multi_query
+.kg use test_multi_query
+
++data[(1, "a", 100), (2, "b", 200), (3, "c", 300)].
+
+% Multiple independent queries
+?- data(X, _, _).
+?- data(_, Y, _).
+?- data(_, _, Z).
+
+.kg use default
+.kg drop test_multi_query

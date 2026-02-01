@@ -1,0 +1,17 @@
+% Test: Numeric equality filter
+% Expected: Filter by exact numeric value
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_num_eq
+.kg use test_num_eq
+
++data[(1, 100), (2, 200), (3, 100), (4, 300)].
+
+% Filter by exact value
+value_100(Id) :- data(Id, 100).
+
+?- value_100(Id).
+
+.kg use default
+.kg drop test_num_eq

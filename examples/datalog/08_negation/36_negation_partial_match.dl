@@ -1,0 +1,18 @@
+% Test: Negation with partial key match
+% Expected: Negation on subset of columns
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_partial
+.kg use test_neg_partial
+
++items[(1, "a", 100), (2, "b", 200), (3, "a", 300)].
++blocked[("a",)].
+
+% Exclude items with blocked category
+not_blocked(Id, Cat, Val) :- items(Id, Cat, Val), !blocked(Cat).
+
+?- not_blocked(Id, Cat, Val).
+
+.kg use default
+.kg drop test_neg_partial

@@ -1,0 +1,27 @@
+% Test: Ratio calculation pattern
+% Expected: Can calculate ratios and percentages
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_ratio
+.kg use test_ratio
+
++sales[("North", 100), ("North", 150), ("South", 200), ("South", 250), ("East", 50)].
+
+% Total per region
++region_total(Region, <SUM:Amt>) :- sales(Region, Amt).
+
+?- region_total(Region, Total).
+
+% Grand total
++grand_total(<SUM:Amt>) :- sales(_, Amt).
+
+?- grand_total(Total).
+
+% Count per region
++region_count(Region, <COUNT:Amt>) :- sales(Region, Amt).
+
+?- region_count(Region, Count).
+
+.kg use default
+.kg drop test_ratio

@@ -1,0 +1,18 @@
+% Test: Subset check via negation
+% Expected: All A elements are in B
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_subset
+.kg use test_subset
+
++set_a[(1,), (2,), (3,)].
++set_b[(1,), (2,), (3,), (4,), (5,)].
+
+% A elements not in B (if empty, A is subset of B)
++not_in_b(X) :- set_a(X), !set_b(X).
+
+?- not_in_b(X).
+
+.kg use default
+.kg drop test_subset

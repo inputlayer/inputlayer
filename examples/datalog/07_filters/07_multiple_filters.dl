@@ -1,0 +1,17 @@
+% Test: Multiple filter conditions
+% Expected: All filters must pass
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_multi_filter
+.kg use test_multi_filter
+
++data[(1, "A", 100), (2, "B", 200), (3, "A", 300), (4, "B", 400)].
+
+% Multiple conditions
+filtered(Id, Cat, Val) :- data(Id, Cat, Val), Cat = "A", Val > 50.
+
+?- filtered(Id, Cat, Val).
+
+.kg use default
+.kg drop test_multi_filter

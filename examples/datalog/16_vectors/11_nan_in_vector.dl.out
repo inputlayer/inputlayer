@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_nan
+Knowledge graph 'test_vec_nan' created.
+Switched to knowledge graph: test_vec_nan
+> .kg use test_vec_nan
+Switched to knowledge graph: test_vec_nan
+> +vecs[(1, [1.0, 2.0, 3.0]), (2, [4.0, 5.0, 6.0])].
+Inserted 2 fact(s) into 'vecs'.
+> dist(Id1, Id2, D) :- vecs(Id1, V1), vecs(Id2, V2), Id1 < Id2, D = euclidean_distance(V1, V2).
+Script error: Parse error: Invalid term: 'euclidean_distance(V1, V2)'

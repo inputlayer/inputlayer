@@ -1,0 +1,17 @@
+% Test: Integer division truncation
+% Expected: Integer division truncates toward zero
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic behavior
+
+.kg create test_div_trunc
+.kg use test_div_trunc
+
++vals[(7,), (10,), (15,), (-7,), (-10,)].
+
+% Integer division
+int_div(X, Y) :- vals(X), Y = X / 3.
+
+?- int_div(X, Y).
+
+.kg use default
+.kg drop test_div_trunc

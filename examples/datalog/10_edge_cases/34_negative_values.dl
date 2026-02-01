@@ -1,0 +1,28 @@
+% Test: Negative values in operations
+% Expected: Negative numbers handled correctly
+% Category: 10_edge_cases
+% Priority: P1 - Edge cases
+
+.kg create test_negative
+.kg use test_negative
+
++data[(-5, 10), (5, -10), (-5, -10), (5, 10)].
+
+% Sum positive and negative
+sums(X, Y, S) :- data(X, Y), S = X + Y.
+
+?- sums(X, Y, S).
+
+% Product with negatives
+products(X, Y, P) :- data(X, Y), P = X * Y.
+
+?- products(X, Y, P).
+
+% Filter negatives
+has_negative(X, Y) :- data(X, Y), X < 0.
+has_negative(X, Y) :- data(X, Y), Y < 0.
+
+?- has_negative(X, Y).
+
+.kg use default
+.kg drop test_negative

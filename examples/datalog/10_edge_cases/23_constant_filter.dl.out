@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_const_filter
+Knowledge graph 'test_const_filter' created.
+Switched to knowledge graph: test_const_filter
+> .kg use test_const_filter
+Switched to knowledge graph: test_const_filter
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'data'.
+> const_true(X, Y) :- data(X, Y), 5 = 5.
+Script error: Query execution failed: Unsupported comparison: Constant(5) Equal Constant(5)

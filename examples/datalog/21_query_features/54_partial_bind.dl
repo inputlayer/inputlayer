@@ -1,0 +1,18 @@
+% Test: Partial binding in query
+% Expected: Some columns bound, others free
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_partial
+.kg use test_partial
+
++data[(1, "a", 100), (2, "a", 200), (3, "b", 100)].
+
+% First column bound, rest free
+?- data(1, Y, Z).
+
+% Middle column bound
+?- data(X, "a", Z).
+
+.kg use default
+.kg drop test_partial

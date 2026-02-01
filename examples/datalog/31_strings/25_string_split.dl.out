@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_string_path
+Knowledge graph 'test_string_path' created.
+Switched to knowledge graph: test_string_path
+> .kg use test_string_path
+Switched to knowledge graph: test_string_path
+> +paths[("/home/user/file.txt",), ("/var/log/app.log",)].
+Inserted 2 fact(s) into 'paths'.
+> path_info(P, L) :- paths(P), L = LEN(P).
+Script error: Parse error: Invalid term: 'LEN(P)'

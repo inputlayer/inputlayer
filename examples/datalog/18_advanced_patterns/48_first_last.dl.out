@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_first_last
+Knowledge graph 'test_first_last' created.
+Switched to knowledge graph: test_first_last
+> .kg use test_first_last
+Switched to knowledge graph: test_first_last
+> +events[(1, "start", 100), (2, "middle", 200), (3, "end", 300)].
+Inserted 3 fact(s) into 'events'.
+> +first_time(<MIN:T>) :- events(T, _, _).
+Script error: Parse error: Invalid term: '<MIN:T>'

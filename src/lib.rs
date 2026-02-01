@@ -200,7 +200,7 @@ mod test_arithmetic;
 // Re-export public types
 pub use catalog::Catalog;
 pub use code_generator::CodeGenerator;
-pub use config::Config;
+pub use config::{Config, DurabilityMode};
 pub use ir_builder::IRBuilder;
 pub use optimizer::Optimizer;
 pub use pipeline_trace::{OptimizationStats, PipelineTrace};

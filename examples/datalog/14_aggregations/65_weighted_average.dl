@@ -1,0 +1,19 @@
+% Test: Weighted average pattern
+% Expected: Compute weighted sum / total weight
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_weighted_avg
+.kg use test_weighted_avg
+
++scores[(1, 90, 3), (2, 80, 2), (3, 70, 1)].
+
+% Sum of (score * weight) and sum of weights
+weighted_sum(<SUM:WS>) :- scores(_, S, W), WS = S * W.
+total_weight(<SUM:W>) :- scores(_, _, W).
+
+?- weighted_sum(WS).
+?- total_weight(TW).
+
+.kg use default
+.kg drop test_weighted_avg

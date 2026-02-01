@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bom
+Knowledge graph 'test_bom' created.
+Switched to knowledge graph: test_bom
+> .kg use test_bom
+Switched to knowledge graph: test_bom
+> +component[(1, 2, 2), (1, 3, 1), (2, 4, 3), (3, 4, 1), (3, 5, 2)].
+Inserted 5 fact(s) into 'component'.
+> +part_name[(1, "Assembly"), (2, "SubA"), (3, "SubB"), (4, "Bolt"), (5, "Nut")].
+Inserted 5 fact(s) into 'part_name'.
+> +all_parts(Part, Comp, Qty) :- component(Part, Comp, Qty).
+Rule 'all_parts' registered.
+> +all_parts(Part, Comp, Qty) :- component(Part, Mid, _), all_parts(Mid, Comp, Qty).
+Rule 'all_parts' registered.
+> ?- all_parts(Part, Comp, Qty).
+8 rows:
+  (1, 2, 2)
+  (1, 3, 1)
+  (1, 4, 1)
+  (1, 4, 3)
+  (1, 5, 2)
+  (2, 4, 3)
+  (3, 4, 1)
+  (3, 5, 2)
+> unique_comps(Part, <COUNT:Comp>) :- all_parts(Part, Comp, _).
+Script error: Parse error: Unknown aggregate function: 

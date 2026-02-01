@@ -1,0 +1,17 @@
+% Test: Parallel/multi-edges
+% Expected: Handle multiple edges between same nodes
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_parallel
+.kg use test_parallel
+
++multi_edge[("a", "b", 1), ("a", "b", 2), ("a", "b", 3), ("b", "c", 1)].
+
+% Count edges between each pair
+edge_count(A, B, <COUNT:Label>) :- multi_edge(A, B, Label).
+
+?- edge_count(A, B, N).
+
+.kg use default
+.kg drop test_parallel

@@ -1,0 +1,15 @@
+% Test: Unbound variable in rule head
+% Expected: Error for unbound head variable
+% Category: 12_errors
+% Priority: P1 - Safety checking
+
+.kg create test_unbound_head
+.kg use test_unbound_head
+
++data[(1, 2), (3, 4)].
+
+% Y is not bound in body - should fail safety check
+unsafe_rule(X, Y) :- data(X, _).
+
+.kg use default
+.kg drop test_unbound_head

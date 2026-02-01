@@ -1,0 +1,28 @@
+% Test: Mixed type arithmetic
+% Expected: Arithmetic with different numeric types
+% Category: 11_types
+% Priority: P1 - Type handling
+
+.kg create test_mixed_arith
+.kg use test_mixed_arith
+
++integers[(1,), (2,), (3,)].
++floats[(1.5,), (2.5,), (3.5,)].
+
+% Integer arithmetic
+int_doubled(X, D) :- integers(X), D = X * 2.
+
+?- int_doubled(X, D).
+
+% Float arithmetic
+float_doubled(X, D) :- floats(X), D = X * 2.
+
+?- float_doubled(X, D).
+
+% Integer division
+int_div(X, D) :- integers(X), D = X / 2.
+
+?- int_div(X, D).
+
+.kg use default
+.kg drop test_mixed_arith

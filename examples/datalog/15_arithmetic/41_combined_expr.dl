@@ -1,0 +1,17 @@
+% Test: Combined arithmetic in filter
+% Expected: Use arithmetic in comparison
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_comb_expr
+.kg use test_comb_expr
+
++data[(5, 2), (10, 3), (15, 4)].
+
+% Where a * b > 20
+big_product(A, B) :- data(A, B), A * B > 20.
+
+?- big_product(A, B).
+
+.kg use default
+.kg drop test_comb_expr

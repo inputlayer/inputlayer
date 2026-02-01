@@ -1,0 +1,25 @@
+% Test: Percentile simulation
+% Expected: Can simulate percentile calculation
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_percentile
+.kg use test_percentile
+
++scores[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 60), (7, 70), (8, 80), (9, 90), (10, 100)].
+
+% Count total
++total_count(<COUNT:S>) :- scores(_, S).
+
+% Rank each score
+rank(Id, Score, <COUNT:Other>) :- scores(Id, Score), scores(_, Other), Other <= Score.
+
+?- rank(Id, Score, Rank).
+
+% Find median position (5th of 10)
+median_score(Id, Score) :- rank(Id, Score, 5).
+
+?- median_score(Id, Score).
+
+.kg use default
+.kg drop test_percentile

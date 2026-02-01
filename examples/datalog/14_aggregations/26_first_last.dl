@@ -1,0 +1,29 @@
+% Test: First and last values
+% Expected: Can find first/last by some ordering
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_first_last
+.kg use test_first_last
+
++events[(1, "start"), (2, "process"), (3, "validate"), (4, "complete")].
+
+% First event (min id)
++first_id(<MIN:Id>) :- events(Id, _).
+
+?- first_id(Id).
+
+% Last event (max id)
++last_id(<MAX:Id>) :- events(Id, _).
+
+?- last_id(Id).
+
+% Get actual event names
+first_event(Name) :- events(Id, Name), first_id(Id).
+last_event(Name) :- events(Id, Name), last_id(Id).
+
+?- first_event(Name).
+?- last_event(Name).
+
+.kg use default
+.kg drop test_first_last

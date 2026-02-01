@@ -1,0 +1,18 @@
+% Test: Small cross product
+% Expected: All combinations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_cross_sm
+.kg use test_cross_sm
+
++a[(1,), (2,)].
++b[("x",), ("y",)].
+
+% Cross product
+cross(N, S) :- a(N), b(S).
+
+?- cross(N, S).
+
+.kg use default
+.kg drop test_cross_sm

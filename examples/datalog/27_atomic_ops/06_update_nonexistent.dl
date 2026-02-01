@@ -1,0 +1,19 @@
+% Test: Update non-existent tuple
+% Expected: Update on non-existent tuple handled gracefully
+% Category: 27_atomic_ops
+% Priority: P1 - Atomic operations
+
+.kg create test_update_noexist
+.kg use test_update_noexist
+
+% Some initial data
++items[(1, "apple"), (2, "banana")].
+
+% Try to update non-existent item
++items(99, "grape").
+-items(99, "grape").
+
+?- items(Id, Name).
+
+.kg use default
+.kg drop test_update_noexist

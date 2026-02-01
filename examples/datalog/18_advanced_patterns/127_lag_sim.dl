@@ -1,0 +1,20 @@
+% Test: LAG function simulation
+% Expected: Access previous row value
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_lag
+.kg use test_lag
+
++data[(1, 100), (2, 150), (3, 120), (4, 180)].
+
+% Find consecutive pairs (simulates LAG)
++consecutive(Id, Val, PrevVal) :-
+    data(Id, Val),
+    data(PrevId, PrevVal),
+    PrevId = Id - 1.
+
+?- consecutive(Id, Val, Prev).
+
+.kg use default
+.kg drop test_lag

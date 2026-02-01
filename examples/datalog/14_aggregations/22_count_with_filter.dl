@@ -1,0 +1,27 @@
+% Test: Count with filter conditions
+% Expected: COUNT works with filters
+% Category: 14_aggregations
+% Priority: P1 - Aggregation patterns
+
+.kg create test_count_filter
+.kg use test_count_filter
+
++sales[(1, 100), (1, 200), (1, 50), (2, 300), (2, 400), (3, 150)].
+
+% Count all sales per customer
+all_count(Cust, <COUNT:Amt>) :- sales(Cust, Amt).
+
+?- all_count(Cust, Count).
+
+% Count high-value sales (> 150) per customer
+high_count(Cust, <COUNT:Amt>) :- sales(Cust, Amt), Amt > 150.
+
+?- high_count(Cust, Count).
+
+% Sum only high-value sales
+high_sum(Cust, <SUM:Amt>) :- sales(Cust, Amt), Amt > 150.
+
+?- high_sum(Cust, Total).
+
+.kg use default
+.kg drop test_count_filter

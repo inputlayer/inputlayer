@@ -1,0 +1,17 @@
+% Test: SUM with large values
+% Expected: Large sums computed correctly
+% Category: 14_aggregations
+% Priority: P2 - Aggregation edge cases
+
+.kg create test_sum_large
+.kg use test_sum_large
+
++big_nums[(1000000000,), (2000000000,), (3000000000,)].
+
+% Sum of large numbers
++big_sum(<SUM:X>) :- big_nums(X).
+
+?- big_sum(S).
+
+.kg use default
+.kg drop test_sum_large

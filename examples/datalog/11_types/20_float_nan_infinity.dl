@@ -1,0 +1,29 @@
+% Test: Float NaN and Infinity handling
+% Expected: Special float values handled correctly
+% Category: 11_types
+% Priority: P2 - Type edge cases
+
+.kg create test_float_special
+.kg use test_float_special
+
+% Divide by zero produces infinity or NULL
++divs[(10.0, 0.0), (5.0, 2.0), (-10.0, 0.0)].
+
+div_result(A, B, R) :- divs(A, B), B != 0.0, R = A / B.
+
+?- div_result(A, B, R).
+
+% Very large floats
++big_floats[(1.0e308, 1), (1.0e-308, 2)].
+
+?- big_floats(Val, Id).
+
+% Arithmetic with tiny floats
++tiny[(1.0e-100, 2.0e-100)].
+
+tiny_add(A, B, R) :- tiny(A, B), R = A + B.
+
+?- tiny_add(A, B, R).
+
+.kg use default
+.kg drop test_float_special

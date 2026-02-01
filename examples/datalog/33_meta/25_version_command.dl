@@ -1,0 +1,6 @@
+% Test: Version command
+% Expected: Show version information
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.version

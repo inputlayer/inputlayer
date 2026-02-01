@@ -1,0 +1,17 @@
+% Test: Zero value handling
+% Expected: Handle zero correctly in operations
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_zero
+.kg use test_zero
+
++nums[(0,), (1,), (10,)].
+
+% Zero in arithmetic
+computed(N, Plus, Times) :- nums(N), Plus = N + 0, Times = N * 0.
+
+?- computed(N, P, T).
+
+.kg use default
+.kg drop test_zero

@@ -1,0 +1,17 @@
+% Test: COUNT_DISTINCT with grouping
+% Expected: Count unique values per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_dist_grp
+.kg use test_count_dist_grp
+
++visits[(1, "Alice", "homepage"), (2, "Bob", "homepage"), (3, "Alice", "products"), (4, "Alice", "homepage"), (5, "Bob", "checkout")].
+
+% Count distinct pages per user
++pages_per_user(User, <COUNT_DISTINCT:Page>) :- visits(_, User, Page).
+
+?- pages_per_user(U, C).
+
+.kg use default
+.kg drop test_count_dist_grp

@@ -1,0 +1,19 @@
+% Test: Insert into view error
+% Expected: Error - cannot insert into a derived relation (view)
+% Category: 12_errors
+% Priority: P0 Critical - Core semantic that must be enforced
+
+.kg create test_insert_view
+.kg use test_insert_view
+
+% Create a base relation
++base[(1), (2), (3)].
+
+% Create a view (derived relation)
++derived(X) :- base(X), X > 1.
+
+% Try to insert into the view - this should fail with an error
++derived[(99)].
+
+.kg use default
+.kg drop test_insert_view

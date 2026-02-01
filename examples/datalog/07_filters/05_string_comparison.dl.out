@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_cmp
+Knowledge graph 'test_str_cmp' created.
+Switched to knowledge graph: test_str_cmp
+> .kg use test_str_cmp
+Switched to knowledge graph: test_str_cmp
+> +words[("apple",), ("banana",), ("cherry",), ("apricot",)].
+Inserted 4 fact(s) into 'words'.
+> ?- words(W), W = "apple".
+1 rows:
+  ("apple")
+> ?- words(W), W != "banana".
+3 rows:
+  ("apple")
+  ("apricot")
+  ("cherry")
+> ?- words(W), W < "banana".
+Script error: Query execution failed: Comparison LessThan not supported for string constants

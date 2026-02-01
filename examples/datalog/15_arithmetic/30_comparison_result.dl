@@ -1,0 +1,21 @@
+% Test: Comparison as filter
+% Expected: Use comparison in rule body
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_compare
+.kg use test_compare
+
++pairs[(10, 5), (3, 7), (5, 5), (8, 2)].
+
+% First greater than second
+first_bigger(A, B) :- pairs(A, B), A > B.
+
+% Equal values
+equal_vals(A, B) :- pairs(A, B), A = B.
+
+?- first_bigger(A, B).
+?- equal_vals(A, B).
+
+.kg use default
+.kg drop test_compare

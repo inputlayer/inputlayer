@@ -1,0 +1,17 @@
+% Test: Reorder columns in projection
+% Expected: Output columns in specified order
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_proj_reorder
+.kg use test_proj_reorder
+
++data[(1, "Alice", 100), (2, "Bob", 200)].
+
+% Project with different order
+reordered(Name, Val, Id) :- data(Id, Name, Val).
+
+?- reordered(Name, Val, Id).
+
+.kg use default
+.kg drop test_proj_reorder

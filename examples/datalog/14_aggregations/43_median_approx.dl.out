@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_median
+Knowledge graph 'test_median' created.
+Switched to knowledge graph: test_median
+> .kg use test_median
+Switched to knowledge graph: test_median
+> +vals[(10,), (20,), (30,), (40,), (50,)].
+Inserted 5 fact(s) into 'vals'.
+> +val_count(<COUNT:V>) :- vals(V).
+Script error: Parse error: Invalid term: '<COUNT:V>'

@@ -381,9 +381,12 @@ fn test_parallel_queries_on_knowledge_graphs() {
         .unwrap();
 
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].1, vec![(1, 2)]);
-    assert_eq!(results[1].1, vec![(2, 3)]);
-    assert_eq!(results[2].1, vec![(3, 4)]);
+    // Results may come back in any order due to parallel execution
+    // Collect into HashMap for order-independent comparison
+    let results_map: std::collections::HashMap<_, _> = results.into_iter().collect();
+    assert_eq!(results_map.get("kg1"), Some(&vec![(1, 2)]));
+    assert_eq!(results_map.get("kg2"), Some(&vec![(2, 3)]));
+    assert_eq!(results_map.get("kg3"), Some(&vec![(3, 4)]));
 }
 
 #[test]
@@ -406,9 +409,12 @@ fn test_same_query_on_multiple_knowledge_graphs() {
         .unwrap();
 
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].1, vec![(10, 11)]);
-    assert_eq!(results[1].1, vec![(20, 21)]);
-    assert_eq!(results[2].1, vec![(30, 31)]);
+    // Results may come back in any order due to parallel execution
+    // Collect into HashMap for order-independent comparison
+    let results_map: std::collections::HashMap<_, _> = results.into_iter().collect();
+    assert_eq!(results_map.get("kg1"), Some(&vec![(10, 11)]));
+    assert_eq!(results_map.get("kg2"), Some(&vec![(20, 21)]));
+    assert_eq!(results_map.get("kg3"), Some(&vec![(30, 31)]));
 }
 
 #[test]

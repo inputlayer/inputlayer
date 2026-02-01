@@ -1,0 +1,20 @@
+% Test: Self comparison join
+% Expected: Compare rows within same relation
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_self_cmp
+.kg use test_self_cmp
+
++scores[(1, "Alice", 85), (2, "Bob", 90), (3, "Carol", 85), (4, "Dave", 95)].
+
+% Find pairs with same score
++same_score(Name1, Name2, Score) :-
+    scores(Id1, Name1, Score),
+    scores(Id2, Name2, Score),
+    Id1 < Id2.
+
+?- same_score(N1, N2, S).
+
+.kg use default
+.kg drop test_self_cmp

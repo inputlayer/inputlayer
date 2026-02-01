@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested
+Knowledge graph 'test_nested' created.
+Switched to knowledge graph: test_nested
+> .kg use test_nested
+Switched to knowledge graph: test_nested
+> +base[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'base'.
+> +doubled(Id, D) :- base(Id, V), D = V * 2.
+Script error: Failed to register rule: Unsafe rule 'doubled': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

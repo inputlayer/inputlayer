@@ -1,0 +1,20 @@
+% Test: Time-based arithmetic
+% Expected: Compute time differences
+% Category: 29_temporal
+% Priority: P2 - Temporal patterns
+
+.kg create test_time_arith
+.kg use test_time_arith
+
++events[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2800)].
+
+% Compute duration for each event pair
+duration(Id, D) :-
+    events(Id, "start", S),
+    events(Id, "end", E),
+    D = E - S.
+
+?- duration(Id, D).
+
+.kg use default
+.kg drop test_time_arith

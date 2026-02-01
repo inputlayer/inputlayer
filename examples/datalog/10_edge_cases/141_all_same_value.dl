@@ -1,0 +1,20 @@
+% Test: All rows have same value
+% Expected: Aggregation on identical values
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_same_val
+.kg use test_same_val
+
++data[(1, 100), (2, 100), (3, 100)].
+
++sum_same(<SUM:V>) :- data(_, V).
++count_same(<COUNT:Id>) :- data(Id, _).
++avg_same(<AVG:V>) :- data(_, V).
+
+?- sum_same(S).
+?- count_same(C).
+?- avg_same(A).
+
+.kg use default
+.kg drop test_same_val

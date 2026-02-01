@@ -1,0 +1,25 @@
+% Test: Many rule clauses for same head
+% Expected: All clauses contribute to the result
+% Category: 10_edge_cases
+% Priority: P1 - Rule handling
+
+.kg create test_many_rules
+.kg use test_many_rules
+
++a[(1,), (2,)].
++b[(3,), (4,)].
++c[(5,), (6,)].
++d[(7,), (8,)].
++e[(9,), (10,)].
+
+% Five clauses for same head relation
++combined(X) :- a(X).
++combined(X) :- b(X).
++combined(X) :- c(X).
++combined(X) :- d(X).
++combined(X) :- e(X).
+
+?- combined(X).
+
+.kg use default
+.kg drop test_many_rules

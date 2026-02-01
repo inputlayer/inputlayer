@@ -1,0 +1,22 @@
+% Test: Temporal edge cases
+% Expected: Edge cases in time operations handled
+% Category: 29_temporal
+% Priority: P2 - Temporal operations
+
+.kg create test_time_edge
+.kg use test_time_edge
+
+% Get current time
+current_time(T) :- T = time_now().
+
+?- current_time(T).
+
+% Time difference between same times
++same_times[(1000000, 1000000)].
+
+zero_diff(A, B, D) :- same_times(A, B), D = time_diff(A, B).
+
+?- zero_diff(A, B, D).
+
+.kg use default
+.kg drop test_time_edge

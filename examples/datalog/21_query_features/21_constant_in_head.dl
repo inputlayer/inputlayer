@@ -1,0 +1,17 @@
+% Test: Constant value in head
+% Expected: Include constant in output
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_const_head
+.kg use test_const_head
+
++items[(1,), (2,), (3,)].
+
+% Add constant column
+with_label(X, "item") :- items(X).
+
+?- with_label(X, Label).
+
+.kg use default
+.kg drop test_const_head

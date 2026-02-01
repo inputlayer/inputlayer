@@ -1,0 +1,22 @@
+% Test: Comparison between different numeric types
+% Expected: Handle int vs float comparison
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_mixed_cmp
+.kg use test_mixed_cmp
+
++int_vals[(1,), (2,), (3,)].
++float_vals[(1.5,), (2.5,), (3.5,)].
+
+% Compare int to constant float
+big_int(X) :- int_vals(X), X > 1.5.
+
+% Compare float to constant int
+small_float(X) :- float_vals(X), X < 3.
+
+?- big_int(X).
+?- small_float(X).
+
+.kg use default
+.kg drop test_mixed_cmp

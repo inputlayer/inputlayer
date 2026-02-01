@@ -1,0 +1,20 @@
+% Test: Delete from empty relation
+% Expected: No error, graceful handling
+% Category: 02_relations
+% Priority: P1 - Edge case handling
+
+.kg create test_delete_empty
+.kg use test_delete_empty
+
+% Create an empty relation by inserting and deleting
++empty_rel(1).
+-empty_rel(1).
+
+% Try to delete from empty relation - should succeed gracefully
+-empty_rel(99).
+
+% Verify relation is empty
+?- empty_rel(X).
+
+.kg use default
+.kg drop test_delete_empty

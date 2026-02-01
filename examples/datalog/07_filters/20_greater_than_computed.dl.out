@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_filter_comp
+Knowledge graph 'test_filter_comp' created.
+Switched to knowledge graph: test_filter_comp
+> .kg use test_filter_comp
+Switched to knowledge graph: test_filter_comp
+> +products[(1, 100, 0.1), (2, 200, 0.2), (3, 50, 0.05)].
+Inserted 3 fact(s) into 'products'.
+> high_discount(Id, Price, Disc, Amount) :- products(Id, Price, Disc), Amount = Price * Disc, Amount > 15.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "high_discount", args: [Variable("Id"), Variable("Price"), Variable("Disc"), Variable("Amount")] }. Variables ["Amount"] in head do not appear in positive body atoms.

@@ -1,0 +1,20 @@
+% Test: Path existence check
+% Expected: Check if path exists between nodes
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_path_exists
+.kg use test_path_exists
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("x", "y")].
+
+% Reachability
++reaches(X, Y) :- edge(X, Y).
++reaches(X, Z) :- reaches(X, Y), edge(Y, Z).
+
+% Check specific paths
+?- reaches("a", "d").
+?- reaches("a", "y").
+
+.kg use default
+.kg drop test_path_exists

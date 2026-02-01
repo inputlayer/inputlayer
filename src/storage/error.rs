@@ -61,6 +61,17 @@ pub enum StorageError {
     /// Generic error
     #[error("{0}")]
     Other(String),
+
+    /// Lock poisoned (another thread panicked while holding the lock)
+    /// Note: No longer used after migration to parking_lot (which never poisons)
+    /// Kept for backward compatibility with any code matching on this variant
+    #[error("Lock poisoned: a thread panicked while holding this lock")]
+    #[deprecated(note = "parking_lot locks never poison; this variant is no longer used")]
+    LockPoisoned,
+
+    /// Lock acquisition timeout
+    #[error("Lock acquisition timed out after {0}ms")]
+    LockTimeout(u64),
 }
 
 /// Result type for storage operations

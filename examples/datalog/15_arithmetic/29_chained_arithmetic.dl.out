@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_chained
+Knowledge graph 'test_chained' created.
+Switched to knowledge graph: test_chained
+> .kg use test_chained
+Switched to knowledge graph: test_chained
+> +base[(10,)].
+Inserted 1 fact(s) into 'base'.
+> result(V, A, B, C) :- base(V), A = V + 5, B = A * 2, C = B - 10.
+Script error: Parse error: Invalid term: 'B - 10'

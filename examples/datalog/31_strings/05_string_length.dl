@@ -1,0 +1,16 @@
+% Test: String length function
+% Expected: Return length of string
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_strlen
+.kg use test_strlen
+
++words[("",), ("a",), ("hello",), ("hello world",)].
+
+len_result(S, L) :- words(S), L = LEN(S).
+
+?- len_result(S, L).
+
+.kg use default
+.kg drop test_strlen

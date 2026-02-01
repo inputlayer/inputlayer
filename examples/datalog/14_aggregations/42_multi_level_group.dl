@@ -1,0 +1,21 @@
+% Test: Multi-level grouping
+% Expected: Aggregate at different levels
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_multi_group
+.kg use test_multi_group
+
++orders[(1, "Alice", "Widget", 100), (2, "Alice", "Gadget", 150), (3, "Bob", "Widget", 200)].
+
+% Level 1: by customer and product
++by_cust_prod(Cust, Prod, <SUM:Amt>) :- orders(_, Cust, Prod, Amt).
+
+% Level 2: by customer only
++by_cust(Cust, <SUM:Amt>) :- orders(_, Cust, _, Amt).
+
+?- by_cust_prod(Cust, Prod, Sum).
+?- by_cust(Cust, Sum).
+
+.kg use default
+.kg drop test_multi_group

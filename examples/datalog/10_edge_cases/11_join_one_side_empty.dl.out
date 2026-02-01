@@ -28,13 +28,11 @@ Inserted 2 fact(s) into 'right'.
 1 rows:
   (2)
 > -left(X) :- left(X).
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 3 fact(s) deleted from 'left'.
 > ?- joined(X, Y).
-1 rows:
-  (2, 2)
+No results.
 > ?- matched(X).
-1 rows:
-  (2)
+No results.
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_join_empty

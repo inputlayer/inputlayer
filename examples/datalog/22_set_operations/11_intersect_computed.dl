@@ -1,0 +1,18 @@
+% Test: Intersection with computed values
+% Expected: Intersect on computed values
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_intersect_comp
+.kg use test_intersect_comp
+
++set_a[(1,), (2,), (3,), (4,)].
++set_b[(2,), (4,), (6,), (8,)].
+
+% Values in both (intersection)
+common(X) :- set_a(X), set_b(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_intersect_comp

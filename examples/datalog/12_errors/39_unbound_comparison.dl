@@ -1,0 +1,17 @@
+% Test: Unbound comparison variable error
+% Expected: Error when comparing unbound variable
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_unbound_cmp
+.kg use test_unbound_cmp
+
++data[(1, 10), (2, 20)].
+
+% Y is not bound before comparison - should error or give empty result
+bad(X) :- data(X, _), Y > 5.
+
+?- bad(X).
+
+.kg use default
+.kg drop test_unbound_cmp

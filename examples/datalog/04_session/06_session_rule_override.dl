@@ -1,0 +1,25 @@
+% Test: Session rules with same name as persistent
+% Expected: Session rules work alongside persistent rules
+% Category: 04_session
+% Priority: P1 - Session management
+
+.kg create test_sess_override
+.kg use test_sess_override
+
+% Persistent rule
++persistent_view(X, Y) :- edge(X, Y).
+
+% Base data
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Query persistent view
+?- persistent_view(X, Y).
+
+% Session-only rule (no +)
+session_only(X) :- edge(X, _).
+
+% Query session rule
+?- session_only(X).
+
+.kg use default
+.kg drop test_sess_override

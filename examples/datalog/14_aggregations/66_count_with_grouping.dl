@@ -1,0 +1,17 @@
+% Test: COUNT with multiple grouping columns
+% Expected: Count grouped by multiple columns
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_group
+.kg use test_count_group
+
++orders[(1, "Alice", "NYC"), (2, "Bob", "LA"), (3, "Alice", "NYC"), (4, "Alice", "LA"), (5, "Bob", "NYC")].
+
+% Count orders per customer per city
++orders_by_city(Cust, City, <COUNT:Id>) :- orders(Id, Cust, City).
+
+?- orders_by_city(Cust, City, C).
+
+.kg use default
+.kg drop test_count_group

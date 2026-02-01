@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_rel_name
+Knowledge graph 'test_rule_rel_name' created.
+Switched to knowledge graph: test_rule_rel_name
+> .kg use test_rule_rel_name
+Switched to knowledge graph: test_rule_rel_name
+> +data[(1, 10), (2, 20)].
+Inserted 2 fact(s) into 'data'.
+> +computed(X, Y) :- data(X, Z), Y = Z * 2.
+Script error: Failed to register rule: Unsafe rule 'computed': Head variable(s) Y not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

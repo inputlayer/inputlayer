@@ -1,0 +1,20 @@
+% Test: Equijoin on multiple keys
+% Expected: Join on composite key
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_multikey
+.kg use test_multikey
+
++orders[(1, "2024", "Q1", 100), (2, "2024", "Q2", 200), (3, "2023", "Q1", 50)].
++targets[(1, "2024", "Q1", 90), (2, "2024", "Q2", 150)].
+
+% Join on year and quarter
+matched(OrdId, Year, Qtr, Actual, Target) :-
+    orders(OrdId, Year, Qtr, Actual),
+    targets(_, Year, Qtr, Target).
+
+?- matched(OrdId, Year, Qtr, Actual, Target).
+
+.kg use default
+.kg drop test_multikey

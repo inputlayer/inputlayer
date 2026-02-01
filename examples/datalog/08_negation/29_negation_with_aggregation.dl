@@ -1,0 +1,23 @@
+% Test: Negation combined with aggregation
+% Expected: Negation works correctly with aggregated views
+% Category: 08_negation
+% Priority: P1 - Negation completeness
+
+.kg create test_neg_agg_29
+.kg use test_neg_agg_29
+
+% Products with sales
++sales[(1, 100), (2, 200), (3, 150)].
+
+% All products
++products[(1,), (2,), (3,), (4,), (5,)].
+
+% Products with sales (via aggregation)
++has_sales(P) :- sales(P, _).
+
+% Products without sales
++no_sales(P) :- products(P), !has_sales(P).
+?- no_sales(P).
+
+.kg use default
+.kg drop test_neg_agg_29

@@ -1,0 +1,19 @@
+% Test: Empty string handling
+% Expected: Handle empty string values
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_str
+.kg use test_empty_str
+
++data[(1, "value"), (2, ""), (3, "another")].
+
+?- data(Id, V).
+
+% Filter non-empty
+non_empty(Id, V) :- data(Id, V), V != "".
+
+?- non_empty(Id, V).
+
+.kg use default
+.kg drop test_empty_str

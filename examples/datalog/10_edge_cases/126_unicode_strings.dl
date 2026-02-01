@@ -1,0 +1,14 @@
+% Test: Unicode string handling
+% Expected: Handle non-ASCII characters
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_unicode
+.kg use test_unicode
+
++names[("Alice",), ("Böb",), ("日本語",), ("émoji",)].
+
+?- names(N).
+
+.kg use default
+.kg drop test_unicode

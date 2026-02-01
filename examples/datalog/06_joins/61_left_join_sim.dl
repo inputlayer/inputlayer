@@ -1,0 +1,22 @@
+% Test: Left join simulation
+% Expected: Include all left rows
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_left_join
+.kg use test_left_join
+
++employees[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++salaries[(1, 50000), (2, 60000)].
+
+% Matched rows (inner join)
++with_salary(Id, Name, Salary) :- employees(Id, Name), salaries(Id, Salary).
+
+% Unmatched rows (left only)
++without_salary(Id, Name) :- employees(Id, Name), !salaries(Id, _).
+
+?- with_salary(Id, N, S).
+?- without_salary(Id, N).
+
+.kg use default
+.kg drop test_left_join

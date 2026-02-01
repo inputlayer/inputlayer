@@ -1,0 +1,22 @@
+% Test: Simulated outer join
+% Expected: Include unmatched rows with default
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_outer
+.kg use test_outer
+
++left_table[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++right_table[(1, 100), (3, 300)].
+
+% Inner join portion
++joined(Id, Name, Value) :- left_table(Id, Name), right_table(Id, Value).
+
+% Left-only (no match on right)
++left_only(Id, Name) :- left_table(Id, Name), !right_table(Id, _).
+
+?- joined(Id, Name, Value).
+?- left_only(Id, Name).
+
+.kg use default
+.kg drop test_outer

@@ -1,0 +1,21 @@
+% Test: MIN/MAX with grouping
+% Expected: Find min/max per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_minmax_grp
+.kg use test_minmax_grp
+
++sales[(1, "East", 100), (2, "West", 150), (3, "East", 200), (4, "West", 80), (5, "East", 120)].
+
+% Min sale per region
++min_sale(Region, <MIN:Amount>) :- sales(_, Region, Amount).
+
+% Max sale per region
++max_sale(Region, <MAX:Amount>) :- sales(_, Region, Amount).
+
+?- min_sale(R, M).
+?- max_sale(R, M).
+
+.kg use default
+.kg drop test_minmax_grp

@@ -1,0 +1,13 @@
+% Test: Invalid identifier
+% Expected: Error for invalid identifier
+% Category: 12_errors
+% Priority: P1 - Parse errors
+
+.kg create test_invalid_id
+.kg use test_invalid_id
+
+% Try to use invalid identifier (starts with number)
++123invalid(1, 2).
+
+.kg use default
+.kg drop test_invalid_id

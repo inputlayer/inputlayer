@@ -1,0 +1,27 @@
+% Test: Zero values in operations
+% Expected: Zero handled correctly in all operations
+% Category: 10_edge_cases
+% Priority: P1 - Edge cases
+
+.kg create test_zero
+.kg use test_zero
+
++data[(0, 0), (1, 0), (0, 1), (1, 1)].
+
+% Multiplication by zero
+mult_zero(X, Y, R) :- data(X, Y), R = X * Y.
+
+?- mult_zero(X, Y, R).
+
+% Addition with zero
+add_zero(X, Y, R) :- data(X, Y), R = X + Y.
+
+?- add_zero(X, Y, R).
+
+% Filter on zero
+is_zero(X, Y) :- data(X, Y), X = 0.
+
+?- is_zero(X, Y).
+
+.kg use default
+.kg drop test_zero

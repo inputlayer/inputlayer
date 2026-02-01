@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_var_expr
+Knowledge graph 'test_var_expr' created.
+Switched to knowledge graph: test_var_expr
+> .kg use test_var_expr
+Switched to knowledge graph: test_var_expr
+> +items[(1, 10, 5), (2, 20, 15), (3, 30, 25)].
+Inserted 3 fact(s) into 'items'.
+> above_threshold(Id, Val, Threshold) :- items(Id, Val, Threshold), Val > Threshold.
+3 rows:
+  (1, 10, 5)
+  (2, 20, 15)
+  (3, 30, 25)
+(session: 1 rule(s))
+> ?- above_threshold(Id, Val, Threshold).
+3 rows:
+  (1, 10, 5)
+  (2, 20, 15)
+  (3, 30, 25)
+> computed_filter(Id, Val) :- items(Id, Val, _), Val > 10 + 5.
+Script error: Query execution failed: Unsupported comparison: Variable("Val") GreaterThan Arithmetic(Binary { op: Add, left: Constant(10), right: Constant(5) })

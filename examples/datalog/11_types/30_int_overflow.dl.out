@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_int
+Knowledge graph 'test_large_int' created.
+Switched to knowledge graph: test_large_int
+> .kg use test_large_int
+Switched to knowledge graph: test_large_int
+> +big_nums[(1000000000,), (2000000000,), (3000000000,)].
+Inserted 3 fact(s) into 'big_nums'.
+> sum_big(<SUM:X>) :- big_nums(X).
+Script error: Parse error: Unknown aggregate function: 

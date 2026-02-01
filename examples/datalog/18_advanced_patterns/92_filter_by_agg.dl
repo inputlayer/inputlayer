@@ -1,0 +1,17 @@
+% Test: Filter based on aggregate
+% Expected: Having-like behavior
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_filter_agg
+.kg use test_filter_agg
+
++orders[("A", 100), ("A", 200), ("B", 50), ("B", 60), ("B", 70), ("C", 500)].
+
+% Total per customer
+total_per_cust(Cust, <SUM:Amount>) :- orders(Cust, Amount).
+
+?- total_per_cust(Cust, Total).
+
+.kg use default
+.kg drop test_filter_agg

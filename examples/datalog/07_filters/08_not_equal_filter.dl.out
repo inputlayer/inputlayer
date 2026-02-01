@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neq
+Knowledge graph 'test_neq' created.
+Switched to knowledge graph: test_neq
+> .kg use test_neq
+Switched to knowledge graph: test_neq
+> +items[(1, "A"), (2, "B"), (3, "A"), (4, "C")].
+Inserted 4 fact(s) into 'items'.
+> not_category_a(Id, Cat) :- items(Id, Cat), Cat != "A".
+2 rows:
+  (2, "B")
+  (4, "C")
+(session: 1 rule(s))
+> ?- not_category_a(Id, Cat).
+2 rows:
+  (2, "B")
+  (4, "C")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neq
+Knowledge graph 'test_neq' dropped.

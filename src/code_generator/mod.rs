@@ -91,7 +91,8 @@ use differential_dataflow::operators::join::Join;
 use differential_dataflow::operators::{Reduce, Threshold};
 use differential_dataflow::Collection;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use timely::dataflow::operators::{Inspect, Map, Probe, ToStream};
 use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
@@ -203,7 +204,7 @@ impl CodeGenerator {
                     .distinct()
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().unwrap().push(data.clone());
+                        results_clone.lock().push(data.clone());
                     })
                     .probe_with(&mut probe);
             });
@@ -215,10 +216,10 @@ impl CodeGenerator {
         });
 
         // Extract results from Arc<Mutex<>>
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
-            .into_inner()
-            .map_err(|_| "Failed to unlock results")?;
+            .into_inner();
 
         Ok(final_results)
     }
@@ -489,7 +490,7 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().unwrap().push(data.clone());
+                        results_clone.lock().push(data.clone());
                     })
                     .probe_with(&mut probe);
             });
@@ -501,10 +502,10 @@ impl CodeGenerator {
         });
 
         // Extract results
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
-            .into_inner()
-            .map_err(|_| "Failed to unlock results")?;
+            .into_inner();
 
         Ok(final_results)
     }
@@ -603,7 +604,7 @@ impl CodeGenerator {
                     .distinct()
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().unwrap().push(data.clone());
+                        results_clone.lock().push(data.clone());
                     })
                     .probe_with(&mut probe);
             });
@@ -613,10 +614,10 @@ impl CodeGenerator {
             }
         });
 
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
-            .into_inner()
-            .map_err(|_| "Failed to unlock results")?;
+            .into_inner();
 
         Ok(final_results)
     }
@@ -1299,7 +1300,7 @@ impl CodeGenerator {
                 let results_ref = Arc::clone(&results_clone);
                 coll.inner.inspect(move |(tuple, _time, diff)| {
                     if *diff > 0 {
-                        results_ref.lock().unwrap().push(tuple.clone());
+                        results_ref.lock().push(tuple.clone());
                     }
                 });
             });
@@ -1307,7 +1308,15 @@ impl CodeGenerator {
             while worker.step() {}
         });
 
-        Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+        // Safely extract results from Arc<Mutex<Vec<Tuple>>>
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
+        match Arc::try_unwrap(results) {
+            Ok(mutex) => mutex.into_inner(),
+            Err(arc) => {
+                // Arc still has references (shouldn't happen, but handle gracefully)
+                arc.lock().clone()
+            }
+        }
     }
 
     /// Generate distinct node (production)
@@ -1706,19 +1715,17 @@ impl CodeGenerator {
                             Value::Int64(tuples.len() as i64)
                         }
                         AggregateFunction::Sum => {
-                            // Use checked arithmetic to detect overflow
+                            // Use saturating arithmetic to handle overflow safely
+                            // This processes ALL tuples and saturates at boundaries
                             let mut sum: i64 = 0;
                             let mut overflow = false;
                             for t in &tuples {
                                 let val = t.get(*col_idx).map(|v| v.to_i64()).unwrap_or(0);
-                                match sum.checked_add(val) {
-                                    Some(new_sum) => sum = new_sum,
-                                    None => {
-                                        overflow = true;
-                                        // Saturate at max/min value
-                                        sum = if val > 0 { i64::MAX } else { i64::MIN };
-                                        break;
-                                    }
+                                let old_sum = sum;
+                                sum = sum.saturating_add(val);
+                                // Detect if saturation occurred
+                                if !overflow && sum != old_sum.wrapping_add(val) {
+                                    overflow = true;
                                 }
                             }
                             if overflow {
@@ -1748,11 +1755,15 @@ impl CodeGenerator {
                         }
                         AggregateFunction::Avg => {
                             let count = tuples.len() as f64;
-                            let sum: f64 = tuples
-                                .iter()
-                                .map(|t| t.get(*col_idx).map(|v| v.to_f64()).unwrap_or(0.0))
-                                .sum();
-                            Value::Float64(sum / count)
+                            if count == 0.0 {
+                                Value::Null // Guard against division by zero
+                            } else {
+                                let sum: f64 = tuples
+                                    .iter()
+                                    .map(|t| t.get(*col_idx).map(|v| v.to_f64()).unwrap_or(0.0))
+                                    .sum();
+                                Value::Float64(sum / count)
+                            }
                         }
                         // Ranking aggregates handled above
                         _ => continue,
@@ -2349,7 +2360,7 @@ impl CodeGenerator {
             }
         };
 
-        // Return Int64 if both inputs were integers
+        // Return Int64 if both inputs were integers and result is finite
         if matches!(left, Value::Int32(_) | Value::Int64(_))
             && matches!(right, Value::Int32(_) | Value::Int64(_))
             && matches!(
@@ -2357,6 +2368,10 @@ impl CodeGenerator {
                 ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Mod
             )
         {
+            // Check for NaN/Infinity before casting to avoid undefined behavior
+            if !result.is_finite() {
+                return Value::Null;
+            }
             Value::Int64(result as i64)
         } else {
             Value::Float64(result)
@@ -2608,7 +2623,7 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().unwrap().push(data.clone());
+                        results_clone.lock().push(data.clone());
                     })
                     .probe_with(&mut probe);
             });
@@ -2620,10 +2635,10 @@ impl CodeGenerator {
         });
 
         // Extract results
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
-            .into_inner()
-            .map_err(|_| "Failed to unlock results")?;
+            .into_inner();
 
         Ok(final_results)
     }
@@ -2721,7 +2736,7 @@ impl CodeGenerator {
                 reach_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().unwrap().push(data.clone());
+                        results_clone.lock().push(data.clone());
                     })
                     .probe_with(&mut probe);
             });
@@ -2733,10 +2748,10 @@ impl CodeGenerator {
         });
 
         // Extract results
+        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
-            .into_inner()
-            .map_err(|_| "Failed to unlock results")?;
+            .into_inner();
 
         Ok(final_results)
     }

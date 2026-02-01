@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cross_small
+Knowledge graph 'test_cross_small' created.
+Switched to knowledge graph: test_cross_small
+> .kg use test_cross_small
+Switched to knowledge graph: test_cross_small
+> +colors[("red",), ("blue",)].
+Inserted 2 fact(s) into 'colors'.
+> +sizes[("S",), ("M",), ("L",)].
+Inserted 3 fact(s) into 'sizes'.
+> product(Color, Size) :- colors(Color), sizes(Size).
+6 rows:
+  ("blue", "L")
+  ("blue", "M")
+  ("blue", "S")
+  ("red", "L")
+  ("red", "M")
+  ("red", "S")
+(session: 1 rule(s))
+> ?- product(Color, Size).
+6 rows:
+  ("blue", "L")
+  ("blue", "M")
+  ("blue", "S")
+  ("red", "L")
+  ("red", "M")
+  ("red", "S")
+> +product_count(<COUNT:Color>) :- product(Color, _).
+Script error: Parse error: Invalid term: '<COUNT:Color>'

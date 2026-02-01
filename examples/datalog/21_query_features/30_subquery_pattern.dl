@@ -1,0 +1,17 @@
+% Test: Subquery-like pattern
+% Expected: Use derived relation as filter
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_subquery
+.kg use test_subquery
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)].
+
+% Find max order amount
+max_order(<MAX:Val>) :- orders(_, _, Val).
+
+?- max_order(M).
+
+.kg use default
+.kg drop test_subquery

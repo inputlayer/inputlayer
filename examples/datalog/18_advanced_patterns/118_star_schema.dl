@@ -1,0 +1,27 @@
+% Test: Star schema join
+% Expected: Fact table joins to dimension tables
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_star
+.kg use test_star
+
+% Dimension tables
++dim_product[(1, "Widget"), (2, "Gadget")].
++dim_date[(1, "2024-01"), (2, "2024-02")].
++dim_region[(1, "East"), (2, "West")].
+
+% Fact table
++fact_sales[(1, 1, 1, 100), (2, 1, 2, 150), (3, 2, 1, 200)].
+
+% Star join
++report(ProdName, DateVal, RegionName, Amount) :-
+    fact_sales(_, ProdId, DateId, Amount),
+    dim_product(ProdId, ProdName),
+    dim_date(DateId, DateVal),
+    dim_region(1, RegionName).
+
+?- report(P, D, R, A).
+
+.kg use default
+.kg drop test_star

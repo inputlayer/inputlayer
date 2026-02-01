@@ -1,0 +1,25 @@
+% Test: Ancestor relation
+% Expected: Recursive ancestors computed
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_ancestors
+.kg use test_ancestors
+
++parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Carol", "Eve")].
+
+% Direct parent
++ancestor(A, D) :- parent(A, D).
+
+% Transitive ancestor
++ancestor(A, D) :- parent(A, M), ancestor(M, D).
+
+?- ancestor(A, D).
+
+% Count ancestors of Eve
++eve_ancestors(<COUNT:A>) :- ancestor(A, "Eve").
+
+?- eve_ancestors(N).
+
+.kg use default
+.kg drop test_ancestors

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_eq
+Knowledge graph 'test_multi_eq' created.
+Switched to knowledge graph: test_multi_eq
+> .kg use test_multi_eq
+Switched to knowledge graph: test_multi_eq
+> +data[(1, "A", 100), (2, "A", 200), (3, "B", 100), (4, "A", 100)].
+Inserted 4 fact(s) into 'data'.
+> matches(Id) :- data(Id, "A", 100).
+2 rows:
+  (1)
+  (4)
+(session: 1 rule(s))
+> ?- matches(Id).
+2 rows:
+  (1)
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multi_eq
+Knowledge graph 'test_multi_eq' dropped.

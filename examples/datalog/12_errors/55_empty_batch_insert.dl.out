@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_batch
+Knowledge graph 'test_empty_batch' created.
+Switched to knowledge graph: test_empty_batch
+> .kg use test_empty_batch
+Switched to knowledge graph: test_empty_batch
+> +data[].
+Inserted 0 fact(s) into 'data'.
+> ?- data(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_batch
+Knowledge graph 'test_empty_batch' dropped.

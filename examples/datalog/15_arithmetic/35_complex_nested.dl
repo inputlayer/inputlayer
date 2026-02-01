@@ -1,0 +1,17 @@
+% Test: Deeply nested arithmetic
+% Expected: Evaluate nested expressions correctly
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_nested_arith
+.kg use test_nested_arith
+
++base[(2,)].
+
+% Nested: ((x + 1) * 2 + 3) * 4
+nested(X, Y) :- base(X), Y = ((X + 1) * 2 + 3) * 4.
+
+?- nested(X, Y).
+
+.kg use default
+.kg drop test_nested_arith

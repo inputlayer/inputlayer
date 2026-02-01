@@ -1,0 +1,17 @@
+% Test: Wildcard-like query
+% Expected: Query ignoring some columns
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_wildcard
+.kg use test_wildcard
+
++records[(1, "A", 100, true), (2, "B", 200, false), (3, "C", 150, true)].
+
+% Query only first and last columns
+first_last(First, Last) :- records(First, _, _, Last).
+
+?- first_last(F, L).
+
+.kg use default
+.kg drop test_wildcard

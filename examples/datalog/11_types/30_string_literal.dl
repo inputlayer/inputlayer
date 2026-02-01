@@ -1,0 +1,17 @@
+% Test: String literal in rule
+% Expected: Use string constant in rule body
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_str_lit
+.kg use test_str_lit
+
++items[(1, "active"), (2, "pending"), (3, "active")].
+
+% Filter by string literal
+active_items(Id) :- items(Id, "active").
+
+?- active_items(Id).
+
+.kg use default
+.kg drop test_str_lit

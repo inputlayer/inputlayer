@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_depth_limit
+Knowledge graph 'test_depth_limit' created.
+Switched to knowledge graph: test_depth_limit
+> .kg use test_depth_limit
+Switched to knowledge graph: test_depth_limit
+> +link[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)].
+Inserted 5 fact(s) into 'link'.
+> +reach(X, Y, 1) :- link(X, Y).
+Rule 'reach' registered.
+> +reach(X, Z, D2) :- reach(X, Y, D), link(Y, Z), D < 3, D2 = D + 1.
+Script error: Failed to register rule: Unsafe rule 'reach': Head variable(s) D2 not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

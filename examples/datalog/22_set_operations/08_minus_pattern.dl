@@ -1,0 +1,18 @@
+% Test: Set minus pattern
+% Expected: Set difference works correctly
+% Category: 22_set_operations
+% Priority: P1 - Set operations
+
+.kg create test_minus
+.kg use test_minus
+
++all_items[(1,), (2,), (3,), (4,), (5,)].
++to_remove[(2,), (4,)].
+
+% All items minus those to remove
+remaining(X) :- all_items(X), !to_remove(X).
+
+?- remaining(X).
+
+.kg use default
+.kg drop test_minus

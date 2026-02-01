@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_clamp
+Knowledge graph 'test_clamp' created.
+Switched to knowledge graph: test_clamp
+> .kg use test_clamp
+Switched to knowledge graph: test_clamp
+> +values[(-5,), (0,), (5,), (10,), (15,), (20,)].
+Inserted 6 fact(s) into 'values'.
+> clamped(V, C) :- values(V), MinV = 0, MaxV = 10, C = V, V >= MinV, V <= MaxV.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "clamped", args: [Variable("V"), Variable("C")] }. Variables ["C"] in head do not appear in positive body atoms.

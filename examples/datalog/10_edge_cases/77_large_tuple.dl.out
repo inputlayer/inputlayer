@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_tuple
+Knowledge graph 'test_large_tuple' created.
+Switched to knowledge graph: test_large_tuple
+> .kg use test_large_tuple
+Switched to knowledge graph: test_large_tuple
+> +wide[(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)].
+Inserted 1 fact(s) into 'wide'.
+> ?- wide(A, B, C, D, E, F, G, H, I, J).
+1 rows:
+  (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+> subset(A, E, J) :- wide(A, _, _, _, E, _, _, _, _, J).
+1 rows:
+  (1, 5, 10)
+(session: 1 rule(s))
+> ?- subset(A, E, J).
+1 rows:
+  (1, 5, 10)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_tuple
+Knowledge graph 'test_large_tuple' dropped.

@@ -1,0 +1,17 @@
+% Test: String contains check
+% Expected: Check if string contains substring
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_contains
+.kg use test_contains
+
++words[("hello world",), ("goodbye",), ("hello there",)].
+
+% Find words containing "hello"
+has_hello(S) :- words(S), CONTAINS(S, "hello").
+
+?- has_hello(S).
+
+.kg use default
+.kg drop test_contains

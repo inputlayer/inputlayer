@@ -1,0 +1,19 @@
+% Test: Set cardinality comparison
+% Expected: Count elements in sets
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_cardinality
+.kg use test_cardinality
+
++set_a[(1,), (2,), (3,)].
++set_b[(1,), (2,), (3,), (4,), (5,)].
+
+count_a(<COUNT:X>) :- set_a(X).
+count_b(<COUNT:X>) :- set_b(X).
+
+?- count_a(N).
+?- count_b(N).
+
+.kg use default
+.kg drop test_cardinality

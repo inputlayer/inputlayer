@@ -1,0 +1,19 @@
+% Test: Repeated inserts
+% Expected: Duplicates deduplicated
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_repeat
+.kg use test_repeat
+
++data[(1, "a")].
++data[(1, "a")].
++data[(1, "a")].
++data[(2, "b")].
++data[(2, "b")].
+
+% Should have only 2 rows
+?- data(X, Y).
+
+.kg use default
+.kg drop test_repeat

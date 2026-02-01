@@ -34,13 +34,12 @@ Inserted 1 fact(s) into 'edge'.
 > +edge(15, 25).
 Inserted 1 fact(s) into 'edge'.
 > -edge(X, Y) :- edge(X, Y), X > 10.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 1 fact(s) deleted from 'edge'.
 > ?- edge(X, Y).
-4 rows:
+3 rows:
   (2, 3)
   (3, 4)
   (10, 20)
-  (15, 25)
 > +counter(1, 0).
 Inserted 1 fact(s) into 'counter'.
 > ?- counter(Id, Val).

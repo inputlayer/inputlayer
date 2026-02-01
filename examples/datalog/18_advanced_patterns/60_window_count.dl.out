@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_window_cnt
+Knowledge graph 'test_window_cnt' created.
+Switched to knowledge graph: test_window_cnt
+> .kg use test_window_cnt
+Switched to knowledge graph: test_window_cnt
+> +sales[("Q1", "A", 100), ("Q1", "B", 150), ("Q1", "C", 120), ("Q2", "A", 200), ("Q2", "B", 180)].
+Inserted 5 fact(s) into 'sales'.
+> position(Q, Name, Val, <COUNT:N2>) :- sales(Q, Name, Val), sales(Q, N2, V2), V2 < Val.
+Script error: Parse error: Unknown aggregate function: 

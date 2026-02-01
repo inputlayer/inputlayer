@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_remove_nex
+Knowledge graph 'test_rule_remove_nex' created.
+Switched to knowledge graph: test_rule_remove_nex
+> .kg use test_rule_remove_nex
+Switched to knowledge graph: test_rule_remove_nex
+> .rule list
+No rules defined.
+> .rule remove nonexistent 1
+Script error: Failed to remove rule clause: Rule 'nonexistent' does not exist

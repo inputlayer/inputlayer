@@ -1,0 +1,28 @@
+% Test: Nested group by operations
+% Expected: Aggregations can be chained
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_nested_group
+.kg use test_nested_group
+
+% Sales by region and product
++sales[("North", "Widget", 100),
+       ("North", "Widget", 150),
+       ("North", "Gadget", 200),
+       ("South", "Widget", 300),
+       ("South", "Gadget", 250)].
+
+% First level: sum by region and product
++region_product_sum(Region, Product, <SUM:Amount>) :-
+    sales(Region, Product, Amount).
+
+?- region_product_sum(Region, Product, Sum).
+
+% Second level: max product sum by region
++region_max(Region, <MAX:Total>) :- region_product_sum(Region, _, Total).
+
+?- region_max(Region, MaxProduct).
+
+.kg use default
+.kg drop test_nested_group

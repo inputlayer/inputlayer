@@ -1,0 +1,17 @@
+% Test: Variable bound multiple times
+% Expected: All bindings must agree
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_multi_bind
+.kg use test_multi_bind
+
++data[(1, 1), (1, 2), (2, 2), (3, 3)].
+
+% Same variable in both positions - must be equal
+diagonal(X) :- data(X, X).
+
+?- diagonal(X).
+
+.kg use default
+.kg drop test_multi_bind

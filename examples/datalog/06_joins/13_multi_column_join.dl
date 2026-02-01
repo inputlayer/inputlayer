@@ -1,0 +1,21 @@
+% Test: Join on multiple columns
+% Expected: Join matches on all specified columns
+% Category: 06_joins
+% Priority: P1 - Join completeness
+
+.kg create test_multi_col_join
+.kg use test_multi_col_join
+
+% Two relations with multi-column keys
++orders[(1, 100, "2024-01-01"), (2, 100, "2024-01-02"), (3, 200, "2024-01-01")].
++shipments[(100, "2024-01-01", "shipped"), (100, "2024-01-02", "pending"), (200, "2024-01-01", "delivered")].
+
+% Join on both customer_id and date
++order_status(OrderId, CustId, Date, Status) :-
+    orders(OrderId, CustId, Date),
+    shipments(CustId, Date, Status).
+
+?- order_status(O, C, D, S).
+
+.kg use default
+.kg drop test_multi_col_join

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_const
+Knowledge graph 'test_neg_const' created.
+Switched to knowledge graph: test_neg_const
+> .kg use test_neg_const
+Switched to knowledge graph: test_neg_const
+> +status[(1, "active"), (2, "inactive"), (3, "active"), (4, "pending")].
+Inserted 4 fact(s) into 'status'.
+> non_active(Id, S) :- status(Id, S), S != "active".
+2 rows:
+  (2, "inactive")
+  (4, "pending")
+(session: 1 rule(s))
+> ?- non_active(Id, S).
+2 rows:
+  (2, "inactive")
+  (4, "pending")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_const
+Knowledge graph 'test_neg_const' dropped.

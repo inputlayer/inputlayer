@@ -1,0 +1,17 @@
+% Test: Filter with missing value
+% Expected: Handle missing comparisons
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_null_cmp
+.kg use test_null_cmp
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% Simple filter
+has_value(Id, Val) :- data(Id, Val), Val > 15.
+
+?- has_value(Id, Val).
+
+.kg use default
+.kg drop test_null_cmp

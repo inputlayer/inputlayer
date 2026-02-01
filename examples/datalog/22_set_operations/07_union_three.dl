@@ -1,0 +1,21 @@
+% Test: Union of three sets
+% Expected: Three-way union via multiple clauses
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_union3
+.kg use test_union3
+
++set_a[(1,), (2,)].
++set_b[(2,), (3,)].
++set_c[(3,), (4,)].
+
+% Union via multiple rule clauses
++union_all(X) :- set_a(X).
++union_all(X) :- set_b(X).
++union_all(X) :- set_c(X).
+
+?- union_all(X).
+
+.kg use default
+.kg drop test_union3

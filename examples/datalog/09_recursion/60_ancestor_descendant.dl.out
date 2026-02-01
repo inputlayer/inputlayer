@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_anc_desc
+Knowledge graph 'test_anc_desc' created.
+Switched to knowledge graph: test_anc_desc
+> .kg use test_anc_desc
+Switched to knowledge graph: test_anc_desc
+> +parent[("grandpa", "dad"), ("grandma", "dad"), ("dad", "child1"), ("dad", "child2")].
+Inserted 4 fact(s) into 'parent'.
+> +ancestor(A, D) :- parent(A, D).
+Rule 'ancestor' registered.
+> +ancestor(A, D) :- parent(A, M), ancestor(M, D).
+Rule 'ancestor' registered.
+> ?- ancestor(A, D).
+8 rows:
+  ("dad", "child1")
+  ("dad", "child2")
+  ("grandma", "child1")
+  ("grandma", "child2")
+  ("grandma", "dad")
+  ("grandpa", "child1")
+  ("grandpa", "child2")
+  ("grandpa", "dad")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_anc_desc
+Knowledge graph 'test_anc_desc' dropped.

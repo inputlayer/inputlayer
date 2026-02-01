@@ -1,0 +1,24 @@
+% Test: Multiple aggregates in same query
+% Expected: Can compute multiple aggregates
+% Category: 21_query_features
+% Priority: P1 - Query features
+
+.kg create test_multi_agg
+.kg use test_multi_agg
+
++sales[("Electronics", 100), ("Electronics", 200), ("Electronics", 150),
+       ("Clothing", 50), ("Clothing", 75), ("Clothing", 60)].
+
+% Multiple aggregates per category
++stats_sum(Cat, <SUM:Amt>) :- sales(Cat, Amt).
++stats_count(Cat, <COUNT:Amt>) :- sales(Cat, Amt).
++stats_min(Cat, <MIN:Amt>) :- sales(Cat, Amt).
++stats_max(Cat, <MAX:Amt>) :- sales(Cat, Amt).
+
+?- stats_sum(Cat, Sum).
+?- stats_count(Cat, Count).
+?- stats_min(Cat, Min).
+?- stats_max(Cat, Max).
+
+.kg use default
+.kg drop test_multi_agg

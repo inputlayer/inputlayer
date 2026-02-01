@@ -1,0 +1,17 @@
+% Test: Multiple range conditions
+% Expected: AND of multiple ranges
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_multi_range
+.kg use test_multi_range
+
++data[(1, 10, 100), (2, 20, 200), (3, 15, 150), (4, 25, 250)].
+
+% Where A > 10 AND B < 200
+filtered(Id, A, B) :- data(Id, A, B), A > 10, B < 200.
+
+?- filtered(Id, A, B).
+
+.kg use default
+.kg drop test_multi_range

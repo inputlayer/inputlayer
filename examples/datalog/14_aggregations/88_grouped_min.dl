@@ -1,0 +1,16 @@
+% Test: Grouped MIN
+% Expected: Minimum per category
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_grp_min
+.kg use test_grp_min
+
++prices[(1, "Electronics", 500), (2, "Electronics", 300), (3, "Books", 20), (4, "Books", 15)].
+
++min_by_cat(Cat, <MIN:Price>) :- prices(_, Cat, Price).
+
+?- min_by_cat(C, M).
+
+.kg use default
+.kg drop test_grp_min

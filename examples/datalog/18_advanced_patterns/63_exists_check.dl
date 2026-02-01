@@ -1,0 +1,22 @@
+% Test: Exists check pattern
+% Expected: Check if any matching row exists
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_exists
+.kg use test_exists
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)].
++customers[("Alice",), ("Bob",), ("Carol",)].
+
+% Customers with at least one order (exists)
+has_orders(Name) :- customers(Name), orders(_, Name, _).
+
+% Customers without orders (not exists)
+no_orders(Name) :- customers(Name), !has_orders(Name).
+
+?- has_orders(Name).
+?- no_orders(Name).
+
+.kg use default
+.kg drop test_exists

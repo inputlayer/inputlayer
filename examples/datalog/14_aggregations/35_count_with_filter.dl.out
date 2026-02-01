@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_filter
+Knowledge graph 'test_count_filter' created.
+Switched to knowledge graph: test_count_filter
+> .kg use test_count_filter
+Switched to knowledge graph: test_count_filter
+> +items[(1, "A", 10), (2, "B", 20), (3, "A", 30), (4, "B", 40), (5, "A", 50)].
+Inserted 5 fact(s) into 'items'.
+> +count_by_cat(Cat, <COUNT:Id>) :- items(Id, Cat, _).
+Script error: Parse error: Invalid term: '<COUNT:Id>'

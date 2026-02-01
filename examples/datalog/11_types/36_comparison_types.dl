@@ -1,0 +1,17 @@
+% Test: Comparison between same types
+% Expected: Compare ints with ints
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_cmp_types
+.kg use test_cmp_types
+
++nums[(10,), (20,), (30,)].
+
+% Compare numeric values
+bigger(N) :- nums(N), N > 15.
+
+?- bigger(N).
+
+.kg use default
+.kg drop test_cmp_types

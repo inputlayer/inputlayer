@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_or_union
+Knowledge graph 'test_or_union' created.
+Switched to knowledge graph: test_or_union
+> .kg use test_or_union
+Switched to knowledge graph: test_or_union
+> +items[(1, "A", 100), (2, "B", 200), (3, "C", 50), (4, "A", 300)].
+Inserted 4 fact(s) into 'items'.
+> +selected(Id, Cat, Price) :- items(Id, Cat, Price), Cat = "A".
+Rule 'selected' registered.
+> +selected(Id, Cat, Price) :- items(Id, Cat, Price), Price > 150.
+Rule 'selected' registered.
+> ?- selected(Id, Cat, Price).
+3 rows:
+  (1, "A", 100)
+  (2, "B", 200)
+  (4, "A", 300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_or_union
+Knowledge graph 'test_or_union' dropped.

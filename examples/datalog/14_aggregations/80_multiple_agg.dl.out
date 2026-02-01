@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg
+Knowledge graph 'test_multi_agg' created.
+Switched to knowledge graph: test_multi_agg
+> .kg use test_multi_agg
+Switched to knowledge graph: test_multi_agg
+> +values[(10,), (20,), (30,), (40,), (50,)].
+Inserted 5 fact(s) into 'values'.
+> +stats_sum(<SUM:V>) :- values(V).
+Script error: Parse error: Invalid term: '<SUM:V>'

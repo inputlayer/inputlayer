@@ -1,0 +1,21 @@
+% Test: AVG with filter condition
+% Expected: Average only matching rows
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_avg_filter
+.kg use test_avg_filter
+
++scores[(1, "Math", 85), (2, "Math", 90), (3, "Science", 75), (4, "Science", 80), (5, "Math", 95)].
+
+% Average score for Math only
++math_avg(<AVG:Score>) :- scores(_, "Math", Score).
+
+% Average score for Science
++science_avg(<AVG:Score>) :- scores(_, "Science", Score).
+
+?- math_avg(A).
+?- science_avg(A).
+
+.kg use default
+.kg drop test_avg_filter

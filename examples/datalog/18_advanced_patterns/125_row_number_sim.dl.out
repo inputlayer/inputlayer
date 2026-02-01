@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rownum
+Knowledge graph 'test_rownum' created.
+Switched to knowledge graph: test_rownum
+> .kg use test_rownum
+Switched to knowledge graph: test_rownum
+> +data[(5, "E"), (3, "C"), (1, "A"), (4, "D"), (2, "B")].
+Inserted 5 fact(s) into 'data'.
+> +row_pos(Id, Name, <COUNT:OtherId>) :- data(Id, Name), data(OtherId, _), OtherId < Id.
+Script error: Parse error: Invalid term: '<COUNT:OtherId>'

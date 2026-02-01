@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank
+Knowledge graph 'test_rank' created.
+Switched to knowledge graph: test_rank
+> .kg use test_rank
+Switched to knowledge graph: test_rank
+> +scores[(1, 95), (2, 87), (3, 95), (4, 72), (5, 87)].
+Inserted 5 fact(s) into 'scores'.
+> rank(Id, Score, <COUNT:OtherScore>) :- scores(Id, Score), scores(_, OtherScore), OtherScore > Score.
+Script error: Parse error: Unknown aggregate function: 

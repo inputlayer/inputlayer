@@ -1,0 +1,22 @@
+% Test: Very small float values
+% Expected: Tiny floats handled correctly
+% Category: 11_types
+% Priority: P2 - Type edge cases
+
+.kg create test_small_floats
+.kg use test_small_floats
+
++tiny[(1.0e-100,), (2.0e-100,), (3.0e-100,)].
+
+% Arithmetic on tiny floats
++sum_tiny(<SUM:X>) :- tiny(X).
+
+?- sum_tiny(S).
+
+% Comparison of tiny floats
+tiny_cmp(A, B) :- tiny(A), tiny(B), A < B.
+
+?- tiny_cmp(A, B).
+
+.kg use default
+.kg drop test_small_floats

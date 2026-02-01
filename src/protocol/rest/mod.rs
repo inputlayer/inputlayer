@@ -71,6 +71,10 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
             "/knowledge-graphs/:kg/rules/:name",
             get(rules::get_rule).delete(rules::delete_rule),
         )
+        .route(
+            "/knowledge-graphs/:kg/rules/:name/:index",
+            delete(rules::delete_rule_clause),
+        )
         // Views routes
         .route("/knowledge-graphs/:kg/views", get(views::list_views))
         .route("/knowledge-graphs/:kg/views/:name", get(views::get_view))

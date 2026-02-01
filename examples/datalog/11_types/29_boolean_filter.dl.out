@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bool_filter
+Knowledge graph 'test_bool_filter' created.
+Switched to knowledge graph: test_bool_filter
+> .kg use test_bool_filter
+Switched to knowledge graph: test_bool_filter
+> +features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)].
+Inserted 3 fact(s) into 'features'.
+> enabled(Id, Name) :- features(Id, Name, true).
+2 rows:
+  (1, "feature_a")
+  (3, "feature_c")
+(session: 1 rule(s))
+> disabled(Id, Name) :- features(Id, Name, false).
+1 rows:
+  (2, "feature_b")
+(session: 2 rule(s))
+> ?- enabled(Id, N).
+2 rows:
+  (1, "feature_a")
+  (3, "feature_c")
+> ?- disabled(Id, N).
+1 rows:
+  (2, "feature_b")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_bool_filter
+Knowledge graph 'test_bool_filter' dropped.

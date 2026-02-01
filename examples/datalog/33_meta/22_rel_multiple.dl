@@ -1,0 +1,16 @@
+% Test: .rel with multiple relations
+% Expected: Show info for multiple relations
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_rel_multi
+.kg use test_rel_multi
+
++rel_a[(1,), (2,), (3,)].
++rel_b[(1, "a"), (2, "b")].
++rel_c[(1, 2, 3)].
+
+.rel
+
+.kg use default
+.kg drop test_rel_multi

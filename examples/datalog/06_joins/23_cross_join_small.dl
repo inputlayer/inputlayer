@@ -1,0 +1,22 @@
+% Test: Small cross join
+% Expected: Cartesian product of small sets
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_cross_small
+.kg use test_cross_small
+
++colors[("red",), ("blue",)].
++sizes[("S",), ("M",), ("L",)].
+
+% Cross product
+product(Color, Size) :- colors(Color), sizes(Size).
+
+?- product(Color, Size).
+
++product_count(<COUNT:Color>) :- product(Color, _).
+
+?- product_count(N).
+
+.kg use default
+.kg drop test_cross_small

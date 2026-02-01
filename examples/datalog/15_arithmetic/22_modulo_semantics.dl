@@ -1,0 +1,22 @@
+% Test: Modulo operation semantics
+% Expected: Correct modulo behavior
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic behavior
+
+.kg create test_mod
+.kg use test_mod
+
++vals[(7,), (10,), (15,), (8,)].
+
+% Modulo operation
+mod_3(X, Y) :- vals(X), Y = X % 3.
+
+?- mod_3(X, Y).
+
+% Check divisibility
+divisible_by_5(X) :- vals(X), X % 5 = 0.
+
+?- divisible_by_5(X).
+
+.kg use default
+.kg drop test_mod

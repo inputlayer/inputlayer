@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_string_minmax
+Knowledge graph 'test_string_minmax' created.
+Switched to knowledge graph: test_string_minmax
+> .kg use test_string_minmax
+Switched to knowledge graph: test_string_minmax
+> +names[("Charlie",), ("Alice",), ("Bob",), ("Dave",)].
+Inserted 4 fact(s) into 'names'.
+> +min_name(<MIN:N>) :- names(N).
+Script error: Parse error: Invalid term: '<MIN:N>'

@@ -1,0 +1,18 @@
+% Test: Not member of set
+% Expected: Elements not in list
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_not_member
+.kg use test_not_member
+
++candidates[(1,), (2,), (3,), (4,), (5,)].
++selected[(2,), (4,)].
+
+% Not selected
++not_selected(X) :- candidates(X), !selected(X).
+
+?- not_selected(X).
+
+.kg use default
+.kg drop test_not_member

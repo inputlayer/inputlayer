@@ -1,0 +1,17 @@
+% Test: Division operation
+% Expected: Integer division
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_divide
+.kg use test_divide
+
++nums[(10, 2), (15, 4), (20, 3)].
+
+% Compute quotient
+quotient(A, B, Result) :- nums(A, B), Result = A / B.
+
+?- quotient(A, B, R).
+
+.kg use default
+.kg drop test_divide

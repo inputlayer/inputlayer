@@ -1,0 +1,27 @@
+% Test: Most common value pattern
+% Expected: Can find mode/most common value
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_mode
+.kg use test_mode
+
++values[("a",), ("b",), ("a",), ("c",), ("a",), ("b",)].
+
+% Count occurrences
++freq(Val, <COUNT:Val>) :- values(Val).
+
+?- freq(Val, Count).
+
+% Find max frequency
++max_freq(<MAX:C>) :- freq(_, C).
+
+?- max_freq(M).
+
+% Most common value(s)
+most_common(Val) :- freq(Val, C), max_freq(C).
+
+?- most_common(Val).
+
+.kg use default
+.kg drop test_mode

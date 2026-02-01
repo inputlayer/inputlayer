@@ -1,0 +1,17 @@
+% Test: Empty result preserves type
+% Expected: Empty query still valid
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_empty_type
+.kg use test_empty_type
+
++data[(1, "a"), (2, "b")].
+
+% Query that returns empty
+empty_result(Id, Val) :- data(Id, Val), Id > 100.
+
+?- empty_result(Id, Val).
+
+.kg use default
+.kg drop test_empty_type

@@ -1,0 +1,17 @@
+% Test: Complex arithmetic expression
+% Expected: Evaluate nested arithmetic
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_complex_expr
+.kg use test_complex_expr
+
++data[(10, 5, 2)].
+
+% Complex expression: (a + b) * c - a / c
+result(A, B, C, R) :- data(A, B, C), R = (A + B) * C - A / C.
+
+?- result(A, B, C, R).
+
+.kg use default
+.kg drop test_complex_expr

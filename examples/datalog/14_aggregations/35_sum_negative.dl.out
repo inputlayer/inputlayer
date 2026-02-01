@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sum_neg
+Knowledge graph 'test_sum_neg' created.
+Switched to knowledge graph: test_sum_neg
+> .kg use test_sum_neg
+Switched to knowledge graph: test_sum_neg
+> +amounts[(100,), (-50,), (200,), (-75,), (25,)].
+Inserted 5 fact(s) into 'amounts'.
+> total(<SUM:X>) :- amounts(X).
+Script error: Parse error: Unknown aggregate function: 

@@ -1,0 +1,21 @@
+% Test: Sum and Average aggregations
+% Expected: Correct sum and average values
+% Category: 14_aggregations
+% Priority: P1 - Aggregation completeness
+
+.kg create test_sum_avg
+.kg use test_sum_avg
+
+% Sample data
++sales[(1, 100), (1, 150), (1, 200), (2, 300), (2, 250)].
+
+% Sum per group
++total_sales(Group, sum<Amount>) :- sales(Group, Amount).
+?- total_sales(G, T).
+
+% Average per group
++avg_sales(Group, avg<Amount>) :- sales(Group, Amount).
+?- avg_sales(G, A).
+
+.kg use default
+.kg drop test_sum_avg

@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_insert
+Knowledge graph 'test_rel_insert' created.
+Switched to knowledge graph: test_rel_insert
+> .kg use test_rel_insert
+Switched to knowledge graph: test_rel_insert
+> +data[(1, "a"), (2, "b"), (3, "c")].
+Inserted 3 fact(s) into 'data'.
+> .rel data
+Relation: data
+  Columns: ["col0", "col1"]
+  Total rows: 3
+  Preview (first 3):
+    (1, "a")
+    (2, "b")
+    (3, "c")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_insert
+Knowledge graph 'test_rel_insert' dropped.

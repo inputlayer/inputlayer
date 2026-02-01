@@ -1,0 +1,18 @@
+% Test: Bounded recursion with limit
+% Expected: Stop at specified depth
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_bounded
+.kg use test_bounded
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("d", "e"), ("e", "f")].
+
+% Path with max depth 3
++limited_path(X, Y, 1) :- edge(X, Y).
++limited_path(X, Z, D) :- limited_path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3.
+
+?- limited_path("a", Y, D).
+
+.kg use default
+.kg drop test_bounded

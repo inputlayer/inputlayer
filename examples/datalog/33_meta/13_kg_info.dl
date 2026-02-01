@@ -1,0 +1,14 @@
+% Test: .kg info command
+% Expected: Show info about current KG
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_kg_info
+.kg use test_kg_info
+
++facts[(1,), (2,), (3,)].
+
+.kg info test_kg_info
+
+.kg use default
+.kg drop test_kg_info

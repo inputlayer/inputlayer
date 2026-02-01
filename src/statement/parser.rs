@@ -111,10 +111,9 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
                 let after = part[i + 1..].trim();
 
                 // Before should be a valid identifier (not starting with digits)
-                if before.is_empty() {
+                let Some(first_char) = before.chars().next() else {
                     continue;
-                }
-                let first_char = before.chars().next().unwrap();
+                };
                 if first_char.is_ascii_digit() || first_char == '"' {
                     // This is a value like "foo:bar" or a number, not a typed arg
                     continue;
@@ -161,10 +160,10 @@ pub fn is_simple_name_deletion(input: &str) -> bool {
 
 /// Validate a relation name (must be lowercase identifier)
 pub fn validate_relation_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
+    let Some(first_char) = name.chars().next() else {
         return Err("Relation name cannot be empty".to_string());
-    }
-    if !name.chars().next().unwrap().is_lowercase() {
+    };
+    if !first_char.is_lowercase() {
         return Err(format!(
             "Relation name '{}' must start with lowercase letter.\n\
              (Uppercase names are for type declarations.)",
@@ -247,20 +246,20 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     }
 
     // Check if valid identifier (alphanumeric + underscore)
-    if input.chars().all(|c| c.is_alphanumeric() || c == '_') && !input.is_empty() {
-        let first_char = input.chars().next().unwrap();
+    if let Some(first_char) = input.chars().next() {
+        if input.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            // Variable: starts with uppercase letter or underscore
+            // Examples: X, Y, Foo, _temp, _
+            if first_char.is_uppercase() || first_char == '_' {
+                return Ok(Term::Variable(input.to_string()));
+            }
 
-        // Variable: starts with uppercase letter or underscore
-        // Examples: X, Y, Foo, _temp, _
-        if first_char.is_uppercase() || first_char == '_' {
-            return Ok(Term::Variable(input.to_string()));
-        }
-
-        // Atom: starts with lowercase letter
-        // Examples: tom, liz, edge, parent
-        // Atoms are represented as StringConstant for compatibility
-        if first_char.is_lowercase() {
-            return Ok(Term::StringConstant(input.to_string()));
+            // Atom: starts with lowercase letter
+            // Examples: tom, liz, edge, parent
+            // Atoms are represented as StringConstant for compatibility
+            if first_char.is_lowercase() {
+                return Ok(Term::StringConstant(input.to_string()));
+            }
         }
     }
 
@@ -317,8 +316,7 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                 }
 
                 // Standard aggregates with single variable parameter
-                if !params.is_empty() {
-                    let first_char = params.chars().next().unwrap();
+                if let Some(first_char) = params.chars().next() {
                     if first_char.is_uppercase() || first_char == '_' {
                         let agg_func = match func_lower.as_str() {
                             "count" => Some(AggregateFunc::Count),
@@ -344,9 +342,9 @@ fn parse_aggregate(input: &str) -> Option<Term> {
 pub fn split_by_comma(input: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut paren_depth = 0;
-    let mut bracket_depth = 0; // Track square brackets for vectors
-    let mut angle_depth = 0; // Track angle brackets for aggregates like top_k<3, Points, desc>
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0; // Track square brackets for vectors
+    let mut angle_depth: i32 = 0; // Track angle brackets for aggregates like top_k<3, Points, desc>
     let mut in_string = false;
 
     for ch in input.chars() {
@@ -360,7 +358,8 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' if !in_string => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             '[' if !in_string => {
@@ -368,7 +367,8 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             ']' if !in_string => {
-                bracket_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                bracket_depth = (bracket_depth - 1).max(0);
                 current.push(ch);
             }
             '<' if !in_string => {
@@ -376,7 +376,8 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             '>' if !in_string => {
-                angle_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                angle_depth = (angle_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 && !in_string => {

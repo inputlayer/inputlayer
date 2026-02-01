@@ -1,0 +1,17 @@
+% Test: Self-referential rule
+% Expected: Rule that references itself
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_self_ref_rule
+.kg use test_self_ref_rule
+
++base[(1,), (2,)].
+
+% Self-referential (transitive closure pattern)
++closure(X) :- base(X).
+
+?- closure(X).
+
+.kg use default
+.kg drop test_self_ref_rule

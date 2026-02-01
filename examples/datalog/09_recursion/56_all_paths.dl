@@ -1,0 +1,18 @@
+% Test: All paths between nodes
+% Expected: Find all distinct paths
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_all_paths
+.kg use test_all_paths
+
++edge[("s", "a"), ("s", "b"), ("a", "t"), ("b", "t"), ("a", "b")].
+
+% All paths from s to any node
++reachable("s", "s", 0).
++reachable(Start, End, D) :- reachable(Start, Mid, D1), edge(Mid, End), D = D1 + 1, D < 5.
+
+?- reachable("s", End, D).
+
+.kg use default
+.kg drop test_all_paths

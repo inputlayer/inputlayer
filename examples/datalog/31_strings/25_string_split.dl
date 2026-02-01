@@ -1,0 +1,17 @@
+% Test: String operations on paths
+% Expected: Handle path-like strings
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_string_path
+.kg use test_string_path
+
++paths[("/home/user/file.txt",), ("/var/log/app.log",)].
+
+% Get length of paths
+path_info(P, L) :- paths(P), L = LEN(P).
+
+?- path_info(P, L).
+
+.kg use default
+.kg drop test_string_path

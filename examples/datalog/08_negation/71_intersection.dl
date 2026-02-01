@@ -1,0 +1,18 @@
+% Test: Set intersection via double containment
+% Expected: Elements in both sets
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_intersect
+.kg use test_intersect
+
++set_a[(1,), (2,), (3,), (4,)].
++set_b[(3,), (4,), (5,), (6,)].
+
+% Intersection: elements in both
++intersection(X) :- set_a(X), set_b(X).
+
+?- intersection(X).
+
+.kg use default
+.kg drop test_intersect

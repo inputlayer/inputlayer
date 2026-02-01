@@ -1,0 +1,18 @@
+% Test: OR condition simulation via union
+% Expected: Can simulate OR using multiple rules
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_or_sim
+.kg use test_or_sim
+
++items[(1, "a", 100), (2, "b", 200), (3, "c", 50), (4, "d", 300), (5, "e", 25)].
+
+% OR: Val > 150 OR Id = 1 (simulate with union)
+or_result(Id, Name, Val) :- items(Id, Name, Val), Val > 150.
+or_result(Id, Name, Val) :- items(Id, Name, Val), Id = 1.
+
+?- or_result(Id, Name, Val).
+
+.kg use default
+.kg drop test_or_sim

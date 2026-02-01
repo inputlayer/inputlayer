@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_reorder
+Knowledge graph 'test_reorder' created.
+Switched to knowledge graph: test_reorder
+> .kg use test_reorder
+Switched to knowledge graph: test_reorder
+> +records[(1, "Alice", 100), (2, "Bob", 200)].
+Inserted 2 fact(s) into 'records'.
+> ?- records(Id, Name, Val).
+2 rows:
+  (1, "Alice", 100)
+  (2, "Bob", 200)
+> reordered(Name, Val, Id) :- records(Id, Name, Val).
+2 rows:
+  ("Alice", 100, 1)
+  ("Bob", 200, 2)
+(session: 1 rule(s))
+> ?- reordered(Name, Val, Id).
+2 rows:
+  ("Alice", 100, 1)
+  ("Bob", 200, 2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_reorder
+Knowledge graph 'test_reorder' dropped.

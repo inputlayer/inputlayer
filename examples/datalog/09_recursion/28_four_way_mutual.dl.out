@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_four_mutual
+Knowledge graph 'test_four_mutual' created.
+Switched to knowledge graph: test_four_mutual
+> .kg use test_four_mutual
+Switched to knowledge graph: test_four_mutual
+> +start[(1, "a"), (5, "b")].
+Inserted 2 fact(s) into 'start'.
+> +step_a(X, Y) :- start(X, _), Y = X.
+Script error: Failed to register rule: Unsafe rule 'step_a': Head variable(s) Y not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

@@ -1,0 +1,17 @@
+% Test: Duplicate variable in rule head
+% Expected: Works correctly (same value in multiple positions)
+% Category: 12_errors
+% Priority: P1 - Rule handling
+
+.kg create test_dup_head_var
+.kg use test_dup_head_var
+
+% Base data
++data[(1, 1), (2, 2), (3, 4), (4, 4)].
+
+% Rule where same variable appears twice in head (valid - finds self-loops)
++same_pair(X, X) :- data(X, X).
+?- same_pair(A, B).
+
+.kg use default
+.kg drop test_dup_head_var

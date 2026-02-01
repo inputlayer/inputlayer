@@ -1,0 +1,17 @@
+% Test: Unary minus operation
+% Expected: Negate values
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_unary
+.kg use test_unary
+
++nums[(10,), (20,), (-5,)].
+
+% Negate using 0 - X
+negated(X, N) :- nums(X), N = 0 - X.
+
+?- negated(X, N).
+
+.kg use default
+.kg drop test_unary

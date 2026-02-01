@@ -1,0 +1,21 @@
+% Test: Delete with wildcard patterns
+% Expected: Can delete using wildcard in condition
+% Category: 02_relations
+% Priority: P2 - Delete operations
+
+.kg create test_delete_wildcard
+.kg use test_delete_wildcard
+
++items[(1, "a", 100), (2, "b", 200), (3, "a", 300), (4, "c", 400)].
+
+?- items(Id, Cat, Val).
+
+% Delete all items with category "a"
+-items(Id, "a", Val).
+
+?- items(Id, Cat, Val).
+
+% Verify only "b" and "c" items remain
+
+.kg use default
+.kg drop test_delete_wildcard

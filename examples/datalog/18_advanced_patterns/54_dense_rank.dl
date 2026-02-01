@@ -1,0 +1,20 @@
+% Test: Dense rank simulation
+% Expected: Rank without gaps
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_dense_rank
+.kg use test_dense_rank
+
++scores[("A", 100), ("B", 90), ("C", 100), ("D", 85)].
+
+% Get distinct scores
++distinct_scores(<MIN:Score>) :- scores(_, Score).
+
+% Count distinct scores higher = rank
++dense_rank(Name, Score, <COUNT_DISTINCT:Higher>) :- scores(Name, Score), scores(_, Higher), Higher > Score.
+
+?- dense_rank(Name, Score, Rank).
+
+.kg use default
+.kg drop test_dense_rank

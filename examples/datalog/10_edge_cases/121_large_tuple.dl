@@ -1,0 +1,20 @@
+% Test: Large arity tuple
+% Expected: Handle tuple with many columns
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_large_tuple
+.kg use test_large_tuple
+
++wide_table[(1, "a", 10, 1.5, "x", 100, "y", 2.5, "z", 1000)].
+
+% Query all columns
+?- wide_table(A, B, C, D, E, F, G, H, I, J).
+
+% Project specific columns
+narrow(A, E, I) :- wide_table(A, _, _, _, E, _, _, _, I, _).
+
+?- narrow(A, E, I).
+
+.kg use default
+.kg drop test_large_tuple

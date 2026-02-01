@@ -1,0 +1,23 @@
+% Test: String operations and handling
+% Expected: Strings handled correctly in various contexts
+% Category: 11_types
+% Priority: P1 - Type completeness
+
+.kg create test_strings
+.kg use test_strings
+
+% Various string values
++names[("alice",), ("bob",), ("carol",), ("Alice",), ("BOB",)].
+
+% Query exact match
+?- names(N), N = "alice".
+
+% Query inequality
+?- names(N), N != "alice".
+
+% Strings in multi-column relations
++people[(1, "John", "Doe"), (2, "Jane", "Smith"), (3, "Bob", "Jones")].
+?- people(Id, First, Last), First = "Jane".
+
+.kg use default
+.kg drop test_strings

@@ -1,0 +1,17 @@
+% Test: String values containing numbers
+% Expected: Strings with numeric content treated as strings
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_str_nums
+.kg use test_str_nums
+
++codes[("123",), ("456",), ("789",)].
++ids[(123,), (456,), (789,)].
+
+% These are different - string vs int
+?- codes(C).
+?- ids(I).
+
+.kg use default
+.kg drop test_str_nums

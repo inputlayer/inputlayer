@@ -1,0 +1,25 @@
+% Test: Float and integer mixing in arithmetic
+% Expected: Mixed type arithmetic works
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_mixed_arith
+.kg use test_mixed_arith
+
++ints[(10,), (20,)].
++floats[(1.5,), (2.5,)].
+
+% Int + Float
++pairs[(10, 1.5), (20, 2.5)].
+
+mixed_add(I, F, R) :- pairs(I, F), R = I + F.
+
+?- mixed_add(I, F, R).
+
+% Int * Float
+mixed_mul(I, F, R) :- pairs(I, F), R = I * F.
+
+?- mixed_mul(I, F, R).
+
+.kg use default
+.kg drop test_mixed_arith

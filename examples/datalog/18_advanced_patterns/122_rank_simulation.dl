@@ -1,0 +1,17 @@
+% Test: Rank simulation pattern
+% Expected: Simulate ranking by counting
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_rank
+.kg use test_rank
+
++scores[(1, 95), (2, 87), (3, 92), (4, 87)].
+
+% Count how many have higher score (rank-1)
++rank(Id, Score, <COUNT:OtherId>) :- scores(Id, Score), scores(OtherId, OtherScore), OtherScore > Score.
+
+?- rank(Id, Score, R).
+
+.kg use default
+.kg drop test_rank

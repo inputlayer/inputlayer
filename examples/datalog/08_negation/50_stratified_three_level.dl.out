@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_strat_three
+Knowledge graph 'test_strat_three' created.
+Switched to knowledge graph: test_strat_three
+> .kg use test_strat_three
+Switched to knowledge graph: test_strat_three
+> +base[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'base'.
+> +exclude_l1[(1,), (2,)].
+Inserted 2 fact(s) into 'exclude_l1'.
+> level1(X) :- base(X), !exclude_l1(X).
+3 rows:
+  (3)
+  (4)
+  (5)
+(session: 1 rule(s))
+> level2(X) :- base(X), !level1(X).
+2 rows:
+  (1)
+  (2)
+(session: 2 rule(s))
+> ?- level1(X).
+3 rows:
+  (3)
+  (4)
+  (5)
+> ?- level2(X).
+2 rows:
+  (1)
+  (2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_strat_three
+Knowledge graph 'test_strat_three' dropped.

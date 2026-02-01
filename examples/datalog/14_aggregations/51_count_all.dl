@@ -1,0 +1,16 @@
+% Test: Global count (no grouping)
+% Expected: Count of all rows
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_all
+.kg use test_count_all
+
++items[(1, "a"), (2, "b"), (3, "c"), (4, "d")].
+
+total_count(<COUNT:Id>) :- items(Id, _).
+
+?- total_count(N).
+
+.kg use default
+.kg drop test_count_all

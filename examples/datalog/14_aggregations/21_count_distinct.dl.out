@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_distinct
+Knowledge graph 'test_count_distinct' created.
+Switched to knowledge graph: test_count_distinct
+> .kg use test_count_distinct
+Switched to knowledge graph: test_count_distinct
+> +data[(1, "a"), (2, "b"), (3, "a"), (4, "c"), (5, "b"), (6, "a")].
+Inserted 6 fact(s) into 'data'.
+> +total_count(count<V>) :- data(_, V).
+Rule 'total_count' registered.
+> ?- total_count(C).
+1 rows:
+  (6)
+> +value_count(V, count<Id>) :- data(Id, V).
+Rule 'value_count' registered.
+> ?- value_count(V, C).
+3 rows:
+  ("a", 3)
+  ("b", 2)
+  ("c", 1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_count_distinct
+Knowledge graph 'test_count_distinct' dropped.

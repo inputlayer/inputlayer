@@ -1,0 +1,27 @@
+% Test: Constant comparison patterns
+% Expected: Constant comparisons work correctly
+% Category: 10_edge_cases
+% Priority: P1 - Edge case handling
+
+.kg create test_const_filter
+.kg use test_const_filter
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% Constant = Constant (always true)
+const_true(X, Y) :- data(X, Y), 5 = 5.
+
+?- const_true(X, Y).
+
+% Constant = Constant (always false)
+const_false(X, Y) :- data(X, Y), 5 = 6.
+
+?- const_false(X, Y).
+
+% Variable = Constant
+match_const(X, Y) :- data(X, Y), X = 2.
+
+?- match_const(X, Y).
+
+.kg use default
+.kg drop test_const_filter

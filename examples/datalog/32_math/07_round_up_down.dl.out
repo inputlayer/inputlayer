@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_round
+Knowledge graph 'test_round' created.
+Switched to knowledge graph: test_round
+> .kg use test_round
+Switched to knowledge graph: test_round
+> +values[(15,), (23,), (50,), (77,), (100,)].
+Inserted 5 fact(s) into 'values'.
+> round_down(V, R) :- values(V), R = (V / 10) * 10.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "round_down", args: [Variable("V"), Variable("R")] }. Variables ["R"] in head do not appear in positive body atoms.

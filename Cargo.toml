@@ -42,6 +42,8 @@ num_cpus = "1.16"
 
 # High-performance synchronization
 parking_lot = "0.12"
+arc-swap = "1.7"
+dashmap = "5.5"
 
 # REPL readline support
 rustyline = "14.0"

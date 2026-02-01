@@ -1,0 +1,24 @@
+% Test: Four-way mutual recursion
+% Expected: Complex mutual recursion terminates correctly
+% Category: 09_recursion
+% Priority: P2 - Recursion edge cases
+
+.kg create test_four_way
+.kg use test_four_way
+
+% Four mutually recursive relations
++start(1).
+
+% Chain: a -> b -> c -> d -> a
++rel_a(X) :- start(X).
++rel_b(X) :- rel_a(X).
++rel_c(X) :- rel_b(X).
++rel_d(X) :- rel_c(X).
+
+?- rel_a(X).
+?- rel_b(X).
+?- rel_c(X).
+?- rel_d(X).
+
+.kg use default
+.kg drop test_four_way

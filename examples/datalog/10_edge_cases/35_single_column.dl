@@ -1,0 +1,30 @@
+% Test: Single column relation
+% Expected: Single column relations work correctly
+% Category: 10_edge_cases
+% Priority: P1 - Boundary conditions
+
+.kg create test_single_col
+.kg use test_single_col
+
+% Single column relation
++ids[(1,), (2,), (3,), (4,), (5,)].
+
+?- ids(X).
+
+% Aggregation on single column
++id_count(<COUNT:X>) :- ids(X).
+
+?- id_count(C).
+
+% Filter on single column
+big_ids(X) :- ids(X), X > 3.
+
+?- big_ids(X).
+
+% Self-join on single column
+pairs(X, Y) :- ids(X), ids(Y), X < Y.
+
+?- pairs(X, Y).
+
+.kg use default
+.kg drop test_single_col

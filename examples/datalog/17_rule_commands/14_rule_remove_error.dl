@@ -1,0 +1,11 @@
+% Test: Rule Remove Index Out of Bounds
+% Category: 17_rule_commands
+% Description: Tests error when removing clause with invalid index
+.kg create test_rule_remove_err
+.kg use test_rule_remove_err
+% Insert base data and define a rule
++edge[(1,2)].
++simple(X, Y) :- edge(X, Y).
+.rule list
+% Error: clause index out of bounds (rule has only 1 clause)
+.rule remove simple 5

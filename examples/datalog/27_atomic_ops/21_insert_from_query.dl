@@ -1,0 +1,17 @@
+% Test: Insert derived from query
+% Expected: Insert results of computation
+% Category: 27_atomic_ops
+% Priority: P2 - Atomic operations
+
+.kg create test_insert_query
+.kg use test_insert_query
+
++source[(1, 10), (2, 20), (3, 30)].
+
+% Derive and persist doubled values
++doubled(Id, Val) :- source(Id, V), Val = V * 2.
+
+?- doubled(Id, Val).
+
+.kg use default
+.kg drop test_insert_query

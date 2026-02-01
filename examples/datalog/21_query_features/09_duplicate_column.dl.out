@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_col
+Knowledge graph 'test_dup_col' created.
+Switched to knowledge graph: test_dup_col
+> .kg use test_dup_col
+Switched to knowledge graph: test_dup_col
+> +pairs[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'pairs'.
+> +dup_first(X, Y, X) :- pairs(X, Y).
+Rule 'dup_first' registered.
+> ?- dup_first(A, B, C).
+3 rows:
+  (1, 10, 1)
+  (2, 20, 2)
+  (3, 30, 3)
+> +triple_val(X, Y, Y, Y) :- pairs(X, Y).
+Rule 'triple_val' registered.
+> ?- triple_val(A, B, C, D).
+3 rows:
+  (1, 10, 10, 10)
+  (2, 20, 20, 20)
+  (3, 30, 30, 30)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_col
+Knowledge graph 'test_dup_col' dropped.

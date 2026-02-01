@@ -1,0 +1,27 @@
+% Test: Single column relation
+% Expected: Arity-1 relations work correctly
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single_col
+.kg use test_single_col
+
++flags[(true,), (false,)].
++ids[(1,), (2,), (3,)].
+
+?- flags(F).
+
+?- ids(I).
+
+% Join single-column relations
+both(I, F) :- ids(I), flags(F).
+
+?- both(I, F).
+
+% Aggregation on single column
++count_ids(<COUNT:I>) :- ids(I).
+
+?- count_ids(C).
+
+.kg use default
+.kg drop test_single_col

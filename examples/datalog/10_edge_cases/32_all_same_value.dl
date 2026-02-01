@@ -1,0 +1,29 @@
+% Test: All same value
+% Expected: Operations work when all values are identical
+% Category: 10_edge_cases
+% Priority: P1 - Edge cases
+
+.kg create test_same_val
+.kg use test_same_val
+
+% All same value in second column
++uniform[(1, 100), (2, 100), (3, 100), (4, 100)].
+
+% Aggregations on uniform data
++uniform_sum(<SUM:V>) :- uniform(_, V).
++uniform_min(<MIN:V>) :- uniform(_, V).
++uniform_max(<MAX:V>) :- uniform(_, V).
++uniform_count(<COUNT:V>) :- uniform(_, V).
+
+?- uniform_sum(S).
+?- uniform_min(M).
+?- uniform_max(M).
+?- uniform_count(C).
+
+% Distinct values
+distinct_vals(V) :- uniform(_, V).
+
+?- distinct_vals(V).
+
+.kg use default
+.kg drop test_same_val

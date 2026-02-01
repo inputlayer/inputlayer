@@ -1,0 +1,19 @@
+% Test: Pivot pattern (wide to long)
+% Expected: Transform columnar data
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_pivot
+.kg use test_pivot
+
++monthly_sales[("Q1", 100, 110, 105), ("Q2", 120, 130, 125), ("Q3", 140, 150, 145)].
+
+% Extract individual months (simplified representation)
++sale_record(Quarter, 1, M1) :- monthly_sales(Quarter, M1, _, _).
++sale_record(Quarter, 2, M2) :- monthly_sales(Quarter, _, M2, _).
++sale_record(Quarter, 3, M3) :- monthly_sales(Quarter, _, _, M3).
+
+?- sale_record(Q, M, Amount).
+
+.kg use default
+.kg drop test_pivot

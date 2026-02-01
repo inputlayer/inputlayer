@@ -1,0 +1,21 @@
+% Test: Recursion followed by aggregation
+% Expected: Aggregate over recursive results
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_rec_agg
+.kg use test_rec_agg
+
++edge[("a", "b"), ("b", "c"), ("c", "d")].
+
+% Reachable nodes
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+
+% Count reachable from each node
+reach_count(X, <COUNT:Y>) :- reachable(X, Y).
+
+?- reach_count(X, N).
+
+.kg use default
+.kg drop test_rec_agg

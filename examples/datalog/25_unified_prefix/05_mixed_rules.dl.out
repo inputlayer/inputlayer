@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_rules
+Knowledge graph 'test_mixed_rules' created.
+Switched to knowledge graph: test_mixed_rules
+> .kg use test_mixed_rules
+Switched to knowledge graph: test_mixed_rules
+> +base[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'base'.
+> +step1(X, Y) :- base(X, Y), Y > 10.
+Rule 'step1' registered.
+> step2(X, Z) :- step1(X, Y), Z = Y + 5.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "step2", args: [Variable("X"), Variable("Z")] }. Variables ["Z"] in head do not appear in positive body atoms.

@@ -1,0 +1,21 @@
+% Test: Absolute value computation
+% Expected: Compute absolute values manually
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_abs
+.kg use test_abs
+
++values[(-10,), (5,), (-3,), (0,), (7,)].
+
+% Positive values stay positive
++positive(V) :- values(V), V >= 0.
+
+% Negative values
++negative(V) :- values(V), V < 0.
+
+?- positive(V).
+?- negative(V).
+
+.kg use default
+.kg drop test_abs

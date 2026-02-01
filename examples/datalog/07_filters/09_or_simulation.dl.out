@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_or_sim
+Knowledge graph 'test_or_sim' created.
+Switched to knowledge graph: test_or_sim
+> .kg use test_or_sim
+Switched to knowledge graph: test_or_sim
+> +items[(1, "a", 100), (2, "b", 200), (3, "c", 50), (4, "d", 300), (5, "e", 25)].
+Inserted 5 fact(s) into 'items'.
+> or_result(Id, Name, Val) :- items(Id, Name, Val), Val > 150.
+2 rows:
+  (2, "b", 200)
+  (4, "d", 300)
+(session: 1 rule(s))
+> or_result(Id, Name, Val) :- items(Id, Name, Val), Id = 1.
+3 rows:
+  (1, "a", 100)
+  (2, "b", 200)
+  (4, "d", 300)
+(session: 2 rule(s))
+> ?- or_result(Id, Name, Val).
+3 rows:
+  (1, "a", 100)
+  (2, "b", 200)
+  (4, "d", 300)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_or_sim
+Knowledge graph 'test_or_sim' dropped.

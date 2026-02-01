@@ -1,0 +1,16 @@
+% Test: Vector with mixed types
+% Expected: Handle vectors with different element types
+% Category: 16_vectors
+% Priority: P2 - Vector patterns
+
+.kg create test_vec_types
+.kg use test_vec_types
+
++int_vectors[(1, [1, 2, 3])].
++float_vectors[(1, [1.5, 2.5, 3.5])].
+
+?- int_vectors(Id, V).
+?- float_vectors(Id, V).
+
+.kg use default
+.kg drop test_vec_types

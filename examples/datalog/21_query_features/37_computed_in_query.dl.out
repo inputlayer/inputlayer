@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_query_comp
+Knowledge graph 'test_query_comp' created.
+Switched to knowledge graph: test_query_comp
+> .kg use test_query_comp
+Switched to knowledge graph: test_query_comp
+> +nums[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'nums'.
+> doubled(X, Y) :- nums(X), Y = X * 2.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "doubled", args: [Variable("X"), Variable("Y")] }. Variables ["Y"] in head do not appear in positive body atoms.

@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cross_sm
+Knowledge graph 'test_cross_sm' created.
+Switched to knowledge graph: test_cross_sm
+> .kg use test_cross_sm
+Switched to knowledge graph: test_cross_sm
+> +a[(1,), (2,)].
+Inserted 2 fact(s) into 'a'.
+> +b[("x",), ("y",)].
+Inserted 2 fact(s) into 'b'.
+> cross(N, S) :- a(N), b(S).
+4 rows:
+  (1, "x")
+  (1, "y")
+  (2, "x")
+  (2, "y")
+(session: 1 rule(s))
+> ?- cross(N, S).
+4 rows:
+  (1, "x")
+  (1, "y")
+  (2, "x")
+  (2, "y")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_cross_sm
+Knowledge graph 'test_cross_sm' dropped.

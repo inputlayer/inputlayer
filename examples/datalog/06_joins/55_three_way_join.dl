@@ -1,0 +1,22 @@
+% Test: Three-way join
+% Expected: Join three relations together
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_three_join
+.kg use test_three_join
+
++customers[(1, "Alice"), (2, "Bob")].
++orders[(101, 1, 201), (102, 2, 202), (103, 1, 203)].
++products[(201, "Widget", 10.0), (202, "Gadget", 20.0), (203, "Gizmo", 15.0)].
+
+% Three-way join: customer -> order -> product
++full_order(CustName, OrderId, ProdName, Price) :-
+    customers(CustId, CustName),
+    orders(OrderId, CustId, ProdId),
+    products(ProdId, ProdName, Price).
+
+?- full_order(C, O, P, Pr).
+
+.kg use default
+.kg drop test_three_join

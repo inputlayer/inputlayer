@@ -1,0 +1,18 @@
+% Test: Disjoint sets check
+% Expected: No common elements
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_disjoint
+.kg use test_disjoint
+
++set_a[(1,), (2,), (3,)].
++set_b[(4,), (5,), (6,)].
+
+% Intersection (should be empty for disjoint)
++common(X) :- set_a(X), set_b(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_disjoint

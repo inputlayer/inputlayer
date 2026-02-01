@@ -109,7 +109,7 @@ fn parse_bulk_tuples(input: &str) -> Result<Vec<Vec<Term>>, String> {
     let inner = &input[1..input.len() - 1];
     let mut tuples = Vec::new();
     let mut current = String::new();
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
 
     for ch in inner.chars() {
         match ch {
@@ -118,7 +118,8 @@ fn parse_bulk_tuples(input: &str) -> Result<Vec<Vec<Term>>, String> {
                 current.push(ch);
             }
             ')' => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if paren_depth == 0 => {

@@ -1,0 +1,17 @@
+% Test: Gap detection pattern
+% Expected: Find missing values in sequence
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_gaps
+.kg use test_gaps
+
++existing[(1,), (2,), (4,), (5,), (8,)].
+
+% Find gaps: id exists but id+1 doesn't
+gap_start(X) :- existing(X), X1 = X + 1, !existing(X1).
+
+?- gap_start(X).
+
+.kg use default
+.kg drop test_gaps

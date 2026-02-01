@@ -1,0 +1,13 @@
+% Test: Empty rule body
+% Expected: Error for empty rule body
+% Category: 12_errors
+% Priority: P1 - Error handling
+
+.kg create test_empty_body
+.kg use test_empty_body
+
+% This should fail - rule with empty body
+bad_rule(X) :- .
+
+.kg use default
+.kg drop test_empty_body

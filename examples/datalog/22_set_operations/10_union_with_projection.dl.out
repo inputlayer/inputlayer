@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_proj
+Knowledge graph 'test_union_proj' created.
+Switched to knowledge graph: test_union_proj
+> .kg use test_union_proj
+Switched to knowledge graph: test_union_proj
+> +employees[(1, "Alice", "Eng"), (2, "Bob", "Sales")].
+Inserted 2 fact(s) into 'employees'.
+> +contractors[(3, "Carol", "Eng"), (4, "Dave", "Marketing")].
+Inserted 2 fact(s) into 'contractors'.
+> all_names(Name) :- employees(_, Name, _).
+2 rows:
+  ("Alice")
+  ("Bob")
+(session: 1 rule(s))
+> all_names(Name) :- contractors(_, Name, _).
+4 rows:
+  ("Alice")
+  ("Bob")
+  ("Carol")
+  ("Dave")
+(session: 2 rule(s))
+> ?- all_names(Name).
+4 rows:
+  ("Alice")
+  ("Bob")
+  ("Carol")
+  ("Dave")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_union_proj
+Knowledge graph 'test_union_proj' dropped.

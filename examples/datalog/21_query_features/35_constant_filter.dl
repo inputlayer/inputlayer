@@ -1,0 +1,15 @@
+% Test: Query with constant filter
+% Expected: Filter on constant value
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_const_filter
+.kg use test_const_filter
+
++data[(1, "A", 100), (2, "B", 200), (3, "A", 150)].
+
+% Query with constant in filter position
+?- data(Id, "A", Val).
+
+.kg use default
+.kg drop test_const_filter

@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_theta
+Knowledge graph 'test_theta' created.
+Switched to knowledge graph: test_theta
+> .kg use test_theta
+Switched to knowledge graph: test_theta
+> +products[(1, "Widget", 50), (2, "Gadget", 100), (3, "Gizmo", 75)].
+Inserted 3 fact(s) into 'products'.
+> +budgets[(1, "Alice", 80), (2, "Bob", 120)].
+Inserted 2 fact(s) into 'budgets'.
+> affordable(BuyerName, ProductName, Price, Budget) :- budgets(_, BuyerName, Budget), products(_, ProductName, Price), Price <= Budget.
+2 rows:
+  ("Alice", "Widget", 50, 80)
+  ("Bob", "Gadget", 100, 120)
+(session: 1 rule(s))
+> ?- affordable(BuyerName, ProductName, Price, Budget).
+2 rows:
+  ("Alice", "Widget", 50, 80)
+  ("Bob", "Gadget", 100, 120)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_theta
+Knowledge graph 'test_theta' dropped.

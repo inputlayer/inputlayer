@@ -27,12 +27,11 @@ Deleted 1 facts from 'edge'.
   (2, 3)
   (3, 4)
 > -edge(X, Y) :- edge(X, Y), X > 2.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 1 fact(s) deleted from 'edge'.
 > ?- edge(X, Y).
-3 rows:
+2 rows:
   (1, 2)
   (2, 3)
-  (3, 4)
 > +counter[(1, 0), (2, 10)].
 Inserted 2 fact(s) into 'counter'.
 > -counter(1, 0).

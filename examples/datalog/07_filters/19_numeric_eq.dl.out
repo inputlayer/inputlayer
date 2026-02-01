@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_num_eq
+Knowledge graph 'test_num_eq' created.
+Switched to knowledge graph: test_num_eq
+> .kg use test_num_eq
+Switched to knowledge graph: test_num_eq
+> +data[(1, 100), (2, 200), (3, 100), (4, 300)].
+Inserted 4 fact(s) into 'data'.
+> value_100(Id) :- data(Id, 100).
+2 rows:
+  (1)
+  (3)
+(session: 1 rule(s))
+> ?- value_100(Id).
+2 rows:
+  (1)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_num_eq
+Knowledge graph 'test_num_eq' dropped.

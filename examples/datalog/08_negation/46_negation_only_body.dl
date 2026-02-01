@@ -1,0 +1,15 @@
+% Test: Rule with only negation in body
+% Expected: Error - variables must be bound positively
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_only
+.kg use test_neg_only
+
++exclude[(1,), (2,)].
+
+% This should error - X not bound positively
+bad(X) :- !exclude(X).
+
+.kg use default
+.kg drop test_neg_only

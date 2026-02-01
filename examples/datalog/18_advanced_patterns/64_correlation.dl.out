@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_correlation
+Knowledge graph 'test_correlation' created.
+Switched to knowledge graph: test_correlation
+> .kg use test_correlation
+Switched to knowledge graph: test_correlation
+> +sales[(1, "A", 100), (2, "A", 150), (3, "A", 200), (4, "B", 300), (5, "B", 250)].
+Inserted 5 fact(s) into 'sales'.
+> avg_per_cat(Cat, <AVG:Val>) :- sales(_, Cat, Val).
+Script error: Parse error: Unknown aggregate function: 

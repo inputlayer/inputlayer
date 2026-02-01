@@ -1,0 +1,12 @@
+% Test: Session info command
+% Expected: Show current session information
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_session_info
+.kg use test_session_info
+
+.session info
+
+.kg use default
+.kg drop test_session_info

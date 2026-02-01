@@ -1,0 +1,23 @@
+% Test: Triple-way join (3 relations)
+% Expected: Correct join across 3 relations
+% Category: 06_joins
+% Priority: P1 - Join completeness
+
+.kg create test_triple_join
+.kg use test_triple_join
+
+% Setup three related relations
++employees[(1, "Alice", "dev"), (2, "Bob", "sales"), (3, "Carol", "dev")].
++departments[("dev", "Development", 100), ("sales", "Sales", 200)].
++budgets[(100, 50000), (200, 30000)].
+
+% Triple join: employee -> department -> budget
++employee_budget(Name, Dept, Budget) :-
+    employees(_, Name, DeptId),
+    departments(DeptId, Dept, BudgetId),
+    budgets(BudgetId, Budget).
+
+?- employee_budget(Name, Dept, Budget).
+
+.kg use default
+.kg drop test_triple_join

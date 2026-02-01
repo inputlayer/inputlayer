@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_alias
+Knowledge graph 'test_self_alias' created.
+Switched to knowledge graph: test_self_alias
+> .kg use test_self_alias
+Switched to knowledge graph: test_self_alias
+> +employees[(1, "Alice", 2), (2, "Bob", 3), (3, "Carol", 0), (4, "Dave", 2)].
+Inserted 4 fact(s) into 'employees'.
+> same_manager(E1Name, E2Name, MgrId) :- employees(E1, E1Name, MgrId), employees(E2, E2Name, MgrId), E1 < E2, MgrId > 0.
+1 rows:
+  ("Alice", "Dave", 2)
+(session: 1 rule(s))
+> ?- same_manager(E1, E2, M).
+1 rows:
+  ("Alice", "Dave", 2)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_self_alias
+Knowledge graph 'test_self_alias' dropped.

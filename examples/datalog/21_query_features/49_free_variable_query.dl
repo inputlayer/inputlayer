@@ -1,0 +1,15 @@
+% Test: Query with all free variables
+% Expected: Return all tuples
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_free
+.kg use test_free
+
++data[(1, "a", 100), (2, "b", 200), (3, "c", 300)].
+
+% All variables free - returns all rows
+?- data(X, Y, Z).
+
+.kg use default
+.kg drop test_free

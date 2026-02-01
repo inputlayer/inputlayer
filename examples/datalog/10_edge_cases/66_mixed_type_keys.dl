@@ -1,0 +1,17 @@
+% Test: Mixed types in same column position
+% Expected: Different types can coexist in same column
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_mixed_keys
+.kg use test_mixed_keys
+
+% Note: This tests if engine allows mixed types per column
++data[(1, 100), (2, 200)].
++data2[("a", 300), ("b", 400)].
+
+?- data(A, B).
+?- data2(A, B).
+
+.kg use default
+.kg drop test_mixed_keys

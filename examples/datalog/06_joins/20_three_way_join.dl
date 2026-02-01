@@ -1,0 +1,22 @@
+% Test: Three-way join
+% Expected: Join across three relations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_three_join
+.kg use test_three_join
+
++orders[(1, "Alice"), (2, "Bob"), (3, "Alice")].
++items[(1, "Widget"), (2, "Gadget"), (3, "Widget")].
++prices[("Widget", 100), ("Gadget", 200)].
+
+% Join all three
+order_details(OId, Name, Item, Price) :-
+    orders(OId, Name),
+    items(OId, Item),
+    prices(Item, Price).
+
+?- order_details(OId, Name, Item, Price).
+
+.kg use default
+.kg drop test_three_join

@@ -1,0 +1,19 @@
+% Test: Intersection of three sets
+% Expected: Three-way intersection
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_intersect3
+.kg use test_intersect3
+
++set_a[(1,), (2,), (3,)].
++set_b[(2,), (3,), (4,)].
++set_c[(3,), (4,), (5,)].
+
+% Intersection: must be in all three
+intersect_all(X) :- set_a(X), set_b(X), set_c(X).
+
+?- intersect_all(X).
+
+.kg use default
+.kg drop test_intersect3

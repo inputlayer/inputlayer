@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_depth_limit
+Knowledge graph 'test_depth_limit' created.
+Switched to knowledge graph: test_depth_limit
+> .kg use test_depth_limit
+Switched to knowledge graph: test_depth_limit
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7)].
+Inserted 6 fact(s) into 'edge'.
+> +path(X, Y, 1) :- edge(X, Y).
+Rule 'path' registered.
+> +path(X, Z, D) :- path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3.
+Script error: Failed to register rule: Unsafe rule 'path': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

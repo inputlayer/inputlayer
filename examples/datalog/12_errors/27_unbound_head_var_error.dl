@@ -1,0 +1,15 @@
+% Test: Unbound head variable error
+% Expected: Error - head variable Z not bound in body
+% Category: 12_errors
+% Priority: P0 CRITICAL - Safety check must work
+
+.kg create test_unbound_head
+.kg use test_unbound_head
+
++edges[(1, 2), (2, 3)].
+
+% Rule with head variable Z that is not bound in body
++bad_rule(X, Y, Z) :- edges(X, Y).
+
+.kg use default
+.kg drop test_unbound_head

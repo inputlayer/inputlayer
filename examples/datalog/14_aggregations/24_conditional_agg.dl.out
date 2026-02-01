@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_agg
+Knowledge graph 'test_cond_agg' created.
+Switched to knowledge graph: test_cond_agg
+> .kg use test_cond_agg
+Switched to knowledge graph: test_cond_agg
+> +transactions[(1, "credit", 100), (2, "debit", 50), (3, "credit", 200), (4, "debit", 75), (5, "credit", 150)].
+Inserted 5 fact(s) into 'transactions'.
+> credit_sum(<SUM:Amt>) :- transactions(_, "credit", Amt).
+Script error: Parse error: Unknown aggregate function: 

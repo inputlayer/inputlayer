@@ -1,0 +1,20 @@
+% Test: Many rules with same head
+% Expected: Union of all clause results
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_many_rules
+.kg use test_many_rules
+
++nums[(1,), (2,), (3,), (4,), (5,), (6,)].
+
+% Multiple clauses for same head
++classified(X, "tiny") :- nums(X), X <= 1.
++classified(X, "small") :- nums(X), X > 1, X <= 3.
++classified(X, "medium") :- nums(X), X > 3, X <= 5.
++classified(X, "large") :- nums(X), X > 5.
+
+?- classified(X, Cat).
+
+.kg use default
+.kg drop test_many_rules

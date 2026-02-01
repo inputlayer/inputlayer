@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cube
+Knowledge graph 'test_cube' created.
+Switched to knowledge graph: test_cube
+> .kg use test_cube
+Switched to knowledge graph: test_cube
+> +sales[("2024", "Q1", "Widget", 100), ("2024", "Q1", "Gadget", 200), ("2024", "Q2", "Widget", 150), ("2024", "Q2", "Gadget", 250)].
+Inserted 4 fact(s) into 'sales'.
+> +cube_yqp(Year, Quarter, Product, <SUM:Amt>) :- sales(Year, Quarter, Product, Amt).
+Script error: Parse error: Invalid term: '<SUM:Amt>'

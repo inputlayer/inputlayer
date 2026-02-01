@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minmax_grp
+Knowledge graph 'test_minmax_grp' created.
+Switched to knowledge graph: test_minmax_grp
+> .kg use test_minmax_grp
+Switched to knowledge graph: test_minmax_grp
+> +sales[(1, "East", 100), (2, "West", 150), (3, "East", 200), (4, "West", 80), (5, "East", 120)].
+Inserted 5 fact(s) into 'sales'.
+> +min_sale(Region, <MIN:Amount>) :- sales(_, Region, Amount).
+Script error: Parse error: Invalid term: '<MIN:Amount>'

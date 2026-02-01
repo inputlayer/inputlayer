@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_subset
+Knowledge graph 'test_subset' created.
+Switched to knowledge graph: test_subset
+> .kg use test_subset
+Switched to knowledge graph: test_subset
+> +small[(1,), (2,)].
+Inserted 2 fact(s) into 'small'.
+> +large[(1,), (2,), (3,), (4,)].
+Inserted 4 fact(s) into 'large'.
+> not_in_large(X) :- small(X), !large(X).
+No results.
+(session: 1 rule(s))
+> ?- not_in_large(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_subset
+Knowledge graph 'test_subset' dropped.

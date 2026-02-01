@@ -1,0 +1,19 @@
+% Test: NULL/empty handling in various contexts
+% Expected: NULLs handled correctly
+% Category: 11_types
+% Priority: P1 - Type completeness
+
+.kg create test_null
+.kg use test_null
+
+% Data with various values including zeros
++data[(1, 0), (2, 100), (3, 0), (4, 50)].
+
+% Division that might produce NULL (div by zero handled elsewhere)
+?- data(Id, Val), Val = 0.
+
+% Non-zero values
+?- data(Id, Val), Val != 0.
+
+.kg use default
+.kg drop test_null

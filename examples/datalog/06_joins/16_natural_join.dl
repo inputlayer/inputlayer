@@ -1,0 +1,20 @@
+% Test: Natural join pattern
+% Expected: Join on common column name
+% Category: 06_joins
+% Priority: P1 - Join patterns
+
+.kg create test_natural
+.kg use test_natural
+
++employees[(1, "Alice", 10), (2, "Bob", 20), (3, "Carol", 10)].
++departments[(10, "Engineering"), (20, "Sales"), (30, "HR")].
+
+% Natural join on department ID
+joined(EmpId, Name, DeptId, DeptName) :-
+    employees(EmpId, Name, DeptId),
+    departments(DeptId, DeptName).
+
+?- joined(EmpId, Name, DeptId, DeptName).
+
+.kg use default
+.kg drop test_natural

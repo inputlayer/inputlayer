@@ -1,0 +1,19 @@
+% Test: Zero and empty values
+% Expected: Handle zero/empty correctly
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_zero_empty
+.kg use test_zero_empty
+
++data[(0, "", 0.0, false)].
+
+?- data(A, B, C, D).
+
+% Filter on zero
+has_zero(A, B, C, D) :- data(A, B, C, D), A = 0.
+
+?- has_zero(A, B, C, D).
+
+.kg use default
+.kg drop test_zero_empty

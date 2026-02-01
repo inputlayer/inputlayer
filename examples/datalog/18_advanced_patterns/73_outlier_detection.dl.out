@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_outlier
+Knowledge graph 'test_outlier' created.
+Switched to knowledge graph: test_outlier
+> .kg use test_outlier
+Switched to knowledge graph: test_outlier
+> +measurements[(10,), (12,), (11,), (100,), (9,), (13,)].
+Inserted 6 fact(s) into 'measurements'.
+> min_val(<MIN:V>) :- measurements(V).
+Script error: Parse error: Unknown aggregate function: 

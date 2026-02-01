@@ -169,11 +169,18 @@ impl DependencyGraph {
 
     /// Check if there's a negative edge within an SCC
     /// Returns the first negative edge found within the SCC, if any
+    /// NOTE: Sorted for deterministic error messages
     pub fn has_negative_edge_in_scc(&self, scc: &[String]) -> Option<(String, String)> {
         let scc_set: HashSet<&String> = scc.iter().collect();
-        for from in scc {
+        // Sort for deterministic iteration order
+        let mut sorted_scc: Vec<&String> = scc.iter().collect();
+        sorted_scc.sort();
+        for from in sorted_scc {
             if let Some(edges) = self.edges.get(from) {
-                for (to, dep_type) in edges {
+                // Sort edges by target for deterministic order
+                let mut sorted_edges: Vec<_> = edges.iter().collect();
+                sorted_edges.sort_by(|a, b| a.0.cmp(&b.0));
+                for (to, dep_type) in sorted_edges {
                     if *dep_type == DependencyType::Negative && scc_set.contains(to) {
                         return Some((from.clone(), to.clone()));
                     }
@@ -406,7 +413,22 @@ impl StratificationResult {
         matches!(self, StratificationResult::Success(_))
     }
 
-    /// Unwrap the strata, panicking if not stratifiable
+    /// Try to convert into strata, returning an error with relation and reason if not stratifiable.
+    /// This is the safe, non-panicking alternative to `unwrap()`.
+    pub fn try_into_strata(self) -> Result<Vec<Vec<usize>>, (String, String)> {
+        match self {
+            StratificationResult::Success(strata) => Ok(strata),
+            StratificationResult::NotStratifiable { relation, reason } => Err((relation, reason)),
+        }
+    }
+
+    /// Unwrap the strata, panicking if not stratifiable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stratification result is `NotStratifiable`.
+    /// For production code, prefer `try_into_strata()` which returns a Result.
+    #[track_caller]
     pub fn unwrap(self) -> Vec<Vec<usize>> {
         match self {
             StratificationResult::Success(strata) => strata,

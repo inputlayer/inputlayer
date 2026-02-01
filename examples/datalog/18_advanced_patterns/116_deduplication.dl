@@ -1,0 +1,17 @@
+% Test: Deduplication pattern
+% Expected: Remove duplicates via projection
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_dedup
+.kg use test_dedup
+
++records[(1, "Alice", "NYC"), (2, "Bob", "NYC"), (3, "Carol", "LA"), (4, "Dave", "NYC")].
+
+% Get unique cities
++unique_cities(City) :- records(_, _, City).
+
+?- unique_cities(C).
+
+.kg use default
+.kg drop test_dedup

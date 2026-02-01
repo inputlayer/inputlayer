@@ -1,0 +1,21 @@
+% Test: Very wide tuples (20 columns)
+% Expected: Handles wide tuples correctly
+% Category: 10_edge_cases
+% Priority: P1 - Boundary condition
+
+.kg create test_wide20
+.kg use test_wide20
+
+% Create 20-column relation
++wide20(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20).
++wide20(21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40).
+
+% Query all columns
+?- wide20(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T).
+
+% Projection of first and last columns
+first_last(A, T) :- wide20(A, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, T).
+?- first_last(X, Y).
+
+.kg use default
+.kg drop test_wide20

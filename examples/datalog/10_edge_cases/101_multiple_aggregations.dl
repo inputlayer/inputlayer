@@ -1,0 +1,24 @@
+% Test: Multiple different aggregations on same data
+% Expected: Each aggregation computes independently
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_multi_agg
+.kg use test_multi_agg
+
++values[(10,), (20,), (30,), (40,), (50,)].
+
+sum_val(<SUM:X>) :- values(X).
+count_val(<COUNT:X>) :- values(X).
+min_val(<MIN:X>) :- values(X).
+max_val(<MAX:X>) :- values(X).
+avg_val(<AVG:X>) :- values(X).
+
+?- sum_val(S).
+?- count_val(C).
+?- min_val(Mi).
+?- max_val(Ma).
+?- avg_val(A).
+
+.kg use default
+.kg drop test_multi_agg

@@ -1,0 +1,17 @@
+% Test: SUM on non-numeric (strings)
+% Expected: Error or skip non-numeric values
+% Category: 14_aggregations
+% Priority: P2 - Error handling
+
+.kg create test_sum_strings
+.kg use test_sum_strings
+
++data[("a",), ("b",), ("c",)].
+
+% Try to SUM strings - should error or return 0
++bad_sum(<SUM:X>) :- data(X).
+
+?- bad_sum(R).
+
+.kg use default
+.kg drop test_sum_strings

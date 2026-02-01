@@ -1,0 +1,27 @@
+% Test: Cycle detection in graphs
+% Expected: Can detect cycles in graph
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_cycle_det
+.kg use test_cycle_det
+
+% Graph with cycle: 1->2->3->1
++edge[(1, 2), (2, 3), (3, 1), (4, 5)].
+
+% Transitive reachability
++reaches(X, Y) :- edge(X, Y).
++reaches(X, Z) :- edge(X, Y), reaches(Y, Z).
+
+% Node is in a cycle if it reaches itself
+in_cycle(X) :- reaches(X, X).
+
+?- in_cycle(X).
+
+% Nodes not in cycle
+not_in_cycle(X) :- edge(X, _), !reaches(X, X).
+
+?- not_in_cycle(X).
+
+.kg use default
+.kg drop test_cycle_det

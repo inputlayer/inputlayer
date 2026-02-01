@@ -1,0 +1,17 @@
+% Test: TOP_K aggregation basic
+% Expected: Get top K values
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_topk_basic
+.kg use test_topk_basic
+
++scores[("Alice", 95), ("Bob", 87), ("Carol", 92), ("Dave", 78), ("Eve", 99)].
+
+% Top 3 scores
+top_three(<TOP_K:3:Score>) :- scores(_, Score).
+
+?- top_three(Scores).
+
+.kg use default
+.kg drop test_topk_basic

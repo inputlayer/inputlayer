@@ -1,0 +1,30 @@
+% Test: String comparison (lexicographic)
+% Expected: Strings compared lexicographically
+% Category: 07_filters
+% Priority: P1 - String operations
+
+.kg create test_str_cmp
+.kg use test_str_cmp
+
++words[("apple",), ("banana",), ("cherry",), ("apricot",)].
+
+% Test equality
+?- words(W), W = "apple".
+
+% Test inequality
+?- words(W), W != "banana".
+
+% Test less than (lexicographic)
+?- words(W), W < "banana".
+
+% Test greater than (lexicographic)
+?- words(W), W > "banana".
+
+% Test less or equal
+?- words(W), W <= "apple".
+
+% Test greater or equal
+?- words(W), W >= "cherry".
+
+.kg use default
+.kg drop test_str_cmp

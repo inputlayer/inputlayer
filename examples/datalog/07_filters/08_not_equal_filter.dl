@@ -1,0 +1,17 @@
+% Test: Not-equal filter
+% Expected: Filter by inequality
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_neq
+.kg use test_neq
+
++items[(1, "A"), (2, "B"), (3, "A"), (4, "C")].
+
+% Filter items NOT in category A
+not_category_a(Id, Cat) :- items(Id, Cat), Cat != "A".
+
+?- not_category_a(Id, Cat).
+
+.kg use default
+.kg drop test_neq

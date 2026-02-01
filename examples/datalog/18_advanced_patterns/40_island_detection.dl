@@ -1,0 +1,18 @@
+% Test: Island detection pattern
+% Expected: Group consecutive values
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_islands
+.kg use test_islands
+
++events[(1, "A"), (2, "A"), (3, "B"), (4, "B"), (5, "B"), (6, "A")].
+
+% Island starts: where value differs from previous
+island_start(T, Val) :- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal.
+island_start(T, Val) :- events(T, Val), T = 1.
+
+?- island_start(T, Val).
+
+.kg use default
+.kg drop test_islands

@@ -1,0 +1,16 @@
+% Test: String replace function
+% Expected: Replace substring
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_replace
+.kg use test_replace
+
++words[("hello world",), ("hello there",)].
+
+replaced(S, R) :- words(S), R = REPLACE(S, "hello", "hi").
+
+?- replaced(S, R).
+
+.kg use default
+.kg drop test_replace

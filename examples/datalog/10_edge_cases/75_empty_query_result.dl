@@ -1,0 +1,15 @@
+% Test: Query returning empty result
+% Expected: Handle empty result gracefully
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_result
+.kg use test_empty_result
+
++data[(1, "a"), (2, "b"), (3, "c")].
+
+% Query with impossible condition
+?- data(X, Y), X > 100.
+
+.kg use default
+.kg drop test_empty_result

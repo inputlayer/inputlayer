@@ -1,0 +1,16 @@
+% Test: Multiple aggregates in same query
+% Expected: Multiple aggregations computed
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_multi_agg
+.kg use test_multi_agg
+
++vals[(10,), (20,), (30,), (40,), (50,)].
+
++stats(<SUM:X>, <COUNT:X>, <MIN:X>, <MAX:X>, <AVG:X>) :- vals(X).
+
+?- stats(Sum, Count, Min, Max, Avg).
+
+.kg use default
+.kg drop test_multi_agg

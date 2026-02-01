@@ -1,0 +1,16 @@
+% Test: Large integer handling
+% Expected: Handle large integers properly
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_large_int
+.kg use test_large_int
+
++big_nums[(1000000000,), (2000000000,), (3000000000,)].
+
+sum_big(<SUM:X>) :- big_nums(X).
+
+?- sum_big(S).
+
+.kg use default
+.kg drop test_large_int

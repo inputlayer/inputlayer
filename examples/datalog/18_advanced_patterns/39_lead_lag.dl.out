@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lead_lag
+Knowledge graph 'test_lead_lag' created.
+Switched to knowledge graph: test_lead_lag
+> .kg use test_lead_lag
+Switched to knowledge graph: test_lead_lag
+> +time_series[(1, 100), (2, 110), (3, 105), (4, 120)].
+Inserted 4 fact(s) into 'time_series'.
+> lag(T, Val, PrevVal) :- time_series(T, Val), T1 = T - 1, time_series(T1, PrevVal).
+Script error: Parse error: Invalid term: 'T - 1'

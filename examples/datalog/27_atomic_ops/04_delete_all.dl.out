@@ -21,19 +21,13 @@ Inserted 1 fact(s) into 'temp_data'.
   (2, 200)
   (3, 300)
 > -temp_data(Id, Value) :- temp_data(Id, Value).
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 3 fact(s) deleted from 'temp_data'.
 > ?- temp_data(Id, Value).
-3 rows:
-  (1, 100)
-  (2, 200)
-  (3, 300)
+No results.
 > +temp_data(10, 999).
 Inserted 1 fact(s) into 'temp_data'.
 > ?- temp_data(Id, Value).
-4 rows:
-  (1, 100)
-  (2, 200)
-  (3, 300)
+1 rows:
   (10, 999)
 > .kg use default
 Switched to knowledge graph: default

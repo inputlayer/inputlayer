@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_most_common
+Knowledge graph 'test_most_common' created.
+Switched to knowledge graph: test_most_common
+> .kg use test_most_common
+Switched to knowledge graph: test_most_common
+> +events[("click",), ("view",), ("click",), ("purchase",), ("click",), ("view",)].
+Inserted 3 fact(s) into 'events'.
+> +event_counts(Event, <COUNT:Event>) :- events(Event).
+Script error: Parse error: Invalid term: '<COUNT:Event>'

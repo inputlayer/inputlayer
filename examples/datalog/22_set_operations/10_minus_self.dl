@@ -1,0 +1,17 @@
+% Test: Set minus self
+% Expected: A - A = empty
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_minus_self
+.kg use test_minus_self
+
++data[(1,), (2,), (3,)].
+
+% A - A should be empty
+minus_self(X) :- data(X), !data(X).
+
+?- minus_self(X).
+
+.kg use default
+.kg drop test_minus_self

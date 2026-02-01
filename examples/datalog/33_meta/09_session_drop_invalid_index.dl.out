@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_invalid
+Knowledge graph 'test_session_invalid' created.
+Switched to knowledge graph: test_session_invalid
+> .kg use test_session_invalid
+Switched to knowledge graph: test_session_invalid
+> computed(X, Y) :- X = 1, Y = 2.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "computed", args: [Variable("X"), Variable("Y")] }. Variables ["X", "Y"] in head do not appear in positive body atoms.

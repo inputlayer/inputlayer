@@ -1,0 +1,18 @@
+% Test: Min and max in same relation
+% Expected: Can compute both in separate rules
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_min_max
+.kg use test_min_max
+
++values[(10,), (20,), (5,), (30,), (15,)].
+
+min_val(<MIN:V>) :- values(V).
+max_val(<MAX:V>) :- values(V).
+
+?- min_val(M).
+?- max_val(M).
+
+.kg use default
+.kg drop test_min_max

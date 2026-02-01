@@ -1,0 +1,22 @@
+% Test: Aggregation of single value
+% Expected: Aggregate equals the single value
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single_agg
+.kg use test_single_agg
+
++single[(42,)].
+
+sum_single(<SUM:X>) :- single(X).
+count_single(<COUNT:X>) :- single(X).
+min_single(<MIN:X>) :- single(X).
+max_single(<MAX:X>) :- single(X).
+
+?- sum_single(S).
+?- count_single(C).
+?- min_single(M).
+?- max_single(M).
+
+.kg use default
+.kg drop test_single_agg

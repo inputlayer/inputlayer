@@ -1,0 +1,19 @@
+% Test: Outlier detection pattern
+% Expected: Find values far from mean
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_outlier
+.kg use test_outlier
+
++measurements[(10,), (12,), (11,), (100,), (9,), (13,)].
+
+% Find min and max
+min_val(<MIN:V>) :- measurements(V).
+max_val(<MAX:V>) :- measurements(V).
+
+?- min_val(M).
+?- max_val(M).
+
+.kg use default
+.kg drop test_outlier

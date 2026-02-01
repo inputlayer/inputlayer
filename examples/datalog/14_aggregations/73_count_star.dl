@@ -1,0 +1,17 @@
+% Test: COUNT all rows (simulated COUNT(*))
+% Expected: Count total rows in relation
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_count_star
+.kg use test_count_star
+
++data[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")].
+
+% Count all rows (using any column)
++total_rows(<COUNT:Id>) :- data(Id, _).
+
+?- total_rows(C).
+
+.kg use default
+.kg drop test_count_star

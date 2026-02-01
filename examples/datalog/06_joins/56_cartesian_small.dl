@@ -1,0 +1,18 @@
+% Test: Small cartesian product
+% Expected: Cross product of two small relations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_cart
+.kg use test_cart
+
++colors[("red",), ("blue",)].
++sizes[("S",), ("M",), ("L",)].
+
+% Cartesian product
+variants(Color, Size) :- colors(Color), sizes(Size).
+
+?- variants(C, S).
+
+.kg use default
+.kg drop test_cart

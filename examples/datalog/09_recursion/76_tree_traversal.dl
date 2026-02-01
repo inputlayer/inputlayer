@@ -1,0 +1,21 @@
+% Test: Tree traversal pattern
+% Expected: Traverse parent-child relationships
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_tree
+.kg use test_tree
+
++parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)].
+
+% Direct children
++descendant(P, C) :- parent(P, C).
+
+% All descendants
++descendant(P, D) :- parent(P, C), descendant(C, D).
+
+% All descendants of node 1
+?- descendant(1, D).
+
+.kg use default
+.kg drop test_tree

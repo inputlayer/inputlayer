@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_divide
+Knowledge graph 'test_divide' created.
+Switched to knowledge graph: test_divide
+> .kg use test_divide
+Switched to knowledge graph: test_divide
+> +nums[(10, 2), (15, 4), (20, 3)].
+Inserted 3 fact(s) into 'nums'.
+> quotient(A, B, Result) :- nums(A, B), Result = A / B.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "quotient", args: [Variable("A"), Variable("B"), Variable("Result")] }. Variables ["Result"] in head do not appear in positive body atoms.

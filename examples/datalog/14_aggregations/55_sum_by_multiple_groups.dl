@@ -1,0 +1,16 @@
+% Test: Sum grouped by multiple columns
+% Expected: Sum per combination of groups
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_multi_grp
+.kg use test_sum_multi_grp
+
++sales[("2024", "Q1", 100), ("2024", "Q1", 150), ("2024", "Q2", 200), ("2025", "Q1", 300)].
+
+sum_by_year_qtr(Year, Qtr, <SUM:Amount>) :- sales(Year, Qtr, Amount).
+
+?- sum_by_year_qtr(Year, Qtr, Total).
+
+.kg use default
+.kg drop test_sum_multi_grp

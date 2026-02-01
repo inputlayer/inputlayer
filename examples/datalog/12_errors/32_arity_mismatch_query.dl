@@ -1,0 +1,16 @@
+% Test: Arity mismatch in query
+% Expected: Error when query arity doesn't match relation
+% Category: 12_errors
+% Priority: P1 - Error handling
+
+.kg create test_arity_query
+.kg use test_arity_query
+
+% Define a 3-arity relation
++triple(1, 2, 3).
+
+% Query with wrong arity (should fail)
+?- triple(X, Y).
+
+.kg use default
+.kg drop test_arity_query

@@ -124,9 +124,12 @@ fn test_same_query_on_multiple_knowledge_graphs() {
         .unwrap();
 
     assert_eq!(results.len(), 3);
-    assert_eq!(results[0].1.len(), 1); // db1 has 1 edge
-    assert_eq!(results[1].1.len(), 2); // db2 has 2 edges
-    assert_eq!(results[2].1.len(), 3); // db3 has 3 edges
+    // Results may come back in any order due to parallel execution
+    // Use HashMap for order-independent comparison
+    let results_map: std::collections::HashMap<_, _> = results.into_iter().collect();
+    assert_eq!(results_map.get("db1").map(|v| v.len()), Some(1)); // db1 has 1 edge
+    assert_eq!(results_map.get("db2").map(|v| v.len()), Some(2)); // db2 has 2 edges
+    assert_eq!(results_map.get("db3").map(|v| v.len()), Some(3)); // db3 has 3 edges
 }
 
 #[test]
@@ -234,12 +237,27 @@ fn test_concurrent_queries_on_different_relations() {
         .unwrap();
 
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].len(), 2); // edge results
-    assert_eq!(results[1].len(), 2); // person results
+    // Both queries should return 2 results each
+    assert_eq!(results[0].len(), 2);
+    assert_eq!(results[1].len(), 2);
 
-    // Verify they don't interfere
-    assert!(results[0].contains(&(1, 2)));
-    assert!(!results[0].contains(&(100, 200))); // edge query shouldn't see person data
+    // Results may come back in any order due to parallel execution
+    // Find which result set contains edge data vs person data
+    let (edge_results, person_results) = if results[0].contains(&(1, 2)) {
+        (&results[0], &results[1])
+    } else {
+        (&results[1], &results[0])
+    };
+
+    // Verify edge results
+    assert!(edge_results.contains(&(1, 2)));
+    assert!(edge_results.contains(&(2, 3)));
+    assert!(!edge_results.contains(&(100, 200))); // edge query shouldn't see person data
+
+    // Verify person results
+    assert!(person_results.contains(&(100, 200)));
+    assert!(person_results.contains(&(200, 300)));
+    assert!(!person_results.contains(&(1, 2))); // person query shouldn't see edge data
 }
 
 // ============================================================================

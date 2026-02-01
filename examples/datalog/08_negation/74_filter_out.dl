@@ -1,0 +1,18 @@
+% Test: Filter out specific values
+% Expected: Exclude certain items
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_filter_out
+.kg use test_filter_out
+
++items[(1, "good"), (2, "bad"), (3, "good"), (4, "bad"), (5, "ok")].
++exclude[("bad",)].
+
+% Keep items not in exclude list
++kept(Id, Status) :- items(Id, Status), !exclude(Status).
+
+?- kept(Id, S).
+
+.kg use default
+.kg drop test_filter_out

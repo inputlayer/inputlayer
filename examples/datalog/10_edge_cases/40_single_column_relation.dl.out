@@ -1,0 +1,43 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_col
+Knowledge graph 'test_single_col' created.
+Switched to knowledge graph: test_single_col
+> .kg use test_single_col
+Switched to knowledge graph: test_single_col
+> +flags[(true,), (false,)].
+Inserted 2 fact(s) into 'flags'.
+> +ids[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'ids'.
+> ?- flags(F).
+2 rows:
+  ("false")
+  ("true")
+> ?- ids(I).
+3 rows:
+  (1)
+  (2)
+  (3)
+> both(I, F) :- ids(I), flags(F).
+6 rows:
+  (1, "false")
+  (1, "true")
+  (2, "false")
+  (2, "true")
+  (3, "false")
+  (3, "true")
+(session: 1 rule(s))
+> ?- both(I, F).
+6 rows:
+  (1, "false")
+  (1, "true")
+  (2, "false")
+  (2, "true")
+  (3, "false")
+  (3, "true")
+> +count_ids(<COUNT:I>) :- ids(I).
+Script error: Parse error: Invalid term: '<COUNT:I>'

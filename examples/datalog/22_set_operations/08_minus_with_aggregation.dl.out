@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minus_agg
+Knowledge graph 'test_minus_agg' created.
+Switched to knowledge graph: test_minus_agg
+> .kg use test_minus_agg
+Switched to knowledge graph: test_minus_agg
+> +all_values[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'all_values'.
+> +exclude_vals[(2,), (4,)].
+Inserted 2 fact(s) into 'exclude_vals'.
+> remaining(X) :- all_values(X), !exclude_vals(X).
+3 rows:
+  (1)
+  (3)
+  (5)
+(session: 1 rule(s))
+> sum_remaining(<SUM:X>) :- remaining(X).
+Script error: Parse error: Unknown aggregate function: 

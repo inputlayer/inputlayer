@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_gaps
+Knowledge graph 'test_gaps' created.
+Switched to knowledge graph: test_gaps
+> .kg use test_gaps
+Switched to knowledge graph: test_gaps
+> +seq[(1,), (2,), (4,), (5,), (8,), (9,), (10,)].
+Inserted 7 fact(s) into 'seq'.
+> has_gap(X) :- seq(X), Next = X + 1, !seq(Next), Next <= 10.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "has_gap", args: [Variable("X")] }. Variables [] in head do not appear in positive body atoms.

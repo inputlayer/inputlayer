@@ -1,0 +1,18 @@
+% Test: Join with empty relation
+% Expected: Empty result when one side empty
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_join
+.kg use test_empty_join
+
++left[(1, "a"), (2, "b")].
++right[(10, 100), (20, 200)].
+
+% No matching keys - empty result
+joined(L, R) :- left(K, L), right(K, R).
+
+?- joined(L, R).
+
+.kg use default
+.kg drop test_empty_join

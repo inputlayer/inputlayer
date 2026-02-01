@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_underscore
+Knowledge graph 'test_underscore' created.
+Switched to knowledge graph: test_underscore
+> .kg use test_underscore
+Switched to knowledge graph: test_underscore
+> +records[(1, "Alice", 100, "active"), (2, "Bob", 200, "inactive"), (3, "Carol", 150, "active")].
+Inserted 3 fact(s) into 'records'.
+> id_status(Id, Status) :- records(Id, _, _, Status).
+3 rows:
+  (1, "active")
+  (2, "inactive")
+  (3, "active")
+(session: 1 rule(s))
+> ?- id_status(Id, Status).
+3 rows:
+  (1, "active")
+  (2, "inactive")
+  (3, "active")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_underscore
+Knowledge graph 'test_underscore' dropped.

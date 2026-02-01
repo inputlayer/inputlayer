@@ -1,0 +1,22 @@
+% Test: Asymmetric difference
+% Expected: A - B != B - A
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_asym_diff
+.kg use test_asym_diff
+
++set_a[(1,), (2,), (3,)].
++set_b[(2,), (3,), (4,)].
+
+% A - B
++a_minus_b(X) :- set_a(X), !set_b(X).
+
+% B - A
++b_minus_a(X) :- set_b(X), !set_a(X).
+
+?- a_minus_b(X).
+?- b_minus_a(X).
+
+.kg use default
+.kg drop test_asym_diff

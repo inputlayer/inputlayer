@@ -212,10 +212,10 @@ pub fn try_parse_schema_definition(input: &str) -> Result<Option<RelationSchema>
     }
 
     // Validate name (must be valid identifier, start with uppercase)
-    if name.is_empty() {
+    let Some(first_char) = name.chars().next() else {
         return Err("Schema name cannot be empty".to_string());
-    }
-    if !name.chars().next().unwrap().is_uppercase() {
+    };
+    if !first_char.is_uppercase() {
         return Err(format!(
             "Schema name '{}' must start with uppercase letter",
             name
@@ -293,7 +293,7 @@ fn parse_schema_columns(content: &str) -> Result<Vec<ColumnSchema>, String> {
 fn split_schema_columns(content: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
     let mut in_string = false;
 
     for ch in content.chars() {
@@ -311,7 +311,8 @@ fn split_schema_columns(content: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' if !in_string => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if paren_depth == 0 && !in_string => {

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inv_const
+Knowledge graph 'test_inv_const' created.
+Switched to knowledge graph: test_inv_const
+> .kg use test_inv_const
+Switched to knowledge graph: test_inv_const
+> +nums[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'nums'.
+> bad(X) :- nums(X), X = "one".
+No results.
+(session: 1 rule(s))
+> ?- bad(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_inv_const
+Knowledge graph 'test_inv_const' dropped.

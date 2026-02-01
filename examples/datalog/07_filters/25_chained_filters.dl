@@ -1,0 +1,21 @@
+% Test: Multiple chained filters
+% Expected: All filters applied
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_chain_filter
+.kg use test_chain_filter
+
++data[(1, "A", 100), (2, "B", 200), (3, "A", 300), (4, "A", 50), (5, "B", 150)].
+
+% Multiple filter conditions
+filtered(Id, Cat, Val) :-
+    data(Id, Cat, Val),
+    Cat = "A",
+    Val >= 50,
+    Val <= 200.
+
+?- filtered(Id, Cat, Val).
+
+.kg use default
+.kg drop test_chain_filter

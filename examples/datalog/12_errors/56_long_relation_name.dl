@@ -1,0 +1,14 @@
+% Test: Very long relation name
+% Expected: Handle long names correctly
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_long_name
+.kg use test_long_name
+
++this_is_a_very_long_relation_name_that_goes_on_for_quite_some_time[(1,), (2,)].
+
+?- this_is_a_very_long_relation_name_that_goes_on_for_quite_some_time(X).
+
+.kg use default
+.kg drop test_long_name

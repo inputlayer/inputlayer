@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_dur
+Knowledge graph 'test_session_dur' created.
+Switched to knowledge graph: test_session_dur
+> .kg use test_session_dur
+Switched to knowledge graph: test_session_dur
+> +sessions[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2300)].
+Inserted 4 fact(s) into 'sessions'.
+> session_duration(SessId, Duration) :- sessions(SessId, "start", StartTime), sessions(SessId, "end", EndTime), Duration = EndTime - StartTime.
+Script error: Parse error: Invalid term: 'EndTime - StartTime'

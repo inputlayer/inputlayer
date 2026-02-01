@@ -1,0 +1,19 @@
+% Test: Union with projection
+% Expected: Project then union
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_union_proj
+.kg use test_union_proj
+
++employees[(1, "Alice", "Eng"), (2, "Bob", "Sales")].
++contractors[(3, "Carol", "Eng"), (4, "Dave", "Marketing")].
+
+% Union of names from both
+all_names(Name) :- employees(_, Name, _).
+all_names(Name) :- contractors(_, Name, _).
+
+?- all_names(Name).
+
+.kg use default
+.kg drop test_union_proj

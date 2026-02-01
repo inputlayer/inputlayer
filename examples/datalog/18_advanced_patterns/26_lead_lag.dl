@@ -1,0 +1,27 @@
+% Test: Lead/lag pattern simulation
+% Expected: Can simulate lead/lag window functions
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_lead_lag
+.kg use test_lead_lag
+
++events[(1, 100), (2, 150), (3, 120), (4, 180), (5, 90)].
+
+% Next value (lead) - find the value with id+1
+lead_val(Id, Val, NextVal) :- events(Id, Val), events(NextId, NextVal), NextId = Id + 1.
+
+?- lead_val(Id, Val, NextVal).
+
+% Previous value (lag) - find the value with id-1
+lag_val(Id, Val, PrevVal) :- events(Id, Val), events(PrevId, PrevVal), PrevId = Id - 1.
+
+?- lag_val(Id, Val, PrevVal).
+
+% Change from previous
+change(Id, Val, Diff) :- lag_val(Id, Val, PrevVal), Diff = Val - PrevVal.
+
+?- change(Id, Val, Diff).
+
+.kg use default
+.kg drop test_lead_lag

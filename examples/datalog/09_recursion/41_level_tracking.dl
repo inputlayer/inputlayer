@@ -1,0 +1,20 @@
+% Test: Track recursion level/depth
+% Expected: Each node gets its depth from root
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_level_track
+.kg use test_level_track
+
++edge[("root", "a"), ("root", "b"), ("a", "c"), ("a", "d"), ("c", "e")].
+
+% Base: root is at level 0
++level("root", 0).
+
+% Recursive: children are one level deeper
++level(Child, Depth) :- level(Parent, D), edge(Parent, Child), Depth = D + 1.
+
+?- level(Node, Depth).
+
+.kg use default
+.kg drop test_level_track

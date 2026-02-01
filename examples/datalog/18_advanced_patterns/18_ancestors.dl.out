@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestors
+Knowledge graph 'test_ancestors' created.
+Switched to knowledge graph: test_ancestors
+> .kg use test_ancestors
+Switched to knowledge graph: test_ancestors
+> +parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Bob", "Eve"), ("Carol", "Frank")].
+Inserted 5 fact(s) into 'parent'.
+> +ancestor(Child, Anc) :- parent(Anc, Child).
+Rule 'ancestor' registered.
+> +ancestor(Child, Anc) :- parent(Mid, Child), ancestor(Mid, Anc).
+Rule 'ancestor' registered.
+> ?- ancestor(Child, Anc).
+8 rows:
+  ("Bob", "Alice")
+  ("Carol", "Alice")
+  ("Dave", "Alice")
+  ("Dave", "Bob")
+  ("Eve", "Alice")
+  ("Eve", "Bob")
+  ("Frank", "Alice")
+  ("Frank", "Carol")
+> alice_descendants(D) :- ancestor(D, "Alice").
+5 rows:
+  ("Bob")
+  ("Carol")
+  ("Dave")
+  ("Eve")
+  ("Frank")
+(session: 1 rule(s))
+> ?- alice_descendants(D).
+5 rows:
+  ("Bob")
+  ("Carol")
+  ("Dave")
+  ("Eve")
+  ("Frank")
+> desc_count(Person, <COUNT:D>) :- ancestor(D, Person).
+Script error: Parse error: Unknown aggregate function: 

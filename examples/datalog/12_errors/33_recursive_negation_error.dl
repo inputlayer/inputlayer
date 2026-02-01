@@ -1,0 +1,15 @@
+% Test: Negation in recursive rule (stratification violation)
+% Expected: Error - recursion through negation not allowed
+% Category: 12_errors
+% Priority: P1 - Error handling
+
+.kg create test_rec_neg_err
+.kg use test_rec_neg_err
+
++base[(1,), (2,), (3,)].
+
+% This should fail - negating a recursive rule in its own definition
++bad(X) :- base(X), !bad(X).
+
+.kg use default
+.kg drop test_rec_neg_err

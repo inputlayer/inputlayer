@@ -1,0 +1,17 @@
+% Test: Empty string as null check
+% Expected: Filter empty vs non-empty
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_null_check
+.kg use test_null_check
+
++data[(1, "value"), (2, ""), (3, "another"), (4, "")].
+
+% Non-empty values
+has_value(Id, V) :- data(Id, V), V != "".
+
+?- has_value(Id, V).
+
+.kg use default
+.kg drop test_null_check

@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_join
+Knowledge graph 'test_neg_join' created.
+Switched to knowledge graph: test_neg_join
+> .kg use test_neg_join
+Switched to knowledge graph: test_neg_join
+> +orders[(1, 100, 50.0), (2, 101, 75.0), (3, 100, 25.0)].
+Inserted 3 fact(s) into 'orders'.
+> +customers[(100, "Alice"), (101, "Bob"), (102, "Carol")].
+Inserted 3 fact(s) into 'customers'.
+> +vip[(100,)].
+Inserted 1 fact(s) into 'vip'.
+> +non_vip_orders(OrderId, CustName, Amount) :- orders(OrderId, CustId, Amount), customers(CustId, CustName), !vip(CustId).
+Rule 'non_vip_orders' registered.
+> ?- non_vip_orders(O, C, A).
+1 rows:
+  (2, "Bob", 75.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_join
+Knowledge graph 'test_neg_join' dropped.

@@ -1,0 +1,47 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_depth_limit
+Knowledge graph 'test_depth_limit' created.
+Switched to knowledge graph: test_depth_limit
+> .kg use test_depth_limit
+Switched to knowledge graph: test_depth_limit
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)].
+Inserted 7 fact(s) into 'edge'.
+> +reach1(X, Y) :- edge(X, Y).
+Rule 'reach1' registered.
+> +reach2(X, Z) :- edge(X, Y), edge(Y, Z).
+Rule 'reach2' registered.
+> +reach3(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
+Rule 'reach3' registered.
+> ?- reach1(X, Y).
+7 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+  (4, 5)
+  (5, 6)
+  (6, 7)
+  (7, 8)
+> ?- reach2(X, Z).
+6 rows:
+  (1, 3)
+  (2, 4)
+  (3, 5)
+  (4, 6)
+  (5, 7)
+  (6, 8)
+> ?- reach3(X, W).
+5 rows:
+  (1, 4)
+  (2, 5)
+  (3, 6)
+  (4, 7)
+  (5, 8)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_depth_limit
+Knowledge graph 'test_depth_limit' dropped.

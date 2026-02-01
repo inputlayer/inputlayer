@@ -1,0 +1,21 @@
+% Test: Ratio calculation pattern
+% Expected: Calculate ratios between values
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_ratio
+.kg use test_ratio
+
++metrics[("visits", 1000), ("clicks", 100), ("purchases", 10)].
+
+% Extract specific metrics for ratio calculation
+visits(V) :- metrics("visits", V).
+clicks(C) :- metrics("clicks", C).
+purchases(P) :- metrics("purchases", P).
+
+?- visits(V).
+?- clicks(C).
+?- purchases(P).
+
+.kg use default
+.kg drop test_ratio

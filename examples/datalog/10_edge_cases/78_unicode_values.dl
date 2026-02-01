@@ -1,0 +1,14 @@
+% Test: Unicode string values
+% Expected: Handle unicode properly
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_unicode
+.kg use test_unicode
+
++names[(1, "Alice"), (2, "日本語"), (3, "émoji"), (4, "Ελληνικά")].
+
+?- names(Id, Name).
+
+.kg use default
+.kg drop test_unicode

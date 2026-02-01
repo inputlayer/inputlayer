@@ -1,0 +1,26 @@
+% Test: Session rule with same name as persistent relation
+% Expected: Session and persistent can coexist
+% Category: 04_session
+% Priority: P1 - Session management
+
+.kg create test_shadow
+.kg use test_shadow
+
+% Create persistent data
++items[(1, "a"), (2, "b"), (3, "c")].
+
+% Query persistent data
+?- items(Id, Val).
+
+% Create session rule using the same data
+filtered(Id, Val) :- items(Id, Val), Id > 1.
+
+?- filtered(Id, Val).
+
+% Persistent rule for comparison
++persistent_filtered(Id, Val) :- items(Id, Val), Id > 2.
+
+?- persistent_filtered(Id, Val).
+
+.kg use default
+.kg drop test_shadow

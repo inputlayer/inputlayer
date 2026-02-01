@@ -1,0 +1,21 @@
+% Test: Order of operations
+% Expected: Correct precedence in arithmetic
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_order
+.kg use test_order
+
++nums[(10,), (20,)].
+
+% Test precedence: multiplication before addition
+result(X, R) :- nums(X), R = X + 5 * 2.
+
+% With parentheses to change order
+result_paren(X, R) :- nums(X), R = (X + 5) * 2.
+
+?- result(X, R).
+?- result_paren(X, R).
+
+.kg use default
+.kg drop test_order

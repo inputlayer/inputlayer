@@ -1,0 +1,17 @@
+% Test: N-tile simulation
+% Expected: Divide into buckets
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_ntile
+.kg use test_ntile
+
++scores[(1, 95), (2, 85), (3, 75), (4, 65)].
+
+% Quartile by counting higher scores
++quartile(Id, Score, <COUNT:OtherId>) :- scores(Id, Score), scores(OtherId, OtherScore), OtherScore >= Score.
+
+?- quartile(Id, Score, Q).
+
+.kg use default
+.kg drop test_ntile

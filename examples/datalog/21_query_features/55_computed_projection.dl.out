@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_computed_proj
+Knowledge graph 'test_computed_proj' created.
+Switched to knowledge graph: test_computed_proj
+> .kg use test_computed_proj
+Switched to knowledge graph: test_computed_proj
+> +items[(1, 10, 5), (2, 20, 3)].
+Inserted 2 fact(s) into 'items'.
+> with_total(Id, Total) :- items(Id, Price, Qty), Total = Price * Qty.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "with_total", args: [Variable("Id"), Variable("Total")] }. Variables ["Total"] in head do not appear in positive body atoms.

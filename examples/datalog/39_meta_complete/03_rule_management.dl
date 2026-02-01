@@ -1,0 +1,42 @@
+% Test: Complete Rule Management
+% Category: 39_meta_complete
+% Description: Tests rule add, list, remove, and drop operations
+
+.kg create test_rule_mgmt
+.kg use test_rule_mgmt
+
+% Insert base facts
++edge[(1, 2), (2, 3), (3, 4), (4, 5)].
++node[(1,), (2,), (3,), (4,), (5,)].
+
+% Add a persistent rule with multiple clauses
++reachable(X, Y) :- edge(X, Y).
++reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
+
+% List all rules
+.rule
+
+% Query the derived relation
+?- reachable(1, X).
+
+% Add another rule
++connected(X, Y) :- edge(X, Y).
+
+% List rules again
+.rule
+
+% Remove a specific rule clause (first clause of reachable)
+.rule remove reachable 1
+
+% List rules after removal (reachable should have 1 clause now)
+.rule
+
+% Drop entire rule
+.rule drop connected
+
+% List all rules again
+.rule
+
+% Cleanup
+.kg use default
+.kg drop test_rule_mgmt

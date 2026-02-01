@@ -1,0 +1,17 @@
+% Test: SUM with filter condition
+% Expected: Sum only matching rows
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_filter
+.kg use test_sum_filter
+
++sales[(1, "East", 100), (2, "West", 200), (3, "East", 150), (4, "West", 50)].
+
+% Sum for East region only
++east_total(<SUM:Amount>) :- sales(_, "East", Amount).
+
+?- east_total(T).
+
+.kg use default
+.kg drop test_sum_filter

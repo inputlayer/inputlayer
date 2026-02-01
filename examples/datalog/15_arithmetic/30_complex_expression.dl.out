@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_complex_expr
+Knowledge graph 'test_complex_expr' created.
+Switched to knowledge graph: test_complex_expr
+> .kg use test_complex_expr
+Switched to knowledge graph: test_complex_expr
+> +nums[(2,), (3,), (5,)].
+Inserted 3 fact(s) into 'nums'.
+> complex(X, Y) :- nums(X), Y = (X + 1) * (X - 1) + X * X.
+Script error: Parse error: Invalid arithmetic expression: 'X - 1'

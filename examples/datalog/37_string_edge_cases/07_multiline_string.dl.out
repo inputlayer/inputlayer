@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multiline
+Knowledge graph 'test_multiline' created.
+Switched to knowledge graph: test_multiline
+> .kg use test_multiline
+Switched to knowledge graph: test_multiline
+> +text[("line1\nline2",), ("single",)].
+Inserted 2 fact(s) into 'text'.
+> ?- text(T).
+2 rows:
+  ("line1\nline2")
+  ("single")
+> has_newline(T) :- text(T), T = "line1\nline2".
+1 rows:
+  ("line1\nline2")
+(session: 1 rule(s))
+> ?- has_newline(T).
+1 rows:
+  ("line1\nline2")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multiline
+Knowledge graph 'test_multiline' dropped.

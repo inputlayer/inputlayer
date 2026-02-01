@@ -1,0 +1,21 @@
+% Test: String equality filter
+% Expected: Filter by exact string match
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_str_eq
+.kg use test_str_eq
+
++users[(1, "admin", "active"), (2, "user", "active"), (3, "admin", "inactive")].
+
+% Filter admins
+admins(Id, Status) :- users(Id, "admin", Status).
+
+% Filter active users
+active(Id, Role) :- users(Id, Role, "active").
+
+?- admins(Id, S).
+?- active(Id, R).
+
+.kg use default
+.kg drop test_str_eq

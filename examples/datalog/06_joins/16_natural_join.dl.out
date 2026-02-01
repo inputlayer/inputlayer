@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_natural
+Knowledge graph 'test_natural' created.
+Switched to knowledge graph: test_natural
+> .kg use test_natural
+Switched to knowledge graph: test_natural
+> +employees[(1, "Alice", 10), (2, "Bob", 20), (3, "Carol", 10)].
+Inserted 3 fact(s) into 'employees'.
+> +departments[(10, "Engineering"), (20, "Sales"), (30, "HR")].
+Inserted 3 fact(s) into 'departments'.
+> joined(EmpId, Name, DeptId, DeptName) :- employees(EmpId, Name, DeptId), departments(DeptId, DeptName).
+3 rows:
+  (10, "Engineering", 1, "Alice")
+  (10, "Engineering", 3, "Carol")
+  (20, "Sales", 2, "Bob")
+(session: 1 rule(s))
+> ?- joined(EmpId, Name, DeptId, DeptName).
+3 rows:
+  (10, "Engineering", 1, "Alice")
+  (10, "Engineering", 3, "Carol")
+  (20, "Sales", 2, "Bob")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_natural
+Knowledge graph 'test_natural' dropped.

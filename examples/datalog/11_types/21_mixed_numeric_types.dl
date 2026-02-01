@@ -1,0 +1,17 @@
+% Test: Mixed numeric types in operations
+% Expected: Handle int and float together
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_mixed_num
+.kg use test_mixed_num
+
++measurements[(1, 10, 2.5), (2, 20, 3.0), (3, 15, 1.5)].
+
+% Compute with mixed types
+computed(Id, Result) :- measurements(Id, Int, Float), Result = Int * Float.
+
+?- computed(Id, R).
+
+.kg use default
+.kg drop test_mixed_num

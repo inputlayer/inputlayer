@@ -1,0 +1,22 @@
+% Test: Session drop with invalid index
+% Expected: Error for invalid session index
+% Category: 33_meta
+% Priority: P1 - Session management
+
+.kg create test_sess_invalid
+.kg use test_sess_invalid
+
+% Add a session rule
+test_rule(X) :- items(X).
+
+% List sessions
+.session
+
+% Try to drop invalid index (too high)
+.session drop 99
+
+% Try to drop index 0 (should be invalid if 1-based)
+.session drop 0
+
+.kg use default
+.kg drop test_sess_invalid

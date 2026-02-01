@@ -1,0 +1,20 @@
+% Test: Strings containing quotes
+% Expected: Quote handling works correctly
+% Category: 37_string_edge_cases
+% Priority: P1 - String handling
+
+.kg create test_str_quotes
+.kg use test_str_quotes
+
+% Strings with escaped quotes
++messages[(1, "He said \"hello\""), (2, "It's fine"), (3, "A 'quote' here")].
+
+?- messages(Id, Msg).
+
+% Simple strings for contrast
++simple[(1, "no quotes here"), (2, "plain text")].
+
+?- simple(Id, Text).
+
+.kg use default
+.kg drop test_str_quotes

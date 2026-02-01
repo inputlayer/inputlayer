@@ -1,0 +1,24 @@
+% Test: Subset check pattern
+% Expected: Can verify if one set is subset of another
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_subset
+.kg use test_subset
+
++set_a[(1,), (2,), (3,)].
++set_b[(1,), (2,), (3,), (4,), (5,)].
++set_c[(1,), (2,)].
+
+% Elements in A not in B (should be empty if A is subset of B)
+a_not_in_b(X) :- set_a(X), !set_b(X).
+
+?- a_not_in_b(X).
+
+% Elements in C not in A (should be empty if C is subset of A)
+c_not_in_a(X) :- set_c(X), !set_a(X).
+
+?- c_not_in_a(X).
+
+.kg use default
+.kg drop test_subset

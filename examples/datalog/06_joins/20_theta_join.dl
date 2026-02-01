@@ -1,0 +1,21 @@
+% Test: Theta join (non-equality condition)
+% Expected: Join with inequality condition
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_theta
+.kg use test_theta
+
++products[(1, "Widget", 50), (2, "Gadget", 100), (3, "Gizmo", 75)].
++budgets[(1, "Alice", 80), (2, "Bob", 120)].
+
+% Theta join: products within budget
+affordable(BuyerName, ProductName, Price, Budget) :-
+    budgets(_, BuyerName, Budget),
+    products(_, ProductName, Price),
+    Price <= Budget.
+
+?- affordable(BuyerName, ProductName, Price, Budget).
+
+.kg use default
+.kg drop test_theta

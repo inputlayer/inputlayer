@@ -1,0 +1,17 @@
+% Test: Integer division semantics
+% Expected: Truncate toward zero
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_int_div
+.kg use test_int_div
+
++pairs[(10, 3), (7, 2), (15, 4), (20, 6)].
+
+% Integer division
+quot(A, B, Q) :- pairs(A, B), Q = A / B.
+
+?- quot(A, B, Q).
+
+.kg use default
+.kg drop test_int_div

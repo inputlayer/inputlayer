@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_same_gen
+Knowledge graph 'test_same_gen' created.
+Switched to knowledge graph: test_same_gen
+> .kg use test_same_gen
+Switched to knowledge graph: test_same_gen
+> +parent[("root", "a"), ("root", "b"), ("a", "c"), ("a", "d"), ("b", "e")].
+Inserted 5 fact(s) into 'parent'.
+> +depth("root", 0).
+Inserted 1 fact(s) into 'depth'.
+> +depth(Child, D) :- depth(Parent, PD), parent(Parent, Child), D = PD + 1.
+Script error: Failed to register rule: Unsafe rule 'depth': Head variable(s) D not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

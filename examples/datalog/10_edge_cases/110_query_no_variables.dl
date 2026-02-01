@@ -1,0 +1,16 @@
+% Test: Query with all constants
+% Expected: Return true/false based on existence
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_const_query
+.kg use test_const_query
+
++data[(1, "a"), (2, "b"), (3, "c")].
+
+% Query with all constants - check existence
+?- data(1, "a").
+?- data(99, "z").
+
+.kg use default
+.kg drop test_const_query

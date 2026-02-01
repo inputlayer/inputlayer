@@ -1,0 +1,32 @@
+% Test: Denormalized data pattern
+% Expected: Can work with denormalized data
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_denorm
+.kg use test_denorm
+
+% Denormalized order data (order_id, product, customer, amount)
++orders[(1, "widget", "Alice", 100),
+        (2, "gadget", "Bob", 200),
+        (3, "widget", "Alice", 150),
+        (4, "gizmo", "Carol", 75),
+        (5, "widget", "Bob", 100)].
+
+% Aggregate by customer
+customer_total(Customer, <SUM:Amt>) :- orders(_, _, Customer, Amt).
+
+?- customer_total(Customer, Total).
+
+% Aggregate by product
+product_total(Product, <SUM:Amt>) :- orders(_, Product, _, Amt).
+
+?- product_total(Product, Total).
+
+% Cross-tabulation: customer x product totals
+crosstab(Customer, Product, <SUM:Amt>) :- orders(_, Product, Customer, Amt).
+
+?- crosstab(Customer, Product, Total).
+
+.kg use default
+.kg drop test_denorm

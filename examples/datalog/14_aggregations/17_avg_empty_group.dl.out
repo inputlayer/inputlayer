@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_avg_empty
+Knowledge graph 'test_avg_empty' created.
+Switched to knowledge graph: test_avg_empty
+> .kg use test_avg_empty
+Switched to knowledge graph: test_avg_empty
+> +values(id: int, amount: int).
+Schema 'values' declared (persistent).
+> +avg_result(avg<Amount>) :- values(_, Amount).
+Rule 'avg_result' registered.
+> ?- avg_result(Avg).
+No results.
+> +data[(1, 100), (2, 200)].
+Inserted 2 fact(s) into 'data'.
+> +filtered_avg(avg<V>) :- data(Id, V), Id > 100.
+Rule 'filtered_avg' registered.
+> ?- filtered_avg(Avg).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_avg_empty
+Knowledge graph 'test_avg_empty' dropped.

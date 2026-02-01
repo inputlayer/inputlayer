@@ -1,0 +1,22 @@
+% Test: Aggregation over empty result
+% Expected: Handle aggregation when no rows match
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_agg
+.kg use test_empty_agg
+
++numbers[(1,), (2,), (3,)].
+
+% Sum of numbers > 100 (none exist)
+big_sum(<SUM:X>) :- numbers(X), X > 100.
+
+?- big_sum(S).
+
+% Count of numbers > 100
+big_count(<COUNT:X>) :- numbers(X), X > 100.
+
+?- big_count(C).
+
+.kg use default
+.kg drop test_empty_agg

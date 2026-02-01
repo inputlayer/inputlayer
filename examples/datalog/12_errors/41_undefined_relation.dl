@@ -1,0 +1,12 @@
+% Test: Query on undefined relation
+% Expected: Error or empty result
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_undef_rel
+.kg use test_undef_rel
+
+?- nonexistent_relation(X, Y).
+
+.kg use default
+.kg drop test_undef_rel

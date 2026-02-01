@@ -1,0 +1,17 @@
+% Test: Unknown aggregate function error
+% Expected: Error for unrecognized aggregate
+% Category: 14_aggregations
+% Priority: P2 - Error handling
+
+.kg create test_unknown_agg
+.kg use test_unknown_agg
+
++data[(1, 10), (2, 20)].
+
+% Use a made-up aggregate function
+bad_agg(X, <MEDIAN:Y>) :- data(X, Y).
+
+?- bad_agg(X, R).
+
+.kg use default
+.kg drop test_unknown_agg

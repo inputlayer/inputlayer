@@ -1,0 +1,21 @@
+% Test: Graph node degree
+% Expected: Count edges per node
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_degree
+.kg use test_degree
+
++edge[("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")].
+
+% Out-degree per node
+out_degree(Node, <COUNT:Target>) :- edge(Node, Target).
+
+% In-degree per node
+in_degree(Node, <COUNT:Source>) :- edge(Source, Node).
+
+?- out_degree(Node, D).
+?- in_degree(Node, D).
+
+.kg use default
+.kg drop test_degree

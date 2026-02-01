@@ -1,0 +1,20 @@
+% Test: Delete with join condition
+% Expected: Delete based on join with another relation
+% Category: 27_atomic_ops
+% Priority: P2 - Atomic operations
+
+.kg create test_del_join
+.kg use test_del_join
+
++products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)].
++discontinued[(1,), (3,)].
+
+?- products(Id, Name, Price).
+
+% Delete discontinued products
+-products(Id, Name, Price) :- products(Id, Name, Price), discontinued(Id).
+
+?- products(Id, Name, Price).
+
+.kg use default
+.kg drop test_del_join

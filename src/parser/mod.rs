@@ -152,6 +152,20 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     let body_str = parts[1].trim();
     let body = parse_body(body_str)?;
 
+    // Check: if body is empty but head has variables, this is an invalid rule
+    // A rule with ":-" must have at least one body predicate
+    if body.is_empty() {
+        // Check if head has any variables
+        let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
+        if has_head_vars {
+            return Err(
+                "Empty rule body with head variables is not allowed. \
+                 Use 'foo(constant).' for facts, or add body predicates."
+                    .to_string(),
+            );
+        }
+    }
+
     Ok(Rule::new(head, body))
 }
 
@@ -217,14 +231,15 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
 /// Find an operator outside parentheses
 fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
     let chars: Vec<char> = s.chars().collect();
     let op_chars: Vec<char> = op.chars().collect();
 
     for i in 0..chars.len() {
         match chars[i] {
             '(' => paren_depth += 1,
-            ')' => paren_depth -= 1,
+            // Clamp to 0 to handle malformed input with extra closing parens
+            ')' => paren_depth = (paren_depth - 1).max(0),
             _ => {}
         }
 
@@ -261,8 +276,8 @@ fn parse_comparison_term(s: &str) -> Result<Term, String> {
 fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut paren_depth = 0;
-    let mut angle_depth = 0;
+    let mut paren_depth: i32 = 0;
+    let mut angle_depth: i32 = 0;
     let mut chars = s.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -272,7 +287,8 @@ fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input with extra closing parens
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             '<' => {
@@ -341,9 +357,9 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
 fn split_args_respecting_angles(s: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut angle_depth = 0;
-    let mut paren_depth = 0;
-    let mut bracket_depth = 0;
+    let mut angle_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
 
     for ch in s.chars() {
         match ch {
@@ -352,7 +368,8 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
                 current.push(ch);
             }
             '>' => {
-                angle_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                angle_depth = (angle_depth - 1).max(0);
                 current.push(ch);
             }
             '(' => {
@@ -360,7 +377,8 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             '[' => {
@@ -368,7 +386,8 @@ fn split_args_respecting_angles(s: &str) -> Vec<String> {
                 current.push(ch);
             }
             ']' => {
-                bracket_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                bracket_depth = (bracket_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
@@ -508,21 +527,21 @@ fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for identifier (variable or atom)
-    if s.chars().all(|c| c.is_alphanumeric() || c == '_') && !s.is_empty() {
-        let first_char = s.chars().next().unwrap();
+    if let Some(first_char) = s.chars().next() {
+        if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            // Variable: starts with uppercase letter or underscore
+            // Examples: X, Y, Foo, _temp
+            if first_char.is_uppercase() || first_char == '_' {
+                return Ok(Term::Variable(s.to_string()));
+            }
 
-        // Variable: starts with uppercase letter or underscore
-        // Examples: X, Y, Foo, _temp
-        if first_char.is_uppercase() || first_char == '_' {
-            return Ok(Term::Variable(s.to_string()));
-        }
-
-        // Atom: starts with lowercase letter
-        // Examples: tom, liz, edge, parent
-        // In standard Prolog/Datalog, lowercase identifiers are atoms (constants)
-        // We represent atoms as StringConstant for compatibility
-        if first_char.is_lowercase() {
-            return Ok(Term::StringConstant(s.to_string()));
+            // Atom: starts with lowercase letter
+            // Examples: tom, liz, edge, parent
+            // In standard Prolog/Datalog, lowercase identifiers are atoms (constants)
+            // We represent atoms as StringConstant for compatibility
+            if first_char.is_lowercase() {
+                return Ok(Term::StringConstant(s.to_string()));
+            }
         }
     }
 
@@ -605,14 +624,15 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
 
     // Find the rightmost + or - at the top level (outside parentheses)
     // We go right-to-left to ensure left-associativity
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
     let chars: Vec<char> = s.chars().collect();
 
     for i in (0..chars.len()).rev() {
         let ch = chars[i];
         match ch {
             ')' => paren_depth += 1,
-            '(' => paren_depth -= 1,
+            // Clamp to 0 to handle malformed input (iterating backwards)
+            '(' => paren_depth = (paren_depth - 1).max(0),
             '+' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];
@@ -651,14 +671,15 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
 fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
     let s = s.trim();
 
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
     let chars: Vec<char> = s.chars().collect();
 
     for i in (0..chars.len()).rev() {
         let ch = chars[i];
         match ch {
             ')' => paren_depth += 1,
-            '(' => paren_depth -= 1,
+            // Clamp to 0 to handle malformed input (iterating backwards)
+            '(' => paren_depth = (paren_depth - 1).max(0),
             '*' if paren_depth == 0 => {
                 let left = &s[..i];
                 let right = &s[i + 1..];

@@ -1,0 +1,25 @@
+% Test: Aggregation over single row
+% Expected: Handle aggregation with just one input
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single_agg
+.kg use test_single_agg
+
++single[(42,)].
+
+% Sum of single value
+single_sum(<SUM:X>) :- single(X).
+
+% Avg of single value
+single_avg(<AVG:X>) :- single(X).
+
+% Count of single value
+single_count(<COUNT:X>) :- single(X).
+
+?- single_sum(S).
+?- single_avg(A).
+?- single_count(C).
+
+.kg use default
+.kg drop test_single_agg

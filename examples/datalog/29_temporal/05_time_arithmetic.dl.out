@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_arith
+Knowledge graph 'test_time_arith' created.
+Switched to knowledge graph: test_time_arith
+> .kg use test_time_arith
+Switched to knowledge graph: test_time_arith
+> +events[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2800)].
+Inserted 4 fact(s) into 'events'.
+> duration(Id, D) :- events(Id, "start", S), events(Id, "end", E), D = E - S.
+Script error: Parse error: Invalid term: 'E - S'

@@ -1,0 +1,21 @@
+% Test: Self-loop handling
+% Expected: Handle self-referential edges
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_self_loop
+.kg use test_self_loop
+
++edge[("a", "b"), ("b", "b"), ("c", "c"), ("c", "d")].
+
+% Find self-loops
+self_loop(N) :- edge(N, N).
+
+% Find non-self-loop edges
+normal_edge(A, B) :- edge(A, B), A != B.
+
+?- self_loop(N).
+?- normal_edge(A, B).
+
+.kg use default
+.kg drop test_self_loop

@@ -1,0 +1,17 @@
+% Test: Projection combined with filter
+% Expected: Filter then project
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_proj_filter
+.kg use test_proj_filter
+
++data[(1, "A", 100), (2, "B", 200), (3, "A", 300)].
+
+% Filter and project specific columns
+filtered(Name, Val) :- data(_, Name, Val), Val > 150.
+
+?- filtered(Name, Val).
+
+.kg use default
+.kg drop test_proj_filter

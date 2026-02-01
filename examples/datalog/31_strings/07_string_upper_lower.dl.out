@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_case
+Knowledge graph 'test_case' created.
+Switched to knowledge graph: test_case
+> .kg use test_case
+Switched to knowledge graph: test_case
+> +words[("Hello",), ("WORLD",), ("MiXeD",)].
+Inserted 3 fact(s) into 'words'.
+> upper_result(S, U) :- words(S), U = UPPER(S).
+Script error: Parse error: Invalid term: 'UPPER(S)'

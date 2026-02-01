@@ -1,0 +1,14 @@
+% Test: Single character strings
+% Expected: Handle 1-char strings
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single_char
+.kg use test_single_char
+
++chars[("a",), ("b",), ("1",), ("@",)].
+
+?- chars(C).
+
+.kg use default
+.kg drop test_single_char

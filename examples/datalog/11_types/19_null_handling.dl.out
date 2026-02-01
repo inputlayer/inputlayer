@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_null
+Knowledge graph 'test_null' created.
+Switched to knowledge graph: test_null
+> .kg use test_null
+Switched to knowledge graph: test_null
+> +nums[(10,), (20,), (0,)].
+Inserted 3 fact(s) into 'nums'.
+> div_result(X, Y) :- nums(X), Y = 100 / X.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "div_result", args: [Variable("X"), Variable("Y")] }. Variables ["Y"] in head do not appear in positive body atoms.

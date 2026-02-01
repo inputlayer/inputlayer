@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_var_rename
+Knowledge graph 'test_var_rename' created.
+Switched to knowledge graph: test_var_rename
+> .kg use test_var_rename
+Switched to knowledge graph: test_var_rename
+> +src[(1, "a", 100)].
+Inserted 1 fact(s) into 'src'.
+> renamed(Id, Name, Value) :- src(Id, Name, Value).
+1 rows:
+  (1, "a", 100)
+(session: 1 rule(s))
+> ?- renamed(X, Y, Z).
+1 rows:
+  (1, "a", 100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_var_rename
+Knowledge graph 'test_var_rename' dropped.

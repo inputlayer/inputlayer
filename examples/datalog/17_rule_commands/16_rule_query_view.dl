@@ -1,0 +1,23 @@
+% Test: Querying rules and views
+% Expected: Can query computed views like base relations
+% Category: 17_rule_commands
+% Priority: P1 - Rule management
+
+.kg create test_rule_query
+.kg use test_rule_query
+
+% Base data
++edges[(1, 2), (2, 3), (3, 4)].
+
+% Define a view
++reachable(X, Y) :- edges(X, Y).
++reachable(X, Z) :- reachable(X, Y), edges(Y, Z).
+
+% Query the view
+?- reachable(1, Y).
+
+% List rules
+.rule list
+
+.kg use default
+.kg drop test_rule_query

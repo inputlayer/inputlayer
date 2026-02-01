@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_type_join
+Knowledge graph 'test_type_join' created.
+Switched to knowledge graph: test_type_join
+> .kg use test_type_join
+Switched to knowledge graph: test_type_join
+> +int_ids[(1, "a"), (2, "b"), (3, "c")].
+Inserted 3 fact(s) into 'int_ids'.
+> +int_vals[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'int_vals'.
+> joined(Id, Name, Val) :- int_ids(Id, Name), int_vals(Id, Val).
+3 rows:
+  (1, 100, "a")
+  (2, 200, "b")
+  (3, 300, "c")
+(session: 1 rule(s))
+> ?- joined(Id, Name, Val).
+3 rows:
+  (1, 100, "a")
+  (2, 200, "b")
+  (3, 300, "c")
+> +float_keys[(1.0, "x"), (2.0, "y")].
+Inserted 2 fact(s) into 'float_keys'.
+> +float_data[(1.0, 10.5), (2.0, 20.5)].
+Inserted 2 fact(s) into 'float_data'.
+> float_joined(K, Name, Val) :- float_keys(K, Name), float_data(K, Val).
+2 rows:
+  (1.0, 10.5, "x")
+  (2.0, 20.5, "y")
+(session: 2 rule(s))
+> ?- float_joined(K, Name, Val).
+2 rows:
+  (1.0, 10.5, "x")
+  (2.0, 20.5, "y")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_type_join
+Knowledge graph 'test_type_join' dropped.

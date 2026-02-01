@@ -1,0 +1,20 @@
+% Test: Column reorder in query
+% Expected: Columns can be reordered in projection
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_reorder
+.kg use test_reorder
+
++records[(1, "Alice", 100), (2, "Bob", 200)].
+
+% Original order
+?- records(Id, Name, Val).
+
+% Reordered via rule
+reordered(Name, Val, Id) :- records(Id, Name, Val).
+
+?- reordered(Name, Val, Id).
+
+.kg use default
+.kg drop test_reorder

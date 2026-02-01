@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_moving
+Knowledge graph 'test_moving' created.
+Switched to knowledge graph: test_moving
+> .kg use test_moving
+Switched to knowledge graph: test_moving
+> +timeseries[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)].
+Inserted 5 fact(s) into 'timeseries'.
+> moving_sum(T, V, <SUM:V2>) :- timeseries(T, V), timeseries(T2, V2), T2 >= T - 1, T2 <= T.
+Script error: Parse error: Unknown aggregate function: 

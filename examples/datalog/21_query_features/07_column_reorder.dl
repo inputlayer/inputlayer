@@ -1,0 +1,23 @@
+% Test: Reorder columns in query output
+% Expected: Columns can be reordered in head
+% Category: 21_query_features
+% Priority: P1 - Query features
+
+.kg create test_col_reorder
+.kg use test_col_reorder
+
+% Base data with 3 columns
++employees[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Carol", 55000)].
+
+% Session rule to reorder (swap columns)
+reordered(Name, Id, Salary) :- employees(Id, Name, Salary).
+
+?- reordered(Name, Id, Salary).
+
+% Different ordering
+reversed(Salary, Name, Id) :- employees(Id, Name, Salary).
+
+?- reversed(Salary, Name, Id).
+
+.kg use default
+.kg drop test_col_reorder

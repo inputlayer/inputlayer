@@ -1,0 +1,17 @@
+% Test: Computed value becomes constant
+% Expected: Computed values work in head
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_comp_const
+.kg use test_comp_const
+
++nums[(1,), (2,), (3,)].
+
+% Compute double and triple
+multiples(X, D, T) :- nums(X), D = X * 2, T = X * 3.
+
+?- multiples(X, D, T).
+
+.kg use default
+.kg drop test_comp_const

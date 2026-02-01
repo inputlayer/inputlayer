@@ -1,0 +1,25 @@
+% Test: KG switch clears session
+% Expected: Session rules/facts cleared on KG switch
+% Category: 01_knowledge_graph
+% Priority: P2 - KG management
+
+.kg create kg_a
+.kg use kg_a
+
++data[(1,)].
+
+% Session rule
+temp(X, Y) :- data(X), Y = X * 2.
+
+?- temp(X, Y).
+
+% Switch to another KG
+.kg create kg_b
+.kg use kg_b
+
+% Session rule should be gone
+?- temp(X, Y).
+
+.kg use default
+.kg drop kg_a
+.kg drop kg_b

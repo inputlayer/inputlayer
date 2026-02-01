@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_rule
+Knowledge graph 'test_vec_rule' created.
+Switched to knowledge graph: test_vec_rule
+> .kg use test_vec_rule
+Switched to knowledge graph: test_vec_rule
+> +data[(1, [1, 2, 3]), (2, [4, 5, 6])].
+Inserted 2 fact(s) into 'data'.
+> has_vector(Id, V) :- data(Id, V).
+2 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+  (2, [Number(4.0), Number(5.0), Number(6.0)])
+(session: 1 rule(s))
+> ?- has_vector(Id, V).
+2 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+  (2, [Number(4.0), Number(5.0), Number(6.0)])
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_rule
+Knowledge graph 'test_vec_rule' dropped.

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_chain_filter
+Knowledge graph 'test_chain_filter' created.
+Switched to knowledge graph: test_chain_filter
+> .kg use test_chain_filter
+Switched to knowledge graph: test_chain_filter
+> +data[(1, "A", 100), (2, "B", 200), (3, "A", 300), (4, "A", 50), (5, "B", 150)].
+Inserted 5 fact(s) into 'data'.
+> filtered(Id, Cat, Val) :- data(Id, Cat, Val), Cat = "A", Val >= 50, Val <= 200.
+2 rows:
+  (1, "A", 100)
+  (4, "A", 50)
+(session: 1 rule(s))
+> ?- filtered(Id, Cat, Val).
+2 rows:
+  (1, "A", 100)
+  (4, "A", 50)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_chain_filter
+Knowledge graph 'test_chain_filter' dropped.

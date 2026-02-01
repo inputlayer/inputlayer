@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_max
+Knowledge graph 'test_max' created.
+Switched to knowledge graph: test_max
+> .kg use test_max
+Switched to knowledge graph: test_max
+> +scores[(85,), (92,), (78,), (95,), (88,)].
+Inserted 5 fact(s) into 'scores'.
+> +max_score(<MAX:S>) :- scores(S).
+Script error: Parse error: Invalid term: '<MAX:S>'

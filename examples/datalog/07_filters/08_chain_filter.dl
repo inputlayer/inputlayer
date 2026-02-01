@@ -1,0 +1,21 @@
+% Test: Chained filter pattern
+% Expected: Multiple filters applied correctly
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_chain_filt
+.kg use test_chain_filt
+
++data[(1, 10, "active"), (2, 20, "inactive"), (3, 30, "active"), (4, 5, "active"), (5, 25, "inactive")].
+
+% Multiple conditions
+filtered(Id, Val, Status) :-
+    data(Id, Val, Status),
+    Status = "active",
+    Val > 5,
+    Id != 4.
+
+?- filtered(Id, Val, Status).
+
+.kg use default
+.kg drop test_chain_filt

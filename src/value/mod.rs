@@ -809,10 +809,11 @@ impl Abomonation for Value {
                 write.write_all(&[8u8])?; // Tag 8 for VectorInt8
                 let len = v.len() as u64;
                 write.write_all(&len.to_le_bytes())?;
-                // i8 values can be written directly as bytes
-                let bytes: &[u8] =
-                    unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len()) };
-                write.write_all(bytes)
+                // Convert i8 to u8 safely (same bit representation)
+                for &b in v.iter() {
+                    write.write_all(&[b as u8])?;
+                }
+                Ok(())
             }
             Value::Timestamp(t) => {
                 write.write_all(&[7u8])?; // Tag 7 for Timestamp
@@ -992,13 +993,24 @@ impl Tuple {
 
     /// Try to convert to a 2-tuple of i32 (for backward compatibility)
     /// Handles both Int32 and Int64 values
+    /// Returns None if values don't fit in i32 range
     pub fn to_pair(&self) -> Option<(i32, i32)> {
         if self.values.len() == 2 {
             match (&self.values[0], &self.values[1]) {
                 (Value::Int32(a), Value::Int32(b)) => Some((*a, *b)),
-                (Value::Int64(a), Value::Int64(b)) => Some((*a as i32, *b as i32)),
-                (Value::Int32(a), Value::Int64(b)) => Some((*a, *b as i32)),
-                (Value::Int64(a), Value::Int32(b)) => Some((*a as i32, *b)),
+                (Value::Int64(a), Value::Int64(b)) => {
+                    let a_i32 = i32::try_from(*a).ok()?;
+                    let b_i32 = i32::try_from(*b).ok()?;
+                    Some((a_i32, b_i32))
+                }
+                (Value::Int32(a), Value::Int64(b)) => {
+                    let b_i32 = i32::try_from(*b).ok()?;
+                    Some((*a, b_i32))
+                }
+                (Value::Int64(a), Value::Int32(b)) => {
+                    let a_i32 = i32::try_from(*a).ok()?;
+                    Some((a_i32, *b))
+                }
                 _ => None,
             }
         } else {

@@ -1,0 +1,17 @@
+% Test: Ratio calculation pattern
+% Expected: Compute ratios using aggregates
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_ratio
+.kg use test_ratio
+
++parts[(1, "A", 30), (2, "A", 20), (3, "B", 50), (4, "B", 25), (5, "B", 25)].
+
+% Sum per category
+sum_per_cat(Cat, <SUM:Val>) :- parts(_, Cat, Val).
+
+?- sum_per_cat(Cat, Total).
+
+.kg use default
+.kg drop test_ratio

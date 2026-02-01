@@ -1,0 +1,21 @@
+% Test: Sequence detection pattern
+% Expected: Find events in sequence
+% Category: 29_temporal
+% Priority: P2 - Temporal patterns
+
+.kg create test_seq
+.kg use test_seq
+
++events[(1, "login", 100), (2, "click", 110), (3, "purchase", 120), (4, "logout", 200)].
+
+% Find events that follow login
+post_login(Id, Action, Time) :-
+    events(_, "login", LoginTime),
+    events(Id, Action, Time),
+    Time > LoginTime,
+    Action != "login".
+
+?- post_login(Id, Action, Time).
+
+.kg use default
+.kg drop test_seq

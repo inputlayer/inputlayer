@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_parent_child
+Knowledge graph 'test_parent_child' created.
+Switched to knowledge graph: test_parent_child
+> .kg use test_parent_child
+Switched to knowledge graph: test_parent_child
+> +parent_child[("dept1", "emp1"), ("dept1", "emp2"), ("dept1", "emp3"), ("dept2", "emp4"), ("dept2", "emp5")].
+Inserted 5 fact(s) into 'parent_child'.
+> emp_count(Dept, <COUNT:Emp>) :- parent_child(Dept, Emp).
+Script error: Parse error: Unknown aggregate function: 

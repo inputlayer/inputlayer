@@ -1,0 +1,21 @@
+% Test: First and last per group
+% Expected: Find min/max keyed items per group
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_first_last
+.kg use test_first_last
+
++events[(1, "A", "start"), (2, "A", "middle"), (3, "A", "end"), (1, "B", "only")].
+
+% First event per group (min ID)
+first_per_group(Group, <MIN:Id>) :- events(Id, Group, _).
+
+% Last event per group (max ID)
+last_per_group(Group, <MAX:Id>) :- events(Id, Group, _).
+
+?- first_per_group(Group, FirstId).
+?- last_per_group(Group, LastId).
+
+.kg use default
+.kg drop test_first_last

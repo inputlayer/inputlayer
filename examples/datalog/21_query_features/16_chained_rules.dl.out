@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_chained
+Knowledge graph 'test_chained' created.
+Switched to knowledge graph: test_chained
+> .kg use test_chained
+Switched to knowledge graph: test_chained
+> +base[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'base'.
+> +step1(X, Y) :- base(X), Y = X + 1.
+Script error: Failed to register rule: Unsafe rule 'step1': Head variable(s) Y not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

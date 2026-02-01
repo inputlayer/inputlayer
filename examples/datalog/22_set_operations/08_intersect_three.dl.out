@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_intersect3
+Knowledge graph 'test_intersect3' created.
+Switched to knowledge graph: test_intersect3
+> .kg use test_intersect3
+Switched to knowledge graph: test_intersect3
+> +set_a[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(2,), (3,), (4,)].
+Inserted 3 fact(s) into 'set_b'.
+> +set_c[(3,), (4,), (5,)].
+Inserted 3 fact(s) into 'set_c'.
+> intersect_all(X) :- set_a(X), set_b(X), set_c(X).
+1 rows:
+  (3)
+(session: 1 rule(s))
+> ?- intersect_all(X).
+1 rows:
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_intersect3
+Knowledge graph 'test_intersect3' dropped.

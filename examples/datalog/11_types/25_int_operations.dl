@@ -1,0 +1,22 @@
+% Test: Integer operations
+% Expected: Basic integer arithmetic
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_int_ops
+.kg use test_int_ops
+
++nums[(10,), (20,), (30,)].
+
+% Various integer operations
+computed(X, Add, Sub, Mul, Div, Mod) :- nums(X),
+    Add = X + 5,
+    Sub = X - 5,
+    Mul = X * 2,
+    Div = X / 5,
+    Mod = X % 7.
+
+?- computed(X, A, S, M, D, R).
+
+.kg use default
+.kg drop test_int_ops

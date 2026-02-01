@@ -260,9 +260,23 @@ impl RuleCatalog {
             }
         }
 
-        // Check 2: Range restriction for negated atoms
-        // Variables in negated atoms must be bound by positive atoms
+        // Check 2: Head variable safety - all head variables must be bound by positive body atoms
         let positive_vars = ast_rule.positive_body_variables();
+        let head_vars = ast_rule.head.variables();
+        let unbound_head: Vec<_> = head_vars.difference(&positive_vars).cloned().collect();
+        if !unbound_head.is_empty() {
+            let mut sorted_unbound = unbound_head;
+            sorted_unbound.sort();
+            return Err(format!(
+                "Unsafe rule '{}': Head variable(s) {} not bound by any positive body atom. \
+                 All head variables must appear in at least one positive body predicate.",
+                name,
+                sorted_unbound.join(", ")
+            ));
+        }
+
+        // Check 3: Range restriction for negated atoms
+        // Variables in negated atoms must be bound by positive atoms
         for pred in &ast_rule.body {
             if let BodyPredicate::Negated(atom) = pred {
                 let neg_vars = atom.variables();
@@ -281,7 +295,7 @@ impl RuleCatalog {
             }
         }
 
-        // Check 3: Full stratification check against all existing rules
+        // Check 4: Full stratification check against all existing rules
         // Build a program with all existing rules plus the new one
         let mut all_rules: Vec<Rule> = Vec::new();
         for rule_def in self.rules.values() {
@@ -305,12 +319,15 @@ impl RuleCatalog {
                         from
                     )
                 } else {
+                    // Sort SCC for deterministic error messages
+                    let mut sorted_scc = scc.clone();
+                    sorted_scc.sort();
                     format!(
                         "Unstratified negation: '{}' negates '{}' within a recursive cycle. \
                          Negation through recursion is not supported. Cycle: [{}]",
                         from,
                         to,
-                        scc.join(", ")
+                        sorted_scc.join(", ")
                     )
                 };
                 return Err(reason);
@@ -399,9 +416,49 @@ impl RuleCatalog {
         }
     }
 
+    /// Remove a specific clause from a rule by index (0-based)
+    /// If the last clause is removed, the entire rule is deleted
+    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
+        if let Some(rule_def) = self.rules.get_mut(name) {
+            if index >= rule_def.rules.len() {
+                return Err(format!(
+                    "Clause index {} out of bounds. Rule '{}' has {} clause(s).",
+                    index + 1,
+                    name,
+                    rule_def.rules.len()
+                ));
+            }
+            rule_def.rules.remove(index);
+
+            // If no clauses remain, remove the entire rule
+            let rule_deleted = if rule_def.rules.is_empty() {
+                self.rules.remove(name);
+                true
+            } else {
+                false
+            };
+
+            self.dirty = true;
+            self.save()?;
+            Ok(rule_deleted)
+        } else {
+            Err(format!("Rule '{}' does not exist", name))
+        }
+    }
+
     /// Get the number of clauses in a rule
     pub fn rule_count(&self, name: &str) -> Option<usize> {
         self.rules.get(name).map(|r| r.rules.len())
+    }
+
+    /// Get the arity (number of head arguments) of a rule
+    pub fn rule_arity(&self, name: &str) -> Option<usize> {
+        self.rules.get(name).and_then(|def| {
+            def.rules.first().map(|r| {
+                let rule = r.to_rule();
+                rule.head.args.len()
+            })
+        })
     }
 
     /// List all rule names
@@ -1155,9 +1212,41 @@ mod tests {
         let result = catalog.register_rule(&rule_def);
         assert!(result.is_err(), "Unsafe negation should be rejected");
         let err = result.unwrap_err();
+        // Either "Unsafe negation" (range restriction) or "Unsafe rule" (unbound head var) is correct
+        // since X only appears in negation and not in any positive body atom
         assert!(
-            err.contains("Unsafe negation") || err.contains("range") || err.contains("Range"),
-            "Error message should mention unsafe negation or range restriction: {}",
+            err.contains("Unsafe negation") || err.contains("Unsafe rule") || err.contains("range") || err.contains("Range") || err.contains("not bound"),
+            "Error message should mention unsafe rule or unsafe negation: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_empty_body_unbound_head_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Empty body rule: foo(X) :- .
+        // X is in head but not bound by any positive body atom (no body atoms at all!)
+        let head = Atom::new("foo".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![]; // Empty body
+        let rule = Rule::new(head, body);
+        let rule_def = RuleDef {
+            name: "foo".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+
+        let result = catalog.register_rule(&rule_def);
+        assert!(
+            result.is_err(),
+            "Rule with empty body and unbound head variable should be rejected"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unsafe rule") || err.contains("not bound"),
+            "Error message should mention unsafe rule: {}",
             err
         );
     }

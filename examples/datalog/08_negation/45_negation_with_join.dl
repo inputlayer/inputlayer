@@ -1,0 +1,20 @@
+% Test: Negation combined with join
+% Expected: Negate joined results
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_join
+.kg use test_neg_join
+
++employees[(1, "Alice", "Eng"), (2, "Bob", "Sales"), (3, "Carol", "Eng")].
++managers[(1, "Eng")].
+
+% Employees not in management
+non_managers(Id, Name, Dept) :-
+    employees(Id, Name, Dept),
+    !managers(Id, Dept).
+
+?- non_managers(Id, Name, Dept).
+
+.kg use default
+.kg drop test_neg_join

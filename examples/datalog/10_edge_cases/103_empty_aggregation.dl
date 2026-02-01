@@ -1,0 +1,19 @@
+% Test: Aggregation on empty relation
+% Expected: Handle empty aggregation gracefully
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_empty_agg
+.kg use test_empty_agg
+
++empty_rel[].
+
+% Aggregations on empty relation
+sum_empty(<SUM:X>) :- empty_rel(X).
+count_empty(<COUNT:X>) :- empty_rel(X).
+
+?- sum_empty(S).
+?- count_empty(C).
+
+.kg use default
+.kg drop test_empty_agg

@@ -1,0 +1,18 @@
+% Test: Full cartesian product
+% Expected: All combinations returned
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_cartesian
+.kg use test_cartesian
+
++left[(1,), (2,)].
++right[("a",), ("b",)].
+
+% Full cartesian product
+product(L, R) :- left(L), right(R).
+
+?- product(L, R).
+
+.kg use default
+.kg drop test_cartesian

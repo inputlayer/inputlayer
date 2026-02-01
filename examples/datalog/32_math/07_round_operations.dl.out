@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rounding
+Knowledge graph 'test_rounding' created.
+Switched to knowledge graph: test_rounding
+> .kg use test_rounding
+Switched to knowledge graph: test_rounding
+> +vals[(7,), (10,), (15,), (23,)].
+Inserted 4 fact(s) into 'vals'.
+> floor_div5(X, Y) :- vals(X), Y = X / 5.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "floor_div5", args: [Variable("X"), Variable("Y")] }. Variables ["Y"] in head do not appear in positive body atoms.

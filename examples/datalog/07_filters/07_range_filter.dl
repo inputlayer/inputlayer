@@ -1,0 +1,27 @@
+% Test: Range filter pattern
+% Expected: Range filters work correctly
+% Category: 07_filters
+% Priority: P1 - Filter patterns
+
+.kg create test_range
+.kg use test_range
+
++scores[(1, 45), (2, 67), (3, 82), (4, 91), (5, 55), (6, 73)].
+
+% In range [60, 80]
+in_range(Id, Score) :- scores(Id, Score), Score >= 60, Score <= 80.
+
+?- in_range(Id, Score).
+
+% Below range
+below(Id, Score) :- scores(Id, Score), Score < 60.
+
+?- below(Id, Score).
+
+% Above range
+above(Id, Score) :- scores(Id, Score), Score > 80.
+
+?- above(Id, Score).
+
+.kg use default
+.kg drop test_range

@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_coalesce
+Knowledge graph 'test_coalesce' created.
+Switched to knowledge graph: test_coalesce
+> .kg use test_coalesce
+Switched to knowledge graph: test_coalesce
+> +primary[(1, "Alice"), (2, "Bob")].
+Inserted 2 fact(s) into 'primary'.
+> +backup[(1, "A1"), (3, "C3")].
+Inserted 2 fact(s) into 'backup'.
+> combined(Id, Name) :- primary(Id, Name).
+2 rows:
+  (1, "Alice")
+  (2, "Bob")
+(session: 1 rule(s))
+> combined(Id, Name) :- backup(Id, Name), !primary(Id, _).
+3 rows:
+  (1, "Alice")
+  (2, "Bob")
+  (3, "C3")
+(session: 2 rule(s))
+> ?- combined(Id, Name).
+3 rows:
+  (1, "Alice")
+  (2, "Bob")
+  (3, "C3")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_coalesce
+Knowledge graph 'test_coalesce' dropped.

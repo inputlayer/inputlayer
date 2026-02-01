@@ -1,0 +1,19 @@
+% Test: Single tuple relation
+% Expected: Relation with one tuple works
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single
+.kg use test_single
+
++single[(42, "answer")].
+
+?- single(X, Y).
+
+% Aggregation on single row
++one_sum(<SUM:X>) :- single(X, _).
+
+?- one_sum(S).
+
+.kg use default
+.kg drop test_single

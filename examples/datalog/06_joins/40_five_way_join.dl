@@ -1,0 +1,25 @@
+% Test: Five-way join
+% Expected: Join across five relations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_five_join
+.kg use test_five_join
+
++a[(1, "x")].
++b[("x", 100)].
++c[(100, "y")].
++d[("y", true)].
++e[(true, "final")].
+
+joined(A1, A2, B2, C2, D2, E2) :-
+    a(A1, A2),
+    b(A2, B2),
+    c(B2, C2),
+    d(C2, D2),
+    e(D2, E2).
+
+?- joined(A1, A2, B2, C2, D2, E2).
+
+.kg use default
+.kg drop test_five_join

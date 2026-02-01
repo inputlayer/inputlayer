@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diff_complex
+Knowledge graph 'test_diff_complex' created.
+Switched to knowledge graph: test_diff_complex
+> .kg use test_diff_complex
+Switched to knowledge graph: test_diff_complex
+> +all_items[(1, 100), (2, 200), (3, 150), (4, 50)].
+Inserted 4 fact(s) into 'all_items'.
+> +high_value[(100,), (200,)].
+Inserted 2 fact(s) into 'high_value'.
+> low_value_items(Id, Val) :- all_items(Id, Val), !high_value(Val).
+2 rows:
+  (3, 150)
+  (4, 50)
+(session: 1 rule(s))
+> ?- low_value_items(Id, Val).
+2 rows:
+  (3, 150)
+  (4, 50)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_diff_complex
+Knowledge graph 'test_diff_complex' dropped.

@@ -130,17 +130,21 @@ where
     ///
     /// This consumes the variable and returns the resulting collection.
     /// Only valid for `Rel::Variable`.
-    pub fn set_from(self, result: &Rel<G>) -> Rel<G>
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if called on a `Rel::Collection` instead of `Rel::Variable`.
+    pub fn set_from(self, result: &Rel<G>) -> Result<Rel<G>, &'static str>
     where
         G::Timestamp: Timestamp,
     {
         match self {
             Rel::Variable(var) => {
                 let coll = var.set(result.as_collection());
-                Rel::Collection(coll)
+                Ok(Rel::Collection(coll))
             }
             Rel::Collection(_) => {
-                panic!("Cannot call set_from on a Collection - only Variables can be set")
+                Err("Cannot call set_from on a Collection - only Variables can be set")
             }
         }
     }

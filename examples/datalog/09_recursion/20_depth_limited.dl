@@ -1,0 +1,26 @@
+% Test: Depth-limited recursion
+% Expected: Can limit recursive depth
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_depth_limit
+.kg use test_depth_limit
+
+% Long chain
++edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)].
+
+% 1-hop reachability
++reach1(X, Y) :- edge(X, Y).
+
+% 2-hop reachability
++reach2(X, Z) :- edge(X, Y), edge(Y, Z).
+
+% 3-hop reachability
++reach3(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).
+
+?- reach1(X, Y).
+?- reach2(X, Z).
+?- reach3(X, W).
+
+.kg use default
+.kg drop test_depth_limit

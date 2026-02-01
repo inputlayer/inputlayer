@@ -1,0 +1,20 @@
+% Test: Filter on computed value
+% Expected: Filter based on computation result
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_filter_comp
+.kg use test_filter_comp
+
++products[(1, 100, 0.1), (2, 200, 0.2), (3, 50, 0.05)].
+
+% Filter products where price * discount > 15
+high_discount(Id, Price, Disc, Amount) :-
+    products(Id, Price, Disc),
+    Amount = Price * Disc,
+    Amount > 15.
+
+?- high_discount(Id, Price, Disc, Amount).
+
+.kg use default
+.kg drop test_filter_comp

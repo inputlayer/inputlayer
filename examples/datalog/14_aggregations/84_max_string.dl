@@ -1,0 +1,16 @@
+% Test: MAX of strings
+% Expected: Lexicographically largest
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_max_str
+.kg use test_max_str
+
++names[("Alice",), ("Bob",), ("Carol",), ("Dave",)].
+
++last_name(<MAX:N>) :- names(N).
+
+?- last_name(N).
+
+.kg use default
+.kg drop test_max_str

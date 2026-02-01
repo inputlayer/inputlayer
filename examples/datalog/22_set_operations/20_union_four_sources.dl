@@ -1,0 +1,22 @@
+% Test: Union of four sources
+% Expected: Combined unique values from all sources
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_union_four
+.kg use test_union_four
+
++src1[(1,), (2,)].
++src2[(2,), (3,)].
++src3[(3,), (4,)].
++src4[(4,), (5,)].
+
+combined(X) :- src1(X).
+combined(X) :- src2(X).
+combined(X) :- src3(X).
+combined(X) :- src4(X).
+
+?- combined(X).
+
+.kg use default
+.kg drop test_union_four

@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_cmp
+Knowledge graph 'test_self_cmp' created.
+Switched to knowledge graph: test_self_cmp
+> .kg use test_self_cmp
+Switched to knowledge graph: test_self_cmp
+> +scores[(1, "Alice", 85), (2, "Bob", 92), (3, "Carol", 78), (4, "Dave", 92)].
+Inserted 4 fact(s) into 'scores'.
+> higher_than(Name1, Name2, Score1, Score2) :- scores(_, Name1, Score1), scores(_, Name2, Score2), Score1 > Score2.
+No results.
+(session: 1 rule(s))
+> ?- higher_than(N1, N2, S1, S2).
+No results.
+> ties(Name1, Name2, Score) :- scores(Id1, Name1, Score), scores(Id2, Name2, Score), Id1 < Id2.
+1 rows:
+  ("Bob", "Dave", 92)
+(session: 2 rule(s))
+> ?- ties(N1, N2, S).
+1 rows:
+  ("Bob", "Dave", 92)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_cmp
+Knowledge graph 'test_self_cmp' dropped.

@@ -27,7 +27,6 @@ UPDATE_MODE=0
 
 # Temporary directory for test outputs
 TEMP_DIR=$(mktemp -d)
-trap "rm -rf $TEMP_DIR" EXIT
 
 # Function to normalize output for comparison
 # - Strips timestamps (e.g., "Created: 2025-12-04T...")
@@ -61,6 +60,9 @@ normalize_output() {
 
 # Function to clean knowledge graph state before each test
 clean_state() {
+    # Switch to default KG first (so we can delete test KGs that might be active)
+    curl -s "http://127.0.0.1:8080/api/v1/knowledge-graphs/default" > /dev/null 2>&1 || true
+
     # Delete all non-default knowledge graphs via API
     local kgs=$(curl -s http://127.0.0.1:8080/api/v1/knowledge-graphs 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)
     for kg in $kgs; do
@@ -202,13 +204,49 @@ done
 # Build the project first (release mode for speed, suppresses warnings)
 echo "Building project..."
 cd "$PROJECT_DIR"
-if ! cargo build --bin inputlayer-client --release --quiet 2>/dev/null; then
+if ! cargo build --bin inputlayer-client --bin inputlayer-server --release --quiet 2>/dev/null; then
     echo -e "${RED}Build failed!${NC}"
     echo "Attempting verbose build to show errors:"
-    cargo build --bin inputlayer-client --release 2>&1 | grep -v "^warning" || true
+    cargo build --bin inputlayer-client --bin inputlayer-server --release 2>&1 | grep -v "^warning" || true
     echo -e "${RED}Aborting tests due to build failure.${NC}"
     exit 1
 fi
+
+# Ensure server is running - start one if needed
+SERVER_STARTED=0
+if ! curl -s http://127.0.0.1:8080/api/v1/knowledge-graphs > /dev/null 2>&1; then
+    echo "Starting server..."
+    rm -rf "$PROJECT_DIR/data"
+    cargo run --bin inputlayer-server --release --quiet 2>/dev/null &
+    SERVER_PID=$!
+    SERVER_STARTED=1
+
+    # Wait for server to be ready (up to 15 seconds)
+    for i in $(seq 1 30); do
+        if curl -s http://127.0.0.1:8080/api/v1/knowledge-graphs > /dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
+
+    if ! curl -s http://127.0.0.1:8080/api/v1/knowledge-graphs > /dev/null 2>&1; then
+        echo -e "${RED}Server failed to start!${NC}"
+        kill $SERVER_PID 2>/dev/null || true
+        exit 1
+    fi
+    echo "Server started (PID $SERVER_PID)"
+fi
+
+# Cleanup function to stop server if we started it
+cleanup() {
+    rm -rf "$TEMP_DIR"
+    if [[ "$SERVER_STARTED" == "1" ]] && [[ -n "$SERVER_PID" ]]; then
+        echo "Stopping server (PID $SERVER_PID)..."
+        kill $SERVER_PID 2>/dev/null || true
+        wait $SERVER_PID 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
 
 echo ""
 echo "========================================"
@@ -220,8 +258,8 @@ fi
 echo "========================================"
 echo ""
 
-# Find all test files
-TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.dl" -type f | sort)
+# Find all test files (exclude files starting with _ which are helpers)
+TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.dl" -type f ! -name "_*" | sort)
 
 for test_file in $TEST_FILES; do
     # Apply filter if specified

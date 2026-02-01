@@ -116,6 +116,12 @@ pub async fn insert_data(
         }
     }
 
+    // TODO: Schema validation here is disabled because schemas are stored globally,
+    // not per-knowledge-graph. This means a schema from KG-A would incorrectly
+    // validate inserts to KG-B. Schema validation still works within the same
+    // query_program request (e.g., schema declaration + insert in same script).
+    // Proper fix: make SchemaCatalog per-KG.
+
     // Use insert_tuples which supports arbitrary arity and validates consistency
     let (inserted, duplicates) = storage
         .insert_tuples(&name, tuples)
@@ -158,29 +164,25 @@ pub async fn delete_data(
         .use_knowledge_graph(&kg)
         .map_err(|e| RestError::not_found(format!("Knowledge graph '{}' not found: {}", kg, e)))?;
 
-    // Convert JSON values to tuples
-    let tuples: Vec<(i32, i32)> = request
-        .rows
-        .iter()
-        .filter_map(|row| {
-            if row.len() >= 2 {
-                let a = row[0].as_i64()? as i32;
-                let b = row[1].as_i64()? as i32;
-                Some((a, b))
-            } else {
-                None
-            }
-        })
-        .collect();
+    // Convert JSON rows to Tuples with proper type handling
+    let mut tuples: Vec<Tuple> = Vec::new();
+    for row in &request.rows {
+        if row.is_empty() {
+            continue;
+        }
+        // Convert all values in the row
+        let values: Option<Vec<Value>> = row.iter().map(json_to_value).collect();
+        if let Some(vals) = values {
+            tuples.push(Tuple::new(vals));
+        }
+    }
 
-    let tuple_count = tuples.len();
-    storage
-        .delete(&name, tuples)
+    let deleted_count = storage
+        .delete_tuples_from(&kg, &name, tuples)
         .map_err(|e| RestError::internal(format!("Delete failed: {}", e)))?;
 
-    // Note: storage.delete doesn't return count, so we report the attempted count
     let response = DeleteDataResponse {
-        rows_deleted: tuple_count,
+        rows_deleted: deleted_count,
     };
 
     Ok(Json(ApiResponse::success(response)))

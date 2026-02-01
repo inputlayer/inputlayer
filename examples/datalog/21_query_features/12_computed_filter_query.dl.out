@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_computed_filter
+Knowledge graph 'test_computed_filter' created.
+Switched to knowledge graph: test_computed_filter
+> .kg use test_computed_filter
+Switched to knowledge graph: test_computed_filter
+> +items[(1, 10), (2, 20), (3, 30), (4, 40)].
+Inserted 4 fact(s) into 'items'.
+> over_threshold(Id, Val, Doubled) :- items(Id, Val), Doubled = Val * 2, Doubled > 50.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "over_threshold", args: [Variable("Id"), Variable("Val"), Variable("Doubled")] }. Variables ["Doubled"] in head do not appear in positive body atoms.

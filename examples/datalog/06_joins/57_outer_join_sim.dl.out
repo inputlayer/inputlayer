@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_outer
+Knowledge graph 'test_outer' created.
+Switched to knowledge graph: test_outer
+> .kg use test_outer
+Switched to knowledge graph: test_outer
+> +left_table[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'left_table'.
+> +right_table[(1, 100), (3, 300)].
+Inserted 2 fact(s) into 'right_table'.
+> +joined(Id, Name, Value) :- left_table(Id, Name), right_table(Id, Value).
+Rule 'joined' registered.
+> +left_only(Id, Name) :- left_table(Id, Name), !right_table(Id, _).
+Rule 'left_only' registered.
+> ?- joined(Id, Name, Value).
+2 rows:
+  (1, 100, "Alice")
+  (3, 300, "Carol")
+> ?- left_only(Id, Name).
+1 rows:
+  (2, "Bob")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_outer
+Knowledge graph 'test_outer' dropped.

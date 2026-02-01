@@ -1,0 +1,14 @@
+% Test: Query returning single result
+% Expected: Return exactly one row
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_single
+.kg use test_single
+
++unique_data[(42, "answer")].
+
+?- unique_data(X, Y).
+
+.kg use default
+.kg drop test_single

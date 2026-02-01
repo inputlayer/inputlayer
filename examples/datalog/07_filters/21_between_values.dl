@@ -1,0 +1,17 @@
+% Test: Between two values filter
+% Expected: Value within inclusive range
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_between
+.kg use test_between
+
++data[(1, 5), (2, 15), (3, 25), (4, 35), (5, 45)].
+
+% Values between 10 and 30
+in_range(Id, Val) :- data(Id, Val), Val >= 10, Val <= 30.
+
+?- in_range(Id, Val).
+
+.kg use default
+.kg drop test_between

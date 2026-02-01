@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_partial_match
+Knowledge graph 'test_partial_match' created.
+Switched to knowledge graph: test_partial_match
+> .kg use test_partial_match
+Switched to knowledge graph: test_partial_match
+> +orders[(1, 100, "A"), (2, 100, "B"), (3, 101, "A")].
+Inserted 3 fact(s) into 'orders'.
+> +customer_regions[(100, "East"), (101, "West")].
+Inserted 2 fact(s) into 'customer_regions'.
+> +with_region(OrderId, CustId, Type, Region) :- orders(OrderId, CustId, Type), customer_regions(CustId, Region).
+Rule 'with_region' registered.
+> ?- with_region(O, C, T, R).
+3 rows:
+  (100, "East", 1, "A")
+  (100, "East", 2, "B")
+  (101, "West", 3, "A")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_partial_match
+Knowledge graph 'test_partial_match' dropped.

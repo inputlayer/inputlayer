@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_path_cost
+Knowledge graph 'test_path_cost' created.
+Switched to knowledge graph: test_path_cost
+> .kg use test_path_cost
+Switched to knowledge graph: test_path_cost
+> +edge[(1, 2, 10), (2, 3, 20), (3, 4, 15), (1, 3, 25)].
+Inserted 4 fact(s) into 'edge'.
+> +path(X, Y, Cost) :- edge(X, Y, Cost).
+Rule 'path' registered.
+> +path(X, Z, TotalCost) :- path(X, Y, C1), edge(Y, Z, C2), TotalCost = C1 + C2.
+Script error: Failed to register rule: Unsafe rule 'path': Head variable(s) TotalCost not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

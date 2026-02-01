@@ -1,0 +1,19 @@
+% Test: Duplicate fact insertion
+% Expected: Duplicates are deduplicated
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_dup_facts
+.kg use test_dup_facts
+
+% Insert same fact multiple times
++data[(1, "a")].
++data[(1, "a")].
++data[(1, "a")].
++data[(2, "b")].
+
+% Should only show 2 unique facts
+?- data(X, Y).
+
+.kg use default
+.kg drop test_dup_facts

@@ -1,0 +1,21 @@
+% Test: Boolean value operations
+% Expected: Filter by boolean
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_bool_ops
+.kg use test_bool_ops
+
++flags[(1, true), (2, false), (3, true), (4, false)].
+
+% True flags
+true_flags(Id) :- flags(Id, true).
+
+% False flags
+false_flags(Id) :- flags(Id, false).
+
+?- true_flags(Id).
+?- false_flags(Id).
+
+.kg use default
+.kg drop test_bool_ops

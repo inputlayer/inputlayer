@@ -1,0 +1,24 @@
+% Test: Four-way join
+% Expected: Join across four relations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_four_join
+.kg use test_four_join
+
++orders[(1, 101, "2024-01")].
++customers[(101, "Alice")].
++products[(1, "Widget")].
++shipping[("2024-01", "Express")].
+
+% Four-way join
+full_details(OrdId, CustName, ProdName, ShipType) :-
+    orders(OrdId, CustId, Date),
+    customers(CustId, CustName),
+    products(OrdId, ProdName),
+    shipping(Date, ShipType).
+
+?- full_details(OrdId, CustName, ProdName, ShipType).
+
+.kg use default
+.kg drop test_four_join

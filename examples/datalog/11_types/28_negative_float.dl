@@ -1,0 +1,19 @@
+% Test: Negative float values
+% Expected: Handle negative floats correctly
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_neg_float
+.kg use test_neg_float
+
++temps[(-10.5,), (0.0,), (10.5,), (-5.25,)].
+
+?- temps(T).
+
+% Filter negative
+negative(T) :- temps(T), T < 0.0.
+
+?- negative(T).
+
+.kg use default
+.kg drop test_neg_float

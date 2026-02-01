@@ -1,0 +1,26 @@
+% Test: First/last value patterns
+% Expected: Get first and last by ordering
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_first_last
+.kg use test_first_last
+
++events[(1, "start", 100), (2, "middle", 200), (3, "end", 300)].
+
+% First (min time)
++first_time(<MIN:T>) :- events(T, _, _).
+
+first_event(Event, Val) :- events(T, Event, Val), first_time(T).
+
+?- first_event(Event, Val).
+
+% Last (max time)
++last_time(<MAX:T>) :- events(T, _, _).
+
+last_event(Event, Val) :- events(T, Event, Val), last_time(T).
+
+?- last_event(Event, Val).
+
+.kg use default
+.kg drop test_first_last

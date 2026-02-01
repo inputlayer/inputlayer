@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_persist
+Knowledge graph 'test_session_persist' created.
+Switched to knowledge graph: test_session_persist
+> .kg use test_session_persist
+Switched to knowledge graph: test_session_persist
+> +base_data[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'base_data'.
+> session_fact(100).
+Session fact added for 'session_fact'. (Use +session_fact(...) to persist)
+> ?- base_data(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> ?- session_fact(X).
+1 rows:
+  (100)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 0 session rule(s), 1 session fact(s))
+> .kg use test_session_persist
+Switched to knowledge graph: test_session_persist
+> ?- base_data(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> ?- session_fact(X).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_persist
+Knowledge graph 'test_session_persist' dropped.

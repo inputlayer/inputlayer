@@ -1,0 +1,14 @@
+% Test: Type inference from values
+% Expected: Infer column types from data
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_type_infer
+.kg use test_type_infer
+
++mixed[(1, "text", 1.5, true)].
+
+?- mixed(A, B, C, D).
+
+.kg use default
+.kg drop test_type_infer

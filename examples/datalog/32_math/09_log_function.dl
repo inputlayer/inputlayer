@@ -1,0 +1,16 @@
+% Test: Logarithm function
+% Expected: Return natural log
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_log
+.kg use test_log
+
++nums[(1,), (10,), (100,)].
+
+log_val(X, Y) :- nums(X), Y = LOG(X).
+
+?- log_val(X, Y).
+
+.kg use default
+.kg drop test_log

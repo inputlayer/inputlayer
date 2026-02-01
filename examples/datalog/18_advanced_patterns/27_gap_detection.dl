@@ -1,0 +1,23 @@
+% Test: Gap detection pattern
+% Expected: Can detect gaps in sequences
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_gaps
+.kg use test_gaps
+
+% Sequence with gaps (missing 3, 6, 7)
++seq[(1,), (2,), (4,), (5,), (8,), (9,), (10,)].
+
+% Find where gaps exist (current + 1 not in seq)
+has_gap(X) :- seq(X), Next = X + 1, !seq(Next), Next <= 10.
+
+?- has_gap(X).
+
+% Find consecutive pairs
+consecutive(X, Y) :- seq(X), seq(Y), Y = X + 1.
+
+?- consecutive(X, Y).
+
+.kg use default
+.kg drop test_gaps

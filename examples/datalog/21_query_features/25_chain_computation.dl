@@ -1,0 +1,21 @@
+% Test: Chained computations
+% Expected: Sequential computation assignments
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_chain_comp
+.kg use test_chain_comp
+
++base[(1,), (2,), (3,)].
+
+% Chain of computations
+chained(X, A, B, C) :-
+    base(X),
+    A = X + 1,
+    B = A * 2,
+    C = B + 10.
+
+?- chained(X, A, B, C).
+
+.kg use default
+.kg drop test_chain_comp

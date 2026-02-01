@@ -1,0 +1,34 @@
+% Test: .rule drop removes ALL clauses of a multi-clause rule
+% Category: 17_rule_commands
+% Priority: P0 Critical - Core rule management semantics
+% Description: Verify that .rule drop completely removes a rule with multiple clauses
+
+.kg create test_drop_all
+.kg use test_drop_all
+
+% Insert base data
++edge[(1,2), (2,3), (3,4), (4,5)].
+
+% Define a multi-clause rule with 3 clauses
++path(X, Y) :- edge(X, Y).
++path(X, Z) :- path(X, Y), edge(Y, Z).
++path(X, X) :- edge(X, _).
+
+% Verify all 3 clauses registered
+.rule list
+
+% Query should work
+?- path(1, Y).
+
+% Drop the rule - should remove ALL 3 clauses
+.rule drop path
+
+% Verify rule is completely gone
+.rule list
+
+% Query should now return empty (no rule to evaluate)
+?- path(1, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_drop_all

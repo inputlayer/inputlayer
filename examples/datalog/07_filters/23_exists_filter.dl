@@ -1,0 +1,18 @@
+% Test: Exists-style filter
+% Expected: Filter by existence in another relation
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_exists_filter
+.kg use test_exists_filter
+
++customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++orders[(101, 1), (102, 1), (103, 2)].
+
+% Customers with at least one order
+has_order(CustId, Name) :- customers(CustId, Name), orders(_, CustId).
+
+?- has_order(Id, N).
+
+.kg use default
+.kg drop test_exists_filter

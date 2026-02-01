@@ -1,0 +1,17 @@
+% Test: Compound arithmetic expression
+% Expected: Multiple nested operations
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_compound
+.kg use test_compound
+
++vals[(10, 5, 2)].
+
+% (a - b) * c + a
+result(A, B, C, R) :- vals(A, B, C), R = (A - B) * C + A.
+
+?- result(A, B, C, R).
+
+.kg use default
+.kg drop test_compound

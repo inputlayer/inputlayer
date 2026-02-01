@@ -1,0 +1,18 @@
+% Test: List rules for specific head
+% Expected: Show only rules for given head
+% Category: 17_rule_commands
+% Priority: P2 - Rule management
+
+.kg create test_rule_list
+.kg use test_rule_list
+
++base[(1,), (2,), (3,)].
+
++rule_a(X, Y) :- base(X), Y = X + 1.
++rule_a(X, Y) :- base(X), Y = X * 2.
++rule_b(X) :- base(X), X > 1.
+
+.rule def rule_a
+
+.kg use default
+.kg drop test_rule_list

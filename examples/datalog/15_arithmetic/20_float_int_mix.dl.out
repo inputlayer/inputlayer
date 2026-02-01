@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_int
+Knowledge graph 'test_float_int' created.
+Switched to knowledge graph: test_float_int
+> .kg use test_float_int
+Switched to knowledge graph: test_float_int
+> +ints[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'ints'.
+> +floats[(1.5,), (2.5,), (3.5,)].
+Inserted 3 fact(s) into 'floats'.
+> int_to_float(X, Y) :- ints(X), Y = X * 1.0.
+Script error: Parse error: Invalid arithmetic expression: '1.0'

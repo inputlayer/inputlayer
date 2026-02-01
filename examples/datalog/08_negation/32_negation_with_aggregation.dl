@@ -1,0 +1,23 @@
+% Test: Negation combined with aggregation
+% Expected: Negation and aggregation work together
+% Category: 08_negation
+% Priority: P2 - Advanced negation
+
+.kg create test_neg_agg
+.kg use test_neg_agg
+
++scores[(1, 80), (2, 90), (3, 70), (4, 85)].
++excluded[(2,)].
+
+% Average of non-excluded scores
++avg_allowed(<AVG:Score>) :- scores(Id, Score), !excluded(Id).
+
+?- avg_allowed(A).
+
+% Count of non-excluded
++count_allowed(<COUNT:Id>) :- scores(Id, _), !excluded(Id).
+
+?- count_allowed(C).
+
+.kg use default
+.kg drop test_neg_agg

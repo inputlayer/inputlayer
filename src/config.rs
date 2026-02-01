@@ -97,9 +97,13 @@ pub struct PersistLayerConfig {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
 
-    /// Whether to sync WAL immediately on each write
+    /// Whether to sync WAL immediately on each write (DEPRECATED: use durability_mode instead)
     #[serde(default = "default_true")]
     pub immediate_sync: bool,
+
+    /// Durability mode for writes (immediate, batched, or async)
+    #[serde(default)]
+    pub durability_mode: DurabilityMode,
 
     /// Compaction window: how much history to retain (0 = keep all)
     #[serde(default)]
@@ -116,6 +120,7 @@ impl Default for PersistLayerConfig {
             enabled: true,
             buffer_size: 10000,
             immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
         }
     }
@@ -143,6 +148,25 @@ pub enum CompressionType {
     Gzip,
     /// No compression
     None,
+}
+
+/// Write durability mode - controls when writes are considered durable
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DurabilityMode {
+    /// Sync to disk immediately after each write (safest, slowest)
+    /// Data is guaranteed durable when write returns
+    #[default]
+    Immediate,
+
+    /// Buffer writes and sync periodically (balanced)
+    /// Some data may be lost if crash occurs between syncs
+    Batched,
+
+    /// Fire-and-forget async writes (fastest, least safe)
+    /// In-memory update completes immediately, persistence is async
+    /// Can lose data on crash, but guarantees ordering within session
+    Async,
 }
 
 /// Performance tuning options

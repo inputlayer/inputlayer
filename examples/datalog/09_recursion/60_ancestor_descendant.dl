@@ -1,0 +1,18 @@
+% Test: Full ancestor/descendant computation
+% Expected: Compute all ancestors and descendants
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_anc_desc
+.kg use test_anc_desc
+
++parent[("grandpa", "dad"), ("grandma", "dad"), ("dad", "child1"), ("dad", "child2")].
+
+% Ancestor relation
++ancestor(A, D) :- parent(A, D).
++ancestor(A, D) :- parent(A, M), ancestor(M, D).
+
+?- ancestor(A, D).
+
+.kg use default
+.kg drop test_anc_desc

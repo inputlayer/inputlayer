@@ -1,0 +1,30 @@
+% Test: Knowledge graph data isolation
+% Expected: Data in one KG is isolated from another
+% Category: 01_knowledge_graph
+% Priority: P1 - KG isolation
+
+.kg create test_iso_a
+.kg use test_iso_a
+
+% Add data to first KG
++data[(1, "a"), (2, "b")].
+?- data(Id, Val).
+
+% Create and switch to second KG
+.kg create test_iso_b
+.kg use test_iso_b
+
+% This should be empty (no data from first KG)
+?- data(Id, Val).
+
+% Add different data to second KG
++data[(99, "z")].
+?- data(Id, Val).
+
+% Switch back to first - data should be unchanged
+.kg use test_iso_a
+?- data(Id, Val).
+
+.kg use default
+.kg drop test_iso_a
+.kg drop test_iso_b

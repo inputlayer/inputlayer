@@ -162,10 +162,10 @@ pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
     let type_expr_str = input[colon_pos + 1..].trim();
 
     // Validate name (must start with uppercase)
-    if name.is_empty() {
+    let Some(first_char) = name.chars().next() else {
         return Err("Type name cannot be empty".to_string());
-    }
-    if !name.chars().next().unwrap().is_uppercase() {
+    };
+    if !first_char.is_uppercase() {
         return Err(format!(
             "Type name '{}' must start with uppercase letter",
             name
@@ -222,13 +222,18 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
         "float" => Ok(TypeExpr::Base(BaseType::Float)),
         _ => {
             // Must be a type reference (uppercase name)
-            if input.chars().next().unwrap().is_uppercase() {
-                Ok(TypeExpr::TypeRef(input.to_string()))
+            // Note: input is non-empty (checked at start of function)
+            if let Some(first_char) = input.chars().next() {
+                if first_char.is_uppercase() {
+                    Ok(TypeExpr::TypeRef(input.to_string()))
+                } else {
+                    Err(format!(
+                        "Unknown base type: '{}'. Use int, string, bool, float, or a type name.",
+                        input
+                    ))
+                }
             } else {
-                Err(format!(
-                    "Unknown base type: '{}'. Use int, string, bool, float, or a type name.",
-                    input
-                ))
+                Err("Type expression cannot be empty".to_string())
             }
         }
     }
@@ -362,8 +367,8 @@ fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
 pub fn split_respecting_braces(input: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut brace_depth = 0;
-    let mut paren_depth = 0;
+    let mut brace_depth: i32 = 0;
+    let mut paren_depth: i32 = 0;
     let mut in_string = false;
 
     for ch in input.chars() {
@@ -377,7 +382,8 @@ pub fn split_respecting_braces(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             '}' if !in_string => {
-                brace_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                brace_depth = (brace_depth - 1).max(0);
                 current.push(ch);
             }
             '(' if !in_string => {
@@ -385,7 +391,8 @@ pub fn split_respecting_braces(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' if !in_string => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if brace_depth == 0 && paren_depth == 0 && !in_string => {
@@ -407,7 +414,7 @@ pub fn split_respecting_braces(input: &str) -> Vec<String> {
 pub fn split_respecting_parens(input: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
-    let mut paren_depth = 0;
+    let mut paren_depth: i32 = 0;
     let mut in_string = false;
 
     for ch in input.chars() {
@@ -421,7 +428,8 @@ pub fn split_respecting_parens(input: &str) -> Vec<String> {
                 current.push(ch);
             }
             ')' if !in_string => {
-                paren_depth -= 1;
+                // Clamp to 0 to handle malformed input
+                paren_depth = (paren_depth - 1).max(0);
                 current.push(ch);
             }
             ',' if paren_depth == 0 && !in_string => {

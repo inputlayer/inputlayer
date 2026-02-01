@@ -1,0 +1,19 @@
+% Test: Fibonacci-like recursion
+% Expected: Sequence generation
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_fib
+.kg use test_fib
+
+% Base cases
++fib(0, 0).
++fib(1, 1).
+
+% Recursive case (limited depth)
++fib(N, V) :- fib(N1, V1), fib(N2, V2), N1 = N - 1, N2 = N - 2, V = V1 + V2, N <= 10, N > 1.
+
+?- fib(N, V).
+
+.kg use default
+.kg drop test_fib

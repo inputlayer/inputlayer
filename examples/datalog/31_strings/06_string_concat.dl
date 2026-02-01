@@ -1,0 +1,16 @@
+% Test: String concatenation
+% Expected: Concatenate strings
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_concat
+.kg use test_concat
+
++parts[("hello", " ", "world"), ("foo", "", "bar")].
+
+concat_result(A, B, C, R) :- parts(A, B, C), R = CONCAT(A, B, C).
+
+?- concat_result(A, B, C, R).
+
+.kg use default
+.kg drop test_concat

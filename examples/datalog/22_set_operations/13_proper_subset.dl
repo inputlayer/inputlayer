@@ -1,0 +1,23 @@
+% Test: Proper subset check
+% Expected: Verify A is proper subset of B
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_proper_sub
+.kg use test_proper_sub
+
++small[(1,), (2,)].
++large[(1,), (2,), (3,)].
+
+% Check if small is subset of large (all elements in large)
+not_in_large(X) :- small(X), !large(X).
+
+?- not_in_large(X).
+
+% Check if there's something in large not in small (proper subset)
+extra_in_large(X) :- large(X), !small(X).
+
+?- extra_in_large(X).
+
+.kg use default
+.kg drop test_proper_sub

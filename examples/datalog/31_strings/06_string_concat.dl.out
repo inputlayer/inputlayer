@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_concat
+Knowledge graph 'test_concat' created.
+Switched to knowledge graph: test_concat
+> .kg use test_concat
+Switched to knowledge graph: test_concat
+> +parts[("hello", " ", "world"), ("foo", "", "bar")].
+Inserted 2 fact(s) into 'parts'.
+> concat_result(A, B, C, R) :- parts(A, B, C), R = CONCAT(A, B, C).
+Script error: Parse error: Invalid term: 'CONCAT(A, B, C)'

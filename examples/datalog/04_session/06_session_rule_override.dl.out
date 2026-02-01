@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_override
+Knowledge graph 'test_sess_override' created.
+Switched to knowledge graph: test_sess_override
+> .kg use test_sess_override
+Switched to knowledge graph: test_sess_override
+> +persistent_view(X, Y) :- edge(X, Y).
+Rule 'persistent_view' registered.
+> +edge[(1, 2), (2, 3), (3, 4)].
+Inserted 3 fact(s) into 'edge'.
+> ?- persistent_view(X, Y).
+3 rows:
+  (1, 2)
+  (2, 3)
+  (3, 4)
+> session_only(X) :- edge(X, _).
+3 rows:
+  (1)
+  (2)
+  (3)
+(session: 1 rule(s))
+> ?- session_only(X).
+3 rows:
+  (1)
+  (2)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_sess_override
+Knowledge graph 'test_sess_override' dropped.

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inline
+Knowledge graph 'test_inline' created.
+Switched to knowledge graph: test_inline
+> .kg use test_inline
+Switched to knowledge graph: test_inline
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'data'.
+> with_computed(Id, Val, Double, Triple) :- data(Id, Val), Double = Val * 2, Triple = Val * 3.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "with_computed", args: [Variable("Id"), Variable("Val"), Variable("Double"), Variable("Triple")] }. Variables ["Double", "Triple"] in head do not appear in positive body atoms.

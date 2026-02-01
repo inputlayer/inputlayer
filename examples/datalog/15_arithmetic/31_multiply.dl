@@ -1,0 +1,17 @@
+% Test: Multiplication operation
+% Expected: Multiply values correctly
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_multiply
+.kg use test_multiply
+
++factors[(2, 3), (5, 4), (10, 10)].
+
+% Compute product
+product(A, B, Result) :- factors(A, B), Result = A * B.
+
+?- product(A, B, R).
+
+.kg use default
+.kg drop test_multiply

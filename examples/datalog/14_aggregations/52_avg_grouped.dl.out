@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_avg_group
+Knowledge graph 'test_avg_group' created.
+Switched to knowledge graph: test_avg_group
+> .kg use test_avg_group
+Switched to knowledge graph: test_avg_group
+> +scores[("Math", 80), ("Math", 90), ("Math", 70), ("Science", 85), ("Science", 95)].
+Inserted 5 fact(s) into 'scores'.
+> avg_by_subject(Subj, <AVG:Score>) :- scores(Subj, Score).
+Script error: Parse error: Unknown aggregate function: 

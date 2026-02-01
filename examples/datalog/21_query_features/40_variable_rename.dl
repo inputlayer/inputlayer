@@ -1,0 +1,17 @@
+% Test: Variable renaming in projection
+% Expected: Project with different variable names
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_var_rename
+.kg use test_var_rename
+
++src[(1, "a", 100)].
+
+% Rename variables in head
+renamed(Id, Name, Value) :- src(Id, Name, Value).
+
+?- renamed(X, Y, Z).
+
+.kg use default
+.kg drop test_var_rename

@@ -1,0 +1,25 @@
+% Test: Cube simulation pattern
+% Expected: Multiple grouping levels
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_cube
+.kg use test_cube
+
++sales[("East", "Q1", 100), ("East", "Q2", 150), ("West", "Q1", 200), ("West", "Q2", 250)].
+
+% Group by region
++by_region(Region, <SUM:Amount>) :- sales(Region, _, Amount).
+
+% Group by quarter
++by_quarter(Quarter, <SUM:Amount>) :- sales(_, Quarter, Amount).
+
+% Grand total
++grand_total(<SUM:Amount>) :- sales(_, _, Amount).
+
+?- by_region(Region, Sum).
+?- by_quarter(Quarter, Sum).
+?- grand_total(Total).
+
+.kg use default
+.kg drop test_cube

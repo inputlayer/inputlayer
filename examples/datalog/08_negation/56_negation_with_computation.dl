@@ -1,0 +1,18 @@
+% Test: Negation with computed values
+% Expected: Negate based on computed condition
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_comp
+.kg use test_neg_comp
+
++nums[(1,), (2,), (3,), (4,), (5,)].
++thresholds[(3,)].
+
+% Numbers not exceeding threshold
+below_threshold(X) :- nums(X), thresholds(T), X <= T.
+
+?- below_threshold(X).
+
+.kg use default
+.kg drop test_neg_comp

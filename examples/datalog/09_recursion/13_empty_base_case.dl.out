@@ -25,12 +25,9 @@ Inserted 2 fact(s) into 'edge'.
   (1, 3)
   (2, 3)
 > -edge(X, Y) :- edge(X, Y).
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'edge'.
 > ?- path(X, Y).
-3 rows:
-  (1, 2)
-  (1, 3)
-  (2, 3)
+No results.
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 2 session rule(s), 0 session fact(s))

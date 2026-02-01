@@ -1,0 +1,18 @@
+% Test: Set difference via negation
+% Expected: A - B using negation
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_set_diff
+.kg use test_set_diff
+
++set_a[(1,), (2,), (3,), (4,), (5,)].
++set_b[(2,), (4,)].
+
+% A - B (elements in A but not in B)
++difference(X) :- set_a(X), !set_b(X).
+
+?- difference(X).
+
+.kg use default
+.kg drop test_set_diff

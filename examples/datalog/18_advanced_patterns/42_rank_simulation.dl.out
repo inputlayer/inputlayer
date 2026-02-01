@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank
+Knowledge graph 'test_rank' created.
+Switched to knowledge graph: test_rank
+> .kg use test_rank
+Switched to knowledge graph: test_rank
+> +scores[("Alice", 90), ("Bob", 85), ("Carol", 95), ("Dave", 85)].
+Inserted 4 fact(s) into 'scores'.
+> +rank(Name, Score, <COUNT:Other>) :- scores(Name, Score), scores(Other, OtherScore), OtherScore > Score.
+Script error: Parse error: Invalid term: '<COUNT:Other>'

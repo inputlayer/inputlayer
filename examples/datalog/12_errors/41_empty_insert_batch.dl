@@ -1,0 +1,15 @@
+% Test: Empty insert batch error
+% Expected: Error when inserting empty batch
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_empty_batch
+.kg use test_empty_batch
+
+% Empty batch insert should error
++data[].
+
+?- data(X).
+
+.kg use default
+.kg drop test_empty_batch

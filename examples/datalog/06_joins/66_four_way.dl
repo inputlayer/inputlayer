@@ -1,0 +1,24 @@
+% Test: Four-way join
+% Expected: Join four relations
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_four_way
+.kg use test_four_way
+
++orders[(1, 100, 200)].
++customers[(100, "Alice")].
++products[(200, "Widget")].
++regions[(100, "East")].
+
+% Four-way join
++full_report(OrdId, CustName, ProdName, Region) :-
+    orders(OrdId, CustId, ProdId),
+    customers(CustId, CustName),
+    products(ProdId, ProdName),
+    regions(CustId, Region).
+
+?- full_report(O, C, P, R).
+
+.kg use default
+.kg drop test_four_way

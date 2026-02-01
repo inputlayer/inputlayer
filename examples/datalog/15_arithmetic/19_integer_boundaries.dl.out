@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_bounds
+Knowledge graph 'test_int_bounds' created.
+Switched to knowledge graph: test_int_bounds
+> .kg use test_int_bounds
+Switched to knowledge graph: test_int_bounds
+> +large_int(2147483647).
+Inserted 1 fact(s) into 'large_int'.
+> ?- large_int(X).
+1 rows:
+  (2147483647)
+> +neg_large(-2147483648).
+Inserted 1 fact(s) into 'neg_large'.
+> ?- neg_large(X).
+1 rows:
+  (-2147483648)
+> ?- large_int(X), X > 2147483640.
+1 rows:
+  (2147483647)
+> ?- neg_large(X), X < -2147483640.
+1 rows:
+  (-2147483648)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int_bounds
+Knowledge graph 'test_int_bounds' dropped.

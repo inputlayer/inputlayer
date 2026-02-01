@@ -1,0 +1,23 @@
+% Test: Set containment check
+% Expected: Check if one set is subset of another
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_containment
+.kg use test_containment
+
++superset[(1,), (2,), (3,), (4,), (5,)].
++subset1[(1,), (2,), (3,)].
++subset2[(1,), (2,), (6,)].
+
+% Items in subset1 not in superset (should be empty)
+subset1_not_in_super(X) :- subset1(X), !superset(X).
+
+% Items in subset2 not in superset
+subset2_not_in_super(X) :- subset2(X), !superset(X).
+
+?- subset1_not_in_super(X).
+?- subset2_not_in_super(X).
+
+.kg use default
+.kg drop test_containment

@@ -18,22 +18,18 @@ Inserted 4 fact(s) into 'counter'.
   (3, 50)
   (4, 150)
 > -counter(Id, Value) :- counter(Id, Value), Value > 100.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'counter'.
 > ?- counter(Id, Value).
-4 rows:
+2 rows:
   (1, 100)
-  (2, 200)
   (3, 50)
-  (4, 150)
 > +counter[(2, 210), (4, 160)].
 Inserted 2 fact(s) into 'counter'.
 > ?- counter(Id, Value).
-6 rows:
+4 rows:
   (1, 100)
-  (2, 200)
   (2, 210)
   (3, 50)
-  (4, 150)
   (4, 160)
 > .kg use default
 Switched to knowledge graph: default

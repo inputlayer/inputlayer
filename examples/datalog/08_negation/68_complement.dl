@@ -1,0 +1,18 @@
+% Test: Set complement via negation
+% Expected: All elements NOT in set
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_complement
+.kg use test_complement
+
++universe[(1,), (2,), (3,), (4,), (5,)].
++subset[(1,), (3,), (5,)].
+
+% Complement: universe - subset
++complement(X) :- universe(X), !subset(X).
+
+?- complement(X).
+
+.kg use default
+.kg drop test_complement

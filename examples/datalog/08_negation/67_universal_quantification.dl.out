@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_universal
+Knowledge graph 'test_universal' created.
+Switched to knowledge graph: test_universal
+> .kg use test_universal
+Switched to knowledge graph: test_universal
+> +students[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'students'.
+> +passed_exam[(1, "math"), (2, "math"), (3, "math"), (1, "science"), (2, "science")].
+Inserted 5 fact(s) into 'passed_exam'.
+> +has_exam(S) :- passed_exam(S, _).
+Rule 'has_exam' registered.
+> ?- has_exam(S).
+3 rows:
+  (1)
+  (2)
+  (3)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_universal
+Knowledge graph 'test_universal' dropped.

@@ -1,0 +1,16 @@
+% Test: String trim function
+% Expected: Remove leading/trailing whitespace
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_trim
+.kg use test_trim
+
++words[("  hello  ",), ("world",), (" spaced ",)].
+
+trim_result(S, T) :- words(S), T = TRIM(S).
+
+?- trim_result(S, T).
+
+.kg use default
+.kg drop test_trim

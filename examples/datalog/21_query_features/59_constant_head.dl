@@ -1,0 +1,17 @@
+% Test: Constant in rule head
+% Expected: Include literal in projection
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_const_head
+.kg use test_const_head
+
++items[(1, 100), (2, 200)].
+
+% Add constant column
+with_const(Id, Price, "USD") :- items(Id, Price).
+
+?- with_const(Id, P, C).
+
+.kg use default
+.kg drop test_const_head

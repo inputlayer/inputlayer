@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_row
+Knowledge graph 'test_single_row' created.
+Switched to knowledge graph: test_single_row
+> .kg use test_single_row
+Switched to knowledge graph: test_single_row
+> +singleton(42, "only_one").
+Inserted 1 fact(s) into 'singleton'.
+> ?- singleton(X, Y).
+1 rows:
+  (42, "only_one")
+> +numbers[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'numbers'.
+> ?- numbers(X), X = 3.
+1 rows:
+  (3)
+> +total_count(count<X>) :- numbers(X).
+Rule 'total_count' registered.
+> ?- total_count(C).
+1 rows:
+  (5)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_single_row
+Knowledge graph 'test_single_row' dropped.

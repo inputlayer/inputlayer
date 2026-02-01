@@ -1,0 +1,16 @@
+% Test: Exponential function
+% Expected: e^x computation
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_exp
+.kg use test_exp
+
++vals[(0,), (1,), (2,)].
+
+exp_val(X, Y) :- vals(X), Y = EXP(X).
+
+?- exp_val(X, Y).
+
+.kg use default
+.kg drop test_exp

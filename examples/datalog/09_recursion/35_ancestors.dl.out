@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestors
+Knowledge graph 'test_ancestors' created.
+Switched to knowledge graph: test_ancestors
+> .kg use test_ancestors
+Switched to knowledge graph: test_ancestors
+> +parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Carol", "Eve")].
+Inserted 4 fact(s) into 'parent'.
+> +ancestor(A, D) :- parent(A, D).
+Rule 'ancestor' registered.
+> +ancestor(A, D) :- parent(A, M), ancestor(M, D).
+Rule 'ancestor' registered.
+> ?- ancestor(A, D).
+6 rows:
+  ("Alice", "Bob")
+  ("Alice", "Carol")
+  ("Alice", "Dave")
+  ("Alice", "Eve")
+  ("Bob", "Dave")
+  ("Carol", "Eve")
+> +eve_ancestors(<COUNT:A>) :- ancestor(A, "Eve").
+Script error: Parse error: Invalid term: '<COUNT:A>'

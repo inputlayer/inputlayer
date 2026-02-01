@@ -1,0 +1,18 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single
+Knowledge graph 'test_single' created.
+Switched to knowledge graph: test_single
+> .kg use test_single
+Switched to knowledge graph: test_single
+> +single[(42, "answer")].
+Inserted 1 fact(s) into 'single'.
+> ?- single(X, Y).
+1 rows:
+  (42, "answer")
+> +one_sum(<SUM:X>) :- single(X, _).
+Script error: Parse error: Invalid term: '<SUM:X>'

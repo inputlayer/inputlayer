@@ -1,0 +1,43 @@
+% Test: Complete Relation Operations
+% Category: 39_meta_complete
+% Description: Tests relation list, info, and query operations
+
+.kg create test_rel_ops
+.kg use test_rel_ops
+
+% Create several relations with different types
++users[("alice", 25), ("bob", 30), ("carol", 28)].
++products[(1, "Widget", 9.99), (2, "Gadget", 19.99)].
++orders[(1, "alice", 1, 2), (2, "bob", 2, 1)].
+
+% List all relations
+.rel
+
+% Get info on specific relation
+.rel users
+
+% Get info on another relation
+.rel products
+
+% Get info on relation with more columns
+.rel orders
+
+% Show relation data via query
+?- users(Name, Age).
+?- products(Id, Name, Price).
+
+% Insert more data
++categories[(1, "Electronics"), (2, "Home")].
+
+% List relations again (should show new relation)
+.rel
+
+% Get info on the new relation
+.rel categories
+
+% Try to get info on non-existent relation
+.rel nonexistent
+
+% Cleanup
+.kg use default
+.kg drop test_rel_ops

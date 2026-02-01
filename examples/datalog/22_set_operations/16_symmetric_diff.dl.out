@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sym_diff
+Knowledge graph 'test_sym_diff' created.
+Switched to knowledge graph: test_sym_diff
+> .kg use test_sym_diff
+Switched to knowledge graph: test_sym_diff
+> +set_a[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(2,), (3,), (4,)].
+Inserted 3 fact(s) into 'set_b'.
+> only_a(X) :- set_a(X), !set_b(X).
+1 rows:
+  (1)
+(session: 1 rule(s))
+> only_b(X) :- set_b(X), !set_a(X).
+1 rows:
+  (4)
+(session: 2 rule(s))
+> ?- only_a(X).
+1 rows:
+  (1)
+> ?- only_b(X).
+1 rows:
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_sym_diff
+Knowledge graph 'test_sym_diff' dropped.

@@ -1,0 +1,21 @@
+% Test: Boolean filter
+% Expected: Filter by boolean values
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_bool_filter
+.kg use test_bool_filter
+
++features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)].
+
+% Enabled features
+enabled(Id, Name) :- features(Id, Name, true).
+
+% Disabled features
+disabled(Id, Name) :- features(Id, Name, false).
+
+?- enabled(Id, N).
+?- disabled(Id, N).
+
+.kg use default
+.kg drop test_bool_filter

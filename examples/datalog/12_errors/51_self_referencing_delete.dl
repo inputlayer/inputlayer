@@ -1,0 +1,19 @@
+% Test: Delete referencing self
+% Expected: Handle deletion correctly
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_self_del
+.kg use test_self_del
+
++items[(1, 100), (2, 200), (3, 300)].
+
+?- items(Id, Val).
+
+% Delete items where value > 150
+-items(Id, Val) :- items(Id, Val), Val > 150.
+
+?- items(Id, Val).
+
+.kg use default
+.kg drop test_self_del

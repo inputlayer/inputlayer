@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_key
+Knowledge graph 'test_multi_key' created.
+Switched to knowledge graph: test_multi_key
+> .kg use test_multi_key
+Switched to knowledge graph: test_multi_key
+> +table_a[(1, "x", "A"), (1, "y", "B"), (2, "x", "C")].
+Inserted 3 fact(s) into 'table_a'.
+> +table_b[(1, "x", 100), (1, "y", 200), (3, "z", 300)].
+Inserted 3 fact(s) into 'table_b'.
+> +joined(K1, K2, ValA, ValB) :- table_a(K1, K2, ValA), table_b(K1, K2, ValB).
+Rule 'joined' registered.
+> ?- joined(K1, K2, A, B).
+2 rows:
+  (1, "x", 100, "A")
+  (1, "y", 200, "B")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_key
+Knowledge graph 'test_multi_key' dropped.

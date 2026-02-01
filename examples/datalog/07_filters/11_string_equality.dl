@@ -1,0 +1,17 @@
+% Test: String equality filter
+% Expected: Exact string match
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_str_eq
+.kg use test_str_eq
+
++items[(1, "active"), (2, "inactive"), (3, "active"), (4, "pending")].
+
+% Filter for active items
+active_items(Id) :- items(Id, "active").
+
+?- active_items(Id).
+
+.kg use default
+.kg drop test_str_eq

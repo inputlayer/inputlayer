@@ -1,0 +1,25 @@
+% Test: Bulk insert and delete operations
+% Expected: Bulk operations work correctly
+% Category: 02_relations
+% Priority: P1 - Data operations
+
+.kg create test_bulk_ops
+.kg use test_bulk_ops
+
+% Bulk insert
++items[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")].
+
+?- items(Id, Val).
+
+% Delete specific items
+-items[(2, "b"), (4, "d")].
+
+?- items(Id, Val).
+
+% Insert more
++items[(6, "f"), (7, "g")].
+
+?- items(Id, Val).
+
+.kg use default
+.kg drop test_bulk_ops

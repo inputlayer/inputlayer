@@ -1,0 +1,24 @@
+% Test: Symmetric relation patterns
+% Expected: Can model symmetric relations
+% Category: 10_edge_cases
+% Priority: P1 - Edge cases
+
+.kg create test_symmetric
+.kg use test_symmetric
+
+% Friend relation (symmetric)
++friends[(1, 2), (2, 3), (1, 4)].
+
+% Make it symmetric
++symmetric_friends(X, Y) :- friends(X, Y).
++symmetric_friends(Y, X) :- friends(X, Y).
+
+?- symmetric_friends(X, Y).
+
+% Count unique friendships (avoid double counting)
+unique_friends(X, Y) :- symmetric_friends(X, Y), X < Y.
+
+?- unique_friends(X, Y).
+
+.kg use default
+.kg drop test_symmetric

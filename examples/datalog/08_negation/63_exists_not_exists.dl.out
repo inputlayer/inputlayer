@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_exists
+Knowledge graph 'test_exists' created.
+Switched to knowledge graph: test_exists
+> .kg use test_exists
+Switched to knowledge graph: test_exists
+> +customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
+Inserted 3 fact(s) into 'customers'.
+> +orders[(101, 1), (102, 1), (103, 2)].
+Inserted 3 fact(s) into 'orders'.
+> +has_orders(CustId, Name) :- customers(CustId, Name), orders(_, CustId).
+Rule 'has_orders' registered.
+> +no_orders(CustId, Name) :- customers(CustId, Name), !orders(_, CustId).
+Rule 'no_orders' registered.
+> ?- has_orders(Id, Name).
+2 rows:
+  (1, "Alice")
+  (2, "Bob")
+> ?- no_orders(Id, Name).
+1 rows:
+  (3, "Carol")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_exists
+Knowledge graph 'test_exists' dropped.

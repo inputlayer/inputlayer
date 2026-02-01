@@ -1,0 +1,22 @@
+% Test: Variable compared to expression
+% Expected: Filter on computed value
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_var_expr
+.kg use test_var_expr
+
++items[(1, 10, 5), (2, 20, 15), (3, 30, 25)].
+
+% Filter: Val > Threshold
+above_threshold(Id, Val, Threshold) :- items(Id, Val, Threshold), Val > Threshold.
+
+?- above_threshold(Id, Val, Threshold).
+
+% Filter: computed comparison
+computed_filter(Id, Val) :- items(Id, Val, _), Val > 10 + 5.
+
+?- computed_filter(Id, Val).
+
+.kg use default
+.kg drop test_var_expr

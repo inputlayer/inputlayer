@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_running
+Knowledge graph 'test_running' created.
+Switched to knowledge graph: test_running
+> .kg use test_running
+Switched to knowledge graph: test_running
+> +ordered_vals[(1, 10), (2, 20), (3, 30), (4, 40)].
+Inserted 4 fact(s) into 'ordered_vals'.
+> +running_sum(Id, <SUM:Val>) :- ordered_vals(I, Val), I <= Id, ordered_vals(Id, _).
+Script error: Parse error: Invalid term: '<SUM:Val>'

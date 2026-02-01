@@ -1,0 +1,21 @@
+% Test: Min and Max aggregations
+% Expected: Correct minimum and maximum values
+% Category: 14_aggregations
+% Priority: P1 - Aggregation completeness
+
+.kg create test_min_max
+.kg use test_min_max
+
+% Sample data with various values
++scores[(1, 85), (1, 92), (1, 78), (2, 95), (2, 88), (3, 70)].
+
+% Find minimum score per group
++min_score(Group, min<Score>) :- scores(Group, Score).
+?- min_score(G, S).
+
+% Find maximum score per group
++max_score(Group, max<Score>) :- scores(Group, Score).
+?- max_score(G, S).
+
+.kg use default
+.kg drop test_min_max

@@ -1,0 +1,18 @@
+% Test: Semi-join pattern
+% Expected: Return left side if match exists
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_semi
+.kg use test_semi
+
++customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++orders[(1, 100), (1, 150), (3, 200)].
+
+% Semi-join: customers who have orders
+has_orders(CustId, Name) :- customers(CustId, Name), orders(CustId, _).
+
+?- has_orders(CustId, Name).
+
+.kg use default
+.kg drop test_semi

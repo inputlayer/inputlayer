@@ -1,0 +1,16 @@
+% Test: Scientific notation floats
+% Expected: Handle large/small floats
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_sci
+.kg use test_sci
+
++large[(1000000.0,), (2500000.0,)].
++small[(0.001,), (0.0025,)].
+
+?- large(V).
+?- small(V).
+
+.kg use default
+.kg drop test_sci

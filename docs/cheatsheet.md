@@ -38,7 +38,8 @@ Meta commands start with `.` and control the system:
 .rule                List persistent rules
 .rule <name>         Query rule (show computed data)
 .rule def <name>     Show rule definition
-.rule drop <name>    Drop rule
+.rule drop <name>    Drop all clauses of a rule
+.rule remove <name> <n>  Remove clause #n from rule (1-based)
 .rule clear <name>   Clear all clauses for re-registration
 
 .session             List session rules

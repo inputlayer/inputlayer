@@ -345,6 +345,17 @@ impl IRBuilder {
                     _ => continue,
                 };
 
+                // Validate argument count
+                let expected_arity = func.arity();
+                if args.len() != expected_arity {
+                    return Err(format!(
+                        "Function '{}' requires {} argument(s), but {} provided",
+                        func.as_str(),
+                        expected_arity,
+                        args.len()
+                    ));
+                }
+
                 // Convert AST function to IR function
                 let ir_func = Self::ast_func_to_ir_func(func)?;
 
@@ -439,6 +450,16 @@ impl IRBuilder {
                 Ok(IRExpression::VectorLiteral(v32))
             }
             Term::FunctionCall(func, args) => {
+                // Validate argument count
+                let expected_arity = func.arity();
+                if args.len() != expected_arity {
+                    return Err(format!(
+                        "Function '{}' requires {} argument(s), but {} provided",
+                        func.as_str(),
+                        expected_arity,
+                        args.len()
+                    ));
+                }
                 let ir_func = Self::ast_func_to_ir_func(func)?;
                 let ir_args: Vec<IRExpression> = args
                     .iter()

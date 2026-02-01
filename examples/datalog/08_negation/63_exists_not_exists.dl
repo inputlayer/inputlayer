@@ -1,0 +1,22 @@
+% Test: Exists/not-exists patterns
+% Expected: Check existence of related records
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_exists
+.kg use test_exists
+
++customers[(1, "Alice"), (2, "Bob"), (3, "Carol")].
++orders[(101, 1), (102, 1), (103, 2)].
+
+% Customers who have orders (exists)
++has_orders(CustId, Name) :- customers(CustId, Name), orders(_, CustId).
+
+% Customers who have no orders (not exists)
++no_orders(CustId, Name) :- customers(CustId, Name), !orders(_, CustId).
+
+?- has_orders(Id, Name).
+?- no_orders(Id, Name).
+
+.kg use default
+.kg drop test_exists

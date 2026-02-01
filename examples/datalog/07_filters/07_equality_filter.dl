@@ -1,0 +1,21 @@
+% Test: Equality filter
+% Expected: Filter by exact value match
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_eq_filter
+.kg use test_eq_filter
+
++items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 100)].
+
+% Filter by category
+category_a(Id, Price) :- items(Id, "A", Price).
+
+% Filter by exact price
+price_100(Id, Cat) :- items(Id, Cat, 100).
+
+?- category_a(Id, Price).
+?- price_100(Id, Cat).
+
+.kg use default
+.kg drop test_eq_filter

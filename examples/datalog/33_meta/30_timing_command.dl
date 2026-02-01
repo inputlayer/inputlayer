@@ -1,0 +1,18 @@
+% Test: Timing meta command
+% Expected: Show query timing information
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_timing
+.kg use test_timing
+
++data[(1,), (2,), (3,), (4,), (5,)].
+
+.timing on
+
+?- data(X).
+
+.timing off
+
+.kg use default
+.kg drop test_timing

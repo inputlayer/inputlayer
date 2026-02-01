@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_const_cmp
+Knowledge graph 'test_const_cmp' created.
+Switched to knowledge graph: test_const_cmp
+> .kg use test_const_cmp
+Switched to knowledge graph: test_const_cmp
+> +data[(1, "a"), (2, "b"), (3, "c")].
+Inserted 3 fact(s) into 'data'.
+> always_true(X, V) :- data(X, V), 5 > 3.
+Script error: Query execution failed: Unsupported comparison: Constant(5) GreaterThan Constant(3)

@@ -1,0 +1,19 @@
+% Test: Large integer values
+% Expected: Handle large numbers correctly
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_large_int
+.kg use test_large_int
+
++big_nums[(1000000,), (999999999,), (123456789,)].
+
+?- big_nums(N).
+
+% Arithmetic with large numbers
+computed(N, R) :- big_nums(N), R = N + 1.
+
+?- computed(N, R).
+
+.kg use default
+.kg drop test_large_int

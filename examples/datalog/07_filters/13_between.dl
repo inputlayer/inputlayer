@@ -1,0 +1,17 @@
+% Test: Between range filter
+% Expected: Filter values in range
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_between
+.kg use test_between
+
++ages[(1, 15), (2, 25), (3, 35), (4, 45), (5, 55)].
+
+% Ages between 20 and 40
+young_adult(Id, Age) :- ages(Id, Age), Age >= 20, Age <= 40.
+
+?- young_adult(Id, Age).
+
+.kg use default
+.kg drop test_between

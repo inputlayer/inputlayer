@@ -1,0 +1,21 @@
+% Test: Group by with having filter
+% Expected: Filter groups after aggregation
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_having
+.kg use test_having
+
++orders[(1, "Alice", 100), (2, "Bob", 50), (3, "Alice", 150), (4, "Bob", 30), (5, "Carol", 200)].
+
+% Sum by customer
++customer_total(Customer, <SUM:Amount>) :- orders(_, Customer, Amount).
+
+% Filter customers with total > 100
+high_value(Customer, Total) :- customer_total(Customer, Total), Total > 100.
+
+?- customer_total(Customer, Total).
+?- high_value(Customer, Total).
+
+.kg use default
+.kg drop test_having

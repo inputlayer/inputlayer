@@ -1,0 +1,15 @@
+% Test: Invalid aggregation syntax
+% Expected: Parse error
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_inv_agg
+.kg use test_inv_agg
+
++data[(1,), (2,), (3,)].
+
+% Invalid aggregation name
+bad(X, <INVALID:Y>) :- data(Y).
+
+.kg use default
+.kg drop test_inv_agg

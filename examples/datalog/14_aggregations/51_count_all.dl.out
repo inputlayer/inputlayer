@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_all
+Knowledge graph 'test_count_all' created.
+Switched to knowledge graph: test_count_all
+> .kg use test_count_all
+Switched to knowledge graph: test_count_all
+> +items[(1, "a"), (2, "b"), (3, "c"), (4, "d")].
+Inserted 4 fact(s) into 'items'.
+> total_count(<COUNT:Id>) :- items(Id, _).
+Script error: Parse error: Unknown aggregate function: 

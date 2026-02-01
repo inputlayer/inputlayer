@@ -1,0 +1,21 @@
+% Test: Union of multiple relations
+% Expected: Multiple sources can be combined
+% Category: 22_set_operations
+% Priority: P1 - Set operations
+
+.kg create test_multi_union
+.kg use test_multi_union
+
++source_a[(1,), (2,), (3,)].
++source_b[(3,), (4,), (5,)].
++source_c[(5,), (6,), (7,)].
+
+% Union all three sources
++combined(X) :- source_a(X).
++combined(X) :- source_b(X).
++combined(X) :- source_c(X).
+
+?- combined(X).
+
+.kg use default
+.kg drop test_multi_union

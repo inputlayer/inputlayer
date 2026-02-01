@@ -1,0 +1,17 @@
+% Test: Modulo by zero
+% Expected: Error on modulo zero
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_mod_zero
+.kg use test_mod_zero
+
++nums[(10,), (0,)].
+
+% This should error when X=0
+result(X, Y) :- nums(X), Y = 100 % X.
+
+?- result(X, Y).
+
+.kg use default
+.kg drop test_mod_zero

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_char
+Knowledge graph 'test_single_char' created.
+Switched to knowledge graph: test_single_char
+> .kg use test_single_char
+Switched to knowledge graph: test_single_char
+> +chars[("a",), ("b",), ("1",), ("@",)].
+Inserted 4 fact(s) into 'chars'.
+> ?- chars(C).
+4 rows:
+  ("1")
+  ("@")
+  ("a")
+  ("b")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_single_char
+Knowledge graph 'test_single_char' dropped.

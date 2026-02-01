@@ -1,0 +1,15 @@
+% Test: Rule body references undefined relation
+% Expected: Error for undefined relation
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_missing_body
+.kg use test_missing_body
+
+% Rule body has undefined relation
+derived(X) :- undefined_source(X).
+
+?- derived(X).
+
+.kg use default
+.kg drop test_missing_body

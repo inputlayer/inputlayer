@@ -1,0 +1,21 @@
+% Test: Non-equi join
+% Expected: Join on inequality
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_non_equi
+.kg use test_non_equi
+
++items[(1, 100), (2, 200), (3, 150)].
++thresholds[(1, 120, "low"), (2, 180, "medium")].
+
+% Items below each threshold
++below_threshold(ItemId, Price, Label) :-
+    items(ItemId, Price),
+    thresholds(_, Thresh, Label),
+    Price < Thresh.
+
+?- below_threshold(I, P, L).
+
+.kg use default
+.kg drop test_non_equi

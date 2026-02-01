@@ -1,0 +1,16 @@
+% Test: Explain meta command
+% Expected: Show query execution plan
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.kg create test_explain
+.kg use test_explain
+
++data[(1, "a"), (2, "b")].
+
+derived(X, Y) :- data(X, Y).
+
+.explain derived
+
+.kg use default
+.kg drop test_explain

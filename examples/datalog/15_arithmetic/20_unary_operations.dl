@@ -1,0 +1,22 @@
+% Test: Unary minus and double negative
+% Expected: Unary operations work correctly
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_unary
+.kg use test_unary
+
++nums[(5,), (10,), (-3,)].
+
+% Negate values
+negated(X, Y) :- nums(X), Y = 0 - X.
+
+?- negated(X, Y).
+
+% Double negative via subtraction
+double_neg(X, Y) :- nums(X), Y = 0 - (0 - X).
+
+?- double_neg(X, Y).
+
+.kg use default
+.kg drop test_unary

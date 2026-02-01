@@ -1,0 +1,17 @@
+% Test: String ends with check
+% Expected: Filter strings by suffix
+% Category: 31_strings
+% Priority: P2 - String functions
+
+.kg create test_ends
+.kg use test_ends
+
++files[("test.txt",), ("data.csv",), ("report.txt",), ("image.png",)].
+
+% Find files ending with ".txt"
+txt_files(F) :- files(F), ENDS_WITH(F, ".txt").
+
+?- txt_files(F).
+
+.kg use default
+.kg drop test_ends

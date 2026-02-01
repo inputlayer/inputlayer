@@ -30,25 +30,19 @@ Inserted 1 fact(s) into 'entry'.
   (5, 1)
   (6, 3)
 > -entry(Id, Type) :- entry(Id, Type), Type = 2.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'entry'.
 > ?- entry(Id, Type).
-6 rows:
+4 rows:
   (1, 1)
-  (2, 2)
   (3, 1)
-  (4, 2)
   (5, 1)
   (6, 3)
 > -entry(Id, Type) :- entry(Id, Type), Id > 4.
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'entry'.
 > ?- entry(Id, Type).
-6 rows:
+2 rows:
   (1, 1)
-  (2, 2)
   (3, 1)
-  (4, 2)
-  (5, 1)
-  (6, 3)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop bulk_delete_test

@@ -1,0 +1,21 @@
+% Test: Nested aggregation pattern
+% Expected: Aggregation over aggregation results
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_nested_agg
+.kg use test_nested_agg
+
++sales[(1, "North", "Q1", 100), (2, "North", "Q2", 150), (3, "South", "Q1", 200), (4, "South", "Q2", 250)].
+
+% First level: sum by region
++regional_sum(Region, <SUM:Amount>) :- sales(_, Region, _, Amount).
+
+% Second level: average of regional sums
++avg_regional(<AVG:Sum>) :- regional_sum(_, Sum).
+
+?- regional_sum(Region, Sum).
+?- avg_regional(Avg).
+
+.kg use default
+.kg drop test_nested_agg

@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_join
+Knowledge graph 'test_count_join' created.
+Switched to knowledge graph: test_count_join
+> .kg use test_count_join
+Switched to knowledge graph: test_count_join
+> +orders[(1, "Alice"), (2, "Bob"), (3, "Alice"), (4, "Carol")].
+Inserted 4 fact(s) into 'orders'.
+> +vip[("Alice",), ("Bob",)].
+Inserted 2 fact(s) into 'vip'.
+> vip_order_count(<COUNT:OId>) :- orders(OId, Name), vip(Name).
+Script error: Parse error: Unknown aggregate function: 

@@ -1,0 +1,19 @@
+% Test: Boolean as key
+% Expected: Boolean values work as keys
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_bool_key
+.kg use test_bool_key
+
++flags[(true, "yes"), (false, "no")].
+
+?- flags(Key, Val).
+
+% Filter true only
+true_only(Val) :- flags(true, Val).
+
+?- true_only(Val).
+
+.kg use default
+.kg drop test_bool_key

@@ -1,0 +1,27 @@
+% Test: Knowledge graph rule isolation
+% Expected: Rules in one KG are isolated from another
+% Category: 01_knowledge_graph
+% Priority: P1 - KG isolation
+
+.kg create test_rule_iso_a
+.kg use test_rule_iso_a
+
+% Add data and rule to first KG
++items[(1,), (2,), (3,)].
++doubled(X, Y) :- items(X), Y = X * 2.
+?- doubled(X, Y).
+
+% Create and switch to second KG
+.kg create test_rule_iso_b
+.kg use test_rule_iso_b
+
+% Rule should not exist here
+.rule
+
+% Query should fail (relation/rule not in this KG)
++items[(100,)].
+?- doubled(X, Y).
+
+.kg use default
+.kg drop test_rule_iso_a
+.kg drop test_rule_iso_b

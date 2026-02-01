@@ -178,13 +178,15 @@ fn test_load_missing_config_file() {
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(temp.path()).unwrap();
 
-    // Should succeed but use defaults when no config file exists
+    // Config::load() returns an error when no config file exists
+    // (it doesn't have built-in defaults, so at least one config source is required)
     let result = Config::load();
 
     env::set_current_dir(original_dir).unwrap();
 
-    // Config::load() should still work with defaults
-    assert!(result.is_ok() || result.is_err()); // Either way is acceptable
+    // Config::load() requires at least one config source - returns error if missing
+    // Use Config::default() if you need defaults without a config file
+    assert!(result.is_err(), "Config::load() should return error when no config file exists");
 }
 
 // ============================================================================
@@ -318,7 +320,9 @@ fn test_persistence_config_fields() {
     // Verify format and compression exist (enums always have a value)
     let _ = format!("{:?}", persistence.format);
     let _ = format!("{:?}", persistence.compression);
-    assert!(persistence.auto_save_interval >= 0);
+    // auto_save_interval is u64 (0 = manual save only, by design)
+    // The important verification is that it exists and has a valid value
+    assert_eq!(persistence.auto_save_interval, 0, "Default should be manual save (0)");
 }
 
 #[test]
@@ -328,7 +332,8 @@ fn test_performance_config_fields() {
 
     assert!(performance.initial_capacity > 0);
     assert!(performance.batch_size > 0);
-    assert!(performance.num_threads >= 0);
+    // num_threads is usize (0 = use all available CPU cores, by design)
+    assert_eq!(performance.num_threads, 0, "Default should be 0 (use all cores)");
 }
 
 // ============================================================================

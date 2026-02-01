@@ -84,7 +84,9 @@ impl Wal {
                 .open(&self.current_file)?;
             self.writer = Some(BufWriter::new(file));
         }
-        Ok(self.writer.as_mut().unwrap())
+        self.writer
+            .as_mut()
+            .ok_or_else(|| StorageError::Other("WAL writer not initialized".into()))
     }
 
     /// Append an entry to the WAL
@@ -96,7 +98,9 @@ impl Wal {
             .map_err(|e| StorageError::Other(format!("WAL serialization failed: {}", e)))?;
 
         writeln!(writer, "{}", json)?;
-        writer.flush()?; // Ensure durability
+        writer.flush()?; // Flush buffers to OS
+        // Ensure data is durably written to disk
+        writer.get_ref().sync_all()?;
 
         self.entries_since_compaction += 1;
 
@@ -111,7 +115,7 @@ impl Wal {
             tuples,
             ts: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis() as u64,
         };
         self.append(entry)
@@ -125,7 +129,7 @@ impl Wal {
             tuples,
             ts: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis() as u64,
         };
         self.append(entry)
@@ -166,7 +170,7 @@ impl Wal {
                 "wal_{}.archived",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs()
             );
             let archive_path = self.wal_dir.join(archive_name);

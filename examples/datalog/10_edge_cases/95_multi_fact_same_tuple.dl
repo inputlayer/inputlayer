@@ -1,0 +1,20 @@
+% Test: Insert same tuple multiple times
+% Expected: Deduplication
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_dup_insert
+.kg use test_dup_insert
+
++data[(1, "a")].
++data[(1, "a")].
++data[(1, "a")].
++data[(2, "b")].
+
+count_rows(<COUNT:X>) :- data(X, _).
+
+?- count_rows(N).
+?- data(X, Y).
+
+.kg use default
+.kg drop test_dup_insert

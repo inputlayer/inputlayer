@@ -1,0 +1,17 @@
+% Test: Computation directly in query
+% Expected: Compute and return result
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_query_comp
+.kg use test_query_comp
+
++nums[(1,), (2,), (3,)].
+
+% Rule with computation
+doubled(X, Y) :- nums(X), Y = X * 2.
+
+?- doubled(X, Y).
+
+.kg use default
+.kg drop test_query_comp

@@ -1,0 +1,21 @@
+% Test: Boolean true and false
+% Expected: Both boolean values work
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_true_false
+.kg use test_true_false
+
++flags[(1, true), (2, false), (3, true)].
+
+% Filter by true
+is_true(Id) :- flags(Id, true).
+
+% Filter by false
+is_false(Id) :- flags(Id, false).
+
+?- is_true(Id).
+?- is_false(Id).
+
+.kg use default
+.kg drop test_true_false

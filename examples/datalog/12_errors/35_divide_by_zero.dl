@@ -1,0 +1,17 @@
+% Test: Division by zero error
+% Expected: Error on divide by zero
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_div_zero
+.kg use test_div_zero
+
++nums[(10,), (0,)].
+
+% This should error when X=0
+result(X, Y) :- nums(X), Y = 100 / X.
+
+?- result(X, Y).
+
+.kg use default
+.kg drop test_div_zero

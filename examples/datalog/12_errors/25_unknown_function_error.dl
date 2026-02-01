@@ -1,0 +1,15 @@
+% Test: Unknown function name error
+% Expected: Error - unknown function 'nonexistent_func'
+% Category: 12_errors
+% Priority: P0 Critical - Function validation
+
+.kg create test_unknown_func
+.kg use test_unknown_func
+
++values[(1, 2), (3, 4)].
+
+% Call a function that doesn't exist - should error
+?- values(X, Y), Z = nonexistent_func(X, Y).
+
+.kg use default
+.kg drop test_unknown_func

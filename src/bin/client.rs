@@ -999,6 +999,49 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("This command is not yet implemented over HTTP.");
         }
 
+        MetaCommand::RuleRemove { name, index } => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            // Server expects 1-based index, but we already converted to 0-based in parsing
+            // So convert back to 1-based for the API
+            let one_based_index = index + 1;
+            let url = state.http.api_url(&format!(
+                "/knowledge-graphs/{}/rules/{}/{}",
+                db, name, one_based_index
+            ));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{}", e))?;
+
+            if !resp.status().is_success() {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                let err_msg = body
+                    .get("error")
+                    .and_then(|e| {
+                        // Try as object with message field first, then as string
+                        e.get("message")
+                            .and_then(|m| m.as_str())
+                            .or_else(|| e.as_str())
+                    })
+                    .unwrap_or("Unknown error");
+                return Err(err_msg.to_string());
+            }
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            if let Some(data) = body.get("data") {
+                if let Some(msg) = data.get("message").and_then(|m| m.as_str()) {
+                    println!("{}", msg);
+                }
+            } else {
+                println!("Clause {} removed from rule '{}'.", one_based_index, name);
+            }
+        }
+
         MetaCommand::Load { path, .. } => {
             println!("Loading file: {}", path);
             execute_script(state, &path).await?;
@@ -1145,9 +1188,27 @@ async fn handle_delete(
                 data.rows_deleted, op.relation
             );
         }
-        DeletePattern::Conditional { .. } => {
-            // Conditional deletes need special handling - for now, execute as query
-            println!("Conditional delete not yet supported over HTTP. Use query API.");
+        DeletePattern::Conditional { head_args, body } => {
+            // Format head arguments
+            let head_str: String = head_args.iter().map(format_term).collect::<Vec<_>>().join(", ");
+
+            // Format body predicates
+            let body_str: String = body.iter().map(format_body_pred).collect::<Vec<_>>().join(", ");
+
+            // Build the conditional delete statement
+            let delete_stmt = format!("-{}({}) :- {}.", op.relation, head_str, body_str);
+
+            // Send through query API
+            let response = execute_query(state, delete_stmt).await?;
+
+            // Print the result messages (rows contain message strings)
+            for row in &response.rows {
+                if let Some(msg) = row.first() {
+                    if let Some(s) = msg.as_str() {
+                        println!("{}", s);
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -1207,16 +1268,27 @@ async fn handle_session_rule(
     rule: inputlayer::ast::Rule,
 ) -> Result<(), String> {
     let head_relation = rule.head.relation.clone();
+    let head_arity = rule.head.args.len();
     state.session_rules.push(rule);
+
+    // Generate variables matching the rule's actual head arity
+    let var_names = ["X", "Y", "Z", "W", "V", "U", "T", "S", "R", "Q"];
+    let args: Vec<Term> = (0..head_arity)
+        .map(|i| {
+            let name = if i < var_names.len() {
+                var_names[i].to_string()
+            } else {
+                format!("V{}", i)
+            };
+            Term::Variable(name)
+        })
+        .collect();
 
     // Execute query to show results
     let goal = inputlayer::statement::QueryGoal {
         goal: inputlayer::ast::Atom {
             relation: head_relation.clone(),
-            args: vec![
-                Term::Variable("X".to_string()),
-                Term::Variable("Y".to_string()),
-            ],
+            args,
         },
         body: vec![],
     };
@@ -1587,7 +1659,8 @@ fn print_help() {
     println!("  .rel <name>          Describe relation");
     println!("  .rule                List rules");
     println!("  .rule <name>         Query rule");
-    println!("  .rule drop <name>    Drop rule");
+    println!("  .rule drop <name>    Drop all clauses of a rule");
+    println!("  .rule remove <name> <n>  Remove clause n from rule (1-based)");
     println!("  .session             List session rules");
     println!("  .session clear       Clear session rules");
     println!("  .status              Server status");

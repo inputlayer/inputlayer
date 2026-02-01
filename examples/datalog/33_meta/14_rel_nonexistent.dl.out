@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_noexist
+Knowledge graph 'test_rel_noexist' created.
+Switched to knowledge graph: test_rel_noexist
+> .kg use test_rel_noexist
+Switched to knowledge graph: test_rel_noexist
+> .rel nonexistent_relation
+Script error: Relation 'nonexistent_relation' not found

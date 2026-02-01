@@ -1,0 +1,22 @@
+% Test: Denormalized data pattern
+% Expected: Work with redundant data
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_denorm
+.kg use test_denorm
+
++orders[(1, "Alice", "alice@email.com", 100), (2, "Alice", "alice@email.com", 150), (3, "Bob", "bob@email.com", 200)].
+
+% Extract unique customers from denormalized data
++unique_customers(Name, <MIN:Email>) :- orders(_, Name, Email, _).
+
+?- unique_customers(Name, Email).
+
+% Sum by customer from denormalized
++customer_totals(Name, <SUM:Amount>) :- orders(_, Name, _, Amount).
+
+?- customer_totals(Name, Total).
+
+.kg use default
+.kg drop test_denorm

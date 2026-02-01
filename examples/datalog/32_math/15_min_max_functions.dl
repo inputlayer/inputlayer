@@ -1,0 +1,18 @@
+% Test: Min/Max math functions
+% Expected: Compute min/max of two values
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_minmax_fn
+.kg use test_minmax_fn
+
++pairs[(10, 20), (30, 15), (5, 5), (100, 50)].
+
+min_of_pair(A, B, M) :- pairs(A, B), M = MIN(A, B).
+max_of_pair(A, B, M) :- pairs(A, B), M = MAX(A, B).
+
+?- min_of_pair(A, B, M).
+?- max_of_pair(A, B, M).
+
+.kg use default
+.kg drop test_minmax_fn

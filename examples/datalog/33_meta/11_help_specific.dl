@@ -1,0 +1,6 @@
+% Test: .help with specific command
+% Expected: Show help for specific command
+% Category: 33_meta
+% Priority: P2 - Meta commands
+
+.help kg

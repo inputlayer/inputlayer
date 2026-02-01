@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ineq_join
+Knowledge graph 'test_ineq_join' created.
+Switched to knowledge graph: test_ineq_join
+> .kg use test_ineq_join
+Switched to knowledge graph: test_ineq_join
+> +employees[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Carol", 45000)].
+Inserted 3 fact(s) into 'employees'.
+> +salary_grades[(1, 0, 40000), (2, 40001, 55000), (3, 55001, 100000)].
+Inserted 3 fact(s) into 'salary_grades'.
+> +emp_grade(Name, Salary, Grade) :- employees(_, Name, Salary), salary_grades(Grade, MinSal, MaxSal), Salary >= MinSal, Salary <= MaxSal.
+Rule 'emp_grade' registered.
+> ?- emp_grade(N, S, G).
+3 rows:
+  ("Alice", 50000, 2)
+  ("Bob", 60000, 3)
+  ("Carol", 45000, 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ineq_join
+Knowledge graph 'test_ineq_join' dropped.

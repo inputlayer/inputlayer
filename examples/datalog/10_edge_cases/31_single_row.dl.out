@@ -1,0 +1,18 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_row
+Knowledge graph 'test_single_row' created.
+Switched to knowledge graph: test_single_row
+> .kg use test_single_row
+Switched to knowledge graph: test_single_row
+> +single[(1, "only")].
+Inserted 1 fact(s) into 'single'.
+> ?- single(Id, Val).
+1 rows:
+  (1, "only")
+> +single_count(<COUNT:V>) :- single(_, V).
+Script error: Parse error: Invalid term: '<COUNT:V>'

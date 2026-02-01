@@ -1,0 +1,22 @@
+% Test: Graph bipartite-like pattern
+% Expected: Group nodes by property
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_bipartite
+.kg use test_bipartite
+
++nodes[(1, "typeA"), (2, "typeB"), (3, "typeA"), (4, "typeB")].
++edges[(1, 2), (2, 3), (3, 4)].
+
+% Edges between same type
+same_type_edge(A, B) :-
+    edges(A, B),
+    nodes(A, TypeA),
+    nodes(B, TypeB),
+    TypeA = TypeB.
+
+?- same_type_edge(A, B).
+
+.kg use default
+.kg drop test_bipartite

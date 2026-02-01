@@ -1,0 +1,26 @@
+% Test: Float and integer mixing in arithmetic
+% Expected: Mixed arithmetic works correctly
+% Category: 15_arithmetic
+% Priority: P1 - Arithmetic operations
+
+.kg create test_float_int
+.kg use test_float_int
+
+% Integer data
++ints[(1,), (2,), (3,)].
+
+% Float data
++floats[(1.5,), (2.5,), (3.5,)].
+
+% Integer to float conversion via arithmetic
+int_to_float(X, Y) :- ints(X), Y = X * 1.0.
+
+?- int_to_float(X, Y).
+
+% Float plus integer (conceptually)
+float_plus_one(X, Y) :- floats(X), Y = X + 1.
+
+?- float_plus_one(X, Y).
+
+.kg use default
+.kg drop test_float_int

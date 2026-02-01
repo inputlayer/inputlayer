@@ -1,0 +1,20 @@
+% Test: Float precision handling
+% Expected: Handle floating point values correctly
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_float_prec
+.kg use test_float_prec
+
++values[(1.1,), (2.22,), (3.333,), (0.1,), (0.01,)].
+
+% Query floats
+?- values(V).
+
+% Arithmetic with floats
+computed(V, R) :- values(V), R = V * 2.0.
+
+?- computed(V, R).
+
+.kg use default
+.kg drop test_float_prec

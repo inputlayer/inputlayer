@@ -1,0 +1,14 @@
+% Test: Special characters in strings
+% Expected: Handle various special characters
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_special
+.kg use test_special
+
++text[("hello@world.com",), ("path/to/file",), ("a+b=c",), ("100%",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_special

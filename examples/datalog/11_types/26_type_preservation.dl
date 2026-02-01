@@ -1,0 +1,28 @@
+% Test: Type preservation in operations
+% Expected: Types maintained through rules
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_type_pres
+.kg use test_type_pres
+
++mixed[(1, "text", 3.14, true)].
+
+% Pass through rule
+pass_through(A, B, C, D) :- mixed(A, B, C, D).
+
+?- pass_through(A, B, C, D).
+
+% Each type in separate rule
+int_only(X) :- mixed(X, _, _, _).
+str_only(X) :- mixed(_, X, _, _).
+float_only(X) :- mixed(_, _, X, _).
+bool_only(X) :- mixed(_, _, _, X).
+
+?- int_only(X).
+?- str_only(X).
+?- float_only(X).
+?- bool_only(X).
+
+.kg use default
+.kg drop test_type_pres

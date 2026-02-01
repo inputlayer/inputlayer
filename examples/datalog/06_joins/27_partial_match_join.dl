@@ -1,0 +1,20 @@
+% Test: Join with partial key overlap
+% Expected: Join on subset of columns
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_partial
+.kg use test_partial
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)].
++customers[("Alice", "VIP"), ("Bob", "Regular"), ("Carol", "New")].
+
+% Join on name only, bringing in customer info
+enriched(OrdId, Name, Amount, Status) :-
+    orders(OrdId, Name, Amount),
+    customers(Name, Status).
+
+?- enriched(OrdId, Name, Amount, Status).
+
+.kg use default
+.kg drop test_partial

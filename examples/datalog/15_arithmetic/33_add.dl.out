@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_add
+Knowledge graph 'test_add' created.
+Switched to knowledge graph: test_add
+> .kg use test_add
+Switched to knowledge graph: test_add
+> +pairs[(10, 5), (20, 30), (7, 3)].
+Inserted 3 fact(s) into 'pairs'.
+> sum_pair(A, B, Result) :- pairs(A, B), Result = A + B.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "sum_pair", args: [Variable("A"), Variable("B"), Variable("Result")] }. Variables ["Result"] in head do not appear in positive body atoms.

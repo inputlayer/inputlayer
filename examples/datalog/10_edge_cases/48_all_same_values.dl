@@ -1,0 +1,26 @@
+% Test: All same values edge case
+% Expected: Relations with identical values
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_all_same
+.kg use test_all_same
+
++same[(5,), (5,), (5,)].
+
+?- same(X).
+
+% Distinct should be 1
++distinct_count(<COUNT_DISTINCT:X>) :- same(X).
+
+?- distinct_count(N).
+
+% Self-join on same values
+pairs(A, B) :- same(A), same(B).
+
++pair_count(<COUNT:A>) :- pairs(A, _).
+
+?- pair_count(N).
+
+.kg use default
+.kg drop test_all_same

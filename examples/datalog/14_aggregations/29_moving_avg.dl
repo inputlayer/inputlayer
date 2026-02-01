@@ -1,0 +1,22 @@
+% Test: Moving average pattern
+% Expected: Can compute moving average
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_moving_avg
+.kg use test_moving_avg
+
++values[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)].
+
+% 3-period moving sum (current and previous 2)
+moving_sum_3(Id, <SUM:Val>) :- values(Id, _), values(OtherId, Val), OtherId <= Id, OtherId >= Id - 2.
+
+?- moving_sum_3(Id, Sum).
+
+% Count of values in window
+moving_count_3(Id, <COUNT:Val>) :- values(Id, _), values(OtherId, Val), OtherId <= Id, OtherId >= Id - 2.
+
+?- moving_count_3(Id, Count).
+
+.kg use default
+.kg drop test_moving_avg

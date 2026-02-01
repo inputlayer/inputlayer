@@ -1,0 +1,22 @@
+% Test: Join with inequality condition
+% Expected: Join where column A < column B
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_ineq_join
+.kg use test_ineq_join
+
++ranges[(1, 10), (5, 20), (15, 30)].
++points[(3,), (12,), (25,), (35,)].
+
+% Points within ranges
+in_range(Start, End, P) :-
+    ranges(Start, End),
+    points(P),
+    P >= Start,
+    P <= End.
+
+?- in_range(Start, End, P).
+
+.kg use default
+.kg drop test_ineq_join

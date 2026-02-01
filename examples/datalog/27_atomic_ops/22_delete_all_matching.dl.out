@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_all
+Knowledge graph 'test_del_all' created.
+Switched to knowledge graph: test_del_all
+> .kg use test_del_all
+Switched to knowledge graph: test_del_all
+> +items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 50)].
+Inserted 4 fact(s) into 'items'.
+> ?- items(Id, Cat, Val).
+4 rows:
+  (1, "A", 100)
+  (2, "B", 200)
+  (3, "A", 150)
+  (4, "C", 50)
+> -items(Id, Cat, Val) :- items(Id, Cat, Val), Cat = "A".
+Conditional delete: 2 fact(s) deleted from 'items'.
+> ?- items(Id, Cat, Val).
+2 rows:
+  (2, "B", 200)
+  (4, "C", 50)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_all
+Knowledge graph 'test_del_all' dropped.

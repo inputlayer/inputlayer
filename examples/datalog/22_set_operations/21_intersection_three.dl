@@ -1,0 +1,19 @@
+% Test: Intersection of three sets
+% Expected: Values in all three sets
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_int_three
+.kg use test_int_three
+
++set1[(1,), (2,), (3,), (4,)].
++set2[(2,), (3,), (4,), (5,)].
++set3[(3,), (4,), (5,), (6,)].
+
+% In all three
+common(X) :- set1(X), set2(X), set3(X).
+
+?- common(X).
+
+.kg use default
+.kg drop test_int_three

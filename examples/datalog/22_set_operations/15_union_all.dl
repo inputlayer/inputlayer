@@ -1,0 +1,19 @@
+% Test: Union preserving duplicates
+% Expected: All rows from both sources
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_union_all
+.kg use test_union_all
+
++set1[(1,), (2,), (3,)].
++set2[(2,), (3,), (4,)].
+
+% Union (Datalog naturally deduplicates)
+combined(X) :- set1(X).
+combined(X) :- set2(X).
+
+?- combined(X).
+
+.kg use default
+.kg drop test_union_all

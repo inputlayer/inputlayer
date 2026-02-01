@@ -1,0 +1,24 @@
+% Test: Percentile buckets
+% Expected: Can assign values to percentile buckets
+% Category: 14_aggregations
+% Priority: P2 - Advanced aggregations
+
+.kg create test_buckets
+.kg use test_buckets
+
++scores[(1, 15), (2, 35), (3, 55), (4, 75), (5, 95)].
+
+% Bucket by score range
+bucket(Id, Score, "low") :- scores(Id, Score), Score < 40.
+bucket(Id, Score, "medium") :- scores(Id, Score), Score >= 40, Score < 70.
+bucket(Id, Score, "high") :- scores(Id, Score), Score >= 70.
+
+?- bucket(Id, Score, Bucket).
+
+% Count per bucket
++bucket_count(Bucket, <COUNT:Id>) :- bucket(Id, _, Bucket).
+
+?- bucket_count(Bucket, Count).
+
+.kg use default
+.kg drop test_buckets

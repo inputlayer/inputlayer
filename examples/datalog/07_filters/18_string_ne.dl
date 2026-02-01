@@ -1,0 +1,17 @@
+% Test: String not-equal filter
+% Expected: Filter strings by inequality
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_str_ne
+.kg use test_str_ne
+
++items[(1, "active"), (2, "pending"), (3, "active"), (4, "deleted")].
+
+% Not active
+not_active(Id, Status) :- items(Id, Status), Status != "active".
+
+?- not_active(Id, S).
+
+.kg use default
+.kg drop test_str_ne

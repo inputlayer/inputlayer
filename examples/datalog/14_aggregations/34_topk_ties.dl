@@ -1,0 +1,17 @@
+% Test: TOP_K with ties
+% Expected: Handle tied values correctly
+% Category: 14_aggregations
+% Priority: P2 - Aggregation edge cases
+
+.kg create test_topk_ties
+.kg use test_topk_ties
+
++scores[("A", 100), ("B", 90), ("C", 90), ("D", 80), ("E", 70)].
+
+% Top 3 - should get A (100), B (90), C (90)
++top3(Name, <TOP_K(3):Score>) :- scores(Name, Score).
+
+?- top3(Name, Score).
+
+.kg use default
+.kg drop test_topk_ties

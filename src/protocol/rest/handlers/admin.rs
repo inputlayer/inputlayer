@@ -44,14 +44,29 @@ pub async fn stats(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<StatsDto>>, RestError> {
     let storage = handler.get_storage();
-    let knowledge_graphs = storage.list_knowledge_graphs().len();
+    let kgs = storage.list_knowledge_graphs();
+    let knowledge_graphs = kgs.len();
+
+    // Count total relations and views across all KGs
+    let mut total_relations = 0;
+    let mut total_views = 0;
+
+    for kg_name in &kgs {
+        if let Ok(relations) = storage.list_relations_in(kg_name) {
+            total_relations += relations.len();
+        }
+        if let Ok(rules) = storage.list_rules_in(kg_name) {
+            total_views += rules.len();
+        }
+    }
+
     drop(storage);
 
     let stats = StatsDto {
         knowledge_graphs,
-        relations: 0,
-        views: 0,
-        memory_usage_bytes: 0,
+        relations: total_relations,
+        views: total_views,
+        memory_usage_bytes: 0, // TODO: Implement actual memory tracking
         query_count: handler.total_queries(),
         uptime_secs: handler.uptime_seconds(),
     };

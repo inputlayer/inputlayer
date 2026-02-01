@@ -1,0 +1,17 @@
+% Test: Negation with constant binding
+% Expected: Negate specific constant values
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_const
+.kg use test_neg_const
+
++status[(1, "active"), (2, "inactive"), (3, "active"), (4, "pending")].
+
+% Non-active items (negation with constant)
+non_active(Id, S) :- status(Id, S), S != "active".
+
+?- non_active(Id, S).
+
+.kg use default
+.kg drop test_neg_const

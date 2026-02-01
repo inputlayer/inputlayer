@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_four_way
+Knowledge graph 'test_four_way' created.
+Switched to knowledge graph: test_four_way
+> .kg use test_four_way
+Switched to knowledge graph: test_four_way
+> +orders[(1, 100, 200)].
+Inserted 1 fact(s) into 'orders'.
+> +customers[(100, "Alice")].
+Inserted 1 fact(s) into 'customers'.
+> +products[(200, "Widget")].
+Inserted 1 fact(s) into 'products'.
+> +regions[(100, "East")].
+Inserted 1 fact(s) into 'regions'.
+> +full_report(OrdId, CustName, ProdName, Region) :- orders(OrdId, CustId, ProdId), customers(CustId, CustName), products(ProdId, ProdName), regions(CustId, Region).
+Rule 'full_report' registered.
+> ?- full_report(O, C, P, R).
+1 rows:
+  (1, "Alice", "Widget", "East")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_four_way
+Knowledge graph 'test_four_way' dropped.

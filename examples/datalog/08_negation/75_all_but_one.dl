@@ -1,0 +1,18 @@
+% Test: All except specific value
+% Expected: Exclude one specific item
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_all_but
+.kg use test_all_but
+
++items[(1,), (2,), (3,), (4,), (5,)].
++excluded[(3,)].
+
+% All except excluded
++result(X) :- items(X), !excluded(X).
+
+?- result(X).
+
+.kg use default
+.kg drop test_all_but

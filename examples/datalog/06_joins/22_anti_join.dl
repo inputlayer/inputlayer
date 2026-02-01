@@ -1,0 +1,18 @@
+% Test: Anti-join pattern
+% Expected: Rows from A without matching B
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_anti_join
+.kg use test_anti_join
+
++all_products[(1, "Widget"), (2, "Gadget"), (3, "Gizmo"), (4, "Doodad")].
++sold_products[(1,), (3,)].
+
+% Products never sold (anti-join)
+unsold(Id, Name) :- all_products(Id, Name), !sold_products(Id).
+
+?- unsold(Id, Name).
+
+.kg use default
+.kg drop test_anti_join

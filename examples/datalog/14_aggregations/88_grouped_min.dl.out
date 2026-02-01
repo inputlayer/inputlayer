@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_grp_min
+Knowledge graph 'test_grp_min' created.
+Switched to knowledge graph: test_grp_min
+> .kg use test_grp_min
+Switched to knowledge graph: test_grp_min
+> +prices[(1, "Electronics", 500), (2, "Electronics", 300), (3, "Books", 20), (4, "Books", 15)].
+Inserted 4 fact(s) into 'prices'.
+> +min_by_cat(Cat, <MIN:Price>) :- prices(_, Cat, Price).
+Script error: Parse error: Invalid term: '<MIN:Price>'

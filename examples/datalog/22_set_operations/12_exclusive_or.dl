@@ -1,0 +1,19 @@
+% Test: Exclusive OR pattern
+% Expected: Elements in exactly one set
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_xor
+.kg use test_xor
+
++set_a[(1,), (2,), (3,)].
++set_b[(2,), (3,), (4,)].
+
+% XOR: in A but not B, or in B but not A
++xor_ab(X) :- set_a(X), !set_b(X).
++xor_ab(X) :- set_b(X), !set_a(X).
+
+?- xor_ab(X).
+
+.kg use default
+.kg drop test_xor

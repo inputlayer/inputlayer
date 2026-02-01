@@ -1,0 +1,20 @@
+% Test: Lookup table pattern
+% Expected: Use one relation as lookup for another
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_lookup
+.kg use test_lookup
+
++status_codes[(1, "pending"), (2, "active"), (3, "completed"), (4, "cancelled")].
++orders[(101, 1), (102, 2), (103, 3), (104, 1)].
+
+% Lookup status name for each order
++order_status(OrderId, StatusName) :-
+    orders(OrderId, StatusCode),
+    status_codes(StatusCode, StatusName).
+
+?- order_status(O, S).
+
+.kg use default
+.kg drop test_lookup

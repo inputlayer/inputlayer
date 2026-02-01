@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_ties
+Knowledge graph 'test_topk_ties' created.
+Switched to knowledge graph: test_topk_ties
+> .kg use test_topk_ties
+Switched to knowledge graph: test_topk_ties
+> +scores[(1, 100), (2, 100), (3, 90), (4, 90), (5, 80)].
+Inserted 5 fact(s) into 'scores'.
+> top2(Id, <TOP_K:Score, 2>) :- scores(Id, Score).
+Script error: Parse error: Unknown aggregate function: 

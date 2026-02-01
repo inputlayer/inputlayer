@@ -1,0 +1,22 @@
+% Test: Chain of joins
+% Expected: Sequential join through multiple tables
+% Category: 06_joins
+% Priority: P2 - Join patterns
+
+.kg create test_chain
+.kg use test_chain
+
++a_to_b[(1, 10), (2, 20)].
++b_to_c[(10, 100), (20, 200)].
++c_to_d[(100, 1000), (200, 2000)].
+
+% Chain: a -> b -> c -> d
++chain(A, D) :-
+    a_to_b(A, B),
+    b_to_c(B, C),
+    c_to_d(C, D).
+
+?- chain(A, D).
+
+.kg use default
+.kg drop test_chain

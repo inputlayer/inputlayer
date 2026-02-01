@@ -1,0 +1,21 @@
+% Test: Time window aggregation
+% Expected: Aggregate within time window
+% Category: 29_temporal
+% Priority: P2 - Temporal patterns
+
+.kg create test_time_win
+.kg use test_time_win
+
++readings[(1, 100, 10), (2, 105, 20), (3, 110, 15), (4, 200, 30), (5, 205, 25)].
+
+% Count readings in 20-unit windows starting at 100
+window_count(Start, <COUNT:Id>) :-
+    readings(Id, Time, _),
+    Start = 100,
+    Time >= Start,
+    Time < Start + 20.
+
+?- window_count(Start, N).
+
+.kg use default
+.kg drop test_time_win

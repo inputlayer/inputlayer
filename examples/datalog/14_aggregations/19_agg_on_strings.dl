@@ -1,0 +1,24 @@
+% Test: Aggregation on non-numeric (strings)
+% Expected: COUNT works on strings, SUM/AVG should fail
+% Category: 14_aggregations
+% Priority: P1 - Aggregation edge cases
+
+.kg create test_agg_strings
+.kg use test_agg_strings
+
++names[(1, "alice"), (1, "bob"), (2, "carol"), (2, "dave"), (2, "eve")].
+
+% COUNT should work on any type
+string_count(G, <COUNT:N>) :- names(G, N).
+
+?- string_count(G, C).
+
+% MIN/MAX on strings (lexicographic)
+first_name(G, <MIN:N>) :- names(G, N).
+last_name(G, <MAX:N>) :- names(G, N).
+
+?- first_name(G, N).
+?- last_name(G, N).
+
+.kg use default
+.kg drop test_agg_strings

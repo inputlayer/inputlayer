@@ -1,0 +1,17 @@
+% Test: Compound filter condition
+% Expected: Complex AND conditions
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_compound_cond
+.kg use test_compound_cond
+
++items[(1, "A", 100, true), (2, "A", 200, false), (3, "B", 150, true), (4, "A", 120, true)].
+
+% Category A AND price > 100 AND active
+filtered(Id, Price) :- items(Id, "A", Price, true), Price > 100.
+
+?- filtered(Id, P).
+
+.kg use default
+.kg drop test_compound_cond

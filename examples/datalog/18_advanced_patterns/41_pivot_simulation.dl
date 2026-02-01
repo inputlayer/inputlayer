@@ -1,0 +1,24 @@
+% Test: Pivot simulation pattern
+% Expected: Transform rows to columns
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_pivot
+.kg use test_pivot
+
++sales[("Q1", 100), ("Q2", 200), ("Q3", 150), ("Q4", 300)].
+
+% Manually pivot specific quarters
+q1_sales(Val) :- sales("Q1", Val).
+q2_sales(Val) :- sales("Q2", Val).
+
+?- q1_sales(V).
+?- q2_sales(V).
+
+% Total
++total(<SUM:Val>) :- sales(_, Val).
+
+?- total(T).
+
+.kg use default
+.kg drop test_pivot

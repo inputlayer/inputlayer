@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nullish
+Knowledge graph 'test_nullish' created.
+Switched to knowledge graph: test_nullish
+> .kg use test_nullish
+Switched to knowledge graph: test_nullish
+> +data[(1, "", 0), (2, "value", 100), (3, "", 50), (4, "other", 0)].
+Inserted 4 fact(s) into 'data'.
+> empty_name(Id) :- data(Id, "", _).
+2 rows:
+  (1)
+  (3)
+(session: 1 rule(s))
+> zero_amount(Id) :- data(Id, _, 0).
+2 rows:
+  (1)
+  (4)
+(session: 2 rule(s))
+> ?- empty_name(Id).
+2 rows:
+  (1)
+  (3)
+> ?- zero_amount(Id).
+2 rows:
+  (1)
+  (4)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_nullish
+Knowledge graph 'test_nullish' dropped.

@@ -1,0 +1,27 @@
+% Test: Find leaf nodes in tree
+% Expected: Can identify nodes with no children
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_leaves
+.kg use test_leaves
+
+% Tree: parent -> children
++edge[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)].
+
+% All nodes
+node(X) :- edge(X, _).
+node(Y) :- edge(_, Y).
+
+?- node(N).
+
+% Nodes that are parents (have children)
+has_children(X) :- edge(X, _).
+
+% Leaf nodes (no children)
+leaf(X) :- node(X), !has_children(X).
+
+?- leaf(L).
+
+.kg use default
+.kg drop test_leaves

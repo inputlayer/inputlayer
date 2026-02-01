@@ -1,0 +1,29 @@
+% Test: Negative values in various contexts
+% Expected: Negative numbers handled correctly
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_negatives
+.kg use test_negatives
+
++nums[(-5,), (-3,), (0,), (3,), (5,)].
+
+% Sum of negatives
++sum_negs(<SUM:X>) :- nums(X), X < 0.
+
+?- sum_negs(S).
+
+% Count negatives
++count_negs(<COUNT:X>) :- nums(X), X < 0.
+
+?- count_negs(C).
+
+% Min/Max with negatives
++min_val(<MIN:X>) :- nums(X).
++max_val(<MAX:X>) :- nums(X).
+
+?- min_val(M).
+?- max_val(M).
+
+.kg use default
+.kg drop test_negatives

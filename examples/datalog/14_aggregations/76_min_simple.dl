@@ -1,0 +1,17 @@
+% Test: MIN aggregation basic
+% Expected: Find minimum value
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_min
+.kg use test_min
+
++scores[(85,), (92,), (78,), (95,), (88,)].
+
+% Minimum score
++min_score(<MIN:S>) :- scores(S).
+
+?- min_score(M).
+
+.kg use default
+.kg drop test_min

@@ -1,0 +1,19 @@
+% Test: Negative number handling
+% Expected: Correct negative arithmetic
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_negative
+.kg use test_negative
+
++nums[(-5,), (0,), (5,)].
+
+% Operations with negatives
+doubled(X, Y) :- nums(X), Y = X * 2.
+inverted(X, Y) :- nums(X), Y = -X.
+
+?- doubled(X, Y).
+?- inverted(X, Y).
+
+.kg use default
+.kg drop test_negative

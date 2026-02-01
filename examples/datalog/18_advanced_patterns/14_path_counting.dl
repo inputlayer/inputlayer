@@ -1,0 +1,21 @@
+% Test: Path counting in graphs
+% Expected: Count distinct paths between nodes
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_path_count
+.kg use test_path_count
+
+% Diamond graph: 1->2->4, 1->3->4 (two paths from 1 to 4)
++edge[(1, 2), (1, 3), (2, 4), (3, 4)].
+
+% Direct connections
+path_count(X, Y, 1) :- edge(X, Y).
+
+% 2-hop paths
+path2(X, Z, <COUNT:M>) :- edge(X, Y), edge(Y, Z).
+
+?- path2(X, Z, C).
+
+.kg use default
+.kg drop test_path_count

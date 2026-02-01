@@ -1,0 +1,27 @@
+% Test: Replace pattern (delete then insert)
+% Expected: Can replace values atomically
+% Category: 02_relations
+% Priority: P1 - Data operations
+
+.kg create test_replace
+.kg use test_replace
+
+% Initial data
++config[(1, "value1"), (2, "value2")].
+
+?- config(Id, Val).
+
+% Replace value for key 1
+-config(1, "value1").
++config(1, "new_value1").
+
+?- config(Id, Val).
+
+% Replace another
+-config(2, "value2").
++config(2, "new_value2").
+
+?- config(Id, Val).
+
+.kg use default
+.kg drop test_replace

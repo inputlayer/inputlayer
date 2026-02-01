@@ -1,0 +1,17 @@
+% Test: Combined filter conditions
+% Expected: Multiple filters ANDed together
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_combined
+.kg use test_combined
+
++products[(1, "A", 100, 10), (2, "B", 200, 5), (3, "A", 150, 20), (4, "C", 50, 15)].
+
+% Category A AND price > 100 AND quantity > 5
+filtered(Id, Price, Qty) :- products(Id, "A", Price, Qty), Price > 100, Qty > 5.
+
+?- filtered(Id, P, Q).
+
+.kg use default
+.kg drop test_combined

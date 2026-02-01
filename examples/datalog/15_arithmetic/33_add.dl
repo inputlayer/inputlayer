@@ -1,0 +1,17 @@
+% Test: Addition operation
+% Expected: Add values correctly
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_add
+.kg use test_add
+
++pairs[(10, 5), (20, 30), (7, 3)].
+
+% Compute sum
+sum_pair(A, B, Result) :- pairs(A, B), Result = A + B.
+
+?- sum_pair(A, B, R).
+
+.kg use default
+.kg drop test_add

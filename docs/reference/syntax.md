@@ -110,21 +110,26 @@ Insert base data into relations.
 
 ### Fact Deletion (`-`)
 
-Remove base data.
+Remove base data from relations.
 
 **Single fact:**
 ```datalog
 -edge(1, 2).
 ```
 
-**Conditional delete:**
+**Conditional delete (based on another relation):**
 ```datalog
-% Delete all edges from node 1
--edge(1, Y) :- edge(1, Y).
+% Delete all edges where source node is in the 'banned' relation
+-edge(X, Y) :- banned(X).
 
-% Delete all edges
--edge(X, Y) :- edge(X, Y).
+% Delete all edges where X is greater than 5
+-edge(X, Y) :- edge(X, Y), X > 5.
+
+% Delete edges that form triangles
+-edge(X, Y) :- edge(X, Y), edge(Y, Z), edge(Z, X).
 ```
+
+**Note:** Conditional delete finds all tuples matching the condition and removes them from the target relation. The target relation is automatically included in the query body to bind all head variables.
 
 ### Persistent Rules (`+head :- body`)
 
@@ -366,7 +371,8 @@ Commands that control the REPL environment.
 .rule                   % List all rules
 .rule <name>            % Query a rule
 .rule def <name>        % Show rule definition
-.rule drop <name>       % Delete a rule
+.rule drop <name>       % Delete all clauses of a rule
+.rule remove <name> <n> % Remove clause #n (1-based)
 .rule clear <name>      % Clear for re-registration
 .rule edit <name> <n> <clause>  % Edit clause
 ```

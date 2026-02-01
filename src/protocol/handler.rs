@@ -111,6 +111,24 @@ impl Handler {
         self.insert_count.load(Ordering::Relaxed)
     }
 
+    /// Validate tuples against a schema for a given relation.
+    /// Returns Ok(()) if validation passes or no schema exists.
+    /// Returns Err with validation error message if schema validation fails.
+    pub fn validate_tuples_against_schema(
+        &self,
+        relation: &str,
+        tuples: &[Tuple],
+    ) -> Result<(), String> {
+        let catalog = self.schema_catalog.read();
+        if let Some(schema) = catalog.get(relation) {
+            let mut engine = ValidationEngine::new();
+            if let Err(e) = engine.validate_batch(schema, tuples) {
+                return Err(format!("{}", e));
+            }
+        }
+        Ok(())
+    }
+
     fn inc_query_count(&self) {
         self.query_count.fetch_add(1, Ordering::Relaxed);
     }
@@ -321,19 +339,110 @@ impl Handler {
                                                     continue;
                                                 }
                                             };
-                                            storage
+                                            let deleted_count = storage
                                                 .delete(&op.relation, vec![(a, b)])
                                                 .map_err(|e| e.to_string())?;
                                             messages.push(format!(
-                                                "Deleted fact from '{}'.",
-                                                op.relation
+                                                "Deleted {} facts from '{}'.",
+                                                deleted_count, op.relation
                                             ));
                                         }
                                     }
-                                    DeletePattern::Conditional { .. } => {
-                                        messages.push(
-                                            "Conditional delete not yet implemented".to_string(),
+                                    DeletePattern::Conditional { head_args, body } => {
+                                        // Build query to find matching tuples
+                                        // Collect variables from head_args
+                                        let mut all_vars: Vec<String> = Vec::new();
+                                        for arg in &head_args {
+                                            if let Term::Variable(v) = arg {
+                                                if !all_vars.contains(v) {
+                                                    all_vars.push(v.clone());
+                                                }
+                                            }
+                                        }
+
+                                        // Format head arguments for the target relation
+                                        let head_args_str: String = head_args
+                                            .iter()
+                                            .map(|t| format_term(t))
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+
+                                        // Build body string from predicates
+                                        // IMPORTANT: Include the target relation to bind all head variables
+                                        let mut body_parts: Vec<String> = vec![
+                                            format!("{}({})", op.relation, head_args_str)
+                                        ];
+                                        for pred in &body {
+                                            body_parts.push(format_body_pred(pred));
+                                        }
+                                        let body_str = body_parts.join(", ");
+
+                                        // Build query rule
+                                        let query_rule = format!(
+                                            "__cond_del_query__({}) :- {}.",
+                                            all_vars.join(", "),
+                                            body_str
                                         );
+
+                                        // Execute query to find matching variable bindings
+                                        let results = storage
+                                            .execute_query_with_rules_tuples(&query_rule)
+                                            .map_err(|e| e.to_string())?;
+
+                                        let mut deleted = 0;
+
+                                        for result_tuple in results {
+                                            // Build bindings from result
+                                            let mut bindings: std::collections::HashMap<String, crate::value::Value> =
+                                                std::collections::HashMap::new();
+                                            for (i, var) in all_vars.iter().enumerate() {
+                                                if let Some(val) = result_tuple.get(i) {
+                                                    bindings.insert(var.clone(), val.clone());
+                                                }
+                                            }
+
+                                            // Build tuple to delete from head_args with bindings
+                                            let mut tuple_values: Vec<crate::value::Value> = Vec::new();
+                                            let mut valid = true;
+                                            for arg in &head_args {
+                                                match arg {
+                                                    Term::Variable(v) => {
+                                                        if let Some(val) = bindings.get(v) {
+                                                            tuple_values.push(val.clone());
+                                                        } else {
+                                                            valid = false;
+                                                            break;
+                                                        }
+                                                    }
+                                                    Term::Constant(c) => {
+                                                        tuple_values.push(crate::value::Value::Int64(*c));
+                                                    }
+                                                    Term::StringConstant(s) => {
+                                                        tuple_values.push(crate::value::Value::string(s));
+                                                    }
+                                                    Term::FloatConstant(f) => {
+                                                        tuple_values.push(crate::value::Value::Float64(*f));
+                                                    }
+                                                    _ => {
+                                                        valid = false;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+
+                                            if valid && !tuple_values.is_empty() {
+                                                let tuple_to_delete = crate::value::Tuple::new(tuple_values);
+                                                let count = storage
+                                                    .delete_tuple(&op.relation, &tuple_to_delete)
+                                                    .map_err(|e| e.to_string())?;
+                                                deleted += count;
+                                            }
+                                        }
+
+                                        messages.push(format!(
+                                            "Conditional delete: {} fact(s) deleted from '{}'.",
+                                            deleted, op.relation
+                                        ));
                                     }
                                 }
                             }

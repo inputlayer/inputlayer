@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_special
+Knowledge graph 'test_special' created.
+Switched to knowledge graph: test_special
+> .kg use test_special
+Switched to knowledge graph: test_special
+> +text[("hello@world.com",), ("path/to/file",), ("a+b=c",), ("100%",)].
+Inserted 4 fact(s) into 'text'.
+> ?- text(T).
+4 rows:
+  ("100%")
+  ("a+b=c")
+  ("hello@world.com")
+  ("path/to/file")
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_special
+Knowledge graph 'test_special' dropped.

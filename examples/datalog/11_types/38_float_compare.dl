@@ -1,0 +1,17 @@
+% Test: Float comparison
+% Expected: Compare floating point values
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_float_cmp
+.kg use test_float_cmp
+
++values[(1.5,), (2.5,), (0.5,), (3.0,)].
+
+% Values > 1.0
+big(V) :- values(V), V > 1.0.
+
+?- big(V).
+
+.kg use default
+.kg drop test_float_cmp

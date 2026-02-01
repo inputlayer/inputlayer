@@ -1,0 +1,22 @@
+% Test: Triangular join (find triangles)
+% Expected: Find cycles of length 3
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_triangle
+.kg use test_triangle
+
++edge[("a", "b"), ("b", "c"), ("c", "a"), ("a", "d"), ("d", "e")].
+
+% Find triangles
+triangle(A, B, C) :-
+    edge(A, B),
+    edge(B, C),
+    edge(C, A),
+    A < B,
+    B < C.
+
+?- triangle(A, B, C).
+
+.kg use default
+.kg drop test_triangle

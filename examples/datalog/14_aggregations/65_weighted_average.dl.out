@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_weighted_avg
+Knowledge graph 'test_weighted_avg' created.
+Switched to knowledge graph: test_weighted_avg
+> .kg use test_weighted_avg
+Switched to knowledge graph: test_weighted_avg
+> +scores[(1, 90, 3), (2, 80, 2), (3, 70, 1)].
+Inserted 3 fact(s) into 'scores'.
+> weighted_sum(<SUM:WS>) :- scores(_, S, W), WS = S * W.
+Script error: Parse error: Unknown aggregate function: 

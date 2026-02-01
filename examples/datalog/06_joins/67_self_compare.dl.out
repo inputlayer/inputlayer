@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_cmp
+Knowledge graph 'test_self_cmp' created.
+Switched to knowledge graph: test_self_cmp
+> .kg use test_self_cmp
+Switched to knowledge graph: test_self_cmp
+> +scores[(1, "Alice", 85), (2, "Bob", 90), (3, "Carol", 85), (4, "Dave", 95)].
+Inserted 4 fact(s) into 'scores'.
+> +same_score(Name1, Name2, Score) :- scores(Id1, Name1, Score), scores(Id2, Name2, Score), Id1 < Id2.
+Rule 'same_score' registered.
+> ?- same_score(N1, N2, S).
+1 rows:
+  ("Alice", "Carol", 85)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_cmp
+Knowledge graph 'test_self_cmp' dropped.

@@ -1,0 +1,22 @@
+% Test: Pivot table pattern
+% Expected: Can pivot data from rows to columns
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_pivot
+.kg use test_pivot
+
+% Sales by region and quarter
++sales[("Q1", "North", 100), ("Q1", "South", 150), ("Q2", "North", 120), ("Q2", "South", 180)].
+
+% Get Q1 sales by region
+q1_sales(Region, <SUM:Amt>) :- sales("Q1", Region, Amt).
+
+% Get Q2 sales by region
+q2_sales(Region, <SUM:Amt>) :- sales("Q2", Region, Amt).
+
+?- q1_sales(Region, Amt).
+?- q2_sales(Region, Amt).
+
+.kg use default
+.kg drop test_pivot

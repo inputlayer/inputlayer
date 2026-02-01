@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_num
+Knowledge graph 'test_mixed_num' created.
+Switched to knowledge graph: test_mixed_num
+> .kg use test_mixed_num
+Switched to knowledge graph: test_mixed_num
+> +measurements[(1, 10, 2.5), (2, 20, 3.0), (3, 15, 1.5)].
+Inserted 3 fact(s) into 'measurements'.
+> computed(Id, Result) :- measurements(Id, Int, Float), Result = Int * Float.
+Script error: Query execution failed: Unsafe rule: Atom { relation: "computed", args: [Variable("Id"), Variable("Result")] }. Variables ["Result"] in head do not appear in positive body atoms.

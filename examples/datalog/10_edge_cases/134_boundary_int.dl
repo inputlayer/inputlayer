@@ -1,0 +1,14 @@
+% Test: Integer boundary values
+% Expected: Handle int boundaries
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_boundary
+.kg use test_boundary
+
++nums[(0,), (1,), (-1,), (2147483647,), (-2147483648,)].
+
+?- nums(N).
+
+.kg use default
+.kg drop test_boundary

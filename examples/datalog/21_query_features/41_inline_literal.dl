@@ -1,0 +1,17 @@
+% Test: Inline literal values
+% Expected: Use literals directly in head
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_inline_lit
+.kg use test_inline_lit
+
++base[(1,), (2,), (3,)].
+
+% Add constant column
+with_const(X, "constant") :- base(X).
+
+?- with_const(X, C).
+
+.kg use default
+.kg drop test_inline_lit

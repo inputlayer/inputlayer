@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sqrt
+Knowledge graph 'test_sqrt' created.
+Switched to knowledge graph: test_sqrt
+> .kg use test_sqrt
+Switched to knowledge graph: test_sqrt
+> +nums[(0,), (1,), (4,), (9,), (16,)].
+Inserted 5 fact(s) into 'nums'.
+> sqrt_val(X, Y) :- nums(X), Y = SQRT(X).
+Script error: Parse error: Invalid term: 'SQRT(X)'

@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bom
+Knowledge graph 'test_bom' created.
+Switched to knowledge graph: test_bom
+> .kg use test_bom
+Switched to knowledge graph: test_bom
+> +component[("car", "engine", 1), ("car", "wheel", 4), ("engine", "piston", 4), ("engine", "sparkplug", 4)].
+Inserted 4 fact(s) into 'component'.
+> +all_parts(Product, Part, Qty) :- component(Product, Part, Qty).
+Rule 'all_parts' registered.
+> +all_parts(Product, SubPart, TotalQty) :- component(Product, Part, Q1), all_parts(Part, SubPart, Q2), TotalQty = Q1 * Q2.
+Script error: Failed to register rule: Unsafe rule 'all_parts': Head variable(s) TotalQty not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

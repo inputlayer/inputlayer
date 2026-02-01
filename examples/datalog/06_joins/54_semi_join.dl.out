@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_semi_join
+Knowledge graph 'test_semi_join' created.
+Switched to knowledge graph: test_semi_join
+> .kg use test_semi_join
+Switched to knowledge graph: test_semi_join
+> +orders[(1, 100, "pending"), (2, 200, "shipped"), (3, 150, "pending"), (4, 300, "delivered")].
+Inserted 4 fact(s) into 'orders'.
+> +priority_customers[(100,), (300,)].
+Inserted 2 fact(s) into 'priority_customers'.
+> priority_order(Id, Status) :- orders(Id, CustId, Status), priority_customers(CustId).
+2 rows:
+  (1, "pending")
+  (4, "delivered")
+(session: 1 rule(s))
+> ?- priority_order(Id, Status).
+2 rows:
+  (1, "pending")
+  (4, "delivered")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_semi_join
+Knowledge graph 'test_semi_join' dropped.

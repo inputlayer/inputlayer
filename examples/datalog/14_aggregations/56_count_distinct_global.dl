@@ -1,0 +1,16 @@
+% Test: Global count distinct
+% Expected: Count unique values across all rows
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_cd_global
+.kg use test_cd_global
+
++events[("click",), ("view",), ("click",), ("purchase",), ("view",), ("click",)].
+
+unique_events(<COUNT_DISTINCT:E>) :- events(E).
+
+?- unique_events(N).
+
+.kg use default
+.kg drop test_cd_global

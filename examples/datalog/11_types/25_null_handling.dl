@@ -1,0 +1,17 @@
+% Test: Null-like value handling
+% Expected: Handle empty strings and special values
+% Category: 11_types
+% Priority: P2 - Type patterns
+
+.kg create test_null
+.kg use test_null
+
++data[(1, "value"), (2, ""), (3, "another")].
+
+% Filter out empty strings
+non_empty(Id, Val) :- data(Id, Val), Val != "".
+
+?- non_empty(Id, Val).
+
+.kg use default
+.kg drop test_null

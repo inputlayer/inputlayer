@@ -1,0 +1,13 @@
+% Test: Unbalanced parentheses error
+% Expected: Parse error - unbalanced parentheses
+% Category: 12_errors
+% Priority: P0 Critical - Basic syntax validation
+
+.kg create test_unbal_parens
+.kg use test_unbal_parens
+
+% This has unbalanced parentheses - should error immediately
++facts[(1, 2, 3].
+
+.kg use default
+.kg drop test_unbal_parens

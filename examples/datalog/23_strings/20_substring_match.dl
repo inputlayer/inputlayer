@@ -1,0 +1,15 @@
+% Test: String substring matching
+% Expected: Match strings containing substrings
+% Category: 23_strings
+% Priority: P2 - String operations
+
+.kg create test_substr
+.kg use test_substr
+
++files[("readme.md",), ("config.json",), ("data.csv",), ("script.js",), ("style.css",)].
+
+% Simple query
+?- files(F).
+
+.kg use default
+.kg drop test_substr

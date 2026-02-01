@@ -13,7 +13,9 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::RwLock;
 
 // ============================================================================
 // Orderable Float Wrapper for BinaryHeap
@@ -970,7 +972,7 @@ fn get_or_create_hyperplanes(
 
     // Fast path: read lock for cache hit
     {
-        let read_guard = cache.read().unwrap();
+        let read_guard = cache.read();
         if let Some(entry) = read_guard.cache.get(&key) {
             entry.touch(); // Update LRU timestamp atomically
             stats.hits.fetch_add(1, Ordering::Relaxed);
@@ -979,7 +981,7 @@ fn get_or_create_hyperplanes(
     }
 
     // Slow path: write lock for cache miss
-    let mut write_guard = cache.write().unwrap();
+    let mut write_guard = cache.write();
 
     // Double-check after acquiring write lock (another thread may have inserted)
     if let Some(entry) = write_guard.cache.get(&key) {
@@ -1094,7 +1096,7 @@ pub fn lsh_buckets(v: &[f32], num_tables: usize, num_hyperplanes: usize) -> Vec<
 pub fn get_lsh_cache_stats() -> LshCacheStats {
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
-    let entries = cache.read().unwrap().cache.len();
+    let entries = cache.read().cache.len();
     stats.to_stats(entries)
 }
 
@@ -1105,7 +1107,7 @@ pub fn get_lsh_cache_stats() -> LshCacheStats {
 pub fn clear_lsh_cache() {
     let cache = get_lsh_cache();
     let stats = get_lsh_stats();
-    cache.write().unwrap().cache.clear();
+    cache.write().cache.clear();
     stats.reset();
 }
 
@@ -1118,7 +1120,7 @@ pub fn clear_lsh_cache() {
 /// Eviction happens on the next cache miss if over capacity.
 pub fn configure_lsh_cache_size(max_entries: usize) {
     let cache = get_lsh_cache();
-    cache.write().unwrap().max_entries = max_entries;
+    cache.write().max_entries = max_entries;
 }
 
 /// Pre-warm the LSH cache for a specific configuration.
@@ -2920,9 +2922,11 @@ mod tests {
         let bucket_f32 = lsh_bucket(&v_f32, 0, 4);
         let bucket_int8 = lsh_bucket_int8(&v_int8, 0, 4);
 
-        // With same hyperplanes and similar values, buckets should often match
-        // (Though not guaranteed due to scale differences)
-        assert!(bucket_f32 >= 0 && bucket_int8 >= 0);
+        // Verify bucket values are valid (computed from bit-setting, so always non-negative)
+        // The key test is that both functions complete without error
+        // and produce deterministic results for the same input
+        assert_eq!(bucket_f32, lsh_bucket(&v_f32, 0, 4), "LSH should be deterministic");
+        assert_eq!(bucket_int8, lsh_bucket_int8(&v_int8, 0, 4), "LSH int8 should be deterministic");
     }
 
     #[test]

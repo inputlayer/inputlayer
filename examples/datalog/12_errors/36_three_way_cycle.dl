@@ -1,0 +1,19 @@
+% Test: Three-way negation cycle
+% Expected: Error for three-way negation cycle
+% Category: 12_errors
+% Priority: P1 - Error handling
+
+.kg create test_3way_cycle
+.kg use test_3way_cycle
+
++base(1).
+
+% Three-way cycle: a -> !b -> !c -> !a
+cycle_a(X) :- base(X), !cycle_b(X).
+cycle_b(X) :- base(X), !cycle_c(X).
+cycle_c(X) :- base(X), !cycle_a(X).
+
+?- cycle_a(X).
+
+.kg use default
+.kg drop test_3way_cycle

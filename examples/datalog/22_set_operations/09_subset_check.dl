@@ -1,0 +1,21 @@
+% Test: Subset check pattern
+% Expected: Verify if A is subset of B
+% Category: 22_set_operations
+% Priority: P2 - Set operations
+
+.kg create test_subset
+.kg use test_subset
+
++small[(1,), (2,)].
++large[(1,), (2,), (3,), (4,)].
+
+% Check if small is subset of large
+% not_in_large exists if there's an element in small not in large
+not_in_large(X) :- small(X), !large(X).
+
+?- not_in_large(X).
+
+% If empty result, small is subset of large
+
+.kg use default
+.kg drop test_subset

@@ -1,0 +1,16 @@
+% Test: Cyclic negation (should error)
+% Expected: Stratification error
+% Category: 12_errors
+% Priority: P2 - Error handling
+
+.kg create test_cyclic_neg
+.kg use test_cyclic_neg
+
++base[(1,)].
+
+% Cyclic: a depends on !b, b depends on !a
++a(X) :- base(X), !b(X).
++b(X) :- base(X), !a(X).
+
+.kg use default
+.kg drop test_cyclic_neg

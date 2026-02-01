@@ -1,0 +1,23 @@
+% Test: Shortest path approximation
+% Expected: Path with minimum hops
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_shortest
+.kg use test_shortest
+
++edge[(1, 2), (2, 3), (3, 4), (1, 3), (1, 4)].
+
+% Paths with length
++path_len(X, Y, 1) :- edge(X, Y).
++path_len(X, Z, L) :- path_len(X, Y, L1), edge(Y, Z), L = L1 + 1, L <= 3.
+
+?- path_len(1, Y, L).
+
+% Minimum length to each destination
++min_len(Dest, <MIN:L>) :- path_len(1, Dest, L).
+
+?- min_len(Dest, MinL).
+
+.kg use default
+.kg drop test_shortest

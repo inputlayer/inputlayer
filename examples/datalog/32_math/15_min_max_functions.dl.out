@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minmax_fn
+Knowledge graph 'test_minmax_fn' created.
+Switched to knowledge graph: test_minmax_fn
+> .kg use test_minmax_fn
+Switched to knowledge graph: test_minmax_fn
+> +pairs[(10, 20), (30, 15), (5, 5), (100, 50)].
+Inserted 4 fact(s) into 'pairs'.
+> min_of_pair(A, B, M) :- pairs(A, B), M = MIN(A, B).
+Script error: Parse error: Invalid term: 'MIN(A, B)'

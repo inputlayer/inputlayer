@@ -28,11 +28,13 @@ Inserted 2 fact(s) into 'excluded'.
   (3)
   (5)
 > -excluded(X) :- excluded(X).
-Conditional delete not yet supported over HTTP. Use query API.
+Conditional delete: 2 fact(s) deleted from 'excluded'.
 > ?- not_excluded(X).
-3 rows:
+5 rows:
   (1)
+  (2)
   (3)
+  (4)
   (5)
 > .kg use default
 Switched to knowledge graph: default

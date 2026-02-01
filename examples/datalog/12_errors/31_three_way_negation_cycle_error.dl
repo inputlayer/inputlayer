@@ -1,0 +1,17 @@
+% Test: Three-way negation cycle error
+% Expected: Error - stratification violation detected
+% Category: 12_errors
+% Priority: P1 High - Safety check
+
+.kg create test_3way_neg
+.kg use test_3way_neg
+
++base[(1,), (2,), (3,)].
+
+% Create a three-way negation cycle: a -> !b -> !c -> !a
++a(X) :- base(X), !b(X).
++b(X) :- base(X), !c(X).
++c(X) :- base(X), !a(X).
+
+.kg use default
+.kg drop test_3way_neg

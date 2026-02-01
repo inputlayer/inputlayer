@@ -1,0 +1,17 @@
+% Test: Parent-child aggregation
+% Expected: Aggregate children per parent
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_parent_child
+.kg use test_parent_child
+
++parent_child[("dept1", "emp1"), ("dept1", "emp2"), ("dept1", "emp3"), ("dept2", "emp4"), ("dept2", "emp5")].
+
+% Count employees per department
+emp_count(Dept, <COUNT:Emp>) :- parent_child(Dept, Emp).
+
+?- emp_count(Dept, N).
+
+.kg use default
+.kg drop test_parent_child

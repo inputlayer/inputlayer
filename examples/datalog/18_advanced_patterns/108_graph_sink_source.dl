@@ -1,0 +1,28 @@
+% Test: Graph sink and source nodes
+% Expected: Find nodes with no outgoing/incoming edges
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_sink_src
+.kg use test_sink_src
+
++edge[("a", "b"), ("b", "c"), ("c", "d")].
++nodes[("a",), ("b",), ("c",), ("d",)].
+
+% Nodes with outgoing edges
+has_outgoing(N) :- edge(N, _).
+
+% Nodes with incoming edges
+has_incoming(N) :- edge(_, N).
+
+% Source: no incoming edges
+source(N) :- nodes(N), !has_incoming(N).
+
+% Sink: no outgoing edges
+sink(N) :- nodes(N), !has_outgoing(N).
+
+?- source(N).
+?- sink(N).
+
+.kg use default
+.kg drop test_sink_src

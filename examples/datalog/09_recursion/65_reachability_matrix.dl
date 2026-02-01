@@ -1,0 +1,18 @@
+% Test: Full reachability matrix
+% Expected: All reachable pairs
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_reach_matrix
+.kg use test_reach_matrix
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("a", "c")].
+
+% Full transitive closure
++reach(X, Y) :- edge(X, Y).
++reach(X, Z) :- reach(X, Y), edge(Y, Z).
+
+?- reach(X, Y).
+
+.kg use default
+.kg drop test_reach_matrix

@@ -1,0 +1,19 @@
+% Test: Single tuple relation
+% Expected: Handle relation with one row
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_single_tuple
+.kg use test_single_tuple
+
++singleton[(42, "answer", true)].
+
+?- singleton(A, B, C).
+
+% Aggregate on single tuple
++single_sum(<SUM:A>) :- singleton(A, _, _).
+
+?- single_sum(S).
+
+.kg use default
+.kg drop test_single_tuple

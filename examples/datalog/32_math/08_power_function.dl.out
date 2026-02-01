@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_pow
+Knowledge graph 'test_pow' created.
+Switched to knowledge graph: test_pow
+> .kg use test_pow
+Switched to knowledge graph: test_pow
+> +base_exp[(2, 0), (2, 1), (2, 3), (3, 2), (10, 2)].
+Inserted 5 fact(s) into 'base_exp'.
+> power_val(B, E, R) :- base_exp(B, E), R = POW(B, E).
+Script error: Parse error: Invalid term: 'POW(B, E)'

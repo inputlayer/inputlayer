@@ -1,0 +1,17 @@
+% Test: SUM with grouping
+% Expected: Sum values per group
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_sum_grp
+.kg use test_sum_grp
+
++transactions[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150), (4, "Bob", 50), (5, "Carol", 300)].
+
+% Total per person
++total_by_person(Person, <SUM:Amount>) :- transactions(_, Person, Amount).
+
+?- total_by_person(P, T).
+
+.kg use default
+.kg drop test_sum_grp

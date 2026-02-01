@@ -1,0 +1,18 @@
+% Test: OR condition simulation
+% Expected: Match multiple conditions via union
+% Category: 07_filters
+% Priority: P2 - Filter patterns
+
+.kg create test_or_sim
+.kg use test_or_sim
+
++items[(1, "A", 100), (2, "B", 200), (3, "C", 50), (4, "A", 300)].
+
+% OR via multiple rule clauses: category A OR value > 150
++matches(Id, Cat, Val) :- items(Id, Cat, Val), Cat = "A".
++matches(Id, Cat, Val) :- items(Id, Cat, Val), Val > 150.
+
+?- matches(Id, Cat, Val).
+
+.kg use default
+.kg drop test_or_sim

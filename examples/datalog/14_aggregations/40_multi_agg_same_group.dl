@@ -1,0 +1,20 @@
+% Test: Multiple aggregations on same group
+% Expected: Each aggregation computed correctly
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_multi_agg
+.kg use test_multi_agg
+
++sales[("A", 100), ("A", 200), ("A", 150), ("B", 300), ("B", 100)].
+
+sum_by_cat(Cat, <SUM:Val>) :- sales(Cat, Val).
+count_by_cat(Cat, <COUNT:Val>) :- sales(Cat, Val).
+avg_by_cat(Cat, <AVG:Val>) :- sales(Cat, Val).
+
+?- sum_by_cat(Cat, S).
+?- count_by_cat(Cat, N).
+?- avg_by_cat(Cat, A).
+
+.kg use default
+.kg drop test_multi_agg

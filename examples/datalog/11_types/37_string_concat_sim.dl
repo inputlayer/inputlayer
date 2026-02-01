@@ -1,0 +1,14 @@
+% Test: String values with special chars
+% Expected: Handle various string content
+% Category: 11_types
+% Priority: P2 - Type handling
+
+.kg create test_str_special
+.kg use test_str_special
+
++text[("hello-world",), ("foo_bar",), ("test.case",), ("a/b/c",)].
+
+?- text(T).
+
+.kg use default
+.kg drop test_str_special

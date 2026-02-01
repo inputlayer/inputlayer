@@ -1,0 +1,17 @@
+% Test: Modulo with negative numbers
+% Expected: Consistent modulo behavior
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_mod_neg
+.kg use test_mod_neg
+
++numbers[(-7,), (-5,), (0,), (5,), (7,)].
+
+% Modulo 3 for all numbers
+mod_result(X, Y) :- numbers(X), Y = X % 3.
+
+?- mod_result(X, Y).
+
+.kg use default
+.kg drop test_mod_neg

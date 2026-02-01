@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_buckets
+Knowledge graph 'test_buckets' created.
+Switched to knowledge graph: test_buckets
+> .kg use test_buckets
+Switched to knowledge graph: test_buckets
+> +scores[(1, 15), (2, 35), (3, 55), (4, 75), (5, 95)].
+Inserted 5 fact(s) into 'scores'.
+> bucket(Id, Score, "low") :- scores(Id, Score), Score < 40.
+2 rows:
+  (1, 15, "low")
+  (2, 35, "low")
+(session: 1 rule(s))
+> bucket(Id, Score, "medium") :- scores(Id, Score), Score >= 40, Score < 70.
+3 rows:
+  (1, 15, "low")
+  (2, 35, "low")
+  (3, 55, "medium")
+(session: 2 rule(s))
+> bucket(Id, Score, "high") :- scores(Id, Score), Score >= 70.
+5 rows:
+  (1, 15, "low")
+  (2, 35, "low")
+  (3, 55, "medium")
+  (4, 75, "high")
+  (5, 95, "high")
+(session: 3 rule(s))
+> ?- bucket(Id, Score, Bucket).
+5 rows:
+  (1, 15, "low")
+  (2, 35, "low")
+  (3, 55, "medium")
+  (4, 75, "high")
+  (5, 95, "high")
+> +bucket_count(Bucket, <COUNT:Id>) :- bucket(Id, _, Bucket).
+Script error: Parse error: Invalid term: '<COUNT:Id>'

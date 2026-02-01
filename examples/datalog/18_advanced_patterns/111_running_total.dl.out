@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_running
+Knowledge graph 'test_running' created.
+Switched to knowledge graph: test_running
+> .kg use test_running
+Switched to knowledge graph: test_running
+> +txns[(1, 100), (2, 50), (3, 75), (4, 25)].
+Inserted 4 fact(s) into 'txns'.
+> +total_sum(<SUM:Amt>) :- txns(_, Amt).
+Script error: Parse error: Invalid term: '<SUM:Amt>'

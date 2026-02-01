@@ -1,0 +1,21 @@
+% Test: Null-like value handling
+% Expected: Handle empty strings and zero values
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_nullish
+.kg use test_nullish
+
++data[(1, "", 0), (2, "value", 100), (3, "", 50), (4, "other", 0)].
+
+% Find rows with empty string
+empty_name(Id) :- data(Id, "", _).
+
+% Find rows with zero amount
+zero_amount(Id) :- data(Id, _, 0).
+
+?- empty_name(Id).
+?- zero_amount(Id).
+
+.kg use default
+.kg drop test_nullish

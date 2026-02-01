@@ -1,0 +1,22 @@
+% Test: Rounding operations
+% Expected: Can round values using arithmetic
+% Category: 32_math
+% Priority: P2 - Math operations
+
+.kg create test_round
+.kg use test_round
+
++values[(15,), (23,), (50,), (77,), (100,)].
+
+% Round down to nearest 10 (integer division)
+round_down(V, R) :- values(V), R = (V / 10) * 10.
+
+?- round_down(V, R).
+
+% Get remainder after rounding
+remainder(V, R) :- values(V), R = V - ((V / 10) * 10).
+
+?- remainder(V, R).
+
+.kg use default
+.kg drop test_round

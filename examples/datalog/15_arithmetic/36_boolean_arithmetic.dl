@@ -1,0 +1,15 @@
+% Test: Boolean in arithmetic context
+% Expected: Handle boolean coercion if supported
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_bool_arith
+.kg use test_bool_arith
+
++flags[(1, true), (2, false), (3, true)].
+
+% Just query the flags
+?- flags(Id, Val).
+
+.kg use default
+.kg drop test_bool_arith

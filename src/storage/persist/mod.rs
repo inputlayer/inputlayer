@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 
 // Parquet I/O for batches
 use arrow::array::{ArrayRef, Int32Array, Int64Array, UInt64Array};
@@ -54,6 +54,8 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use std::sync::Arc;
 
+use crate::config::DurabilityMode;
+
 /// Configuration for the persist layer
 #[derive(Debug, Clone)]
 pub struct PersistConfig {
@@ -61,8 +63,10 @@ pub struct PersistConfig {
     pub path: PathBuf,
     /// Buffer size before flushing to batch file
     pub buffer_size: usize,
-    /// Whether to sync WAL immediately on each write
+    /// Whether to sync WAL immediately on each write (DEPRECATED)
     pub immediate_sync: bool,
+    /// Durability mode for writes
+    pub durability_mode: DurabilityMode,
 }
 
 impl Default for PersistConfig {
@@ -71,6 +75,7 @@ impl Default for PersistConfig {
             path: PathBuf::from("./data/persist"),
             buffer_size: 10000,
             immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
         }
     }
 }
@@ -147,7 +152,7 @@ impl FilePersist {
             return Ok(());
         }
 
-        let mut shards = self.shards.write().unwrap();
+        let mut shards = self.shards.write();
 
         for entry in fs::read_dir(&shards_dir)? {
             let entry = entry?;
@@ -184,10 +189,10 @@ impl FilePersist {
 
     /// Replay WAL entries into shard buffers
     fn replay_wal(&self) -> StorageResult<()> {
-        let wal = self.wal.lock().unwrap();
+        let wal = self.wal.lock();
         let entries = wal.read_all()?;
 
-        let mut shards = self.shards.write().unwrap();
+        let mut shards = self.shards.write();
 
         for entry in entries {
             let state = shards
@@ -249,15 +254,27 @@ impl PersistBackend for FilePersist {
             return Ok(());
         }
 
-        // Write to WAL first (durability)
-        {
-            let mut wal = self.wal.lock().unwrap();
-            wal.append_batch(shard, updates)?;
+        // Handle WAL based on durability mode
+        match self.config.durability_mode {
+            DurabilityMode::Immediate => {
+                // Write to WAL with immediate sync (safest)
+                let mut wal = self.wal.lock();
+                wal.append_batch(shard, updates)?;
+            }
+            DurabilityMode::Batched => {
+                // Write to WAL without sync (faster, batched durability)
+                let mut wal = self.wal.lock();
+                wal.append_batch_buffered(shard, updates)?;
+            }
+            DurabilityMode::Async => {
+                // Skip WAL entirely for maximum speed (in-memory only until flush)
+                // Data may be lost on crash, but in-memory operations are fast
+            }
         }
 
         // Add to buffer
         let should_flush = {
-            let mut shards = self.shards.write().unwrap();
+            let mut shards = self.shards.write();
             let state = shards
                 .entry(shard.to_string())
                 .or_insert_with(|| ShardState {
@@ -286,7 +303,7 @@ impl PersistBackend for FilePersist {
     }
 
     fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>> {
-        let shards = self.shards.read().unwrap();
+        let shards = self.shards.read();
 
         let state = shards
             .get(shard)
@@ -312,7 +329,7 @@ impl PersistBackend for FilePersist {
         // Flush first to ensure all data is in batches
         self.flush(shard)?;
 
-        let mut shards = self.shards.write().unwrap();
+        let mut shards = self.shards.write();
         let state = shards
             .get_mut(shard)
             .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
@@ -359,12 +376,12 @@ impl PersistBackend for FilePersist {
     }
 
     fn list_shards(&self) -> StorageResult<Vec<String>> {
-        let shards = self.shards.read().unwrap();
+        let shards = self.shards.read();
         Ok(shards.keys().cloned().collect())
     }
 
     fn shard_info(&self, shard: &str) -> StorageResult<ShardInfo> {
-        let shards = self.shards.read().unwrap();
+        let shards = self.shards.read();
         let state = shards
             .get(shard)
             .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
@@ -372,7 +389,7 @@ impl PersistBackend for FilePersist {
     }
 
     fn ensure_shard(&self, shard: &str) -> StorageResult<()> {
-        let mut shards = self.shards.write().unwrap();
+        let mut shards = self.shards.write();
         if !shards.contains_key(shard) {
             let meta = ShardMeta::new(shard.to_string());
             self.save_shard_meta(&meta)?;
@@ -388,12 +405,12 @@ impl PersistBackend for FilePersist {
     }
 
     fn sync(&self) -> StorageResult<()> {
-        let mut wal = self.wal.lock().unwrap();
+        let mut wal = self.wal.lock();
         wal.sync()
     }
 
     fn flush(&self, shard: &str) -> StorageResult<()> {
-        let mut shards = self.shards.write().unwrap();
+        let mut shards = self.shards.write();
         let state = shards
             .get_mut(shard)
             .ok_or_else(|| StorageError::Other(format!("Shard not found: {}", shard)))?;
@@ -421,7 +438,7 @@ impl PersistBackend for FilePersist {
 
         // Clear WAL (data is now durable in batch file)
         {
-            let mut wal = self.wal.lock().unwrap();
+            let mut wal = self.wal.lock();
             wal.clear()?;
         }
 
@@ -494,6 +511,9 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
             .map_err(|e| StorageError::Parquet(e))?;
         writer.close().map_err(|e| StorageError::Parquet(e))?;
 
+        // Ensure data is durably written to disk
+        fs::File::open(path)?.sync_all()?;
+
         return Ok(());
     }
 
@@ -540,6 +560,9 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
 
     writer.write(&batch).map_err(|e| StorageError::Parquet(e))?;
     writer.close().map_err(|e| StorageError::Parquet(e))?;
+
+    // Ensure data is durably written to disk
+    fs::File::open(path)?.sync_all()?;
 
     Ok(())
 }
@@ -635,6 +658,7 @@ mod tests {
             path: temp.path().to_path_buf(),
             buffer_size: 5,
             immediate_sync: true,
+            durability_mode: DurabilityMode::Immediate,
         };
         let persist = FilePersist::new(config).unwrap();
         (temp, persist)
@@ -779,6 +803,7 @@ mod tests {
                 path: path.clone(),
                 buffer_size: 100,
                 immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -801,6 +826,7 @@ mod tests {
                 path: path.clone(),
                 buffer_size: 100,
                 immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
 

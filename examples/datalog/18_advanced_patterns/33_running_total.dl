@@ -1,0 +1,17 @@
+% Test: Running total pattern
+% Expected: Cumulative sum simulation
+% Category: 18_advanced_patterns
+% Priority: P2 - Advanced patterns
+
+.kg create test_running
+.kg use test_running
+
++ordered_vals[(1, 10), (2, 20), (3, 30), (4, 40)].
+
+% Running sum for each position using recursive aggregation
++running_sum(Id, <SUM:Val>) :- ordered_vals(I, Val), I <= Id, ordered_vals(Id, _).
+
+?- running_sum(Id, Sum).
+
+.kg use default
+.kg drop test_running

@@ -12,4 +12,4 @@ Switched to knowledge graph: test_unsafe_neg_err
 > +banned[(1), (2)].
 Inserted 2 fact(s) into 'banned'.
 > +unsafe_rule(X) :- !banned(X).
-Script error: Failed to register rule: Unsafe negation in rule 'unsafe_rule': Variable(s) X in negated atom !banned(...) must be bound by a positive body atom. Range restriction violation.
+Script error: Failed to register rule: Unsafe rule 'unsafe_rule': Head variable(s) X not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

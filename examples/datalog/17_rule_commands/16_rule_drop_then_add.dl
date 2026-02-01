@@ -1,0 +1,26 @@
+% Test: Drop rule then add new clauses
+% Expected: Can add new clauses after dropping a rule
+% Category: 17_rule_commands
+% Priority: P1 - Rule management
+
+.kg create test_drop_add
+.kg use test_drop_add
+
++items[(1,), (2,), (3,)].
+
+% Create a rule
++doubled(X, Y) :- items(X), Y = X * 2.
+?- doubled(X, Y).
+
+% Drop the rule
+.rule drop doubled
+
+% Verify rule is gone
+.rule
+
+% Add new version of the rule
++doubled(X, Y) :- items(X), Y = X * 3.
+?- doubled(X, Y).
+
+.kg use default
+.kg drop test_drop_add

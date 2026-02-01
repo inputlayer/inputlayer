@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_eq
+Knowledge graph 'test_vec_eq' created.
+Switched to knowledge graph: test_vec_eq
+> .kg use test_vec_eq
+Switched to knowledge graph: test_vec_eq
+> +data[(1, [1, 2, 3]), (2, [4, 5, 6]), (3, [1, 2, 3])].
+Inserted 3 fact(s) into 'data'.
+> matching(Id, V) :- data(Id, V), data(1, V).
+3 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+  (2, [Number(4.0), Number(5.0), Number(6.0)])
+  (3, [Number(1.0), Number(2.0), Number(3.0)])
+(session: 1 rule(s))
+> ?- matching(Id, V).
+3 rows:
+  (1, [Number(1.0), Number(2.0), Number(3.0)])
+  (2, [Number(4.0), Number(5.0), Number(6.0)])
+  (3, [Number(1.0), Number(2.0), Number(3.0)])
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_eq
+Knowledge graph 'test_vec_eq' dropped.

@@ -1,0 +1,22 @@
+% Test: Reverse path
+% Expected: Path in opposite direction
+% Category: 09_recursion
+% Priority: P2 - Recursion patterns
+
+.kg create test_reverse
+.kg use test_reverse
+
++edge[(1, 2), (2, 3), (3, 4)].
+
+% Forward path
++forward(X, Y) :- edge(X, Y).
++forward(X, Z) :- forward(X, Y), edge(Y, Z).
+
+% Reverse (edge goes other way)
++reverse(Y, X) :- edge(X, Y).
+
+?- forward(X, Y).
+?- reverse(X, Y).
+
+.kg use default
+.kg drop test_reverse

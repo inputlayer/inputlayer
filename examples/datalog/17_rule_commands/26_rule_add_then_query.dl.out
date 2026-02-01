@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_add_query
+Knowledge graph 'test_add_query' created.
+Switched to knowledge graph: test_add_query
+> .kg use test_add_query
+Switched to knowledge graph: test_add_query
+> +facts[(1,), (2,), (3,)].
+Inserted 3 fact(s) into 'facts'.
+> +derived(X, Y) :- facts(X), Y = X * 10.
+Script error: Failed to register rule: Unsafe rule 'derived': Head variable(s) Y not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

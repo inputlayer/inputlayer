@@ -1,0 +1,32 @@
+% Test: Float special values handling
+% Expected: Proper handling of edge cases
+% Category: 11_types
+% Priority: P1 - Numeric edge cases
+
+.kg create test_float_special
+.kg use test_float_special
+
+% Very small float
++small_float(0.0000001).
+
+% Very large float
++large_float(999999999999.99).
+
+% Negative float
++neg_float(-123.456).
+
+% Float near zero
++near_zero(0.0).
+
+% Query and verify
+?- small_float(X).
+?- large_float(X).
+?- neg_float(X).
+?- near_zero(X).
+
+% Arithmetic with floats
+float_calc(Y) :- small_float(X), Y = X * 1000000.
+?- float_calc(Y).
+
+.kg use default
+.kg drop test_float_special

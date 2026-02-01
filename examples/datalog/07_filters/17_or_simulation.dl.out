@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_or_sim
+Knowledge graph 'test_or_sim' created.
+Switched to knowledge graph: test_or_sim
+> .kg use test_or_sim
+Switched to knowledge graph: test_or_sim
+> +items[(1, "A", 100), (2, "B", 200), (3, "C", 50), (4, "A", 300)].
+Inserted 4 fact(s) into 'items'.
+> +matches(Id, Cat, Val) :- items(Id, Cat, Val), Cat = "A".
+Rule 'matches' registered.
+> +matches(Id, Cat, Val) :- items(Id, Cat, Val), Val > 150.
+Rule 'matches' registered.
+> ?- matches(Id, Cat, Val).
+3 rows:
+  (1, "A", 100)
+  (2, "B", 200)
+  (4, "A", 300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_or_sim
+Knowledge graph 'test_or_sim' dropped.

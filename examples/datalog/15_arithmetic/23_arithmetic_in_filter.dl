@@ -1,0 +1,17 @@
+% Test: Arithmetic expression in filter
+% Expected: Filter using computed values
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_arith_filter
+.kg use test_arith_filter
+
++items[(1, 10, 2), (2, 20, 3), (3, 15, 1), (4, 25, 2)].
+
+% Find items where quantity * price > 30
+expensive(Id, Q, P) :- items(Id, Q, P), Q * P > 30.
+
+?- expensive(Id, Q, P).
+
+.kg use default
+.kg drop test_arith_filter

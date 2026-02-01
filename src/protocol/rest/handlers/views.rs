@@ -69,10 +69,11 @@ pub async fn list_views(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
+            let arity = storage.rule_arity(&name).ok().flatten().unwrap_or(0);
             ViewDto {
                 name,
                 definition: description,
-                arity: 0,
+                arity,
                 columns: vec![],
                 dependencies: vec![],
             }
@@ -113,10 +114,12 @@ pub async fn get_view(
         .map_err(|e| RestError::internal(format!("Failed to get view: {}", e)))?
         .ok_or_else(|| RestError::not_found(format!("View '{}' not found", name)))?;
 
+    let arity = storage.rule_arity(&name).ok().flatten().unwrap_or(0);
+
     let view = ViewDto {
         name,
         definition: description,
-        arity: 0,
+        arity,
         columns: vec![],
         dependencies: vec![],
     };
@@ -146,8 +149,24 @@ pub async fn get_view_data(
     Path((kg, name)): Path<(String, String)>,
     Query(query_params): Query<RelationDataQuery>,
 ) -> Result<Json<ApiResponse<RelationDataDto>>, RestError> {
-    // Query the view to get its data
-    let query = format!("?- {}(X, Y).", name);
+    // Get the arity of the view to build the correct query
+    let arity = {
+        let mut storage = handler.get_storage_mut();
+        storage
+            .use_knowledge_graph(&kg)
+            .map_err(|e| RestError::not_found(format!("Knowledge graph '{}' not found: {}", kg, e)))?;
+
+        storage
+            .rule_arity(&name)
+            .map_err(|e| RestError::internal(format!("Failed to get view arity: {}", e)))?
+            .ok_or_else(|| RestError::not_found(format!("View '{}' not found", name)))?
+    };
+
+    // Build query with correct number of variables (A, B, C, ...)
+    let vars: Vec<String> = (0..arity)
+        .map(|i| ((b'A' + i as u8) as char).to_string())
+        .collect();
+    let query = format!("?- {}({}).", name, vars.join(", "));
 
     let result = handler
         .query_program(Some(kg.clone()), query)
@@ -212,11 +231,20 @@ pub async fn create_view(
         .await
         .map_err(|e| RestError::bad_request(format!("{:?}", e)))?;
 
+    // Get the arity of the newly created view
+    let arity = {
+        let mut storage = handler.get_storage_mut();
+        storage
+            .use_knowledge_graph(&kg)
+            .map_err(|e| RestError::internal(format!("Failed to switch KG: {}", e)))?;
+        storage.rule_arity(&request.name).ok().flatten().unwrap_or(0)
+    };
+
     // Return the created view
     let view = ViewDto {
         name: request.name,
         definition: request.definition,
-        arity: 0,
+        arity,
         columns: vec![],
         dependencies: vec![],
     };

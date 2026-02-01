@@ -1,0 +1,19 @@
+% Test: Exclusive OR via set operations
+% Expected: XOR = (A-B) union (B-A)
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_xor
+.kg use test_xor
+
++set_a[(1,), (2,), (3,)].
++set_b[(2,), (3,), (4,)].
+
+% XOR: in exactly one set
++xor_result(X) :- set_a(X), !set_b(X).
++xor_result(X) :- set_b(X), !set_a(X).
+
+?- xor_result(X).
+
+.kg use default
+.kg drop test_xor

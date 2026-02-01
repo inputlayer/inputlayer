@@ -1,0 +1,19 @@
+% Test: Multi-clause rule
+% Expected: Rule with multiple clauses (union)
+% Category: 21_query_features
+% Priority: P2 - Query features
+
+.kg create test_multi_clause
+.kg use test_multi_clause
+
++dogs[(1, "Buddy"), (2, "Max")].
++cats[(3, "Whiskers"), (4, "Luna")].
+
+% Pets from both sources
++pets(Id, Name) :- dogs(Id, Name).
++pets(Id, Name) :- cats(Id, Name).
+
+?- pets(Id, Name).
+
+.kg use default
+.kg drop test_multi_clause

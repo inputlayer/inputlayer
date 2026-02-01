@@ -1,0 +1,49 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_mgmt
+Knowledge graph 'test_rule_mgmt' created.
+Switched to knowledge graph: test_rule_mgmt
+> .kg use test_rule_mgmt
+Switched to knowledge graph: test_rule_mgmt
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
+Inserted 4 fact(s) into 'edge'.
+> +node[(1,), (2,), (3,), (4,), (5,)].
+Inserted 5 fact(s) into 'node'.
+> +reachable(X, Y) :- edge(X, Y).
+Rule 'reachable' registered.
+> +reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
+Rule 'reachable' registered.
+> .rule
+Rules:
+  reachable (2 clause(s))
+> ?- reachable(1, X).
+4 rows:
+  (1, 2)
+  (1, 3)
+  (1, 4)
+  (1, 5)
+> +connected(X, Y) :- edge(X, Y).
+Rule 'connected' registered.
+> .rule
+Rules:
+  connected (1 clause(s))
+  reachable (2 clause(s))
+> .rule remove reachable 1
+Clause 1 removed from rule 'reachable'.
+> .rule
+Rules:
+  connected (1 clause(s))
+  reachable (1 clause(s))
+> .rule drop connected
+Rule 'connected' dropped.
+> .rule
+Rules:
+  reachable (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_mgmt
+Knowledge graph 'test_rule_mgmt' dropped.

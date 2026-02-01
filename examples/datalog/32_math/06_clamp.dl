@@ -1,0 +1,20 @@
+% Test: Clamping values to range
+% Expected: Can clamp values between min and max
+% Category: 32_math
+% Priority: P2 - Math operations
+
+.kg create test_clamp
+.kg use test_clamp
+
++values[(-5,), (0,), (5,), (10,), (15,), (20,)].
+
+% Clamp to [0, 10] using min/max
+clamped(V, C) :- values(V), MinV = 0, MaxV = 10,
+    C = V, V >= MinV, V <= MaxV.
+clamped(V, C) :- values(V), C = 0, V < 0.
+clamped(V, C) :- values(V), C = 10, V > 10.
+
+?- clamped(V, C).
+
+.kg use default
+.kg drop test_clamp

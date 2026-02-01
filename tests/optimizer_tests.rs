@@ -420,8 +420,11 @@ fn test_subplan_sharing_detects_common_subexpressions() {
 
     // Should detect that both are identical
     assert_eq!(optimized.len(), 2);
-    // Shared views may be populated if duplicates are found
-    assert!(shared.len() >= 0);
+    // Shared views is a HashMap of shared subplans
+    // The exact behavior depends on implementation - this test verifies:
+    // 1. The API works without panicking
+    // 2. We get back the expected number of plans
+    let _ = shared; // Use the shared variable to avoid unused warning
 }
 
 #[test]

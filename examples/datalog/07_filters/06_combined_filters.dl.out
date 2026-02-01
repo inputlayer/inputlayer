@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_combined_filters
+Knowledge graph 'test_combined_filters' created.
+Switched to knowledge graph: test_combined_filters
+> .kg use test_combined_filters
+Switched to knowledge graph: test_combined_filters
+> +products[(1, "Widget", 10.0, 100), (2, "Gadget", 25.0, 50), (3, "Gizmo", 15.0, 75), (4, "Thing", 30.0, 25)].
+Inserted 4 fact(s) into 'products'.
+> ?- products(Id, Name, Price, Stock), Price = 10.0.
+1 rows:
+  (1, "Widget", 10.0, 100)
+> ?- products(Id, Name, Price, Stock), Price > 10.0, Stock > 30.
+2 rows:
+  (2, "Gadget", 25.0, 50)
+  (3, "Gizmo", 15.0, 75)
+> ?- products(Id, Name, Price, Stock), Stock >= 50, Price < 30.0.
+3 rows:
+  (1, "Widget", 10.0, 100)
+  (2, "Gadget", 25.0, 50)
+  (3, "Gizmo", 15.0, 75)
+> ?- products(Id, Name, Price, Stock), Price >= 10.0, Price <= 25.0.
+3 rows:
+  (1, "Widget", 10.0, 100)
+  (2, "Gadget", 25.0, 50)
+  (3, "Gizmo", 15.0, 75)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_combined_filters
+Knowledge graph 'test_combined_filters' dropped.

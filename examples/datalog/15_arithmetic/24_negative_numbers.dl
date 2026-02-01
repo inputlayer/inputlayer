@@ -1,0 +1,21 @@
+% Test: Negative number handling
+% Expected: Correctly handle negative values
+% Category: 15_arithmetic
+% Priority: P2 - Arithmetic patterns
+
+.kg create test_negative
+.kg use test_negative
+
++temps[(-10,), (0,), (10,), (-5,), (20,)].
+
+% Filter negative temps
+negative(T) :- temps(T), T < 0.
+
+% Filter non-negative temps
+non_negative(T) :- temps(T), T >= 0.
+
+?- negative(T).
+?- non_negative(T).
+
+.kg use default
+.kg drop test_negative

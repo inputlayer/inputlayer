@@ -1,0 +1,22 @@
+% Test: MIN/MAX on strings
+% Expected: Lexicographic min/max
+% Category: 14_aggregations
+% Priority: P2 - Aggregation patterns
+
+.kg create test_string_minmax
+.kg use test_string_minmax
+
++names[("Charlie",), ("Alice",), ("Bob",), ("Dave",)].
+
+% Lexicographic min
++min_name(<MIN:N>) :- names(N).
+
+?- min_name(N).
+
+% Lexicographic max
++max_name(<MAX:N>) :- names(N).
+
+?- max_name(N).
+
+.kg use default
+.kg drop test_string_minmax

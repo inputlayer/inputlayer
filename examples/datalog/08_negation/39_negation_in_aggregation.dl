@@ -1,0 +1,18 @@
+% Test: Negation combined with aggregation
+% Expected: Count items NOT in exclusion list
+% Category: 08_negation
+% Priority: P2 - Negation patterns
+
+.kg create test_neg_agg
+.kg use test_neg_agg
+
++items[(1, "A"), (2, "B"), (3, "C"), (4, "D"), (5, "E")].
++exclude[("B",), ("D",)].
+
+% Count items not in exclude list
+count_included(<COUNT:Id>) :- items(Id, Name), !exclude(Name).
+
+?- count_included(N).
+
+.kg use default
+.kg drop test_neg_agg

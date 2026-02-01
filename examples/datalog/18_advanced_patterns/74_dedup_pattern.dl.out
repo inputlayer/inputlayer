@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dedup
+Knowledge graph 'test_dedup' created.
+Switched to knowledge graph: test_dedup
+> .kg use test_dedup
+Switched to knowledge graph: test_dedup
+> +events[(1, "click"), (2, "click"), (3, "view"), (4, "click"), (5, "view")].
+Inserted 5 fact(s) into 'events'.
+> unique_types(T) :- events(_, T).
+2 rows:
+  ("click")
+  ("view")
+(session: 1 rule(s))
+> ?- unique_types(T).
+2 rows:
+  ("click")
+  ("view")
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_dedup
+Knowledge graph 'test_dedup' dropped.

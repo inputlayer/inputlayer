@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested
+Knowledge graph 'test_nested' created.
+Switched to knowledge graph: test_nested
+> .kg use test_nested
+Switched to knowledge graph: test_nested
+> +products[(1, "laptop", 999, 50), (2, "phone", 599, 100), (3, "tablet", 399, 75), (4, "watch", 199, 200)].
+Inserted 4 fact(s) into 'products'.
+> ?- products(Id, Name, Price, Stock), Price > 300, Stock > 60.
+2 rows:
+  (2, "phone", 599, 100)
+  (3, "tablet", 399, 75)
+> ?- products(Id, Name, Price, Stock), Price < 300.
+1 rows:
+  (4, "watch", 199, 200)
+> ?- products(Id, Name, Price, Stock), Stock > 150.
+1 rows:
+  (4, "watch", 199, 200)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested
+Knowledge graph 'test_nested' dropped.

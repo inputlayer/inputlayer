@@ -1,0 +1,27 @@
+% Test: Single row operations
+% Expected: Operations work with single row
+% Category: 10_edge_cases
+% Priority: P1 - Edge cases
+
+.kg create test_single_row
+.kg use test_single_row
+
+% Single row relation
++single[(1, "only")].
+
+?- single(Id, Val).
+
+% Aggregate on single row
++single_count(<COUNT:V>) :- single(_, V).
++single_sum(1, <SUM:Id>) :- single(Id, _).
+
+?- single_count(C).
+?- single_sum(G, S).
+
+% Self-join with single row
+self_join(A, B) :- single(A, _), single(B, _).
+
+?- self_join(A, B).
+
+.kg use default
+.kg drop test_single_row

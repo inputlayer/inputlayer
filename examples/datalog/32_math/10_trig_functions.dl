@@ -1,0 +1,18 @@
+% Test: Trigonometric functions
+% Expected: Return sin/cos values
+% Category: 32_math
+% Priority: P2 - Math functions
+
+.kg create test_trig
+.kg use test_trig
+
++angles[(0,), (1,), (3.14159,)].
+
+sin_val(X, Y) :- angles(X), Y = SIN(X).
+cos_val(X, Y) :- angles(X), Y = COS(X).
+
+?- sin_val(X, Y).
+?- cos_val(X, Y).
+
+.kg use default
+.kg drop test_trig

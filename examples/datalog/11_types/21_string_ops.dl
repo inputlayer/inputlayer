@@ -1,0 +1,27 @@
+% Test: String operations
+% Expected: String equality and patterns work
+% Category: 11_types
+% Priority: P1 - Type handling
+
+.kg create test_str_ops
+.kg use test_str_ops
+
++names[(1, "alice"), (2, "bob"), (3, "alice"), (4, "carol")].
+
+% Filter by specific string
+is_alice(Id) :- names(Id, "alice").
+
+?- is_alice(Id).
+
+% Distinct names
+distinct_name(N) :- names(_, N).
+
+?- distinct_name(N).
+
+% Count per name
++name_count(Name, <COUNT:Id>) :- names(Id, Name).
+
+?- name_count(Name, Count).
+
+.kg use default
+.kg drop test_str_ops

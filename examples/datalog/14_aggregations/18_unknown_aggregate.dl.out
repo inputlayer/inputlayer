@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unknown_agg
+Knowledge graph 'test_unknown_agg' created.
+Switched to knowledge graph: test_unknown_agg
+> .kg use test_unknown_agg
+Switched to knowledge graph: test_unknown_agg
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'data'.
+> bad_agg(G, <MEDIAN:V>) :- data(G, V).
+Script error: Parse error: Unknown aggregate function: 

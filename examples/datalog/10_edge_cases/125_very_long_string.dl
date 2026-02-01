@@ -1,0 +1,14 @@
+% Test: Very long string values
+% Expected: Handle strings of various lengths
+% Category: 10_edge_cases
+% Priority: P2 - Edge cases
+
+.kg create test_long_str
+.kg use test_long_str
+
++texts[("short",), ("medium length string here",), ("this is a somewhat longer string that tests handling of moderate length text values",)].
+
+?- texts(T).
+
+.kg use default
+.kg drop test_long_str

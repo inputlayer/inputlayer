@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compound_cond
+Knowledge graph 'test_compound_cond' created.
+Switched to knowledge graph: test_compound_cond
+> .kg use test_compound_cond
+Switched to knowledge graph: test_compound_cond
+> +items[(1, "A", 100, true), (2, "A", 200, false), (3, "B", 150, true), (4, "A", 120, true)].
+Inserted 4 fact(s) into 'items'.
+> filtered(Id, Price) :- items(Id, "A", Price, true), Price > 100.
+1 rows:
+  (4, 120)
+(session: 1 rule(s))
+> ?- filtered(Id, P).
+1 rows:
+  (4, 120)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_compound_cond
+Knowledge graph 'test_compound_cond' dropped.
