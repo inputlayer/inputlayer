@@ -1,0 +1,55 @@
+{
+  "name": "@inputlayer/api-client",
+  "version": "0.1.0",
+  "description": "TypeScript API client for InputLayer RAR engine with runtime validation",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "generate": "orval",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "prepublishOnly": "npm run generate && npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "orval": "^7.3.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "zod": ">=3.20.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/InputLayer/inputlayer.git",
+    "directory": "packages/api-client"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "inputlayer",
+    "datalog",
+    "api-client",
+    "typescript",
+    "zod",
+    "openapi"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "author": "InputLayer Team"
+}
