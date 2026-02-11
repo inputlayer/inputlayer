@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all flush-dev
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev
 
 # Default target
 all: ci
@@ -65,8 +65,63 @@ test-all:
 	fi; \
 	echo "ALL CHECKS PASSED"
 
+# CI-friendly full verification (memory-constrained runners: 16GB RAM)
+# Same checks as test-all but with:
+#   - Thin LTO instead of full LTO (halves linker peak memory)
+#   - More codegen units (reduces per-unit memory)
+#   - Capped test parallelism (DD workers are memory-hungry)
+#   - Capped snapshot parallelism
+ci-test-all:
+	@FAILURES=0; \
+	STRIP_ANSI='s/\x1b\[[0-9;]*m//g'; \
+	CI_JOBS=2; \
+	echo "Running all tests (CI mode, $${CI_JOBS} parallel)..."; \
+	echo ""; \
+	echo "=== Build (release, thin LTO) ==="; \
+	if CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
+	   cargo build --all-features --release 2>&1; then \
+		BUILD_STATUS="PASS"; \
+	else \
+		BUILD_STATUS="FAIL"; \
+		FAILURES=$$((FAILURES + 1)); \
+	fi; \
+	echo ""; \
+	echo "=== Unit Tests ==="; \
+	UNIT_OUTPUT=$$(RUST_TEST_THREADS=$$CI_JOBS cargo test --all-features 2>&1); \
+	UNIT_EXIT=$$?; \
+	echo "$$UNIT_OUTPUT" | tail -5; \
+	UNIT_PASSED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$4} END {print sum+0}'); \
+	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
+	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	echo ""; \
+	echo "=== Snapshot Tests (E2E, $$CI_JOBS parallel) ==="; \
+	SNAP_OUTPUT=$$(CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
+	   ./scripts/run_snapshot_tests.sh -j $$CI_JOBS 2>&1); \
+	SNAP_EXIT=$$?; \
+	echo "$$SNAP_OUTPUT" | tail -10; \
+	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \
+	SNAP_FAILED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Failed:" | awk '{print $$2}'); \
+	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	echo ""; \
+	echo "==========================================="; \
+	echo "           CI TEST SUMMARY"; \
+	echo "==========================================="; \
+	echo ""; \
+	printf "  | %-14s | %-48s |\n" "Category" "Status"; \
+	printf "  |----------------|--------------------------------------------------|\n"; \
+	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
+	printf "  | %-14s | %-48s |\n" "Unit Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed"; \
+	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	echo ""; \
+	echo "==========================================="; \
+	if [ $$FAILURES -ne 0 ]; then \
+		echo "SOME CHECKS FAILED ($$FAILURES)"; \
+		exit 1; \
+	fi; \
+	echo "ALL CHECKS PASSED"
+
 # CI target - runs all checks that CI performs
-ci: check test-all
+ci: check ci-test-all
 	@echo "All CI checks passed!"
 
 # Individual Test Tiers
