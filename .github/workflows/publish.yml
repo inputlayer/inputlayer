@@ -15,7 +15,7 @@ jobs:
   # Gate: all tests must pass before publishing
   test:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +38,7 @@ jobs:
 
   snapshot-test:
     name: Snapshot Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: test
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +64,7 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: [test, snapshot-test]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
@@ -89,7 +89,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
