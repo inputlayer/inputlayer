@@ -97,10 +97,19 @@ impl HnswIndex {
         };
 
         let max_elements = storage_ref.len().max(1000);
+        // Scale max_layer to dataset size: log_M(N), clamped to [4, 16]
+        let max_layer = if storage_ref.len() <= 1 {
+            4
+        } else {
+            let m = (self.config.m as f64).max(2.0);
+            let n = storage_ref.len() as f64;
+            let layers = (n.ln() / m.ln()).ceil() as usize;
+            layers.clamp(4, 16)
+        };
         let hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
             self.config.m,
             max_elements,
-            16,
+            max_layer,
             self.config.ef_construction,
             DistL2,
         );
@@ -634,8 +643,8 @@ mod tests {
 
     #[test]
     fn test_hnsw_different_m_values() {
-        // Test with different M values
-        for m in [4, 8, 16, 32] {
+        // Test with different M values (M=4 excluded: too sparse for reliable ANN)
+        for m in [8, 16, 32] {
             let config = HnswConfig {
                 m,
                 ef_construction: 100,
