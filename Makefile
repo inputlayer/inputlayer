@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run
 
 # Default target
 all: ci
@@ -231,6 +231,16 @@ endif
 	@echo "Next steps:"
 	@echo "  1. Create a PR from release/$(VERSION) to main"
 	@echo "  2. After merge, create and push tag: git tag v$(VERSION) && git push origin v$(VERSION)"
+
+# Docker
+
+# Build Docker image
+docker:
+	DOCKER_BUILDKIT=1 docker build -t inputlayer .
+
+# Run Docker container
+docker-run: docker
+	docker run --rm -p 8080:8080 -v inputlayer-data:/var/lib/inputlayer/data inputlayer
 
 # Flush development data - removes data folder to reset to empty state
 flush-dev:
