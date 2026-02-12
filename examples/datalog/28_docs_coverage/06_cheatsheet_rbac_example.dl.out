@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create acl_n28t06
-Knowledge graph 'acl_n28t06' created.
-Switched to knowledge graph: acl_n28t06
-> .kg use acl_n28t06
-Switched to knowledge graph: acl_n28t06
+> .kg create test_acl_n28t06
+Knowledge graph 'test_acl_n28t06' created.
+Switched to knowledge graph: test_acl_n28t06
+> .kg use test_acl_n28t06
+Switched to knowledge graph: test_acl_n28t06
 > +user_role[("alice", "admin"), ("bob", "viewer")].
 Inserted 2 fact(s) into 'user_role'.
 > +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
@@ -24,5 +24,5 @@ Rule 'has_permission' registered.
   ("bob", "read")
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop acl_n28t06
-Knowledge graph 'acl_n28t06' dropped.
+> .kg drop test_acl_n28t06
+Knowledge graph 'test_acl_n28t06' dropped.

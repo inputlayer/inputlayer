@@ -1,0 +1,43 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_grp_retract_n14t144
+Knowledge graph 'test_topk_grp_retract_n14t144' created.
+Switched to knowledge graph: test_topk_grp_retract_n14t144
+> .kg use test_topk_grp_retract_n14t144
+Switched to knowledge graph: test_topk_grp_retract_n14t144
+> +score[("math", "Alice", 95), ("math", "Bob", 85), ("math", "Charlie", 90), ("science", "Alice", 80), ("science", "Bob", 92), ("science", "Charlie", 88)].
+Inserted 6 fact(s) into 'score'.
+> +top_in_subject(Subject, top_k<2, Name, Grade:desc>) :- score(Subject, Name, Grade).
+Rule 'top_in_subject' registered.
+> ?- top_in_subject(S, N, G).
+4 rows:
+  ("math", "Alice", 95)
+  ("math", "Charlie", 90)
+  ("science", "Bob", 92)
+  ("science", "Charlie", 88)
+> -score("math", "Alice", 95).
+Deleted 1 facts from 'score'.
+> ?- top_in_subject(S, N, G).
+4 rows:
+  ("math", "Bob", 85)
+  ("math", "Charlie", 90)
+  ("science", "Bob", 92)
+  ("science", "Charlie", 88)
+> -score("science", "Alice", 80).
+Deleted 1 facts from 'score'.
+> -score("science", "Bob", 92).
+Deleted 1 facts from 'score'.
+> -score("science", "Charlie", 88).
+Deleted 1 facts from 'score'.
+> ?- top_in_subject(S, N, G).
+2 rows:
+  ("math", "Bob", 85)
+  ("math", "Charlie", 90)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_grp_retract_n14t144
+Knowledge graph 'test_topk_grp_retract_n14t144' dropped.

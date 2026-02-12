@@ -23,8 +23,9 @@
 //! catalog.drop("path").unwrap();
 //! ```
 
-use crate::ast::{BodyPredicate, Program, Rule};
+use crate::ast::{AggregateFunc, BodyPredicate, Program, Rule};
 use crate::recursion::{build_extended_dependency_graph, find_sccs};
+use crate::statement::serialize::SerializableTerm;
 use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -148,6 +149,154 @@ pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Extract the aggregation function from a serializable rule's head arguments, if any.
+fn extract_head_aggregate(rule: &SerializableRule) -> Option<&AggregateFunc> {
+    rule.head_args.iter().find_map(|t| {
+        if let SerializableTerm::Aggregate(func, _) = t {
+            Some(func)
+        } else {
+            None
+        }
+    })
+}
+
+/// Validate that a new rule clause has compatible aggregation with existing clauses.
+///
+/// Ranking aggregates (top_k, top_k_threshold, within_radius) cannot coexist with
+/// different parameters on the same rule head, because DD's reduce operator requires
+/// consistent ordering semantics. Attempting to add conflicting ranking aggregates
+/// causes a panic in DD's merge batcher.
+///
+/// Simple aggregates (count, sum, min, max, avg) can coexist as separate clauses
+/// on the same head, since each produces a single value per group.
+fn validate_aggregation_compatibility(
+    existing_rules: &[SerializableRule],
+    new_rule: &SerializableRule,
+) -> Result<(), String> {
+    let new_agg = match extract_head_aggregate(new_rule) {
+        Some(agg) => agg,
+        None => return Ok(()), // No aggregation in new rule, always compatible
+    };
+
+    for existing in existing_rules {
+        let existing_agg = match extract_head_aggregate(existing) {
+            Some(agg) => agg,
+            None => continue, // No aggregation in this existing clause
+        };
+
+        // Both have ranking aggregates - check for conflicts
+        if new_agg.is_ranking() || existing_agg.is_ranking() {
+            // Ranking aggregates must match exactly, because DD's reduce
+            // operator requires a single consistent ordering across all clauses.
+            if !aggregates_are_compatible(existing_agg, new_agg) {
+                return Err(format!(
+                    "Conflicting aggregation: cannot add clause with '{}' to rule '{}' \
+                     which already has a clause with '{}'. \
+                     Drop the rule first with '.rule drop {}' and re-create it.",
+                    new_agg, new_rule.head_relation, existing_agg, new_rule.head_relation,
+                ));
+            }
+        }
+
+        // For simple aggregates (count, sum, etc.), different types are allowed
+        // as separate clauses - they each produce independent results.
+    }
+
+    Ok(())
+}
+
+/// Validate that a new session rule clause is compatible with existing session rules
+/// for the same head relation. Checks arity and aggregation parameter compatibility.
+///
+/// This is the public API for session rule validation (session rules bypass the rule catalog).
+pub fn validate_session_rule_compatibility(
+    existing_rules: &[Rule],
+    new_rule: &Rule,
+) -> Result<(), String> {
+    let head_name = &new_rule.head.relation;
+
+    // Find existing rules with the same head relation
+    for existing in existing_rules {
+        if existing.head.relation != *head_name {
+            continue;
+        }
+
+        // Check arity
+        let existing_arity = existing.head.effective_arity();
+        let new_arity = new_rule.head.effective_arity();
+        if existing_arity != new_arity {
+            return Err(format!(
+                "Arity mismatch: session rule '{head_name}' has {existing_arity} argument(s) but new clause has {new_arity}. \
+                 Use '.session drop {head_name}' to remove the existing rule first.",
+            ));
+        }
+
+        // Check aggregation compatibility
+        let existing_aggs = existing.head.aggregates();
+        let new_aggs = new_rule.head.aggregates();
+
+        if let (Some((existing_agg, _)), Some((new_agg, _))) =
+            (existing_aggs.first(), new_aggs.first())
+        {
+            if (existing_agg.is_ranking() || new_agg.is_ranking())
+                && !aggregates_are_compatible(existing_agg, new_agg)
+            {
+                return Err(format!(
+                        "Conflicting aggregation: cannot add clause with '{new_agg}' to session rule '{head_name}' \
+                         which already has a clause with '{existing_agg}'. \
+                         Use '.session drop {head_name}' to remove the existing rule first.",
+                    ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if two aggregate functions are compatible for coexistence on the same rule head.
+fn aggregates_are_compatible(a: &AggregateFunc, b: &AggregateFunc) -> bool {
+    match (a, b) {
+        (
+            AggregateFunc::TopK {
+                k: k1,
+                descending: d1,
+                ..
+            },
+            AggregateFunc::TopK {
+                k: k2,
+                descending: d2,
+                ..
+            },
+        ) => k1 == k2 && d1 == d2,
+        (
+            AggregateFunc::TopKThreshold {
+                k: k1,
+                threshold: t1,
+                descending: d1,
+                ..
+            },
+            AggregateFunc::TopKThreshold {
+                k: k2,
+                threshold: t2,
+                descending: d2,
+                ..
+            },
+        ) => k1 == k2 && d1 == d2 && (t1 - t2).abs() < f64::EPSILON,
+        (
+            AggregateFunc::WithinRadius {
+                max_distance: d1, ..
+            },
+            AggregateFunc::WithinRadius {
+                max_distance: d2, ..
+            },
+        ) => (d1 - d2).abs() < f64::EPSILON,
+        // Different ranking aggregate types are always incompatible
+        _ if a.is_ranking() || b.is_ranking() => false,
+        // Simple aggregates are always compatible with each other
+        _ => true,
+    }
 }
 
 /// Result of registering a rule
@@ -302,6 +451,21 @@ impl RuleCatalog {
 
         validate_rules_stratification(&all_rules)?;
 
+        // Validate arity and aggregation compatibility with existing clauses
+        if let Some(existing) = self.rules.get(name) {
+            if let Some(first_rule) = existing.rules.first() {
+                let existing_arity = first_rule.head_args.len();
+                let new_arity = rule.head_args.len();
+                if existing_arity != new_arity {
+                    return Err(format!(
+                        "Arity mismatch: rule '{name}' has {existing_arity} argument(s) but new clause has {new_arity}. \
+                         Drop the rule first with '.rule drop {name}' and re-create it.",
+                    ));
+                }
+            }
+            validate_aggregation_compatibility(&existing.rules, &rule)?;
+        }
+
         // Stratification passed, proceed with registration
         let result = if let Some(existing) = self.rules.get_mut(name) {
             // Check if this is a new clause for an existing rule (recursive case)
@@ -322,6 +486,21 @@ impl RuleCatalog {
     /// Register a rule from a Rule directly
     pub fn register(&mut self, name: &str, rule: &Rule) -> Result<(), String> {
         let serializable = SerializableRule::from_rule(rule);
+
+        // Validate arity and aggregation compatibility with existing clauses
+        if let Some(existing) = self.rules.get(name) {
+            if let Some(first_rule) = existing.rules.first() {
+                let existing_arity = first_rule.head_args.len();
+                let new_arity = serializable.head_args.len();
+                if existing_arity != new_arity {
+                    return Err(format!(
+                        "Arity mismatch: rule '{name}' has {existing_arity} argument(s) but new clause has {new_arity}. \
+                         Drop the rule first with '.rule drop {name}' and re-create it.",
+                    ));
+                }
+            }
+            validate_aggregation_compatibility(&existing.rules, &serializable)?;
+        }
 
         if let Some(existing) = self.rules.get_mut(name) {
             existing.add_rule(serializable);
@@ -419,12 +598,12 @@ impl RuleCatalog {
         self.rules.get(name).map(|r| r.rules.len())
     }
 
-    /// Get the arity (number of head arguments) of a rule
+    /// Get the effective output arity of a rule (accounts for ranking aggregate multi-column output)
     pub fn rule_arity(&self, name: &str) -> Option<usize> {
         self.rules.get(name).and_then(|def| {
             def.rules.first().map(|r| {
                 let rule = r.to_rule();
-                rule.head.args.len()
+                rule.head.effective_arity()
             })
         })
     }
@@ -1258,6 +1437,386 @@ mod tests {
             result.is_ok(),
             "Safe negation with bound variables should be accepted: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_conflicting_top_k_ordering_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First rule: result(X, Y, top_k<2, Score, desc>) :- scores(X, Y, Score).
+        let head1 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body1 = vec![BodyPredicate::Positive(Atom::new(
+            "scores".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule1 = Rule::new(head1, body1);
+        let rule_def1 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&rule_def1).unwrap();
+
+        // Second rule: same head with asc ordering - should be REJECTED
+        let head2 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: false,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body2 = vec![BodyPredicate::Positive(Atom::new(
+            "scores".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule2 = Rule::new(head2, body2);
+        let rule_def2 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&rule_def2);
+        assert!(
+            result.is_err(),
+            "Conflicting top_k ordering should be rejected"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Conflicting aggregation"),
+            "Error should mention conflicting aggregation: {err}"
+        );
+    }
+
+    #[test]
+    fn test_conflicting_top_k_different_k_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First: top_k<2, Score, desc>
+        let head1 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body = vec![BodyPredicate::Positive(Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule1 = Rule::new(head1, body.clone());
+        let def1 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&def1).unwrap();
+
+        // Second: top_k<5, Score, desc> - different k, should be rejected
+        let head2 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 5,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let rule2 = Rule::new(head2, body);
+        let def2 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&def2);
+        assert!(result.is_err(), "Different k values should be rejected");
+    }
+
+    #[test]
+    fn test_compatible_top_k_same_params_accepted() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First: top_k<2, Score, desc> from source1
+        let head1 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body1 = vec![BodyPredicate::Positive(Atom::new(
+            "source1".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule1 = Rule::new(head1, body1);
+        let def1 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&def1).unwrap();
+
+        // Second: top_k<2, Score, desc> from source2 - same params, different body
+        let head2 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body2 = vec![BodyPredicate::Positive(Atom::new(
+            "source2".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule2 = Rule::new(head2, body2);
+        let def2 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&def2);
+        assert!(
+            result.is_ok(),
+            "Compatible top_k with same params should be accepted: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_mixing_ranking_and_simple_agg_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First: top_k<2, Score, desc>
+        let head1 = Atom::new(
+            "result".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 2,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        let body1 = vec![BodyPredicate::Positive(Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule1 = Rule::new(head1, body1);
+        let def1 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&def1).unwrap();
+
+        // Second: sum<Score> - mixing ranking with simple agg should be rejected
+        let head2 = Atom::new(
+            "result".to_string(),
+            vec![Term::Aggregate(AggregateFunc::Sum, "Score".to_string())],
+        );
+        let body2 = vec![BodyPredicate::Positive(Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Score".to_string()),
+            ],
+        ))];
+        let rule2 = Rule::new(head2, body2);
+        let def2 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&def2);
+        assert!(
+            result.is_err(),
+            "Mixing ranking aggregate with simple aggregate should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_different_simple_aggs_accepted() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First: sum<Score>
+        let head1 = Atom::new(
+            "result".to_string(),
+            vec![Term::Aggregate(AggregateFunc::Sum, "V".to_string())],
+        );
+        let body1 = vec![BodyPredicate::Positive(Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("V".to_string()),
+            ],
+        ))];
+        let rule1 = Rule::new(head1, body1);
+        let def1 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&def1).unwrap();
+
+        // Second: max<Score> - different simple agg should be accepted
+        let head2 = Atom::new(
+            "result".to_string(),
+            vec![Term::Aggregate(AggregateFunc::Max, "V".to_string())],
+        );
+        let body2 = vec![BodyPredicate::Positive(Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("V".to_string()),
+            ],
+        ))];
+        let rule2 = Rule::new(head2, body2);
+        let def2 = RuleDef {
+            name: "result".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&def2);
+        assert!(
+            result.is_ok(),
+            "Different simple aggregates should be accepted: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_arity_mismatch_rejected() {
+        use crate::statement::RuleDef;
+
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // First: path(X, Y) :- edge(X, Y). (arity 2)
+        let rule1 = make_test_rule("path", "edge");
+        let def1 = RuleDef {
+            name: "path".to_string(),
+            rule: SerializableRule::from_rule(&rule1),
+        };
+        catalog.register_rule(&def1).unwrap();
+
+        // Second: path(X, Y, Z) :- triple(X, Y, Z). (arity 3 - mismatch!)
+        let head2 = Atom::new(
+            "path".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        );
+        let body2 = vec![BodyPredicate::Positive(Atom::new(
+            "triple".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        ))];
+        let rule2 = Rule::new(head2, body2);
+        let def2 = RuleDef {
+            name: "path".to_string(),
+            rule: SerializableRule::from_rule(&rule2),
+        };
+
+        let result = catalog.register_rule(&def2);
+        assert!(result.is_err(), "Arity mismatch should be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Arity mismatch"),
+            "Error should mention arity mismatch: {err}"
         );
     }
 }

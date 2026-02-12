@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create atomic_update_test_n27t01
-Knowledge graph 'atomic_update_test_n27t01' created.
-Switched to knowledge graph: atomic_update_test_n27t01
-> .kg use atomic_update_test_n27t01
-Switched to knowledge graph: atomic_update_test_n27t01
+> .kg create test_atomic_update_n27t01
+Knowledge graph 'test_atomic_update_n27t01' created.
+Switched to knowledge graph: test_atomic_update_n27t01
+> .kg use test_atomic_update_n27t01
+Switched to knowledge graph: test_atomic_update_n27t01
 > +counter[(1, 0), (2, 10), (3, 20)].
 Inserted 3 fact(s) into 'counter'.
 > ?- counter(Id, Value).
@@ -36,5 +36,5 @@ Inserted 1 fact(s) into 'counter'.
   (3, 20)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop atomic_update_test_n27t01
-Knowledge graph 'atomic_update_test_n27t01' dropped.
+> .kg drop test_atomic_update_n27t01
+Knowledge graph 'test_atomic_update_n27t01' dropped.

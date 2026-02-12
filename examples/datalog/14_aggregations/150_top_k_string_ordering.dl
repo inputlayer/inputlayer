@@ -1,0 +1,31 @@
+% Test: Top-K with string ordering
+% Description: Verifies top_k correctly orders string values (not just numeric)
+
+.kg create test_topk_str_n14t150
+.kg use test_topk_str_n14t150
+
++item[(1, "zebra"), (2, "apple"), (3, "mango"), (4, "banana")].
+
+% Top 2 by name descending: should be "zebra", "mango"
++top_desc(top_k<2, Id, Name:desc>) :- item(Id, Name).
+
+% Top 2 by name ascending: should be "apple", "banana"
++top_asc(top_k<2, Id, Name:asc>) :- item(Id, Name).
+
+?- top_desc(X, Y).
+?- top_asc(X, Y).
+
+% Retract top string and verify reorder
+-item(1, "zebra").
+
+% Now top 2 desc: "mango", "banana"
+?- top_desc(X, Y).
+
+% Add a new highest string
++item[(5, "zoo")].
+
+% Now top 2 desc: "zoo", "mango"
+?- top_desc(X, Y).
+
+.kg use default
+.kg drop test_topk_str_n14t150

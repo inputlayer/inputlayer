@@ -1,0 +1,33 @@
+% Test: Session Drop By Relation Name
+% Description: Validates that .session drop <name> removes only the named
+% relation's session rules, leaving other session rules intact.
+
+.kg create test_session_drop_name_n04t26
+.kg use test_session_drop_name_n04t26
+
+% Insert base data
++score[(1, 100), (2, 200), (3, 300)].
++edge[(1, 2), (2, 3)].
+
+% Add two session rules for different relations
+top2(top_k<2, X, Y:desc>) :- score(X, Y).
+path(X, Y) :- edge(X, Y).
+
+% Verify both are listed
+.session
+
+% Drop only the top2 rules by name
+.session drop top2
+
+% Verify only path remains
+.session
+
+% Query path still works
+?- path(X, Y).
+
+% Dropping a non-existent name should error
+.session drop nonexistent
+
+% Cleanup
+.kg use default
+.kg drop test_session_drop_name_n04t26

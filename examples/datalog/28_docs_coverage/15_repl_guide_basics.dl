@@ -1,8 +1,8 @@
 % Test: REPL Guide Basics
 % Description: Tests basic examples from docs/getting-started/04-repl-guide.md
 
-.kg create repl_guide_n28t15
-.kg use repl_guide_n28t15
+.kg create test_repl_guide_n28t15
+.kg use test_repl_guide_n28t15
 
 % === Insert Facts (single and bulk) ===
 +edge(1, 2).
@@ -34,5 +34,5 @@
 
 % Cleanup
 .kg use default
-.kg drop repl_guide_n28t15
+.kg drop test_repl_guide_n28t15
 

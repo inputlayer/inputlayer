@@ -1,0 +1,22 @@
+% Test: Rule drop with sum aggregation
+% Description: Tests dropping a sum rule and redefining it
+
+.kg create test_drop_sum_n14t122
+.kg use test_drop_sum_n14t122
+
++sales[(1, 100), (1, 200), (2, 300), (2, 250)].
+
++region_total(Region, sum<Amount>) :- sales(Region, Amount).
+
+?- region_total(X, Y).
+
+.rule drop region_total
+
+?- region_total(X, Y).
+
++region_total(Region, sum<Amount>) :- sales(Region, Amount).
+
+?- region_total(X, Y).
+
+.kg use default
+.kg drop test_drop_sum_n14t122

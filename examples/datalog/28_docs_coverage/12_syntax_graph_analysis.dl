@@ -1,8 +1,8 @@
 % Test: Syntax Graph Analysis Example
 % Description: Tests the complete graph analysis example from docs/reference/syntax.md
 
-.kg create syntax_graph_n28t12
-.kg use syntax_graph_n28t12
+.kg create test_syntax_graph_n28t12
+.kg use test_syntax_graph_n28t12
 
 % === Setup graph data ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 2)].
@@ -39,5 +39,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_graph_n28t12
+.kg drop test_syntax_graph_n28t12
 

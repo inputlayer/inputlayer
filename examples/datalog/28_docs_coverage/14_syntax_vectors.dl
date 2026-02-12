@@ -1,8 +1,8 @@
 % Test: Syntax Vector Functions
 % Description: Tests vector function examples from docs/reference/syntax.md
 
-.kg create syntax_vectors_n28t14
-.kg use syntax_vectors_n28t14
+.kg create test_syntax_vectors_n28t14
+.kg use test_syntax_vectors_n28t14
 
 % === Vector embeddings ===
 +embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
@@ -25,5 +25,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_vectors_n28t14
+.kg drop test_syntax_vectors_n28t14
 

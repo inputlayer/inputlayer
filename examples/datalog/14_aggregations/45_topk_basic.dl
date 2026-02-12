@@ -6,7 +6,7 @@
 +scores[("Alice", 95), ("Bob", 87), ("Carol", 92), ("Dave", 78), ("Eve", 99)].
 
 % Top 3 scores (descending by default)
-top_three(Name, top_k<3, Score, desc>) :- scores(Name, Score).
+top_three(top_k<3, Name, Score:desc>) :- scores(Name, Score).
 
 ?- top_three(Name, Score).
 

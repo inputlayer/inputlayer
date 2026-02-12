@@ -31,7 +31,7 @@ See `docs/reference/functions.md` Section 7 for full reference.
 Top-K selection with ordering support:
 
 ```datalog
-+top_scores(Name, top_k<3, Score, desc>) :- scores(Name, Score).
++top_scores(top_k<3, Name, Score:desc>) :- scores(Name, Score).
 ```
 
 Variants: `top_k`, `top_k_threshold`, `within_radius`.

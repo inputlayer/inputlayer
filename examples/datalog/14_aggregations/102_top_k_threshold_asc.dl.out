@@ -11,7 +11,7 @@ Switched to knowledge graph: test_top_k_threshold_asc_n14t102
 Switched to knowledge graph: test_top_k_threshold_asc_n14t102
 > +latency[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 30)].
 Inserted 6 fact(s) into 'latency'.
-> +fast_requests(ReqId, top_k_threshold<3, Ms, 100>) :- latency(ReqId, Ms).
+> +fast_requests(top_k_threshold<3, 100, ReqId, Ms:asc>) :- latency(ReqId, Ms).
 Rule 'fast_requests' registered.
 > ?- fast_requests(X, Y).
 3 rows:

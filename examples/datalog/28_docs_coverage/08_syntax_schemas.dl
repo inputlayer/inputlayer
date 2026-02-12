@@ -1,8 +1,8 @@
 % Test: Syntax Schema Declarations
 % Description: Tests schema declarations from docs/reference/syntax.md
 
-.kg create syntax_schemas_n28t08
-.kg use syntax_schemas_n28t08
+.kg create test_syntax_schemas_n28t08
+.kg use test_syntax_schemas_n28t08
 
 % === Basic schema ===
 +employee(id: int, name: string, dept: string).
@@ -25,5 +25,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_schemas_n28t08
+.kg drop test_syntax_schemas_n28t08
 

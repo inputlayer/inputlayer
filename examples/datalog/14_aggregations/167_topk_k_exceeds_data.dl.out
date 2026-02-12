@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_exceed_n14t167
+Knowledge graph 'test_topk_exceed_n14t167' created.
+Switched to knowledge graph: test_topk_exceed_n14t167
+> .kg use test_topk_exceed_n14t167
+Switched to knowledge graph: test_topk_exceed_n14t167
+> +score[(1, 100), (2, 200)].
+Inserted 2 fact(s) into 'score'.
+> +top5(top_k<5, Id, Score:desc>) :- score(Id, Score).
+Rule 'top5' registered.
+> ?- top5(X, Y).
+2 rows:
+  (1, 100)
+  (2, 200)
+> +score[(3, 300)].
+Inserted 1 fact(s) into 'score'.
+> ?- top5(X, Y).
+3 rows:
+  (1, 100)
+  (2, 200)
+  (3, 300)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_exceed_n14t167
+Knowledge graph 'test_topk_exceed_n14t167' dropped.

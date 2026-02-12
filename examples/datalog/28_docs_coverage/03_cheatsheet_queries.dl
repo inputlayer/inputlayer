@@ -1,8 +1,8 @@
 % Test: Cheatsheet Queries
 % Description: Tests examples from docs/cheatsheet.md - query patterns
 
-.kg create cheatsheet_queries_n28t03
-.kg use cheatsheet_queries_n28t03
+.kg create test_cheatsheet_queries_n28t03
+.kg use test_cheatsheet_queries_n28t03
 
 % Setup
 +edge[(1, 2), (2, 3), (3, 4)].
@@ -25,4 +25,4 @@
 
 % Cleanup
 .kg use default
-.kg drop cheatsheet_queries_n28t03
+.kg drop test_cheatsheet_queries_n28t03

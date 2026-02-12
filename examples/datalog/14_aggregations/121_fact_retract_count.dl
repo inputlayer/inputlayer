@@ -1,0 +1,33 @@
+% Test: Fact retraction affecting count aggregation
+% Description: Tests that retracting base facts correctly updates count results
+
+.kg create test_retract_count_n14t121
+.kg use test_retract_count_n14t121
+
++sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250)].
+
++sales_count(Region, count<Amount>) :- sales(Region, Amount).
+
+% Initial: region 1 has 3, region 2 has 2
+?- sales_count(X, Y).
+
+% Retract one fact from region 1
+-sales(1, 100).
+
+% Region 1 should now have 2
+?- sales_count(X, Y).
+
+% Retract all facts from region 2
+-sales(2, 300).
+-sales(2, 250).
+
+% Region 2 should disappear (count 0 = no group)
+?- sales_count(X, Y).
+
+% Add facts back
++sales[(2, 500)].
+
+?- sales_count(X, Y).
+
+.kg use default
+.kg drop test_retract_count_n14t121

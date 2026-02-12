@@ -26,25 +26,29 @@ pub enum AggregateFunc {
     Min,
     Max,
     Avg,
-    /// Top-K aggregate: select top k results ordered by a variable
-    /// Syntax: `top_k`<10, score> or `top_k`<10, score, desc>
+    /// Top-K aggregate: select top k tuples ordered by order_var
+    /// Syntax: `top_k<2, Name, Score:desc>` — vars inside aggregate, `:desc`/`:asc` marks order var
     TopK {
         k: usize,
         order_var: String,
+        /// All output variables (including order_var) in declaration order
+        output_vars: Vec<String>,
         descending: bool,
     },
     /// Top-K with threshold: only return results if score meets threshold
-    /// Syntax: `top_k_threshold`<10, score, 0.5> or `top_k_threshold`<10, score, 0.5, desc>
+    /// Syntax: `top_k_threshold<5, 0.5, Name, Score:desc>`
     TopKThreshold {
         k: usize,
         order_var: String,
+        output_vars: Vec<String>,
         threshold: f64,
         descending: bool,
     },
     /// Within radius: all results within a distance threshold (range query)
-    /// Syntax: `within_radius`<dist, 0.5>
+    /// Syntax: `within_radius<10.0, Name, Distance:asc>`
     WithinRadius {
         distance_var: String,
+        output_vars: Vec<String>,
         max_distance: f64,
     },
 }
@@ -528,56 +532,132 @@ impl AggregateFunc {
         }
     }
 
-    /// Parse `top_k` with parameters: `top_k`<10, score> or `top_k`<10, score, desc>
+    /// Parse annotated variable specifications from ranking aggregate params.
+    ///
+    /// Each var is either plain (`Name`) or annotated (`Score:desc`, `Distance:asc`).
+    /// Returns `(output_vars, order_var, descending)` or None on error.
+    ///
+    /// Rules:
+    /// - 1 variable without annotation → it IS the order var (default: `default_desc`)
+    /// - Multiple variables → exactly one must have `:desc` or `:asc` annotation
+    /// - Multiple annotations → error (None)
+    fn parse_annotated_vars(
+        parts: &[&str],
+        default_desc: bool,
+    ) -> Option<(Vec<String>, String, bool)> {
+        if parts.is_empty() {
+            return None;
+        }
+
+        let mut output_vars = Vec::new();
+        let mut order_var = None;
+        let mut descending = default_desc;
+
+        for part in parts {
+            let trimmed = part.trim();
+            if let Some(name) = trimmed.strip_suffix(":desc") {
+                let name = name.trim().to_string();
+                if order_var.is_some() {
+                    return None; // Multiple annotations
+                }
+                order_var = Some(name.clone());
+                descending = true;
+                output_vars.push(name);
+            } else if let Some(name) = trimmed.strip_suffix(":asc") {
+                let name = name.trim().to_string();
+                if order_var.is_some() {
+                    return None; // Multiple annotations
+                }
+                order_var = Some(name.clone());
+                descending = false;
+                output_vars.push(name);
+            } else {
+                output_vars.push(trimmed.to_string());
+            }
+        }
+
+        // If no annotation and exactly 1 variable → it's the order var
+        if order_var.is_none() {
+            if output_vars.len() == 1 {
+                order_var = Some(output_vars[0].clone());
+            } else {
+                return None; // Multiple vars without annotation
+            }
+        }
+
+        Some((output_vars, order_var.unwrap(), descending))
+    }
+
+    /// Parse `top_k` with parameters.
+    ///
+    /// New syntax: `top_k<2, Name, Score:desc>` or `top_k<2, Score>` (single var defaults desc)
     pub fn parse_top_k(params: &str) -> Option<Self> {
         let parts: Vec<&str> = params.split(',').map(str::trim).collect();
         if parts.len() < 2 {
             return None;
         }
 
+        // First param must be k (integer)
         let k: usize = parts[0].parse().ok()?;
-        let order_var = parts[1].to_string();
-        let descending = parts.get(2).is_some_and(|s| s.to_lowercase() == "desc");
+
+        // Remaining are annotated variable specs
+        let (output_vars, order_var, descending) = Self::parse_annotated_vars(&parts[1..], true)?; // default desc for top_k
 
         Some(AggregateFunc::TopK {
             k,
             order_var,
+            output_vars,
             descending,
         })
     }
 
-    /// Parse `top_k_threshold` with parameters: `top_k_threshold`<10, score, 0.5> or `top_k_threshold`<10, score, 0.5, desc>
+    /// Parse `top_k_threshold` with parameters.
+    ///
+    /// New syntax: `top_k_threshold<5, 0.5, Name, Score:desc>`
+    /// Numeric params: k (int), threshold (float), then annotated vars.
     pub fn parse_top_k_threshold(params: &str) -> Option<Self> {
         let parts: Vec<&str> = params.split(',').map(str::trim).collect();
         if parts.len() < 3 {
             return None;
         }
 
+        // First param: k (integer)
         let k: usize = parts[0].parse().ok()?;
-        let order_var = parts[1].to_string();
-        let threshold: f64 = parts[2].parse().ok()?;
-        let descending = parts.get(3).is_some_and(|s| s.to_lowercase() == "desc");
+        // Second param: threshold (float)
+        let threshold: f64 = parts[1].parse().ok()?;
+
+        // Remaining are annotated variable specs
+        let (output_vars, order_var, descending) = Self::parse_annotated_vars(&parts[2..], true)?; // default desc
 
         Some(AggregateFunc::TopKThreshold {
             k,
             order_var,
+            output_vars,
             threshold,
             descending,
         })
     }
 
-    /// Parse `within_radius` with parameters: `within_radius`<dist, 0.5>
+    /// Parse `within_radius` with parameters.
+    ///
+    /// New syntax: `within_radius<10.0, Name, Distance:asc>`
+    /// Numeric params: max_distance (float), then annotated vars.
     pub fn parse_within_radius(params: &str) -> Option<Self> {
         let parts: Vec<&str> = params.split(',').map(str::trim).collect();
         if parts.len() < 2 {
             return None;
         }
 
-        let distance_var = parts[0].to_string();
-        let max_distance: f64 = parts[1].parse().ok()?;
+        // First param: max_distance (float)
+        let max_distance: f64 = parts[0].parse().ok()?;
+
+        // Remaining are annotated variable specs
+        let (output_vars, distance_var, _descending) =
+            Self::parse_annotated_vars(&parts[1..], false)?; // default asc for within_radius
 
         Some(AggregateFunc::WithinRadius {
             distance_var,
+            output_vars,
             max_distance,
         })
     }
@@ -589,6 +669,19 @@ impl AggregateFunc {
             AggregateFunc::TopK { .. }
                 | AggregateFunc::TopKThreshold { .. }
                 | AggregateFunc::WithinRadius { .. }
+        )
+    }
+
+    /// Check if this is a simple (scalar) aggregate — many rows → 1 value per group
+    pub fn is_simple(&self) -> bool {
+        matches!(
+            self,
+            AggregateFunc::Count
+                | AggregateFunc::CountDistinct
+                | AggregateFunc::Sum
+                | AggregateFunc::Min
+                | AggregateFunc::Max
+                | AggregateFunc::Avg
         )
     }
 }
@@ -717,15 +810,14 @@ impl Term {
             }
             Term::Aggregate(func, var) => {
                 let mut set = std::collections::HashSet::new();
-                // For standard aggregates, just the var
-                // For TopK variants, also include the order_var
+                // For ranking aggregates, return ALL output_vars
                 match func {
-                    AggregateFunc::TopK { order_var, .. }
-                    | AggregateFunc::TopKThreshold { order_var, .. } => {
-                        set.insert(order_var.clone());
-                    }
-                    AggregateFunc::WithinRadius { distance_var, .. } => {
-                        set.insert(distance_var.clone());
+                    AggregateFunc::TopK { output_vars, .. }
+                    | AggregateFunc::TopKThreshold { output_vars, .. }
+                    | AggregateFunc::WithinRadius { output_vars, .. } => {
+                        for v in output_vars {
+                            set.insert(v.clone());
+                        }
                     }
                     _ => {}
                 }
@@ -809,6 +901,23 @@ impl Atom {
     /// Get the arity (number of arguments) of this atom
     pub fn arity(&self) -> usize {
         self.args.len()
+    }
+
+    /// Get the effective output arity, accounting for ranking aggregates that expand
+    /// into multiple output columns. For non-ranking atoms, this equals `args.len()`.
+    pub fn effective_arity(&self) -> usize {
+        self.args
+            .iter()
+            .map(|term| match term {
+                Term::Aggregate(func, _) if func.is_ranking() => match func {
+                    AggregateFunc::TopK { output_vars, .. }
+                    | AggregateFunc::TopKThreshold { output_vars, .. }
+                    | AggregateFunc::WithinRadius { output_vars, .. } => output_vars.len(),
+                    _ => 1,
+                },
+                _ => 1,
+            })
+            .sum()
     }
 }
 
@@ -1249,31 +1358,66 @@ impl std::fmt::Display for AggregateFunc {
             AggregateFunc::TopK {
                 k,
                 order_var,
+                output_vars,
                 descending,
             } => {
-                if *descending {
-                    write!(f, "top_k<{k}, {order_var}, desc>")
-                } else {
-                    write!(f, "top_k<{k}, {order_var}>")
+                write!(f, "top_k<{k}")?;
+                for v in output_vars {
+                    if v == order_var {
+                        let dir = if *descending { "desc" } else { "asc" };
+                        // Single var without annotation: omit if default (desc)
+                        if output_vars.len() == 1 && *descending {
+                            write!(f, ", {v}")?;
+                        } else {
+                            write!(f, ", {v}:{dir}")?;
+                        }
+                    } else {
+                        write!(f, ", {v}")?;
+                    }
                 }
+                write!(f, ">")
             }
             AggregateFunc::TopKThreshold {
                 k,
                 order_var,
+                output_vars,
                 threshold,
                 descending,
             } => {
-                if *descending {
-                    write!(f, "top_k_threshold<{k}, {order_var}, {threshold}, desc>")
-                } else {
-                    write!(f, "top_k_threshold<{k}, {order_var}, {threshold}>")
+                write!(f, "top_k_threshold<{k}, {threshold}")?;
+                for v in output_vars {
+                    if v == order_var {
+                        let dir = if *descending { "desc" } else { "asc" };
+                        if output_vars.len() == 1 && *descending {
+                            write!(f, ", {v}")?;
+                        } else {
+                            write!(f, ", {v}:{dir}")?;
+                        }
+                    } else {
+                        write!(f, ", {v}")?;
+                    }
                 }
+                write!(f, ">")
             }
             AggregateFunc::WithinRadius {
                 distance_var,
+                output_vars,
                 max_distance,
             } => {
-                write!(f, "within_radius<{distance_var}, {max_distance}>")
+                write!(f, "within_radius<{max_distance}")?;
+                for v in output_vars {
+                    if v == distance_var {
+                        // within_radius default is asc, so omit annotation for single var
+                        if output_vars.len() == 1 {
+                            write!(f, ", {v}")?;
+                        } else {
+                            write!(f, ", {v}:asc")?;
+                        }
+                    } else {
+                        write!(f, ", {v}")?;
+                    }
+                }
+                write!(f, ">")
             }
         }
     }

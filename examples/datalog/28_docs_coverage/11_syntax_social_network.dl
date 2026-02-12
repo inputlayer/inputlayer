@@ -1,8 +1,8 @@
 % Test: Syntax Social Network Example
 % Description: Tests the complete social network example from docs/reference/syntax.md
 
-.kg create syntax_social_n28t11
-.kg use syntax_social_n28t11
+.kg create test_syntax_social_n28t11
+.kg use test_syntax_social_n28t11
 
 % Schema
 +person(id: int, name: string, age: int).
@@ -32,5 +32,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_social_n28t11
+.kg drop test_syntax_social_n28t11
 

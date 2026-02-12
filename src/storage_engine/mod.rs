@@ -1293,7 +1293,10 @@ impl StorageEngine {
         // Find all shards for this knowledge graph
         for shard_name in self.persist.list_shards()? {
             if shard_name.starts_with(&prefix) {
-                let relation = shard_name.strip_prefix(&prefix).unwrap();
+                let relation = match shard_name.strip_prefix(&prefix) {
+                    Some(r) => r,
+                    None => continue, // Skip malformed shard names
+                };
 
                 // Get shard info to determine since frontier
                 let info = self.persist.shard_info(&shard_name)?;
@@ -1940,7 +1943,7 @@ impl KnowledgeGraph {
         // Query for all results: ?- rule_name(X, Y, ...).
         // We need to figure out the arity from the head
         let first_clause = &clauses[0];
-        let arity = first_clause.head.args.len();
+        let arity = first_clause.head.effective_arity();
         let vars: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
         let query = format!("?- {}({}).", rule_name, vars.join(", "));
         program.push_str(&query);

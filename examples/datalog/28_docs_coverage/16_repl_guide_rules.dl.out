@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create repl_rules_n28t16
-Knowledge graph 'repl_rules_n28t16' created.
-Switched to knowledge graph: repl_rules_n28t16
-> .kg use repl_rules_n28t16
-Switched to knowledge graph: repl_rules_n28t16
+> .kg create test_repl_rules_n28t16
+Knowledge graph 'test_repl_rules_n28t16' created.
+Switched to knowledge graph: test_repl_rules_n28t16
+> .kg use test_repl_rules_n28t16
+Switched to knowledge graph: test_repl_rules_n28t16
 > +person[("alice", 30), ("bob", 17), ("carol", 25)].
 Inserted 3 fact(s) into 'person'.
 > +edge[(1, 2), (2, 3), (3, 4)].
@@ -50,5 +50,5 @@ Rule 'dept_count' registered.
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))
-> .kg drop repl_rules_n28t16
-Knowledge graph 'repl_rules_n28t16' dropped.
+> .kg drop test_repl_rules_n28t16
+Knowledge graph 'test_repl_rules_n28t16' dropped.

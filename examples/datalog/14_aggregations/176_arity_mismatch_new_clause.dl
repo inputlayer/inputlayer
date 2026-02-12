@@ -1,0 +1,19 @@
+% Test: Adding clause with different arity should produce error
+% Description: New clause with wrong arity should be rejected, not crash
+% NOTE: Script halts on error, so cleanup won't run (expected dirty state)
+
+.kg create test_arity_mismatch_n14t176
+.kg use test_arity_mismatch_n14t176
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% First rule: 1-arg head
++total(sum<V>) :- data(_, V).
+
+?- total(X).
+
+% Add clause with different arity (2 args) - should be rejected
++total(G, sum<V>) :- data(G, V).
+
+.kg use default
+.kg drop test_arity_mismatch_n14t176

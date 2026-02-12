@@ -1,8 +1,8 @@
 % Test: Cheatsheet RBAC Example
 % Description: Tests the complete RBAC example from docs/cheatsheet.md
 
-.kg create acl_n28t06
-.kg use acl_n28t06
+.kg create test_acl_n28t06
+.kg use test_acl_n28t06
 
 % Facts: users, roles, permissions (from cheatsheet)
 +user_role[("alice", "admin"), ("bob", "viewer")].
@@ -21,4 +21,4 @@
 
 % Cleanup
 .kg use default
-.kg drop acl_n28t06
+.kg drop test_acl_n28t06

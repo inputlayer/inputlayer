@@ -1,0 +1,34 @@
+% Test: Drop an aggregation rule and re-add with different aggregation function
+% Description: Tests changing the aggregation type of a relation from sum to count
+
+.kg create test_switch_agg_n14t147
+.kg use test_switch_agg_n14t147
+
++data[(1, 10), (1, 20), (2, 30), (2, 40), (2, 50)].
+
+% Start with sum
++result(Grp, sum<V>) :- data(Grp, V).
+?- result(X, Y).
+
+% Drop and switch to count
+.rule drop result
++result(Grp, count<V>) :- data(Grp, V).
+?- result(X, Y).
+
+% Drop and switch to max
+.rule drop result
++result(Grp, max<V>) :- data(Grp, V).
+?- result(X, Y).
+
+% Drop and switch to min
+.rule drop result
++result(Grp, min<V>) :- data(Grp, V).
+?- result(X, Y).
+
+% Drop and switch to avg
+.rule drop result
++result(Grp, avg<V>) :- data(Grp, V).
+?- result(X, Y).
+
+.kg use default
+.kg drop test_switch_agg_n14t147

@@ -11,7 +11,7 @@ Switched to knowledge graph: test_top_k_threshold_n14t101
 Switched to knowledge graph: test_top_k_threshold_n14t101
 > +score[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 200)].
 Inserted 6 fact(s) into 'score'.
-> +top_high(Player, top_k_threshold<3, Points, 100, desc>) :- score(Player, Points).
+> +top_high(top_k_threshold<3, 100, Player, Points:desc>) :- score(Player, Points).
 Rule 'top_high' registered.
 > ?- top_high(X, Y).
 3 rows:

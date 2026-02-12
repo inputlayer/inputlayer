@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create cheatsheet_agg_n28t04
-Knowledge graph 'cheatsheet_agg_n28t04' created.
-Switched to knowledge graph: cheatsheet_agg_n28t04
-> .kg use cheatsheet_agg_n28t04
-Switched to knowledge graph: cheatsheet_agg_n28t04
+> .kg create test_cheatsheet_agg_n28t04
+Knowledge graph 'test_cheatsheet_agg_n28t04' created.
+Switched to knowledge graph: test_cheatsheet_agg_n28t04
+> .kg use test_cheatsheet_agg_n28t04
+Switched to knowledge graph: test_cheatsheet_agg_n28t04
 > +sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)].
 Inserted 3 fact(s) into 'sales'.
 > +employee[(1, "engineering"), (2, "engineering"), (3, "sales"), (4, "engineering")].
@@ -46,5 +46,5 @@ Rule 'avg_score' registered.
   (84.33333333333333)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop cheatsheet_agg_n28t04
-Knowledge graph 'cheatsheet_agg_n28t04' dropped.
+> .kg drop test_cheatsheet_agg_n28t04
+Knowledge graph 'test_cheatsheet_agg_n28t04' dropped.

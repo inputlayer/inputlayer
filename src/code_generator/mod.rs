@@ -1892,182 +1892,136 @@ impl CodeGenerator {
 
             // Check for ranking aggregates (TopK, TopKThreshold, WithinRadius)
             // These return multiple rows per group instead of a single aggregate value
-            let has_ranking_agg = aggs_clone.iter().any(|(func, _)| {
-                matches!(func,
-                    AggregateFunction::TopK { .. } |
-                    AggregateFunction::TopKThreshold { .. } |
-                    AggregateFunction::WithinRadius { .. }
-                )
-            });
+            let has_ranking_agg = aggs_clone.iter().any(|(func, _)| func.is_ranking());
 
             if has_ranking_agg {
                 // Handle ranking aggregates - output multiple rows per group
-                // Only one ranking aggregate should be present per query
+                // Output: group_by key cols + output_cols from selected tuples
                 for (func, _col_idx) in &aggs_clone {
                     match func {
-                        AggregateFunction::TopK { k, order_col, descending } => {
-                            // O(n log k) heap-based top-k selection
+                        AggregateFunction::TopK { k, order_col, output_cols, descending } => {
                             use std::cmp::Reverse;
                             use std::collections::BinaryHeap;
 
-                            // Local OrdF64 wrapper for heap ordering
-                            #[derive(Clone, Copy, PartialEq)]
-                            struct OrdF64(f64);
-                            impl Eq for OrdF64 {}
-                            impl PartialOrd for OrdF64 {
-                                fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                                    Some(self.cmp(other))
+                            let null_val = Value::Null;
+
+                            // Helper to build output tuple: key + output_cols values
+                            let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
+                                let mut vals: Vec<Value> = key.values().to_vec();
+                                for &col in output_cols {
+                                    vals.push(t.get(col).cloned().unwrap_or(Value::Null));
                                 }
-                            }
-                            impl Ord for OrdF64 {
-                                fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                                    self.0.partial_cmp(&other.0).unwrap_or_else(|| {
-                                        match (self.0.is_nan(), other.0.is_nan()) {
-                                            (true, true) => std::cmp::Ordering::Equal,
-                                            (true, false) => std::cmp::Ordering::Less,
-                                            (false, true) => std::cmp::Ordering::Greater,
-                                            (false, false) => unreachable!(),
-                                        }
-                                    })
-                                }
-                            }
+                                Tuple::new(vals)
+                            };
 
                             if *descending {
-                                // Top k largest: use min-heap via Reverse
-                                let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
-
+                                let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
                                 for t in &tuples {
-                                    let score = OrdF64(t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64));
+                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
-                                    } else if let Some(&Reverse((min_score, _))) = heap.peek() {
-                                        if score > min_score {
+                                    } else if let Some(Reverse((ref min_score, _))) = heap.peek() {
+                                        if score > *min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
                                         }
                                     }
                                 }
-
-                                // Extract, sort descending, and output
                                 let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
                                 result.sort_by(|a, b| b.0.cmp(&a.0));
                                 for (_, tuple) in result {
-                                    output.push((tuple.clone(), R::one()));
+                                    output.push((build_result(key, tuple), R::one()));
                                 }
                             } else {
-                                // Top k smallest: use max-heap
-                                let mut heap: BinaryHeap<(OrdF64, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
-
+                                let mut heap: BinaryHeap<(Value, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
                                 for t in &tuples {
-                                    let score = OrdF64(t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64));
+                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
                                     if heap.len() < *k {
                                         heap.push((score, *t));
-                                    } else if let Some(&(max_score, _)) = heap.peek() {
-                                        if score < max_score {
+                                    } else if let Some((ref max_score, _)) = heap.peek() {
+                                        if score < *max_score {
                                             heap.pop();
                                             heap.push((score, *t));
                                         }
                                     }
                                 }
-
-                                // Extract, sort ascending, and output
                                 let mut result: Vec<_> = heap.into_iter().collect();
                                 result.sort_by(|a, b| a.0.cmp(&b.0));
                                 for (_, tuple) in result {
-                                    output.push((tuple.clone(), R::one()));
+                                    output.push((build_result(key, tuple), R::one()));
                                 }
                             }
                         }
-                        AggregateFunction::TopKThreshold { k, order_col, threshold, descending } => {
-                            // O(n log k) heap-based top-k selection with threshold filtering
+                        AggregateFunction::TopKThreshold { k, order_col, output_cols, threshold, descending } => {
                             use std::cmp::Reverse;
                             use std::collections::BinaryHeap;
 
-                            // Local OrdF64 wrapper for heap ordering
-                            #[derive(Clone, Copy, PartialEq)]
-                            struct OrdF64(f64);
-                            impl Eq for OrdF64 {}
-                            impl PartialOrd for OrdF64 {
-                                fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                                    Some(self.cmp(other))
+                            let null_val = Value::Null;
+
+                            let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
+                                let mut vals: Vec<Value> = key.values().to_vec();
+                                for &col in output_cols {
+                                    vals.push(t.get(col).cloned().unwrap_or(Value::Null));
                                 }
-                            }
-                            impl Ord for OrdF64 {
-                                fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                                    self.0.partial_cmp(&other.0).unwrap_or_else(|| {
-                                        match (self.0.is_nan(), other.0.is_nan()) {
-                                            (true, true) => std::cmp::Ordering::Equal,
-                                            (true, false) => std::cmp::Ordering::Less,
-                                            (false, true) => std::cmp::Ordering::Greater,
-                                            (false, false) => unreachable!(),
-                                        }
-                                    })
-                                }
-                            }
+                                Tuple::new(vals)
+                            };
 
                             if *descending {
-                                // Top k largest with threshold: use min-heap via Reverse
-                                let mut heap: BinaryHeap<Reverse<(OrdF64, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
-
+                                let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
                                 for t in &tuples {
-                                    let score_val = t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64);
-                                    // Filter: keep if score >= threshold
-                                    if score_val < *threshold {
+                                    let score_f64 = t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64);
+                                    if score_f64 < *threshold {
                                         continue;
                                     }
-                                    let score = OrdF64(score_val);
+                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
                                     if heap.len() < *k {
                                         heap.push(Reverse((score, *t)));
-                                    } else if let Some(&Reverse((min_score, _))) = heap.peek() {
-                                        if score > min_score {
+                                    } else if let Some(Reverse((ref min_score, _))) = heap.peek() {
+                                        if score > *min_score {
                                             heap.pop();
                                             heap.push(Reverse((score, *t)));
                                         }
                                     }
                                 }
-
-                                // Extract, sort descending, and output
                                 let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
                                 result.sort_by(|a, b| b.0.cmp(&a.0));
                                 for (_, tuple) in result {
-                                    output.push((tuple.clone(), R::one()));
+                                    output.push((build_result(key, tuple), R::one()));
                                 }
                             } else {
-                                // Top k smallest with threshold: use max-heap
-                                let mut heap: BinaryHeap<(OrdF64, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
-
+                                let mut heap: BinaryHeap<(Value, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
                                 for t in &tuples {
-                                    let score_val = t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64);
-                                    // Filter: keep if score <= threshold
-                                    if score_val > *threshold {
+                                    let score_f64 = t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64);
+                                    if score_f64 > *threshold {
                                         continue;
                                     }
-                                    let score = OrdF64(score_val);
+                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
                                     if heap.len() < *k {
                                         heap.push((score, *t));
-                                    } else if let Some(&(max_score, _)) = heap.peek() {
-                                        if score < max_score {
+                                    } else if let Some((ref max_score, _)) = heap.peek() {
+                                        if score < *max_score {
                                             heap.pop();
                                             heap.push((score, *t));
                                         }
                                     }
                                 }
-
-                                // Extract, sort ascending, and output
                                 let mut result: Vec<_> = heap.into_iter().collect();
                                 result.sort_by(|a, b| a.0.cmp(&b.0));
                                 for (_, tuple) in result {
-                                    output.push((tuple.clone(), R::one()));
+                                    output.push((build_result(key, tuple), R::one()));
                                 }
                             }
                         }
-                        AggregateFunction::WithinRadius { distance_col, max_distance } => {
-                            // Keep all tuples where distance_col <= max_distance
+                        AggregateFunction::WithinRadius { distance_col, output_cols, max_distance } => {
                             for tuple in &tuples {
                                 let dist = tuple.get(*distance_col)
                                     .map_or(f64::INFINITY, super::value::Value::to_f64);
                                 if dist <= *max_distance {
-                                    output.push(((*tuple).clone(), R::one()));
+                                    let mut vals: Vec<Value> = key.values().to_vec();
+                                    for &col in output_cols {
+                                        vals.push(tuple.get(col).cloned().unwrap_or(Value::Null));
+                                    }
+                                    output.push((Tuple::new(vals), R::one()));
                                 }
                             }
                         }
@@ -5049,6 +5003,7 @@ mod tests {
                 AggregateFunction::TopK {
                     k: 3,
                     order_col: 1,
+                    output_cols: vec![0, 1],
                     descending: true,
                 },
                 0,
@@ -5091,6 +5046,7 @@ mod tests {
                 AggregateFunction::TopKThreshold {
                     k: 3,
                     order_col: 1,
+                    output_cols: vec![0, 1],
                     threshold: 4.0,
                     descending: true,
                 },
@@ -5133,6 +5089,7 @@ mod tests {
             aggregations: vec![(
                 AggregateFunction::WithinRadius {
                     distance_col: 1,
+                    output_cols: vec![0, 1],
                     max_distance: 0.5,
                 },
                 0,
@@ -5200,6 +5157,7 @@ mod tests {
                 AggregateFunction::TopK {
                     k: 2,
                     order_col: 2,
+                    output_cols: vec![0, 1, 2],
                     descending: false,
                 },
                 0,

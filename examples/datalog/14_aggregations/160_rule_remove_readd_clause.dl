@@ -1,0 +1,29 @@
+% Test: Remove one clause, add a different one
+% Description: Remove base clause, keep recursive, add new base from different relation
+
+.kg create test_remove_readd_n14t160
+.kg use test_remove_readd_n14t160
+
++edge[(1, 2), (2, 3), (3, 4)].
++link[(10, 20)].
+
++reach(X, Y) :- edge(X, Y).
++reach(X, Z) :- reach(X, Y), edge(Y, Z).
+
+% Transitive closure
+?- reach(X, Y).
+
+% Remove base clause (clause 1), keep recursive
+.rule remove reach 1
+
+% Recursive without base case — no results
+?- reach(X, Y).
+
+% Add new base clause sourcing from different relation
++reach(X, Y) :- link(X, Y).
+
+% Should use link + recursive (but recursive references edge, not link)
+?- reach(X, Y).
+
+.kg use default
+.kg drop test_remove_readd_n14t160

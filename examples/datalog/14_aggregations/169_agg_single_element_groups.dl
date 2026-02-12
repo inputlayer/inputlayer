@@ -1,0 +1,15 @@
+% Test: Each group has exactly 1 element
+% Description: Grouped aggregations where each group has a single value
+
+.kg create test_agg_single_n14t169
+.kg use test_agg_single_n14t169
+
++data[("a", 10), ("b", 20), ("c", 30)].
+
++result(Group, count<Val>, sum<Val>, min<Val>, max<Val>) :- data(Group, Val).
+
+% count=1, sum=min=max=val for each group
+?- result(G, C, S, Mi, Ma).
+
+.kg use default
+.kg drop test_agg_single_n14t169

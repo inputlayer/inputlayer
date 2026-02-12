@@ -1,0 +1,30 @@
+% Test: Fact insertion affecting top_k results
+% Description: Tests that inserting new base facts correctly updates top_k aggregation
+
+.kg create test_insert_topk_n14t113
+.kg use test_insert_topk_n14t113
+
+% Insert initial data
++score[(1, 100), (2, 250), (3, 175)].
+
+% Define top_k rule - top 2 descending
++top_players(top_k<2, Player, Points:desc>) :- score(Player, Points).
+
+% Query initial state - should be players 2(250), 3(175)
+?- top_players(X, Y).
+
+% Insert a new highest scorer
++score[(4, 400)].
+
+% Query after insert - should be 4(400), 2(250)
+?- top_players(X, Y).
+
+% Insert another that doesn't make the cut
++score[(5, 50)].
+
+% Should still be 4(400), 2(250)
+?- top_players(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_insert_topk_n14t113

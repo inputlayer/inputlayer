@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_literals_n28t07
-Knowledge graph 'syntax_literals_n28t07' created.
-Switched to knowledge graph: syntax_literals_n28t07
-> .kg use syntax_literals_n28t07
-Switched to knowledge graph: syntax_literals_n28t07
+> .kg create test_syntax_literals_n28t07
+Knowledge graph 'test_syntax_literals_n28t07' created.
+Switched to knowledge graph: test_syntax_literals_n28t07
+> .kg use test_syntax_literals_n28t07
+Switched to knowledge graph: test_syntax_literals_n28t07
 > +int_values[(42), (-17), (0)].
 Inserted 3 fact(s) into 'int_values'.
 > ?- int_values(X).
@@ -42,5 +42,5 @@ Inserted 2 fact(s) into 'location'.
   ("NYC", 40.7, -74.0)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_literals_n28t07
-Knowledge graph 'syntax_literals_n28t07' dropped.
+> .kg drop test_syntax_literals_n28t07
+Knowledge graph 'test_syntax_literals_n28t07' dropped.

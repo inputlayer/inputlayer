@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create cheatsheet_rules_n28t02
-Knowledge graph 'cheatsheet_rules_n28t02' created.
-Switched to knowledge graph: cheatsheet_rules_n28t02
-> .kg use cheatsheet_rules_n28t02
-Switched to knowledge graph: cheatsheet_rules_n28t02
+> .kg create test_cheatsheet_rules_n28t02
+Knowledge graph 'test_cheatsheet_rules_n28t02' created.
+Switched to knowledge graph: test_cheatsheet_rules_n28t02
+> .kg use test_cheatsheet_rules_n28t02
+Switched to knowledge graph: test_cheatsheet_rules_n28t02
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 Inserted 4 fact(s) into 'edge'.
 > +person[("alice", 30), ("bob", 17), ("carol", 25)].
@@ -64,5 +64,5 @@ Rule 'adult' registered.
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 2 session rule(s), 0 session fact(s))
-> .kg drop cheatsheet_rules_n28t02
-Knowledge graph 'cheatsheet_rules_n28t02' dropped.
+> .kg drop test_cheatsheet_rules_n28t02
+Knowledge graph 'test_cheatsheet_rules_n28t02' dropped.

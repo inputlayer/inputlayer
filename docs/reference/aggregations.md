@@ -129,22 +129,23 @@ Select the top K results ordered by a variable.
 
 **Syntax:**
 ```datalog
-top_k<K, OrderVariable>           % Ascending order (lowest K)
-top_k<K, OrderVariable, desc>     % Descending order (highest K)
+top_k<K, PassThrough..., OrderVariable>        % Ascending order (lowest K)
+top_k<K, PassThrough..., OrderVariable:desc>   % Descending order (highest K)
 ```
 
 **Parameters:**
 - `K` - Number of results to return (integer)
+- `PassThrough...` - Variables to include in result (optional)
 - `OrderVariable` - Variable to order by
-- `desc` - Optional: use descending order
+- `desc` - Optional suffix on OrderVariable for descending order
 
 **Example:**
 ```datalog
 % Top 10 highest scores
-+top_scores(Name, top_k<10, Score, desc>) :- scores(Name, Score).
++top_scores(top_k<10, Name, Score:desc>) :- scores(Name, Score).
 
 % Top 5 nearest neighbors by distance
-+nearest(Id, top_k<5, Dist>) :-
++nearest(top_k<5, Id, Dist>) :-
     query_vec(QV),
     vectors(Id, V),
     Dist = euclidean(QV, V).
@@ -160,24 +161,25 @@ Select top K results, but only if they meet a minimum threshold.
 
 **Syntax:**
 ```datalog
-top_k_threshold<K, OrderVariable, Threshold>           % Ascending
-top_k_threshold<K, OrderVariable, Threshold, desc>     % Descending
+top_k_threshold<K, Threshold, PassThrough..., OrderVariable>        % Ascending
+top_k_threshold<K, Threshold, PassThrough..., OrderVariable:desc>   % Descending
 ```
 
 **Parameters:**
 - `K` - Maximum number of results
-- `OrderVariable` - Variable to order by
 - `Threshold` - Minimum (or maximum for desc) value to include
-- `desc` - Optional: use descending order
+- `PassThrough...` - Variables to include in result (optional)
+- `OrderVariable` - Variable to order by
+- `desc` - Optional suffix on OrderVariable for descending order
 
 **Example:**
 ```datalog
 % Top 10 products, but only if rating >= 4.0
-+top_rated(Product, top_k_threshold<10, Rating, 4.0, desc>) :-
++top_rated(top_k_threshold<10, 4.0, Product, Rating:desc>) :-
     reviews(Product, Rating).
 
 % Nearest 5 neighbors within distance 0.5
-+near_enough(Id, top_k_threshold<5, Dist, 0.5>) :-
++near_enough(top_k_threshold<5, 0.5, Id, Dist>) :-
     query_vec(QV),
     vectors(Id, V),
     Dist = euclidean(QV, V).
@@ -193,23 +195,24 @@ Return all results within a distance threshold (range query).
 
 **Syntax:**
 ```datalog
-within_radius<DistanceVariable, MaxDistance>
+within_radius<MaxDistance, PassThrough..., DistanceVariable>
 ```
 
 **Parameters:**
-- `DistanceVariable` - Variable containing the distance
 - `MaxDistance` - Maximum distance to include
+- `PassThrough...` - Variables to include in result (optional)
+- `DistanceVariable` - Variable containing the distance
 
 **Example:**
 ```datalog
 % All vectors within distance 0.3
-+nearby(Id, within_radius<Dist, 0.3>) :-
++nearby(within_radius<0.3, Id, Dist>) :-
     query_vec(QV),
     vectors(Id, V),
     Dist = cosine(QV, V).
 
 % Points within 100 meters
-+close_points(Id, within_radius<D, 100.0>) :-
++close_points(within_radius<100.0, Id, D>) :-
     my_location(Lat1, Lon1),
     locations(Id, Lat2, Lon2),
     D = haversine(Lat1, Lon1, Lat2, Lon2).
@@ -264,6 +267,6 @@ Aggregations work with filter conditions:
 | `min` | `min<X>` | Minimum value |
 | `max` | `max<X>` | Maximum value |
 | `avg` | `avg<X>` | Float average |
-| `top_k` | `top_k<K, X>` or `top_k<K, X, desc>` | Top K results |
-| `top_k_threshold` | `top_k_threshold<K, X, T>` | Top K meeting threshold |
-| `within_radius` | `within_radius<D, Max>` | All within distance |
+| `top_k` | `top_k<K, ..., X>` or `top_k<K, ..., X:desc>` | Top K results |
+| `top_k_threshold` | `top_k_threshold<K, T, ..., X>` | Top K meeting threshold |
+| `within_radius` | `within_radius<Max, ..., D>` | All within distance |

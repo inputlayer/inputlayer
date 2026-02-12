@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_recursion_n28t10
-Knowledge graph 'syntax_recursion_n28t10' created.
-Switched to knowledge graph: syntax_recursion_n28t10
-> .kg use syntax_recursion_n28t10
-Switched to knowledge graph: syntax_recursion_n28t10
+> .kg create test_syntax_recursion_n28t10
+Knowledge graph 'test_syntax_recursion_n28t10' created.
+Switched to knowledge graph: test_syntax_recursion_n28t10
+> .kg use test_syntax_recursion_n28t10
+Switched to knowledge graph: test_syntax_recursion_n28t10
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
 Inserted 4 fact(s) into 'edge'.
 > +reachable(X, Y) :- edge(X, Y).
@@ -35,5 +35,5 @@ No results.
 No results.
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_recursion_n28t10
-Knowledge graph 'syntax_recursion_n28t10' dropped.
+> .kg drop test_syntax_recursion_n28t10
+Knowledge graph 'test_syntax_recursion_n28t10' dropped.

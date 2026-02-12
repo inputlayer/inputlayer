@@ -1,8 +1,8 @@
 % Test: Syntax Negation
 % Description: Tests negation examples from docs/reference/syntax.md
 
-.kg create syntax_negation_n28t09
-.kg use syntax_negation_n28t09
+.kg create test_syntax_negation_n28t09
+.kg use test_syntax_negation_n28t09
 
 % === Setup data ===
 +person[(1, "alice"), (2, "bob"), (3, "carol")].
@@ -36,5 +36,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_negation_n28t09
+.kg drop test_syntax_negation_n28t09
 

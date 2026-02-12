@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_readd_topk_n14t111
+Knowledge graph 'test_drop_readd_topk_n14t111' created.
+Switched to knowledge graph: test_drop_readd_topk_n14t111
+> .kg use test_drop_readd_topk_n14t111
+Switched to knowledge graph: test_drop_readd_topk_n14t111
+> +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
+Inserted 6 fact(s) into 'score'.
+> +top_players(top_k<3, Player, Points:desc>) :- score(Player, Points).
+Rule 'top_players' registered.
+> ?- top_players(X, Y).
+3 rows:
+  (2, 250)
+  (4, 300)
+  (6, 200)
+> .rule drop top_players
+Rule 'top_players' dropped.
+> +top_players(top_k<2, Player, Points:asc>) :- score(Player, Points).
+Rule 'top_players' registered.
+> ?- top_players(X, Y).
+2 rows:
+  (1, 100)
+  (5, 125)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_readd_topk_n14t111
+Knowledge graph 'test_drop_readd_topk_n14t111' dropped.

@@ -1,0 +1,48 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_radius_mixed_n14t146
+Knowledge graph 'test_radius_mixed_n14t146' created.
+Switched to knowledge graph: test_radius_mixed_n14t146
+> .kg use test_radius_mixed_n14t146
+Switched to knowledge graph: test_radius_mixed_n14t146
+> +point[(1, 0.1), (2, 0.5), (3, 1.5)].
+Inserted 3 fact(s) into 'point'.
+> +nearby(within_radius<1.0, Id, D:asc>) :- point(Id, D).
+Rule 'nearby' registered.
+> ?- nearby(X, Y).
+2 rows:
+  (1, 0.1)
+  (2, 0.5)
+> -point(3, 1.5).
+Deleted 1 facts from 'point'.
+> +point[(3, 0.8)].
+Inserted 1 fact(s) into 'point'.
+> ?- nearby(X, Y).
+3 rows:
+  (1, 0.1)
+  (2, 0.5)
+  (3, 0.8)
+> -point(1, 0.1).
+Deleted 1 facts from 'point'.
+> +point[(1, 2.0)].
+Inserted 1 fact(s) into 'point'.
+> ?- nearby(X, Y).
+2 rows:
+  (2, 0.5)
+  (3, 0.8)
+> -point(2, 0.5).
+Deleted 1 facts from 'point'.
+> -point(3, 0.8).
+Deleted 1 facts from 'point'.
+> -point(1, 2.0).
+Deleted 1 facts from 'point'.
+> ?- nearby(X, Y).
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_radius_mixed_n14t146
+Knowledge graph 'test_radius_mixed_n14t146' dropped.

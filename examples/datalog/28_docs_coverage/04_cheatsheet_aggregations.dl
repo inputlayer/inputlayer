@@ -1,8 +1,8 @@
 % Test: Cheatsheet Aggregations
 % Description: Tests examples from docs/cheatsheet.md - aggregation patterns
 
-.kg create cheatsheet_agg_n28t04
-.kg use cheatsheet_agg_n28t04
+.kg create test_cheatsheet_agg_n28t04
+.kg use test_cheatsheet_agg_n28t04
 
 % Setup data
 +sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)].
@@ -39,4 +39,4 @@
 
 % Cleanup
 .kg use default
-.kg drop cheatsheet_agg_n28t04
+.kg drop test_cheatsheet_agg_n28t04

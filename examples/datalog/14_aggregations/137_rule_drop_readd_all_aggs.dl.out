@@ -1,0 +1,87 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_readd_all_n14t137
+Knowledge graph 'test_readd_all_n14t137' created.
+Switched to knowledge graph: test_readd_all_n14t137
+> .kg use test_readd_all_n14t137
+Switched to knowledge graph: test_readd_all_n14t137
+> +data[(1, 10), (1, 20), (2, 30), (2, 40), (2, 50)].
+Inserted 5 fact(s) into 'data'.
+> +s(Grp, sum<V>) :- data(Grp, V).
+Rule 's' registered.
+> +c(Grp, count<V>) :- data(Grp, V).
+Rule 'c' registered.
+> +mn(Grp, min<V>) :- data(Grp, V).
+Rule 'mn' registered.
+> +mx(Grp, max<V>) :- data(Grp, V).
+Rule 'mx' registered.
+> +av(Grp, avg<V>) :- data(Grp, V).
+Rule 'av' registered.
+> ?- s(X, Y).
+2 rows:
+  (1, 30)
+  (2, 120)
+> ?- c(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> ?- mn(X, Y).
+2 rows:
+  (1, 10)
+  (2, 30)
+> ?- mx(X, Y).
+2 rows:
+  (1, 20)
+  (2, 50)
+> ?- av(X, Y).
+2 rows:
+  (1, 15.0)
+  (2, 40.0)
+> .rule drop s
+Rule 's' dropped.
+> .rule drop c
+Rule 'c' dropped.
+> .rule drop mn
+Rule 'mn' dropped.
+> .rule drop mx
+Rule 'mx' dropped.
+> .rule drop av
+Rule 'av' dropped.
+> +s(Grp, sum<V>) :- data(Grp, V).
+Rule 's' registered.
+> +c(Grp, count<V>) :- data(Grp, V).
+Rule 'c' registered.
+> +mn(Grp, min<V>) :- data(Grp, V).
+Rule 'mn' registered.
+> +mx(Grp, max<V>) :- data(Grp, V).
+Rule 'mx' registered.
+> +av(Grp, avg<V>) :- data(Grp, V).
+Rule 'av' registered.
+> ?- s(X, Y).
+2 rows:
+  (1, 30)
+  (2, 120)
+> ?- c(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> ?- mn(X, Y).
+2 rows:
+  (1, 10)
+  (2, 30)
+> ?- mx(X, Y).
+2 rows:
+  (1, 20)
+  (2, 50)
+> ?- av(X, Y).
+2 rows:
+  (1, 15.0)
+  (2, 40.0)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_readd_all_n14t137
+Knowledge graph 'test_readd_all_n14t137' dropped.

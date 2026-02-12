@@ -1,8 +1,8 @@
 % Test: Cheatsheet Rules
 % Description: Tests examples from docs/cheatsheet.md - persistent and session rules
 
-.kg create cheatsheet_rules_n28t02
-.kg use cheatsheet_rules_n28t02
+.kg create test_cheatsheet_rules_n28t02
+.kg use test_cheatsheet_rules_n28t02
 
 % === Setup data ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
@@ -37,4 +37,4 @@ reachable_from_one(X) :- path(1, X).
 
 % Cleanup
 .kg use default
-.kg drop cheatsheet_rules_n28t02
+.kg drop test_cheatsheet_rules_n28t02

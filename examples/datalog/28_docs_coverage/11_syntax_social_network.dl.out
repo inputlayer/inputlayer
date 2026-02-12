@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_social_n28t11
-Knowledge graph 'syntax_social_n28t11' created.
-Switched to knowledge graph: syntax_social_n28t11
-> .kg use syntax_social_n28t11
-Switched to knowledge graph: syntax_social_n28t11
+> .kg create test_syntax_social_n28t11
+Knowledge graph 'test_syntax_social_n28t11' created.
+Switched to knowledge graph: test_syntax_social_n28t11
+> .kg use test_syntax_social_n28t11
+Switched to knowledge graph: test_syntax_social_n28t11
 > +person(id: int, name: string, age: int).
 Schema 'person' declared (persistent).
 > +follows(follower: int, followed: int).
@@ -34,5 +34,5 @@ Rule 'influencer' registered.
   (3, 2)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_social_n28t11
-Knowledge graph 'syntax_social_n28t11' dropped.
+> .kg drop test_syntax_social_n28t11
+Knowledge graph 'test_syntax_social_n28t11' dropped.

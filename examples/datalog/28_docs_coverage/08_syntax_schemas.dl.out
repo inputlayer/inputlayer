@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_schemas_n28t08
-Knowledge graph 'syntax_schemas_n28t08' created.
-Switched to knowledge graph: syntax_schemas_n28t08
-> .kg use syntax_schemas_n28t08
-Switched to knowledge graph: syntax_schemas_n28t08
+> .kg create test_syntax_schemas_n28t08
+Knowledge graph 'test_syntax_schemas_n28t08' created.
+Switched to knowledge graph: test_syntax_schemas_n28t08
+> .kg use test_syntax_schemas_n28t08
+Switched to knowledge graph: test_syntax_schemas_n28t08
 > +employee(id: int, name: string, dept: string).
 Schema 'employee' declared (persistent).
 > +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
@@ -26,5 +26,5 @@ Inserted 1 fact(s) into 'example'.
   (1, 3.14, "test")
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_schemas_n28t08
-Knowledge graph 'syntax_schemas_n28t08' dropped.
+> .kg drop test_syntax_schemas_n28t08
+Knowledge graph 'test_syntax_schemas_n28t08' dropped.

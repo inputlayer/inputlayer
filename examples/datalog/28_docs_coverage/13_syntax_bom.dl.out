@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_bom_n28t13
-Knowledge graph 'syntax_bom_n28t13' created.
-Switched to knowledge graph: syntax_bom_n28t13
-> .kg use syntax_bom_n28t13
-Switched to knowledge graph: syntax_bom_n28t13
+> .kg create test_syntax_bom_n28t13
+Knowledge graph 'test_syntax_bom_n28t13' created.
+Switched to knowledge graph: test_syntax_bom_n28t13
+> .kg use test_syntax_bom_n28t13
+Switched to knowledge graph: test_syntax_bom_n28t13
 > +contains[(100, 10, 2), (100, 20, 1), (20, 30, 4), (20, 40, 2)].
 Inserted 4 fact(s) into 'contains'.
 > +requires(Asm, Part) :- contains(Asm, Part, _).
@@ -31,5 +31,5 @@ Rule 'total_qty' registered.
   (100, 20, 1)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_bom_n28t13
-Knowledge graph 'syntax_bom_n28t13' dropped.
+> .kg drop test_syntax_bom_n28t13
+Knowledge graph 'test_syntax_bom_n28t13' dropped.

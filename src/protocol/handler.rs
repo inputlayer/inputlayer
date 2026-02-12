@@ -161,6 +161,8 @@ impl Handler {
         let mut session_fact_tuples: Vec<(String, Tuple)> = Vec::new();
         // Collect session rules to prepend to queries
         let mut session_rules: Vec<String> = Vec::new();
+        // Parsed session rules for validation (arity/aggregation compatibility)
+        let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
 
         for line in program_text.lines() {
             let line = line.trim();
@@ -498,8 +500,15 @@ impl Handler {
                                 // (self-negation, head variable safety, range restriction)
                                 validate_rule(&rule, &rule.head.relation)?;
 
+                                // Validate aggregation/arity compatibility with existing session rules
+                                crate::rule_catalog::validate_session_rule_compatibility(
+                                    &session_rules_parsed,
+                                    &rule,
+                                )?;
+
                                 let rule_text = format_rule_text(&rule);
                                 session_rules.push(rule_text.clone());
+                                session_rules_parsed.push(rule.clone());
                                 messages.push(format!(
                                     "Session rule added for '{}'.",
                                     rule.head.relation

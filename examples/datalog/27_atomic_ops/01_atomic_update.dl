@@ -1,8 +1,8 @@
 % Test: Update Pattern with Delete and Insert
 % Description: Tests the delete-then-insert update pattern
 
-.kg create atomic_update_test_n27t01
-.kg use atomic_update_test_n27t01
+.kg create test_atomic_update_n27t01
+.kg use test_atomic_update_n27t01
 
 % Initial data
 +counter[(1, 0), (2, 10), (3, 20)].
@@ -28,4 +28,4 @@
 
 % Cleanup
 .kg use default
-.kg drop atomic_update_test_n27t01
+.kg drop test_atomic_update_n27t01

@@ -1,0 +1,28 @@
+% Test: Full lifecycle: create → populate → query → drop → verify empty → re-add → verify
+% Description: Drop rule, add more facts while rule is gone, re-add rule
+
+.kg create test_drop_readd_n14t161
+.kg use test_drop_readd_n14t161
+
++data[(1, 10), (2, 20), (3, 30)].
+
++total(sum<V>) :- data(_, V).
+
+?- total(X).
+
+% Drop the rule
+.rule drop total
+
+% Should return no results
+?- total(X).
+
+% Add more facts while rule is gone
++data[(4, 40)].
+
+% Re-add rule — should pick up ALL current facts
++total(sum<V>) :- data(_, V).
+
+?- total(X).
+
+.kg use default
+.kg drop test_drop_readd_n14t161

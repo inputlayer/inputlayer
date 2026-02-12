@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_retract_all_n14t164
+Knowledge graph 'test_agg_retract_all_n14t164' created.
+Switched to knowledge graph: test_agg_retract_all_n14t164
+> .kg use test_agg_retract_all_n14t164
+Switched to knowledge graph: test_agg_retract_all_n14t164
+> +data[(1), (2), (3)].
+Inserted 3 fact(s) into 'data'.
+> +cnt(count<X>) :- data(X).
+Rule 'cnt' registered.
+> ?- cnt(X).
+1 rows:
+  (3)
+> -data(1).
+Deleted 1 facts from 'data'.
+> -data(2).
+Deleted 1 facts from 'data'.
+> -data(3).
+Deleted 1 facts from 'data'.
+> ?- cnt(X).
+No results.
+> +data[(10)].
+Inserted 1 fact(s) into 'data'.
+> ?- cnt(X).
+1 rows:
+  (1)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_retract_all_n14t164
+Knowledge graph 'test_agg_retract_all_n14t164' dropped.

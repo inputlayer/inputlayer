@@ -8,7 +8,7 @@
 +latency[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 30)].
 
 % Get bottom 3 latencies that are <= 100ms (ascending - no desc flag)
-+fast_requests(ReqId, top_k_threshold<3, Ms, 100>) :- latency(ReqId, Ms).
++fast_requests(top_k_threshold<3, 100, ReqId, Ms:asc>) :- latency(ReqId, Ms).
 
 ?- fast_requests(X, Y).
 

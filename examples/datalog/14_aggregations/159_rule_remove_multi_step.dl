@@ -1,0 +1,28 @@
+% Test: Remove clauses one by one, verify intermediate states
+% Description: Step-by-step clause removal with intermediate queries
+
+.kg create test_remove_steps_n14t159
+.kg use test_remove_steps_n14t159
+
++edge[(1, 2), (2, 3), (3, 4)].
+
++reach(X, Y) :- edge(X, Y).
++reach(X, Z) :- reach(X, Y), edge(Y, Z).
+
+% Transitive closure
+?- reach(X, Y).
+
+% Remove recursive clause (clause 2)
+.rule remove reach 2
+
+% Only base edges remain
+?- reach(X, Y).
+
+% Remove last clause → rule auto-deleted
+.rule remove reach 1
+
+% No results
+?- reach(X, Y).
+
+.kg use default
+.kg drop test_remove_steps_n14t159

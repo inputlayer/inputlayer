@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create delete_all_test_n27t04
-Knowledge graph 'delete_all_test_n27t04' created.
-Switched to knowledge graph: delete_all_test_n27t04
-> .kg use delete_all_test_n27t04
-Switched to knowledge graph: delete_all_test_n27t04
+> .kg create test_delete_all_n27t04
+Knowledge graph 'test_delete_all_n27t04' created.
+Switched to knowledge graph: test_delete_all_n27t04
+> .kg use test_delete_all_n27t04
+Switched to knowledge graph: test_delete_all_n27t04
 > +temp_data(1, 100).
 Inserted 1 fact(s) into 'temp_data'.
 > +temp_data(2, 200).
@@ -31,5 +31,5 @@ Inserted 1 fact(s) into 'temp_data'.
   (10, 999)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop delete_all_test_n27t04
-Knowledge graph 'delete_all_test_n27t04' dropped.
+> .kg drop test_delete_all_n27t04
+Knowledge graph 'test_delete_all_n27t04' dropped.

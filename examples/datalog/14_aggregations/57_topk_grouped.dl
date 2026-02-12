@@ -6,7 +6,7 @@
 +scores[("Math", "Alice", 95), ("Math", "Bob", 87), ("Math", "Carol", 92), ("Science", "Dave", 88), ("Science", "Eve", 91), ("Science", "Frank", 85)].
 
 % Top 2 per subject by score descending
-top2_by_subject(Subj, Name, top_k<2, Score, desc>) :- scores(Subj, Name, Score).
+top2_by_subject(Subj, top_k<2, Name, Score:desc>) :- scores(Subj, Name, Score).
 
 ?- top2_by_subject(Subj, Name, Score).
 

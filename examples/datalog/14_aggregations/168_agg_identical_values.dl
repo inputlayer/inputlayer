@@ -1,0 +1,20 @@
+% Test: All values the same
+% Description: Aggregations when every value is identical
+
+.kg create test_agg_ident_n14t168
+.kg use test_agg_ident_n14t168
+
++score[(1, 50), (2, 50), (3, 50)].
+
++total(sum<S>) :- score(_, S).
++cnt(count<Id>) :- score(Id, _).
++biggest(max<S>) :- score(_, S).
++top2(top_k<2, Id, S:desc>) :- score(Id, S).
+
+?- total(X).
+?- cnt(X).
+?- biggest(X).
+?- top2(X, Y).
+
+.kg use default
+.kg drop test_agg_ident_n14t168

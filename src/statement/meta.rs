@@ -35,9 +35,10 @@ pub enum MetaCommand {
     },
 
     // Session commands (transient rules)
-    SessionList,        // .session - list session rules
-    SessionClear,       // .session clear - clear all session rules
-    SessionDrop(usize), // .session drop <n> - remove rule #n (0-based internally)
+    SessionList,             // .session - list session rules
+    SessionClear,            // .session clear - clear all session rules
+    SessionDrop(usize),      // .session drop <n> - remove rule #n (0-based internally)
+    SessionDropName(String), // .session drop <name> - remove all rules for a relation
 
     // Index commands (HNSW and other indexes)
     IndexList,                       // .index list - list all indexes
@@ -238,19 +239,18 @@ fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
             "clear" => Ok(MetaCommand::SessionClear),
             "drop" => {
                 if parts.len() < 3 {
-                    Err("Usage: .session drop <n>".to_string())
-                } else {
-                    let index: usize = parts[2].parse().map_err(|_| {
-                        format!("Invalid index '{}': must be a number (1-based)", parts[2])
-                    })?;
+                    Err("Usage: .session drop <n|name>".to_string())
+                } else if let Ok(index) = parts[2].parse::<usize>() {
                     if index == 0 {
                         return Err("Index must be 1 or greater (1-based indexing)".to_string());
                     }
                     Ok(MetaCommand::SessionDrop(index - 1)) // Convert to 0-based
+                } else {
+                    Ok(MetaCommand::SessionDropName(parts[2].to_string()))
                 }
             }
             _ => Err(format!(
-                "Unknown session subcommand: {}. Use: clear, drop <n>",
+                "Unknown session subcommand: {}. Use: clear, drop <n|name>",
                 parts[1]
             )),
         }
@@ -739,5 +739,28 @@ mod tests {
         let result = parse_meta_command(".index foo");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown index subcommand"));
+    }
+
+    #[test]
+    fn test_parse_session_drop_by_index() {
+        let cmd = parse_meta_command(".session drop 3").unwrap();
+        assert!(matches!(cmd, MetaCommand::SessionDrop(2))); // 1-based → 0-based
+    }
+
+    #[test]
+    fn test_parse_session_drop_by_name() {
+        let cmd = parse_meta_command(".session drop top2").unwrap();
+        if let MetaCommand::SessionDropName(name) = cmd {
+            assert_eq!(name, "top2");
+        } else {
+            panic!("Expected SessionDropName");
+        }
+    }
+
+    #[test]
+    fn test_parse_session_drop_missing_arg() {
+        let result = parse_meta_command(".session drop");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
     }
 }

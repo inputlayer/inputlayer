@@ -1264,21 +1264,9 @@ impl IRBuilder {
         let input_schema = input.output_schema();
         let head = &rule.head;
 
-        // Check if this is a ranking aggregate (TopK, TopKThreshold, WithinRadius)
-        // Ranking aggregates should NOT group by head variables - they select globally
-        let has_ranking_agg = head.args.iter().any(|term| {
-            matches!(
-                term,
-                Term::Aggregate(
-                    AggregateFunc::TopK { .. }
-                        | AggregateFunc::TopKThreshold { .. }
-                        | AggregateFunc::WithinRadius { .. },
-                    _
-                )
-            )
-        });
-
         // Separate group-by variables from aggregate terms
+        // For ranking aggregates: Term::Variable = group-by key (PARTITION BY)
+        // For simple aggregates: Term::Variable = group-by key (same behavior, always correct)
         let mut group_by = Vec::new();
         let mut aggregations = Vec::new();
         let mut output_schema = Vec::new();
@@ -1292,25 +1280,130 @@ impl IRBuilder {
                         .position(|s| s == v)
                         .ok_or_else(|| format!("Variable {v} not found in schema"))?;
 
-                    // For ranking aggregates, don't add to group_by (process globally)
-                    // For standard aggregates, this is a group-by variable
-                    if !has_ranking_agg {
-                        group_by.push(pos);
-                    }
+                    // All non-aggregate head variables are group-by keys
+                    group_by.push(pos);
                     output_schema.push(v.clone());
                 }
                 Term::Aggregate(func, var_name) => {
-                    // Handle ranking aggregates specially - they store their order variable
-                    // internally and don't use the var_name parameter (which is empty)
-                    let (ir_func, agg_col_pos, agg_var_name) = match func {
-                        // Standard aggregates use var_name
-                        AggregateFunc::Count
-                        | AggregateFunc::CountDistinct
-                        | AggregateFunc::Sum
-                        | AggregateFunc::Min
-                        | AggregateFunc::Max
-                        | AggregateFunc::Avg => {
-                            let col_pos = input_schema
+                    if func.is_ranking() {
+                        // Ranking aggregates: output_vars are inside the aggregate
+                        let (ir_func, agg_col_pos) = match func {
+                            AggregateFunc::TopK {
+                                k,
+                                order_var,
+                                output_vars,
+                                descending,
+                            } => {
+                                let order_col = input_schema
+                                    .iter()
+                                    .position(|s| s == order_var)
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Variable {order_var} not found in schema for top_k"
+                                        )
+                                    })?;
+                                let output_cols: Vec<usize> = output_vars
+                                    .iter()
+                                    .map(|v| {
+                                        input_schema.iter().position(|s| s == v).ok_or_else(|| {
+                                            format!(
+                                                "Variable {v} not found in schema for top_k output"
+                                            )
+                                        })
+                                    })
+                                    .collect::<Result<_, _>>()?;
+                                (
+                                    AggregateFunction::TopK {
+                                        k: *k,
+                                        order_col,
+                                        output_cols,
+                                        descending: *descending,
+                                    },
+                                    order_col,
+                                )
+                            }
+                            AggregateFunc::TopKThreshold {
+                                k,
+                                order_var,
+                                output_vars,
+                                threshold,
+                                descending,
+                            } => {
+                                let order_col = input_schema
+                                    .iter()
+                                    .position(|s| s == order_var)
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Variable {order_var} not found in schema for top_k_threshold"
+                                        )
+                                    })?;
+                                let output_cols: Vec<usize> = output_vars
+                                    .iter()
+                                    .map(|v| {
+                                        input_schema.iter().position(|s| s == v).ok_or_else(|| {
+                                            format!("Variable {v} not found in schema for top_k_threshold output")
+                                        })
+                                    })
+                                    .collect::<Result<_, _>>()?;
+                                (
+                                    AggregateFunction::TopKThreshold {
+                                        k: *k,
+                                        order_col,
+                                        output_cols,
+                                        threshold: *threshold,
+                                        descending: *descending,
+                                    },
+                                    order_col,
+                                )
+                            }
+                            AggregateFunc::WithinRadius {
+                                distance_var,
+                                output_vars,
+                                max_distance,
+                            } => {
+                                let dist_col = input_schema
+                                    .iter()
+                                    .position(|s| s == distance_var)
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Variable {distance_var} not found in schema for within_radius"
+                                        )
+                                    })?;
+                                let output_cols: Vec<usize> = output_vars
+                                    .iter()
+                                    .map(|v| {
+                                        input_schema.iter().position(|s| s == v).ok_or_else(|| {
+                                            format!("Variable {v} not found in schema for within_radius output")
+                                        })
+                                    })
+                                    .collect::<Result<_, _>>()?;
+                                (
+                                    AggregateFunction::WithinRadius {
+                                        distance_col: dist_col,
+                                        output_cols,
+                                        max_distance: *max_distance,
+                                    },
+                                    dist_col,
+                                )
+                            }
+                            _ => unreachable!(),
+                        };
+
+                        aggregations.push((ir_func, agg_col_pos));
+                        // Push each output var name into the schema
+                        let output_vars = match func {
+                            AggregateFunc::TopK { output_vars, .. }
+                            | AggregateFunc::TopKThreshold { output_vars, .. }
+                            | AggregateFunc::WithinRadius { output_vars, .. } => output_vars,
+                            _ => unreachable!(),
+                        };
+                        for v in output_vars {
+                            output_schema.push(v.clone());
+                        }
+                    } else {
+                        // Simple (scalar) aggregates use var_name
+                        let col_pos =
+                            input_schema
                                 .iter()
                                 .position(|s| s == var_name)
                                 .ok_or_else(|| {
@@ -1318,95 +1411,17 @@ impl IRBuilder {
                                         "Variable {var_name} not found in schema for aggregation"
                                     )
                                 })?;
-                            let ir_func = match func {
-                                AggregateFunc::Count => AggregateFunction::Count,
-                                AggregateFunc::CountDistinct => AggregateFunction::CountDistinct,
-                                AggregateFunc::Sum => AggregateFunction::Sum,
-                                AggregateFunc::Min => AggregateFunction::Min,
-                                AggregateFunc::Max => AggregateFunction::Max,
-                                AggregateFunc::Avg => AggregateFunction::Avg,
-                                _ => unreachable!(),
-                            };
-                            (ir_func, col_pos, var_name.clone())
-                        }
-                        // Ranking aggregates extract order_var from the function itself
-                        AggregateFunc::TopK {
-                            k,
-                            order_var,
-                            descending,
-                        } => {
-                            let order_col = input_schema
-                                .iter()
-                                .position(|s| s == order_var)
-                                .ok_or_else(|| {
-                                    format!("Variable {order_var} not found in schema for top_k")
-                                })?;
-                            (
-                                AggregateFunction::TopK {
-                                    k: *k,
-                                    order_col,
-                                    descending: *descending,
-                                },
-                                order_col,
-                                order_var.clone(),
-                            )
-                        }
-                        AggregateFunc::TopKThreshold {
-                            k,
-                            order_var,
-                            threshold,
-                            descending,
-                        } => {
-                            let order_col = input_schema
-                                .iter()
-                                .position(|s| s == order_var)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "Variable {order_var} not found in schema for top_k_threshold"
-                                    )
-                                })?;
-                            (
-                                AggregateFunction::TopKThreshold {
-                                    k: *k,
-                                    order_col,
-                                    threshold: *threshold,
-                                    descending: *descending,
-                                },
-                                order_col,
-                                order_var.clone(),
-                            )
-                        }
-                        AggregateFunc::WithinRadius {
-                            distance_var,
-                            max_distance,
-                        } => {
-                            let dist_col = input_schema
-                                .iter()
-                                .position(|s| s == distance_var)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "Variable {distance_var} not found in schema for within_radius"
-                                    )
-                                })?;
-                            (
-                                AggregateFunction::WithinRadius {
-                                    distance_col: dist_col,
-                                    max_distance: *max_distance,
-                                },
-                                dist_col,
-                                distance_var.clone(),
-                            )
-                        }
-                    };
-
-                    aggregations.push((ir_func, agg_col_pos));
-                    // Name the output column
-                    // For ranking aggregates, use just the variable name (since output is the value)
-                    // For standard aggregates, use func_var format (e.g., "count_X")
-                    if has_ranking_agg {
-                        output_schema.push(agg_var_name);
-                    } else {
-                        output_schema.push(format!("{}_{}", func_to_str(func), agg_var_name));
+                        let ir_func = match func {
+                            AggregateFunc::Count => AggregateFunction::Count,
+                            AggregateFunc::CountDistinct => AggregateFunction::CountDistinct,
+                            AggregateFunc::Sum => AggregateFunction::Sum,
+                            AggregateFunc::Min => AggregateFunction::Min,
+                            AggregateFunc::Max => AggregateFunction::Max,
+                            AggregateFunc::Avg => AggregateFunction::Avg,
+                            _ => unreachable!(),
+                        };
+                        aggregations.push((ir_func, col_pos));
+                        output_schema.push(format!("{}_{}", func_to_str(func), var_name));
                     }
                 }
                 Term::Constant(_) => {

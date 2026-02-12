@@ -1,8 +1,8 @@
 % Test: Comment Syntax
 % This test verifies that all comment styles work correctly
 
-.kg create comments_test_n10t13
-.kg use comments_test_n10t13
+.kg create test_comments_n10t13
+.kg use test_comments_n10t13
 
 % Test 1: Line comments with %
 % This is a full line comment
@@ -39,4 +39,4 @@
 
 % Cleanup - switch to default before dropping
 .kg use default
-.kg drop comments_test_n10t13
+.kg drop test_comments_n10t13

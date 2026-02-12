@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create repl_schemas_n28t17
-Knowledge graph 'repl_schemas_n28t17' created.
-Switched to knowledge graph: repl_schemas_n28t17
-> .kg use repl_schemas_n28t17
-Switched to knowledge graph: repl_schemas_n28t17
+> .kg create test_repl_schemas_n28t17
+Knowledge graph 'test_repl_schemas_n28t17' created.
+Switched to knowledge graph: test_repl_schemas_n28t17
+> .kg use test_repl_schemas_n28t17
+Switched to knowledge graph: test_repl_schemas_n28t17
 > +employee(id: int, name: string, dept: string).
 Schema 'employee' declared (persistent).
 > +employee[(1, "alice", "engineering"), (2, "bob", "sales")].
@@ -27,5 +27,5 @@ Inserted 2 fact(s) into 'user'.
   (2, "bob@example.com")
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop repl_schemas_n28t17
-Knowledge graph 'repl_schemas_n28t17' dropped.
+> .kg drop test_repl_schemas_n28t17
+Knowledge graph 'test_repl_schemas_n28t17' dropped.

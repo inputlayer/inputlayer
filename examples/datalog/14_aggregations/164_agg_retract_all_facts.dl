@@ -1,0 +1,25 @@
+% Test: Delete every single fact, aggregation should return 0 rows
+% Description: Retract all facts feeding an aggregation, then re-insert
+
+.kg create test_agg_retract_all_n14t164
+.kg use test_agg_retract_all_n14t164
+
++data[(1), (2), (3)].
++cnt(count<X>) :- data(X).
+
+?- cnt(X).
+
+-data(1).
+-data(2).
+-data(3).
+
+% No input = no output
+?- cnt(X).
+
+% Re-insert
++data[(10)].
+
+?- cnt(X).
+
+.kg use default
+.kg drop test_agg_retract_all_n14t164

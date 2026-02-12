@@ -195,7 +195,7 @@ Supported aggregates: `count`, `sum`, `min`, `max`, `avg`, `count_distinct`, `to
 
 ### TopK Example
 ```datalog
-+top_scores(Name, top_k<3, Score, desc>) :- scores(Name, Score).
++top_scores(top_k<3, Name, Score:desc>) :- scores(Name, Score).
 ```
 
 ## Builtin Functions

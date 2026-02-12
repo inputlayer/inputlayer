@@ -7,47 +7,47 @@ Current knowledge graph: default
 > .kg list
 Knowledge Graphs:
   default *
-> .kg create kg_alpha_n39t06
-Knowledge graph 'kg_alpha_n39t06' created.
-Switched to knowledge graph: kg_alpha_n39t06
-> .kg create kg_beta_n39t06
-Knowledge graph 'kg_beta_n39t06' created.
-Switched to knowledge graph: kg_beta_n39t06
-> .kg create kg_gamma_n39t06
-Knowledge graph 'kg_gamma_n39t06' created.
-Switched to knowledge graph: kg_gamma_n39t06
+> .kg create test_kg_alpha_n39t06
+Knowledge graph 'test_kg_alpha_n39t06' created.
+Switched to knowledge graph: test_kg_alpha_n39t06
+> .kg create test_kg_beta_n39t06
+Knowledge graph 'test_kg_beta_n39t06' created.
+Switched to knowledge graph: test_kg_beta_n39t06
+> .kg create test_kg_gamma_n39t06
+Knowledge graph 'test_kg_gamma_n39t06' created.
+Switched to knowledge graph: test_kg_gamma_n39t06
 > .kg list
 Knowledge Graphs:
   default
-  kg_alpha_n39t06
-  kg_beta_n39t06
-  kg_gamma_n39t06 *
-> .kg use kg_alpha_n39t06
-Switched to knowledge graph: kg_alpha_n39t06
+  test_kg_alpha_n39t06
+  test_kg_beta_n39t06
+  test_kg_gamma_n39t06 *
+> .kg use test_kg_alpha_n39t06
+Switched to knowledge graph: test_kg_alpha_n39t06
 > +alpha_data[(1, "first"), (2, "second")].
 Inserted 2 fact(s) into 'alpha_data'.
 > ?- alpha_data(Id, Val).
 2 rows:
   (1, "first")
   (2, "second")
-> .kg use kg_beta_n39t06
-Switched to knowledge graph: kg_beta_n39t06
+> .kg use test_kg_beta_n39t06
+Switched to knowledge graph: test_kg_beta_n39t06
 > +beta_data[(10, 20), (30, 40)].
 Inserted 2 fact(s) into 'beta_data'.
 > .kg
-Current knowledge graph: kg_beta_n39t06
-> .kg use kg_gamma_n39t06
-Switched to knowledge graph: kg_gamma_n39t06
+Current knowledge graph: test_kg_beta_n39t06
+> .kg use test_kg_gamma_n39t06
+Switched to knowledge graph: test_kg_gamma_n39t06
 > +gamma_data[("x",), ("y",), ("z",)].
 Inserted 3 fact(s) into 'gamma_data'.
 > .kg list
 Knowledge Graphs:
   default
-  kg_alpha_n39t06
-  kg_beta_n39t06
-  kg_gamma_n39t06 *
-> .kg use kg_alpha_n39t06
-Switched to knowledge graph: kg_alpha_n39t06
+  test_kg_alpha_n39t06
+  test_kg_beta_n39t06
+  test_kg_gamma_n39t06 *
+> .kg use test_kg_alpha_n39t06
+Switched to knowledge graph: test_kg_alpha_n39t06
 > ?- alpha_data(Id, Val).
 2 rows:
   (1, "first")
@@ -56,12 +56,12 @@ Switched to knowledge graph: kg_alpha_n39t06
 No results.
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop kg_alpha_n39t06
-Knowledge graph 'kg_alpha_n39t06' dropped.
-> .kg drop kg_beta_n39t06
-Knowledge graph 'kg_beta_n39t06' dropped.
-> .kg drop kg_gamma_n39t06
-Knowledge graph 'kg_gamma_n39t06' dropped.
+> .kg drop test_kg_alpha_n39t06
+Knowledge graph 'test_kg_alpha_n39t06' dropped.
+> .kg drop test_kg_beta_n39t06
+Knowledge graph 'test_kg_beta_n39t06' dropped.
+> .kg drop test_kg_gamma_n39t06
+Knowledge graph 'test_kg_gamma_n39t06' dropped.
 > .kg list
 Knowledge Graphs:
   default *

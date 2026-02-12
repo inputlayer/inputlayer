@@ -1,8 +1,8 @@
 % Test: Bulk Conditional Delete
 % Description: Tests conditional delete with filter condition
 
-.kg create bulk_delete_test_n27t03
-.kg use bulk_delete_test_n27t03
+.kg create test_bulk_delete_n27t03
+.kg use test_bulk_delete_n27t03
 
 % Initial data: entries with (id, value) pairs
 % Values: 1=info, 2=error, 3=warn
@@ -30,4 +30,4 @@
 
 % Cleanup
 .kg use default
-.kg drop bulk_delete_test_n27t03
+.kg drop test_bulk_delete_n27t03

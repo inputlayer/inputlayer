@@ -1,0 +1,25 @@
+% Test: Drop and re-add top_k rule with different K
+% Description: Tests dropping a top_k rule and redefining it with different parameters
+
+.kg create test_drop_readd_topk_n14t111
+.kg use test_drop_readd_topk_n14t111
+
+% Insert base data
++score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125), (6, 200)].
+
+% Define top_k rule - top 3 descending
++top_players(top_k<3, Player, Points:desc>) :- score(Player, Points).
+
+?- top_players(X, Y).
+
+% Drop the rule
+.rule drop top_players
+
+% Redefine with different K (top 2) and ascending
++top_players(top_k<2, Player, Points:asc>) :- score(Player, Points).
+
+?- top_players(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_drop_readd_topk_n14t111

@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_agg_rule_n14t152
+Knowledge graph 'test_dup_agg_rule_n14t152' created.
+Switched to knowledge graph: test_dup_agg_rule_n14t152
+> .kg use test_dup_agg_rule_n14t152
+Switched to knowledge graph: test_dup_agg_rule_n14t152
+> +score[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'score'.
+> +total(sum<S>) :- score(_, S).
+Rule 'total' registered.
+> ?- total(X).
+1 rows:
+  (600)
+> +total(sum<S>) :- score(_, S).
+Rule 'total' registered.
+> ?- total(X).
+1 rows:
+  (600)
+> .rule list
+Rules:
+  total (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_agg_rule_n14t152
+Knowledge graph 'test_dup_agg_rule_n14t152' dropped.
