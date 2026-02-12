@@ -1,0 +1,80 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n14t174
+Knowledge graph 'test_multi_agg_n14t174' created.
+Switched to knowledge graph: test_multi_agg_n14t174
+> .kg use test_multi_agg_n14t174
+Switched to knowledge graph: test_multi_agg_n14t174
+> +score[(1, 100), (2, 200), (3, 150)].
+Inserted 3 fact(s) into 'score'.
+> +s(sum<V>) :- score(_, V).
+Rule 's' registered.
+> +c(count<V>) :- score(_, V).
+Rule 'c' registered.
+> +mx(max<V>) :- score(_, V).
+Rule 'mx' registered.
+> +mn(min<V>) :- score(_, V).
+Rule 'mn' registered.
+> +tk(top_k<2, Id, V:desc>) :- score(Id, V).
+Rule 'tk' registered.
+> ?- s(X).
+1 rows:
+  (450)
+> ?- c(X).
+1 rows:
+  (3)
+> ?- mx(X).
+1 rows:
+  (200)
+> ?- mn(X).
+1 rows:
+  (100)
+> ?- tk(X, Y).
+2 rows:
+  (2, 200)
+  (3, 150)
+> +score[(4, 300)].
+Inserted 1 fact(s) into 'score'.
+> ?- s(X).
+1 rows:
+  (750)
+> ?- c(X).
+1 rows:
+  (4)
+> ?- mx(X).
+1 rows:
+  (300)
+> ?- mn(X).
+1 rows:
+  (100)
+> ?- tk(X, Y).
+2 rows:
+  (2, 200)
+  (4, 300)
+> -score(4, 300).
+Deleted 1 facts from 'score'.
+> ?- s(X).
+1 rows:
+  (450)
+> ?- mx(X).
+1 rows:
+  (200)
+> ?- tk(X, Y).
+2 rows:
+  (2, 200)
+  (3, 150)
+> .rule drop s
+Rule 's' dropped.
+> +s(sum<V>) :- score(_, V), V > 100.
+Rule 's' registered.
+> ?- s(X).
+1 rows:
+  (350)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n14t174
+Knowledge graph 'test_multi_agg_n14t174' dropped.

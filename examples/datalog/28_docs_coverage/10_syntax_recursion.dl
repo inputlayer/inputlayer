@@ -1,8 +1,8 @@
 % Test: Syntax Recursion
 % Description: Tests recursion examples from docs/reference/syntax.md
 
-.kg create syntax_recursion_n28t10
-.kg use syntax_recursion_n28t10
+.kg create test_syntax_recursion_n28t10
+.kg use test_syntax_recursion_n28t10
 
 % === Basic transitive closure ===
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)].
@@ -26,5 +26,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_recursion_n28t10
+.kg drop test_syntax_recursion_n28t10
 

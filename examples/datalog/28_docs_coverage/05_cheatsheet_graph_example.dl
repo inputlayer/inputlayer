@@ -1,8 +1,8 @@
 % Test: Cheatsheet Graph Database Example
 % Description: Tests the complete graph database example from docs/cheatsheet.md
 
-.kg create social_n28t05
-.kg use social_n28t05
+.kg create test_social_n28t05
+.kg use test_social_n28t05
 
 % Add edges (from cheatsheet example)
 +follows[(1, 2), (2, 3), (3, 4), (1, 4)].
@@ -16,4 +16,4 @@
 
 % Cleanup
 .kg use default
-.kg drop social_n28t05
+.kg drop test_social_n28t05

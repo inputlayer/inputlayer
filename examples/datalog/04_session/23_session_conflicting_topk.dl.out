@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_topk_n04t23
+Knowledge graph 'test_session_topk_n04t23' created.
+Switched to knowledge graph: test_session_topk_n04t23
+> .kg use test_session_topk_n04t23
+Switched to knowledge graph: test_session_topk_n04t23
+> +score[(1, 100), (2, 200), (3, 300)].
+Inserted 3 fact(s) into 'score'.
+> top2(top_k<2, X, Y:desc>) :- score(X, Y).
+2 rows:
+  (2, 200)
+  (3, 300)
+(session: 1 rule(s))
+> top2(top_k<2, X, Y:asc>) :- score(X, Y).
+Script error: Conflicting aggregation: cannot add clause with 'top_k<2, X, Y:asc>' to session rule 'top2' which already has a clause with 'top_k<2, X, Y:desc>'. Use '.session drop top2' to remove the existing rule first.

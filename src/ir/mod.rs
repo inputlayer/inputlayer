@@ -19,11 +19,13 @@ pub enum AggregateFunction {
     Max,
     /// Average value (returns float)
     Avg,
-    /// Top-K: select top k results ordered by a column
+    /// Top-K: select top k tuples ordered by order_col, outputting output_cols
     TopK {
         k: usize,
         /// Column index for ordering
         order_col: usize,
+        /// Column indices for output variables (in declaration order)
+        output_cols: Vec<usize>,
         /// If true, highest values first
         descending: bool,
     },
@@ -31,15 +33,30 @@ pub enum AggregateFunction {
     TopKThreshold {
         k: usize,
         order_col: usize,
+        output_cols: Vec<usize>,
         threshold: f64,
         descending: bool,
     },
-    /// Within radius: all results where `order_col` <= `max_distance`
+    /// Within radius: all results where distance_col <= max_distance
     WithinRadius {
         /// Column index for distance
         distance_col: usize,
+        /// Column indices for output variables (in declaration order)
+        output_cols: Vec<usize>,
         max_distance: f64,
     },
+}
+
+impl AggregateFunction {
+    /// Check if this is a ranking aggregate (returns multiple rows per group)
+    pub fn is_ranking(&self) -> bool {
+        matches!(
+            self,
+            AggregateFunction::TopK { .. }
+                | AggregateFunction::TopKThreshold { .. }
+                | AggregateFunction::WithinRadius { .. }
+        )
+    }
 }
 
 /// Built-in function types for vector operations
@@ -984,16 +1001,19 @@ mod tests {
         let topk = AggregateFunction::TopK {
             k: 5,
             order_col: 1,
+            output_cols: vec![1],
             descending: true,
         };
         let topk2 = AggregateFunction::TopK {
             k: 5,
             order_col: 1,
+            output_cols: vec![1],
             descending: true,
         };
         let topk3 = AggregateFunction::TopK {
             k: 10,
             order_col: 1,
+            output_cols: vec![1],
             descending: true,
         };
         assert_eq!(topk, topk2);

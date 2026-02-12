@@ -1,0 +1,34 @@
+% Test: Alternate between rule and fact changes
+% Description: Interleave rule drops/adds with fact mutations
+
+.kg create test_interleave_n14t173
+.kg use test_interleave_n14t173
+
++data[(1, 10), (2, 20), (3, 30)].
+
++agg(sum<V>) :- data(_, V).
+
+?- agg(X).
+
+% Add more facts
++data[(4, 40)].
+
+?- agg(X).
+
+% Drop rule
+.rule drop agg
+
+?- agg(X).
+
+% Re-add with different agg
++agg(max<V>) :- data(_, V).
+
+?- agg(X).
+
+% Remove a fact
+-data(4, 40).
+
+?- agg(X).
+
+.kg use default
+.kg drop test_interleave_n14t173

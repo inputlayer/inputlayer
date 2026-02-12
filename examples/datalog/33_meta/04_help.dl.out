@@ -21,7 +21,8 @@ Meta Commands:
   .rule drop <name>    Drop all clauses of a rule
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
-  .session clear       Clear session rules
+  .session clear       Clear all session rules
+  .session drop <n|name>  Drop session rule by index or relation name
   .status              Server status
   .help                Show this help
   .quit                Exit

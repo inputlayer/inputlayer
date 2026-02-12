@@ -292,10 +292,10 @@ Check if interval 1 fully contains interval 2:
     Score = BaseScore * Decay.
 
 % Get top items for user
-+recommendations(UserId, ItemId, top_k<5, Score, desc>) :-
++recommendations(UserId, top_k<5, ItemId, Score:desc>) :-
     item_score(UserId, ItemId, Score).
 
-?- recommendations(101, ItemId, Score).
+?- recommendations(101, Result).
 ```
 
 ### Session Detection

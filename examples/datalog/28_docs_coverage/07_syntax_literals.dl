@@ -1,8 +1,8 @@
 % Test: Syntax Literals
 % Description: Tests literal types from docs/reference/syntax.md
 
-.kg create syntax_literals_n28t07
-.kg use syntax_literals_n28t07
+.kg create test_syntax_literals_n28t07
+.kg use test_syntax_literals_n28t07
 
 % === Integer literals ===
 +int_values[(42), (-17), (0)].
@@ -31,5 +31,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_literals_n28t07
+.kg drop test_syntax_literals_n28t07
 

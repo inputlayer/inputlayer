@@ -964,6 +964,16 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("Removed rule {}: {}", index + 1, format_rule(&removed));
         }
 
+        MetaCommand::SessionDropName(name) => {
+            let before = state.session_rules.len();
+            state.session_rules.retain(|r| r.head.relation != name);
+            let removed = before - state.session_rules.len();
+            if removed == 0 {
+                return Err(format!("No session rules found for relation '{name}'."));
+            }
+            println!("Dropped {removed} session rule(s) for '{name}'.");
+        }
+
         MetaCommand::Status => {
             let health_url = state.http.api_url("/health");
             let health_resp = state
@@ -1359,10 +1369,14 @@ async fn handle_session_rule(
     rule: inputlayer::ast::Rule,
 ) -> Result<(), String> {
     let head_relation = rule.head.relation.clone();
-    let head_arity = rule.head.args.len();
+    let head_arity = rule.head.effective_arity();
+
+    // Validate aggregation/arity compatibility with existing session rules
+    inputlayer::rule_catalog::validate_session_rule_compatibility(&state.session_rules, &rule)?;
+
     state.session_rules.push(rule);
 
-    // Generate variables matching the rule's actual head arity
+    // Generate variables matching the rule's effective output arity
     let var_names = ["X", "Y", "Z", "W", "V", "U", "T", "S", "R", "Q"];
     let args: Vec<Term> = (0..head_arity)
         .map(|i| {
@@ -1654,7 +1668,8 @@ fn print_help() {
     println!("  .rule drop <name>    Drop all clauses of a rule");
     println!("  .rule remove <name> <n>  Remove clause n from rule (1-based)");
     println!("  .session             List session rules");
-    println!("  .session clear       Clear session rules");
+    println!("  .session clear       Clear all session rules");
+    println!("  .session drop <n|name>  Drop session rule by index or relation name");
     println!("  .status              Server status");
     println!("  .help                Show this help");
     println!("  .quit                Exit");

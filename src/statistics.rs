@@ -231,7 +231,7 @@ impl StatisticsManager {
         }
 
         let mut sorted = numeric_values.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let bucket_size = sorted.len().div_ceil(self.config.histogram_buckets);
         let bucket_size = bucket_size.max(1);

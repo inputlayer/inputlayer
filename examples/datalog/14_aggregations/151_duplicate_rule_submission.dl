@@ -1,0 +1,22 @@
+% Test: Duplicate rule submission (idempotency)
+% Description: Submit exact same rule twice — should be silently ignored
+
+.kg create test_dup_rule_n14t151
+.kg use test_dup_rule_n14t151
+
++edge[(1, 2), (2, 3)].
++reach(X, Y) :- edge(X, Y).
+
+?- reach(X, Y).
+
+% Submit EXACT DUPLICATE rule
++reach(X, Y) :- edge(X, Y).
+
+% Should still return same 2 rows, not doubled
+?- reach(X, Y).
+
+% Should show reach with correct clause count
+.rule list
+
+.kg use default
+.kg drop test_dup_rule_n14t151

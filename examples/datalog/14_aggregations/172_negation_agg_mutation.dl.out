@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_agg_n14t172
+Knowledge graph 'test_neg_agg_n14t172' created.
+Switched to knowledge graph: test_neg_agg_n14t172
+> .kg use test_neg_agg_n14t172
+Switched to knowledge graph: test_neg_agg_n14t172
+> +score[("Alice", 90), ("Bob", 80), ("Charlie", 70)].
+Inserted 3 fact(s) into 'score'.
+> +banned[("Bob")].
+Inserted 1 fact(s) into 'banned'.
+> +top(Name, max<Grade>) :- score(Name, Grade), !banned(Name).
+Rule 'top' registered.
+> ?- top(N, G).
+2 rows:
+  ("Alice", 90)
+  ("Charlie", 70)
+> -banned("Bob").
+Deleted 1 facts from 'banned'.
+> ?- top(N, G).
+3 rows:
+  ("Alice", 90)
+  ("Bob", 80)
+  ("Charlie", 70)
+> +banned[("Alice")].
+Inserted 1 fact(s) into 'banned'.
+> ?- top(N, G).
+2 rows:
+  ("Bob", 80)
+  ("Charlie", 70)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_n14t172
+Knowledge graph 'test_neg_agg_n14t172' dropped.

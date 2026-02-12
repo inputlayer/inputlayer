@@ -1,8 +1,8 @@
 % Test: Conditional Delete Operation
 % Description: Tests conditional delete with filter conditions
 
-.kg create conditional_update_test_n27t02
-.kg use conditional_update_test_n27t02
+.kg create test_conditional_update_n27t02
+.kg use test_conditional_update_n27t02
 
 % Initial data: counters with values
 +counter[(1, 100), (2, 200), (3, 50), (4, 150)].
@@ -24,4 +24,4 @@
 
 % Cleanup
 .kg use default
-.kg drop conditional_update_test_n27t02
+.kg drop test_conditional_update_n27t02

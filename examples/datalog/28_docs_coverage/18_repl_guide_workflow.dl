@@ -1,8 +1,8 @@
 % Test: REPL Guide Common Workflows
 % Description: Tests workflow examples from docs/getting-started/04-repl-guide.md
 
-.kg create repl_workflow_n28t18
-.kg use repl_workflow_n28t18
+.kg create test_repl_workflow_n28t18
+.kg use test_repl_workflow_n28t18
 
 % === Building Business Rules Example ===
 
@@ -37,5 +37,5 @@
 
 % Cleanup
 .kg use default
-.kg drop repl_workflow_n28t18
+.kg drop test_repl_workflow_n28t18
 

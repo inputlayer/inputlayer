@@ -1,0 +1,22 @@
+% Test: All-negative values with various aggregations
+% Description: Tests min, max, sum, top_k with all negative numbers
+
+.kg create test_agg_neg_n14t165
+.kg use test_agg_neg_n14t165
+
++temp[(-10), (-20), (-5), (-30), (-1)].
+
++hottest(max<T>) :- temp(T).
++coldest(min<T>) :- temp(T).
++total(sum<T>) :- temp(T).
++top2_warm(top_k<2, T:desc>) :- temp(T).
++top2_cold(top_k<2, T:asc>) :- temp(T).
+
+?- hottest(X).
+?- coldest(X).
+?- total(X).
+?- top2_warm(X).
+?- top2_cold(X).
+
+.kg use default
+.kg drop test_agg_neg_n14t165

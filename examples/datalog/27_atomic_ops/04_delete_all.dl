@@ -1,8 +1,8 @@
 % Test: Delete All Pattern
 % Description: Tests deleting all tuples from a relation
 
-.kg create delete_all_test_n27t04
-.kg use delete_all_test_n27t04
+.kg create test_delete_all_n27t04
+.kg use test_delete_all_n27t04
 
 % Initial data (integer pairs)
 +temp_data(1, 100).
@@ -26,4 +26,4 @@
 
 % Cleanup
 .kg use default
-.kg drop delete_all_test_n27t04
+.kg drop test_delete_all_n27t04

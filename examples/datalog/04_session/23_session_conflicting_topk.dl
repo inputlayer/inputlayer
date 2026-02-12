@@ -1,0 +1,19 @@
+% Test: Session Rule Conflicting TopK Orderings
+% Description: Validates that conflicting top_k aggregation orderings
+% are rejected for session rules (desc vs asc on same head)
+
+.kg create test_session_topk_n04t23
+.kg use test_session_topk_n04t23
+
+% Insert test data
++score[(1, 100), (2, 200), (3, 300)].
+
+% First session rule with desc ordering
+top2(top_k<2, X, Y:desc>) :- score(X, Y).
+
+% Second session rule with CONFLICTING asc ordering - should be rejected
+top2(top_k<2, X, Y:asc>) :- score(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_session_topk_n04t23

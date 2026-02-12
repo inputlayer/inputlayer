@@ -70,7 +70,7 @@ derived(X, Y) :- base(X, Z), other(Z, Y).      % Session rule
 ```datalog
 ?- count<X> :- relation(X, _).
 ?- sum<Value> :- data(_, Value).
-?- top_k<5, Score, desc> :- scores(Item, Score).
+?- top_k<5, Item, Score:desc> :- scores(Item, Score).
 ```
 
 ---

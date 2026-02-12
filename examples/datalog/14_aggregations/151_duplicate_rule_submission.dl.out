@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_rule_n14t151
+Knowledge graph 'test_dup_rule_n14t151' created.
+Switched to knowledge graph: test_dup_rule_n14t151
+> .kg use test_dup_rule_n14t151
+Switched to knowledge graph: test_dup_rule_n14t151
+> +edge[(1, 2), (2, 3)].
+Inserted 2 fact(s) into 'edge'.
+> +reach(X, Y) :- edge(X, Y).
+Rule 'reach' registered.
+> ?- reach(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> +reach(X, Y) :- edge(X, Y).
+Rule 'reach' registered.
+> ?- reach(X, Y).
+2 rows:
+  (1, 2)
+  (2, 3)
+> .rule list
+Rules:
+  reach (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_rule_n14t151
+Knowledge graph 'test_dup_rule_n14t151' dropped.

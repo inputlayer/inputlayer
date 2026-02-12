@@ -474,14 +474,15 @@ mod tests {
 
     #[test]
     fn test_parse_persistent_rule_with_top_k() {
-        // This is the exact statement from the failing snapshot test
+        // New syntax: Points:desc annotation inside aggregate
         let stmt = parse_statement(
-            "+top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).",
+            "+top_players(Player, top_k<3, Points:desc>) :- score(Player, Points).",
         )
         .unwrap();
         if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "top_players");
             assert_eq!(rule.head.args.len(), 2);
+            assert_eq!(rule.head.effective_arity(), 2);
             assert!(rule.head.has_aggregates());
         } else {
             panic!("Expected PersistentRule, got {:?}", stmt);

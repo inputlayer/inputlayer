@@ -1,0 +1,19 @@
+% Test: Mixing ranking aggregate (top_k) with simple aggregate (sum) on same head
+% Description: Should be rejected since ranking and simple aggregates have different semantics
+% NOTE: Script halts on error, so cleanup won't run (expected dirty state)
+
+.kg create test_rank_simple_n14t177
+.kg use test_rank_simple_n14t177
+
++data[(1, 10), (2, 20), (3, 30)].
+
+% First: ranking aggregate
++result(top_k<2, Id, V:desc>) :- data(Id, V).
+
+?- result(X, Y).
+
+% Try adding simple aggregate to same head - should be rejected
++result(sum<V>) :- data(_, V).
+
+.kg use default
+.kg drop test_rank_simple_n14t177

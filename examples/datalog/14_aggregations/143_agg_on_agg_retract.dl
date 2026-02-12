@@ -1,0 +1,39 @@
+% Test: Aggregation over aggregation with fact retraction
+% Description: Tests a chain of aggregations where base facts are retracted
+
+.kg create test_agg_on_agg_n14t143
+.kg use test_agg_on_agg_n14t143
+
++sales[("US", 100), ("US", 200), ("US", 150), ("EU", 300), ("EU", 250)].
+
+% First level: sum per region
++region_total(Region, sum<Amount>) :- sales(Region, Amount).
+
+% Second level: max across all region totals
++global_max(max<Total>) :- region_total(_, Total).
+
+% Third level: count of regions
++region_count(count<Region>) :- region_total(Region, _).
+
+?- region_total(X, Y).
+?- global_max(X).
+?- region_count(X).
+
+% Retract some sales from US
+-sales("US", 100).
+-sales("US", 200).
+
+?- region_total(X, Y).
+?- global_max(X).
+?- region_count(X).
+
+% Retract all EU sales
+-sales("EU", 300).
+-sales("EU", 250).
+
+?- region_total(X, Y).
+?- global_max(X).
+?- region_count(X).
+
+.kg use default
+.kg drop test_agg_on_agg_n14t143

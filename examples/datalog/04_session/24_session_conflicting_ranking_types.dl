@@ -1,0 +1,19 @@
+% Test: Session Rule Conflicting Ranking Aggregate Types
+% Description: Validates that mixing different ranking aggregate types
+% (top_k vs within_radius) is rejected for session rules
+
+.kg create test_session_rank_n04t24
+.kg use test_session_rank_n04t24
+
+% Insert test data
++data[(1, 0.5), (2, 1.5), (3, 2.5)].
+
+% First session rule with top_k
+result(top_k<2, X, Y:desc>) :- data(X, Y).
+
+% Second session rule with within_radius - conflicting type
+result(within_radius<2.0, X, Y:asc>) :- data(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_session_rank_n04t24

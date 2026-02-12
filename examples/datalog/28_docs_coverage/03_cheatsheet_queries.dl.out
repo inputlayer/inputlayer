@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create cheatsheet_queries_n28t03
-Knowledge graph 'cheatsheet_queries_n28t03' created.
-Switched to knowledge graph: cheatsheet_queries_n28t03
-> .kg use cheatsheet_queries_n28t03
-Switched to knowledge graph: cheatsheet_queries_n28t03
+> .kg create test_cheatsheet_queries_n28t03
+Knowledge graph 'test_cheatsheet_queries_n28t03' created.
+Switched to knowledge graph: test_cheatsheet_queries_n28t03
+> .kg use test_cheatsheet_queries_n28t03
+Switched to knowledge graph: test_cheatsheet_queries_n28t03
 > +edge[(1, 2), (2, 3), (3, 4)].
 Inserted 3 fact(s) into 'edge'.
 > +person[("alice", 30), ("bob", 25), ("carol", 35)].
@@ -35,5 +35,5 @@ Rule 'path' registered.
   (3, 4)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop cheatsheet_queries_n28t03
-Knowledge graph 'cheatsheet_queries_n28t03' dropped.
+> .kg drop test_cheatsheet_queries_n28t03
+Knowledge graph 'test_cheatsheet_queries_n28t03' dropped.

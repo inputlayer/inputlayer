@@ -544,7 +544,7 @@ fn process(data: &[Tuple]) { ... }    // Borrows
 feat: add TopK aggregate function
 
 Implements top-k selection with ordering column support.
-Syntax: top_k<10, score, desc>
+Syntax: top_k<10, name, score:desc>
 
 refactor: split statement.rs into focused modules
 

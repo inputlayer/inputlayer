@@ -1,0 +1,34 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_agg_retract_n14t138
+Knowledge graph 'test_neg_agg_retract_n14t138' created.
+Switched to knowledge graph: test_neg_agg_retract_n14t138
+> .kg use test_neg_agg_retract_n14t138
+Switched to knowledge graph: test_neg_agg_retract_n14t138
+> +employee[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Charlie", 45000), (4, "Diana", 70000)].
+Inserted 4 fact(s) into 'employee'.
+> +manager[(2), (4)].
+Inserted 2 fact(s) into 'manager'.
+> +non_mgr_count(count<Name>) :- employee(Id, Name, _), !manager(Id).
+Rule 'non_mgr_count' registered.
+> ?- non_mgr_count(X).
+1 rows:
+  (2)
+> +manager[(1)].
+Inserted 1 fact(s) into 'manager'.
+> ?- non_mgr_count(X).
+1 rows:
+  (1)
+> -manager(2).
+Deleted 1 facts from 'manager'.
+> ?- non_mgr_count(X).
+1 rows:
+  (2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_retract_n14t138
+Knowledge graph 'test_neg_agg_retract_n14t138' dropped.

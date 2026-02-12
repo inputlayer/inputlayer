@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_negation_n28t09
-Knowledge graph 'syntax_negation_n28t09' created.
-Switched to knowledge graph: syntax_negation_n28t09
-> .kg use syntax_negation_n28t09
-Switched to knowledge graph: syntax_negation_n28t09
+> .kg create test_syntax_negation_n28t09
+Knowledge graph 'test_syntax_negation_n28t09' created.
+Switched to knowledge graph: test_syntax_negation_n28t09
+> .kg use test_syntax_negation_n28t09
+Switched to knowledge graph: test_syntax_negation_n28t09
 > +person[(1, "alice"), (2, "bob"), (3, "carol")].
 Inserted 3 fact(s) into 'person'.
 > +purchase[(1, "laptop"), (1, "phone")].
@@ -46,5 +46,5 @@ Rule 'only_in_a' registered.
   (1)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_negation_n28t09
-Knowledge graph 'syntax_negation_n28t09' dropped.
+> .kg drop test_syntax_negation_n28t09
+Knowledge graph 'test_syntax_negation_n28t09' dropped.

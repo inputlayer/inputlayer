@@ -7,12 +7,12 @@
 +scores[(1, 100), (2, 100), (3, 90), (4, 90), (5, 80)].
 
 % Top 2 by score descending - should get the two 100s
-top2(Id, top_k<2, Score, desc>) :- scores(Id, Score).
+top2(top_k<2, Id, Score:desc>) :- scores(Id, Score).
 
 ?- top2(Id, Score).
 
 % Top 3 by score descending - should get 100s and some 90s
-top3(Id, top_k<3, Score, desc>) :- scores(Id, Score).
+top3(top_k<3, Id, Score:desc>) :- scores(Id, Score).
 
 ?- top3(Id, Score).
 

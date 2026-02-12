@@ -1,7 +1,7 @@
 % Test: KG switch clears session
 
-.kg create kg_a_n01t08
-.kg use kg_a_n01t08
+.kg create test_kg_a_n01t08
+.kg use test_kg_a_n01t08
 
 +data[(1,)].
 
@@ -11,12 +11,12 @@ temp(X, Y) :- data(X), Y = X * 2.
 ?- temp(X, Y).
 
 % Switch to another KG
-.kg create kg_b_n01t08
-.kg use kg_b_n01t08
+.kg create test_kg_b_n01t08
+.kg use test_kg_b_n01t08
 
 % Session rule should be gone
 ?- temp(X, Y).
 
 .kg use default
-.kg drop kg_a_n01t08
-.kg drop kg_b_n01t08
+.kg drop test_kg_a_n01t08
+.kg drop test_kg_b_n01t08

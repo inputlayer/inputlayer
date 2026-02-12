@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_retract_min_n14t125
+Knowledge graph 'test_retract_min_n14t125' created.
+Switched to knowledge graph: test_retract_min_n14t125
+> .kg use test_retract_min_n14t125
+Switched to knowledge graph: test_retract_min_n14t125
+> +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 15)].
+Inserted 5 fact(s) into 'reading'.
+> +min_temp(Sensor, min<Temp>) :- reading(Sensor, Temp).
+Rule 'min_temp' registered.
+> ?- min_temp(X, Y).
+2 rows:
+  (1, 22)
+  (2, 15)
+> -reading(1, 22).
+Deleted 1 facts from 'reading'.
+> ?- min_temp(X, Y).
+2 rows:
+  (1, 25)
+  (2, 15)
+> +reading[(1, 10)].
+Inserted 1 fact(s) into 'reading'.
+> ?- min_temp(X, Y).
+2 rows:
+  (1, 10)
+  (2, 15)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_retract_min_n14t125
+Knowledge graph 'test_retract_min_n14t125' dropped.

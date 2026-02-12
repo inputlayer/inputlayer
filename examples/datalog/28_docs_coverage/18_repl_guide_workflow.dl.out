@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create repl_workflow_n28t18
-Knowledge graph 'repl_workflow_n28t18' created.
-Switched to knowledge graph: repl_workflow_n28t18
-> .kg use repl_workflow_n28t18
-Switched to knowledge graph: repl_workflow_n28t18
+> .kg create test_repl_workflow_n28t18
+Knowledge graph 'test_repl_workflow_n28t18' created.
+Switched to knowledge graph: test_repl_workflow_n28t18
+> .kg use test_repl_workflow_n28t18
+Switched to knowledge graph: test_repl_workflow_n28t18
 > +user(id: int, name: string).
 Schema 'user' declared (persistent).
 > +order(id: int, user_id: int, amount: float).
@@ -35,5 +35,5 @@ Rule 'vip' registered.
   (1, 4300)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop repl_workflow_n28t18
-Knowledge graph 'repl_workflow_n28t18' dropped.
+> .kg drop test_repl_workflow_n28t18
+Knowledge graph 'test_repl_workflow_n28t18' dropped.

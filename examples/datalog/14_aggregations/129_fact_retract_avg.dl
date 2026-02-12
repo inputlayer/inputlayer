@@ -1,0 +1,27 @@
+% Test: Fact retraction affecting avg aggregation
+% Description: Tests that retracting facts correctly updates avg results
+
+.kg create test_retract_avg_n14t129
+.kg use test_retract_avg_n14t129
+
++score[(1, 80), (1, 90), (1, 100), (2, 60), (2, 80)].
+
++avg_score(Student, avg<Points>) :- score(Student, Points).
+
+% Initial: student 1 avg=90.0, student 2 avg=70.0
+?- avg_score(X, Y).
+
+% Retract one fact from student 1
+-score(1, 100).
+
+% Student 1 avg should now be 85.0
+?- avg_score(X, Y).
+
+% Add a new score
++score[(1, 70)].
+
+% Student 1 avg should now be 80.0
+?- avg_score(X, Y).
+
+.kg use default
+.kg drop test_retract_avg_n14t129

@@ -1,8 +1,8 @@
 % Test: REPL Guide Wildcards
 % Description: Tests wildcard examples from docs/getting-started/04-repl-guide.md
 
-.kg create repl_wildcards_n28t19
-.kg use repl_wildcards_n28t19
+.kg create test_repl_wildcards_n28t19
+.kg use test_repl_wildcards_n28t19
 
 % Setup data
 +edge[(1, 2), (1, 3), (2, 4), (3, 4)].
@@ -16,5 +16,5 @@ temp(count<X>) :- edge(X, _).
 
 % Cleanup
 .kg use default
-.kg drop repl_wildcards_n28t19
+.kg drop test_repl_wildcards_n28t19
 

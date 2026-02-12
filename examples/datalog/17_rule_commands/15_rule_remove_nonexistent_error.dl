@@ -6,3 +6,6 @@
 .rule list
 % Error: rule doesn't exist
 .rule remove nonexistent 1
+
+.kg use default
+.kg drop test_rule_remove_nex_n17t15

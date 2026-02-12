@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create bulk_delete_test_n27t03
-Knowledge graph 'bulk_delete_test_n27t03' created.
-Switched to knowledge graph: bulk_delete_test_n27t03
-> .kg use bulk_delete_test_n27t03
-Switched to knowledge graph: bulk_delete_test_n27t03
+> .kg create test_bulk_delete_n27t03
+Knowledge graph 'test_bulk_delete_n27t03' created.
+Switched to knowledge graph: test_bulk_delete_n27t03
+> .kg use test_bulk_delete_n27t03
+Switched to knowledge graph: test_bulk_delete_n27t03
 > +entry(1, 1).
 Inserted 1 fact(s) into 'entry'.
 > +entry(2, 2).
@@ -45,5 +45,5 @@ Conditional delete: 2 fact(s) deleted from 'entry'.
   (3, 1)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop bulk_delete_test_n27t03
-Knowledge graph 'bulk_delete_test_n27t03' dropped.
+> .kg drop test_bulk_delete_n27t03
+Knowledge graph 'test_bulk_delete_n27t03' dropped.

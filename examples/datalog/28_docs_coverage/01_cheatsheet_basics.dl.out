@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create cheatsheet_basics_n28t01
-Knowledge graph 'cheatsheet_basics_n28t01' created.
-Switched to knowledge graph: cheatsheet_basics_n28t01
-> .kg use cheatsheet_basics_n28t01
-Switched to knowledge graph: cheatsheet_basics_n28t01
+> .kg create test_cheatsheet_basics_n28t01
+Knowledge graph 'test_cheatsheet_basics_n28t01' created.
+Switched to knowledge graph: test_cheatsheet_basics_n28t01
+> .kg use test_cheatsheet_basics_n28t01
+Switched to knowledge graph: test_cheatsheet_basics_n28t01
 > +edge(1, 2).
 Inserted 1 fact(s) into 'edge'.
 > +edge[(2, 3), (3, 4), (4, 5)].
@@ -44,5 +44,5 @@ Inserted 1 fact(s) into 'counter'.
   (2, 10)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop cheatsheet_basics_n28t01
-Knowledge graph 'cheatsheet_basics_n28t01' dropped.
+> .kg drop test_cheatsheet_basics_n28t01
+Knowledge graph 'test_cheatsheet_basics_n28t01' dropped.

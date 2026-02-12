@@ -1,0 +1,30 @@
+% Test: Fact retraction affecting top_k results
+% Description: Tests that retracting base facts correctly updates top_k aggregation
+
+.kg create test_retract_topk_n14t112
+.kg use test_retract_topk_n14t112
+
+% Insert base data
++score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125)].
+
+% Define top_k rule - top 3 descending
++top_players(top_k<3, Player, Points:desc>) :- score(Player, Points).
+
+% Query initial state - should be players 4(300), 2(250), 3(175)
+?- top_players(X, Y).
+
+% Retract the top scorer
+-score(4, 300).
+
+% Query after retraction - top 3 should shift: 2(250), 3(175), 5(125)
+?- top_players(X, Y).
+
+% Retract another player
+-score(2, 250).
+
+% Now only 3 players remain, top 3 = all: 3(175), 5(125), 1(100)
+?- top_players(X, Y).
+
+% Cleanup
+.kg use default
+.kg drop test_retract_topk_n14t112

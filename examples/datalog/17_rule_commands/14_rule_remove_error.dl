@@ -8,3 +8,6 @@
 .rule list
 % Error: clause index out of bounds (rule has only 1 clause)
 .rule remove simple 5
+
+.kg use default
+.kg drop test_rule_remove_err_n17t14

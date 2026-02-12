@@ -1,0 +1,27 @@
+% Test: Fact retraction affecting max aggregation
+% Description: Tests that retracting the max value causes max to update
+
+.kg create test_retract_max_n14t127
+.kg use test_retract_max_n14t127
+
++reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35)].
+
++max_temp(Sensor, max<Temp>) :- reading(Sensor, Temp).
+
+% Initial: sensor 1 max=28, sensor 2 max=35
+?- max_temp(X, Y).
+
+% Retract the current maximum for sensor 1
+-reading(1, 28).
+
+% Sensor 1 max should now be 25
+?- max_temp(X, Y).
+
+% Add a new higher value
++reading[(1, 50)].
+
+% Sensor 1 max should now be 50
+?- max_temp(X, Y).
+
+.kg use default
+.kg drop test_retract_max_n14t127

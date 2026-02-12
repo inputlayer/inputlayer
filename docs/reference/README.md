@@ -47,7 +47,7 @@ Quick lookup documentation in Redis-style format. Each entry includes syntax, de
 | MAX | `max<X>` | Maximum value |
 | AVG | `avg<X>` | Average value |
 | COUNT_DISTINCT | `count_distinct<X>` | Count distinct values |
-| TOP_K | `top_k<K, OrderVar, desc>` | Top K by ordering |
+| TOP_K | `top_k<K, ..., OrderVar:desc>` | Top K by ordering |
 
 ### Comparison Operators
 

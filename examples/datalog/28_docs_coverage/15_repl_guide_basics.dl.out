@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create repl_guide_n28t15
-Knowledge graph 'repl_guide_n28t15' created.
-Switched to knowledge graph: repl_guide_n28t15
-> .kg use repl_guide_n28t15
-Switched to knowledge graph: repl_guide_n28t15
+> .kg create test_repl_guide_n28t15
+Knowledge graph 'test_repl_guide_n28t15' created.
+Switched to knowledge graph: test_repl_guide_n28t15
+> .kg use test_repl_guide_n28t15
+Switched to knowledge graph: test_repl_guide_n28t15
 > +edge(1, 2).
 Inserted 1 fact(s) into 'edge'.
 > +edge[(2, 3), (3, 4)].
@@ -54,5 +54,5 @@ Inserted 1 fact(s) into 'counter'.
   (1, 5)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop repl_guide_n28t15
-Knowledge graph 'repl_guide_n28t15' dropped.
+> .kg drop test_repl_guide_n28t15
+Knowledge graph 'test_repl_guide_n28t15' dropped.

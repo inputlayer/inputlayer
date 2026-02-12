@@ -1,8 +1,8 @@
 % Test: Syntax Bill of Materials Example
 % Description: Tests the complete bill of materials example from docs/reference/syntax.md
 
-.kg create syntax_bom_n28t13
-.kg use syntax_bom_n28t13
+.kg create test_syntax_bom_n28t13
+.kg use test_syntax_bom_n28t13
 
 % Part hierarchy: contains(assembly, part, quantity)
 +contains[(100, 10, 2), (100, 20, 1), (20, 30, 4), (20, 40, 2)].
@@ -23,5 +23,5 @@
 
 % Cleanup
 .kg use default
-.kg drop syntax_bom_n28t13
+.kg drop test_syntax_bom_n28t13
 

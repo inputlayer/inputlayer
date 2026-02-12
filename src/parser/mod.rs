@@ -1429,11 +1429,13 @@ mod tests {
     // New Aggregate Tests (TopK, TopKThreshold, WithinRadius)
     #[test]
     fn test_parse_top_k_aggregate() {
+        // Single var without annotation → default desc for top_k
         let term = parse_term("top_k<10, Score>").unwrap();
         if let Term::Aggregate(
             AggregateFunc::TopK {
                 k,
                 order_var,
+                output_vars,
                 descending,
             },
             _,
@@ -1441,7 +1443,8 @@ mod tests {
         {
             assert_eq!(k, 10);
             assert_eq!(order_var, "Score");
-            assert!(!descending);
+            assert_eq!(output_vars, vec!["Score"]);
+            assert!(descending); // default for top_k is desc
         } else {
             panic!("Expected TopK aggregate, got {:?}", term);
         }
@@ -1449,11 +1452,13 @@ mod tests {
 
     #[test]
     fn test_parse_top_k_descending() {
-        let term = parse_term("top_k<5, Dist, desc>").unwrap();
+        // Explicit :desc annotation
+        let term = parse_term("top_k<5, Dist:desc>").unwrap();
         if let Term::Aggregate(
             AggregateFunc::TopK {
                 k,
                 order_var,
+                output_vars,
                 descending,
             },
             _,
@@ -1461,6 +1466,7 @@ mod tests {
         {
             assert_eq!(k, 5);
             assert_eq!(order_var, "Dist");
+            assert_eq!(output_vars, vec!["Dist"]);
             assert!(descending);
         } else {
             panic!("Expected TopK aggregate");
@@ -1468,14 +1474,60 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_top_k_ascending() {
+        let term = parse_term("top_k<5, Dist:asc>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                descending,
+                ..
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(k, 5);
+            assert_eq!(order_var, "Dist");
+            assert!(!descending);
+        } else {
+            panic!("Expected TopK aggregate");
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_multi_var() {
+        // Multiple vars: one must have annotation
+        let term = parse_term("top_k<2, Name, Score:desc>").unwrap();
+        if let Term::Aggregate(
+            AggregateFunc::TopK {
+                k,
+                order_var,
+                output_vars,
+                descending,
+            },
+            _,
+        ) = term
+        {
+            assert_eq!(k, 2);
+            assert_eq!(order_var, "Score");
+            assert_eq!(output_vars, vec!["Name", "Score"]);
+            assert!(descending);
+        } else {
+            panic!("Expected TopK aggregate, got {:?}", term);
+        }
+    }
+
+    #[test]
     fn test_parse_top_k_threshold() {
-        let term = parse_term("top_k_threshold<10, Score, 0.8>").unwrap();
+        // New syntax: top_k_threshold<k, threshold, vars...>
+        let term = parse_term("top_k_threshold<10, 0.8, Score>").unwrap();
         if let Term::Aggregate(
             AggregateFunc::TopKThreshold {
                 k,
                 order_var,
                 threshold,
                 descending,
+                ..
             },
             _,
         ) = term
@@ -1483,7 +1535,7 @@ mod tests {
             assert_eq!(k, 10);
             assert_eq!(order_var, "Score");
             assert!((threshold - 0.8).abs() < f64::EPSILON);
-            assert!(!descending);
+            assert!(descending); // default desc
         } else {
             panic!("Expected TopKThreshold aggregate, got {:?}", term);
         }
@@ -1491,11 +1543,13 @@ mod tests {
 
     #[test]
     fn test_parse_within_radius() {
-        let term = parse_term("within_radius<Dist, 0.5>").unwrap();
+        // New syntax: within_radius<max_distance, vars...>
+        let term = parse_term("within_radius<0.5, Dist>").unwrap();
         if let Term::Aggregate(
             AggregateFunc::WithinRadius {
                 distance_var,
                 max_distance,
+                ..
             },
             _,
         ) = term
@@ -1510,11 +1564,11 @@ mod tests {
     // Integration Tests - Complete Rules with Vector Operations
     #[test]
     fn test_parse_top_k_rule() {
-        // Example: top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).
-        let rule =
-            parse_rule("top_results(Id, Dist, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
+        // New syntax: pass-through vars go inside the aggregate
+        let rule = parse_rule("top_results(Id, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
         assert_eq!(rule.head.relation, "top_results");
-        assert_eq!(rule.head.args.len(), 3);
+        assert_eq!(rule.head.args.len(), 2); // Id, top_k<...>
+        assert_eq!(rule.head.effective_arity(), 2); // Id + Dist (1 output_var)
         assert!(rule.head.has_aggregates());
     }
 
@@ -1659,13 +1713,14 @@ mod tests {
 
     #[test]
     fn test_top_k_rule_failing_case() {
-        // Exact match for the failing snapshot test
+        // New syntax: Points:desc annotation inside aggregate
         let result =
-            parse_rule("top_players(Player, top_k<3, Points, desc>) :- score(Player, Points).");
+            parse_rule("top_players(Player, top_k<3, Points:desc>) :- score(Player, Points).");
         println!("Result: {:?}", result);
         let rule = result.unwrap();
         assert_eq!(rule.head.relation, "top_players");
-        assert_eq!(rule.head.args.len(), 2); // Player, top_k<3, Points, desc>
+        assert_eq!(rule.head.args.len(), 2); // Player, top_k<3, Points:desc>
+        assert_eq!(rule.head.effective_arity(), 2); // Player + Points
         assert!(rule.head.has_aggregates());
     }
 }

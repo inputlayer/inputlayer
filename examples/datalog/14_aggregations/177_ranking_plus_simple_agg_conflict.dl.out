@@ -1,0 +1,21 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank_simple_n14t177
+Knowledge graph 'test_rank_simple_n14t177' created.
+Switched to knowledge graph: test_rank_simple_n14t177
+> .kg use test_rank_simple_n14t177
+Switched to knowledge graph: test_rank_simple_n14t177
+> +data[(1, 10), (2, 20), (3, 30)].
+Inserted 3 fact(s) into 'data'.
+> +result(top_k<2, Id, V:desc>) :- data(Id, V).
+Rule 'result' registered.
+> ?- result(X, Y).
+2 rows:
+  (2, 20)
+  (3, 30)
+> +result(sum<V>) :- data(_, V).
+Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'sum' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.

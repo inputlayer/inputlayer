@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_vectors_n28t14
-Knowledge graph 'syntax_vectors_n28t14' created.
-Switched to knowledge graph: syntax_vectors_n28t14
-> .kg use syntax_vectors_n28t14
-Switched to knowledge graph: syntax_vectors_n28t14
+> .kg create test_syntax_vectors_n28t14
+Knowledge graph 'test_syntax_vectors_n28t14' created.
+Switched to knowledge graph: test_syntax_vectors_n28t14
+> .kg use test_syntax_vectors_n28t14
+Switched to knowledge graph: test_syntax_vectors_n28t14
 > +embedding[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])].
 Inserted 3 fact(s) into 'embedding'.
 > +point[(1, [0.0, 0.0]), (2, [3.0, 4.0]), (3, [1.0, 1.0])].
@@ -38,5 +38,5 @@ Inserted 3 fact(s) into 'point'.
   (1, [Number(1.0), Number(0.0), Number(0.0)], 2, [Number(0.0), Number(1.0), Number(0.0)], 1.0)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_vectors_n28t14
-Knowledge graph 'syntax_vectors_n28t14' dropped.
+> .kg drop test_syntax_vectors_n28t14
+Knowledge graph 'test_syntax_vectors_n28t14' dropped.

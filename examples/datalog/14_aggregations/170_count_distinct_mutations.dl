@@ -1,0 +1,30 @@
+% Test: count_distinct through insert/delete cycles
+% Description: Verifies count_distinct tracks unique values through mutations
+
+.kg create test_cnt_dist_n14t170
+.kg use test_cnt_dist_n14t170
+
++items[(1, "apple"), (2, "banana"), (3, "apple"), (4, "cherry")].
+
++unique(count_distinct<Name>) :- items(_, Name).
+
+?- unique(X).
+
+% Remove cherry
+-items(4, "cherry").
+
+?- unique(X).
+
+% Add duplicate banana
++items[(5, "banana")].
+
+% Still 2 (apple, banana)
+?- unique(X).
+
+% Add new fruit
++items[(6, "date")].
+
+?- unique(X).
+
+.kg use default
+.kg drop test_cnt_dist_n14t170

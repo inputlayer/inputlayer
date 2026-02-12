@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create comments_test_n10t13
-Knowledge graph 'comments_test_n10t13' created.
-Switched to knowledge graph: comments_test_n10t13
-> .kg use comments_test_n10t13
-Switched to knowledge graph: comments_test_n10t13
+> .kg create test_comments_n10t13
+Knowledge graph 'test_comments_n10t13' created.
+Switched to knowledge graph: test_comments_n10t13
+> .kg use test_comments_n10t13
+Switched to knowledge graph: test_comments_n10t13
 > +edge(1, 2).
 Inserted 1 fact(s) into 'edge'.
 > +edge(2, 3).
@@ -43,5 +43,5 @@ Inserted 1 fact(s) into 'data'.
   (101, 201)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop comments_test_n10t13
-Knowledge graph 'comments_test_n10t13' dropped.
+> .kg drop test_comments_n10t13
+Knowledge graph 'test_comments_n10t13' dropped.

@@ -4,11 +4,11 @@ Connected!
 Server status: healthy
 Current knowledge graph: default
 
-> .kg create syntax_graph_n28t12
-Knowledge graph 'syntax_graph_n28t12' created.
-Switched to knowledge graph: syntax_graph_n28t12
-> .kg use syntax_graph_n28t12
-Switched to knowledge graph: syntax_graph_n28t12
+> .kg create test_syntax_graph_n28t12
+Knowledge graph 'test_syntax_graph_n28t12' created.
+Switched to knowledge graph: test_syntax_graph_n28t12
+> .kg use test_syntax_graph_n28t12
+Switched to knowledge graph: test_syntax_graph_n28t12
 > +edge[(1, 2), (2, 3), (3, 4), (4, 2)].
 Inserted 4 fact(s) into 'edge'.
 > +node[(1), (2), (3), (4), (5)].
@@ -65,5 +65,5 @@ Rule 'source' registered.
   (5)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop syntax_graph_n28t12
-Knowledge graph 'syntax_graph_n28t12' dropped.
+> .kg drop test_syntax_graph_n28t12
+Knowledge graph 'test_syntax_graph_n28t12' dropped.
