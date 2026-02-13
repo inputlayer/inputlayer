@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_whitespace_n10t61
+Knowledge graph 'test_whitespace_n10t61' created.
+Switched to knowledge graph: test_whitespace_n10t61
+> .kg use test_whitespace_n10t61
+Switched to knowledge graph: test_whitespace_n10t61
+> +names[(1, "John Doe"), (2, "Jane Smith"), (3, "Bob")]
+Inserted 3 fact(s) into 'names'.
+> ?names(Id, Name)
+┌──────┬──────────────┐
+│ col0 │ col1         │
+├──────┼──────────────┤
+│    1 │ "John Doe"   │
+│    2 │ "Jane Smith" │
+│    3 │ "Bob"        │
+└──────┴──────────────┘
+3 rows

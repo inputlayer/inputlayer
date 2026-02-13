@@ -65,10 +65,10 @@ fn test_execute_queries_on_multiple_knowledge_graphs_concurrently() {
 
     // Execute queries on all knowledge_graphs in parallel
     let queries = vec![
-        ("db1", "result(X,Y) :- edge(X,Y)."),
-        ("db2", "result(X,Y) :- edge(X,Y)."),
-        ("db3", "result(X,Y) :- edge(X,Y)."),
-        ("db4", "result(X,Y) :- edge(X,Y)."),
+        ("db1", "result(X,Y) <- edge(X,Y)"),
+        ("db2", "result(X,Y) <- edge(X,Y)"),
+        ("db3", "result(X,Y) <- edge(X,Y)"),
+        ("db4", "result(X,Y) <- edge(X,Y)"),
     ];
 
     let results = storage
@@ -100,7 +100,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 
     // Execute same query on all knowledge_graphs in parallel
     let knowledge_graphs = vec!["db1", "db2", "db3"];
-    let query = "result(X,Y) :- edge(X,Y).";
+    let query = "result(X,Y) <- edge(X,Y)";
 
     let results = storage
         .execute_query_on_multiple_knowledge_graphs(knowledge_graphs, query)
@@ -141,10 +141,10 @@ fn test_multiple_queries_on_same_knowledge_graph() {
 
     // Execute multiple queries on the same knowledge_graph in parallel
     let queries = vec![
-        "q1(X,Y) :- edge(X,Y).",               // All edges
-        "q2(X,Y) :- edge(X,Y), X > 5.",        // x > 5
-        "q3(X,Y) :- edge(X,Y), X < 5.",        // x < 5
-        "q4(X,Y) :- edge(X,Y), X > 3, X < 7.", // 3 < x < 7
+        "q1(X,Y) <- edge(X,Y)",               // All edges
+        "q2(X,Y) <- edge(X,Y), X > 5",        // x > 5
+        "q3(X,Y) <- edge(X,Y), X < 5",        // x < 5
+        "q4(X,Y) <- edge(X,Y), X > 3, X < 7", // 3 < x < 7
     ];
 
     let results = storage
@@ -176,8 +176,8 @@ fn test_parallel_queries_maintain_knowledge_graph_isolation() {
 
     // Execute queries in parallel
     let queries = vec![
-        ("db1", "result(X,Y) :- edge(X,Y)."),
-        ("db2", "result(X,Y) :- edge(X,Y)."),
+        ("db1", "result(X,Y) <- edge(X,Y)"),
+        ("db2", "result(X,Y) <- edge(X,Y)"),
     ];
 
     let results = storage
@@ -210,7 +210,7 @@ fn test_concurrent_queries_on_different_relations() {
         .unwrap();
 
     // Query different relations in parallel
-    let queries = vec!["q1(X,Y) :- edge(X,Y).", "q2(X,Y) :- person(X,Y)."];
+    let queries = vec!["q1(X,Y) <- edge(X,Y)", "q2(X,Y) <- person(X,Y)"];
 
     let results = storage
         .execute_parallel_queries_on_knowledge_graph("test", queries)
@@ -250,8 +250,8 @@ fn test_parallel_queries_with_invalid_knowledge_graph() {
 
     // Mix valid and invalid knowledge_graphs
     let queries = vec![
-        ("db1", "result(X,Y) :- edge(X,Y)."),
-        ("nonexistent", "result(X,Y) :- edge(X,Y)."),
+        ("db1", "result(X,Y) <- edge(X,Y)"),
+        ("nonexistent", "result(X,Y) <- edge(X,Y)"),
     ];
 
     let result = storage.execute_parallel_queries_on_knowledge_graphs(queries);
@@ -271,9 +271,9 @@ fn test_parallel_queries_handle_empty_results() {
     }
 
     let queries = vec![
-        ("empty_db1", "result(X,Y) :- edge(X,Y)."),
-        ("empty_db2", "result(X,Y) :- edge(X,Y)."),
-        ("empty_db3", "result(X,Y) :- edge(X,Y)."),
+        ("empty_db1", "result(X,Y) <- edge(X,Y)"),
+        ("empty_db2", "result(X,Y) <- edge(X,Y)"),
+        ("empty_db3", "result(X,Y) <- edge(X,Y)"),
     ];
 
     let results = storage
@@ -304,7 +304,7 @@ fn test_parallel_execution_with_many_knowledge_graphs() {
 
     // Execute queries on all knowledge_graphs in parallel
     let queries: Vec<(&str, &str)> = (1..=num_knowledge_graphs)
-        .map(|i| (format!("db{}", i), "result(X,Y) :- data(X,Y)."))
+        .map(|i| (format!("db{}", i), "result(X,Y) <- data(X,Y)"))
         .map(|(db, q)| (Box::leak(db.into_boxed_str()) as &str, q))
         .collect();
 
@@ -340,10 +340,10 @@ fn test_parallel_execution_with_complex_queries() {
 
     // Execute multiple complex queries in parallel
     let queries = vec![
-        "q1(X,Y) :- edge(X,Y), X > 5.",
-        "q2(X,Y) :- edge(X,Y), X < 15.",
-        "q3(X,Y) :- edge(X,Y), X > 5, X < 15.",
-        "q4(X,Y) :- edge(X,Y), Y > 10.",
+        "q1(X,Y) <- edge(X,Y), X > 5",
+        "q2(X,Y) <- edge(X,Y), X < 15",
+        "q3(X,Y) <- edge(X,Y), X > 5, X < 15",
+        "q4(X,Y) <- edge(X,Y), Y > 10",
     ];
 
     let results = storage
@@ -370,10 +370,10 @@ fn test_parallel_queries_use_internal_thread_safety() {
     // Execute same query multiple times in parallel via the parallel API
     // This tests that the internal Arc<RwLock<KnowledgeGraph>> mechanism works
     let queries = vec![
-        ("shared_db", "q1(X,Y) :- edge(X,Y)."),
-        ("shared_db", "q2(X,Y) :- edge(X,Y)."),
-        ("shared_db", "q3(X,Y) :- edge(X,Y)."),
-        ("shared_db", "q4(X,Y) :- edge(X,Y)."),
+        ("shared_db", "q1(X,Y) <- edge(X,Y)"),
+        ("shared_db", "q2(X,Y) <- edge(X,Y)"),
+        ("shared_db", "q3(X,Y) <- edge(X,Y)"),
+        ("shared_db", "q4(X,Y) <- edge(X,Y)"),
     ];
 
     let results = storage
@@ -407,11 +407,11 @@ fn test_concurrent_queries_do_not_deadlock() {
             vec![
                 (
                     Box::leak(db.clone().into_boxed_str()) as &str,
-                    "q1(X,Y) :- data(X,Y).",
+                    "q1(X,Y) <- data(X,Y)",
                 ),
                 (
                     Box::leak(db.into_boxed_str()) as &str,
-                    "q2(X,Y) :- data(X,Y).",
+                    "q2(X,Y) <- data(X,Y)",
                 ),
             ]
         })
@@ -445,7 +445,7 @@ fn test_parallel_query_with_single_query() {
     storage.create_knowledge_graph("solo").unwrap();
     storage.insert_into("solo", "edge", vec![(1, 2)]).unwrap();
 
-    let queries = vec![("solo", "result(X,Y) :- edge(X,Y).")];
+    let queries = vec![("solo", "result(X,Y) <- edge(X,Y)")];
     let results = storage
         .execute_parallel_queries_on_knowledge_graphs(queries)
         .unwrap();

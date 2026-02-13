@@ -1,0 +1,21 @@
+// Test: Duplicate Handling
+// Description: Tests that duplicate insertions are handled correctly
+
+.kg create test_dup_n10t03
+.kg use test_dup_n10t03
+
+// Insert same facts multiple times
++edge[(1,2)]
++edge[(1,2)]
++edge[(1,2), (2,3), (2,3)]
+
+// Should only show unique facts
+?edge(X, Y)
+
+// Join that could produce duplicates
++path(X, Z) <- edge(X, Y), edge(Y, Z)
+?path(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_dup_n10t03

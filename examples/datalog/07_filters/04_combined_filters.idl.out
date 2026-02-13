@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_combined_filters_n07t04
+Knowledge graph 'test_combined_filters_n07t04' created.
+Switched to knowledge graph: test_combined_filters_n07t04
+> .kg use test_combined_filters_n07t04
+Switched to knowledge graph: test_combined_filters_n07t04
+> +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 15), (7, 25), (8, 35), (9, 45), (10, 55)]
+Inserted 10 fact(s) into 'data'.

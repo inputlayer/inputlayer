@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bug_verification_n19t04
+Knowledge graph 'test_bug_verification_n19t04' created.
+Switched to knowledge graph: test_bug_verification_n19t04
+> .kg use test_bug_verification_n19t04
+Switched to knowledge graph: test_bug_verification_n19t04
+> +src3[(1, 7777, 999), (2, 8888, 888)]
+Inserted 2 fact(s) into 'src3'.
+> +link[(1, 1001), (2, 1002)]
+Inserted 2 fact(s) into 'link'.

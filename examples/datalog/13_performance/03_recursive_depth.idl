@@ -1,0 +1,25 @@
+// Test: Recursive Depth (Transitive Closure on Chain)
+// Description: Tests recursive query performance on a chain graph
+
+.kg create test_perf_rec_n13t03
+.kg use test_perf_rec_n13t03
+
+// Chain of 20 nodes: 1->2->3->...->20
++edge[(1,2), (2,3), (3,4), (4,5), (5,6), (6,7), (7,8), (8,9), (9,10), (10,11), (11,12), (12,13), (13,14), (14,15), (15,16), (16,17), (17,18), (18,19), (19,20)]
+
+// Transitive closure - requires 19 iterations to compute all paths
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+// Query all paths from node 1 (should have 19 results: 1->2, 1->3, ..., 1->20)
+?path(1, X)
+
+// Query paths to node 20 (should have 19 results: 1->20, 2->20, ..., 19->20)
+?path(X, 20)
+
+// Total number of paths
+?path(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_perf_rec_n13t03

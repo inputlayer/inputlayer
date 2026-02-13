@@ -11,9 +11,9 @@ InputLayer supports record types as a way to document the structure of data. Rec
 ### 1.1 Simple Type Aliases
 
 ```datalog
-type Email: string.
-type UserId: int.
-type Score: int.
+type Email: string
+type UserId: int
+type Score: int
 ```
 
 These declare type aliases that can be used in schema declarations for documentation.
@@ -25,7 +25,7 @@ type User: {
     id:      int,
     name:    string,
     email:   string
-}.
+}
 ```
 
 A **record type** `{ f₁ : τ₁, …, fₙ : τₙ }` documents the structure of a relation.
@@ -35,7 +35,7 @@ A **record type** `{ f₁ : τ₁, …, fₙ : τₙ }` documents the structure 
 Schemas are declared using the `+` prefix with typed columns:
 
 ```datalog
-+user(id: int, name: string, email: string).
++user(id: int, name: string, email: string)
 ```
 
 This declares a 3-ary relation with typed columns. The schema enables:
@@ -48,10 +48,10 @@ This declares a 3-ary relation with typed columns. The schema enables:
 You can reference declared types in schemas:
 
 ```datalog
-type Email: string.
-type UserId: int.
+type Email: string
+type UserId: int
 
-+user(id: UserId, name: string, email: Email).
++user(id: UserId, name: string, email: Email)
 ```
 
 ## 3. Working with Data
@@ -59,26 +59,26 @@ type UserId: int.
 ### 3.1 Inserting Facts
 
 ```datalog
-% Single fact
-+user(1, "Alice", "alice@example.com").
+// Single fact
++user(1, "Alice", "alice@example.com")
 
-% Bulk insert
-+user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
+// Bulk insert
++user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")]
 ```
 
 ### 3.2 Persistent Rules
 
 ```datalog
-+admin_email(Email) :-
++admin_email(Email) <-
     user(_, _, Email),
-    admin(Email).
+    admin(Email)
 ```
 
 ### 3.3 Queries
 
 ```datalog
-?- user(Id, Name, Email).
-?- user(1, Name, _).
+?user(Id, Name, Email)
+?user(1, Name, _)
 ```
 
 ## 4. Planned Features (Not Yet Implemented)
@@ -90,10 +90,10 @@ The following features are documented for future implementation:
 **Planned syntax** (not yet implemented):
 
 ```datalog
-type User: { id: int, name: string, email: string }.
+type User: { id: int, name: string, email: string }
 
-% Would desugar to: +user(id: int, name: string, email: string).
-+user: User.
+// Would desugar to: +user(id: int, name: string, email: string).
++user: User
 ```
 
 ### 4.2 Named-Field Atoms
@@ -101,7 +101,7 @@ type User: { id: int, name: string, email: string }.
 **Planned syntax** (not yet implemented):
 
 ```datalog
-+user(id = 1, name = "Alice", email = "alice@example.com").
++user(id = 1, name = "Alice", email = "alice@example.com")
 ```
 
 Would desugar to positional form based on schema order.
@@ -111,7 +111,7 @@ Would desugar to positional form based on schema order.
 **Planned syntax** (not yet implemented):
 
 ```datalog
-+user({ id = 1, name = "Alice", email = "alice@example.com" }).
++user({ id = 1, name = "Alice", email = "alice@example.com" })
 ```
 
 ### 4.4 Record Destructuring Patterns
@@ -119,9 +119,9 @@ Would desugar to positional form based on schema order.
 **Planned syntax** (not yet implemented):
 
 ```datalog
-admin_email(e) :-
+admin_email(e) <-
     user({ id: _, name: _, email: e }),
-    admin(e).
+    admin(e)
 ```
 
 ## 5. Style Guidelines
@@ -137,12 +137,12 @@ admin_email(e) :-
 Use explicit positional schemas and facts:
 
 ```datalog
-% Declare schema
-+user(id: int, name: string, email: string).
+// Declare schema
++user(id: int, name: string, email: string)
 
-% Insert facts positionally
-+user[(1, "Alice", "alice@example.com")].
+// Insert facts positionally
++user[(1, "Alice", "alice@example.com")]
 
-% Query with positional variables
-?- user(Id, Name, Email).
+// Query with positional variables
+?user(Id, Name, Email)
 ```

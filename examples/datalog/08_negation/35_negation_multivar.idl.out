@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_multi_n08t35
+Knowledge graph 'test_neg_multi_n08t35' created.
+Switched to knowledge graph: test_neg_multi_n08t35
+> .kg use test_neg_multi_n08t35
+Switched to knowledge graph: test_neg_multi_n08t35
+> +pairs[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'pairs'.
+> +exclude[(1, 2), (3, 4)]
+Inserted 2 fact(s) into 'exclude'.

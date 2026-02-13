@@ -1,0 +1,10 @@
+// Test: Empty rule body error
+
+.kg create test_empty_body_n12t30
+.kg use test_empty_body_n12t30
+
+// Try to create a rule with empty body - should error
++foo(X) <- .
+
+.kg use default
+.kg drop test_empty_body_n12t30

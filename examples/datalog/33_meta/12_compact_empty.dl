@@ -1,9 +1,0 @@
-% Test: Compact on empty KG
-
-.kg create test_compact_empty_n33t12
-.kg use test_compact_empty_n33t12
-
-.compact
-
-.kg use default
-.kg drop test_compact_empty_n33t12

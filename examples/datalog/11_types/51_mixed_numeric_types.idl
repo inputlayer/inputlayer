@@ -1,0 +1,14 @@
+// Test: Mixed numeric types in operations
+
+.kg create test_mixed_num_n11t51
+.kg use test_mixed_num_n11t51
+
++measurements[(1, 10, 2.5), (2, 20, 3.0), (3, 15, 1.5)]
+
+// Compute with mixed types
+computed(Id, Result) <- measurements(Id, Int, Float), Result = Int * Float
+
+?computed(Id, R)
+
+.kg use default
+.kg drop test_mixed_num_n11t51

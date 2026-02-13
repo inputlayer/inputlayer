@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cross_n18t90
+Knowledge graph 'test_cross_n18t90' created.
+Switched to knowledge graph: test_cross_n18t90
+> .kg use test_cross_n18t90
+Switched to knowledge graph: test_cross_n18t90
+> +colors[("red",), ("blue",)]
+Inserted 2 fact(s) into 'colors'.
+> +sizes[("S",), ("M",), ("L",)]
+Inserted 3 fact(s) into 'sizes'.

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_syntax_graph_n28t12
+Knowledge graph 'test_syntax_graph_n28t12' created.
+Switched to knowledge graph: test_syntax_graph_n28t12
+> .kg use test_syntax_graph_n28t12
+Switched to knowledge graph: test_syntax_graph_n28t12
+> +edge[(1, 2), (2, 3), (3, 4), (4, 2)]
+Inserted 4 fact(s) into 'edge'.
+> +node[(1), (2), (3), (4), (5)]
+Inserted 5 fact(s) into 'node'.

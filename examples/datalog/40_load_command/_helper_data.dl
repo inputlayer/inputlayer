@@ -1,5 +1,0 @@
-% Helper file for load testing - DO NOT RUN DIRECTLY
-% This file is loaded by 01_load_basic.dl
-
-+loaded_relation[(1, "from_file"), (2, "also_loaded")].
-+loaded_rule(X, Y) :- loaded_relation(X, Y).

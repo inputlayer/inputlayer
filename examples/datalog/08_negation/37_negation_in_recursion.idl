@@ -1,0 +1,22 @@
+// Test: Negation after recursive relation
+
+.kg create test_neg_rec_n08t37
+.kg use test_neg_rec_n08t37
+
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Reachability (recursive)
++reach(A, B) <- edge(A, B)
++reach(A, C) <- reach(A, B), edge(B, C)
+
+// Not reachable from 1 (uses negation on recursive)
++all_nodes(X) <- edge(X, _)
++all_nodes(X) <- edge(_, X)
+
+not_from_1(X) <- all_nodes(X), !reach(1, X), X != 1
+
+?reach(1, X)
+?not_from_1(X)
+
+.kg use default
+.kg drop test_neg_rec_n08t37

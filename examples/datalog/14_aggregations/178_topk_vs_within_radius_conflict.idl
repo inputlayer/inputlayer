@@ -1,0 +1,19 @@
+// Test: Conflicting ranking aggregate types (top_k vs within_radius) on same head
+// Description: Different ranking aggregate types should be rejected
+// NOTE: Script halts on error, so cleanup won't run (expected dirty state)
+
+.kg create test_rank_conflict_n14t178
+.kg use test_rank_conflict_n14t178
+
++data[(1, 0.5), (2, 1.5), (3, 2.5)]
+
+// First: top_k ranking aggregate
++result(top_k<2, Id, V:desc>) <- data(Id, V)
+
+?result(X, Y)
+
+// Try adding within_radius to same head - should be rejected (different ranking type)
++result(within_radius<2.0, Id, V:asc>) <- data(Id, V)
+
+.kg use default
+.kg drop test_rank_conflict_n14t178

@@ -1,0 +1,16 @@
+// Test: Single tuple relation
+
+.kg create test_single_n10t55
+.kg use test_single_n10t55
+
++single[(42, "answer")]
+
+?single(X, Y)
+
+// Aggregation on single row
++one_sum(sum<X>) <- single(X, _)
+
+?one_sum(S)
+
+.kg use default
+.kg drop test_single_n10t55

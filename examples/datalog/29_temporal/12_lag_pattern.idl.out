@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lag_n29t12
+Knowledge graph 'test_lag_n29t12' created.
+Switched to knowledge graph: test_lag_n29t12
+> .kg use test_lag_n29t12
+Switched to knowledge graph: test_lag_n29t12
+> +timeseries[(1, 10), (2, 15), (3, 12), (4, 20)]
+Inserted 4 fact(s) into 'timeseries'.

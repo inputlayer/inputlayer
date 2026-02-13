@@ -1,0 +1,14 @@
+// Test: Rule with unused variable in body
+
+.kg create test_unused_var_n10t111
+.kg use test_unused_var_n10t111
+
++data[(1, "a", 100), (2, "b", 200), (3, "c", 300)]
+
+// Project only id, but bind all columns
+ids_only(Id) <- data(Id, _, _)
+
+?ids_only(Id)
+
+.kg use default
+.kg drop test_unused_var_n10t111

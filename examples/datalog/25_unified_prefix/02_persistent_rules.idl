@@ -1,0 +1,28 @@
+// Test: Unified Prefix Persistent Rules
+// Description: Tests persistent rules (views) using + prefix
+
+.kg create test_unified_rules_n25t02
+.kg use test_unified_rules_n25t02
+
+// Base data
++edge(1, 2)
++edge(2, 3)
++edge(3, 4)
++edge(1, 3)
+
+// Persistent rule (new syntax - replaces 'view')
++reachable(X, Y) <- edge(X, Y)
++reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
+// Query reachable pairs
+?reachable(X, Y)
+
+// Delete the rule
+-reachable
+
+// Verify rule is gone
+.rule
+
+// Cleanup
+.kg use default
+.kg drop test_unified_rules_n25t02

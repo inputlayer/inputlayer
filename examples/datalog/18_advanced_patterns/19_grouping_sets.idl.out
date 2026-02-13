@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_grouping_n18t19
+Knowledge graph 'test_grouping_n18t19' created.
+Switched to knowledge graph: test_grouping_n18t19
+> .kg use test_grouping_n18t19
+Switched to knowledge graph: test_grouping_n18t19
+> +sales[("East", "Widget", 100), ("East", "Gadget", 200), ("West", "Widget", 150), ("West", "Gadget", 250)]
+Inserted 4 fact(s) into 'sales'.

@@ -1,0 +1,18 @@
+// Test: Negative number handling
+
+.kg create test_negative_n15t24
+.kg use test_negative_n15t24
+
++temps[(-10,), (0,), (10,), (-5,), (20,)]
+
+// Filter negative temps
+negative(T) <- temps(T), T < 0
+
+// Filter non-negative temps
+non_negative(T) <- temps(T), T >= 0
+
+?negative(T)
+?non_negative(T)
+
+.kg use default
+.kg drop test_negative_n15t24

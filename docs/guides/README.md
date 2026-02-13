@@ -32,35 +32,35 @@ Guides from basics to advanced features.
 
 ### Hello World
 ```datalog
-% Add some facts
-+person("alice").
-+person("bob").
+// Add some facts
++person("alice")
++person("bob")
 
-% Query all persons
-?- person(X).
+// Query all persons
+?person(X)
 ```
 
 ### Simple Rule
 ```datalog
-% Facts
-+parent("alice", "bob").
-+parent("bob", "charlie").
+// Facts
++parent("alice", "bob")
++parent("bob", "charlie")
 
-% Rule: grandparent relationship
-+grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
+// Rule: grandparent relationship
++grandparent(X, Z) <- parent(X, Y), parent(Y, Z)
 
-% Query
-?- grandparent(X, Y).
+// Query
+?grandparent(X, Y)
 ```
 
 ### Aggregation
 ```datalog
-+score("alice", 95).
-+score("bob", 87).
-+score("charlie", 92).
++score("alice", 95)
++score("bob", 87)
++score("charlie", 92)
 
-% Average score
-?- avg<S> :- score(_, S).
+// Average score
+?avg<S> <- score(_, S)
 ```
 
 ---

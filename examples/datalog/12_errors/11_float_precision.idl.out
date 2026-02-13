@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_precision_n12t11
+Knowledge graph 'test_float_precision_n12t11' created.
+Switched to knowledge graph: test_float_precision_n12t11
+> .kg use test_float_precision_n12t11
+Switched to knowledge graph: test_float_precision_n12t11
+> +scaled_floats[(1, 2, 3), (10, 20, 30), (100, 200, 300)]
+Inserted 3 fact(s) into 'scaled_floats'.

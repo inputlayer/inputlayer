@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_col_n21t67
+Knowledge graph 'test_dup_col_n21t67' created.
+Switched to knowledge graph: test_dup_col_n21t67
+> .kg use test_dup_col_n21t67
+Switched to knowledge graph: test_dup_col_n21t67
+> +pairs[(1, 10), (2, 20), (3, 30)]
+Inserted 3 fact(s) into 'pairs'.

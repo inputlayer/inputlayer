@@ -1,0 +1,19 @@
+// Test: quantize_symmetric function
+// Quantizes a float32 vector to int8 using symmetric scaling
+.kg create test_quantize_symmetric_n30t02
+.kg use test_quantize_symmetric_n30t02
+
+// Create some float vectors to quantize
++embedding[(1, [1.0, 0.5, -0.5, -1.0])]
++embedding[(2, [0.0, 0.0, 0.0, 0.0])]
++embedding[(3, [2.0, -2.0, 1.0, -1.0])]
+
+// Apply quantize_symmetric function
+?embedding(Id, V), Q = quantize_symmetric(V)
+
+// Use in a rule
+quantized_sym(Id, Q) <- embedding(Id, V), Q = quantize_symmetric(V)
+?quantized_sym(Id, Q)
+
+.kg use default
+.kg drop test_quantize_symmetric_n30t02

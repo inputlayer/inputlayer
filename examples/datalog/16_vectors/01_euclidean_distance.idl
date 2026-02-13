@@ -1,0 +1,21 @@
+// Test: Euclidean Distance
+// Description: Tests euclidean distance calculation between vectors
+
+.kg create test_vec_euclidean_n16t01
+.kg use test_vec_euclidean_n16t01
+
+// Insert vectors: vectors(id, vector)
++vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])]
+
+// Insert query vector
++query[([0.0, 0.0, 0.0])]
+
+// Calculate euclidean distance from query to all vectors
+nearest(Id, Dist) <- vectors(Id, V), query(Q), Dist = euclidean(V, Q)
+
+// Query distances
+?nearest(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_vec_euclidean_n16t01

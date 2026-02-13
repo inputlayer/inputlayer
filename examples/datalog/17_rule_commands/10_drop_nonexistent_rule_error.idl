@@ -1,0 +1,18 @@
+// Test: Drop non-existent rule error
+// Description: `.rule drop` on a rule that doesn't exist should return an error.
+
+.kg create test_drop_noexist_n17t10
+.kg use test_drop_noexist_n17t10
+
+// List rules - should be empty
+.rule list
+
+// Try to drop a rule that doesn't exist - should error
+.rule drop nonexistent_rule
+
+// Verify list is still empty
+.rule list
+
+// Cleanup
+.kg use default
+.kg drop test_drop_noexist_n17t10

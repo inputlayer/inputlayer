@@ -1,0 +1,19 @@
+// Test: Rule Query Command
+// Description: Tests .rule <name> to query a specific rule
+
+.kg create test_rule_desc_n17t02
+.kg use test_rule_desc_n17t02
+
+// Insert base data
++edge[(1,2), (2,3), (3,4)]
+
+// Define a rule with multiple clauses
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
+// Query the rule (shows definition and results)
+.rule reach
+
+// Cleanup
+.kg use default
+.kg drop test_rule_desc_n17t02

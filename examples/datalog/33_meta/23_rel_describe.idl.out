@@ -1,0 +1,39 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rel_desc_n33t23
+Knowledge graph 'test_rel_desc_n33t23' created.
+Switched to knowledge graph: test_rel_desc_n33t23
+> .kg use test_rel_desc_n33t23
+Switched to knowledge graph: test_rel_desc_n33t23
+> +users[(1, "Alice", 30), (2, "Bob", 25), (3, "Carol", 35)]
+Inserted 3 fact(s) into 'users'.
+> .rel
+Relations:
+  users (arity: 3)
+> .rel users
+Relation: users
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "Alice" │   30 │
+│    2 │ "Bob"   │   25 │
+│    3 │ "Carol" │   35 │
+└──────┴─────────┴──────┘
+3 of 3 total rows
+> ?users(Id, Name, Age)
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "Alice" │   30 │
+│    2 │ "Bob"   │   25 │
+│    3 │ "Carol" │   35 │
+└──────┴─────────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_desc_n33t23
+Knowledge graph 'test_rel_desc_n33t23' dropped.

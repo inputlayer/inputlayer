@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cnt_dist_n14t170
+Knowledge graph 'test_cnt_dist_n14t170' created.
+Switched to knowledge graph: test_cnt_dist_n14t170
+> .kg use test_cnt_dist_n14t170
+Switched to knowledge graph: test_cnt_dist_n14t170
+> +items[(1, "apple"), (2, "banana"), (3, "apple"), (4, "cherry")]
+Inserted 4 fact(s) into 'items'.

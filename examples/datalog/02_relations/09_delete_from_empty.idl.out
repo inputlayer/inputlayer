@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_delete_empty_n02t09
+Knowledge graph 'test_delete_empty_n02t09' created.
+Switched to knowledge graph: test_delete_empty_n02t09
+> .kg use test_delete_empty_n02t09
+Switched to knowledge graph: test_delete_empty_n02t09
+> +empty_rel(1)
+Inserted 1 fact(s) into 'empty_rel'.
+> -empty_rel(1)
+Deleted 1 facts from 'empty_rel'.
+> -empty_rel(99)
+Deleted 0 facts from 'empty_rel'.
+> ?empty_rel(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_delete_empty_n02t09
+Knowledge graph 'test_delete_empty_n02t09' dropped.

@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ntile_n18t52
+Knowledge graph 'test_ntile_n18t52' created.
+Switched to knowledge graph: test_ntile_n18t52
+> .kg use test_ntile_n18t52
+Switched to knowledge graph: test_ntile_n18t52
+> +scores[(1, 100), (2, 85), (3, 92), (4, 78), (5, 88)]
+Inserted 5 fact(s) into 'scores'.
+> high(Id, Score) <- scores(Id, Score), Score >= 90
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │   92 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))

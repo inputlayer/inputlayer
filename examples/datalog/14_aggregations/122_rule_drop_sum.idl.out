@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_sum_n14t122
+Knowledge graph 'test_drop_sum_n14t122' created.
+Switched to knowledge graph: test_drop_sum_n14t122
+> .kg use test_drop_sum_n14t122
+Switched to knowledge graph: test_drop_sum_n14t122
+> +sales[(1, 100), (1, 200), (2, 300), (2, 250)]
+Inserted 4 fact(s) into 'sales'.

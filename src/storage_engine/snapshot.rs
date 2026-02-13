@@ -190,7 +190,7 @@ impl KnowledgeGraphSnapshot {
     /// ```ignore
     /// let snapshot = kg.snapshot();
     /// let result = snapshot.execute_with_session_facts(
-    ///     "result(X) :- edge(X, Y), session_filter(Y).",
+    ///     "result(X) <- edge(X, Y), session_filter(Y)",
     ///     vec![("session_filter".to_string(), Tuple::from_pair(3, 0))],
     /// )?;
     /// // session_filter is only visible to THIS query, not other concurrent queries
@@ -307,7 +307,7 @@ mod tests {
 
         let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
 
-        let results = snapshot.execute("result(X,Y) :- edge(X,Y).").unwrap();
+        let results = snapshot.execute("result(X,Y) <- edge(X,Y)").unwrap();
         assert_eq!(results.len(), 3);
     }
 
@@ -394,7 +394,7 @@ mod tests {
             ],
         );
 
-        // Create a rule: path(X, Y) :- edge(X, Y).
+        // Create a rule: path(X, Y) <- edge(X, Y)
         let rule = Rule {
             head: Atom {
                 relation: "path".to_string(),
@@ -422,7 +422,7 @@ mod tests {
 
         // Query for path - should use the rule
         let results = snapshot_no_mat
-            .execute_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .execute_with_rules_tuples("result(X, Y) <- path(X, Y)")
             .unwrap();
         assert_eq!(results.len(), 2); // edge has 2 tuples, so path has 2 tuples
 
@@ -449,7 +449,7 @@ mod tests {
 
         // Query for path - should use materialized data (3 tuples, not 2)
         let results = snapshot_with_mat
-            .execute_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .execute_with_rules_tuples("result(X, Y) <- path(X, Y)")
             .unwrap();
         assert_eq!(results.len(), 3); // Uses materialized data, not rule
     }
@@ -514,13 +514,13 @@ mod tests {
 
         // derived1 uses materialized data (3 tuples)
         let results1 = snapshot
-            .execute_with_rules_tuples("result(X) :- derived1(X).")
+            .execute_with_rules_tuples("result(X) <- derived1(X)")
             .unwrap();
         assert_eq!(results1.len(), 3);
 
         // derived2 uses rule (2 tuples)
         let results2 = snapshot
-            .execute_with_rules_tuples("result(X) :- derived2(X).")
+            .execute_with_rules_tuples("result(X) <- derived2(X)")
             .unwrap();
         assert_eq!(results2.len(), 2);
     }

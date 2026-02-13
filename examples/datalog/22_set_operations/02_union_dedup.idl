@@ -1,0 +1,35 @@
+// Test: Union with Deduplication
+// Description: Tests that union naturally deduplicates overlapping results
+
+.kg create test_union_dedup_n22t02
+.kg use test_union_dedup_n22t02
+
+// Sources with overlapping data
++set_a[(1), (2), (3)]
++set_b[(2), (3), (4)]
+
+// Union should deduplicate (2, 3 appear in both)
++union_ab(X) <- set_a(X)
++union_ab(X) <- set_b(X)
+
+?union_ab(X)
+// Should show: 1, 2, 3, 4 (each once)
+
+// Count to verify deduplication
++union_count(count<X>) <- union_ab(X)
+?union_count(C)
+// Should be 4, not 6
+
+// More complex overlapping tuples
++pairs_a[(1, 10), (2, 20), (3, 30)]
++pairs_b[(2, 20), (3, 30), (4, 40)]
+
++pair_union(X, Y) <- pairs_a(X, Y)
++pair_union(X, Y) <- pairs_b(X, Y)
+
+?pair_union(X, Y)
+// Should show 4 unique pairs
+
+// Cleanup
+.kg use default
+.kg drop test_union_dedup_n22t02

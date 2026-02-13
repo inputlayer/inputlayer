@@ -1,0 +1,11 @@
+// Test: Special characters in strings
+
+.kg create test_special_n10t129
+.kg use test_special_n10t129
+
++text[("hello@world.com",), ("path/to/file",), ("a+b=c",), ("100%",)]
+
+?text(T)
+
+.kg use default
+.kg drop test_special_n10t129

@@ -47,7 +47,7 @@ fn test_euclidean_distance_basic() {
     // Euclidean distance from origin should be 5.0 (3-4-5 triangle)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0]).",
+            "result(Id, D) <- embedding(Id, V), D = euclidean(V, [0.0, 0.0])",
         )
         .unwrap();
 
@@ -72,7 +72,7 @@ fn test_cosine_similarity_basic() {
 
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = cosine(V, [0.0, 1.0, 0.0]).",
+            "result(Id, D) <- embedding(Id, V), D = cosine(V, [0.0, 1.0, 0.0])",
         )
         .unwrap();
 
@@ -97,7 +97,7 @@ fn test_dot_product_basic() {
 
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = dot(V, [4.0, 5.0, 6.0]).",
+            "result(Id, D) <- embedding(Id, V), D = dot(V, [4.0, 5.0, 6.0])",
         )
         .unwrap();
 
@@ -119,7 +119,7 @@ fn test_manhattan_distance_basic() {
 
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = manhattan(V, [0.0, 0.0, 0.0]).",
+            "result(Id, D) <- embedding(Id, V), D = manhattan(V, [0.0, 0.0, 0.0])",
         )
         .unwrap();
 
@@ -153,7 +153,7 @@ fn test_pairwise_cosine_similarity() {
     // Pairwise cosine similarity - the KEY test case for Cartesian product
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+            "result(Id1, Id2, Sim) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -190,7 +190,7 @@ fn test_pairwise_euclidean_distance() {
     // Pairwise distances
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, D) :- point(Id1, V1), point(Id2, V2), Id1 < Id2, D = euclidean(V1, V2).",
+            "result(Id1, Id2, D) <- point(Id1, V1), point(Id2, V2), Id1 < Id2, D = euclidean(V1, V2)",
         )
         .unwrap();
 
@@ -221,7 +221,7 @@ fn test_pairwise_all_distances() {
     // Pairwise distances (all pairs)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, Dist) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Dist = cosine(V1, V2).",
+            "result(Id1, Id2, Dist) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Dist = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -240,7 +240,7 @@ fn test_vector_empty_relation() {
     // Create empty relation by inserting nothing
     // Just query an undefined relation or one without data
     let results = storage.execute_query_with_rules_tuples(
-        "result(Id, D) :- nonexistent_embedding(Id, V), D = cosine(V, [1.0, 0.0]).",
+        "result(Id, D) <- nonexistent_embedding(Id, V), D = cosine(V, [1.0, 0.0])",
     );
 
     // Should either fail or return empty results - both are acceptable
@@ -265,7 +265,7 @@ fn test_vector_single_element() {
     // Single element query should work
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+            "result(Id, D) <- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0])",
         )
         .unwrap();
 
@@ -278,7 +278,7 @@ fn test_vector_single_element() {
     // Pairwise on single element should give no results (no pairs where Id1 < Id2)
     let pairwise = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2).",
+            "result(Id1, Id2, D) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -303,7 +303,7 @@ fn test_vector_self_comparison() {
     // Self comparison without filter (1x1 = 1 result)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), D = cosine(V1, V2).",
+            "result(Id1, Id2, D) <- embedding(Id1, V1), embedding(Id2, V2), D = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -334,7 +334,7 @@ fn test_vector_high_dimensional() {
 
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, D) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2).",
+            "result(Id1, Id2, D) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, D = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -365,7 +365,7 @@ fn test_vector_inline_rule() {
     // Direct query with vector function
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+            "result(Id, D) <- embedding(Id, V), D = euclidean(V, [0.0, 0.0, 0.0])",
         )
         .unwrap();
 
@@ -400,7 +400,7 @@ fn test_vector_inline_similarity() {
     // Direct pairwise similarity query (all pairs where Id1 < Id2)
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+            "result(Id1, Id2, Sim) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -434,26 +434,26 @@ fn test_all_vector_operations() {
     // Test each operation
     let euclidean = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- v(Id, V), D = euclidean(V, [0.0, 0.0, 0.0]).",
+            "result(Id, D) <- v(Id, V), D = euclidean(V, [0.0, 0.0, 0.0])",
         )
         .unwrap();
     assert_eq!(euclidean.len(), 2, "Euclidean should work");
 
     let cosine = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- v(Id, V), D = cosine(V, [1.0, 0.0, 0.0]).",
+            "result(Id, D) <- v(Id, V), D = cosine(V, [1.0, 0.0, 0.0])",
         )
         .unwrap();
     assert_eq!(cosine.len(), 2, "Cosine should work");
 
     let dot = storage
-        .execute_query_with_rules_tuples("result(Id, D) :- v(Id, V), D = dot(V, [1.0, 1.0, 1.0]).")
+        .execute_query_with_rules_tuples("result(Id, D) <- v(Id, V), D = dot(V, [1.0, 1.0, 1.0])")
         .unwrap();
     assert_eq!(dot.len(), 2, "Dot should work");
 
     let manhattan = storage
         .execute_query_with_rules_tuples(
-            "result(Id, D) :- v(Id, V), D = manhattan(V, [0.0, 0.0, 0.0]).",
+            "result(Id, D) <- v(Id, V), D = manhattan(V, [0.0, 0.0, 0.0])",
         )
         .unwrap();
     assert_eq!(manhattan.len(), 2, "Manhattan should work");
@@ -490,7 +490,7 @@ fn test_cartesian_full() {
 
     // Full Cartesian product without filter (2x2 = 4 results)
     let results = storage
-        .execute_query_with_rules_tuples("result(X, Y, P, Q) :- a(X, Y), b(P, Q).")
+        .execute_query_with_rules_tuples("result(X, Y, P, Q) <- a(X, Y), b(P, Q)")
         .unwrap();
 
     assert_eq!(
@@ -524,7 +524,7 @@ fn test_pairwise_vector_regression() {
     // The exact query pattern from the documentation that was failing
     let results = storage
         .execute_query_with_rules_tuples(
-            "result(Id1, Id2, Sim) :- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2).",
+            "result(Id1, Id2, Sim) <- embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2, Sim = cosine(V1, V2)",
         )
         .unwrap();
 
@@ -558,7 +558,7 @@ fn test_three_way_cartesian() {
     // Self-join twice: 2x2x2 = 8 results (but distinct because same relation)
     // Actually with the same relation, we'll get 2x2 = 4 pairs if it's aliased
     let results = storage
-        .execute_query_with_rules_tuples("result(A, B) :- item(A), item(B).")
+        .execute_query_with_rules_tuples("result(A, B) <- item(A), item(B)")
         .unwrap();
 
     // 2x2 = 4 pairs

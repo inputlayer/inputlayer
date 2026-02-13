@@ -1,0 +1,14 @@
+// Test: Rule with same name as base relation
+
+.kg create test_shadow_n10t102
+.kg use test_shadow_n10t102
+
++data[(1,), (2,)]
+
+// Rule adds more to 'data' relation
++data(X) <- data(Y), X = Y + 10
+
+?data(X)
+
+.kg use default
+.kg drop test_shadow_n10t102

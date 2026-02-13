@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unpivot_n18t97
+Knowledge graph 'test_unpivot_n18t97' created.
+Switched to knowledge graph: test_unpivot_n18t97
+> .kg use test_unpivot_n18t97
+Switched to knowledge graph: test_unpivot_n18t97
+> +wide_data[(1, 10, 20, 30)]
+Inserted 1 fact(s) into 'wide_data'.

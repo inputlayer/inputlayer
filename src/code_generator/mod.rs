@@ -267,14 +267,14 @@ impl CodeGenerator {
     /// Detect if the recursive pattern is a simple BINARY transitive closure
     ///
     /// Pattern must be EXACTLY:
-    ///   base: tc(X, Y) :- edge(X, Y)
-    ///   recursive: tc(X, Z) :- edge(X, Y), tc(Y, Z)
+    ///   base: tc(X, Y) <- edge(X, Y)
+    ///   recursive: tc(X, Z) <- edge(X, Y), tc(Y, Z)
     ///
     /// This matches standard transitive closure where:
     /// - edge is on the LEFT side of the join, keyed by column 1
     /// - tc (recursive) is on the RIGHT side of the join, keyed by column 0
     ///
-    /// Other patterns like `subordinate(Mgr, Emp) :- reports_to(Emp, Mid), subordinate(Mgr, Mid)`
+    /// Other patterns like `subordinate(Mgr, Emp) <- reports_to(Emp, Mid), subordinate(Mgr, Mid)`
     /// have different join key columns and must use the general recursive handler.
     fn detect_transitive_closure_pattern(
         base_inputs: &[IRNode],
@@ -444,7 +444,7 @@ impl CodeGenerator {
                     // Enter edge collection into iterative scope
                     let edges_in_scope = edge_collection.enter(inner);
 
-                    // Recursive case: tc(x, z) :- tc(x, y), edge(y, z)
+                    // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
                     // Key tc by second column (y) for join with edge(y, z)
                     let tc_keyed = variable.map(|tuple| {
                         let x = tuple.get(0).cloned().unwrap_or(Value::Null);
@@ -1273,6 +1273,19 @@ impl CodeGenerator {
                     .and_then(super::value::Value::as_f64)
                     .is_some_and(|f| f <= val)
             }),
+            // Boolean comparisons
+            Predicate::ColumnEqBool(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_bool)
+                    .is_some_and(|b| b == val)
+            }),
+            Predicate::ColumnNeBool(col, val) => Box::new(move |tuple: &Tuple| {
+                tuple
+                    .get(col)
+                    .and_then(super::value::Value::as_bool)
+                    .is_none_or(|b| b != val)
+            }),
             // Column comparisons
             Predicate::ColumnsEq(left, right) => Box::new(move |tuple: &Tuple| {
                 let lv = tuple.get(left);
@@ -1542,7 +1555,7 @@ impl CodeGenerator {
     ///
     /// ## Example
     /// ```text
-    /// unreachable(x) :- node(x), !reach(x).
+    /// unreachable(x) <- node(x), !reach(x).
     ///
     /// left (node):  [(1,), (2,), (3,), (4,)]
     /// right (reach): [(1,), (2,)]
@@ -2168,6 +2181,7 @@ impl CodeGenerator {
             IRExpression::IntConstant(val) => Value::Int64(*val),
             IRExpression::FloatConstant(val) => Value::Float64(*val),
             IRExpression::StringConstant(s) => Value::String(s.clone().into()),
+            IRExpression::BoolConstant(b) => Value::Bool(*b),
             IRExpression::VectorLiteral(vals) => Value::vector(vals.clone()),
             IRExpression::FunctionCall(func, args) => Self::evaluate_function(func, args, tuple),
             IRExpression::Arithmetic { op, left, right } => {
@@ -2905,8 +2919,8 @@ impl CodeGenerator {
     /// Execute transitive closure query using iterative materialization
     ///
     /// This is a convenience method for the common pattern:
-    /// tc(x, y) :- edge(x, y).
-    /// tc(x, z) :- tc(x, y), edge(y, z).
+    /// tc(x, y) <- edge(x, y).
+    /// tc(x, z) <- tc(x, y), edge(y, z).
     ///
     /// Takes edge relation name and computes transitive closure.
     /// Uses iterative materialization for reliable fixpoint computation.
@@ -2967,8 +2981,8 @@ impl CodeGenerator {
     /// Execute reachability query from a set of source nodes
     ///
     /// Pattern:
-    /// reach(x) :- source(x).
-    /// reach(y) :- reach(x), edge(x, y).
+    /// reach(x) <- source(x).
+    /// reach(y) <- reach(x), edge(x, y).
     ///
     /// Returns nodes reachable from any source node.
     pub fn execute_reachability(
@@ -3049,7 +3063,7 @@ impl CodeGenerator {
     ///     // Enter base case into scope
     ///     let base = edges.enter(inner);
     ///
-    ///     // Recursive step: tc(x,z) :- tc(x,y), edge(y,z)
+    ///     // Recursive step: tc(x,z) <- tc(x,y), edge(y,z)
     ///     let recursive = variable.join(&edges_keyed).map(|(y, (x, z))| (x, z));
     ///
     ///     // Combine base and recursive, set variable
@@ -3103,10 +3117,10 @@ impl CodeGenerator {
                     // Enter edge collection into iterative scope
                     let edges_in_scope = edge_collection.enter(inner);
 
-                    // Base case: tc(x, y) :- edge(x, y)
+                    // Base case: tc(x, y) <- edge(x, y)
                     // (already have edges in scope)
 
-                    // Recursive case: tc(x, z) :- tc(x, y), edge(y, z)
+                    // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
                     // Key tc by second column (y) for join with edge(y, z)
                     let tc_keyed = variable.map(|tuple| {
                         let x = tuple.get(0).cloned().unwrap_or(Value::Null);
@@ -3163,8 +3177,8 @@ impl CodeGenerator {
     /// Execute reachability using TRUE Differential Dataflow recursion
     ///
     /// Pattern:
-    /// reach(x) :- source(x).
-    /// reach(y) :- reach(x), edge(x, y).
+    /// reach(x) <- source(x).
+    /// reach(y) <- reach(x), edge(x, y).
     ///
     /// Uses DD's `.iterative()` scope for proper semi-naive evaluation.
     pub fn execute_reachability_dd(
@@ -3217,10 +3231,10 @@ impl CodeGenerator {
                     let sources_in_scope = source_collection.enter(inner);
                     let edges_in_scope = edge_collection.enter(inner);
 
-                    // Base case: reach(x) :- source(x)
+                    // Base case: reach(x) <- source(x)
                     // (sources_in_scope is the base case)
 
-                    // Recursive case: reach(y) :- reach(x), edge(x, y)
+                    // Recursive case: reach(y) <- reach(x), edge(x, y)
                     // Key reach by its value (x) for join with edge(x, y)
                     let reach_keyed = variable.map(|tuple| {
                         let x = tuple.get(0).cloned().unwrap_or(Value::Null);
@@ -4220,7 +4234,7 @@ mod tests {
     // Antijoin (Negation) Tests
     #[test]
     fn test_antijoin_simple() {
-        // Test: unreachable(x) :- node(x), !reach(x)
+        // Test: unreachable(x) <- node(x), !reach(x)
         // Nodes: 1, 2, 3, 4, 5
         // Reachable: 1, 2
         // Expected unreachable: 3, 4, 5
@@ -4618,7 +4632,7 @@ mod tests {
 
     #[test]
     fn test_antijoin_new_edges() {
-        // Pattern: new_edge(x,y) :- candidate(x,y), !edge(x,y)
+        // Pattern: new_edge(x,y) <- candidate(x,y), !edge(x,y)
         // Find edges that are candidates but not already in graph
         let mut codegen = CodeGenerator::new();
 

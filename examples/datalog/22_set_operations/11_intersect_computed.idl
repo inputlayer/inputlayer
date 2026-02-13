@@ -1,0 +1,15 @@
+// Test: Intersection with computed values
+
+.kg create test_intersect_comp_n22t11
+.kg use test_intersect_comp_n22t11
+
++set_a[(1,), (2,), (3,), (4,)]
++set_b[(2,), (4,), (6,), (8,)]
+
+// Values in both (intersection)
+common(X) <- set_a(X), set_b(X)
+
+?common(X)
+
+.kg use default
+.kg drop test_intersect_comp_n22t11

@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bipartite_n18t04
+Knowledge graph 'test_bipartite_n18t04' created.
+Switched to knowledge graph: test_bipartite_n18t04
+> .kg use test_bipartite_n18t04
+Switched to knowledge graph: test_bipartite_n18t04
+> +edge[(1, 2), (2, 3), (3, 4), (4, 1)]
+Inserted 4 fact(s) into 'edge'.
+> +start[(1, 0)]
+Inserted 1 fact(s) into 'start'.

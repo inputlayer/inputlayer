@@ -1,0 +1,21 @@
+// Test: Histogram pattern
+
+.kg create test_histogram_n18t110
+.kg use test_histogram_n18t110
+
++scores[(45,), (67,), (82,), (91,), (55,), (73,), (88,), (64,), (79,), (95,)]
+
+// Compute grade bucket (simplified)
++grade_bucket(S, "A") <- scores(S), S >= 90
++grade_bucket(S, "B") <- scores(S), S >= 80, S < 90
++grade_bucket(S, "C") <- scores(S), S >= 70, S < 80
++grade_bucket(S, "D") <- scores(S), S >= 60, S < 70
++grade_bucket(S, "F") <- scores(S), S < 60
+
+// Count per bucket
++histogram(Grade, count<S>) <- grade_bucket(S, Grade)
+
+?histogram(Grade, Count)
+
+.kg use default
+.kg drop test_histogram_n18t110

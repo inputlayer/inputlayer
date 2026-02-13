@@ -1,0 +1,14 @@
+// Test: Moving average simulation
+
+.kg create test_moving_avg_n18t46
+.kg use test_moving_avg_n18t46
+
++time_series[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)]
+
+// 2-period average: average of current and previous
++avg_2(T, avg<V>) <- time_series(T2, V), T2 >= T - 1, T2 <= T, time_series(T, _)
+
+?avg_2(T, Avg)
+
+.kg use default
+.kg drop test_moving_avg_n18t46

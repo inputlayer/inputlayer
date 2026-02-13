@@ -50,27 +50,27 @@ InputLayer supports 9 value types:
 
 ### Fact Syntax
 ```datalog
-+relation(value1, value2).     % Persistent fact
-relation(value1, value2).      % Session fact
--relation(value1, value2).     % Delete fact
++relation(value1, value2)     // Persistent fact
+relation(value1, value2)      // Session fact
+-relation(value1, value2)     // Delete fact
 ```
 
 ### Rule Syntax
 ```datalog
-+derived(X, Y) :- base(X, Z), other(Z, Y).     % Persistent rule
-derived(X, Y) :- base(X, Z), other(Z, Y).      % Session rule
++derived(X, Y) <- base(X, Z), other(Z, Y)     // Persistent rule
+derived(X, Y) <- base(X, Z), other(Z, Y)      // Session rule
 ```
 
 ### Query Syntax
 ```datalog
-?- relation(X, Y), X > 10.
+?relation(X, Y), X > 10
 ```
 
 ### Aggregation Syntax
 ```datalog
-?- count<X> :- relation(X, _).
-?- sum<Value> :- data(_, Value).
-?- top_k<5, Item, Score:desc> :- scores(Item, Score).
+?count<X> <- relation(X, _)
+?sum<Value> <- data(_, Value)
+?top_k<5, Item, Score:desc> <- scores(Item, Score)
 ```
 
 ---

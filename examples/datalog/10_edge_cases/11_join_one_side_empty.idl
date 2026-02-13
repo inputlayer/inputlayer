@@ -1,0 +1,35 @@
+// Test: Join with One Side Empty
+// Description: Tests join behavior when one relation is empty
+
+.kg create test_join_empty_n10t11
+.kg use test_join_empty_n10t11
+
+// Only populate one relation
++left[(1), (2), (3)]
+// 'right' is empty
+
+// Join with empty right side - should produce no results
++joined(X, Y) <- left(X), right(Y), X = Y
+?joined(X, Y)
+
+// Another join pattern
++matched(X) <- left(X), right(X)
+?matched(X)
+
+// Now add some data to right
++right[(2), (4)]
+
+// Join should work now
+?joined(X, Y)
+?matched(X)
+
+// Empty the left side
+-left(X) <- left(X)
+
+// Join with empty left side
+?joined(X, Y)
+?matched(X)
+
+// Cleanup
+.kg use default
+.kg drop test_join_empty_n10t11

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_short_n09t22
+Knowledge graph 'test_short_n09t22' created.
+Switched to knowledge graph: test_short_n09t22
+> .kg use test_short_n09t22
+Switched to knowledge graph: test_short_n09t22
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.

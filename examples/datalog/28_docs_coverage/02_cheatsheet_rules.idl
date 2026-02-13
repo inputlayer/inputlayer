@@ -1,0 +1,40 @@
+// Test: Cheatsheet Rules
+// Description: Tests examples from docs/cheatsheet.md - persistent and session rules
+
+.kg create test_cheatsheet_rules_n28t02
+.kg use test_cheatsheet_rules_n28t02
+
+// === Setup data ===
++edge[(1, 2), (2, 3), (3, 4), (4, 5)]
++person[("alice", 30), ("bob", 17), ("carol", 25)]
+
+// === Persistent Rules ===
+
+// Simple rule
++path(X, Y) <- edge(X, Y)
+
+// Recursive rule (transitive closure)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+?path(X, Y)
+
+// Rule with filter
++adult(Name, Age) <- person(Name, Age), Age >= 18
+
+?adult(Name, Age)
+
+// === Session Rules ===
+
+// Transient rule (no + prefix)
+result(X, Y) <- edge(X, Y), X < Y
+
+?result(X, Y)
+
+// Session rules referencing persistent rules
+reachable_from_one(X) <- path(1, X)
+
+?reachable_from_one(X)
+
+// Cleanup
+.kg use default
+.kg drop test_cheatsheet_rules_n28t02

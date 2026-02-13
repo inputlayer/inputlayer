@@ -467,7 +467,9 @@ impl Optimizer {
             | Predicate::ColumnGtFloat(col, _)
             | Predicate::ColumnLtFloat(col, _)
             | Predicate::ColumnGeFloat(col, _)
-            | Predicate::ColumnLeFloat(col, _) => {
+            | Predicate::ColumnLeFloat(col, _)
+            | Predicate::ColumnEqBool(col, _)
+            | Predicate::ColumnNeBool(col, _) => {
                 vec![*col]
             }
             Predicate::ColumnsEq(col1, col2)
@@ -518,6 +520,9 @@ impl Optimizer {
             Predicate::ColumnLtFloat(col, val) => Predicate::ColumnLtFloat(adjust(*col), *val),
             Predicate::ColumnGeFloat(col, val) => Predicate::ColumnGeFloat(adjust(*col), *val),
             Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(adjust(*col), *val),
+            // Boolean predicates
+            Predicate::ColumnEqBool(col, val) => Predicate::ColumnEqBool(adjust(*col), *val),
+            Predicate::ColumnNeBool(col, val) => Predicate::ColumnNeBool(adjust(*col), *val),
             Predicate::ColumnsEq(col1, col2) => Predicate::ColumnsEq(adjust(*col1), adjust(*col2)),
             Predicate::ColumnsNe(col1, col2) => Predicate::ColumnsNe(adjust(*col1), adjust(*col2)),
             Predicate::ColumnsLt(col1, col2) => Predicate::ColumnsLt(adjust(*col1), adjust(*col2)),

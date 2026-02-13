@@ -1,0 +1,15 @@
+// Test: Empty Insert
+// Description: Tests handling of empty insert statements
+
+.kg create test_empty_n12t07
+.kg use test_empty_n12t07
+
+// Empty bulk insert - should error or be rejected
++empty[]
+
+// If that didn't error, try querying
+?empty(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_empty_n12t07

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rank_conflict_n14t178
+Knowledge graph 'test_rank_conflict_n14t178' created.
+Switched to knowledge graph: test_rank_conflict_n14t178
+> .kg use test_rank_conflict_n14t178
+Switched to knowledge graph: test_rank_conflict_n14t178
+> +data[(1, 0.5), (2, 1.5), (3, 2.5)]
+Inserted 3 fact(s) into 'data'.

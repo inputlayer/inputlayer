@@ -1,0 +1,14 @@
+// Test: Mixed types in same column position
+
+.kg create test_mixed_keys_n10t66
+.kg use test_mixed_keys_n10t66
+
+// Note: This tests if engine allows mixed types per column
++data[(1, 100), (2, 200)]
++data2[("a", 300), ("b", 400)]
+
+?data(A, B)
+?data2(A, B)
+
+.kg use default
+.kg drop test_mixed_keys_n10t66

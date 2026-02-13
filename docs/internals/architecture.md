@@ -357,8 +357,8 @@ pub fn execute_with_session_facts(
 ### 5.1 Persistent Rules (`+` prefix)
 
 ```datalog
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 ```
 
 **Characteristics**:
@@ -370,8 +370,8 @@ pub fn execute_with_session_facts(
 ### 5.2 Session Rules (no prefix)
 
 ```datalog
-reachable_from(Y) :- path(1, Y).
-?- reachable_from(X).
+reachable_from(Y) <- path(1, Y)
+?reachable_from(X)
 ```
 
 **Characteristics**:
@@ -445,7 +445,7 @@ All AST types implement `Display` for consistent Datalog text formatting:
 impl Display for Term { ... }      // Variables, constants, aggregates, etc.
 impl Display for Atom { ... }      // relation(arg1, arg2, ...)
 impl Display for BodyPredicate { ... }  // Positive, negated, comparison
-impl Display for Rule { ... }      // head :- body.
+impl Display for Rule { ... }      // head <- body
 impl Display for ArithExpr { ... } // Arithmetic expressions
 impl Display for AggregateFunc { ... }  // count, sum, top_k<...>, etc.
 impl Display for ComparisonOp { ... }   // =, !=, <, <=, >, >=
@@ -564,12 +564,12 @@ pub struct Handler {
 ```rust
 pub enum Statement {
     SchemaDecl(SchemaDecl),
-    PersistentRule(Rule),      // +name(...) :- body.
-    SessionRule(Rule),          // name(...) :- body.
-    PersistentFact(Fact),      // +relation(values).
-    SessionFact(Fact),          // relation(values).
-    Query(Query),               // ?- body.
-    ConditionalDelete(Rule),   // -relation(X) :- condition.
+    PersistentRule(Rule),      // +name(...) <- body
+    SessionRule(Rule),          // name(...) <- body
+    PersistentFact(Fact),      // +relation(values)
+    SessionFact(Fact),          // relation(values)
+    Query(Query),               // ?body
+    ConditionalDelete(Rule),   // -relation(X) <- condition
     DotCommand(DotCommand),    // .kg, .rule, .rel, etc.
 }
 ```

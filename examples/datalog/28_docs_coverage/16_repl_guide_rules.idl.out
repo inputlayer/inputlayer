@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_repl_rules_n28t16
+Knowledge graph 'test_repl_rules_n28t16' created.
+Switched to knowledge graph: test_repl_rules_n28t16
+> .kg use test_repl_rules_n28t16
+Switched to knowledge graph: test_repl_rules_n28t16
+> +person[("alice", 30), ("bob", 17), ("carol", 25)]
+Inserted 3 fact(s) into 'person'.
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.
+> +employee[(1, "engineering"), (2, "sales"), (3, "engineering")]
+Inserted 3 fact(s) into 'employee'.
+> +adult(Name, Age) <- person(Name, Age), Age >= 18
+Rule 'adult' registered.
+> ?adult(Name, Age)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "alice" │   30 │
+│ "carol" │   25 │
+└─────────┴──────┘
+2 rows

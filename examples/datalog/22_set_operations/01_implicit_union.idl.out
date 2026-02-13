@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_n22t01
+Knowledge graph 'test_union_n22t01' created.
+Switched to knowledge graph: test_union_n22t01
+> .kg use test_union_n22t01
+Switched to knowledge graph: test_union_n22t01
+> +source_a[(1, 100), (2, 200)]
+Inserted 2 fact(s) into 'source_a'.
+> +source_b[(3, 300), (4, 400)]
+Inserted 2 fact(s) into 'source_b'.

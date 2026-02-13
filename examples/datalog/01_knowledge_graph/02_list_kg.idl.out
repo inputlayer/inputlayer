@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_kg_list1_n01t02
+Knowledge graph 'test_kg_list1_n01t02' created.
+Switched to knowledge graph: test_kg_list1_n01t02
+> .kg create test_kg_list2_n01t02
+Knowledge graph 'test_kg_list2_n01t02' created.
+Switched to knowledge graph: test_kg_list2_n01t02
+> .kg create test_kg_list3_n01t02
+Knowledge graph 'test_kg_list3_n01t02' created.
+Switched to knowledge graph: test_kg_list3_n01t02
+> .kg list
+Knowledge Graphs:
+  default
+  test_kg_list1_n01t02
+  test_kg_list2_n01t02
+  test_kg_list3_n01t02 *
+> .kg use test_kg_list1_n01t02
+Switched to knowledge graph: test_kg_list1_n01t02
+> +data[(1), (2), (3)]
+Inserted 3 fact(s) into 'data'.
+> ?data(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_kg_list1_n01t02
+Knowledge graph 'test_kg_list1_n01t02' dropped.
+> .kg drop test_kg_list2_n01t02
+Knowledge graph 'test_kg_list2_n01t02' dropped.
+> .kg drop test_kg_list3_n01t02
+Knowledge graph 'test_kg_list3_n01t02' dropped.
+> .kg list
+Knowledge Graphs:
+  default *

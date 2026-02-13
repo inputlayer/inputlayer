@@ -1,0 +1,16 @@
+// Test: Unpivot pattern
+
+.kg create test_unpivot_n18t97
+.kg use test_unpivot_n18t97
+
++wide_data[(1, 10, 20, 30)]
+
+// Unpivot to long format
+long_data(Id, "col1", V) <- wide_data(Id, V, _, _)
+long_data(Id, "col2", V) <- wide_data(Id, _, V, _)
+long_data(Id, "col3", V) <- wide_data(Id, _, _, V)
+
+?long_data(Id, Col, Val)
+
+.kg use default
+.kg drop test_unpivot_n18t97

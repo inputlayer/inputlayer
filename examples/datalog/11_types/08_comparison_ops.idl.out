@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compare_n11t08
+Knowledge graph 'test_compare_n11t08' created.
+Switched to knowledge graph: test_compare_n11t08
+> .kg use test_compare_n11t08
+Switched to knowledge graph: test_compare_n11t08
+> +vals[(1, 10), (2, 20), (3, 30), (4, 20), (5, 40)]
+Inserted 5 fact(s) into 'vals'.

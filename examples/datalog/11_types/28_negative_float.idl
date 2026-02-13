@@ -1,0 +1,16 @@
+// Test: Negative float values
+
+.kg create test_neg_float_n11t28
+.kg use test_neg_float_n11t28
+
++temps[(-10.5,), (0.0,), (10.5,), (-5.25,)]
+
+?temps(T)
+
+// Filter negative
+negative(T) <- temps(T), T < 0.0
+
+?negative(T)
+
+.kg use default
+.kg drop test_neg_float_n11t28

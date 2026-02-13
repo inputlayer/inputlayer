@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_join_const_n06t08
+Knowledge graph 'test_join_const_n06t08' created.
+Switched to knowledge graph: test_join_const_n06t08
+> .kg use test_join_const_n06t08
+Switched to knowledge graph: test_join_const_n06t08
+> +edges[(1, 2), (2, 3), (3, 4), (1, 4)]
+Inserted 4 fact(s) into 'edges'.
+> +nodes[(1, "start"), (2, "mid1"), (3, "mid2"), (4, "end")]
+Inserted 4 fact(s) into 'nodes'.

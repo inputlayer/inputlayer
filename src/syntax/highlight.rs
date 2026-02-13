@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_highlight_produces_ansi() {
         let h = DatalogHelper::new();
-        let result = h.highlight("?- edge(X, Y).", 0);
+        let result = h.highlight("?edge(X, Y)", 0);
         // Should contain ANSI escape codes
         assert!(result.contains("\x1b["));
         // Should contain reset codes
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn test_highlight_preserves_text_content() {
         let h = DatalogHelper::new();
-        let input = "?- edge(X, Y).";
+        let input = "?edge(X, Y)";
         let result = h.highlight(input, 0);
         // Strip ANSI codes and verify text is preserved
         let stripped = strip_ansi(&result);

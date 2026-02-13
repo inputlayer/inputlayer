@@ -1,0 +1,18 @@
+// Test: Multi-Column Group By
+// Description: Tests aggregation with multiple grouping columns
+
+.kg create test_agg_multi_n14t06
+.kg use test_agg_multi_n14t06
+
+// Insert order data: order(region, product, quantity)
++order[(1, 10, 5), (1, 10, 3), (1, 20, 7), (2, 10, 2), (2, 20, 4), (2, 20, 6)]
+
+// Sum quantity per region and product
++order_total(Region, Product, sum<Qty>) <- order(Region, Product, Qty)
+
+// Query the result
+?order_total(X, Y, Z)
+
+// Cleanup
+.kg use default
+.kg drop test_agg_multi_n14t06

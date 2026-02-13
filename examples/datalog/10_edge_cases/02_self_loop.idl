@@ -1,0 +1,27 @@
+// Test: Self-Loop Handling
+// Description: Tests handling of edges where source = target
+// Note: Unary relations not well supported, using binary workaround
+
+.kg create test_loop_n10t02
+.kg use test_loop_n10t02
+
+// Insert edges including self-loops
++edge[(1,1), (1,2), (2,2), (2,3), (3,3)]
+
+// Query all edges
+?edge(X, Y)
+
+// Find self-loops using X = Y constraint (binary output)
++loop(X, Y) <- edge(X, Y), X = Y
+?loop(X, Y)
+
+// Transitive closure with self-loops
++tc(X, Y) <- edge(X, Y)
++tc(X, Z) <- tc(X, Y), edge(Y, Z)
+
+// All reachable from 1
+?tc(1, X)
+
+// Cleanup
+.kg use default
+.kg drop test_loop_n10t02

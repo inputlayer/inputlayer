@@ -1,0 +1,24 @@
+// Test: Clear rule then add new clause
+
+.kg create test_clear_add_n17t20
+.kg use test_clear_add_n17t20
+
++base[(1,), (2,), (3,)]
+
+// Initial rule
++compute(X, Y) <- base(X), Y = X + 10
+
+?compute(X, Y)
+
+// Clear it
+.rule clear compute
+
+.rule
+
+// Add new version
++compute(X, Y) <- base(X), Y = X * 100
+
+?compute(X, Y)
+
+.kg use default
+.kg drop test_clear_add_n17t20

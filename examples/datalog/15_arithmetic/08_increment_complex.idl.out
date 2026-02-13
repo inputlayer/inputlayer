@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inc_complex_n15t08
+Knowledge graph 'test_inc_complex_n15t08' created.
+Switched to knowledge graph: test_inc_complex_n15t08
+> .kg use test_inc_complex_n15t08
+Switched to knowledge graph: test_inc_complex_n15t08
+> +data1[(1, 5), (2, 10), (3, 0)]
+Inserted 3 fact(s) into 'data1'.
+> +link1[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'link1'.

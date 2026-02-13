@@ -1,0 +1,24 @@
+// Test: Rule exists before any facts
+// Description: Aggregation rule defined before any base facts exist
+
+.kg create test_agg_empty_n14t163
+.kg use test_agg_empty_n14t163
+
+// Define rule before any facts
++total(sum<X>) <- numbers(X)
+
+// No facts yet — should return no results
+?total(X)
+
+// Now add facts
++numbers[(10), (20), (30)]
+
+?total(X)
+
+// Retract one
+-numbers(10)
+
+?total(X)
+
+.kg use default
+.kg drop test_agg_empty_n14t163

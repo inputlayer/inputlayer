@@ -11,9 +11,9 @@ Decl       ::= TypeDecl | SchemaDecl | RuleDecl | FactDecl
 ```
 
 - `type` - defines **value types** (aliases, refinements, record types)
-- `+name(col: type, ...).` - defines **relation schemas** with typed columns
+- `+name(col: type, ...)` - defines **relation schemas** with typed columns
 - Facts (`+name[(...)]`) - provide **base tuples** for relations
-- Rules (`+name(...) :- body.`) - define **derived tuples** for relations
+- Rules (`+name(...) <- body`) - define **derived tuples** for relations
 
 ## 1. Type Declarations (`type`)
 
@@ -48,9 +48,9 @@ A `type` declaration introduces a **value type**. Types describe the **shape and
 ### 1.3 Aliases and Refinements
 
 ```datalog
-type Email: string(pattern("^[^@]+@[^@]+$")).
-type Id:    int(range(1, 1000000)).
-type Tags:  list[string](not_empty).
+type Email: string(pattern("^[^@]+@[^@]+$"))
+type Id:    int(range(1, 1000000))
+type Tags:  list[string](not_empty)
 ```
 
 Interpretation as refinement types:
@@ -75,7 +75,7 @@ type User: {
     name:    string(not_empty),
     email:   Email,
     my_tags: Tags
-}.
+}
 ```
 
 A **record type** `{ f₁ : τ₁, …, fₙ : τₙ }` is the type of records with named fields `fᵢ` of types `τᵢ`.
@@ -112,7 +112,7 @@ AnnotName   ::= "key" | "unique" | "not_empty" | ...
     id:      int,
     name:    string,
     email:   string
-).
+)
 ```
 
 This declares a 3-ary relation:
@@ -128,10 +128,10 @@ Each parameter is a **column** in the relation.
 ### 2.3 Schema with Type References
 
 ```datalog
-type Id:    int.
-type Email: string.
+type Id:    int
+type Email: string
 
-+user(id: Id, name: string, email: Email).
++user(id: Id, name: string, email: Email)
 ```
 
 ## 3. Terms and Expressions
@@ -160,7 +160,7 @@ Arg         ::= Term
 Example (positional):
 
 ```datalog
-user(1, "Alice", "alice@example.com").
+user(1, "Alice", "alice@example.com")
 ```
 
 ### 4.2 Facts
@@ -173,14 +173,14 @@ FactDecl    ::= "+" Atom "."
 Example:
 
 ```datalog
-+user(1, "Alice", "alice@example.com").
-+user[(2, "Bob", "bob@example.com"), (3, "Charlie", "charlie@example.com")].
++user(1, "Alice", "alice@example.com")
++user[(2, "Bob", "bob@example.com"), (3, "Charlie", "charlie@example.com")]
 ```
 
 ### 4.3 Rules
 
 ```ebnf
-RuleDecl    ::= ["+" ] HeadAtom ":-" Body "."
+RuleDecl    ::= ["+" ] HeadAtom "<-" Body "."
 HeadAtom    ::= RelName "(" HeadArgList? ")"
 HeadArgList ::= HeadArg ("," HeadArg)*
 HeadArg     ::= Term
@@ -195,13 +195,13 @@ RelOp       ::= "=" | "!=" | "<" | ">" | "<=" | ">="
 ### 4.4 Persistent vs Session Rules
 
 ```datalog
-% Persistent rule (with + prefix) - stored and incrementally maintained
-+admin_email(Email) :-
+// Persistent rule (with + prefix) - stored and incrementally maintained
++admin_email(Email) <-
     user(_, _, Email),
-    admin(Email).
+    admin(Email)
 
-% Session rule (no + prefix) - computed on-demand, not stored
-temp_result(X, Y) :- source(X, Y), X > 10.
+// Session rule (no + prefix) - computed on-demand, not stored
+temp_result(X, Y) <- source(X, Y), X > 10
 ```
 
 ## 5. Base vs Derived Relations
@@ -214,8 +214,8 @@ Both are still just **relations**:
 - Facts and rules together define the relation's **extension**
 
 SQL analogy:
-- `+user(...) + facts` ≈ `CREATE TABLE user (...) + INSERT INTO user ...`
-- `+admin_email(...) + rules` ≈ `CREATE VIEW admin_email AS SELECT ...`
+- `+user(...) + facts` ≈ `CREATE TABLE user (...) + INSERT INTO user .`
+- `+admin_email(...) + rules` ≈ `CREATE VIEW admin_email AS SELECT .`
 
 ## 6. Persistent Rules and the `+` Prefix
 
@@ -226,15 +226,15 @@ Clear separation of concerns:
 | Syntax | Purpose | DD Materialization | Type Checking |
 |--------|---------|-------------------|---------------|
 | `type` | Value type definitions | No | N/A |
-| `+name(col: type, ...).` | Schema declaration | **No** | **Yes** |
-| `+name(...) :- body.` | Persistent rule (DD view) | **Yes** | Only if schema exists |
-| `name(...) :- body.` | Session rule (transient) | **No** | Only if schema exists |
+| `+name(col: type, ...)` | Schema declaration | **No** | **Yes** |
+| `+name(...) <- body` | Persistent rule (DD view) | **Yes** | Only if schema exists |
+| `name(...) <- body` | Session rule (transient) | **No** | Only if schema exists |
 | `+`/`-` (facts) | Base data manipulation | No | Only if schema exists |
 
 ### 6.2 Persistent Rule Grammar
 
 ```ebnf
-PersistentRule ::= "+" RuleName "(" ParamList ")" ":-" Body "."
+PersistentRule ::= "+" RuleName "(" ParamList ")" "<-" Body "."
 ```
 
 ### 6.3 Session Rules
@@ -242,7 +242,7 @@ PersistentRule ::= "+" RuleName "(" ParamList ")" ":-" Body "."
 Rules without `+` prefix are **session rules**:
 
 ```datalog
-temp_result(X, Y) :- source(X, Y), X > 10.
+temp_result(X, Y) <- source(X, Y), X > 10
 ```
 
 - Computed on-demand during evaluation
@@ -266,34 +266,34 @@ To avoid confusion between types and variables:
 ### 7.3 Command vs Keyword Distinction
 
 Do NOT confuse:
-- `+name(col: type).` - Schema declaration syntax
+- `+name(col: type)` - Schema declaration syntax
 - `.rel` meta command - REPL command to list/describe relations
 
 ## 8. Complete Example
 
 ```datalog
-% Type definitions
-type Id: int(range(1, 1000000)).
-type Email: string(pattern("^[^@]+@[^@]+$")).
+// Type definitions
+type Id: int(range(1, 1000000))
+type Email: string(pattern("^[^@]+@[^@]+$"))
 
-% Schema declarations
-+user(id: Id, name: string, email: Email).
-+purchase(user_id: Id, amount: int).
+// Schema declarations
++user(id: Id, name: string, email: Email)
++purchase(user_id: Id, amount: int)
 
-% Base data
-+user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")].
-+purchase[(1, 1500), (1, 200), (2, 300)].
+// Base data
++user[(1, "Alice", "alice@example.com"), (2, "Bob", "bob@example.com")]
++purchase[(1, 1500), (1, 200), (2, 300)]
 
-% Persistent rule (explicit DD materialization)
-+high_spender(UserId) :-
+// Persistent rule (explicit DD materialization)
++high_spender(UserId) <-
     purchase(UserId, Amount),
-    Amount > 1000.
+    Amount > 1000
 
-% Session rule (not materialized, just computed on query)
-temp(Id) :- user(Id, _, _), high_spender(Id).
+// Session rule (not materialized, just computed on query)
+temp(Id) <- user(Id, _, _), high_spender(Id)
 
-% Query
-?- high_spender(X).
+// Query
+?high_spender(X)
 ```
 
 ## 9. Type Checking Algorithm
@@ -303,11 +303,11 @@ temp(Id) :- user(Id, _, _), high_spender(Id).
 Given a rule:
 
 ```datalog
-+admin_email(Email) :- user(_, _, Email), admin(Email).
++admin_email(Email) <- user(_, _, Email), admin(Email)
 ```
 
 Type checking steps:
-1. Lookup schema: if `+admin_email(email: Email).` exists, check arity matches
+1. Lookup schema: if `+admin_email(email: Email)` exists, check arity matches
 2. Check that variable types are consistent across the rule
 3. Report type errors if mismatches found
 

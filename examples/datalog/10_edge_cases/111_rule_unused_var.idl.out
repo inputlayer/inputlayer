@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unused_var_n10t111
+Knowledge graph 'test_unused_var_n10t111' created.
+Switched to knowledge graph: test_unused_var_n10t111
+> .kg use test_unused_var_n10t111
+Switched to knowledge graph: test_unused_var_n10t111
+> +data[(1, "a", 100), (2, "b", 200), (3, "c", 300)]
+Inserted 3 fact(s) into 'data'.

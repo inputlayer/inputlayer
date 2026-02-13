@@ -31,7 +31,7 @@ See `docs/reference/functions.md` Section 7 for full reference.
 Top-K selection with ordering support:
 
 ```datalog
-+top_scores(top_k<3, Name, Score:desc>) :- scores(Name, Score).
++top_scores(top_k<3, Name, Score:desc>) <- scores(Name, Score)
 ```
 
 Variants: `top_k`, `top_k_threshold`, `within_radius`.
@@ -45,14 +45,14 @@ Variants: `top_k`, `top_k_threshold`, `within_radius`.
 All builtin functions (vector, math, string, temporal) now work in rule heads via computed head variables:
 
 ```datalog
-% Compute and store similarities
-+similarity(Id1, Id2, Score) :-
+// Compute and store similarities
++similarity(Id1, Id2, Score) <-
     embedding(Id1, V1), embedding(Id2, V2),
     Id1 < Id2,
-    Score = cosine(V1, V2).
+    Score = cosine(V1, V2)
 
-% Arithmetic in rule heads
-+doubled(X, Y) :- nums(X), Y = X * 2.
+// Arithmetic in rule heads
++doubled(X, Y) <- nums(X), Y = X * 2
 ```
 
 ---

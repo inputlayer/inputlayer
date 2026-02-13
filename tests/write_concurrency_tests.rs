@@ -54,7 +54,7 @@ fn test_concurrent_inserts_to_same_kg() {
     // Verify all inserts succeeded
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("insert_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("insert_test", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(
         results.len(),
@@ -106,7 +106,7 @@ fn test_concurrent_inserts_to_different_kgs() {
     for i in 0..5 {
         let kg_name = format!("kg_{}", i);
         let results = storage_guard
-            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
         // Each KG should have tuples from 4 threads (20 / 5)
         let expected = 4 * inserts_per_thread;
@@ -160,7 +160,7 @@ fn test_high_volume_concurrent_inserts() {
     // Verify data integrity
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("high_volume", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("high_volume", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), num_threads * inserts_per_thread);
 }
@@ -210,7 +210,7 @@ fn test_insert_throughput_under_read_load() {
             for _ in 0..ops_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard
-                    .execute_query_on("throughput_test", "result(X,Y) :- initial(X,Y).")
+                    .execute_query_on("throughput_test", "result(X,Y) <- initial(X,Y)")
                     .expect("Query failed");
                 counter.fetch_add(1, Ordering::SeqCst);
             }
@@ -274,7 +274,7 @@ fn test_concurrent_deletes_to_same_kg() {
     // Verify all tuples were deleted
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("delete_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("delete_test", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), 0, "Expected 0 tuples after delete");
 }
@@ -316,7 +316,7 @@ fn test_concurrent_deletes_to_different_kgs() {
     for i in 0..5 {
         let kg_name = format!("delete_kg_{}", i);
         let results = storage_guard
-            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
         assert_eq!(results.len(), 0, "KG {} should be empty", kg_name);
     }
@@ -363,7 +363,7 @@ fn test_delete_nonexistent_concurrent() {
     // Original data should still exist
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("delete_nonexistent", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("delete_nonexistent", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), 2);
 }
@@ -410,7 +410,7 @@ fn test_readers_not_blocked_by_writers() {
             for _ in 0..ops_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("read_write_mix", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("read_write_mix", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 // Should always see at least the initial tuple
                 assert!(!results.is_empty());
@@ -459,7 +459,7 @@ fn test_writers_not_blocked_by_readers() {
             for _ in 0..ops_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("write_read_mix", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("write_read_mix", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 assert!(!results.is_empty());
                 // Simulate some processing time
@@ -522,7 +522,7 @@ fn test_read_write_interleaving() {
                 } else {
                     // Read
                     let _ = storage_guard
-                        .execute_query_on("interleave", "result(X,Y) :- data(X,Y).")
+                        .execute_query_on("interleave", "result(X,Y) <- data(X,Y)")
                         .expect("Query failed");
                 }
             }
@@ -537,7 +537,7 @@ fn test_read_write_interleaving() {
     // Verify writes succeeded
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("interleave", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("interleave", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     // Each thread does ops_per_thread / 2 writes
     assert_eq!(results.len(), num_threads * (ops_per_thread / 2));
@@ -570,7 +570,7 @@ fn test_snapshot_visibility_after_write() {
             {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("snapshot_vis", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("snapshot_vis", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 // Should see at least our own tuple
                 assert!(
@@ -590,7 +590,7 @@ fn test_snapshot_visibility_after_write() {
     // Verify all writes are visible
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("snapshot_vis", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("snapshot_vis", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), num_threads);
 }
@@ -637,7 +637,7 @@ fn test_100_concurrent_writers_same_kg() {
     // Verify data
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("stress_same", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("stress_same", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), num_threads * writes_per_thread);
 }
@@ -693,7 +693,7 @@ fn test_100_concurrent_writers_10_kgs() {
     for i in 0..10 {
         let kg_name = format!("stress_kg_{}", i);
         let results = storage_guard
-            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
         // Each KG should have tuples from 10 threads (100/10)
         assert_eq!(results.len(), 10 * writes_per_thread);
@@ -741,7 +741,7 @@ fn test_sustained_write_load_1000_ops() {
     // Verify all data
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("sustained_write", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("sustained_write", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), num_threads * ops_per_thread);
 }
@@ -820,7 +820,7 @@ fn test_write_error_doesnt_corrupt_state() {
     // State should be consistent
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("error_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("error_test", "result(X,Y) <- data(X,Y)")
         .expect("Query failed after errors");
     // Original 2 + 5 valid inserts
     assert_eq!(results.len(), 7);
@@ -871,7 +871,7 @@ fn test_concurrent_writes_with_errors() {
     // Verify data integrity
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("mixed_errors", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("mixed_errors", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
     assert_eq!(results.len(), success_count.load(Ordering::SeqCst));
 }
@@ -917,7 +917,7 @@ fn test_concurrent_kg_creation_and_writes() {
     for i in 0..num_threads {
         let kg_name = format!("created_kg_{}", i);
         let results = storage_guard
-            .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+            .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
         assert_eq!(results.len(), 10);
     }

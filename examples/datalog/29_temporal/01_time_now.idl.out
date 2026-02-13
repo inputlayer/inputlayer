@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_now_n29t01
+Knowledge graph 'test_time_now_n29t01' created.
+Switched to knowledge graph: test_time_now_n29t01
+> .kg use test_time_now_n29t01
+Switched to knowledge graph: test_time_now_n29t01
+> +ref[(1, 1736640000000)]
+Inserted 1 fact(s) into 'ref'.
+> valid_ref(Id, RefTime) <- ref(Id, RefTime), Now = time_now(), Now > RefTime
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│    1 │ 1736640000000 │
+└──────┴───────────────┘
+1 rows
+(session: 1 rule(s))
+> ?valid_ref(Id, RefTime)
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│    1 │ 1736640000000 │
+└──────┴───────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_time_now_n29t01
+Knowledge graph 'test_time_now_n29t01' dropped.

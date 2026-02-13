@@ -1,0 +1,38 @@
+// Test: REPL Guide Rules
+// Description: Tests rule examples from docs/getting-started/04-repl-guide.md
+
+.kg create test_repl_rules_n28t16
+.kg use test_repl_rules_n28t16
+
+// === Setup data ===
++person[("alice", 30), ("bob", 17), ("carol", 25)]
++edge[(1, 2), (2, 3), (3, 4)]
++employee[(1, "engineering"), (2, "sales"), (3, "engineering")]
+
+// === Persistent Rules (+head :- body) ===
+
+// Simple rule
++adult(Name, Age) <- person(Name, Age), Age >= 18
+
+?adult(Name, Age)
+
+// Recursive rule
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+?path(1, X)
+
+// With aggregation
++dept_count(Dept, count<Id>) <- employee(Id, Dept)
+
+?dept_count(Dept, Count)
+
+// === Session Rules (head :- body, no + prefix) ===
+temp_result(X, Y) <- edge(X, Y), X < Y
+
+?temp_result(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_repl_rules_n28t16
+

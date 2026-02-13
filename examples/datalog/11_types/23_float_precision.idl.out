@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_prec_n11t23
+Knowledge graph 'test_float_prec_n11t23' created.
+Switched to knowledge graph: test_float_prec_n11t23
+> .kg use test_float_prec_n11t23
+Switched to knowledge graph: test_float_prec_n11t23
+> +values[(1.1,), (2.22,), (3.333,), (0.1,), (0.01,)]
+Inserted 5 fact(s) into 'values'.
+> ?values(V)
+┌───────┐
+│ col0  │
+├───────┤
+│  0.01 │
+│   0.1 │
+│   1.1 │
+│  2.22 │
+│ 3.333 │
+└───────┘
+5 rows

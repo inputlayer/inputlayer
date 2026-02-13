@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_fact_dim_n18t119
+Knowledge graph 'test_fact_dim_n18t119' created.
+Switched to knowledge graph: test_fact_dim_n18t119
+> .kg use test_fact_dim_n18t119
+Switched to knowledge graph: test_fact_dim_n18t119
+> +fact_events[(1, 100, 10), (2, 101, 20), (3, 100, 15)]
+Inserted 3 fact(s) into 'fact_events'.
+> +dim_users[(100, "Alice", "NYC"), (101, "Bob", "LA")]
+Inserted 2 fact(s) into 'dim_users'.

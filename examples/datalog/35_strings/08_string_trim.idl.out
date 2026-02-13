@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_trim_n35t08
+Knowledge graph 'test_trim_n35t08' created.
+Switched to knowledge graph: test_trim_n35t08
+> .kg use test_trim_n35t08
+Switched to knowledge graph: test_trim_n35t08
+> +words[("  hello  ",), ("world",), (" spaced ",)]
+Inserted 3 fact(s) into 'words'.

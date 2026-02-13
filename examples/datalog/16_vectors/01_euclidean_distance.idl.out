@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_vec_euclidean_n16t01
+Knowledge graph 'test_vec_euclidean_n16t01' created.
+Switched to knowledge graph: test_vec_euclidean_n16t01
+> .kg use test_vec_euclidean_n16t01
+Switched to knowledge graph: test_vec_euclidean_n16t01
+> +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [1.0, 1.0, 0.0])]
+Inserted 3 fact(s) into 'vectors'.
+> +query[([0.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'query'.

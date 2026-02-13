@@ -1,0 +1,11 @@
+// Test: Missing period error
+
+.kg create test_missing_period_n12t24
+.kg use test_missing_period_n12t24
+
+// Missing period - when followed by another statement, causes parse error
++edge(1, 2)
++edge(2, 3)
+
+.kg use default
+.kg drop test_missing_period_n12t24

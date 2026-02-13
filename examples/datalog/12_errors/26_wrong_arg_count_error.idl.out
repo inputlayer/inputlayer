@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wrong_args_n12t26
+Knowledge graph 'test_wrong_args_n12t26' created.
+Switched to knowledge graph: test_wrong_args_n12t26
+> .kg use test_wrong_args_n12t26
+Switched to knowledge graph: test_wrong_args_n12t26
+> +embeddings[(1, [0.1, 0.2, 0.3]), (2, [0.4, 0.5, 0.6])]
+Inserted 2 fact(s) into 'embeddings'.
+> ?embeddings(Id, V), Dist = euclidean(V)
+Script error: Query execution failed: Function 'euclidean' requires 2 argument(s), but 1 provided

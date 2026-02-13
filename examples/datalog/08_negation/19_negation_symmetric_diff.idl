@@ -1,0 +1,29 @@
+// Test: Set Operations via Negation
+// Description: Tests computing set difference using negation
+// NOTE: Multi-rule views with negation have limitations
+
+.kg create test_neg_sym_n08t19
+.kg use test_neg_sym_n08t19
+
+// Two sets
++set_a[(1, 0), (2, 0), (3, 0), (4, 0)]
++set_b[(3, 0), (4, 0), (5, 0), (6, 0)]
+
+// In A but not B (set difference A - B)
++a_only(X, Y) <- set_a(X, Y), !set_b(X, _)
+?a_only(X, Y)
+// Should return: (1, 0), (2, 0)
+
+// In B but not A (set difference B - A)
++b_only(X, Y) <- set_b(X, Y), !set_a(X, _)
+?b_only(X, Y)
+// Should return: (5, 0), (6, 0)
+
+// Intersection: elements in both A and B
++intersection(X, Y) <- set_a(X, Y), set_b(X, _)
+?intersection(X, Y)
+// Should return: (3, 0), (4, 0)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_sym_n08t19

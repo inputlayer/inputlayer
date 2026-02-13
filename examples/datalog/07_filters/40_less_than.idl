@@ -1,0 +1,18 @@
+// Test: Less than filter
+
+.kg create test_lt_n07t40
+.kg use test_lt_n07t40
+
++temps[(1, 30), (2, 15), (3, -5), (4, 25), (5, 0)]
+
+// Freezing temperatures (< 0)
+freezing(Id, Temp) <- temps(Id, Temp), Temp < 0
+
+// Cold (< 20)
+cold(Id, Temp) <- temps(Id, Temp), Temp < 20
+
+?freezing(Id, T)
+?cold(Id, T)
+
+.kg use default
+.kg drop test_lt_n07t40

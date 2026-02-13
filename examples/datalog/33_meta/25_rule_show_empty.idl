@@ -1,0 +1,9 @@
+// Test: .rule when no rules defined
+
+.kg create test_rule_empty_n33t25
+.kg use test_rule_empty_n33t25
+
+.rule
+
+.kg use default
+.kg drop test_rule_empty_n33t25

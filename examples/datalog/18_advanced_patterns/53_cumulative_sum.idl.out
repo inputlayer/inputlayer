@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cumsum_n18t53
+Knowledge graph 'test_cumsum_n18t53' created.
+Switched to knowledge graph: test_cumsum_n18t53
+> .kg use test_cumsum_n18t53
+Switched to knowledge graph: test_cumsum_n18t53
+> +daily[(1, 10), (2, 20), (3, 15), (4, 25)]
+Inserted 4 fact(s) into 'daily'.

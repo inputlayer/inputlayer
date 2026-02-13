@@ -69,12 +69,12 @@ Manage persistent rules:
 
 **Examples:**
 ```datalog
-.rule                           % List all rules
-.rule path                      % Query the 'path' rule
-.rule def path                  % Show path's definition
-.rule drop path                 % Delete the path rule
-.rule clear path                % Clear for re-definition
-.rule edit path 1 +path(X,Y) :- edge(X,Y).  % Edit clause 1
+.rule                           // List all rules
+.rule path                      // Query the 'path' rule
+.rule def path                  // Show path's definition
+.rule drop path                 // Delete the path rule
+.rule clear path                // Clear for re-definition
+.rule edit path 1 +path(X,Y) <- edge(X,Y)  // Edit clause 1
 ```
 
 ### Session Commands (`.session`)
@@ -89,10 +89,10 @@ Manage transient session rules:
 
 **Examples:**
 ```datalog
-temp(X) :- edge(1, X).    % Add session rule
-.session                   % List session rules
-.session drop 1            % Remove first rule
-.session clear             % Clear all
+temp(X) <- edge(1, X)    // Add session rule
+.session                   // List session rules
+.session drop 1            // Remove first rule
+.session clear             // Clear all
 ```
 
 ### File Commands (`.load`)
@@ -101,15 +101,15 @@ Load and execute Datalog files:
 
 | Command | Description |
 |---------|-------------|
-| `.load <file>` | Execute a .dl file |
+| `.load <file>` | Execute a .idl file |
 | `.load <file> --replace` | Replace existing rules |
 | `.load <file> --merge` | Merge with existing rules |
 
 **Examples:**
 ```datalog
-.load schema.dl
-.load rules.dl --replace
-.load additional_data.dl --merge
+.load schema.idl
+.load rules.idl --replace
+.load additional_data.idl --merge
 ```
 
 ### System Commands
@@ -126,78 +126,78 @@ Load and execute Datalog files:
 ### Insert Facts (`+`)
 
 ```datalog
-% Single fact
-+edge(1, 2).
+// Single fact
++edge(1, 2)
 
-% Bulk insert
-+edge[(1, 2), (2, 3), (3, 4)].
+// Bulk insert
++edge[(1, 2), (2, 3), (3, 4)]
 
-% With different types
-+person("alice", 30, "engineering").
+// With different types
++person("alice", 30, "engineering")
 ```
 
 ### Delete Facts (`-`)
 
 ```datalog
-% Single fact
--edge(1, 2).
+// Single fact
+-edge(1, 2)
 
-% Conditional delete (must reference relation in body)
--edge(X, Y) :- edge(X, Y), X > 10.
+// Conditional delete (must reference relation in body)
+-edge(X, Y) <- edge(X, Y), X > 10
 
-% Delete all from a relation
--edge(X, Y) :- edge(X, Y).
+// Delete all from a relation
+-edge(X, Y) <- edge(X, Y)
 ```
 
 ### Updates (Delete then Insert)
 
 ```datalog
-% First delete old value
--counter(1, 0).
-% Then insert new value
-+counter(1, 5).
+// First delete old value
+-counter(1, 0)
+// Then insert new value
++counter(1, 5)
 ```
 
-### Persistent Rules (`+head :- body`)
+### Persistent Rules (`+head <- body`)
 
 ```datalog
-% Simple rule
-+adult(Name, Age) :- person(Name, Age), Age >= 18.
+// Simple rule
++adult(Name, Age) <- person(Name, Age), Age >= 18
 
-% Recursive rule
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
+// Recursive rule
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 
-% With aggregation
-+dept_count(Dept, count<Id>) :- employee(Id, Dept).
+// With aggregation
++dept_count(Dept, count<Id>) <- employee(Id, Dept)
 ```
 
-### Session Rules (`head :- body`)
+### Session Rules (`head <- body`)
 
 ```datalog
-% Transient rule (no + prefix)
-temp_result(X, Y) :- edge(X, Y), X < Y.
+// Transient rule (no + prefix)
+temp_result(X, Y) <- edge(X, Y), X < Y
 ```
 
-### Queries (`?-`)
+### Queries (`?`)
 
 ```datalog
-% Simple query
-?- edge(1, X).
+// Simple query
+?edge(1, X)
 
-% With constraints
-?- person(Name, Age), Age > 25.
+// With constraints
+?person(Name, Age), Age > 25
 
-% Query derived data
-?- path(1, X).
+// Query derived data
+?path(1, X)
 ```
 
 ### Schema Declarations
 
 ```datalog
-% Typed schema
-+employee(id: int, name: string, dept: string).
-+user(id: int, name: string, email: string).
+// Typed schema
++employee(id: int, name: string, dept: string)
++user(id: int, name: string, email: string)
 ```
 
 ## Tips and Tricks
@@ -207,19 +207,19 @@ temp_result(X, Y) :- edge(X, Y), X < Y.
 Statements can span multiple lines. They're executed when you type the final `.`:
 
 ```datalog
-+complex_rule(X, Y, Z) :-
++complex_rule(X, Y, Z) <-
   first_condition(X, A),
   second_condition(A, Y),
   third_condition(Y, Z),
   X < Y,
-  Y < Z.
+  Y < Z
 ```
 
 ### Comments
 
 ```datalog
-% Single line comment (Prolog style - preferred)
-+edge(1, 2).  % Inline comment
+// Single line comment (Prolog style - preferred)
++edge(1, 2)  // Inline comment
 
 /*
    Multi-line
@@ -232,7 +232,7 @@ Statements can span multiple lines. They're executed when you type the final `.`
 Query results are displayed with row counts:
 
 ```
-inputlayer> ?- edge(X, Y).
+inputlayer> ?edge(X, Y)
 Results: 5 rows
   (1, 2)
   (2, 3)
@@ -246,11 +246,11 @@ Results: 5 rows
 Use `_` to ignore columns:
 
 ```datalog
-% Get all source nodes (ignore target)
-?- edge(X, _).
+// Get all source nodes (ignore target)
+?edge(X, _)
 
-% Count unique sources
-temp(count<X>) :- edge(X, _).
+// Count unique sources
+temp(count<X>) <- edge(X, _)
 ```
 
 ## Common Workflows
@@ -260,11 +260,11 @@ temp(count<X>) :- edge(X, _).
 ```datalog
 .kg create exploration
 .kg use exploration
-.load data.dl
-.rel                          % See what data exists
-?- some_relation(X, Y).       % Explore
-temp(X) :- complex_query...   % Session rule for analysis
-.session clear                % Clean up when done
+.load data.idl
+.rel                          // See what data exists
+?some_relation(X, Y)       // Explore
+temp(X) <- complex_query...   // Session rule for analysis
+.session clear                // Clean up when done
 ```
 
 ### 2. Building a Schema
@@ -273,15 +273,15 @@ temp(X) :- complex_query...   % Session rule for analysis
 .kg create production
 .kg use production
 
-% Define schemas first
-+user(id: int, name: string, email: string).
-+order(id: int, user_id: int, amount: float).
+// Define schemas first
++user(id: int, name: string, email: string)
++order(id: int, user_id: int, amount: float)
 
-% Load data
-.load users.dl
-.load orders.dl
+// Load data
+.load users.idl
+.load orders.idl
 
-% Verify
+// Verify
 .rel user
 .rel order
 ```
@@ -289,40 +289,40 @@ temp(X) :- complex_query...   % Session rule for analysis
 ### 3. Defining Business Rules
 
 ```datalog
-% Define persistent rules
-+high_value_customer(UserId) :-
+// Define persistent rules
++high_value_customer(UserId) <-
   order(_, UserId, Amount),
-  Amount > 1000.
+  Amount > 1000
 
-% Aggregate total spend per customer
-+customer_spend(UserId, sum<Amount>) :-
-  order(_, UserId, Amount).
+// Aggregate total spend per customer
++customer_spend(UserId, sum<Amount>) <-
+  order(_, UserId, Amount)
 
-% VIPs have high total spend
-+vip(UserId, Total) :-
+// VIPs have high total spend
++vip(UserId, Total) <-
   high_value_customer(UserId),
   customer_spend(UserId, Total),
-  Total > 5000.
+  Total > 5000
 
-% Query
-?- vip(User, Spend).
+// Query
+?vip(User, Spend)
 ```
 
 ### 4. Iterating on Rules
 
 ```datalog
-% First attempt
-+path(X, Y) :- edge(X, Y).
+// First attempt
++path(X, Y) <- edge(X, Y)
 
-% Check results
+// Check results
 .rule path
 
-% Not right? Clear and redefine
+// Not right? Clear and redefine
 .rule clear path
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 
-% Verify
+// Verify
 .rule def path
 .rule path
 ```
@@ -341,7 +341,7 @@ temp(X) :- complex_query...   % Session rule for analysis
 When something goes wrong, InputLayer provides helpful error messages:
 
 ```
-inputlayer> +edge(1, "two").
+inputlayer> +edge(1, "two")
 Error: Type mismatch in relation 'edge'
   Expected: (int, int)
   Got: (int, string)
@@ -349,7 +349,7 @@ Error: Type mismatch in relation 'edge'
 ```
 
 ```
-inputlayer> ?- undefined_relation(X).
+inputlayer> ?undefined_relation(X)
 Error: Unknown relation 'undefined_relation'
   Available relations: edge, node, path
 ```

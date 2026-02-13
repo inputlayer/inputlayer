@@ -177,7 +177,7 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
     } else if parts[1].to_lowercase() == "edit" {
         // .rule edit <name> <index> <rule>
         if parts.len() < 5 {
-            Err("Usage: .rule edit <name> <index> <rule>\nExample: .rule edit connected 2 rule connected(x: int, z: int) :- edge(x, y), connected(y, z).".to_string())
+            Err("Usage: .rule edit <name> <index> <rule>\nExample: .rule edit connected 2 rule connected(x: int, z: int) <- edge(x, y), connected(y, z)".to_string())
         } else {
             let name = parts[2].to_string();
             let index: usize = parts[3]
@@ -593,9 +593,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_command() {
-        let cmd = parse_meta_command(".load file.dl").unwrap();
+        let cmd = parse_meta_command(".load file.idl").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "file.dl");
+            assert_eq!(path, "file.idl");
             assert_eq!(mode, LoadMode::Default);
         } else {
             panic!("Expected Load");
@@ -604,9 +604,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_replace() {
-        let cmd = parse_meta_command(".load rules.dl --replace").unwrap();
+        let cmd = parse_meta_command(".load rules.idl --replace").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "rules.dl");
+            assert_eq!(path, "rules.idl");
             assert_eq!(mode, LoadMode::Replace);
         } else {
             panic!("Expected Load with Replace");
@@ -615,9 +615,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_merge() {
-        let cmd = parse_meta_command(".load data.dl --merge").unwrap();
+        let cmd = parse_meta_command(".load data.idl --merge").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "data.dl");
+            assert_eq!(path, "data.idl");
             assert_eq!(mode, LoadMode::Merge);
         } else {
             panic!("Expected Load with Merge");

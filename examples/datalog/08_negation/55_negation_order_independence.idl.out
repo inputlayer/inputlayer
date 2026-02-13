@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_order_n08t55
+Knowledge graph 'test_neg_order_n08t55' created.
+Switched to knowledge graph: test_neg_order_n08t55
+> .kg use test_neg_order_n08t55
+Switched to knowledge graph: test_neg_order_n08t55
+> +all[(1,), (2,), (3,), (4,)]
+Inserted 4 fact(s) into 'all'.
+> +exclude[(2,), (4,)]
+Inserted 2 fact(s) into 'exclude'.

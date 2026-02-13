@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_parallel_n10t116
+Knowledge graph 'test_parallel_n10t116' created.
+Switched to knowledge graph: test_parallel_n10t116
+> .kg use test_parallel_n10t116
+Switched to knowledge graph: test_parallel_n10t116
+> +multi_edge[("a", "b", 1), ("a", "b", 2), ("a", "b", 3), ("b", "c", 1)]
+Inserted 4 fact(s) into 'multi_edge'.

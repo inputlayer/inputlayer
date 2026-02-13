@@ -1,0 +1,82 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_repl_guide_n28t15
+Knowledge graph 'test_repl_guide_n28t15' created.
+Switched to knowledge graph: test_repl_guide_n28t15
+> .kg use test_repl_guide_n28t15
+Switched to knowledge graph: test_repl_guide_n28t15
+> +edge(1, 2)
+Inserted 1 fact(s) into 'edge'.
+> +edge[(2, 3), (3, 4)]
+Inserted 2 fact(s) into 'edge'.
+> +person("alice", 30, "engineering")
+Inserted 1 fact(s) into 'person'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+> ?person(Name, Age, Dept)
+┌─────────┬──────┬───────────────┐
+│ col0    │ col1 │ col2          │
+├─────────┼──────┼───────────────┤
+│ "alice" │   30 │ "engineering" │
+└─────────┴──────┴───────────────┘
+1 rows
+> -edge(1, 2)
+Deleted 1 facts from 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+2 rows
+> +edge(10, 20)
+Inserted 1 fact(s) into 'edge'.
+> +edge(15, 25)
+Inserted 1 fact(s) into 'edge'.
+> -edge(X, Y) <- edge(X, Y), X > 10
+Conditional delete: 1 fact(s) deleted from 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    3 │
+│    3 │    4 │
+│   10 │   20 │
+└──────┴──────┘
+3 rows
+> +counter(1, 0)
+Inserted 1 fact(s) into 'counter'.
+> ?counter(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+└──────┴──────┘
+1 rows
+> -counter(1, 0)
+Deleted 1 facts from 'counter'.
+> +counter(1, 5)
+Inserted 1 fact(s) into 'counter'.
+> ?counter(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    5 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_repl_guide_n28t15
+Knowledge graph 'test_repl_guide_n28t15' dropped.

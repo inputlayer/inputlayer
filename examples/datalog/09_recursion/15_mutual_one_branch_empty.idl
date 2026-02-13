@@ -1,0 +1,29 @@
+// Test: Mutual Recursion with One Branch Empty
+// Description: Tests mutual recursion when one relation starts empty
+
+.kg create test_mutual_empty_n09t15
+.kg use test_mutual_empty_n09t15
+
+// Only add facts for relation a, not for relation b
++a_base[(1), (2), (3)]
+
+// Mutual recursion where b starts empty
+a_derived(X) <- a_base(X)
+a_derived(X) <- b_derived(X)
+b_derived(X) <- b_base(X)
+b_derived(X) <- a_derived(X), X > 10
+
+// Query both - a_derived should have results, b_derived shouldn't contribute new ones
+?a_derived(X)
+?b_derived(X)
+
+// Now add b_base facts
++b_base[(10), (20)]
+
+// Query again
+?a_derived(X)
+?b_derived(X)
+
+// Cleanup
+.kg use default
+.kg drop test_mutual_empty_n09t15

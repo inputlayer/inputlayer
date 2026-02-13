@@ -1,0 +1,28 @@
+// Test: Grouped top_k with fact retraction
+// Description: Tests top_k per group when facts are retracted
+
+.kg create test_topk_grp_retract_n14t144
+.kg use test_topk_grp_retract_n14t144
+
++score[("math", "Alice", 95), ("math", "Bob", 85), ("math", "Charlie", 90),
+       ("science", "Alice", 80), ("science", "Bob", 92), ("science", "Charlie", 88)]
+
+// Top 2 per subject (descending)
++top_in_subject(Subject, top_k<2, Name, Grade:desc>) <- score(Subject, Name, Grade)
+
+?top_in_subject(S, N, G)
+
+// Remove Alice's math score
+-score("math", "Alice", 95)
+
+?top_in_subject(S, N, G)
+
+// Remove all science scores
+-score("science", "Alice", 80)
+-score("science", "Bob", 92)
+-score("science", "Charlie", 88)
+
+?top_in_subject(S, N, G)
+
+.kg use default
+.kg drop test_topk_grp_retract_n14t144

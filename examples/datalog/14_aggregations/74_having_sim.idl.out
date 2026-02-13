@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_having_n14t74
+Knowledge graph 'test_having_n14t74' created.
+Switched to knowledge graph: test_having_n14t74
+> .kg use test_having_n14t74
+Switched to knowledge graph: test_having_n14t74
+> +orders[(1, "Alice", 50), (2, "Bob", 100), (3, "Alice", 75), (4, "Carol", 30), (5, "Alice", 25)]
+Inserted 5 fact(s) into 'orders'.

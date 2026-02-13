@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_session_compat_n04t25
+Knowledge graph 'test_session_compat_n04t25' created.
+Switched to knowledge graph: test_session_compat_n04t25
+> .kg use test_session_compat_n04t25
+Switched to knowledge graph: test_session_compat_n04t25
+> +score[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'score'.
+> +bonus[(1, 10), (2, 20), (3, 30)]
+Inserted 3 fact(s) into 'bonus'.

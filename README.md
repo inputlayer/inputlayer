@@ -33,38 +33,38 @@ No embedding model will make a medical condition rank highly against a restauran
 
 Here's how InputLayer handles it. First, the data:
 
-```prolog
+```datalog
 +user_memory[
     ("m1", "loves_sushi", "User loves sushi", [0.91, 0.12, 0.03]),
     ("m2", "shellfish_allergy", "Severe shellfish allergy", [0.22, 0.05, 0.88]),
     ("m3", "visited_paris", "Visited Paris last year", [0.45, 0.67, 0.11])
-].
+]
 
 +related_to[("sushi", "japanese_cuisine"), ("shellfish", "japanese_cuisine"),
-            ("japanese_cuisine", "tokyo")].
+            ("japanese_cuisine", "tokyo")]
 
-+memory_topic[("m1", "sushi"), ("m2", "shellfish"), ("m3", "paris")].
++memory_topic[("m1", "sushi"), ("m2", "shellfish"), ("m3", "paris")]
 ```
 
 Then rules that follow those relationships:
 
-```prolog
-% Direct: memories about topics related to the destination
-+trip_relevant(MemId, Text, "direct") :-
+```datalog
+// Direct: memories about topics related to the destination
++trip_relevant(MemId, Text, "direct") <-
     user_memory(MemId, _, Text, _),
     memory_topic(MemId, Topic),
-    related_to(Topic, "tokyo").
+    related_to(Topic, "tokyo")
 
-% Transitive: memories connected THROUGH an intermediate topic
-+trip_relevant(MemId, Text, "inferred") :-
+// Transitive: memories connected THROUGH an intermediate topic
++trip_relevant(MemId, Text, "inferred") <-
     user_memory(MemId, _, Text, _),
     memory_topic(MemId, Topic),
     related_to(Topic, Bridge),
-    related_to(Bridge, "tokyo").
+    related_to(Bridge, "tokyo")
 ```
 
-```prolog
-?- trip_relevant(Id, Text, How).
+```datalog
+?trip_relevant(Id, Text, How)
 ```
 
 | Id | Text | How |
@@ -109,14 +109,14 @@ facts + rules → derived facts (updated incrementally)
 
 **Access control baked into the query.** Instead of filtering results after retrieval, you write the policy as a rule. Who can see what is part of the computation, not a middleware layer that might disagree.
 
-```prolog
-+accessible_doc(User, Doc, Score) :-
+```datalog
++accessible_doc(User, Doc, Score) <-
     document(Doc, Embedding),
     !confidential(Doc),
     has_permission(User, Doc),
     query_embedding(User, QEmb),
     Score = cosine(Embedding, QEmb),
-    Score > 0.5.
+    Score > 0.5
 ```
 
 **Multi-hop expansion.** You found 10 relevant documents. Now find documents cited by those documents. That's two lines of Datalog, not a pipeline of API calls.

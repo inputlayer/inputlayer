@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_repl_wildcards_n28t19
+Knowledge graph 'test_repl_wildcards_n28t19' created.
+Switched to knowledge graph: test_repl_wildcards_n28t19
+> .kg use test_repl_wildcards_n28t19
+Switched to knowledge graph: test_repl_wildcards_n28t19
+> +edge[(1, 2), (1, 3), (2, 4), (3, 4)]
+Inserted 4 fact(s) into 'edge'.
+> ?edge(X, _)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    2 │    4 │
+│    3 │    4 │
+└──────┴──────┘
+4 rows

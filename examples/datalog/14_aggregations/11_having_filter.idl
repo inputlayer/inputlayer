@@ -1,0 +1,39 @@
+// Test: HAVING-Style Filter on Aggregations
+// Verifies: Filtering groups based on aggregate values
+
+.kg create test_having_n14t11
+.kg use test_having_n14t11
+
+// Orders: customer_id, order_amount
++orders[(1, 100), (1, 200), (1, 50),
+        (2, 500), (2, 300),
+        (3, 25), (3, 30), (3, 20),
+        (4, 1000),
+        (5, 100), (5, 100), (5, 100), (5, 100)]
+
+// Calculate total per customer
++customer_total(Customer, sum<Amount>) <- orders(Customer, Amount)
+?customer_total(C, T)
+
+// HAVING equivalent: customers with total > 300
++big_spenders(Customer, Total) <- customer_total(Customer, Total), Total > 300
+?big_spenders(C, T)
+
+
+// Count orders per customer
++order_count(Customer, count<Amount>) <- orders(Customer, Amount)
+?order_count(C, N)
+
+// HAVING: customers with more than 2 orders
++frequent_buyers(Customer, Count) <- order_count(Customer, Count), Count > 2
+?frequent_buyers(C, N)
+
+
+// Combined filter: big spenders who are also frequent buyers
++vip_customers(Customer) <- big_spenders(Customer, _), frequent_buyers(Customer, _)
+?vip_customers(C)
+
+
+// Cleanup
+.kg use default
+.kg drop test_having_n14t11

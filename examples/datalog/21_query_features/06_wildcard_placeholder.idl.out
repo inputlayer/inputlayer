@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcard_n21t06
+Knowledge graph 'test_wildcard_n21t06' created.
+Switched to knowledge graph: test_wildcard_n21t06
+> .kg use test_wildcard_n21t06
+Switched to knowledge graph: test_wildcard_n21t06
+> +people[(1, "alice", 25), (2, "bob", 30), (3, "charlie", 25), (4, "diana", 35)]
+Inserted 4 fact(s) into 'people'.
+> ?people(Id, _, 25)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "alice"   │   25 │
+│    3 │ "charlie" │   25 │
+└──────┴───────────┴──────┘
+2 rows
+> ?people(Id, _, _)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "alice"   │   25 │
+│    2 │ "bob"     │   30 │
+│    3 │ "charlie" │   25 │
+│    4 │ "diana"   │   35 │
+└──────┴───────────┴──────┘
+4 rows
+> ?people(_, Name, 30)
+┌──────┬───────┬──────┐
+│ col0 │ col1  │ col2 │
+├──────┼───────┼──────┤
+│    2 │ "bob" │   30 │
+└──────┴───────┴──────┘
+1 rows

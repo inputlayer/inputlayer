@@ -52,7 +52,7 @@ pub struct CompiledRule {
     pub name: String,
 
     /// All clauses of this rule compiled to IR
-    /// Multiple clauses for recursive rules: path(X,Y) :- edge(X,Y). path(X,Z) :- path(X,Y), edge(Y,Z).
+    /// Multiple clauses for recursive rules: path(X,Y) <- edge(X,Y). path(X,Z) <- path(X,Y), edge(Y,Z).
     pub clauses: Vec<CompiledClause>,
 
     /// Base relations this rule depends on (transitive)

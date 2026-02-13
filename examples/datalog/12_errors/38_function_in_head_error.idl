@@ -1,0 +1,12 @@
+// Test: Function call in rule head
+
+.kg create test_func_head_n12t38
+.kg use test_func_head_n12t38
+
++data[(1, 2), (3, 4)]
+
+// Try to use function in head (invalid)
+abs_result(abs_int64(X), Y) <- data(X, Y)
+
+.kg use default
+.kg drop test_func_head_n12t38

@@ -1,0 +1,20 @@
+// Test: Temporal edge cases
+
+.kg create test_time_edge_n29t13
+.kg use test_time_edge_n29t13
+
+// Timestamps as integers (epoch seconds)
++events[(1, 1000000), (2, 1000000), (3, 2000000)]
+
+// Time difference between events
+time_diff(A, B, D) <- events(A, T1), events(B, T2), A < B, D = T2 - T1
+
+?time_diff(A, B, D)
+
+// Same timestamp events
+same_time(A, B) <- events(A, T), events(B, T), A < B
+
+?same_time(A, B)
+
+.kg use default
+.kg drop test_time_edge_n29t13

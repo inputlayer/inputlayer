@@ -1,0 +1,28 @@
+// Test: Complex stratified negation
+
+.kg create test_stratified_n08t30
+.kg use test_stratified_n08t30
+
+// Base data
++items[(1, "a"), (2, "b"), (3, "c"), (4, "d")]
++excluded_1[(1)]
++excluded_2[(2)]
+
+// First level: exclude items in excluded_1
++level_1(Id, Val) <- items(Id, Val), !excluded_1(Id)
+
+?level_1(Id, Val)
+
+// Second level: further exclude items in excluded_2
++level_2(Id, Val) <- level_1(Id, Val), !excluded_2(Id)
+
+?level_2(Id, Val)
+
+// Third level: combine with another negation
++special[(3)]
++level_3(Id, Val) <- level_2(Id, Val), !special(Id)
+
+?level_3(Id, Val)
+
+.kg use default
+.kg drop test_stratified_n08t30

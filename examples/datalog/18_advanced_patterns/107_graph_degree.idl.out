@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_degree_n18t107
+Knowledge graph 'test_degree_n18t107' created.
+Switched to knowledge graph: test_degree_n18t107
+> .kg use test_degree_n18t107
+Switched to knowledge graph: test_degree_n18t107
+> +edge[("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")]
+Inserted 4 fact(s) into 'edge'.

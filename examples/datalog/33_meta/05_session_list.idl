@@ -1,0 +1,23 @@
+// Test: Session List Command
+// Description: Tests .session command to list session rules
+
+.kg create test_session_list_n33t05
+.kg use test_session_list_n33t05
+
+// Insert some data
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Create session rules
+connected(X, Y) <- edge(X, Y)
+path(X, Y) <- edge(X, Y)
+path(X, Z) <- edge(X, Y), path(Y, Z)
+
+// List session rules
+.session
+
+// Query the rules work
+?path(1, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_session_list_n33t05

@@ -1,0 +1,14 @@
+// Test: Inline computation in query
+
+.kg create test_inline_n21t15
+.kg use test_inline_n21t15
+
++data[(1, 10), (2, 20), (3, 30)]
+
+// Inline computation
+with_computed(Id, Val, Double, Triple) <- data(Id, Val), Double = Val * 2, Triple = Val * 3
+
+?with_computed(Id, Val, Double, Triple)
+
+.kg use default
+.kg drop test_inline_n21t15

@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_col_n10t40
+Knowledge graph 'test_single_col_n10t40' created.
+Switched to knowledge graph: test_single_col_n10t40
+> .kg use test_single_col_n10t40
+Switched to knowledge graph: test_single_col_n10t40
+> +flags[(true,), (false,)]
+Inserted 2 fact(s) into 'flags'.
+> +ids[(1,), (2,), (3,)]
+Inserted 3 fact(s) into 'ids'.
+> ?flags(F)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+│    1 │
+└──────┘
+2 rows
+> ?ids(I)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows

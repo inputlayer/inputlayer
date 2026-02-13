@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unary_minus_n15t44
+Knowledge graph 'test_unary_minus_n15t44' created.
+Switched to knowledge graph: test_unary_minus_n15t44
+> .kg use test_unary_minus_n15t44
+Switched to knowledge graph: test_unary_minus_n15t44
+> +vals[(5,), (10,), (15,)]
+Inserted 3 fact(s) into 'vals'.

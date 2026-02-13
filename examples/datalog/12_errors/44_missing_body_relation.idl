@@ -1,0 +1,12 @@
+// Test: Rule body references undefined relation
+
+.kg create test_missing_body_n12t44
+.kg use test_missing_body_n12t44
+
+// Rule body has undefined relation
+derived(X) <- undefined_source(X)
+
+?derived(X)
+
+.kg use default
+.kg drop test_missing_body_n12t44

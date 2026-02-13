@@ -1,0 +1,21 @@
+// Test: Triangle Query (Cyclic Join)
+// Description: Tests finding triangles in a graph using ternary relations
+
+.kg create test_tri_n06t03
+.kg use test_tri_n06t03
+
+// Graph with triangle: 1->2->3->1
++edge[(1,2), (2,3), (3,1)]
++edge[(4,5), (5,6)]
+
+// Find triangles: three nodes A->B->C->A where all edges exist
+// Returns all three nodes of each triangle
++triangle(A, B, C) <- edge(A, B), edge(B, C), edge(C, A)
+
+// Query triangles - should find the cycle 1->2->3->1
+// Each triangle appears 3 times (once for each starting node)
+?triangle(X, Y, Z)
+
+// Cleanup
+.kg use default
+.kg drop test_tri_n06t03

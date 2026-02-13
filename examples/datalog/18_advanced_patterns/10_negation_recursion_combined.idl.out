@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_rec_combined_n18t10
+Knowledge graph 'test_neg_rec_combined_n18t10' created.
+Switched to knowledge graph: test_neg_rec_combined_n18t10
+> .kg use test_neg_rec_combined_n18t10
+Switched to knowledge graph: test_neg_rec_combined_n18t10
+> +edge[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4)]
+Inserted 6 fact(s) into 'edge'.
+> +blocked[(2, 3), (4, 5)]
+Inserted 2 fact(s) into 'blocked'.

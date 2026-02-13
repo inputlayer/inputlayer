@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_seq_n29t18
+Knowledge graph 'test_seq_n29t18' created.
+Switched to knowledge graph: test_seq_n29t18
+> .kg use test_seq_n29t18
+Switched to knowledge graph: test_seq_n29t18
+> +events[(1, "login", 100), (2, "click", 110), (3, "purchase", 120), (4, "logout", 200)]
+Inserted 4 fact(s) into 'events'.
+> post_login(Id, Action, Time) <- events(_, "login", LoginTime), events(Id, Action, Time), Time > LoginTime,
+┌──────┬────────────┬──────┐
+│ col0 │ col1       │ col2 │
+├──────┼────────────┼──────┤
+│    2 │ "click"    │  110 │
+│    3 │ "purchase" │  120 │
+│    4 │ "logout"   │  200 │
+└──────┴────────────┴──────┘
+3 rows
+(session: 1 rule(s))
+> Action != "login"
+Script error: Parse error: Unrecognized statement: Action != "login"

@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_all_bound_n21t53
+Knowledge graph 'test_all_bound_n21t53' created.
+Switched to knowledge graph: test_all_bound_n21t53
+> .kg use test_all_bound_n21t53
+Switched to knowledge graph: test_all_bound_n21t53
+> +data[(1, "a", 100), (2, "b", 200)]
+Inserted 2 fact(s) into 'data'.
+> ?data(1, "a", 100)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "a"  │  100 │
+└──────┴──────┴──────┘
+1 rows
+> ?data(1, "a", 999)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_bound_n21t53
+Knowledge graph 'test_all_bound_n21t53' dropped.

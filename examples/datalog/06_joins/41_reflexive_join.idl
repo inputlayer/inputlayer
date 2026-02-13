@@ -1,0 +1,14 @@
+// Test: Reflexive join (same column twice)
+
+.kg create test_reflexive_n06t41
+.kg use test_reflexive_n06t41
+
++matrix[(1, 1), (1, 2), (2, 1), (2, 2), (3, 3)]
+
+// Find diagonal elements
+diagonal(X) <- matrix(X, X)
+
+?diagonal(X)
+
+.kg use default
+.kg drop test_reflexive_n06t41

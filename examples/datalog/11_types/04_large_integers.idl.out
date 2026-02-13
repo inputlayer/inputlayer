@@ -1,0 +1,54 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_int_n11t04
+Knowledge graph 'test_large_int_n11t04' created.
+Switched to knowledge graph: test_large_int_n11t04
+> .kg use test_large_int_n11t04
+Switched to knowledge graph: test_large_int_n11t04
+> +large_pos[(1000000, 2000000), (999999, 1000001)]
+Inserted 2 fact(s) into 'large_pos'.
+> +large_neg[(-1000000, -2000000), (-999999, -1000001)]
+Inserted 2 fact(s) into 'large_neg'.
+> +mixed[(1000000, -1000000), (-999999, 999999)]
+Inserted 2 fact(s) into 'mixed'.
+> ?large_pos(X, Y)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│  999999 │ 1000001 │
+│ 1000000 │ 2000000 │
+└─────────┴─────────┘
+2 rows
+> ?large_neg(X, Y)
+┌──────────┬──────────┐
+│ col0     │ col1     │
+├──────────┼──────────┤
+│ -1000000 │ -2000000 │
+│  -999999 │ -1000001 │
+└──────────┴──────────┘
+2 rows
+> ?mixed(X, Y)
+┌─────────┬──────────┐
+│ col0    │ col1     │
+├─────────┼──────────┤
+│ -999999 │   999999 │
+│ 1000000 │ -1000000 │
+└─────────┴──────────┘
+2 rows
+> +big_first(X, Y) <- large_pos(X, Y), X > 999999
+Rule 'big_first' registered.
+> ?big_first(X, Y)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ 1000000 │ 2000000 │
+└─────────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_large_int_n11t04
+Knowledge graph 'test_large_int_n11t04' dropped.

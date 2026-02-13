@@ -1,7 +1,7 @@
 use inputlayer::{DatalogEngine, OptimizationConfig};
 
 fn main() {
-    let base_query = "path2(x, z) :- edge(x, y), edge(y, z).";
+    let base_query = "path2(x, z) <- edge(x, y), edge(y, z)";
     let edges: Vec<(i32, i32)> = vec![(1, 2), (2, 3), (3, 4), (4, 5)];
 
     // Test with NO optimizations

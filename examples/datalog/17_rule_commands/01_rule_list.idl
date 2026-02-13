@@ -1,0 +1,20 @@
+// Test: Rule List Command
+// Description: Tests .rule command to list all defined rules
+
+.kg create test_rule_list_n17t01
+.kg use test_rule_list_n17t01
+
+// Insert base data
++edge[(1,2), (2,3)]
+
+// Define multiple rules
++reverse(X, Y) <- edge(Y, X)
++paths(X, Y) <- edge(X, Y)
++paths(X, Z) <- paths(X, Y), edge(Y, Z)
+
+// List all rules
+.rule
+
+// Cleanup
+.kg use default
+.kg drop test_rule_list_n17t01

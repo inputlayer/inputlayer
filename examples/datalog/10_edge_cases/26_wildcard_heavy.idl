@@ -1,0 +1,25 @@
+// Test: Many wildcards in pattern
+
+.kg create test_wildcards_n10t26
+.kg use test_wildcards_n10t26
+
++wide[(1, 2, 3, 4, 5, 6)]
++wide[(10, 20, 30, 40, 50, 60)]
+
+// Keep only first and last
+ends(First, Last) <- wide(First, _, _, _, _, Last)
+
+?ends(First, Last)
+
+// Keep only middle two
+middle(C, D) <- wide(_, _, C, D, _, _)
+
+?middle(C, D)
+
+// Keep every other
+alternate(A, C, E) <- wide(A, _, C, _, E, _)
+
+?alternate(A, C, E)
+
+.kg use default
+.kg drop test_wildcards_n10t26

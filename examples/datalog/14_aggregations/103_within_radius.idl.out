@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_within_radius_n14t103
+Knowledge graph 'test_within_radius_n14t103' created.
+Switched to knowledge graph: test_within_radius_n14t103
+> .kg use test_within_radius_n14t103
+Switched to knowledge graph: test_within_radius_n14t103
+> +dist[(1, 0.1), (2, 0.5), (3, 1.2), (4, 0.3), (5, 2.0), (6, 0.45)]
+Inserted 6 fact(s) into 'dist'.

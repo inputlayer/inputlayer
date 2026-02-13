@@ -8,23 +8,23 @@
 use std::fs;
 use std::path::Path;
 
-/// Helper to find all .dl files recursively in a directory
-fn find_dl_files(dir: &Path) -> Vec<std::path::PathBuf> {
-    let mut dl_files = Vec::new();
+/// Helper to find all .idl files recursively in a directory
+fn find_idl_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut idl_files = Vec::new();
 
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if path.is_dir() {
-                dl_files.extend(find_dl_files(&path));
-            } else if path.extension().and_then(|s| s.to_str()) == Some("dl") {
-                dl_files.push(path);
+                idl_files.extend(find_idl_files(&path));
+            } else if path.extension().and_then(|s| s.to_str()) == Some("idl") {
+                idl_files.push(path);
             }
         }
     }
 
-    dl_files.sort();
-    dl_files
+    idl_files.sort();
+    idl_files
 }
 
 // Datalog Example Structure Tests
@@ -36,7 +36,7 @@ fn test_all_datalog_examples_present() {
         panic!("examples/datalog directory does not exist!");
     }
 
-    let dl_files = find_dl_files(examples_dir);
+    let idl_files = find_idl_files(examples_dir);
 
     // Expected test categories
     let expected_categories = vec![
@@ -64,14 +64,14 @@ fn test_all_datalog_examples_present() {
 
     // Should have at least one test file per category (26 total based on current structure)
     assert!(
-        dl_files.len() >= 20,
+        idl_files.len() >= 20,
         "Expected at least 20 test files, found {}",
-        dl_files.len()
+        idl_files.len()
     );
 
     println!(
         "Found {} datalog test files across {} categories",
-        dl_files.len(),
+        idl_files.len(),
         expected_categories.len()
     );
 }
@@ -79,20 +79,20 @@ fn test_all_datalog_examples_present() {
 #[test]
 fn test_all_test_files_have_output_snapshots() {
     let examples_dir = Path::new("examples/datalog");
-    let dl_files = find_dl_files(examples_dir);
+    let idl_files = find_idl_files(examples_dir);
 
     let mut missing_outputs = Vec::new();
 
-    for dl_file in &dl_files {
-        let out_file = dl_file.with_extension("dl.out");
+    for idl_file in &idl_files {
+        let out_file = idl_file.with_extension("idl.out");
         if !out_file.exists() {
-            missing_outputs.push(dl_file.display().to_string());
+            missing_outputs.push(idl_file.display().to_string());
         }
     }
 
     assert!(
         missing_outputs.is_empty(),
-        "The following test files are missing .dl.out snapshot files:\n  {}",
+        "The following test files are missing .idl.out snapshot files:\n  {}",
         missing_outputs.join("\n  ")
     );
 }
@@ -134,9 +134,9 @@ fn test_all_rust_examples_present() {
 #[test]
 fn test_examples_not_empty() {
     let examples_dir = Path::new("examples/datalog");
-    let dl_files = find_dl_files(examples_dir);
+    let idl_files = find_idl_files(examples_dir);
 
-    for path in dl_files {
+    for path in idl_files {
         let content =
             fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {:?}", path));
 
@@ -157,10 +157,10 @@ fn test_examples_not_empty() {
 #[test]
 fn test_output_files_not_empty() {
     let examples_dir = Path::new("examples/datalog");
-    let dl_files = find_dl_files(examples_dir);
+    let idl_files = find_idl_files(examples_dir);
 
-    for dl_file in dl_files {
-        let out_file = dl_file.with_extension("dl.out");
+    for idl_file in idl_files {
+        let out_file = idl_file.with_extension("idl.out");
         if out_file.exists() {
             let content = fs::read_to_string(&out_file)
                 .unwrap_or_else(|_| panic!("Failed to read {:?}", out_file));
@@ -178,7 +178,7 @@ fn test_output_files_not_empty() {
 #[test]
 fn test_knowledge_graph_tests() {
     let dir = Path::new("examples/datalog/01_knowledge_graph");
-    let files = find_dl_files(dir);
+    let files = find_idl_files(dir);
     assert!(
         !files.is_empty(),
         "01_knowledge_graph should have at least one test"
@@ -188,7 +188,7 @@ fn test_knowledge_graph_tests() {
 #[test]
 fn test_relations_tests() {
     let dir = Path::new("examples/datalog/02_relations");
-    let files = find_dl_files(dir);
+    let files = find_idl_files(dir);
     assert!(
         files.len() >= 3,
         "02_relations should have at least 3 tests (insert, bulk, delete)"
@@ -198,14 +198,14 @@ fn test_relations_tests() {
 #[test]
 fn test_joins_tests() {
     let dir = Path::new("examples/datalog/06_joins");
-    let files = find_dl_files(dir);
+    let files = find_idl_files(dir);
     assert!(files.len() >= 3, "06_joins should have at least 3 tests");
 }
 
 #[test]
 fn test_negation_tests() {
     let dir = Path::new("examples/datalog/08_negation");
-    let files = find_dl_files(dir);
+    let files = find_idl_files(dir);
     assert!(
         !files.is_empty(),
         "08_negation should have at least one test"
@@ -215,7 +215,7 @@ fn test_negation_tests() {
 #[test]
 fn test_recursion_tests() {
     let dir = Path::new("examples/datalog/09_recursion");
-    let files = find_dl_files(dir);
+    let files = find_idl_files(dir);
     assert!(
         files.len() >= 2,
         "09_recursion should have at least 2 tests"
@@ -223,14 +223,14 @@ fn test_recursion_tests() {
 }
 
 // Syntax Validation Tests
-/// Extract persistent rule statements from our test format (new syntax uses "+name(...) :- ...")
+/// Extract persistent rule statements from our test format (new syntax uses "+name(...) <- ...")
 fn extract_rules_from_test(content: &str) -> Vec<String> {
     content
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            // Keep lines that look like persistent rule declarations (start with "+" and contain ":-")
-            if trimmed.starts_with("+") && trimmed.contains(":-") {
+            // Keep lines that look like persistent rule declarations (start with "+" and contain "<-")
+            if trimmed.starts_with("+") && trimmed.contains("<-") {
                 Some(trimmed.to_string())
             } else {
                 None
@@ -241,7 +241,7 @@ fn extract_rules_from_test(content: &str) -> Vec<String> {
 
 #[test]
 fn test_negation_syntax_valid() {
-    let path = Path::new("examples/datalog/08_negation/01_simple_negation.dl");
+    let path = Path::new("examples/datalog/08_negation/01_simple_negation.idl");
     let content = fs::read_to_string(path).expect("Failed to read negation test");
     let rules = extract_rules_from_test(&content);
 
@@ -259,7 +259,7 @@ fn test_negation_syntax_valid() {
 
 #[test]
 fn test_recursion_syntax_valid() {
-    let path = Path::new("examples/datalog/09_recursion/01_transitive_closure.dl");
+    let path = Path::new("examples/datalog/09_recursion/01_transitive_closure.idl");
     let content = fs::read_to_string(path).expect("Failed to read recursion test");
     let rules = extract_rules_from_test(&content);
 
@@ -275,7 +275,7 @@ fn test_recursion_syntax_valid() {
         // Extract name after "+" and before "("
         let after_plus = r.strip_prefix("+").unwrap_or("");
         let head_name = after_plus.split('(').next().unwrap_or("").trim();
-        let body = r.split(":-").nth(1).unwrap_or("");
+        let body = r.split("<-").nth(1).unwrap_or("");
         // Check if the relation in head appears in body
         !head_name.is_empty() && body.contains(head_name)
     });
@@ -300,7 +300,7 @@ fn test_example_statistics() {
         })
         .count();
 
-    let datalog_count = find_dl_files(datalog_dir).len();
+    let datalog_count = find_idl_files(datalog_dir).len();
 
     println!("\n=== Example Statistics ===");
     println!("Rust examples: {}", rust_count);

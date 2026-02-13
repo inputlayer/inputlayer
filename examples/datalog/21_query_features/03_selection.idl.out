@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_selection_n21t03
+Knowledge graph 'test_selection_n21t03' created.
+Switched to knowledge graph: test_selection_n21t03
+> .kg use test_selection_n21t03
+Switched to knowledge graph: test_selection_n21t03
+> +products[(1, 100, 10), (2, 200, 5), (3, 150, 15), (4, 300, 8), (5, 50, 20)]
+Inserted 5 fact(s) into 'products'.
+> +expensive(Id, P, Q) <- products(Id, P, Q), P > 100
+Rule 'expensive' registered.
+> ?expensive(X, Y, Z)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │  200 │    5 │
+│    3 │  150 │   15 │
+│    4 │  300 │    8 │
+└──────┴──────┴──────┘
+3 rows

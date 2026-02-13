@@ -1,0 +1,45 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_n11t03
+Knowledge graph 'test_float_n11t03' created.
+Switched to knowledge graph: test_float_n11t03
+> .kg use test_float_n11t03
+Switched to knowledge graph: test_float_n11t03
+> +values[(1.9, 2.1), (3.7, 4.9), (0.5, 0.1)]
+Inserted 3 fact(s) into 'values'.
+> ?values(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  0.5 │  0.1 │
+│  1.9 │  2.1 │
+│  3.7 │  4.9 │
+└──────┴──────┘
+3 rows
+> +negfloat[(-1.5, -2.9), (-3.1, -4.8)]
+Inserted 2 fact(s) into 'negfloat'.
+> ?negfloat(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ -3.1 │ -4.8 │
+│ -1.5 │ -2.9 │
+└──────┴──────┘
+2 rows
+> +large(X, Y) <- values(X, Y), X > 2
+Rule 'large' registered.
+> ?large(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  3.7 │  4.9 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_float_n11t03
+Knowledge graph 'test_float_n11t03' dropped.

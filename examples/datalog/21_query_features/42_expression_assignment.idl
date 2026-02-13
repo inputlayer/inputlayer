@@ -1,0 +1,18 @@
+// Test: Expression assigned to variable
+
+.kg create test_expr_assign_n21t42
+.kg use test_expr_assign_n21t42
+
++vals[(10,), (20,), (30,)]
+
+// Compute multiple expressions
+computed(X, Plus10, Times2, Squared) <-
+    vals(X),
+    Plus10 = X + 10,
+    Times2 = X * 2,
+    Squared = X * X
+
+?computed(X, Plus10, Times2, Squared)
+
+.kg use default
+.kg drop test_expr_assign_n21t42

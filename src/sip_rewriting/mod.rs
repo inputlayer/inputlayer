@@ -11,14 +11,14 @@
 //!
 //! Original:
 //! ```datalog
-//! result(X, Z) :- R(X, Y), S(Y, Z), T(Z, W).
+//! result(X, Z) <- R(X, Y), S(Y, Z), T(Z, W).
 //! ```
 //!
 //! After SIP (forward pass):
 //! ```datalog
-//! R_sip0f0(X, Y) :- R(X, Y).
-//! S_sip0f1(Y, Z) :- S(Y, Z), R_sip0f0(_, Y).
-//! T_sip0f2(Z, W) :- T(Z, W), S_sip0f1(_, Z).
+//! R_sip0f0(X, Y) <- R(X, Y).
+//! S_sip0f1(Y, Z) <- S(Y, Z), R_sip0f0(_, Y).
+//! T_sip0f2(Z, W) <- T(Z, W), S_sip0f1(_, Z).
 //! ```
 //!
 //! Then backward pass, then final rule using SIP-renamed atoms.
@@ -214,7 +214,7 @@ impl SipRewriter {
             "SIP: not all non-core atoms were consumed by forward/backward passes"
         );
 
-        // Construct final rule: head :- core atoms (now SIP-renamed), active negated, comparisons
+        // Construct final rule: head <- core atoms (now SIP-renamed), active negated, comparisons
         let final_head = rule.head.clone();
         let mut final_body: Vec<BodyPredicate> = Vec::new();
 
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn test_two_way_join_produces_sip_rules() {
         let mut rewriter = SipRewriter::new();
-        // result(X, Z) :- R(X, Y), S(Y, Z).
+        // result(X, Z) <- R(X, Y), S(Y, Z).
         let rule = Rule::new(
             atom("result", vec![var("X"), var("Z")]),
             vec![
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn test_three_way_join_produces_sip_rules() {
         let mut rewriter = SipRewriter::new();
-        // result(X, W) :- R(X, Y), S(Y, Z), T(Z, W).
+        // result(X, W) <- R(X, Y), S(Y, Z), T(Z, W).
         let rule = Rule::new(
             atom("result", vec![var("X"), var("W")]),
             vec![
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn test_no_shared_variables_unchanged() {
         let mut rewriter = SipRewriter::new();
-        // result(X, Z) :- R(X, Y), S(A, B). (no shared variables)
+        // result(X, Z) <- R(X, Y), S(A, B). (no shared variables)
         let rule = Rule::new(
             atom("result", vec![var("X"), var("Z")]),
             vec![
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn test_sip_with_negation() {
         let mut rewriter = SipRewriter::new();
-        // result(X, Z) :- R(X, Y), S(Y, Z), not T(X).
+        // result(X, Z) <- R(X, Y), S(Y, Z), not T(X).
         let rule = Rule::new(
             atom("result", vec![var("X"), var("Z")]),
             vec![
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn test_sip_with_comparisons() {
         let mut rewriter = SipRewriter::new();
-        // result(X, Z) :- R(X, Y), S(Y, Z), X > 1.
+        // result(X, Z) <- R(X, Y), S(Y, Z), X > 1.
         let rule = Rule::new(
             atom("result", vec![var("X"), var("Z")]),
             vec![

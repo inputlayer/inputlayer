@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_load_merge_n40t03
+Knowledge graph 'test_load_merge_n40t03' created.
+Switched to knowledge graph: test_load_merge_n40t03
+> .kg use test_load_merge_n40t03
+Switched to knowledge graph: test_load_merge_n40t03
+> +existing_data[(1, "original"), (2, "also_original")]
+Inserted 2 fact(s) into 'existing_data'.
+> +loaded_relation[(0, "pre_existing")]
+Inserted 1 fact(s) into 'loaded_relation'.
+> ?loaded_relation(X, Y)
+┌──────┬────────────────┐
+│ col0 │ col1           │
+├──────┼────────────────┤
+│    0 │ "pre_existing" │
+└──────┴────────────────┘
+1 rows
+> .load examples/datalog/40_load_command/_helper_data.dl --merge
+Loading file: examples/datalog/40_load_command/_helper_data.dl
+Script error: Failed to read script 'examples/datalog/40_load_command/_helper_data.dl': No such file or directory (os error 2)

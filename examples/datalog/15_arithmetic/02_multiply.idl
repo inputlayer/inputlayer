@@ -1,0 +1,18 @@
+// Test: Multiply Computed Column
+// Description: Tests multiplication in rule head
+
+.kg create test_arith_mul_n15t02
+.kg use test_arith_mul_n15t02
+
+// Insert prices: item(id, unit_price)
++item[(1, 10), (2, 25), (3, 15)]
+
+// Compute doubled price
+double_price(Id, Price*2) <- item(Id, Price)
+
+// Query doubled prices
+?double_price(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_arith_mul_n15t02

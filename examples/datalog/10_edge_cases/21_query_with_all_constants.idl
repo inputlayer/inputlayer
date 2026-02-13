@@ -1,0 +1,19 @@
+// Test: Query with all constant arguments
+
+.kg create test_const_query_n10t21
+.kg use test_const_query_n10t21
+
+// Sample data
++facts[(1, 2), (3, 4), (5, 6)]
+
+// Query for existing tuple (should return 1 row)
+?facts(1, 2)
+
+// Query for non-existing tuple (should return 0 rows)
+?facts(1, 3)
+
+// Query for another existing tuple
+?facts(3, 4)
+
+.kg use default
+.kg drop test_const_query_n10t21

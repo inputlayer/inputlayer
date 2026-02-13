@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_list_n17t01
+Knowledge graph 'test_rule_list_n17t01' created.
+Switched to knowledge graph: test_rule_list_n17t01
+> .kg use test_rule_list_n17t01
+Switched to knowledge graph: test_rule_list_n17t01
+> +edge[(1,2), (2,3)]
+Inserted 2 fact(s) into 'edge'.

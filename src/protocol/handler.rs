@@ -36,6 +36,7 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
         Term::FieldAccess(_, _) => {
             Err("Cannot insert field access - use constants only".to_string())
         }
+        Term::BoolConstant(b) => Ok(Value::Bool(*b)),
         Term::RecordPattern(_) => {
             Err("Cannot insert record pattern - use constants only".to_string())
         }
@@ -172,7 +173,7 @@ impl Handler {
             current_stmt.push_str(line);
             current_stmt.push(' ');
 
-            if line.ends_with('.') {
+            {
                 let stmt_text = current_stmt.trim();
                 if !stmt_text.is_empty() {
                     if let Ok(stmt) = statement::parse_statement(stmt_text) {
@@ -405,7 +406,7 @@ impl Handler {
 
                                         // Build query rule
                                         let query_rule = format!(
-                                            "__cond_del_query__({}) :- {}.",
+                                            "__cond_del_query__({}) <- {}",
                                             all_vars.join(", "),
                                             body_str
                                         );
@@ -555,7 +556,7 @@ impl Handler {
                                     .join(", ");
 
                                 let query_rule = format!(
-                                    "__upd_query__({}) :- {}.",
+                                    "__upd_query__({}) <- {}",
                                     all_vars.join(", "),
                                     body_str
                                 );
@@ -668,8 +669,14 @@ impl Handler {
         let program_text = query_to_execute.unwrap_or(program_text);
 
         // Transform query
-        let query_program = if program_text.trim().starts_with("?-") {
-            let query_text = program_text.trim().trim_start_matches("?-").trim();
+        let query_program = if program_text.trim().starts_with('?')
+            && program_text
+                .trim()
+                .chars()
+                .nth(1)
+                .is_some_and(char::is_alphabetic)
+        {
+            let query_text = &program_text.trim()[1..];
             let goal = statement::parse_query(query_text)
                 .map_err(|e| format!("Failed to parse query: {e}"))?;
 
@@ -725,7 +732,7 @@ impl Handler {
             body_parts.extend(extra_constraints);
 
             format!(
-                "__query__({}) :- {}.",
+                "__query__({}) <- {}",
                 head_vars.join(", "),
                 body_parts.join(", ")
             )

@@ -1,0 +1,20 @@
+.kg create test_remat_n04t21
+.kg use test_remat_n04t21
+
++edge(1, 2)
++edge(2, 3)
+
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+from_one(Y) <- path(1, Y)
+?from_one(X)
+
++edge(3, 4)
++edge(4, 5)
+
+from_one_updated(Y) <- path(1, Y)
+?from_one_updated(X)
+
+.kg use default
+.kg drop test_remat_n04t21

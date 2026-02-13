@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_math_combined_n32t03
+Knowledge graph 'test_math_combined_n32t03' created.
+Switched to knowledge graph: test_math_combined_n32t03
+> .kg use test_math_combined_n32t03
+Switched to knowledge graph: test_math_combined_n32t03
+> +coords[(1, 10, 20)]
+Inserted 1 fact(s) into 'coords'.
+> +coords[(2, -5, 15)]
+Inserted 1 fact(s) into 'coords'.
+> +coords[(3, 30, -10)]
+Inserted 1 fact(s) into 'coords'.
+> +coords[(4, -25, -30)]
+Inserted 1 fact(s) into 'coords'.

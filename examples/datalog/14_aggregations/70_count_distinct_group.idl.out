@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_count_dist_grp_n14t70
+Knowledge graph 'test_count_dist_grp_n14t70' created.
+Switched to knowledge graph: test_count_dist_grp_n14t70
+> .kg use test_count_dist_grp_n14t70
+Switched to knowledge graph: test_count_dist_grp_n14t70
+> +visits[(1, "Alice", "homepage"), (2, "Bob", "homepage"), (3, "Alice", "products"), (4, "Alice", "homepage"), (5, "Bob", "checkout")]
+Inserted 5 fact(s) into 'visits'.

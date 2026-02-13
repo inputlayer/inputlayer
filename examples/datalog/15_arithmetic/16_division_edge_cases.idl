@@ -1,0 +1,41 @@
+// Test: Division Edge Cases
+// Verifies: Division by zero and edge cases
+// CRITICAL: Division by zero should not crash or produce incorrect results
+
+.kg create test_division_n15t16
+.kg use test_division_n15t16
+
+// Test data with potential zero divisors
++div_data[(10, 2), (20, 4), (15, 3), (100, 0), (50, 0)]
+
+// Safe division (exclude zero divisors)
++safe_div(X, Y, X/Y) <- div_data(X, Y), Y != 0
+?safe_div(A, B, C)
+
+
+// Division where divisor might be zero dynamically
++numerators[(100), (200), (300)]
++denominators[(10), (20), (0)]
+
+// Cross product division - some will be div by zero
++cross_div(N, D, N/D) <- numerators(N), denominators(D), D != 0
+?cross_div(N, D, R)
+
+// Test: What happens if we DON'T filter zero?
+// Uncomment to test actual div-by-zero behavior:
+// +unsafe_div(N, D, N/D) :- numerators(N), denominators(D).
+// ?- unsafe_div(N, D, R).
+
+// Modulo by zero test
++safe_mod(X, Y, X%Y) <- div_data(X, Y), Y != 0
+?safe_mod(A, B, C)
+
+// Integer division results
++int_div_data[(7, 2), (10, 3), (15, 4), (100, 7)]
++int_div_result(X, Y, X/Y) <- int_div_data(X, Y)
+?int_div_result(A, B, C)
+
+
+// Cleanup
+.kg use default
+.kg drop test_division_n15t16

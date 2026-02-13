@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diamond_n10t87
+Knowledge graph 'test_diamond_n10t87' created.
+Switched to knowledge graph: test_diamond_n10t87
+> .kg use test_diamond_n10t87
+Switched to knowledge graph: test_diamond_n10t87
+> +start[(1,), (2,)]
+Inserted 2 fact(s) into 'start'.

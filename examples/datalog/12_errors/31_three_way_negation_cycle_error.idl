@@ -1,0 +1,14 @@
+// Test: Three-way negation cycle error
+
+.kg create test_3way_neg_n12t31
+.kg use test_3way_neg_n12t31
+
++base[(1,), (2,), (3,)]
+
+// Create a three-way negation cycle: a -> !b -> !c -> !a
++a(X) <- base(X), !b(X)
++b(X) <- base(X), !c(X)
++c(X) <- base(X), !a(X)
+
+.kg use default
+.kg drop test_3way_neg_n12t31

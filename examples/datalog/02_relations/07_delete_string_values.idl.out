@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_str_n02t07
+Knowledge graph 'test_del_str_n02t07' created.
+Switched to knowledge graph: test_del_str_n02t07
+> .kg use test_del_str_n02t07
+Switched to knowledge graph: test_del_str_n02t07
+> +person[("alice", 25), ("bob", 30), ("charlie", 35)]
+Inserted 3 fact(s) into 'person'.
+> ?person(X, Y)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "alice"   │   25 │
+│ "bob"     │   30 │
+│ "charlie" │   35 │
+└───────────┴──────┘
+3 rows
+> -person[("bob", 30)]
+Deleted 1 facts from 'person'.
+> ?person(X, Y)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "alice"   │   25 │
+│ "charlie" │   35 │
+└───────────┴──────┘
+2 rows
+> -person[("alice", 25), ("charlie", 35)]
+Deleted 2 facts from 'person'.
+> ?person(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_str_n02t07
+Knowledge graph 'test_del_str_n02t07' dropped.

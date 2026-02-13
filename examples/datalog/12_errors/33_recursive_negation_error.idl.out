@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_neg_err_n12t33
+Knowledge graph 'test_rec_neg_err_n12t33' created.
+Switched to knowledge graph: test_rec_neg_err_n12t33
+> .kg use test_rec_neg_err_n12t33
+Switched to knowledge graph: test_rec_neg_err_n12t33
+> +base[(1,), (2,), (3,)]
+Inserted 3 fact(s) into 'base'.

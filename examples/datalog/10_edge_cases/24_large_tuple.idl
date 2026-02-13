@@ -1,0 +1,17 @@
+// Test: Large tuple (many columns)
+
+.kg create test_large_tuple_n10t24
+.kg use test_large_tuple_n10t24
+
+// 8-column tuple
++wide[(1, 2, 3, 4, 5, 6, 7, 8)]
+
+?wide(A, B, C, D, E, F, G, H)
+
+// Join with itself on first column
+self_join(A, B, C) <- wide(A, B, C, _, _, _, _, _), wide(A, _, _, D, E, F, G, H)
+
+?self_join(A, B, C)
+
+.kg use default
+.kg drop test_large_tuple_n10t24

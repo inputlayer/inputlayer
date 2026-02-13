@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_single_elem_n16t24
+Knowledge graph 'test_single_elem_n16t24' created.
+Switched to knowledge graph: test_single_elem_n16t24
+> .kg use test_single_elem_n16t24
+Switched to knowledge graph: test_single_elem_n16t24
+> +scalar[(1, [5.0]), (2, [3.0]), (3, [-2.0])]
+Inserted 3 fact(s) into 'scalar'.

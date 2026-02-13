@@ -1,0 +1,14 @@
+// Test: Dense rank pattern
+
+.kg create test_dense_rank_n18t123
+.kg use test_dense_rank_n18t123
+
++scores[(1, 100), (2, 90), (3, 100), (4, 80)]
+
+// Count distinct higher scores
++distinct_scores(S) <- scores(_, S)
+
+?distinct_scores(S)
+
+.kg use default
+.kg drop test_dense_rank_n18t123

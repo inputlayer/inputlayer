@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_neg_large_n08t17
+Knowledge graph 'test_neg_large_n08t17' created.
+Switched to knowledge graph: test_neg_large_n08t17
+> .kg use test_neg_large_n08t17
+Switched to knowledge graph: test_neg_large_n08t17
+> +data[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10), (11, 11), (12, 12), (13, 13), (14, 14), (15, 15), (16, 16), (17, 17), (18, 18), (19, 19), (20, 20)]
+Inserted 20 fact(s) into 'data'.
+> +exclude[(2, 0), (4, 0), (6, 0), (8, 0), (10, 0), (12, 0), (14, 0), (16, 0), (18, 0), (20, 0)]
+Inserted 10 fact(s) into 'exclude'.

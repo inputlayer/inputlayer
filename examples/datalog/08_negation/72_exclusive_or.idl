@@ -1,0 +1,16 @@
+// Test: Exclusive OR via set operations
+
+.kg create test_xor_n08t72
+.kg use test_xor_n08t72
+
++set_a[(1,), (2,), (3,)]
++set_b[(2,), (3,), (4,)]
+
+// XOR: in exactly one set
++xor_result(X) <- set_a(X), !set_b(X)
++xor_result(X) <- set_b(X), !set_a(X)
+
+?xor_result(X)
+
+.kg use default
+.kg drop test_xor_n08t72

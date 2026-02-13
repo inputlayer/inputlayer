@@ -1,0 +1,18 @@
+// Test: Moving aggregate pattern
+
+.kg create test_moving_n18t72
+.kg use test_moving_n18t72
+
++timeseries[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)]
+
+// Sum of current and previous value
+moving_sum(T, V, sum<V2>) <-
+    timeseries(T, V),
+    timeseries(T2, V2),
+    T2 >= T - 1,
+    T2 <= T
+
+?moving_sum(T, V, S)
+
+.kg use default
+.kg drop test_moving_n18t72

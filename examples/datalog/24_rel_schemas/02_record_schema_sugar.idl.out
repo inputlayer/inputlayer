@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_record_sugar_n24t02
+Knowledge graph 'test_record_sugar_n24t02' created.
+Switched to knowledge graph: test_record_sugar_n24t02
+> .kg use test_record_sugar_n24t02
+Switched to knowledge graph: test_record_sugar_n24t02
+> type Person: { id: int, name: string, age: int }.
+Script error: Parse error: Unknown base type: '{ id: int, name: string, age: int }.'. Use int, string, bool, float, or a type name.

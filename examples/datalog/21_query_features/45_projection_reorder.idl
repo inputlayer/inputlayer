@@ -1,0 +1,14 @@
+// Test: Projection with column reordering
+
+.kg create test_reorder_n21t45
+.kg use test_reorder_n21t45
+
++records[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)]
+
+// Reorder: amount, name, id
+reordered(Amount, Name, Id) <- records(Id, Name, Amount)
+
+?reordered(A, N, I)
+
+.kg use default
+.kg drop test_reorder_n21t45

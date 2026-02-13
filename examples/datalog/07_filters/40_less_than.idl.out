@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lt_n07t40
+Knowledge graph 'test_lt_n07t40' created.
+Switched to knowledge graph: test_lt_n07t40
+> .kg use test_lt_n07t40
+Switched to knowledge graph: test_lt_n07t40
+> +temps[(1, 30), (2, 15), (3, -5), (4, 25), (5, 0)]
+Inserted 5 fact(s) into 'temps'.

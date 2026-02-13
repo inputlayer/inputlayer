@@ -1,0 +1,21 @@
+// Test: Record Type Declaration
+// Description: Tests record type definitions
+
+.kg create test_record_type_n11t67
+.kg use test_record_type_n11t67
+
+// Declare a record type
+type User: { id: int, name: string }.
+
+// Declare schema explicitly using + prefix (record sugar not yet implemented)
++user(id: int, name: string)
+
+// Insert data
++user[(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+
+// Query all users
+?user(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_record_type_n11t67

@@ -1,0 +1,17 @@
+// Test: Top-K with Threshold (Ascending)
+// Description: Tests top_k_threshold in ascending mode - bottom K where score <= threshold
+
+.kg create test_top_k_threshold_asc_n14t102
+.kg use test_top_k_threshold_asc_n14t102
+
+// Insert latencies: latency(request_id, ms)
++latency[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 30)]
+
+// Get bottom 3 latencies that are <= 100ms (ascending - no desc flag)
++fast_requests(top_k_threshold<3, 100, ReqId, Ms:asc>) <- latency(ReqId, Ms)
+
+?fast_requests(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_top_k_threshold_asc_n14t102

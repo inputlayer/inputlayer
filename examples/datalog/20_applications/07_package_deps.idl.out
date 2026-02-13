@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_deps_n20t07
+Knowledge graph 'test_deps_n20t07' created.
+Switched to knowledge graph: test_deps_n20t07
+> .kg use test_deps_n20t07
+Switched to knowledge graph: test_deps_n20t07
+> +depends[(1, 2), (1, 3), (2, 4), (2, 5), (3, 5), (3, 6), (4, 7), (5, 7), (5, 8), (6, 8)].
+Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]

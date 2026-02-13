@@ -1,0 +1,21 @@
+// Test: Schema Type Mismatch
+// Description: Tests that type mismatches are reported in schema validation
+
+.kg create test_type_mismatch_n24t05
+.kg use test_type_mismatch_n24t05
+
+// Define schema with specific types
++users(id: int, name: string, age: int)
+
+// Valid inserts
++users[(1, "Alice", 30), (2, "Bob", 25)]
+
+// Query the data
+?users(Id, Name, Active)
+
+// Show relation info
+.rel users
+
+// Cleanup
+.kg use default
+.kg drop test_type_mismatch_n24t05

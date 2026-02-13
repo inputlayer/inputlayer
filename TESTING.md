@@ -34,7 +34,7 @@ make integration-test   # cargo test --all-features --test '*'
 
 ### Tier 3: Snapshot Tests (E2E)
 
-~995 Datalog scripts in `examples/datalog/` organized across 33 categories. Each `.dl` file has a corresponding `.dl.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
+~995 Datalog scripts in `examples/datalog/` organized across 33 categories. Each `.idl` file has a corresponding `.idl.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
 
 ```bash
 make e2e-test                              # Run all (parallel, 4 jobs)
@@ -51,7 +51,7 @@ Options:
 | `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`) |
 | `-j N` | Parallel jobs (default: 4, use 1 for sequential) |
 | `-v` | Verbose mode with full diffs (forces sequential) |
-| `-u` | Update mode  - regenerate `.dl.out` files |
+| `-u` | Update mode  - regenerate `.idl.out` files |
 
 Environment variables:
 | Variable | Default | Description |
@@ -109,27 +109,27 @@ Source-to-category mapping:
 
 | Target | Description |
 |--------|-------------|
-| `make e2e-update` | Regenerate all snapshot `.dl.out` files |
+| `make e2e-update` | Regenerate all snapshot `.idl.out` files |
 | `make flush-dev` | Delete `./data` folder to reset server state |
 | `make release VERSION=x.x.x` | Create release branch, bump version, push |
 
 ## Writing Snapshot Tests
 
-Each snapshot test is a `.dl` file in `examples/datalog/<category>/`:
+Each snapshot test is a `.idl` file in `examples/datalog/<category>/`:
 
 ```datalog
-% Test: Descriptive Name
-% Description: What this test verifies
+// Test: Descriptive Name
+// Description: What this test verifies
 
 .kg create test_unique_name_n<CAT>t<NUM>
 .kg use test_unique_name_n<CAT>t<NUM>
 
-+edge[(1,2), (2,3)].
-+path(X, Y) :- edge(X, Y).
++edge[(1,2), (2,3)]
++path(X, Y) <- edge(X, Y)
 
-?- path(X, Y).
+?path(X, Y)
 
-% Cleanup
+// Cleanup
 .kg use default
 .kg drop test_unique_name_n<CAT>t<NUM>
 ```
@@ -137,8 +137,8 @@ Each snapshot test is a `.dl` file in `examples/datalog/<category>/`:
 Rules:
 1. **Unique KG names**  - append `_n<category_number>t<file_number>` suffix (e.g., `_n08t01`) to prevent parallel test collisions.
 2. **Always clean up**  - switch back to `default` and drop your KG at the end.
-3. **File naming**  - `<number>_<description>.dl` (e.g., `01_simple_negation.dl`). Numbers must be unique within a category.
-4. **Generate snapshots**  - run `./scripts/run_snapshot_tests.sh -u -f <category>` to create the `.dl.out` file, then verify the output is correct.
+3. **File naming**  - `<number>_<description>.idl` (e.g., `01_simple_negation.idl`). Numbers must be unique within a category.
+4. **Generate snapshots**  - run `./scripts/run_snapshot_tests.sh -u -f <category>` to create the `.idl.out` file, then verify the output is correct.
 
 ## Test Categories
 

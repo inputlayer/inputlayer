@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minus_clause_n17t09
+Knowledge graph 'test_minus_clause_n17t09' created.
+Switched to knowledge graph: test_minus_clause_n17t09
+> .kg use test_minus_clause_n17t09
+Switched to knowledge graph: test_minus_clause_n17t09
+> +edge[(1,2), (2,3), (3,4)]
+Inserted 3 fact(s) into 'edge'.

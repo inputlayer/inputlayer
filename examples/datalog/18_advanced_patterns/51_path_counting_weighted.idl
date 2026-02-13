@@ -1,0 +1,17 @@
+// Test: Weighted path pattern
+
+.kg create test_weighted_n18t51
+.kg use test_weighted_n18t51
+
++edge[(1, 2, 10), (2, 3, 20), (1, 3, 50), (3, 4, 15)]
+
+// Direct paths with cost
++path_cost(A, B, C) <- edge(A, B, C)
+
+// Extended paths
++path_cost(A, C, TotalCost) <- path_cost(A, B, C1), edge(B, C, C2), TotalCost = C1 + C2, TotalCost < 100
+
+?path_cost(1, Dest, Cost)
+
+.kg use default
+.kg drop test_weighted_n18t51

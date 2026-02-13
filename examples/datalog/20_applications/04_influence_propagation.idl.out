@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_influence_n20t04
+Knowledge graph 'test_influence_n20t04' created.
+Switched to knowledge graph: test_influence_n20t04
+> .kg use test_influence_n20t04
+Switched to knowledge graph: test_influence_n20t04
+> +follows[(1, 2), (1, 3), (2, 4), (3, 4), (4, 5), (5, 6), (6, 7), (3, 7)]
+Inserted 8 fact(s) into 'follows'.
+> +influencer[(1)]
+Inserted 1 fact(s) into 'influencer'.

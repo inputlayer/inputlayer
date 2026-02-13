@@ -1,0 +1,27 @@
+// Test: Fact retraction affecting min aggregation
+// Description: Tests that retracting the min value causes min to update
+
+.kg create test_retract_min_n14t125
+.kg use test_retract_min_n14t125
+
++reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 15)]
+
++min_temp(Sensor, min<Temp>) <- reading(Sensor, Temp)
+
+// Initial: sensor 1 min=22, sensor 2 min=15
+?min_temp(X, Y)
+
+// Retract the current minimum for sensor 1
+-reading(1, 22)
+
+// Sensor 1 min should now be 25
+?min_temp(X, Y)
+
+// Add a new lower value
++reading[(1, 10)]
+
+// Sensor 1 min should now be 10
+?min_temp(X, Y)
+
+.kg use default
+.kg drop test_retract_min_n14t125

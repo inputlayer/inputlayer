@@ -1,0 +1,16 @@
+// Test: Boolean as key
+
+.kg create test_bool_key_n10t65
+.kg use test_bool_key_n10t65
+
++flags[(true, "yes"), (false, "no")]
+
+?flags(Key, Val)
+
+// Filter true only
+true_only(Val) <- flags(true, Val)
+
+?true_only(Val)
+
+.kg use default
+.kg drop test_bool_key_n10t65

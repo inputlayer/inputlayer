@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rec_depth_n09t47
+Knowledge graph 'test_rec_depth_n09t47' created.
+Switched to knowledge graph: test_rec_depth_n09t47
+> .kg use test_rec_depth_n09t47
+Switched to knowledge graph: test_rec_depth_n09t47
+> +link[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")]
+Inserted 4 fact(s) into 'link'.
+> +path_depth(X, X, 0)
+No facts inserted (1 duplicate skipped).

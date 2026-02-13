@@ -1,0 +1,29 @@
+// Test: Syntax Schema Declarations
+// Description: Tests schema declarations from docs/reference/syntax.md
+
+.kg create test_syntax_schemas_n28t08
+.kg use test_syntax_schemas_n28t08
+
+// === Basic schema ===
++employee(id: int, name: string, dept: string)
+
+// Insert data matching schema
++employee[(1, "alice", "engineering"), (2, "bob", "sales")]
+
+?employee(Id, Name, Dept)
+
+// === Schema with all types ===
++example(
+  a: int,
+  b: float,
+  c: string
+)
+
++example(1, 3.14, "test")
+
+?example(A, B, C)
+
+// Cleanup
+.kg use default
+.kg drop test_syntax_schemas_n28t08
+

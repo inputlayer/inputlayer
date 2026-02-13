@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ratio_n18t45
+Knowledge graph 'test_ratio_n18t45' created.
+Switched to knowledge graph: test_ratio_n18t45
+> .kg use test_ratio_n18t45
+Switched to knowledge graph: test_ratio_n18t45
+> +metrics[("visits", 1000), ("clicks", 100), ("purchases", 10)]
+Inserted 3 fact(s) into 'metrics'.

@@ -1,0 +1,16 @@
+// Test: Intersection of three sets
+
+.kg create test_intersect3_n22t08
+.kg use test_intersect3_n22t08
+
++set_a[(1,), (2,), (3,)]
++set_b[(2,), (3,), (4,)]
++set_c[(3,), (4,), (5,)]
+
+// Intersection: must be in all three
+intersect_all(X) <- set_a(X), set_b(X), set_c(X)
+
+?intersect_all(X)
+
+.kg use default
+.kg drop test_intersect3_n22t08
