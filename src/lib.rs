@@ -124,6 +124,7 @@ pub mod semiring_types; // Diff type abstraction: BooleanDiff, MinDiff, MaxDiff
 mod sip_rewriting; // AST-level semijoin reduction
 pub mod statement; // Datalog-native statement parser
 mod subplan_sharing; // Common subexpression elimination
+pub mod syntax; // PEG-based syntax highlighting for REPL
 
 // Storage Engine
 pub mod config; // Configuration system

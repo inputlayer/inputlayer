@@ -20,7 +20,7 @@ use inputlayer::statement::{parse_statement, MetaCommand, Statement};
 
 use reqwest::Client;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::Editor;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -598,7 +598,8 @@ fn is_complete_statement(line: &str) -> bool {
 }
 
 async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error>> {
-    let mut rl = DefaultEditor::new()?;
+    let mut rl = Editor::new()?;
+    rl.set_helper(Some(inputlayer::syntax::highlight::DatalogHelper::new()));
 
     let history_path = get_history_path();
     if history_path.exists() {
