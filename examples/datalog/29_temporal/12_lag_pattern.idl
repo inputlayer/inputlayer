@@ -1,0 +1,17 @@
+// Test: Lag/previous value pattern
+
+.kg create test_lag_n29t12
+.kg use test_lag_n29t12
+
++timeseries[(1, 10), (2, 15), (3, 12), (4, 20)]
+
+// Find consecutive pairs (current and previous)
+consecutive(T1, V1, T2, V2) <-
+    timeseries(T1, V1),
+    timeseries(T2, V2),
+    T2 = T1 + 1
+
+?consecutive(T1, V1, T2, V2)
+
+.kg use default
+.kg drop test_lag_n29t12

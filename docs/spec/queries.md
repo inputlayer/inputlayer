@@ -4,16 +4,16 @@ Queries retrieve data from InputLayer. They return matching facts without modify
 
 ## Basic Syntax
 
-Queries start with `?-` and end with `.`:
+Queries start with `?` and end with `.`:
 
 ```datalog
-?- edge(X, Y).
+?edge(X, Y)
 ```
 
 ## Grammar
 
 ```ebnf
-query ::= "?-" body "." ;
+query ::= "?" body "." ;
 body  ::= literal ("," literal)* ;
 ```
 
@@ -24,7 +24,7 @@ body  ::= literal ("," literal)* ;
 Query all facts in a relation:
 
 ```datalog
-?- edge(X, Y).
+?edge(X, Y)
 ```
 
 Result:
@@ -40,8 +40,8 @@ Result:
 Fix one column to filter results:
 
 ```datalog
-% Edges starting from node 1
-?- edge(1, Y).
+// Edges starting from node 1
+?edge(1, Y)
 ```
 
 Result:
@@ -55,7 +55,7 @@ Result:
 Query with all constants to check if a fact exists:
 
 ```datalog
-?- edge(1, 2).
+?edge(1, 2)
 ```
 
 Result:
@@ -71,8 +71,8 @@ An empty tuple `()` means "yes, it exists". No results means "no".
 Use `_` (wildcard) to ignore columns you don't need:
 
 ```datalog
-% Get all source nodes (ignore destination)
-?- edge(X, _).
+// Get all source nodes (ignore destination)
+?edge(X, _)
 ```
 
 Result:
@@ -90,7 +90,7 @@ Result:
 Filter results with comparison operators:
 
 ```datalog
-?- person(Name, Age), Age > 25.
+?person(Name, Age), Age > 25
 ```
 
 ### Multiple Conditions
@@ -98,7 +98,7 @@ Filter results with comparison operators:
 Combine conditions with commas (AND):
 
 ```datalog
-?- person(Name, Age), Age >= 18, Age <= 65.
+?person(Name, Age), Age >= 18, Age <= 65
 ```
 
 ### Negation
@@ -106,8 +106,8 @@ Combine conditions with commas (AND):
 Find facts that don't match a pattern:
 
 ```datalog
-% People who are not managers
-?- employee(Id, Name), !manager(Id).
+// People who are not managers
+?employee(Id, Name), !manager(Id)
 ```
 
 ## Joins
@@ -117,7 +117,7 @@ Find facts that don't match a pattern:
 Join two relations:
 
 ```datalog
-?- employee(Id, Name), works_in(Id, DeptId), department(DeptId, DeptName).
+?employee(Id, Name), works_in(Id, DeptId), department(DeptId, DeptName)
 ```
 
 This finds employees with their department names.
@@ -127,8 +127,8 @@ This finds employees with their department names.
 Join a relation with itself:
 
 ```datalog
-% Find pairs where A follows B and B follows A (mutual follows)
-?- follows(A, B), follows(B, A), A < B.
+// Find pairs where A follows B and B follows A (mutual follows)
+?follows(A, B), follows(B, A), A < B
 ```
 
 The `A < B` avoids duplicate pairs.
@@ -138,12 +138,12 @@ The `A < B` avoids duplicate pairs.
 Query derived relations (views) the same way as base relations:
 
 ```datalog
-% Define a rule
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
+// Define a rule
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 
-% Query the derived data
-?- path(1, X).
+// Query the derived data
+?path(1, X)
 ```
 
 ## Computed Values
@@ -153,7 +153,7 @@ Query derived relations (views) the same way as base relations:
 Compute values in queries:
 
 ```datalog
-?- product(Name, Price, Qty), Total = Price * Qty.
+?product(Name, Price, Qty), Total = Price * Qty
 ```
 
 ### Vector Functions
@@ -161,9 +161,9 @@ Compute values in queries:
 Compute distances or similarities:
 
 ```datalog
-?- vectors(Id1, V1), vectors(Id2, V2),
+?vectors(Id1, V1), vectors(Id2, V2),
    Id1 < Id2,
-   Dist = euclidean(V1, V2).
+   Dist = euclidean(V1, V2)
 ```
 
 ## Aggregations in Queries
@@ -171,17 +171,17 @@ Compute distances or similarities:
 Use aggregation functions:
 
 ```datalog
-% Count employees per department
-?- works_in(_, Dept), count<_>.
+// Count employees per department
+?works_in(_, Dept), count<_>
 
-% This is equivalent to defining a rule and querying it
+// This is equivalent to defining a rule and querying it
 ```
 
 For complex aggregations, define a rule first:
 
 ```datalog
-+dept_count(Dept, count<Id>) :- works_in(Id, Dept).
-?- dept_count(Dept, Count).
++dept_count(Dept, count<Id>) <- works_in(Id, Dept)
+?dept_count(Dept, Count)
 ```
 
 ## Result Format
@@ -197,7 +197,7 @@ N rows:
 If no matches are found:
 
 ```
-No results.
+No results
 ```
 
 ## Examples
@@ -205,9 +205,9 @@ No results.
 ### Simple Lookup
 
 ```datalog
-+person[("alice", 30), ("bob", 25), ("charlie", 35)].
++person[("alice", 30), ("bob", 25), ("charlie", 35)]
 
-?- person("alice", Age).
+?person("alice", Age)
 ```
 
 Result:
@@ -219,9 +219,9 @@ Result:
 ### Filtered Search
 
 ```datalog
-+employee[(1, "alice", 75000), (2, "bob", 65000), (3, "charlie", 80000)].
++employee[(1, "alice", 75000), (2, "bob", 65000), (3, "charlie", 80000)]
 
-?- employee(Id, Name, Salary), Salary > 70000.
+?employee(Id, Name, Salary), Salary > 70000
 ```
 
 Result:
@@ -234,11 +234,11 @@ Result:
 ### Complex Query
 
 ```datalog
-% Data
-+follows[(1, 2), (2, 3), (3, 1), (2, 1)].
+// Data
++follows[(1, 2), (2, 3), (3, 1), (2, 1)]
 
-% Find mutual follows
-?- follows(A, B), follows(B, A), A < B.
+// Find mutual follows
+?follows(A, B), follows(B, A), A < B
 ```
 
 Result:
@@ -251,13 +251,13 @@ Result:
 ### Query with Aggregation
 
 ```datalog
-+sales[("north", 100), ("north", 200), ("south", 150)].
++sales[("north", 100), ("north", 200), ("south", 150)]
 
-% Define aggregation rule
-+total_by_region(Region, sum<Amount>) :- sales(Region, Amount).
+// Define aggregation rule
++total_by_region(Region, sum<Amount>) <- sales(Region, Amount)
 
-% Query it
-?- total_by_region(Region, Total).
+// Query it
+?total_by_region(Region, Total)
 ```
 
 Result:

@@ -1,0 +1,20 @@
+// Test: Basic vector operations
+
+.kg create test_vec_ops_n16t18
+.kg use test_vec_ops_n16t18
+
+// Store vectors
++vectors(1, [1.0, 2.0, 3.0])
++vectors(2, [4.0, 5.0, 6.0])
++vectors(3, [1.0, 0.0, 0.0])
+
+// Query vectors
+?vectors(Id, V)
+
+// Find similar vectors using euclidean distance
+similar(Id1, Id2, D) <- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2, D = euclidean(V1, V2)
+
+?similar(A, B, D)
+
+.kg use default
+.kg drop test_vec_ops_n16t18

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_readd_all_n14t137
+Knowledge graph 'test_readd_all_n14t137' created.
+Switched to knowledge graph: test_readd_all_n14t137
+> .kg use test_readd_all_n14t137
+Switched to knowledge graph: test_readd_all_n14t137
+> +data[(1, 10), (1, 20), (2, 30), (2, 40), (2, 50)]
+Inserted 5 fact(s) into 'data'.

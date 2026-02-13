@@ -1,0 +1,20 @@
+// Test: Reorder columns in query output
+
+.kg create test_col_reorder_n21t07
+.kg use test_col_reorder_n21t07
+
+// Base data with 3 columns
++employees[(1, "Alice", 50000), (2, "Bob", 60000), (3, "Carol", 55000)]
+
+// Session rule to reorder (swap columns)
+reordered(Name, Id, Salary) <- employees(Id, Name, Salary)
+
+?reordered(Name, Id, Salary)
+
+// Different ordering
+reversed(Salary, Name, Id) <- employees(Id, Name, Salary)
+
+?reversed(Salary, Name, Id)
+
+.kg use default
+.kg drop test_col_reorder_n21t07

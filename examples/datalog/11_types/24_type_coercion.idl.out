@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_coerce_n11t24
+Knowledge graph 'test_coerce_n11t24' created.
+Switched to knowledge graph: test_coerce_n11t24
+> .kg use test_coerce_n11t24
+Switched to knowledge graph: test_coerce_n11t24
+> +int_vals[(10,), (20,), (30,)]
+Inserted 3 fact(s) into 'int_vals'.
+> +float_vals[(10.0,), (25.0,), (30.0,)]
+Inserted 3 fact(s) into 'float_vals'.
+> ?int_vals(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+│   30 │
+└──────┘
+3 rows
+> ?float_vals(X)
+┌──────┐
+│ col0 │
+├──────┤
+│ 10.0 │
+│ 25.0 │
+│ 30.0 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_coerce_n11t24
+Knowledge graph 'test_coerce_n11t24' dropped.

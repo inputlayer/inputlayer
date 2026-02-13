@@ -8,14 +8,14 @@ A unified Datalog-native syntax for InputLayer, designed for intuitive data mani
 |----------|---------|-----------|--------------|
 | `+` | Insert fact or persistent rule | Yes | diff = +1 |
 | `-` | Delete fact or drop rule | Yes | diff = -1 |
-| `:-` | Session rule (transient) | No | Ad-hoc computation |
-| `?-` | Query | No | Ad-hoc query |
+| `<-` | Session rule (transient) | No | Ad-hoc computation |
+| `?` | Query | No | Ad-hoc query |
 
 ## Key Terminology
 
 | Term | Description |
 |------|-------------|
-| **Fact** | Base data stored in a relation (e.g., `+edge(1, 2).`) |
+| **Fact** | Base data stored in a relation (e.g., `+edge(1, 2)`) |
 | **Rule** | Derived relation defined by a Datalog rule (persistent) |
 | **Session Rule** | Transient rule that exists only for current session |
 | **Schema** | Type definition for a relation's columns |
@@ -54,7 +54,7 @@ Meta commands start with `.` and control the system:
 .index stats <name>  Show index statistics
 .index rebuild <name>  Rebuild an index
 
-.load <file>         Load and execute a .dl file
+.load <file>         Load and execute a .idl file
 .compact             Compact WAL and consolidate batch files
 .status              Show system status
 .help                Show this help
@@ -77,99 +77,99 @@ Options: `type <hnsw>`, `metric <cosine|euclidean|dot_product|manhattan>`, `m <N
 
 Single fact:
 ```datalog
-+edge(1, 2).
++edge(1, 2)
 ```
 
 Bulk insert:
 ```datalog
-+edge[(1, 2), (2, 3), (3, 4)].
++edge[(1, 2), (2, 3), (3, 4)]
 ```
 
 ### Delete Facts (`-`)
 
 Single fact:
 ```datalog
--edge(1, 2).
+-edge(1, 2)
 ```
 
 Conditional delete (query-based):
 ```datalog
--edge(X, Y) :- edge(X, Y), X > 5.
+-edge(X, Y) <- edge(X, Y), X > 5
 ```
 
 ### Updates (Delete then Insert)
 
 To update data, delete the old value then insert the new:
 ```datalog
-% Delete old value
--counter(1, 0).
-% Insert new value
-+counter(1, 5).
+// Delete old value
+-counter(1, 0)
+// Insert new value
++counter(1, 5)
 ```
 
-## Persistent Rules (`+head :- body`)
+## Persistent Rules (`+head <- body`)
 
 Persistent rules are saved to disk and incrementally maintained by Differential Dataflow.
 
 Simple rule:
 ```datalog
-+path(X, Y) :- edge(X, Y).
++path(X, Y) <- edge(X, Y)
 ```
 
 Recursive rule (transitive closure):
 ```datalog
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 ```
 
 Rule with filter:
 ```datalog
-+adult(Name, Age) :- person(Name, Age), Age >= 18.
++adult(Name, Age) <- person(Name, Age), Age >= 18
 ```
 
 Rule with computed head variable:
 ```datalog
-+doubled(X, Y) :- nums(X), Y = X * 2.
++doubled(X, Y) <- nums(X), Y = X * 2
 ```
 
 Rules are saved to `{kg_dir}/rules/catalog.json` and automatically loaded on knowledge graph startup.
 
-## Session Rules (`:-`)
+## Session Rules (`<-`)
 
 Session rules are executed immediately but not persisted. They're useful for ad-hoc analysis:
 
 ```datalog
-result(X, Y) :- edge(X, Y), X < Y.
+result(X, Y) <- edge(X, Y), X < Y
 ```
 
 Session rules can reference persistent rules:
 ```datalog
-reachable_from_one(X) :- path(1, X).
+reachable_from_one(X) <- path(1, X)
 ```
 
 Multiple session rules accumulate and evaluate together:
 ```datalog
-foo(X, Y) :- bar(X, Y).
-foo(X, Z) :- foo(X, Y), foo(Y, Z).  % Adds to previous rule
+foo(X, Y) <- bar(X, Y)
+foo(X, Z) <- foo(X, Y), foo(Y, Z)  // Adds to previous rule
 ```
 
-## Queries (`?-`)
+## Queries (`?`)
 
 Query a relation or rule:
 
 Simple query:
 ```datalog
-?- edge(1, X).
+?edge(1, X)
 ```
 
 Query with constraints:
 ```datalog
-?- person(Name, Age), Age > 30.
+?person(Name, Age), Age > 30
 ```
 
 Query a derived relation:
 ```datalog
-?- path(1, X).
+?path(1, X)
 ```
 
 ## Schema Declarations
@@ -177,85 +177,85 @@ Query a derived relation:
 Define typed relations:
 
 ```datalog
-+employee(id: int, name: string, dept_id: int).
-+user(id: int, email: string, name: string).
++employee(id: int, name: string, dept_id: int)
++user(id: int, email: string, name: string)
 ```
 
 ## Aggregations
 
 ```datalog
-+total_sales(Dept, sum<Amount>) :- sales(Dept, _, Amount).
-+employee_count(Dept, count<Id>) :- employee(Id, _, Dept).
-+max_salary(Dept, max<Salary>) :- employee(_, Salary, Dept).
-+min_age(min<Age>) :- person(_, Age).
-+avg_score(avg<Score>) :- test_results(_, Score).
++total_sales(Dept, sum<Amount>) <- sales(Dept, _, Amount)
++employee_count(Dept, count<Id>) <- employee(Id, _, Dept)
++max_salary(Dept, max<Salary>) <- employee(_, Salary, Dept)
++min_age(min<Age>) <- person(_, Age)
++avg_score(avg<Score>) <- test_results(_, Score)
 ```
 
 Supported aggregates: `count`, `sum`, `min`, `max`, `avg`, `count_distinct`, `top_k`, `top_k_threshold`.
 
 ### TopK Example
 ```datalog
-+top_scores(top_k<3, Name, Score:desc>) :- scores(Name, Score).
++top_scores(top_k<3, Name, Score:desc>) <- scores(Name, Score)
 ```
 
 ## Builtin Functions
 
 ### Distance Functions
 ```datalog
-Dist = euclidean(V1, V2)    % Euclidean (L2) distance
-Dist = cosine(V1, V2)       % Cosine distance (1 - similarity)
-Score = dot(V1, V2)         % Dot product
-Dist = manhattan(V1, V2)    % Manhattan (L1) distance
-Dist = hamming(A, B)        % Hamming distance (bitwise)
+Dist = euclidean(V1, V2)    // Euclidean (L2) distance
+Dist = cosine(V1, V2)       // Cosine distance (1 - similarity)
+Score = dot(V1, V2)         // Dot product
+Dist = manhattan(V1, V2)    // Manhattan (L1) distance
+Dist = hamming(A, B)        // Hamming distance (bitwise)
 ```
 
 ### Vector Operations
 ```datalog
-NormV = normalize(V)        % Unit vector
-Dim = vec_dim(V)            % Vector dimension
-Sum = vec_add(V1, V2)       % Element-wise addition
-Scaled = vec_scale(V, S)    % Scalar multiplication
+NormV = normalize(V)        // Unit vector
+Dim = vec_dim(V)            // Vector dimension
+Sum = vec_add(V1, V2)       // Element-wise addition
+Scaled = vec_scale(V, S)    // Scalar multiplication
 ```
 
 ### Math Functions
 ```datalog
-A = abs(X)                  % Absolute value
-R = sqrt(X)                 % Square root
-R = pow(Base, Exp)          % Power
-R = log(X)                  % Natural logarithm
-R = exp(X)                  % Exponential (e^x)
-R = sin(X)                  % Sine (radians)
-R = cos(X)                  % Cosine (radians)
-R = tan(X)                  % Tangent (radians)
-R = floor(X)                % Floor
-R = ceil(X)                 % Ceiling
-S = sign(X)                 % Sign (-1, 0, 1)
+A = abs(X)                  // Absolute value
+R = sqrt(X)                 // Square root
+R = pow(Base, Exp)          // Power
+R = log(X)                  // Natural logarithm
+R = exp(X)                  // Exponential (e^x)
+R = sin(X)                  // Sine (radians)
+R = cos(X)                  // Cosine (radians)
+R = tan(X)                  // Tangent (radians)
+R = floor(X)                // Floor
+R = ceil(X)                 // Ceiling
+S = sign(X)                 // Sign (-1, 0, 1)
 ```
 
 ### String Functions
 ```datalog
-L = len(S)                  % String length
-U = upper(S)                % To uppercase
-L = lower(S)                % To lowercase
-T = trim(S)                 % Trim whitespace
-Sub = substr(S, Start, Len) % Substring
-R = replace(S, Find, Repl)  % Replace all
-R = concat(S1, S2)          % Concatenate
+L = len(S)                  // String length
+U = upper(S)                // To uppercase
+L = lower(S)                // To lowercase
+T = trim(S)                 // Trim whitespace
+Sub = substr(S, Start, Len) // Substring
+R = replace(S, Find, Repl)  // Replace all
+R = concat(S1, S2)          // Concatenate
 ```
 
 ### Temporal Functions
 ```datalog
-Now = time_now()            % Current Unix timestamp (ms)
-Diff = time_diff(T1, T2)   % Timestamp difference
-New = time_add(Ts, Dur)     % Add duration
-New = time_sub(Ts, Dur)     % Subtract duration
-W = time_decay(Ts, Now, HL) % Exponential decay
+Now = time_now()            // Current Unix timestamp (ms)
+Diff = time_diff(T1, T2)   // Timestamp difference
+New = time_add(Ts, Dur)     // Add duration
+New = time_sub(Ts, Dur)     // Subtract duration
+W = time_decay(Ts, Now, HL) // Exponential decay
 ```
 
 ### Scalar Min/Max
 ```datalog
-M = min_val(A, B)           % Smaller of two values
-M = max_val(A, B)           % Larger of two values
+M = min_val(A, B)           // Smaller of two values
+M = max_val(A, B)           // Larger of two values
 ```
 
 See [functions.md](functions.md) for the complete reference (55 functions).
@@ -263,18 +263,18 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 ## Vector Operations Example
 
 ```datalog
-% Insert vectors
-+vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])].
+// Insert vectors
++vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])]
 
-% Query with distance computation
-?- vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
-   Dist = euclidean(V1, V2), Dist < 1.0.
+// Query with distance computation
+?vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
+   Dist = euclidean(V1, V2), Dist < 1.0
 
-% Persistent rule with vector computation
-+similarity(Id1, Id2, Score) :-
+// Persistent rule with vector computation
++similarity(Id1, Id2, Score) <-
     vectors(Id1, V1), vectors(Id2, V2),
     Id1 < Id2,
-    Score = cosine(V1, V2).
+    Score = cosine(V1, V2)
 ```
 
 ## Examples
@@ -282,19 +282,19 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 ### Social Graph
 
 ```datalog
-% Create knowledge graph
+// Create knowledge graph
 .kg create social
 .kg use social
 
-% Add edges
-+follows[(1, 2), (2, 3), (3, 4), (1, 4)].
+// Add edges
++follows[(1, 2), (2, 3), (3, 4), (1, 4)]
 
-% Define reachability rule (persistent)
-+reach(X, Y) :- follows(X, Y).
-+reach(X, Z) :- reach(X, Y), follows(Y, Z).
+// Define reachability rule (persistent)
++reach(X, Y) <- follows(X, Y)
++reach(X, Z) <- reach(X, Y), follows(Y, Z)
 
-% Query who user 1 can reach
-?- reach(1, X).
+// Query who user 1 can reach
+?reach(1, X)
 ```
 
 ### Access Control (RBAC)
@@ -303,17 +303,17 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 .kg create acl
 .kg use acl
 
-% Facts: users, roles, permissions
-+user_role[("alice", "admin"), ("bob", "viewer")].
-+role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")].
+// Facts: users, roles, permissions
++user_role[("alice", "admin"), ("bob", "viewer")]
++role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")]
 
-% Rule: user has permission if they have a role with that permission
-+has_permission(User, Perm) :-
+// Rule: user has permission if they have a role with that permission
++has_permission(User, Perm) <-
   user_role(User, Role),
-  role_permission(Role, Perm).
+  role_permission(Role, Perm)
 
-% Query: what can alice do?
-?- has_permission("alice", Perm).
+// Query: what can alice do?
+?has_permission("alice", Perm)
 ```
 
 ### Policy-First RAG
@@ -322,26 +322,26 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 .kg create rag
 .kg use rag
 
-% Facts
-+member[("alice", "engineering"), ("bob", "sales")].
-+doc[(101, "Design Doc"), (102, "Sales Pitch")].
-+acl[("engineering", 101), ("sales", 102)].
-+emb[(101, [1.0, 0.0]), (102, [0.0, 1.0])].
+// Facts
++member[("alice", "engineering"), ("bob", "sales")]
++doc[(101, "Design Doc"), (102, "Sales Pitch")]
++acl[("engineering", 101), ("sales", 102)]
++emb[(101, [1.0, 0.0]), (102, [0.0, 1.0])]
 
-% Rule: user can access docs via group membership
-+can_access(User, DocId) :- member(User, Group), acl(Group, DocId).
+// Rule: user can access docs via group membership
++can_access(User, DocId) <- member(User, Group), acl(Group, DocId)
 
-% Query: what can alice retrieve, with similarity score?
-?- can_access("alice", DocId), emb(DocId, V),
-   Sim = cosine(V, [0.9, 0.1]), Sim > 0.5.
+// Query: what can alice retrieve, with similarity score?
+?can_access("alice", DocId), emb(DocId, V),
+   Sim = cosine(V, [0.9, 0.1]), Sim > 0.5
 ```
 
 ## Differential Dataflow Semantics
 
 InputLayer is built on Differential Dataflow (DD), which uses a diff-based model:
 
-- `+fact.` sends `(fact, time, +1)` to DD
-- `-fact.` sends `(fact, time, -1)` to DD
+- `+fact` sends `(fact, time, +1)` to DD
+- `-fact` sends `(fact, time, -1)` to DD
 - Rules are incrementally maintained using DD's `iterate()` operator
 - Queries are executed using DD's dataflow operators
 

@@ -93,30 +93,30 @@ See [Functions Reference](functions.md) for complete documentation.
 ## Syntax Quick Reference
 
 ```datalog
-% Facts
-+relation(value1, value2).     % Insert persistent fact
-relation(value1, value2).      % Insert session fact
--relation(value1, value2).     % Delete fact
+// Facts
++relation(value1, value2)     // Insert persistent fact
+relation(value1, value2)      // Insert session fact
+-relation(value1, value2)     // Delete fact
 
-% Rules
-+head(X, Y) :- body(X, Z), other(Z, Y).     % Persistent rule
-head(X, Y) :- body(X, Z), other(Z, Y).      % Session rule
+// Rules
++head(X, Y) <- body(X, Z), other(Z, Y)     // Persistent rule
+head(X, Y) <- body(X, Z), other(Z, Y)      // Session rule
 
-% Negation
-result(X) :- source(X), !excluded(X).
+// Negation
+result(X) <- source(X), !excluded(X)
 
-% Queries
-?- relation(X, Y), X > 10.
+// Queries
+?relation(X, Y), X > 10
 
-% Aggregations
-?- count<X> :- relation(X, _).
-?- sum<V> : G :- data(G, V).  % Group by G
+// Aggregations
+?count<X> <- relation(X, _)
+?sum<V> : G <- data(G, V)  // Group by G
 
-% Computed values
-result(X, Y) :- input(X), Y = X * 2 + 1.
+// Computed values
+result(X, Y) <- input(X), Y = X * 2 + 1
 
-% Comments
-% Single line comment
+// Comments
+// Single line comment
 /* Multi-line
    comment */
 ```

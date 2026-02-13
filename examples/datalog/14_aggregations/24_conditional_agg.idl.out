@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_agg_n14t24
+Knowledge graph 'test_cond_agg_n14t24' created.
+Switched to knowledge graph: test_cond_agg_n14t24
+> .kg use test_cond_agg_n14t24
+Switched to knowledge graph: test_cond_agg_n14t24
+> +transactions[(1, "credit", 100), (2, "debit", 50), (3, "credit", 200), (4, "debit", 75), (5, "credit", 150)]
+Inserted 5 fact(s) into 'transactions'.

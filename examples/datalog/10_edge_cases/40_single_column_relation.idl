@@ -1,0 +1,24 @@
+// Test: Single column relation
+
+.kg create test_single_col_n10t40
+.kg use test_single_col_n10t40
+
++flags[(true,), (false,)]
++ids[(1,), (2,), (3,)]
+
+?flags(F)
+
+?ids(I)
+
+// Join single-column relations
+both(I, F) <- ids(I), flags(F)
+
+?both(I, F)
+
+// Aggregation on single column
++count_ids(count<I>) <- ids(I)
+
+?count_ids(C)
+
+.kg use default
+.kg drop test_single_col_n10t40

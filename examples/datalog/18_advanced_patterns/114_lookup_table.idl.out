@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_lookup_n18t114
+Knowledge graph 'test_lookup_n18t114' created.
+Switched to knowledge graph: test_lookup_n18t114
+> .kg use test_lookup_n18t114
+Switched to knowledge graph: test_lookup_n18t114
+> +status_codes[(1, "pending"), (2, "active"), (3, "completed"), (4, "cancelled")]
+Inserted 4 fact(s) into 'status_codes'.
+> +orders[(101, 1), (102, 2), (103, 3), (104, 1)]
+Inserted 4 fact(s) into 'orders'.

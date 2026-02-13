@@ -1,0 +1,14 @@
+// Test: Modulo by zero
+
+.kg create test_mod_zero_n12t52
+.kg use test_mod_zero_n12t52
+
++nums[(10,), (0,)]
+
+// This should error when X=0
+result(X, Y) <- nums(X), Y = 100 % X
+
+?result(X, Y)
+
+.kg use default
+.kg drop test_mod_zero_n12t52

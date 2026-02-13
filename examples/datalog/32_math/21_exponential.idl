@@ -1,0 +1,13 @@
+// Test: Exponential function
+
+.kg create test_exp_n32t21
+.kg use test_exp_n32t21
+
++vals[(0,), (1,), (2,)]
+
+exp_val(X, Y) <- vals(X), Y = EXP(X)
+
+?exp_val(X, Y)
+
+.kg use default
+.kg drop test_exp_n32t21

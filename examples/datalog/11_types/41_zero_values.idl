@@ -1,0 +1,16 @@
+// Test: Zero and empty values
+
+.kg create test_zero_empty_n11t41
+.kg use test_zero_empty_n11t41
+
++data[(0, "", 0.0, false)]
+
+?data(A, B, C, D)
+
+// Filter on zero
+has_zero(A, B, C, D) <- data(A, B, C, D), A = 0
+
+?has_zero(A, B, C, D)
+
+.kg use default
+.kg drop test_zero_empty_n11t41

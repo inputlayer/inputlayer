@@ -1,6 +1,6 @@
 //! Rule Catalog for Persistent Rules (Policies)
 //!
-//! Manages persistent rule definitions per database. Rules are defined with `:-`
+//! Manages persistent rule definitions per database. Rules are defined with `<-`
 //! and are automatically loaded on database startup.
 //!
 //! ## Storage
@@ -104,8 +104,8 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
 /// Validate that a set of rules doesn't have negation cycles (stratification check)
 ///
 /// This checks for mutual negation cycles like:
-/// - a(X) :- !b(X)
-/// - b(X) :- !a(X)
+/// - a(X) <- !b(X)
+/// - b(X) <- !a(X)
 ///
 /// # Arguments
 /// * `rules` - The rules to validate together
@@ -431,8 +431,8 @@ impl RuleCatalog {
     /// Returns information about whether rule was created or updated
     ///
     /// This function performs stratification checking to reject:
-    /// - Self-negation: a(X) :- !a(X)
-    /// - Mutual negation cycles: a(X) :- !b(X), b(X) :- !a(X)
+    /// - Self-negation: a(X) <- !a(X)
+    /// - Mutual negation cycles: a(X) <- !b(X), b(X) <- !a(X)
     /// - Any recursion through negation
     pub fn register_rule(&mut self, rule_def: &RuleDef) -> Result<RuleRegisterResult, String> {
         let name = &rule_def.name;
@@ -873,11 +873,11 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First rule: path(X, Y) :- edge(X, Y).
+        // First rule: path(X, Y) <- edge(X, Y).
         let rule1 = make_test_rule("path", "edge");
         catalog.register("path", &rule1).unwrap();
 
-        // Second rule: path(X, Z) :- edge(X, Y), path(Y, Z).
+        // Second rule: path(X, Z) <- edge(X, Y), path(Y, Z).
         let head = Atom::new(
             "path".to_string(),
             vec![
@@ -1160,7 +1160,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First rule: connected(X, Y) :- edge(X, Y).
+        // First rule: connected(X, Y) <- edge(X, Y).
         let rule1 = make_test_rule("connected", "edge");
         let rule_def1 = RuleDef {
             name: "connected".to_string(),
@@ -1174,7 +1174,7 @@ mod tests {
             println!("  Rules in 'connected': {}", view.rules.len());
         }
 
-        // Second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
+        // Second rule: connected(X, Z) <- edge(X, Y), connected(Y, Z).
         let head = Atom::new(
             "connected".to_string(),
             vec![
@@ -1304,7 +1304,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // Self-negation: a(X) :- base(X), !a(X).
+        // Self-negation: a(X) <- base(X), !a(X).
         // This should be rejected as unstratified
         let head = Atom::new("a".to_string(), vec![Term::Variable("X".to_string())]);
         let body = vec![
@@ -1340,7 +1340,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // Unsafe negation: unsafe_rule(X) :- !banned(X).
+        // Unsafe negation: unsafe_rule(X) <- !banned(X).
         // X only appears in the negated atom, not in any positive atom
         // This should be rejected as unsafe (range restriction violation)
         let head = Atom::new(
@@ -1380,7 +1380,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // Empty body rule: foo(X) :- .
+        // Empty body rule: foo(X) <- .
         // X is in head but not bound by any positive body atom (no body atoms at all!)
         let head = Atom::new("foo".to_string(), vec![Term::Variable("X".to_string())]);
         let body = vec![]; // Empty body
@@ -1410,7 +1410,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // Safe negation: not_banned(X) :- person(X), !banned(X).
+        // Safe negation: not_banned(X) <- person(X), !banned(X).
         // X is bound by positive atom person(X), so !banned(X) is safe
         let head = Atom::new(
             "not_banned".to_string(),
@@ -1447,7 +1447,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First rule: result(X, Y, top_k<2, Score, desc>) :- scores(X, Y, Score).
+        // First rule: result(X, Y, top_k<2, Score, desc>) <- scores(X, Y, Score).
         let head1 = Atom::new(
             "result".to_string(),
             vec![
@@ -1780,7 +1780,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
 
-        // First: path(X, Y) :- edge(X, Y). (arity 2)
+        // First: path(X, Y) <- edge(X, Y). (arity 2)
         let rule1 = make_test_rule("path", "edge");
         let def1 = RuleDef {
             name: "path".to_string(),
@@ -1788,7 +1788,7 @@ mod tests {
         };
         catalog.register_rule(&def1).unwrap();
 
-        // Second: path(X, Y, Z) :- triple(X, Y, Z). (arity 3 - mismatch!)
+        // Second: path(X, Y, Z) <- triple(X, Y, Z). (arity 3 - mismatch!)
         let head2 = Atom::new(
             "path".to_string(),
             vec![

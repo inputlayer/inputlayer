@@ -1,0 +1,14 @@
+// Test: SUM with large values
+
+.kg create test_sum_large_n14t96
+.kg use test_sum_large_n14t96
+
++big_nums[(1000000000,), (2000000000,), (3000000000,)]
+
+// Sum of large numbers
++big_sum(sum<X>) <- big_nums(X)
+
+?big_sum(S)
+
+.kg use default
+.kg drop test_sum_large_n14t96

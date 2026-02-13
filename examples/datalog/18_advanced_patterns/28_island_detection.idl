@@ -1,0 +1,22 @@
+// Test: Island detection pattern
+
+.kg create test_islands_n18t28
+.kg use test_islands_n18t28
+
+// Data with islands (groups of consecutive 1s)
++data[(1, 1), (2, 1), (3, 0), (4, 1), (5, 1), (6, 1), (7, 0), (8, 1)]
+
+// Find start of islands (1 preceded by 0 or first)
+island_start(Id) <- data(Id, 1), PrevId = Id - 1, data(PrevId, 0)
+island_start(1) <- data(1, 1)
+
+?island_start(Id)
+
+// Find end of islands (1 followed by 0 or last)
+island_end(Id) <- data(Id, 1), NextId = Id + 1, data(NextId, 0)
+island_end(Id) <- data(Id, 1), NextId = Id + 1, !data(NextId, _)
+
+?island_end(Id)
+
+.kg use default
+.kg drop test_islands_n18t28

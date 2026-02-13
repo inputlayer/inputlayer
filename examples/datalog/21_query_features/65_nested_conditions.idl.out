@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_nested_n21t65
+Knowledge graph 'test_nested_n21t65' created.
+Switched to knowledge graph: test_nested_n21t65
+> .kg use test_nested_n21t65
+Switched to knowledge graph: test_nested_n21t65
+> +products[(1, "laptop", 999, 50), (2, "phone", 599, 100), (3, "tablet", 399, 75), (4, "watch", 199, 200)]
+Inserted 4 fact(s) into 'products'.
+> ?products(Id, Name, Price, Stock), Price > 300, Stock > 60
+┌──────┬──────────┬──────┬──────┐
+│ col0 │ col1     │ col2 │ col3 │
+├──────┼──────────┼──────┼──────┤
+│    2 │ "phone"  │  599 │  100 │
+│    3 │ "tablet" │  399 │   75 │
+└──────┴──────────┴──────┴──────┘
+2 rows
+> ?products(Id, Name, Price, Stock), Price < 300 ?products(Id, Name, Price, Stock), Stock > 150
+Script error: Parse error: Invalid term: '300 ?products(Id, Name, Price, Stock)'

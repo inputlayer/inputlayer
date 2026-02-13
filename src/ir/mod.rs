@@ -219,6 +219,8 @@ pub enum IRExpression {
     FloatConstant(f64),
     /// String constant
     StringConstant(String),
+    /// Boolean constant
+    BoolConstant(bool),
     /// Vector literal (list of f32 values)
     VectorLiteral(Vec<f32>),
     /// Function call with arguments
@@ -304,7 +306,7 @@ pub enum IRNode {
 
     /// Aggregate operation (GROUP BY with aggregation functions)
     ///
-    /// Example: `result(x, count<y>) :- data(x, y).` groups by x and counts y values
+    /// Example: `result(x, count<y>) <- data(x, y).` groups by x and counts y values
     Aggregate {
         /// Input node to aggregate
         input: Box<IRNode>,
@@ -639,6 +641,10 @@ pub enum Predicate {
     ColumnLeStr(usize, String),
     /// Column greater or equal to string constant (lexicographic)
     ColumnGeStr(usize, String),
+    /// Column equals boolean constant
+    ColumnEqBool(usize, bool),
+    /// Column not equals boolean constant
+    ColumnNeBool(usize, bool),
     /// Column equals float constant
     ColumnEqFloat(usize, f64),
     /// Column not equals float constant
@@ -696,6 +702,8 @@ impl Predicate {
             | Predicate::ColumnLtConst(col, _)
             | Predicate::ColumnGeConst(col, _)
             | Predicate::ColumnLeConst(col, _)
+            | Predicate::ColumnEqBool(col, _)
+            | Predicate::ColumnNeBool(col, _)
             | Predicate::ColumnEqStr(col, _)
             | Predicate::ColumnNeStr(col, _)
             | Predicate::ColumnLtStr(col, _)
@@ -810,6 +818,13 @@ impl Predicate {
             }
             Predicate::ColumnLeConst(col, val) => {
                 find_new_index(*col).map(|new_col| Predicate::ColumnLeConst(new_col, *val))
+            }
+            // Bool predicates
+            Predicate::ColumnEqBool(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnEqBool(new_col, *val))
+            }
+            Predicate::ColumnNeBool(col, val) => {
+                find_new_index(*col).map(|new_col| Predicate::ColumnNeBool(new_col, *val))
             }
             // String predicates
             Predicate::ColumnEqStr(col, val) => {
@@ -1946,7 +1961,7 @@ mod tests {
     // Integration / Complex Scenario Tests
     #[test]
     fn test_datalog_negation_pattern() {
-        // Pattern: unreachable(x) :- node(x), !reachable(x).
+        // Pattern: unreachable(x) <- node(x), !reachable(x).
         let nodes = IRNode::Scan {
             relation: "node".to_string(),
             schema: vec!["x".to_string()],
@@ -1972,7 +1987,7 @@ mod tests {
 
     #[test]
     fn test_datalog_aggregation_pattern() {
-        // Pattern: result(x, count<y>) :- data(x, y).
+        // Pattern: result(x, count<y>) <- data(x, y).
         let data = IRNode::Scan {
             relation: "data".to_string(),
             schema: vec!["x".to_string(), "y".to_string()],

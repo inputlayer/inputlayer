@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcard_patterns_n15t15
+Knowledge graph 'test_wildcard_patterns_n15t15' created.
+Switched to knowledge graph: test_wildcard_patterns_n15t15
+> .kg use test_wildcard_patterns_n15t15
+Switched to knowledge graph: test_wildcard_patterns_n15t15
+> +r3[(1, 10, 100), (2, 20, 200), (3, 30, 300)]
+Inserted 3 fact(s) into 'r3'.
+> +link[(1, 1000), (2, 2000), (3, 3000)]
+Inserted 3 fact(s) into 'link'.

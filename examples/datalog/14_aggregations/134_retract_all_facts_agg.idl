@@ -1,0 +1,43 @@
+// Test: Retract all base facts from an aggregation
+// Description: Tests behavior when all facts feeding an aggregation are retracted
+
+.kg create test_retract_all_n14t134
+.kg use test_retract_all_n14t134
+
++data[(1, 10), (2, 20), (3, 30)]
+
++total(sum<V>) <- data(_, V)
++cnt(count<V>) <- data(_, V)
++mn(min<V>) <- data(_, V)
++mx(max<V>) <- data(_, V)
++av(avg<V>) <- data(_, V)
+
+?total(X)
+?cnt(X)
+?mn(X)
+?mx(X)
+?av(X)
+
+// Retract all facts
+-data(1, 10)
+-data(2, 20)
+-data(3, 30)
+
+// All aggregations should return empty (no groups)
+?total(X)
+?cnt(X)
+?mn(X)
+?mx(X)
+?av(X)
+
+// Re-add some data
++data[(4, 40)]
+
+?total(X)
+?cnt(X)
+?mn(X)
+?mx(X)
+?av(X)
+
+.kg use default
+.kg drop test_retract_all_n14t134

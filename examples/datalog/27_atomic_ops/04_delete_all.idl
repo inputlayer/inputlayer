@@ -1,0 +1,29 @@
+// Test: Delete All Pattern
+// Description: Tests deleting all tuples from a relation
+
+.kg create test_delete_all_n27t04
+.kg use test_delete_all_n27t04
+
+// Initial data (integer pairs)
++temp_data(1, 100)
++temp_data(2, 200)
++temp_data(3, 300)
+
+// Query initial state
+?temp_data(Id, Value)
+
+// Delete all: conditional delete matching everything
+-temp_data(Id, Value) <- temp_data(Id, Value)
+
+// Query after delete all (should be empty)
+?temp_data(Id, Value)
+
+// Re-insert some data
++temp_data(10, 999)
+
+// Query after re-insert
+?temp_data(Id, Value)
+
+// Cleanup
+.kg use default
+.kg drop test_delete_all_n27t04

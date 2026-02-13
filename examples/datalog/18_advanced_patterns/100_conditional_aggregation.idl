@@ -1,0 +1,18 @@
+// Test: Conditional aggregation
+
+.kg create test_cond_agg_n18t100
+.kg use test_cond_agg_n18t100
+
++orders[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "B", 50)]
+
+// Sum only orders > 100
+large_order_total(sum<Amount>) <- orders(_, _, Amount), Amount > 100
+
+// Count orders per category where amount > 75
+count_large_per_cat(Cat, count<Id>) <- orders(Id, Cat, Amount), Amount > 75
+
+?large_order_total(T)
+?count_large_per_cat(Cat, N)
+
+.kg use default
+.kg drop test_cond_agg_n18t100

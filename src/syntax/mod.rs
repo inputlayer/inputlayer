@@ -137,20 +137,19 @@ mod tests {
 
     #[test]
     fn test_query_with_variables() {
-        let tokens = token_kinds("?- edge(X, Y).");
-        assert_eq!(tokens[0], (TokenKind::QueryMarker, "?-"));
+        let tokens = token_kinds("?edge(X, Y)");
+        assert_eq!(tokens[0], (TokenKind::QueryMarker, "?"));
         assert_eq!(tokens[1], (TokenKind::Identifier, "edge"));
         assert_eq!(tokens[2], (TokenKind::Punctuation, "("));
         assert_eq!(tokens[3], (TokenKind::Variable, "X"));
         assert_eq!(tokens[4], (TokenKind::Punctuation, ","));
         assert_eq!(tokens[5], (TokenKind::Variable, "Y"));
         assert_eq!(tokens[6], (TokenKind::Punctuation, ")"));
-        assert_eq!(tokens[7], (TokenKind::Punctuation, "."));
     }
 
     #[test]
     fn test_insert_with_string_and_number() {
-        let tokens = token_kinds("+person(\"alice\", 30).");
+        let tokens = token_kinds("+person(\"alice\", 30)");
         assert_eq!(tokens[0], (TokenKind::OperatorPrefix, "+"));
         assert_eq!(tokens[1], (TokenKind::Identifier, "person"));
         assert_eq!(tokens[2], (TokenKind::Punctuation, "("));
@@ -158,7 +157,6 @@ mod tests {
         assert_eq!(tokens[4], (TokenKind::Punctuation, ","));
         assert_eq!(tokens[5], (TokenKind::Number, "30"));
         assert_eq!(tokens[6], (TokenKind::Punctuation, ")"));
-        assert_eq!(tokens[7], (TokenKind::Punctuation, "."));
     }
 
     #[test]
@@ -170,14 +168,14 @@ mod tests {
 
     #[test]
     fn test_line_comment() {
-        let tokens = token_kinds("% this is a comment");
+        let tokens = token_kinds("// this is a comment");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].0, TokenKind::Comment);
     }
 
     #[test]
     fn test_rule_with_arrow() {
-        let tokens = token_kinds("path(X, Z) :- edge(X, Y), edge(Y, Z).");
+        let tokens = token_kinds("path(X, Z) <- edge(X, Y), edge(Y, Z)");
         let kinds: Vec<TokenKind> = tokens.iter().map(|t| t.0).collect();
         assert!(kinds.contains(&TokenKind::RuleArrow));
         assert!(kinds.contains(&TokenKind::Variable));
@@ -213,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_comparison_operators() {
-        for op in &[">=", "<=", "!=", "==", "<", ">", "="] {
+        for op in &[">=", "<=", "!=", "<", ">", "="] {
             let tokens = token_kinds(op);
             assert_eq!(tokens[0].0, TokenKind::ComparisonOp, "Failed for {op}");
         }
@@ -280,7 +278,7 @@ mod tests {
     #[test]
     fn test_graceful_degradation() {
         // Partial/malformed input should not panic
-        let tokens = tokenize("?- edge(X,");
+        let tokens = tokenize("?edge(X,");
         assert!(!tokens.is_empty());
     }
 
@@ -298,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_persistent_rule() {
-        let tokens = token_kinds("+path(X, Y) :- edge(X, Y).");
+        let tokens = token_kinds("+path(X, Y) <- edge(X, Y)");
         // + is separate from path
         assert_eq!(tokens[0], (TokenKind::OperatorPrefix, "+"));
         assert_eq!(tokens[1], (TokenKind::Identifier, "path"));
@@ -309,14 +307,14 @@ mod tests {
 
     #[test]
     fn test_delete_prefix() {
-        let tokens = token_kinds("-edge(1, 2).");
+        let tokens = token_kinds("-edge(1, 2)");
         assert_eq!(tokens[0], (TokenKind::OperatorPrefix, "-"));
         assert_eq!(tokens[1], (TokenKind::Identifier, "edge"));
     }
 
     #[test]
     fn test_bulk_insert() {
-        let tokens = token_kinds("+sales[(\"North\", 100)].");
+        let tokens = token_kinds("+sales[(\"North\", 100)]");
         assert_eq!(tokens[0], (TokenKind::OperatorPrefix, "+"));
         assert_eq!(tokens[1], (TokenKind::Identifier, "sales"));
         assert_eq!(tokens[2], (TokenKind::Punctuation, "["));
@@ -331,7 +329,7 @@ mod tests {
     #[test]
     fn test_mixed_statement() {
         // Complex real-world statement
-        let input = "?- person(X, Name), X > 5, len(Name) >= 3.";
+        let input = "?person(X, Name), X > 5, len(Name) >= 3";
         let tokens = token_kinds(input);
         let kinds: Vec<TokenKind> = tokens.iter().map(|t| t.0).collect();
         assert!(kinds.contains(&TokenKind::QueryMarker));

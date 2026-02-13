@@ -1,0 +1,14 @@
+// Test: Vector in rule body
+
+.kg create test_vec_rule_n16t19
+.kg use test_vec_rule_n16t19
+
++data[(1, [1, 2, 3]), (2, [4, 5, 6])]
+
+// Project out the vector
+has_vector(Id, V) <- data(Id, V)
+
+?has_vector(Id, V)
+
+.kg use default
+.kg drop test_vec_rule_n16t19

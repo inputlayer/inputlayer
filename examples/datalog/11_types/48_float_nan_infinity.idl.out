@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_special_n11t48
+Knowledge graph 'test_float_special_n11t48' created.
+Switched to knowledge graph: test_float_special_n11t48
+> .kg use test_float_special_n11t48
+Switched to knowledge graph: test_float_special_n11t48
+> +divs[(10.0, 0.0), (5.0, 2.0), (-10.0, 0.0)]
+Inserted 3 fact(s) into 'divs'.

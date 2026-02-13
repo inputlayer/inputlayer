@@ -1,0 +1,19 @@
+// Test: Triangular join (find triangles)
+
+.kg create test_triangle_n18t81
+.kg use test_triangle_n18t81
+
++edge[("a", "b"), ("b", "c"), ("c", "a"), ("a", "d"), ("d", "e")]
+
+// Find triangles
+triangle(A, B, C) <-
+    edge(A, B),
+    edge(B, C),
+    edge(C, A),
+    A < B,
+    B < C
+
+?triangle(A, B, C)
+
+.kg use default
+.kg drop test_triangle_n18t81

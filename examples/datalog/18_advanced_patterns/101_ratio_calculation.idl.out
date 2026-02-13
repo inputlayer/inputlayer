@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ratio_n18t101
+Knowledge graph 'test_ratio_n18t101' created.
+Switched to knowledge graph: test_ratio_n18t101
+> .kg use test_ratio_n18t101
+Switched to knowledge graph: test_ratio_n18t101
+> +parts[(1, "A", 30), (2, "A", 20), (3, "B", 50), (4, "B", 25), (5, "B", 25)]
+Inserted 5 fact(s) into 'parts'.

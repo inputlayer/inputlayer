@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_perf_multi_n13t05
+Knowledge graph 'test_perf_multi_n13t05' created.
+Switched to knowledge graph: test_perf_multi_n13t05
+> .kg use test_perf_multi_n13t05
+Switched to knowledge graph: test_perf_multi_n13t05
+> +employee[(1, 10), (2, 10), (3, 20), (4, 20), (5, 30), (6, 10), (7, 20), (8, 30), (9, 10), (10, 20)]
+Inserted 10 fact(s) into 'employee'.
+> +department[(10, 100), (20, 200), (30, 300)]
+Inserted 3 fact(s) into 'department'.
+> +assignment[(1, 1000), (2, 1000), (3, 1001), (4, 1001), (5, 1002), (1, 1001), (6, 1000), (7, 1002), (8, 1000), (9, 1001)]
+Inserted 10 fact(s) into 'assignment'.
+> +project[(1000, 50000), (1001, 75000), (1002, 100000)]
+Inserted 3 fact(s) into 'project'.

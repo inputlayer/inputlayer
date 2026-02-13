@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_zeros_n10t46
+Knowledge graph 'test_zeros_n10t46' created.
+Switched to knowledge graph: test_zeros_n10t46
+> .kg use test_zeros_n10t46
+Switched to knowledge graph: test_zeros_n10t46
+> +nums[(0,), (1,), (-1,)]
+Inserted 3 fact(s) into 'nums'.

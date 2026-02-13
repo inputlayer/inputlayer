@@ -1,0 +1,16 @@
+// Test: Conditional update pattern
+
+.kg create test_cond_update_n27t20
+.kg use test_cond_update_n27t20
+
++inventory[(1, "Widget", 10), (2, "Gadget", 5), (3, "Gizmo", 20)]
+
+?inventory(Id, Name, Qty)
+
+// Delete low stock items
+-inventory(Id, Name, Qty) <- inventory(Id, Name, Qty), Qty < 10
+
+?inventory(Id, Name, Qty)
+
+.kg use default
+.kg drop test_cond_update_n27t20

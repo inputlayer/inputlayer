@@ -1,0 +1,30 @@
+// Test: Session Meta Commands
+// Description: Tests .session command for managing session-scoped rules
+
+.kg create test_session_cmd_n01t04
+.kg use test_session_cmd_n01t04
+
+// Add base data
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Define a session rule (transient, not persistent)
+reachable(X, Y) <- edge(X, Y)
+reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
+
+// List session rules
+.session
+
+// Query the session rule
+?reachable(1, X)
+
+// Clear session rules
+.session clear
+
+// List session again (should be empty)
+.session
+
+// Query should still work via base relation
+?edge(X, Y)
+
+.kg use default
+.kg drop test_session_cmd_n01t04

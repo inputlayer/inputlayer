@@ -1,0 +1,20 @@
+// Test: Window function simulation
+
+.kg create test_window_n18t132
+.kg use test_window_n18t132
+
+// Sales data
++sales[(1, 100), (2, 150), (3, 200), (4, 125), (5, 175)]
+
+// Rank by comparing values
+rank(Id, count<Other>) <- sales(Id, Val), sales(Other, OtherVal), OtherVal > Val
+
+?rank(Id, R)
+
+// Running count (how many are <= this value)
+running(Id, count<Other>) <- sales(Id, Val), sales(Other, OtherVal), OtherVal <= Val
+
+?running(Id, R)
+
+.kg use default
+.kg drop test_window_n18t132

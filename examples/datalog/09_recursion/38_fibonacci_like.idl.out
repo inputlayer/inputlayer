@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_fib_n09t38
+Knowledge graph 'test_fib_n09t38' created.
+Switched to knowledge graph: test_fib_n09t38
+> .kg use test_fib_n09t38
+Switched to knowledge graph: test_fib_n09t38
+> +fib(0, 0)
+Inserted 1 fact(s) into 'fib'.
+> +fib(1, 1)
+Inserted 1 fact(s) into 'fib'.

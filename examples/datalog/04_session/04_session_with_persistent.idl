@@ -1,0 +1,28 @@
+// Test: Session Rules with Persistent Rules
+// Description: Tests interaction between session rules and persistent rules
+
+.kg create test_sess_persist_n04t04
+.kg use test_sess_persist_n04t04
+
+// Create a persistent rule
++base[(1), (2), (3)]
++persistent_rule(X) <- base(X), X > 1
+
+// Verify persistent rule works
+?persistent_rule(X)
+
+// Add session rule that uses persistent rule
+session_combo(X) <- persistent_rule(X), X < 3
+
+// Query with session rule
+?session_combo(X)
+
+// Clear session
+.session clear
+
+// Persistent rule should still work
+?persistent_rule(X)
+
+// Cleanup
+.kg use default
+.kg drop test_sess_persist_n04t04

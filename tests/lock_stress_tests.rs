@@ -50,7 +50,7 @@ fn test_100_concurrent_readers_during_write() {
             for _ in 0..10 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("reader_stress", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("reader_stress", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 // Should always see data (at least initial 100)
                 assert!(results.len() >= 100);
@@ -196,7 +196,7 @@ fn test_rapid_lock_acquire_release_cycles() {
             for _ in 0..cycles_per_thread {
                 // Rapidly acquire and release lock
                 let storage_guard = storage_clone.write().expect("Lock failed");
-                let _ = storage_guard.execute_query_on("rapid_lock", "result(X,Y) :- data(X,Y).");
+                let _ = storage_guard.execute_query_on("rapid_lock", "result(X,Y) <- data(X,Y)");
                 drop(storage_guard);
                 counter.fetch_add(1, Ordering::Relaxed);
             }
@@ -262,7 +262,7 @@ fn test_concurrent_kg_create_delete() {
         .insert_into("final_test", "data", vec![(1, 1)])
         .unwrap();
     let results = storage_guard
-        .execute_query_on("final_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("final_test", "result(X,Y) <- data(X,Y)")
         .expect("Query failed after stress");
     assert_eq!(results.len(), 1);
 }
@@ -296,7 +296,7 @@ fn test_concurrent_kg_switch_under_load() {
 
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+                    .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
 
                 // Each KG should have (kg_idx + 1) tuples
@@ -345,7 +345,7 @@ fn test_concurrent_rule_modification() {
                 {
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
-                        .execute_query_on("rule_mod", "result(X,Y) :- edge(X,Y).")
+                        .execute_query_on("rule_mod", "result(X,Y) <- edge(X,Y)")
                         .expect("Query failed");
                     assert_eq!(results.len(), 3);
                 }
@@ -392,7 +392,7 @@ fn test_concurrent_recursive_queries() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 // Simple query (not actually recursive, but exercises query path)
                 let results = storage_guard
-                    .execute_query_on("recursive_stress", "result(X,Y) :- edge(X,Y).")
+                    .execute_query_on("recursive_stress", "result(X,Y) <- edge(X,Y)")
                     .expect("Query failed");
                 assert_eq!(results.len(), 20);
                 counter.fetch_add(1, Ordering::Relaxed);
@@ -447,18 +447,18 @@ fn test_parallel_queries_with_different_complexities() {
                     0 => {
                         // Simple single-relation query
                         storage_guard
-                            .execute_query_on("complexity_test", "result(X,Y) :- edge(X,Y).")
+                            .execute_query_on("complexity_test", "result(X,Y) <- edge(X,Y)")
                     }
                     1 => {
                         // Node query
                         storage_guard
-                            .execute_query_on("complexity_test", "result(X,Y) :- node(X,Y).")
+                            .execute_query_on("complexity_test", "result(X,Y) <- node(X,Y)")
                     }
                     _ => {
                         // Join query
                         storage_guard.execute_query_on(
                             "complexity_test",
-                            "result(X,Y,Z) :- edge(X,Y), edge(Y,Z).",
+                            "result(X,Y,Z) <- edge(X,Y), edge(Y,Z)",
                         )
                     }
                 };
@@ -501,7 +501,7 @@ fn test_many_short_lived_operations() {
         let handle = thread::spawn(move || {
             for _ in 0..ops_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
-                let _ = storage_guard.execute_query_on("short_ops", "result(X,Y) :- data(X,Y).");
+                let _ = storage_guard.execute_query_on("short_ops", "result(X,Y) <- data(X,Y)");
                 drop(storage_guard);
                 counter.fetch_add(1, Ordering::Relaxed);
                 // No sleep - rapid fire operations
@@ -543,7 +543,7 @@ fn test_burst_traffic_pattern() {
                 for _ in 0..ops_per_thread {
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
-                        .execute_query_on("burst_test", "result(X,Y) :- data(X,Y).")
+                        .execute_query_on("burst_test", "result(X,Y) <- data(X,Y)")
                         .expect("Query failed");
                     assert_eq!(results.len(), 3);
                 }
@@ -595,7 +595,7 @@ fn test_data_integrity_under_heavy_concurrent_writes() {
     // Verify data integrity
     let storage_guard = storage.write().expect("Lock failed");
     let results = storage_guard
-        .execute_query_on("integrity_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("integrity_test", "result(X,Y) <- data(X,Y)")
         .expect("Query failed");
 
     assert_eq!(
@@ -641,7 +641,7 @@ fn test_no_data_loss_during_concurrent_operations() {
                 if thread_id % 2 == 0 {
                     // Reader - verify initial data is intact
                     let results = storage_guard
-                        .execute_query_on("no_loss_test", "result(X,Y) :- initial(X,Y).")
+                        .execute_query_on("no_loss_test", "result(X,Y) <- initial(X,Y)")
                         .expect("Query failed");
                     assert_eq!(
                         results.len(),
@@ -668,7 +668,7 @@ fn test_no_data_loss_during_concurrent_operations() {
     // Final verification
     let storage_guard = storage.write().expect("Lock failed");
     let initial_results = storage_guard
-        .execute_query_on("no_loss_test", "result(X,Y) :- initial(X,Y).")
+        .execute_query_on("no_loss_test", "result(X,Y) <- initial(X,Y)")
         .expect("Query failed");
     assert_eq!(initial_results.len(), 100, "Initial data was corrupted");
 }
@@ -690,7 +690,7 @@ fn test_concurrent_empty_query_results() {
             for _ in 0..50 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("empty_results", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("empty_results", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 // Empty result is valid
                 assert!(results.is_empty());
@@ -725,7 +725,7 @@ fn test_concurrent_single_tuple_contention() {
             for _ in 0..queries_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("single_tuple", "result(X,Y) :- data(X,Y).")
+                    .execute_query_on("single_tuple", "result(X,Y) <- data(X,Y)")
                     .expect("Query failed");
                 if results.len() == 1 && results[0] == (42, 84) {
                     counter.fetch_add(1, Ordering::Relaxed);

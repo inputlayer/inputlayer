@@ -51,8 +51,8 @@
 //!
 //! // Define and execute rules (variables must be uppercase)
 //! let program = "
-//!     path(X, Y) :- edge(X, Y).
-//!     path(X, Z) :- path(X, Y), edge(Y, Z).
+//!     path(X, Y) <- edge(X, Y)
+//!     path(X, Z) <- path(X, Y), edge(Y, Z)
 //! ";
 //!
 //! let results = engine.execute(program).unwrap();
@@ -76,7 +76,7 @@
 //!
 //! // Insert data and query (variables must be uppercase)
 //! storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
-//! let results = storage.execute_query("path(X,Y) :- edge(X,Y).").unwrap();
+//! let results = storage.execute_query("path(X,Y) <- edge(X,Y)").unwrap();
 //!
 //! // Persist to disk
 //! storage.save_knowledge_graph("analytics").unwrap();
@@ -587,7 +587,7 @@ impl DatalogEngine {
                         .collect::<Vec<_>>()
                         .join(", ");
                     eprintln!(
-                        "DEBUG SIP rule[{}]: {}({}) :- {}",
+                        "DEBUG SIP rule[{}]: {}({}) <- {}",
                         i, rule.head.relation, head_args, body_str
                     );
                 }
@@ -1525,8 +1525,7 @@ mod tests {
             ],
         );
 
-        let query =
-            r#"duration(Id, D) :- events(Id, "start", S), events(Id, "end", E), D = E - S."#;
+        let query = r#"duration(Id, D) <- events(Id, "start", S), events(Id, "end", E), D = E - S"#;
         let results = engine.execute_tuples(query).unwrap();
         eprintln!("Self-join results: {:?}", results);
         assert_eq!(
@@ -1542,7 +1541,7 @@ mod tests {
     fn test_self_join_with_different_integer_constants() {
         // Regression test: self-join with different integer constants must
         // correctly filter each side independently (not produce empty result or Cartesian).
-        // Pattern: common(A) :- ancestor(8, A), ancestor(10, A).
+        // Pattern: common(A) <- ancestor(8, A), ancestor(10, A)
         let mut engine = DatalogEngine::new();
         // Ancestors: 8 has ancestors {4, 2, 1}, 10 has ancestors {6, 3, 1}
         engine.add_tuples(
@@ -1557,7 +1556,7 @@ mod tests {
             ],
         );
 
-        let query = "common(A) :- ancestor(8, A), ancestor(10, A).";
+        let query = "common(A) <- ancestor(8, A), ancestor(10, A)";
         let results = engine.execute_tuples(query).unwrap();
         eprintln!("Common ancestor results: {:?}", results);
         // Common ancestor of 8 and 10 is just: 1
@@ -1576,9 +1575,9 @@ mod tests {
         // Regression test: recursive rules with integer constants in the head
         // must produce correct results through the combined program execution path.
         // This mirrors the snapshot test pattern:
-        //   descendant(2, X) :- parent(X, 2).
-        //   descendant(2, X) :- parent(X, Y), descendant(2, Y).
-        //   __query__(_c0, X) :- descendant(_c0, X), _c0 = 2.
+        //   descendant(2, X) <- parent(X, 2)
+        //   descendant(2, X) <- parent(X, Y), descendant(2, Y)
+        //   __query__(_c0, X) <- descendant(_c0, X), _c0 = 2
         let mut engine = DatalogEngine::new();
         engine.add_tuples(
             "parent",
@@ -1597,9 +1596,9 @@ mod tests {
 
         // Combined program as the server would construct it:
         let program = concat!(
-            "descendant(2, X) :- parent(X, 2).\n",
-            "descendant(2, X) :- parent(X, Y), descendant(2, Y).\n",
-            "__query__(_c0, X) :- descendant(_c0, X), _c0 = 2.\n",
+            "descendant(2, X) <- parent(X, 2)\n",
+            "descendant(2, X) <- parent(X, Y), descendant(2, Y)\n",
+            "__query__(_c0, X) <- descendant(_c0, X), _c0 = 2\n",
         );
         let results = engine.execute_tuples(program).unwrap();
         eprintln!("Recursive descendant results: {:?}", results);
@@ -1659,8 +1658,8 @@ mod tests {
         );
 
         let program = concat!(
-            "matched(OrdId, Year, Qtr, Actual, Target) :- orders(OrdId, Year, Qtr, Actual), targets(_, Year, Qtr, Target).\n",
-            "__query__(OrdId, Year, Qtr, Actual, Target) :- matched(OrdId, Year, Qtr, Actual, Target).\n",
+            "matched(OrdId, Year, Qtr, Actual, Target) <- orders(OrdId, Year, Qtr, Actual), targets(_, Year, Qtr, Target)\n",
+            "__query__(OrdId, Year, Qtr, Actual, Target) <- matched(OrdId, Year, Qtr, Actual, Target)\n",
         );
         let results = engine.execute_tuples(program).unwrap();
 

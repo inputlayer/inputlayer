@@ -14,7 +14,7 @@ fn test_chained_joins_3hop() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     // 3-hop paths
-    let query = "path3(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).";
+    let query = "path3(X, W) <- edge(X, Y), edge(Y, Z), edge(Z, W)";
     let results = engine.execute(query).unwrap();
 
     assert_eq!(results.len(), 2);
@@ -29,7 +29,7 @@ fn test_self_join_with_filter() {
     engine.add_fact("data", vec![(1, 2), (2, 3), (3, 4), (5, 6)]);
 
     // Find pairs where x connects to z through y, with X < Z
-    let query = "result(X, Z) :- data(X, Y), data(Y, Z), X < Z.";
+    let query = "result(X, Z) <- data(X, Y), data(Y, Z), X < Z";
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
@@ -46,7 +46,7 @@ fn test_complex_filter_combination() {
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
 
     // x in range [2, 4], y in range [20, 40]
-    let query = "result(X, Y) :- data(X, Y), X >= 2, X <= 4, Y >= 20, Y <= 40.";
+    let query = "result(X, Y) <- data(X, Y), X >= 2, X <= 4, Y >= 20, Y <= 40";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -61,8 +61,8 @@ fn test_column_swap_projection() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
 
-    // Swap columns: result(Y, X) :- edge(X, Y)
-    let query = "result(Y, X) :- edge(X, Y).";
+    // Swap columns: result(Y, X) <- edge(X, Y)
+    let query = "result(Y, X) <- edge(X, Y)";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -78,7 +78,7 @@ fn test_join_with_column_equality() {
     engine.add_fact("s", vec![(2, 10), (3, 20), (3, 30)]);
 
     // Join where y from r equals x from s
-    let query = "result(X, Z) :- r(X, Y), s(Y, Z).";
+    let query = "result(X, Z) <- r(X, Y), s(Y, Z)";
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
@@ -95,7 +95,7 @@ fn test_cartesian_product_filtered() {
     engine.add_fact("s", vec![(10, 20), (30, 40)]);
 
     // Cartesian product filtered by constraint
-    let query = "result(A, C) :- r(A, B), s(C, D), A < C.";
+    let query = "result(A, C) <- r(A, B), s(C, D), A < C";
     let results = engine.execute(query).unwrap();
 
     // Should have results where a < c
@@ -111,7 +111,7 @@ fn test_variable_reuse_in_body() {
     engine.add_fact("edge", vec![(1, 2), (2, 1), (2, 3), (3, 1), (4, 4)]);
 
     // Find cycles: edge(X, Y), edge(Y, X)
-    let query = "cycle(X, Y) :- edge(X, Y), edge(Y, X).";
+    let query = "cycle(X, Y) <- edge(X, Y), edge(Y, X)";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -136,7 +136,7 @@ fn test_empty_result_set() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     // Filter that excludes everything
-    let query = "result(X, Y) :- edge(X, Y), X > 10.";
+    let query = "result(X, Y) <- edge(X, Y), X > 10";
     let results = engine.execute(query).unwrap();
 
     assert_eq!(results.len(), 0, "Expected empty result set");
@@ -149,7 +149,7 @@ fn test_single_variable_constraint() {
     engine.add_fact("data", vec![(1, 1), (2, 2), (3, 4), (5, 5)]);
 
     // Only pairs where X == Y
-    let query = "result(X, Y) :- data(X, Y), X = Y.";
+    let query = "result(X, Y) <- data(X, Y), X = Y";
     let results = engine.execute(query).unwrap();
 
     for (x, y) in &results {
@@ -170,7 +170,7 @@ fn test_multiple_inequality_constraints() {
     engine.add_fact("data", vec![(1, 1), (2, 3), (4, 5), (6, 6)]);
 
     // X != Y
-    let query = "result(X, Y) :- data(X, Y), X != Y.";
+    let query = "result(X, Y) <- data(X, Y), X != Y";
     let results = engine.execute(query).unwrap();
 
     for (x, y) in &results {
@@ -187,7 +187,7 @@ fn test_join_with_multiple_constraints() {
     engine.add_fact("s", vec![(2, 5), (3, 6), (4, 7)]);
 
     // Join with both join condition and filter
-    let query = "result(X, Z) :- r(X, Y), s(Y, Z), X < Y, Y < Z.";
+    let query = "result(X, Z) <- r(X, Y), s(Y, Z), X < Y, Y < Z";
     let results = engine.execute(query).unwrap();
 
     for (x, z) in &results {
@@ -208,7 +208,7 @@ fn test_large_dataset_performance() {
     }
     engine.add_fact("edge", data);
 
-    let query = "result(X, Y) :- edge(X, Y), X > 50.";
+    let query = "result(X, Y) <- edge(X, Y), X > 50";
     let results = engine.execute(query).unwrap();
 
     assert_eq!(results.len(), 50); // 51 to 100
@@ -222,7 +222,7 @@ fn test_nested_join_complex() {
     engine.add_fact("c", vec![(4, 6), (5, 7)]);
 
     // Three-way join: a JOIN b JOIN c
-    let query = "result(X, W) :- a(X, Y), b(Y, Z), c(Z, W).";
+    let query = "result(X, W) <- a(X, Y), b(Y, Z), c(Z, W)";
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
@@ -234,7 +234,7 @@ fn test_pipeline_with_trace() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
-    let query = "result(X, Y) :- edge(X, Y), X > 1.";
+    let query = "result(X, Y) <- edge(X, Y), X > 1";
     let (results, trace) = engine.execute_with_trace(query).unwrap();
 
     // Verify trace captured all stages
@@ -256,12 +256,12 @@ fn test_all_comparison_operators_comprehensive() {
 
     // Test each operator
     let tests = vec![
-        ("result(X, Y) :- data(X, Y), X = 3.", 1),  // Equal
-        ("result(X, Y) :- data(X, Y), X != 3.", 4), // Not equal
-        ("result(X, Y) :- data(X, Y), X < 3.", 2),  // Less than
-        ("result(X, Y) :- data(X, Y), X > 3.", 2),  // Greater than
-        ("result(X, Y) :- data(X, Y), X <= 3.", 3), // Less or equal
-        ("result(X, Y) :- data(X, Y), X >= 3.", 3), // Greater or equal
+        ("result(X, Y) <- data(X, Y), X = 3", 1),  // Equal
+        ("result(X, Y) <- data(X, Y), X != 3", 4), // Not equal
+        ("result(X, Y) <- data(X, Y), X < 3", 2),  // Less than
+        ("result(X, Y) <- data(X, Y), X > 3", 2),  // Greater than
+        ("result(X, Y) <- data(X, Y), X <= 3", 3), // Less or equal
+        ("result(X, Y) <- data(X, Y), X >= 3", 3), // Greater or equal
     ];
 
     for (query, expected_count) in tests {
@@ -283,7 +283,7 @@ fn test_safety_violation_detection() {
     engine.add_fact("edge", vec![(1, 2)]);
 
     // Unsafe: z not in body
-    let query = "result(X, Z) :- edge(X, Y).";
+    let query = "result(X, Z) <- edge(X, Y)";
     let result = engine.execute(query);
 
     assert!(result.is_err(), "Expected safety violation error");
@@ -300,7 +300,7 @@ fn test_empty_knowledge_graph_query() {
     let mut engine = DatalogEngine::new();
     // No facts added
 
-    let query = "result(X, Y) :- edge(X, Y).";
+    let query = "result(X, Y) <- edge(X, Y)";
     let results = engine.execute(query).unwrap();
 
     assert_eq!(results.len(), 0);
@@ -312,7 +312,7 @@ fn test_optimization_actually_optimizes() {
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
     // Query that creates identity projection (will be optimized away)
-    let query = "result(X, Y) :- edge(X, Y).";
+    let query = "result(X, Y) <- edge(X, Y)";
     let (_results, trace) = engine.execute_with_trace(query).unwrap();
 
     // In the IR, there might be a Map node before optimization
@@ -330,8 +330,8 @@ fn test_multiple_rules_execution() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let program = "
-        direct(X, Y) :- edge(X, Y).
-        hop2(X, Z) :- edge(X, Y), edge(Y, Z).
+        direct(X, Y) <- edge(X, Y)
+        hop2(X, Z) <- edge(X, Y), edge(Y, Z)
     ";
 
     let results_map = engine.execute_all_rules(program).unwrap();
@@ -356,8 +356,8 @@ fn test_asymmetric_joins() {
     engine.add_fact("parent", vec![(1, 2), (1, 3), (2, 4)]);
     engine.add_fact("age", vec![(1, 50), (2, 25), (3, 22), (4, 5)]);
 
-    // Join parent with age: result(P, C, A) :- parent(P, C), age(C, A)
-    let query = "result(P, A) :- parent(P, C), age(C, A).";
+    // Join parent with age: result(P, C, A) <- parent(P, C), age(C, A)
+    let query = "result(P, A) <- parent(P, C), age(C, A)";
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
@@ -378,7 +378,7 @@ fn test_filters_pushed_through_pipeline() {
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
 
     // Multiple filters that should all be applied
-    let query = "result(X, Y) :- data(X, Y), X > 1, X < 5, Y >= 20, Y <= 40.";
+    let query = "result(X, Y) <- data(X, Y), X > 1, X < 5, Y >= 20, Y <= 40";
     let results = engine.execute(query).unwrap();
 
     // Should get (2,20), (3,30), (4,40)
@@ -397,7 +397,7 @@ fn test_column_to_column_comparison() {
     engine.add_fact("pairs", vec![(1, 1), (1, 2), (2, 1), (2, 2), (3, 4)]);
 
     // X != Y (column-to-column comparison)
-    let query = "result(X, Y) :- pairs(X, Y), X != Y.";
+    let query = "result(X, Y) <- pairs(X, Y), X != Y";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -414,8 +414,8 @@ fn test_fact_parsing() {
 
     // Test parsing facts (rules with no body)
     let program = "
-        edge(1, 2).
-        edge(2, 3).
+        edge(1, 2)
+        edge(2, 3)
     ";
 
     engine.parse(program).unwrap();
@@ -433,9 +433,9 @@ fn test_comment_handling() {
     engine.add_fact("edge", vec![(1, 2)]);
 
     let program = "
-        % This is a comment
-        % This is also a comment (Prolog-style)
-        result(X, Y) :- edge(X, Y).
+        // This is a comment
+        // This is also a comment (Prolog-style)
+        result(X, Y) <- edge(X, Y)
     ";
 
     let results = engine.execute(program).unwrap();
@@ -450,7 +450,7 @@ fn test_whitespace_handling() {
     // Test various whitespace scenarios
     let program = "
 
-        result(X,Y):-edge(X,Y).
+        result(X,Y)<-edge(X,Y)
 
     ";
 
@@ -472,7 +472,7 @@ fn test_config_creation() {
     let mut engine = DatalogEngine::with_config(config);
     engine.add_fact("edge", vec![(1, 2)]);
 
-    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
     assert_eq!(results.len(), 1);
 }
 
@@ -482,7 +482,7 @@ fn test_distinct_eliminates_duplicates() {
     // Add duplicate facts
     engine.add_fact("data", vec![(1, 2), (1, 2), (2, 3), (2, 3), (3, 4)]);
 
-    let query = "result(X, Y) :- data(X, Y).";
+    let query = "result(X, Y) <- data(X, Y)";
     let results = engine.execute(query).unwrap();
 
     // DD collections are naturally distinct, so duplicates should be eliminated
@@ -495,7 +495,7 @@ fn test_no_constraints_returns_all() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
 
-    let query = "result(X, Y) :- edge(X, Y).";
+    let query = "result(X, Y) <- edge(X, Y)";
     let results = engine.execute(query).unwrap();
 
     assert_eq!(results.len(), 3);
@@ -515,7 +515,7 @@ fn test_ir_nodes_generated() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
-    engine.parse("result(X, Y) :- edge(X, Y).").unwrap();
+    engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
     engine.build_ir().unwrap();
 
     let ir_nodes = engine.ir_nodes();
@@ -542,7 +542,7 @@ fn test_multiple_atoms_in_body() {
     engine.add_fact("t", vec![(3, 4)]);
 
     // Three atoms in body
-    let query = "result(X, W) :- r(X, Y), s(Y, Z), t(Z, W).";
+    let query = "result(X, W) <- r(X, Y), s(Y, Z), t(Z, W)";
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
@@ -724,9 +724,9 @@ fn test_sip_chain_join_correctness() {
     engine.add_fact("s", vec![(2, 5), (4, 6)]);
     engine.add_fact("t", vec![(5, 7), (6, 8)]);
 
-    // Chain query: result(A, D) :- r(A, B), s(B, C), t(C, D).
+    // Chain query: result(A, D) <- r(A, B), s(B, C), t(C, D).
     // Expected: (1, 7) via 1->2->5->7 and (3, 8) via 3->4->6->8
-    let query = "result(A, D) :- r(A, B), s(B, C), t(C, D).";
+    let query = "result(A, D) <- r(A, B), s(B, C), t(C, D)";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -751,7 +751,7 @@ fn test_sip_two_way_join_correctness() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     // Two-hop path query
-    let query = "path2(X, Z) :- edge(X, Y), edge(Y, Z).";
+    let query = "path2(X, Z) <- edge(X, Y), edge(Y, Z)";
     let results = engine.execute(query).unwrap();
 
     let result_set = to_set(results);
@@ -780,7 +780,7 @@ fn test_sip_with_dangling_tuples() {
     engine.add_fact("s", vec![(2, 3), (999, 888)]); // 999 won't join
     engine.add_fact("t", vec![(3, 4)]);
 
-    let query = "result(A, D) :- r(A, B), s(B, C), t(C, D).";
+    let query = "result(A, D) <- r(A, B), s(B, C), t(C, D)";
     let results = engine.execute(query).unwrap();
 
     // Only 1->2->3->4 should work

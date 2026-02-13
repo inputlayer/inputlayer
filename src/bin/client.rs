@@ -12,7 +12,7 @@
 //! cargo run --bin inputlayer-client -- --server http://192.168.1.100:8080
 //!
 //! # Execute a Datalog script
-//! cargo run --bin inputlayer-client -- --script examples/datalog/basic/same_component.dl
+//! cargo run --bin inputlayer-client -- --script examples/datalog/basic/same_component.idl
 //! ```
 
 use inputlayer::ast::Term;
@@ -218,11 +218,29 @@ const HEARTBEAT_INTERVAL_SECS: u64 = 5;
 const HEARTBEAT_TIMEOUT_SECS: u64 = 3;
 const HEARTBEAT_MAX_FAILURES: u32 = 2;
 
+/// Display configuration for query results
+struct DisplayConfig {
+    max_rows: usize,      // 0 = unlimited; default 50 for REPL, 0 for --script
+    max_col_width: usize, // default 40
+    show_timing: bool,    // show execution time; false for --script
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        DisplayConfig {
+            max_rows: 50,
+            max_col_width: 40,
+            show_timing: true,
+        }
+    }
+}
+
 /// Command-line arguments
 struct Args {
     script: Option<String>,
     repl: bool,
     server: String,
+    display_limit: Option<usize>,
 }
 
 /// HTTP Client state
@@ -257,6 +275,8 @@ struct ReplState {
     session_facts: Vec<inputlayer::ast::Rule>,
     /// Receiver for server disconnect signal from heartbeat task
     disconnect_rx: watch::Receiver<bool>,
+    /// Display configuration for query results
+    display_config: DisplayConfig,
 }
 
 impl ReplState {
@@ -281,6 +301,7 @@ fn parse_args() -> Args {
         script: None,
         repl: false,
         server: "http://127.0.0.1:8080".to_string(),
+        display_limit: None,
     };
 
     let mut i = 1;
@@ -308,11 +329,25 @@ fn parse_args() -> Args {
                     std::process::exit(1);
                 }
             }
+            "--limit" | "-l" => {
+                if i + 1 < args.len() {
+                    result.display_limit = Some(args[i + 1].parse().unwrap_or_else(|_| {
+                        eprintln!("Error: --limit requires a number");
+                        std::process::exit(1);
+                    }));
+                    i += 2;
+                } else {
+                    eprintln!("Error: --limit requires a number");
+                    std::process::exit(1);
+                }
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
             }
-            arg if arg.to_ascii_lowercase().ends_with(".dl") => {
+            arg if arg.to_ascii_lowercase().ends_with(".idl")
+                || arg.to_ascii_lowercase().ends_with(".dl") =>
+            {
                 result.script = Some(arg.to_string());
                 i += 1;
             }
@@ -331,18 +366,21 @@ fn print_usage() {
     println!("InputLayer Datalog Client (HTTP)");
     println!();
     println!("USAGE:");
-    println!("  inputlayer-client [OPTIONS] [SCRIPT.dl]");
+    println!("  inputlayer-client [OPTIONS] [SCRIPT.idl]");
     println!();
     println!("OPTIONS:");
     println!("  -s, --script <FILE>   Execute a Datalog script file");
     println!("  -r, --repl            Open REPL after script execution");
     println!("      --server <URL>    Server URL (default: http://127.0.0.1:8080)");
+    println!(
+        "  -l, --limit <N>       Max rows to display (0 = unlimited, default: 50 REPL, 0 script)"
+    );
     println!("  -h, --help            Show this help message");
     println!();
     println!("EXAMPLES:");
     println!("  inputlayer-client                              # Connect to local server");
     println!("  inputlayer-client --server http://10.0.0.5:8080   # Connect to remote server");
-    println!("  inputlayer-client script.dl                    # Execute script");
+    println!("  inputlayer-client script.idl                   # Execute script");
 }
 
 #[tokio::main]
@@ -406,12 +444,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         heartbeat_task(server_url, disconnect_tx).await;
     });
 
+    // Display config: script mode defaults to unlimited + no timing, REPL defaults to 50 + timing
+    let is_script = args.script.is_some();
+    let display_config = DisplayConfig {
+        max_rows: args.display_limit.unwrap_or(if is_script { 0 } else { 50 }),
+        max_col_width: 40,
+        show_timing: !is_script,
+    };
+
     let mut state = ReplState {
         http,
         current_kg,
         session_rules: Vec::new(),
         session_facts: Vec::new(),
         disconnect_rx,
+        display_config,
     };
 
     // If a script is provided, execute it
@@ -461,8 +508,8 @@ fn execute_script<'a>(
             }
 
             let line = line.trim();
-            // Skip empty lines and line comments (% Prolog style, // C-style)
-            if line.is_empty() || line.starts_with('%') || line.starts_with("//") {
+            // Skip empty lines and line comments
+            if line.is_empty() || line.starts_with("//") {
                 continue;
             }
 
@@ -526,61 +573,15 @@ fn strip_block_comments(source: &str) -> String {
     result
 }
 
-/// Strip inline comments (% Prolog-style or // C-style) from a line.
-/// Recognizes `%` as modulo operator when between operands inside expressions.
+/// Strip inline comments (`//`) from a line, respecting string literals.
 fn strip_inline_comment(line: &str) -> &str {
     let mut in_string = false;
-    let chars: Vec<char> = line.chars().collect();
-    let mut paren_depth: i32 = 0;
-    for (i, c) in chars.iter().enumerate() {
-        if *c == '"' {
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'"' {
             in_string = !in_string;
-        } else if !in_string {
-            if *c == '(' {
-                paren_depth += 1;
-            } else if *c == ')' {
-                paren_depth -= 1;
-            } else if *c == '%' {
-                // Inside parenthesized expression, treat as modulo
-                if paren_depth > 0 {
-                    continue;
-                }
-                // Check if this is a modulo operator (between operands)
-                let is_modulo = if i > 0 && i + 1 < chars.len() {
-                    let mut pi = i - 1;
-                    while pi > 0 && chars[pi].is_whitespace() {
-                        pi -= 1;
-                    }
-                    let prev = chars[pi];
-                    let mut ni = i + 1;
-                    while ni < chars.len() && chars[ni].is_whitespace() {
-                        ni += 1;
-                    }
-                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
-                    let next_is_operand = ni < chars.len() && {
-                        let next = chars[ni];
-                        next.is_alphanumeric() || next == '_' || next == '('
-                    };
-                    prev_is_operand && next_is_operand
-                } else {
-                    false
-                };
-                if !is_modulo {
-                    let byte_pos = line
-                        .char_indices()
-                        .nth(i)
-                        .map_or(line.len(), |(pos, _)| pos);
-                    return line[..byte_pos].trim_end();
-                }
-            }
-            // Check for // comment (C-style)
-            if *c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
-                let byte_pos = line
-                    .char_indices()
-                    .nth(i)
-                    .map_or(line.len(), |(pos, _)| pos);
-                return line[..byte_pos].trim_end();
-            }
+        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return line[..i].trim_end();
         }
     }
     line
@@ -591,10 +592,28 @@ fn is_complete_statement(line: &str) -> bool {
     if stripped.is_empty() {
         return false;
     }
+    // Meta commands are always complete
     if stripped.starts_with('.') {
         return true;
     }
-    stripped.ends_with('.')
+    // Track delimiter balance: (), [], <>
+    let mut paren: i32 = 0;
+    let mut bracket: i32 = 0;
+    let mut angle: i32 = 0;
+    let mut in_string = false;
+    for c in stripped.chars() {
+        match c {
+            '"' => in_string = !in_string,
+            '(' if !in_string => paren += 1,
+            ')' if !in_string => paren -= 1,
+            '[' if !in_string => bracket += 1,
+            ']' if !in_string => bracket -= 1,
+            '<' if !in_string => angle += 1,
+            '>' if !in_string => angle -= 1,
+            _ => {}
+        }
+    }
+    paren <= 0 && bracket <= 0 && angle <= 0
 }
 
 async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error>> {
@@ -854,16 +873,7 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                 resp.json().await.map_err(|e| format!("{e}"))?;
 
             let data = result.data.ok_or("No data returned")?;
-            println!("Relation: {name}");
-            println!("  Columns: {:?}", data.columns);
-            println!("  Total rows: {}", data.total_count);
-            if !data.rows.is_empty() {
-                println!("  Preview (first {}):", data.rows.len());
-                for row in &data.rows {
-                    let vals: Vec<String> = row.iter().map(format_json_value).collect();
-                    println!("    ({})", vals.join(", "));
-                }
-            }
+            display_relation_data(&data, &name);
         }
 
         MetaCommand::RuleList => {
@@ -895,14 +905,10 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
 
         MetaCommand::RuleQuery(name) => {
             // Query the rule to show its data
-            let query = format!("?- {name}(X, Y).");
+            let query = format!("?{name}(X, Y)");
             let result = execute_query(state, query).await?;
             println!("Rule: {name}");
-            println!("{} rows:", result.rows.len());
-            for row in &result.rows {
-                let vals: Vec<String> = row.iter().map(format_json_value).collect();
-                println!("  ({})", vals.join(", "));
-            }
+            display_query_result(&result, &state.display_config);
         }
 
         MetaCommand::RuleDrop(name) => {
@@ -1301,7 +1307,7 @@ async fn handle_delete(
                 .join(", ");
 
             // Build the conditional delete statement
-            let delete_stmt = format!("-{}({}) :- {}.", op.relation, head_str, body_str);
+            let delete_stmt = format!("-{}({}) <- {}", op.relation, head_str, body_str);
 
             // Send through query API
             let response = execute_query(state, delete_stmt).await?;
@@ -1348,20 +1354,10 @@ async fn handle_query(
         body_parts.push(format_body_pred(pred));
     }
 
-    program.push_str(&format!("?- {}.", body_parts.join(", ")));
+    program.push_str(&format!("?{}", body_parts.join(", ")));
 
     let response = execute_query(state, program).await?;
-
-    if response.rows.is_empty() {
-        println!("No results.");
-    } else {
-        println!("{} rows:", response.rows.len());
-        for row in &response.rows {
-            let vals: Vec<String> = row.iter().map(format_json_value).collect();
-            println!("  ({})", vals.join(", "));
-        }
-    }
-
+    display_query_result(&response, &state.display_config);
     Ok(())
 }
 
@@ -1502,14 +1498,13 @@ async fn handle_update(
         update_text.push_str(&format!("+{}({})", target.relation, args.join(", ")));
     }
 
-    update_text.push_str(" :- ");
+    update_text.push_str(" <- ");
 
     let mut condition_parts = Vec::new();
     for pred in &update.body {
         condition_parts.push(format_body_pred(pred));
     }
     update_text.push_str(&condition_parts.join(", "));
-    update_text.push('.');
 
     let _ = execute_query(state, update_text).await?;
     println!("Update executed.");
@@ -1539,6 +1534,7 @@ fn validate_fact_term(term: &Term) -> Result<(), String> {
         Term::Constant(_)
         | Term::FloatConstant(_)
         | Term::StringConstant(_)
+        | Term::BoolConstant(_)
         | Term::VectorLiteral(_) => Ok(()),
         Term::Variable(v) => Err(format!(
             "Cannot use variable '{v}' in a fact - use constants only (wrap in quotes for strings)"
@@ -1577,6 +1573,7 @@ fn term_to_json(term: &Term) -> serde_json::Value {
         Term::Constant(n) => serde_json::Value::Number((*n).into()),
         Term::FloatConstant(f) => serde_json::json!(*f),
         Term::StringConstant(s) => serde_json::Value::String(s.clone()),
+        Term::BoolConstant(b) => serde_json::Value::Bool(*b),
         Term::VectorLiteral(v) => {
             serde_json::Value::Array(v.iter().map(|x| serde_json::json!(*x)).collect())
         }
@@ -1590,19 +1587,231 @@ fn term_to_json(term: &Term) -> serde_json::Value {
     }
 }
 
-fn format_json_value(value: &serde_json::Value) -> String {
+// ── Table formatting ──────────────────────────────────────────────
+
+/// Format a JSON value for display in a table cell.
+fn format_cell_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Number(n) => {
-            // Normalize exponent format across platforms (e+20 -> e20)
             let s = n.to_string();
             s.replace("e+", "e")
         }
         serde_json::Value::String(s) => format!("\"{s}\""),
         serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Array(arr) => format!("{arr:?}"),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(format_cell_value).collect();
+            format!("[{}]", items.join(", "))
+        }
         serde_json::Value::Object(obj) => format!("{obj:?}"),
     }
+}
+
+/// Truncate a string to `max` characters, appending `…` if truncated.
+fn truncate_str(s: &str, max: usize) -> String {
+    if max == 0 || s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{truncated}\u{2026}")
+    }
+}
+
+/// Detect whether a column contains only numeric values (for right-alignment).
+fn is_numeric_column(rows: &[Vec<serde_json::Value>], col_idx: usize) -> bool {
+    rows.iter()
+        .all(|row| row.get(col_idx).is_some_and(serde_json::Value::is_number))
+}
+
+/// Compute the display width for each column, capped at `max_width`.
+fn compute_column_widths(
+    columns: &[String],
+    rows: &[Vec<serde_json::Value>],
+    max_width: usize,
+) -> Vec<usize> {
+    let mut widths: Vec<usize> = columns.iter().map(std::string::String::len).collect();
+    for row in rows {
+        for (i, val) in row.iter().enumerate() {
+            if i < widths.len() {
+                let cell = format_cell_value(val);
+                widths[i] = widths[i].max(cell.chars().count());
+            }
+        }
+    }
+    if max_width > 0 {
+        for w in &mut widths {
+            if *w > max_width {
+                *w = max_width;
+            }
+        }
+    }
+    widths
+}
+
+/// Display a query result as a formatted table.
+fn display_query_result(response: &QueryResponse, config: &DisplayConfig) {
+    if response.rows.is_empty() {
+        println!("No results.");
+        return;
+    }
+
+    let total_rows = response.rows.len();
+    let display_rows = if config.max_rows > 0 && total_rows > config.max_rows {
+        config.max_rows
+    } else {
+        total_rows
+    };
+
+    let visible_rows = &response.rows[..display_rows];
+    let widths = compute_column_widths(&response.columns, visible_rows, config.max_col_width);
+    let numeric: Vec<bool> = (0..response.columns.len())
+        .map(|i| is_numeric_column(visible_rows, i))
+        .collect();
+
+    // Top border
+    let top: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{252c}");
+    println!("\u{250c}{top}\u{2510}");
+
+    // Header
+    let header: String = widths
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let name = response
+                .columns
+                .get(i)
+                .map_or("", std::string::String::as_str);
+            format!(" {name:<w$} ")
+        })
+        .collect::<Vec<_>>()
+        .join("\u{2502}");
+    println!("\u{2502}{header}\u{2502}");
+
+    // Header separator
+    let sep: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{253c}");
+    println!("\u{251c}{sep}\u{2524}");
+
+    // Data rows
+    for row in visible_rows {
+        let cells: String = widths
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let raw = row.get(i).map(format_cell_value).unwrap_or_default();
+                let cell = truncate_str(&raw, config.max_col_width);
+                if numeric[i] {
+                    format!(" {cell:>w$} ")
+                } else {
+                    format!(" {cell:<w$} ")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\u{2502}");
+        println!("\u{2502}{cells}\u{2502}");
+    }
+
+    // Bottom border
+    let bottom: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{2534}");
+    println!("\u{2514}{bottom}\u{2518}");
+
+    // Row count + truncation notice
+    if display_rows < total_rows {
+        if config.show_timing {
+            println!(
+                "{display_rows} of {total_rows} rows ({}ms). Use --limit 0 for all rows.",
+                response.execution_time_ms
+            );
+        } else {
+            println!("{display_rows} of {total_rows} rows. Use --limit 0 for all rows.");
+        }
+    } else if config.show_timing {
+        println!("{total_rows} rows ({}ms)", response.execution_time_ms);
+    } else {
+        println!("{total_rows} rows");
+    }
+}
+
+/// Display relation data (from `.rel name`) as a table.
+fn display_relation_data(data: &RelationDataResponse, name: &str) {
+    println!("Relation: {name}");
+    if data.rows.is_empty() {
+        println!("  No data.");
+        return;
+    }
+
+    let widths = compute_column_widths(&data.columns, &data.rows, 40);
+    let numeric: Vec<bool> = (0..data.columns.len())
+        .map(|i| is_numeric_column(&data.rows, i))
+        .collect();
+
+    // Top border
+    let top: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{252c}");
+    println!("\u{250c}{top}\u{2510}");
+
+    // Header
+    let header: String = widths
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let name = data.columns.get(i).map_or("", std::string::String::as_str);
+            format!(" {name:<w$} ")
+        })
+        .collect::<Vec<_>>()
+        .join("\u{2502}");
+    println!("\u{2502}{header}\u{2502}");
+
+    // Header separator
+    let sep: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{253c}");
+    println!("\u{251c}{sep}\u{2524}");
+
+    // Data rows
+    for row in &data.rows {
+        let cells: String = widths
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let raw = row.get(i).map(format_cell_value).unwrap_or_default();
+                let cell = truncate_str(&raw, 40);
+                if numeric[i] {
+                    format!(" {cell:>w$} ")
+                } else {
+                    format!(" {cell:<w$} ")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\u{2502}");
+        println!("\u{2502}{cells}\u{2502}");
+    }
+
+    // Bottom border
+    let bottom: String = widths
+        .iter()
+        .map(|w| "\u{2500}".repeat(w + 2))
+        .collect::<Vec<_>>()
+        .join("\u{2534}");
+    println!("\u{2514}{bottom}\u{2518}");
+
+    println!("{} of {} total rows", data.rows.len(), data.total_count);
 }
 
 /// Format a rule as Datalog text (uses Rule's Display impl)
@@ -1676,15 +1885,15 @@ fn print_help() {
     println!("  .quit                Exit");
     println!();
     println!("Data Manipulation:");
-    println!("  edge(1, 2).          Insert fact");
-    println!("  -edge(1, 2).         Delete fact");
+    println!("  edge(1, 2)           Insert fact");
+    println!("  -edge(1, 2)          Delete fact");
     println!();
     println!("Rules:");
-    println!("  +path(X, Y) :- edge(X, Y).   Persistent rule");
-    println!("  foo(X, Y) :- bar(X, Y).      Session rule");
+    println!("  +path(X, Y) <- edge(X, Y)    Persistent rule");
+    println!("  foo(X, Y) <- bar(X, Y)       Session rule");
     println!();
     println!("Queries:");
-    println!("  ?- path(1, X).       Query");
+    println!("  ?path(1, X)          Query");
     println!();
 }
 

@@ -1,0 +1,18 @@
+// Test: Different types in joins
+
+.kg create test_type_join_n11t47
+.kg use test_type_join_n11t47
+
+// Integer keys
++int_data[(1, "one"), (2, "two"), (3, "three")]
+
+// String descriptions
++desc[(1, "first item"), (2, "second item")]
+
+// Join on integer key
+joined(Id, Name, Desc) <- int_data(Id, Name), desc(Id, Desc)
+
+?joined(Id, Name, Desc)
+
+.kg use default
+.kg drop test_type_join_n11t47

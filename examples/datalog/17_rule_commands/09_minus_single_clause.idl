@@ -1,0 +1,38 @@
+// Test: Minus operator removes single clause only
+// Description: The `-` operator should remove ONLY the specific clause,
+//              while `.rule drop` removes ALL clauses of a rule.
+
+.kg create test_minus_clause_n17t09
+.kg use test_minus_clause_n17t09
+
+// Insert base data
++edge[(1,2), (2,3), (3,4)]
+
+// Define a multi-clause rule (transitive closure)
+// Clause 1: Base case
++reachable(X, Y) <- edge(X, Y)
+// Clause 2: Recursive case
++reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
+// Show rules before removal
+.rule list
+
+// Show rule definition (should have 2 clauses)
+.rule def reachable
+
+// Query before removal - should find all transitive paths
+?reachable(1, Y)
+
+// Remove ONLY the base case clause using `-` operator
+-reachable(X, Y) <- edge(X, Y)
+
+// Show rule definition after removal (should have 1 clause - recursive only)
+.rule def reachable
+
+// Query after removal - recursive clause needs base case to work
+// Without base case, should return empty (no base facts to recurse from)
+?reachable(1, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_minus_clause_n17t09

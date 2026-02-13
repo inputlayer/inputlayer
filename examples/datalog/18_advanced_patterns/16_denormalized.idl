@@ -1,0 +1,29 @@
+// Test: Denormalized data pattern
+
+.kg create test_denorm_n18t16
+.kg use test_denorm_n18t16
+
+// Denormalized order data (order_id, product, customer, amount)
++orders[(1, "widget", "Alice", 100),
+        (2, "gadget", "Bob", 200),
+        (3, "widget", "Alice", 150),
+        (4, "gizmo", "Carol", 75),
+        (5, "widget", "Bob", 100)]
+
+// Aggregate by customer
+customer_total(Customer, sum<Amt>) <- orders(_, _, Customer, Amt)
+
+?customer_total(Customer, Total)
+
+// Aggregate by product
+product_total(Product, sum<Amt>) <- orders(_, Product, _, Amt)
+
+?product_total(Product, Total)
+
+// Cross-tabulation: customer x product totals
+crosstab(Customer, Product, sum<Amt>) <- orders(_, Product, Customer, Amt)
+
+?crosstab(Customer, Product, Total)
+
+.kg use default
+.kg drop test_denorm_n18t16

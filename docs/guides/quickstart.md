@@ -22,27 +22,27 @@ cargo build --release
 You should see:
 ```
 InputLayer v0.1.0
-Type .help for commands, .quit to exit.
+Type .help for commands, .quit to exit
 >
 ```
 
 ## 3. Add Some Data
 
 ```datalog
-> +person("alice", 30).
+> +person("alice", 30)
 OK
 
-> +person("bob", 25).
+> +person("bob", 25)
 OK
 
-> +person("charlie", 35).
+> +person("charlie", 35)
 OK
 ```
 
 ## 4. Query the Data
 
 ```datalog
-> ?- person(Name, Age).
+> ?person(Name, Age)
 ┌─────────┬─────┐
 │ Name    │ Age │
 ├─────────┼─────┤
@@ -56,7 +56,7 @@ OK
 ## 5. Add a Filter
 
 ```datalog
-> ?- person(Name, Age), Age > 28.
+> ?person(Name, Age), Age > 28
 ┌─────────┬─────┐
 │ Name    │ Age │
 ├─────────┼─────┤
@@ -69,10 +69,10 @@ OK
 ## 6. Create a Rule
 
 ```datalog
-> +senior(Name) :- person(Name, Age), Age >= 30.
+> +senior(Name) <- person(Name, Age), Age >= 30
 OK
 
-> ?- senior(X).
+> ?senior(X)
 ┌─────────┐
 │ X       │
 ├─────────┤
@@ -85,7 +85,7 @@ OK
 ## 7. Use Aggregation
 
 ```datalog
-> ?- avg<Age> :- person(_, Age).
+> ?avg<Age> <- person(_, Age)
 ┌─────┐
 │ avg │
 ├─────┤

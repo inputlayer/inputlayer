@@ -1,0 +1,24 @@
+// Test: Single row operations
+
+.kg create test_single_row_n10t31
+.kg use test_single_row_n10t31
+
+// Single row relation
++single[(1, "only")]
+
+?single(Id, Val)
+
+// Aggregate on single row
++single_count(count<V>) <- single(_, V)
++single_sum(sum<Id>) <- single(Id, _)
+
+?single_count(C)
+?single_sum(S)
+
+// Self-join with single row
+self_join(A, B) <- single(A, _), single(B, _)
+
+?self_join(A, B)
+
+.kg use default
+.kg drop test_single_row_n10t31

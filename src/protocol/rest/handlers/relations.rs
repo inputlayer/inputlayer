@@ -153,7 +153,7 @@ pub async fn get_relation_data(
 
     // Generate query with correct arity
     let vars = generate_variables(arity);
-    let query = format!("?- {}({}).", name, vars.join(", "));
+    let query = format!("?{}({})", name, vars.join(", "));
 
     let result = handler
         .query_program(Some(kg.clone()), query)

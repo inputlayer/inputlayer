@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_projection_n21t02
+Knowledge graph 'test_projection_n21t02' created.
+Switched to knowledge graph: test_projection_n21t02
+> .kg use test_projection_n21t02
+Switched to knowledge graph: test_projection_n21t02
+> +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)]
+Inserted 4 fact(s) into 'employees'.

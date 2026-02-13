@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_result_n10t22
+Knowledge graph 'test_empty_result_n10t22' created.
+Switched to knowledge graph: test_empty_result_n10t22
+> .kg use test_empty_result_n10t22
+Switched to knowledge graph: test_empty_result_n10t22
+> +items[(1, "a"), (2, "b"), (3, "c")]
+Inserted 3 fact(s) into 'items'.
+> ?items(Id, Name), Id > 100
+No results.
+> ?items(99, Name)
+No results.
+> +empty_rel(999, "z")
+Inserted 1 fact(s) into 'empty_rel'.
+> -empty_rel(999, "z")
+Deleted 1 facts from 'empty_rel'.
+> ?items(Id, N), empty_rel(Id, _)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_result_n10t22
+Knowledge graph 'test_empty_result_n10t22' dropped.

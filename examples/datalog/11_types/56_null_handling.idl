@@ -1,0 +1,14 @@
+// Test: Null-like value handling
+
+.kg create test_null_n11t56
+.kg use test_null_n11t56
+
++data[(1, "value"), (2, ""), (3, "another")]
+
+// Filter out empty strings
+non_empty(Id, Val) <- data(Id, Val), Val != ""
+
+?non_empty(Id, Val)
+
+.kg use default
+.kg drop test_null_n11t56

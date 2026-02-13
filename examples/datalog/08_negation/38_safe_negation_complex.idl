@@ -1,0 +1,15 @@
+// Test: Complex safe negation
+
+.kg create test_safe_neg_n08t38
+.kg use test_safe_neg_n08t38
+
++orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)]
++vip[("Alice",)]
+
+// Non-VIP orders with value > 100
+non_vip_high(Id, Name, Val) <- orders(Id, Name, Val), !vip(Name), Val > 100
+
+?non_vip_high(Id, Name, Val)
+
+.kg use default
+.kg drop test_safe_neg_n08t38

@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_zero_key_n10t62
+Knowledge graph 'test_zero_key_n10t62' created.
+Switched to knowledge graph: test_zero_key_n10t62
+> .kg use test_zero_key_n10t62
+Switched to knowledge graph: test_zero_key_n10t62
+> +data[(0, "zero"), (1, "one"), (2, "two")]
+Inserted 3 fact(s) into 'data'.
+> ?data(Key, Val)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    0 │ "zero" │
+│    1 │ "one"  │
+│    2 │ "two"  │
+└──────┴────────┘
+3 rows

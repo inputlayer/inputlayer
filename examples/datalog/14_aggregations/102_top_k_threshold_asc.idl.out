@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_top_k_threshold_asc_n14t102
+Knowledge graph 'test_top_k_threshold_asc_n14t102' created.
+Switched to knowledge graph: test_top_k_threshold_asc_n14t102
+> .kg use test_top_k_threshold_asc_n14t102
+Switched to knowledge graph: test_top_k_threshold_asc_n14t102
+> +latency[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 30)]
+Inserted 6 fact(s) into 'latency'.

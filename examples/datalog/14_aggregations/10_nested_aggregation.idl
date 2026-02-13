@@ -1,0 +1,36 @@
+// Test: Nested Aggregation Pattern
+// Verifies: Using aggregation results as input to another aggregation
+
+.kg create test_nested_agg_n14t10
+.kg use test_nested_agg_n14t10
+
+// Student scores: student_id, course_id, score
++scores[(1, 101, 85), (1, 102, 90), (1, 103, 95),
+        (2, 101, 70), (2, 102, 75), (2, 103, 80),
+        (3, 101, 90), (3, 102, 85), (3, 103, 88),
+        (4, 101, 60), (4, 102, 65), (4, 103, 70)]
+
+// Step 1: Calculate sum of scores per student
++student_total(Student, sum<Score>) <- scores(Student, _, Score)
+?student_total(S, Total)
+
+// Step 2: Find the maximum total score (best student)
++best_total(max<Total>) <- student_total(_, Total)
+?best_total(T)
+
+// Step 3: Calculate average score per course
++course_avg(Course, avg<Score>) <- scores(_, Course, Score)
+?course_avg(C, A)
+
+// Step 4: Find the course with highest average
++top_course_avg(max<Avg>) <- course_avg(_, Avg)
+?top_course_avg(A)
+
+// Count students per score range (using derived data)
++high_scorer(Student) <- student_total(Student, Total), Total > 250
++high_count(count<S>) <- high_scorer(S)
+?high_count(C)
+
+// Cleanup
+.kg use default
+.kg drop test_nested_agg_n14t10

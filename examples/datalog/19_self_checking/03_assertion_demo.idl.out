@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_assertion_demo_n19t03
+Knowledge graph 'test_assertion_demo_n19t03' created.
+Switched to knowledge graph: test_assertion_demo_n19t03
+> .kg use test_assertion_demo_n19t03
+Switched to knowledge graph: test_assertion_demo_n19t03
+> +data[(1, 5), (2, 10), (3, 15)]
+Inserted 3 fact(s) into 'data'.
+> +link[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'link'.

@@ -1,0 +1,24 @@
+// Test: Star schema join pattern
+
+.kg create test_star_n06t15
+.kg use test_star_n06t15
+
+// Fact table
++sales[(1, 100, 1000, "2024-01-01"),
+       (2, 101, 1001, "2024-01-02"),
+       (3, 100, 1000, "2024-01-03")]
+
+// Dimension tables
++products[(100, "Widget"), (101, "Gadget")]
++customers[(1000, "Alice"), (1001, "Bob")]
+
+// Star join (fact -> all dimensions)
+full_report(SaleId, ProdName, CustName, Date) <-
+    sales(SaleId, ProdId, CustId, Date),
+    products(ProdId, ProdName),
+    customers(CustId, CustName)
+
+?full_report(SaleId, ProdName, CustName, Date)
+
+.kg use default
+.kg drop test_star_n06t15

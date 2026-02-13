@@ -106,7 +106,7 @@ fn test_parse_meta_commands() {
 #[test]
 fn test_parse_insert_operations() {
     // Single insert
-    let stmt = parse_statement("+edge(1, 2).").unwrap();
+    let stmt = parse_statement("+edge(1, 2)").unwrap();
     if let Statement::Insert(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert_eq!(op.tuples.len(), 1);
@@ -115,7 +115,7 @@ fn test_parse_insert_operations() {
     }
 
     // Bulk insert
-    let stmt = parse_statement("+edge[(1, 2), (3, 4), (5, 6)].").unwrap();
+    let stmt = parse_statement("+edge[(1, 2), (3, 4), (5, 6)]").unwrap();
     if let Statement::Insert(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert_eq!(op.tuples.len(), 3);
@@ -127,7 +127,7 @@ fn test_parse_insert_operations() {
 #[test]
 fn test_parse_delete_operations() {
     // Single delete
-    let stmt = parse_statement("-edge(1, 2).").unwrap();
+    let stmt = parse_statement("-edge(1, 2)").unwrap();
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -136,7 +136,7 @@ fn test_parse_delete_operations() {
     }
 
     // Conditional delete - use valid atom syntax instead of constraint
-    let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
+    let stmt = parse_statement("-edge(X, Y) <- source(X)").unwrap();
     if let Statement::Delete(op) = stmt {
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -148,7 +148,7 @@ fn test_parse_delete_operations() {
 #[test]
 fn test_parse_persistent_rule() {
     // Simple persistent rule (new syntax using + prefix)
-    let stmt = parse_statement("+path(X, Y) :- edge(X, Y).").unwrap();
+    let stmt = parse_statement("+path(X, Y) <- edge(X, Y)").unwrap();
     if let Statement::PersistentRule(rule) = stmt {
         assert_eq!(rule.head.relation, "path");
     } else {
@@ -156,7 +156,7 @@ fn test_parse_persistent_rule() {
     }
 
     // Persistent rule with join - use valid atom syntax instead of constraint
-    let stmt = parse_statement("+adult(N, A) :- person(N, A), ages(N, A).").unwrap();
+    let stmt = parse_statement("+adult(N, A) <- person(N, A), ages(N, A)").unwrap();
     if let Statement::PersistentRule(rule) = stmt {
         assert_eq!(rule.head.relation, "adult");
     } else {
@@ -167,7 +167,7 @@ fn test_parse_persistent_rule() {
 #[test]
 fn test_parse_transient_rule() {
     // Use valid atom syntax instead of constraint
-    let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
+    let stmt = parse_statement("result(X, Y) <- edge(X, Y), node(X)").unwrap();
     if let Statement::SessionRule(rule) = stmt {
         assert_eq!(rule.head.relation, "result");
     } else {
@@ -177,7 +177,7 @@ fn test_parse_transient_rule() {
 
 #[test]
 fn test_parse_query() {
-    let stmt = parse_statement("?- edge(1, X).").unwrap();
+    let stmt = parse_statement("?edge(1, X)").unwrap();
     if let Statement::Query(goal) = stmt {
         assert_eq!(goal.goal.relation, "edge");
     } else {
@@ -189,7 +189,7 @@ fn test_parse_query() {
 fn test_parse_update_operation() {
     // Use valid atom syntax instead of constraint
     let stmt = parse_statement(
-        "-person(X, OldAge), +person(X, NewAge) :- person(X, OldAge), newage(X, NewAge).",
+        "-person(X, OldAge), +person(X, NewAge) <- person(X, OldAge), newage(X, NewAge)",
     )
     .unwrap();
     if let Statement::Update(op) = stmt {
@@ -204,7 +204,7 @@ fn test_parse_update_operation() {
 
 #[test]
 fn test_parse_rule_definition_function() {
-    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let rule_def = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     assert_eq!(rule_def.name, "path");
 
     let rule = rule_def.rule.to_rule();
@@ -227,7 +227,7 @@ fn test_rule_catalog_with_storage_engine() {
         .unwrap();
 
     // Register a rule
-    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let rule_def = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     storage.register_rule(&rule_def).unwrap();
 
     // List rules
@@ -241,7 +241,7 @@ fn test_rule_catalog_with_storage_engine() {
 
     // Execute query using rule
     let results = storage
-        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .execute_query_with_rules("result(X, Y) <- path(X, Y)")
         .unwrap();
     assert_eq!(results.len(), 3);
 
@@ -264,10 +264,10 @@ fn test_recursive_rule_definition() {
         .unwrap();
 
     // Register recursive rule (two clauses)
-    let base_rule = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let base_rule = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     storage.register_rule(&base_rule).unwrap();
 
-    let recursive_rule = parse_rule_definition("path(X, Z) :-edge(X, Y), path(Y, Z).").unwrap();
+    let recursive_rule = parse_rule_definition("path(X, Z) <- edge(X, Y), path(Y, Z)").unwrap();
     storage.register_rule(&recursive_rule).unwrap();
 
     // The rule should have 2 clauses
@@ -287,7 +287,7 @@ fn test_rule_persistence() {
         storage.create_knowledge_graph("mydb").unwrap();
         storage.use_knowledge_graph("mydb").unwrap();
 
-        let rule_def = parse_rule_definition("derived(X) :-base(X).").unwrap();
+        let rule_def = parse_rule_definition("derived(X) <- base(X)").unwrap();
         storage.register_rule(&rule_def).unwrap();
 
         storage.save_all().unwrap();
@@ -312,7 +312,7 @@ fn test_rule_catalog_standalone() {
     let mut catalog = RuleCatalog::new(temp.path().to_path_buf()).unwrap();
 
     // Register rule
-    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let rule_def = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     catalog.register_rule(&rule_def).unwrap();
 
     assert!(catalog.exists("path"));
@@ -360,12 +360,12 @@ fn test_execute_query_with_rules() {
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
     // Register rule
-    let rule_def = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let rule_def = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     storage.register_rule(&rule_def).unwrap();
 
     // Query that uses the rule
     let results = storage
-        .execute_query_with_rules("result(X, Y) :- path(X, Y).")
+        .execute_query_with_rules("result(X, Y) <- path(X, Y)")
         .unwrap();
     assert_eq!(results.len(), 2);
 }
@@ -415,7 +415,7 @@ fn test_serializable_rule_roundtrip() {
     use inputlayer::statement::SerializableRule;
 
     // Use valid atom syntax instead of constraint
-    let rule_str = "path(X, Y) :- edge(X, Y), node(X).";
+    let rule_str = "path(X, Y) <- edge(X, Y), node(X)";
     let rule = parse_rule(rule_str).unwrap();
 
     // Convert to serializable
@@ -433,7 +433,7 @@ fn test_serializable_rule_json() {
     use inputlayer::parser::parse_rule;
     use inputlayer::statement::SerializableRule;
 
-    let rule_str = "result(X, Y) :- edge(X, Y).";
+    let rule_str = "result(X, Y) <- edge(X, Y)";
     let rule = parse_rule(rule_str).unwrap();
 
     let serializable = SerializableRule::from_rule(&rule);
@@ -462,12 +462,12 @@ fn test_view_with_constraints() {
         .unwrap();
 
     // Register view with constraint
-    let view_def = parse_rule_definition("adult(Id, Age) :-person(Id, Age), Age >= 18.").unwrap();
+    let view_def = parse_rule_definition("adult(Id, Age) <- person(Id, Age), Age >= 18").unwrap();
     storage.register_rule(&view_def).unwrap();
 
     // Query the view
     let results = storage
-        .execute_query_with_rules("result(Id, Age) :- adult(Id, Age).")
+        .execute_query_with_rules("result(Id, Age) <- adult(Id, Age)")
         .unwrap();
 
     // Should only get people 18 or older (id 1 age 25, id 3 age 30)
@@ -485,10 +485,10 @@ fn test_multiple_views() {
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
     // Register multiple views
-    let view1 = parse_rule_definition("path(X, Y) :-edge(X, Y).").unwrap();
+    let view1 = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
     storage.register_rule(&view1).unwrap();
 
-    let view2 = parse_rule_definition("reach(X) :-path(1, X).").unwrap();
+    let view2 = parse_rule_definition("reach(X) <- path(1, X)").unwrap();
     storage.register_rule(&view2).unwrap();
 
     let views = storage.list_rules().unwrap();
@@ -508,9 +508,9 @@ fn test_query_with_constant_first_arg() {
         .insert("parent", vec![(1, 2), (1, 3), (2, 4)])
         .unwrap();
 
-    // Query: ?- parent(1, X). - use constant directly in atom
+    // Query: ?parent(1, X). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(1, X) :- parent(1, X).")
+        .execute_query_with_rules("__query__(1, X) <- parent(1, X)")
         .unwrap();
 
     // Should return (1, 2) and (1, 3) - children of parent 1
@@ -531,18 +531,18 @@ fn test_query_with_all_constants() {
         .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
         .unwrap();
 
-    // Query: ?- edge(1, 2). - use constants directly in atom
+    // Query: ?edge(1, 2). - use constants directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(1, 2) :- edge(1, 2).")
+        .execute_query_with_rules("__query__(1, 2) <- edge(1, 2)")
         .unwrap();
 
     // Should return (1, 2) since that fact exists
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], (1, 2));
 
-    // Query: ?- edge(1, 99). - fact doesn't exist
+    // Query: ?edge(1, 99). - fact doesn't exist
     let results = storage
-        .execute_query_with_rules("__query__(1, 99) :- edge(1, 99).")
+        .execute_query_with_rules("__query__(1, 99) <- edge(1, 99)")
         .unwrap();
 
     // Should return empty since (1, 99) doesn't exist
@@ -562,9 +562,9 @@ fn test_query_with_constant_on_base_relation() {
         .insert("edge", vec![(1, 2), (1, 3), (2, 4)])
         .unwrap();
 
-    // Query: ?- edge(1, X). - use constant directly in atom
+    // Query: ?edge(1, X). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(1, X) :- edge(1, X).")
+        .execute_query_with_rules("__query__(1, X) <- edge(1, X)")
         .unwrap();
 
     // From 1, direct edges are: (1,2), (1,3)
@@ -585,9 +585,9 @@ fn test_query_constant_second_arg() {
         .insert("edge", vec![(1, 3), (2, 3), (4, 5)])
         .unwrap();
 
-    // Query: ?- edge(X, 3). - use constant directly in atom
+    // Query: ?edge(X, 3). - use constant directly in atom
     let results = storage
-        .execute_query_with_rules("__query__(X, 3) :- edge(X, 3).")
+        .execute_query_with_rules("__query__(X, 3) <- edge(X, 3)")
         .unwrap();
 
     // Should return (1, 3) and (2, 3)
@@ -600,7 +600,7 @@ fn test_query_constant_second_arg() {
 #[test]
 fn test_unquoted_atom_rejected_in_insert() {
     // Unquoted lowercase identifier should be rejected - use quoted strings instead
-    let result = parse_statement("+person(alice, 30).");
+    let result = parse_statement("+person(alice, 30)");
     assert!(result.is_err(), "Unquoted atom 'alice' should be rejected");
     let err = result.unwrap_err();
     assert!(
@@ -612,7 +612,7 @@ fn test_unquoted_atom_rejected_in_insert() {
 #[test]
 fn test_quoted_string_accepted_in_insert() {
     // Quoted string should work
-    let result = parse_statement("+person(\"alice\", 30).");
+    let result = parse_statement("+person(\"alice\", 30)");
     assert!(
         result.is_ok(),
         "Quoted string should be accepted: {:?}",
@@ -623,14 +623,14 @@ fn test_quoted_string_accepted_in_insert() {
 #[test]
 fn test_unquoted_atom_rejected_in_fact() {
     // Session fact with unquoted atom should be rejected
-    let result = parse_statement("person(bob, 25).");
+    let result = parse_statement("person(bob, 25)");
     assert!(result.is_err(), "Unquoted atom 'bob' should be rejected");
 }
 
 #[test]
 fn test_quoted_string_accepted_in_fact() {
     // Session fact with quoted string should work
-    let result = parse_statement("person(\"bob\", 25).");
+    let result = parse_statement("person(\"bob\", 25)");
     assert!(
         result.is_ok(),
         "Quoted string should be accepted: {:?}",
@@ -641,7 +641,7 @@ fn test_quoted_string_accepted_in_fact() {
 #[test]
 fn test_unquoted_atom_rejected_in_query() {
     // Query with unquoted atom constant should be rejected
-    let result = parse_statement("?- person(alice, X).");
+    let result = parse_statement("?person(alice, X)");
     assert!(
         result.is_err(),
         "Unquoted atom 'alice' in query should be rejected"
@@ -651,14 +651,14 @@ fn test_unquoted_atom_rejected_in_query() {
 #[test]
 fn test_variables_still_work_in_query() {
     // Variables (uppercase) should still work fine
-    let result = parse_statement("?- person(X, Y).");
+    let result = parse_statement("?person(X, Y)");
     assert!(result.is_ok(), "Variables should work: {:?}", result.err());
 }
 
 #[test]
 fn test_mixed_quoted_and_variables() {
     // Mix of quoted strings and variables should work
-    let result = parse_statement("?- person(\"alice\", Age).");
+    let result = parse_statement("?person(\"alice\", Age)");
     assert!(
         result.is_ok(),
         "Mix of quoted string and variable should work: {:?}",
@@ -668,7 +668,7 @@ fn test_mixed_quoted_and_variables() {
 
 #[test]
 fn test_unquoted_atom_error_message_helpful() {
-    let result = parse_statement("+person(alice, 30).");
+    let result = parse_statement("+person(alice, 30)");
     let err = result.unwrap_err();
     // Error should suggest using quotes
     assert!(

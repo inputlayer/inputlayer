@@ -125,7 +125,7 @@ fn test_insert_and_query() {
         .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
         .unwrap();
 
-    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert_eq!(results.len(), 3);
     assert!(results.contains(&(1, 2)));
     assert!(results.contains(&(2, 3)));
@@ -140,10 +140,8 @@ fn test_insert_multiple_relations() {
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
     storage.insert("person", vec![(1, 100), (2, 200)]).unwrap();
 
-    let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-    let person_results = storage
-        .execute_query("result(X,Y) :- person(X,Y).")
-        .unwrap();
+    let edge_results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
+    let person_results = storage.execute_query("result(X,Y) <- person(X,Y)").unwrap();
 
     assert_eq!(edge_results.len(), 2);
     assert_eq!(person_results.len(), 2);
@@ -160,7 +158,7 @@ fn test_delete_tuples() {
 
     storage.delete("edge", vec![(2, 3)]).unwrap();
 
-    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert_eq!(results.len(), 2);
     assert!(!results.contains(&(2, 3)));
 }
@@ -178,7 +176,7 @@ fn test_knowledge_graph_isolation() {
     storage.create_knowledge_graph("kg2").unwrap();
     storage.use_knowledge_graph("kg2").unwrap();
 
-    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert_eq!(results.len(), 0); // No data in kg2
 }
 
@@ -197,10 +195,10 @@ fn test_insert_into_specific_knowledge_graph() {
 
     // Verify data in correct knowledge graphs
     let kg1_results = storage
-        .execute_query_on("kg1", "result(X,Y) :- edge(X,Y).")
+        .execute_query_on("kg1", "result(X,Y) <- edge(X,Y)")
         .unwrap();
     let kg2_results = storage
-        .execute_query_on("kg2", "result(X,Y) :- edge(X,Y).")
+        .execute_query_on("kg2", "result(X,Y) <- edge(X,Y)")
         .unwrap();
 
     assert_eq!(kg1_results, vec![(1, 2)]);
@@ -221,7 +219,7 @@ fn test_execute_query_on_specific_knowledge_graph() {
 
     // Query without switching knowledge graphs
     let results = storage
-        .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+        .execute_query_on("test", "result(X,Y) <- edge(X,Y)")
         .unwrap();
     assert_eq!(results.len(), 2);
 
@@ -256,10 +254,8 @@ fn test_save_and_load_knowledge_graph() {
 
         storage.use_knowledge_graph("persist_test").unwrap();
 
-        let edge_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
-        let person_results = storage
-            .execute_query("result(X,Y) :- person(X,Y).")
-            .unwrap();
+        let edge_results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
+        let person_results = storage.execute_query("result(X,Y) <- person(X,Y)").unwrap();
 
         assert_eq!(edge_results.len(), 3);
         assert_eq!(person_results.len(), 2);
@@ -292,10 +288,10 @@ fn test_save_all_knowledge_graphs() {
         let storage = StorageEngine::new(config).unwrap();
 
         let kg1_results = storage
-            .execute_query_on("kg1", "result(X,Y) :- data(X,Y).")
+            .execute_query_on("kg1", "result(X,Y) <- data(X,Y)")
             .unwrap();
         let kg2_results = storage
-            .execute_query_on("kg2", "result(X,Y) :- data(X,Y).")
+            .execute_query_on("kg2", "result(X,Y) <- data(X,Y)")
             .unwrap();
 
         assert_eq!(kg1_results, vec![(1, 1)]);
@@ -342,9 +338,9 @@ fn test_parallel_queries_on_knowledge_graphs() {
 
     // Execute queries in parallel
     let queries = vec![
-        ("kg1", "result(X,Y) :- edge(X,Y)."),
-        ("kg2", "result(X,Y) :- edge(X,Y)."),
-        ("kg3", "result(X,Y) :- edge(X,Y)."),
+        ("kg1", "result(X,Y) <- edge(X,Y)"),
+        ("kg2", "result(X,Y) <- edge(X,Y)"),
+        ("kg3", "result(X,Y) <- edge(X,Y)"),
     ];
 
     let results = storage
@@ -376,7 +372,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
     // Execute same query on all knowledge graphs
     let knowledge_graphs = vec!["kg1", "kg2", "kg3"];
     let results = storage
-        .execute_query_on_multiple_knowledge_graphs(knowledge_graphs, "result(X,Y) :- edge(X,Y).")
+        .execute_query_on_multiple_knowledge_graphs(knowledge_graphs, "result(X,Y) <- edge(X,Y)")
         .unwrap();
 
     assert_eq!(results.len(), 3);
@@ -400,9 +396,9 @@ fn test_multiple_queries_on_same_knowledge_graph() {
 
     // Execute multiple queries in parallel
     let queries = vec![
-        "q1(X,Y) :- edge(X,Y).",
-        "q2(X,Y) :- edge(X,Y), X > 2.",
-        "q3(X,Y) :- edge(X,Y), X < 4.",
+        "q1(X,Y) <- edge(X,Y)",
+        "q2(X,Y) <- edge(X,Y), X > 2",
+        "q3(X,Y) <- edge(X,Y), X < 4",
     ];
 
     let results = storage
@@ -429,7 +425,7 @@ fn test_worker_pool_configuration() {
 fn test_query_nonexistent_knowledge_graph() {
     let (storage, _temp) = create_test_storage();
 
-    let result = storage.execute_query_on("nonexistent", "result(X,Y) :- edge(X,Y).");
+    let result = storage.execute_query_on("nonexistent", "result(X,Y) <- edge(X,Y)");
     assert!(result.is_err());
 }
 
@@ -459,7 +455,7 @@ fn test_multi_knowledge_graph_workflow() {
     storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
     // Verify staging
-    let staging_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let staging_results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert_eq!(staging_results.len(), 2);
 
     // Add different data to production
@@ -467,13 +463,13 @@ fn test_multi_knowledge_graph_workflow() {
     storage.insert("edge", vec![(10, 20), (20, 30)]).unwrap();
 
     // Verify production
-    let prod_results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let prod_results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert_eq!(prod_results.len(), 2);
     assert!(prod_results.contains(&(10, 20)));
 
     // Verify isolation
     storage.use_knowledge_graph("staging").unwrap();
-    let staging_results2 = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let staging_results2 = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     assert!(!staging_results2.contains(&(10, 20))); // Production data not in staging
 }
 
@@ -507,7 +503,7 @@ fn test_persistence_with_updates() {
         let storage = StorageEngine::new(config).unwrap();
 
         let results = storage
-            .execute_query_on("test", "result(X,Y) :- edge(X,Y).")
+            .execute_query_on("test", "result(X,Y) <- edge(X,Y)")
             .unwrap();
         assert_eq!(results.len(), 3);
         assert!(results.contains(&(1, 2)));

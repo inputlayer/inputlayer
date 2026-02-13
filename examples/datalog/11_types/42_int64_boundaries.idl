@@ -1,0 +1,27 @@
+// Test: INT64 MIN/MAX boundaries
+
+.kg create test_int64_bounds_n11t42
+.kg use test_int64_bounds_n11t42
+
+// INT64_MAX = 9223372036854775807
+// INT64_MIN = -9223372036854775808
+
+// Test near max value
++big_vals[(9223372036854775806,), (1,)]
+?big_vals(X)
+
+// Test max value directly
++max_val(9223372036854775807)
+?max_val(X)
+
+// Test near min value
++min_val(-9223372036854775807)
+?min_val(X)
+
+// Test arithmetic near boundary (should handle overflow gracefully)
++nums[(9223372036854775800,), (10,)]
++sum_big(sum<X>) <- nums(X)
+?sum_big(S)
+
+.kg use default
+.kg drop test_int64_bounds_n11t42

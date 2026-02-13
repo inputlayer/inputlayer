@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_empty_type_n11t35
+Knowledge graph 'test_empty_type_n11t35' created.
+Switched to knowledge graph: test_empty_type_n11t35
+> .kg use test_empty_type_n11t35
+Switched to knowledge graph: test_empty_type_n11t35
+> +data[(1, "a"), (2, "b")]
+Inserted 2 fact(s) into 'data'.
+> empty_result(Id, Val) <- data(Id, Val), Id > 100
+No results.
+(session: 1 rule(s))
+> ?empty_result(Id, Val)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_type_n11t35
+Knowledge graph 'test_empty_type_n11t35' dropped.

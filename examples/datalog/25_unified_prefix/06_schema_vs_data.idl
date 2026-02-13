@@ -1,0 +1,26 @@
+// Test: Schema vs Data Distinction
+// Description: Tests that parser correctly distinguishes typed (schema) from value (data) arguments
+
+.kg create test_schema_vs_data_n25t06
+.kg use test_schema_vs_data_n25t06
+
+// Schema declaration (typed arguments with colons)
++person(id: int, name: string, age: int)
+
+// Data insert (value arguments - integers, strings, variables)
++person(1, "Alice", 30)
++person(2, "Bob", 25)
+
+// Query to verify data
+?person(Id, Name, Age)
+
+// Another example: same relation name, different operations
++product(sku: string, price: int)
++product("SKU001", 100)
++product("SKU002", 200)
+
+?product(Sku, Price)
+
+// Cleanup
+.kg use default
+.kg drop test_schema_vs_data_n25t06

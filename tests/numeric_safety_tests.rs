@@ -26,7 +26,7 @@ fn test_avg_with_single_value() {
 
     // AVG of single value should equal that value
     let _results = storage
-        .execute_query("result(avg<V>) :- scores(_, V).")
+        .execute_query("result(avg<V>) <- scores(_, V)")
         .unwrap();
     // AVG of single value 100 should return a result
     // Note: May return empty if no grouping - system dependent
@@ -46,7 +46,7 @@ fn test_avg_multiple_values() {
         .unwrap();
 
     let _results = storage
-        .execute_query("result(avg<V>) :- numbers(_, V).")
+        .execute_query("result(avg<V>) <- numbers(_, V)")
         .unwrap();
     // Should have a result (not crash)
     // The actual value should be around 20.0
@@ -65,7 +65,7 @@ fn test_avg_empty_relation_no_panic() {
 
     // Query on nonexistent relation should not crash
     // Either returns empty results or error (depending on implementation)
-    let _result = storage.execute_query("result(avg<V>) :- nonexistent(_, V).");
+    let _result = storage.execute_query("result(avg<V>) <- nonexistent(_, V)");
     // Test passes if no panic occurred
 }
 
@@ -79,7 +79,7 @@ fn test_count_empty_returns_zero_or_empty() {
 
     // Query count on nonexistent relation
     // Should not panic - either returns empty or 0
-    let _result = storage.execute_query("result(count<X>) :- nonexistent(X).");
+    let _result = storage.execute_query("result(count<X>) <- nonexistent(X)");
     // Test passes if no panic occurred
 }
 
@@ -93,7 +93,7 @@ fn test_count_single_value() {
     storage.insert("items", vec![(1, 0)]).unwrap();
 
     let _results = storage
-        .execute_query("result(count<X>) :- items(X).")
+        .execute_query("result(count<X>) <- items(X)")
         .unwrap();
     // COUNT should return a result (1 for single item)
     // Note: Exact behavior depends on aggregation implementation
@@ -108,7 +108,7 @@ fn test_sum_empty_returns_zero_or_empty() {
     storage.use_knowledge_graph("test_sum").unwrap();
 
     // Should not panic
-    let _result = storage.execute_query("result(sum<V>) :- nonexistent(_, V).");
+    let _result = storage.execute_query("result(sum<V>) <- nonexistent(_, V)");
     // Test passes if no panic occurred
 }
 
@@ -124,7 +124,7 @@ fn test_sum_multiple_values() {
         .unwrap();
 
     let _results = storage
-        .execute_query("result(sum<V>) :- amounts(_, V).")
+        .execute_query("result(sum<V>) <- amounts(_, V)")
         .unwrap();
     // Sum should be 60, but mainly verify no panic
 }
@@ -138,7 +138,7 @@ fn test_min_empty_returns_null_or_empty() {
     storage.use_knowledge_graph("test_min").unwrap();
 
     // MIN of empty set should return NULL or empty results, not panic
-    let _result = storage.execute_query("result(min<V>) :- nonexistent(_, V).");
+    let _result = storage.execute_query("result(min<V>) <- nonexistent(_, V)");
     // Test passes if no panic occurred
 }
 
@@ -150,7 +150,7 @@ fn test_max_empty_returns_null_or_empty() {
     storage.use_knowledge_graph("test_max").unwrap();
 
     // MAX of empty set should return NULL or empty results, not panic
-    let _result = storage.execute_query("result(max<V>) :- nonexistent(_, V).");
+    let _result = storage.execute_query("result(max<V>) <- nonexistent(_, V)");
     // Test passes if no panic occurred
 }
 
@@ -164,10 +164,10 @@ fn test_min_max_single_value() {
     storage.insert("vals", vec![(1, 42)]).unwrap();
 
     let _min_results = storage
-        .execute_query("result(min<V>) :- vals(_, V).")
+        .execute_query("result(min<V>) <- vals(_, V)")
         .unwrap();
     let _max_results = storage
-        .execute_query("result(max<V>) :- vals(_, V).")
+        .execute_query("result(max<V>) <- vals(_, V)")
         .unwrap();
 
     // Both should equal the single value
@@ -185,7 +185,7 @@ fn test_arithmetic_division_normal() {
 
     // Normal division should work: 10 / 2 = 5
     let _results = storage
-        .execute_query("result(X / Y) :- nums(X, Y).")
+        .execute_query("result(X / Y) <- nums(X, Y)")
         .unwrap();
     // Should not panic
 }
@@ -200,7 +200,7 @@ fn test_arithmetic_division_by_zero_no_panic() {
     storage.insert("nums", vec![(10, 0)]).unwrap();
 
     // Division by zero should not panic - returns inf, null, or filters out
-    let _result = storage.execute_query("result(X / Y) :- nums(X, Y).");
+    let _result = storage.execute_query("result(X / Y) <- nums(X, Y)");
     // Test passes if no panic occurred
 }
 
@@ -214,7 +214,7 @@ fn test_arithmetic_modulo_by_zero_no_panic() {
     storage.insert("nums", vec![(10, 0)]).unwrap();
 
     // Modulo by zero should not panic
-    let _result = storage.execute_query("result(X % Y) :- nums(X, Y).");
+    let _result = storage.execute_query("result(X % Y) <- nums(X, Y)");
     // Test passes if no panic occurred
 }
 
@@ -279,7 +279,7 @@ fn test_int64_max_in_aggregation() {
         .unwrap();
 
     // Sum of i64::MAX + 1 would overflow - system should handle gracefully
-    let _result = storage.execute_query("result(sum<V>) :- big_nums(_, V).");
+    let _result = storage.execute_query("result(sum<V>) <- big_nums(_, V)");
     // Test passes if no panic occurred
 }
 
@@ -318,7 +318,7 @@ fn test_grouped_aggregation_one_group_empty() {
 
     // Compute AVG per group
     let _results = storage
-        .execute_query("result(G, avg<V>) :- sales(G, V).")
+        .execute_query("result(G, avg<V>) <- sales(G, V)")
         .unwrap();
     // Should have 2 groups
 }
@@ -336,7 +336,7 @@ fn test_multiple_aggregations_same_query() {
 
     // Multiple aggregations in one query
     let _results = storage
-        .execute_query("result(count<X>, sum<V>, min<V>, max<V>) :- data(X, V).")
+        .execute_query("result(count<X>, sum<V>, min<V>, max<V>) <- data(X, V)")
         .unwrap();
     // Should not panic
 }

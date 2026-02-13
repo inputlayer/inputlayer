@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_termination_n09t12
+Knowledge graph 'test_termination_n09t12' created.
+Switched to knowledge graph: test_termination_n09t12
+> .kg use test_termination_n09t12
+Switched to knowledge graph: test_termination_n09t12
+> +loop_edge[(1, 1), (1, 2), (2, 3)]
+Inserted 3 fact(s) into 'loop_edge'.

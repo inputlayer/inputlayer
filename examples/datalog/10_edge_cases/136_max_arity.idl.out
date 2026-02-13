@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_max_arity_n10t136
+Knowledge graph 'test_max_arity_n10t136' created.
+Switched to knowledge graph: test_max_arity_n10t136
+> .kg use test_max_arity_n10t136
+Switched to knowledge graph: test_max_arity_n10t136
+> +wide[(1, 2, 3, 4, 5, 6, 7, 8)]
+Inserted 1 fact(s) into 'wide'.
+> ?wide(A, B, C, D, E, F, G, H)
+┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │ col4 │ col5 │ col6 │ col7 │
+├──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤
+│    1 │    2 │    3 │    4 │    5 │    6 │    7 │    8 │
+└──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+1 rows

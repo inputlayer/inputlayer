@@ -1,0 +1,21 @@
+// Test: Dot Product
+// Description: Tests dot product calculation between vectors
+
+.kg create test_vec_dot_n16t03
+.kg use test_vec_dot_n16t03
+
+// Insert vectors: vectors(id, vector)
++vectors[(1, [1.0, 2.0, 3.0]), (2, [2.0, 0.0, 1.0]), (3, [1.0, 1.0, 1.0])]
+
+// Insert query vector
++query[([1.0, 1.0, 1.0])]
+
+// Calculate dot product of each vector with query
+dot_result(Id, Score) <- vectors(Id, V), query(Q), Score = dot(V, Q)
+
+// Query dot products
+?dot_result(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_vec_dot_n16t03

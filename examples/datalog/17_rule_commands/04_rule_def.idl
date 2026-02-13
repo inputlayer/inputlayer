@@ -1,0 +1,19 @@
+// Test: Rule Definition Command
+// Description: Tests .rule def <name> to show only the definition
+
+.kg create test_rule_def_n17t04
+.kg use test_rule_def_n17t04
+
+// Insert base data
++edge[(1,2), (2,3)]
+
+// Define a rule
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
+// Show definition only (no results)
+.rule def reach
+
+// Cleanup
+.kg use default
+.kg drop test_rule_def_n17t04

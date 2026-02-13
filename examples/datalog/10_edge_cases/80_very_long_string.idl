@@ -1,0 +1,13 @@
+// Test: Very long string value
+
+.kg create test_long_str_n10t80
+.kg use test_long_str_n10t80
+
++data[(1, "this_is_a_very_long_string_that_goes_on_and_on_and_on_for_quite_some_time_to_test_handling_of_longer_values")]
+
+len_check(Id, S, L) <- data(Id, S), L = LEN(S)
+
+?len_check(Id, S, L)
+
+.kg use default
+.kg drop test_long_str_n10t80

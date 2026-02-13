@@ -9,11 +9,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Missing period at end of statement.
 
 ```datalog
-% Wrong
+// Wrong
 +edge(1, 2)
 
-% Correct
-+edge(1, 2).
+// Correct
++edge(1, 2)
 ```
 
 ### "Invalid relation name"
@@ -21,11 +21,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Relation names must start with lowercase.
 
 ```datalog
-% Wrong
-+Edge(1, 2).
+// Wrong
++Edge(1, 2)
 
-% Correct
-+edge(1, 2).
+// Correct
++edge(1, 2)
 ```
 
 ### "Expected ':-'"
@@ -33,11 +33,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Rule syntax error.
 
 ```datalog
-% Wrong - missing :-
-+path(X, Y) edge(X, Y).
+// Wrong - missing :-
++path(X, Y) edge(X, Y)
 
-% Correct
-+path(X, Y) :- edge(X, Y).
+// Correct
++path(X, Y) <- edge(X, Y)
 ```
 
 ### "Unclosed parenthesis"
@@ -45,11 +45,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Mismatched parentheses.
 
 ```datalog
-% Wrong
-+edge((1, 2).
+// Wrong
++edge((1, 2)
 
-% Correct
-+edge(1, 2).
+// Correct
++edge(1, 2)
 ```
 
 ## Type Errors
@@ -59,13 +59,13 @@ This guide covers common errors and how to resolve them.
 **Cause**: Value doesn't match schema.
 
 ```datalog
-% If schema is: +person(id: int, name: string)
+// If schema is: +person(id: int, name: string)
 
-% Wrong
-+person("alice", 1).
+// Wrong
++person("alice", 1)
 
-% Correct
-+person(1, "alice").
+// Correct
++person(1, "alice")
 ```
 
 ### "Expected int, got float"
@@ -73,11 +73,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Using 1.0 where 1 is expected.
 
 ```datalog
-% Wrong (if relation expects int)
-+score(1.0).
+// Wrong (if relation expects int)
++score(1.0)
 
-% Correct
-+score(1).
+// Correct
++score(1)
 ```
 
 ## Query Errors
@@ -87,25 +87,25 @@ This guide covers common errors and how to resolve them.
 **Cause**: Querying a relation that doesn't exist.
 
 ```datalog
-?- nonexistent(X).
-% Error: Unknown relation 'nonexistent'
+?nonexistent(X)
+// Error: Unknown relation 'nonexistent'
 ```
 
 **Solutions**:
 1. Check spelling
 2. Use `.rel` to list existing relations
-3. Create the relation first with `+relation(...).`
+3. Create the relation first with `+relation(...)`
 
 ### "Unbound variable in head"
 
 **Cause**: Variable in rule head not used in body.
 
 ```datalog
-% Wrong - Z is not in the body
-+path(X, Z) :- edge(X, Y).
+// Wrong - Z is not in the body
++path(X, Z) <- edge(X, Y)
 
-% Correct
-+path(X, Y) :- edge(X, Y).
+// Correct
++path(X, Y) <- edge(X, Y)
 ```
 
 ### "Unsafe variable"
@@ -113,11 +113,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Variable only appears in negation or constraint.
 
 ```datalog
-% Wrong - X only appears in negation
-+orphan(X) :- !parent(_, X).
+// Wrong - X only appears in negation
++orphan(X) <- !parent(_, X)
 
-% Correct - X must appear positively
-+orphan(X) :- person(X), !parent(_, X).
+// Correct - X must appear positively
++orphan(X) <- person(X), !parent(_, X)
 ```
 
 ## Recursion Errors
@@ -127,9 +127,9 @@ This guide covers common errors and how to resolve them.
 **Cause**: Negation through recursion.
 
 ```datalog
-% Wrong - circular negation
-+a(X) :- b(X).
-+b(X) :- !a(X).  % Error: a depends on not-a
+// Wrong - circular negation
++a(X) <- b(X)
++b(X) <- !a(X)  // Error: a depends on not-a
 ```
 
 **Solution**: Restructure to avoid negation in recursive cycles.
@@ -139,16 +139,16 @@ This guide covers common errors and how to resolve them.
 **Cause**: Infinite recursion or very deep recursion.
 
 ```datalog
-% Potential issue - unbounded generation
-+nums(0).
-+nums(N) :- nums(M), N = M + 1.  % Never terminates!
+// Potential issue - unbounded generation
++nums(0)
++nums(N) <- nums(M), N = M + 1  // Never terminates!
 ```
 
 **Solution**: Add termination conditions.
 
 ```datalog
-+nums(0).
-+nums(N) :- nums(M), N = M + 1, N < 100.  % Bounded
++nums(0)
++nums(N) <- nums(M), N = M + 1, N < 100  // Bounded
 ```
 
 ## Knowledge Graph Errors
@@ -159,7 +159,7 @@ This guide covers common errors and how to resolve them.
 
 ```datalog
 .kg use nonexistent
-% Error: Knowledge graph 'nonexistent' not found
+// Error: Knowledge graph 'nonexistent' not found
 ```
 
 **Solution**: Create it first.
@@ -194,7 +194,7 @@ This guide covers common errors and how to resolve them.
 
 ```datalog
 .rule drop nonexistent
-% Error: Rule 'nonexistent' not found
+// Error: Rule 'nonexistent' not found
 ```
 
 **Solution**: Check `.rule` to list existing rules.
@@ -212,11 +212,11 @@ This guide covers common errors and how to resolve them.
 **Cause**: Using a variable in the head without aggregating or grouping.
 
 ```datalog
-% Wrong - Name appears but isn't grouped
-+total(Name, sum<Amount>) :- purchase(_, Amount).
+// Wrong - Name appears but isn't grouped
++total(Name, sum<Amount>) <- purchase(_, Amount)
 
-% Correct - Name is in the body
-+total(Name, sum<Amount>) :- purchase(Name, Amount).
+// Correct - Name is in the body
++total(Name, sum<Amount>) <- purchase(Name, Amount)
 ```
 
 ### "Cannot aggregate over empty set"
@@ -268,26 +268,26 @@ chmod 755 ~/.inputlayer/data
 
 1. **Add constraints early**:
    ```datalog
-   % Slow - filters after join
-   ?- huge_table1(X, Y), huge_table2(Y, Z), X < 10.
+   // Slow - filters after join
+   ?huge_table1(X, Y), huge_table2(Y, Z), X < 10
 
-   % Fast - filter first
-   ?- huge_table1(X, Y), X < 10, huge_table2(Y, Z).
+   // Fast - filter first
+   ?huge_table1(X, Y), X < 10, huge_table2(Y, Z)
    ```
 
 2. **Check for Cartesian products**:
    ```datalog
-   % Bad - no shared variables = cross product
-   ?- table1(X), table2(Y).
+   // Bad - no shared variables = cross product
+   ?table1(X), table2(Y)
 
-   % Good - joined on Y
-   ?- table1(X, Y), table2(Y, Z).
+   // Good - joined on Y
+   ?table1(X, Y), table2(Y, Z)
    ```
 
 3. **Limit results**:
    ```datalog
-   % For exploration, check small sample first
-   ?- huge_relation(X, Y), X < 10.
+   // For exploration, check small sample first
+   ?huge_relation(X, Y), X < 10
    ```
 
 ### "High memory usage"

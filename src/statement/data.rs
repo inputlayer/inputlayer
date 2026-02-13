@@ -4,8 +4,8 @@
 //! - `+relation(args).` - single insert
 //! - `+relation[(t1), (t2), ...]` - bulk insert
 //! - `-relation(args).` - single delete
-//! - `-relation(X, Y) :- condition.` - conditional delete
-//! - `-old, +new :- condition.` - atomic update
+//! - `-relation(X, Y) <- condition.` - conditional delete
+//! - `-old, +new <- condition.` - atomic update
 
 use crate::ast::{Atom, BodyPredicate, Rule, Term};
 use crate::parser::parse_rule;
@@ -19,7 +19,7 @@ pub struct InsertOp {
     pub tuples: Vec<Vec<Term>>,
 }
 
-/// Delete operation: -relation(args). or -relation(X) :- body.
+/// Delete operation: -relation(args). or -relation(X) <- body.
 #[derive(Debug, Clone)]
 pub struct DeleteOp {
     /// Relation name
@@ -35,7 +35,7 @@ pub enum DeletePattern {
     SingleTuple(Vec<Term>),
     /// Bulk tuples: -edge[(1, 2), (3, 4)].
     BulkTuples(Vec<Vec<Term>>),
-    /// Conditional delete: -edge(X, Y) :- condition.
+    /// Conditional delete: -edge(X, Y) <- condition.
     Conditional {
         /// Variables in the head
         head_args: Vec<Term>,
@@ -44,7 +44,7 @@ pub enum DeletePattern {
     },
 }
 
-/// Update operation: -old, +new :- condition. (atomic)
+/// Update operation: -old, +new <- condition. (atomic)
 #[derive(Debug, Clone)]
 pub struct UpdateOp {
     /// Deletions to perform
@@ -74,7 +74,7 @@ use super::parser::{parse_atom_args, parse_single_term, split_by_comma, term_to_
 
 /// Parse an insert operation: +relation(args). or +relation[(t1), (t2), ...].
 pub fn parse_insert(input: &str) -> Result<InsertOp, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
     // Check for bulk insert: relation[(t1), (t2), ...]
     // Only if [ appears before ( (otherwise [ is inside args like vectors)
@@ -156,11 +156,11 @@ fn parse_tuple(input: &str) -> Result<Vec<Term>, String> {
 
 /// Parse a delete operation
 pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
-    // Check for conditional delete: relation(X, Y) :- condition.
-    if input.contains(":-") {
-        let parts: Vec<&str> = input.splitn(2, ":-").collect();
+    // Check for conditional delete: relation(X, Y) <- condition.
+    if input.contains("<-") {
+        let parts: Vec<&str> = input.splitn(2, "<-").collect();
         if parts.len() != 2 {
             return Err("Invalid conditional delete syntax".to_string());
         }
@@ -173,7 +173,7 @@ pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
 
         // Parse the body using the existing parser
         let dummy_rule_str = format!(
-            "__dummy__({}) :- {}",
+            "__dummy__({}) <- {}",
             head_args
                 .iter()
                 .map(term_to_string)
@@ -215,22 +215,22 @@ pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
     })
 }
 
-/// Try to parse an update pattern: -rel(...), +rel(...) :- body.
+/// Try to parse an update pattern: -rel(...), +rel(...) <- body.
 pub fn try_parse_update(input: &str) -> Result<Option<UpdateOp>, String> {
-    // An update has the pattern: -rel1(...), +rel2(...) :- body.
-    // It must have both - and + before :-
+    // An update has the pattern: -rel1(...), +rel2(...) <- body.
+    // It must have both - and + before <-
 
-    if !input.contains(":-") {
+    if !input.contains("<-") {
         return Ok(None);
     }
 
-    let parts: Vec<&str> = input.splitn(2, ":-").collect();
+    let parts: Vec<&str> = input.splitn(2, "<-").collect();
     if parts.len() != 2 {
         return Ok(None);
     }
 
     let head_part = parts[0].trim();
-    let body_part = parts[1].trim().trim_end_matches('.');
+    let body_part = parts[1].trim();
 
     // Split head by comma (outside parentheses)
     let head_items = split_by_comma(head_part);
@@ -258,7 +258,7 @@ pub fn try_parse_update(input: &str) -> Result<Option<UpdateOp>, String> {
     }
 
     // Parse the body using existing parser
-    let dummy_rule_str = format!("__dummy__(X) :- {body_part}");
+    let dummy_rule_str = format!("__dummy__(X) <- {body_part}");
     let rule = parse_rule(&dummy_rule_str)?;
 
     Ok(Some(UpdateOp {
@@ -282,7 +282,7 @@ fn parse_head_atom(input: &str) -> Result<(String, Vec<Term>), String> {
 
 /// Parse a fact: atom. (rule with empty body)
 pub fn parse_fact(input: &str) -> Result<Rule, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
     // Parse as an atom and create a rule with empty body
     let head = parse_atom_for_fact(input)?;
@@ -338,14 +338,14 @@ mod tests {
 
     #[test]
     fn test_parse_conditional_delete() {
-        let op = parse_delete("edge(X, Y) :- source(X)").unwrap();
+        let op = parse_delete("edge(X, Y) <- source(X)").unwrap();
         assert_eq!(op.relation, "edge");
         assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
     }
 
     #[test]
     fn test_parse_update() {
-        let update = try_parse_update("-edge(1, Y), +edge(1, 100) :- edge(1, Y).").unwrap();
+        let update = try_parse_update("-edge(1, Y), +edge(1, 100) <- edge(1, Y)").unwrap();
         assert!(update.is_some());
         let op = update.unwrap();
         assert_eq!(op.deletes.len(), 1);

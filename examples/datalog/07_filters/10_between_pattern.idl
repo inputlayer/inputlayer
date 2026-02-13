@@ -1,0 +1,20 @@
+// Test: BETWEEN pattern
+
+.kg create test_between_n07t10
+.kg use test_between_n07t10
+
++data[(1, 5), (2, 15), (3, 25), (4, 35), (5, 45), (6, 55)]
+
+// BETWEEN 10 AND 40 (inclusive)
+between_10_40(Id, Val) <- data(Id, Val), Val >= 10, Val <= 40
+
+?between_10_40(Id, Val)
+
+// NOT BETWEEN (outside range)
+outside_range(Id, Val) <- data(Id, Val), Val < 10
+outside_range(Id, Val) <- data(Id, Val), Val > 40
+
+?outside_range(Id, Val)
+
+.kg use default
+.kg drop test_between_n07t10

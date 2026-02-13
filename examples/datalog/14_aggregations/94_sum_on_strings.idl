@@ -1,0 +1,14 @@
+// Test: SUM on non-numeric (strings)
+
+.kg create test_sum_strings_n14t94
+.kg use test_sum_strings_n14t94
+
++data[("a",), ("b",), ("c",)]
+
+// Try to SUM strings - should error or return 0
++bad_sum(sum<X>) <- data(X)
+
+?bad_sum(R)
+
+.kg use default
+.kg drop test_sum_strings_n14t94

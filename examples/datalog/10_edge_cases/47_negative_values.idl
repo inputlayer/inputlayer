@@ -1,0 +1,26 @@
+// Test: Negative values in various contexts
+
+.kg create test_negatives_n10t47
+.kg use test_negatives_n10t47
+
++nums[(-5,), (-3,), (0,), (3,), (5,)]
+
+// Sum of negatives
++sum_negs(sum<X>) <- nums(X), X < 0
+
+?sum_negs(S)
+
+// Count negatives
++count_negs(count<X>) <- nums(X), X < 0
+
+?count_negs(C)
+
+// Min/Max with negatives
++min_val(min<X>) <- nums(X)
++max_val(max<X>) <- nums(X)
+
+?min_val(M)
+?max_val(M)
+
+.kg use default
+.kg drop test_negatives_n10t47

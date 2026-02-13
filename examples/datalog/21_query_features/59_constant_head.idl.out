@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_const_head_n21t59
+Knowledge graph 'test_const_head_n21t59' created.
+Switched to knowledge graph: test_const_head_n21t59
+> .kg use test_const_head_n21t59
+Switched to knowledge graph: test_const_head_n21t59
+> +items[(1, 100), (2, 200)]
+Inserted 2 fact(s) into 'items'.

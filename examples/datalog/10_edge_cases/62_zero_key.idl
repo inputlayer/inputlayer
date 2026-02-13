@@ -1,0 +1,16 @@
+// Test: Zero as key value
+
+.kg create test_zero_key_n10t62
+.kg use test_zero_key_n10t62
+
++data[(0, "zero"), (1, "one"), (2, "two")]
+
+?data(Key, Val)
+
+// Filter for zero key
+zero_entry(Val) <- data(0, Val)
+
+?zero_entry(Val)
+
+.kg use default
+.kg drop test_zero_key_n10t62

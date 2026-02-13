@@ -1,0 +1,12 @@
+// Test: Unbound head variable error
+
+.kg create test_unbound_head_n12t27
+.kg use test_unbound_head_n12t27
+
++edges[(1, 2), (2, 3)]
+
+// Rule with head variable Z that is not bound in body
++bad_rule(X, Y, Z) <- edges(X, Y)
+
+.kg use default
+.kg drop test_unbound_head_n12t27

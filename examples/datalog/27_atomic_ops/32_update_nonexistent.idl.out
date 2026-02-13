@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_update_noexist_n27t32
+Knowledge graph 'test_update_noexist_n27t32' created.
+Switched to knowledge graph: test_update_noexist_n27t32
+> .kg use test_update_noexist_n27t32
+Switched to knowledge graph: test_update_noexist_n27t32
+> +items[(1, "apple"), (2, "banana")]
+Inserted 2 fact(s) into 'items'.
+> +items(99, "grape")
+Inserted 1 fact(s) into 'items'.
+> -items(99, "grape")
+Deleted 1 facts from 'items'.
+> ?items(Id, Name)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    1 │ "apple"  │
+│    2 │ "banana" │
+└──────┴──────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_update_noexist_n27t32
+Knowledge graph 'test_update_noexist_n27t32' dropped.

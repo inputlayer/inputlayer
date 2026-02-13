@@ -22,13 +22,13 @@ A recursive rule references itself in its body. This allows computing things tha
 .kg create recursion_tutorial
 .kg use recursion_tutorial
 
-% A simple directed graph
-%     1 → 2 → 3 → 4
-%     ↓   ↓
-%     5 → 6 → 7
+// A simple directed graph
+//     1 → 2 → 3 → 4
+//     ↓   ↓
+//     5 → 6 → 7
 
 +edge[(1, 2), (2, 3), (3, 4),
-      (1, 5), (2, 6), (5, 6), (6, 7)].
+      (1, 5), (2, 6), (5, 6), (6, 7)]
 ```
 
 ## Basic Recursion: Transitive Closure
@@ -42,14 +42,14 @@ Given edges, find all pairs (X, Y) where you can get from X to Y through any pat
 You could try explicit path lengths:
 
 ```datalog
-% Direct edges (length 1)
-+path1(X, Y) :- edge(X, Y).
+// Direct edges (length 1)
++path1(X, Y) <- edge(X, Y)
 
-% Length 2
-+path2(X, Y) :- edge(X, Z), edge(Z, Y).
+// Length 2
++path2(X, Y) <- edge(X, Z), edge(Z, Y)
 
-% Length 3
-+path3(X, Y) :- edge(X, Z), path2(Z, Y).
+// Length 3
++path3(X, Y) <- edge(X, Z), path2(Z, Y)
 ```
 
 But this only works for paths up to length 3. What about longer paths?
@@ -57,16 +57,16 @@ But this only works for paths up to length 3. What about longer paths?
 ### Recursive Solution
 
 ```datalog
-% Base case: direct edges are paths
-+reachable(X, Y) :- edge(X, Y).
+// Base case: direct edges are paths
++reachable(X, Y) <- edge(X, Y)
 
-% Recursive case: if X can reach Z, and Z has an edge to Y, then X can reach Y
-+reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+// Recursive case: if X can reach Z, and Z has an edge to Y, then X can reach Y
++reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 ```
 
 Query:
 ```datalog
-?- reachable(1, X).
+?reachable(1, X)
 ```
 
 Result:
@@ -106,8 +106,8 @@ InputLayer evaluates recursive rules using *fixpoint iteration*:
 ### Left Recursion (Preferred)
 
 ```datalog
-+reach_left(X, Y) :- edge(X, Y).
-+reach_left(X, Z) :- reach_left(X, Y), edge(Y, Z).
++reach_left(X, Y) <- edge(X, Y)
++reach_left(X, Z) <- reach_left(X, Y), edge(Y, Z)
 ```
 
 The recursive call is on the **left** side of the join.
@@ -115,8 +115,8 @@ The recursive call is on the **left** side of the join.
 ### Right Recursion
 
 ```datalog
-+reach_right(X, Y) :- edge(X, Y).
-+reach_right(X, Z) :- edge(X, Y), reach_right(Y, Z).
++reach_right(X, Y) <- edge(X, Y)
++reach_right(X, Z) <- edge(X, Y), reach_right(Y, Z)
 ```
 
 The recursive call is on the **right** side.
@@ -128,12 +128,12 @@ The recursive call is on the **right** side.
 Rules can reference each other:
 
 ```datalog
-% Odd-length paths from node 1
-+odd_path(X) :- edge(1, X).
-+odd_path(X) :- even_path(Y), edge(Y, X).
+// Odd-length paths from node 1
++odd_path(X) <- edge(1, X)
++odd_path(X) <- even_path(Y), edge(Y, X)
 
-% Even-length paths from node 1
-+even_path(X) :- odd_path(Y), edge(Y, X).
+// Even-length paths from node 1
++even_path(X) <- odd_path(Y), edge(Y, X)
 ```
 
 These rules depend on each other and are computed together.
@@ -143,18 +143,18 @@ These rules depend on each other and are computed together.
 ### Example 1: Ancestor/Descendant
 
 ```datalog
-% Family tree
-+parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)].
-% 1 is parent of 2, 3; 2 is parent of 4, 5; 3 is parent of 6
+// Family tree
++parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)]
+// 1 is parent of 2, 3; 2 is parent of 4, 5; 3 is parent of 6
 
-% Ancestor relationship
-+ancestor(X, Y) :- parent(X, Y).
-+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+// Ancestor relationship
++ancestor(X, Y) <- parent(X, Y)
++ancestor(X, Z) <- parent(X, Y), ancestor(Y, Z)
 ```
 
 Query: Who are person 1's descendants?
 ```datalog
-?- ancestor(1, Desc).
+?ancestor(1, Desc)
 ```
 
 Result: 4, 5, 6 (grandchildren) plus 2, 3 (children)
@@ -164,15 +164,15 @@ Result: 4, 5, 6 (grandchildren) plus 2, 3 (children)
 Find all pairs at the same generation level:
 
 ```datalog
-% Root nodes (no parents)
-+root(X) :- node(X), !parent(_, X).
+// Root nodes (no parents)
++root(X) <- node(X), !parent(_, X)
 
-% Generation level
-+generation(X, 0) :- root(X).
-+generation(X, N) :- parent(P, X), generation(P, M), N = M + 1.
+// Generation level
++generation(X, 0) <- root(X)
++generation(X, N) <- parent(P, X), generation(P, M), N = M + 1
 
-% Same generation
-+same_gen(X, Y) :- generation(X, N), generation(Y, N), X != Y.
+// Same generation
++same_gen(X, Y) <- generation(X, N), generation(Y, N), X != Y
 ```
 
 ### Example 3: Shortest Path (with Distance)
@@ -180,20 +180,20 @@ Find all pairs at the same generation level:
 Compute shortest path distances:
 
 ```datalog
-% Direct edges have distance 1
-+distance(X, Y, 1) :- edge(X, Y).
+// Direct edges have distance 1
++distance(X, Y, 1) <- edge(X, Y)
 
-% Extend shortest paths
-+distance(X, Z, D) :-
+// Extend shortest paths
++distance(X, Z, D) <-
   distance(X, Y, D1),
   edge(Y, Z),
   D = D1 + 1,
-  !shorter_path(X, Z, D).  % Only keep if no shorter path exists
+  !shorter_path(X, Z, D)  // Only keep if no shorter path exists
 
-% Helper: there's a shorter path
-+shorter_path(X, Z, D) :-
+// Helper: there's a shorter path
++shorter_path(X, Z, D) <-
   distance(X, Z, D2),
-  D2 < D.
+  D2 < D
 ```
 
 **Note**: This pattern requires stratified negation.
@@ -203,14 +203,14 @@ Compute shortest path distances:
 Find which nodes are in the same connected component:
 
 ```datalog
-% Symmetric edges for undirected graph
-+sym_edge(X, Y) :- edge(X, Y).
-+sym_edge(X, Y) :- edge(Y, X).
+// Symmetric edges for undirected graph
++sym_edge(X, Y) <- edge(X, Y)
++sym_edge(X, Y) <- edge(Y, X)
 
-% Same component (connected)
-+same_component(X, X) :- node(X).  % Reflexive
-+same_component(X, Y) :- sym_edge(X, Y).
-+same_component(X, Z) :- same_component(X, Y), sym_edge(Y, Z).
+// Same component (connected)
++same_component(X, X) <- node(X)  // Reflexive
++same_component(X, Y) <- sym_edge(X, Y)
++same_component(X, Z) <- same_component(X, Y), sym_edge(Y, Z)
 ```
 
 ### Example 5: Bill of Materials
@@ -218,14 +218,14 @@ Find which nodes are in the same connected component:
 Classic manufacturing example - compute all parts needed:
 
 ```datalog
-% Part containment: component(assembly, part, quantity)
-+component[(1, 2, 1), (1, 3, 2), (2, 4, 3), (3, 4, 1), (3, 5, 2)].
+// Part containment: component(assembly, part, quantity)
++component[(1, 2, 1), (1, 3, 2), (2, 4, 3), (3, 4, 1), (3, 5, 2)]
 
-% All parts required for an assembly (including nested)
-+requires(Assembly, Part) :- component(Assembly, Part, _).
-+requires(Assembly, Part) :-
+// All parts required for an assembly (including nested)
++requires(Assembly, Part) <- component(Assembly, Part, _)
++requires(Assembly, Part) <-
   component(Assembly, SubAsm, _),
-  requires(SubAsm, Part).
+  requires(SubAsm, Part)
 ```
 
 ## Recursion with Aggregation
@@ -233,9 +233,9 @@ Classic manufacturing example - compute all parts needed:
 ### Counting Path Lengths
 
 ```datalog
-% Count number of paths of each length
-+path_count(Src, Dst, Len, count<Path>) :-
-  path_with_length(Src, Dst, Len, Path).
+// Count number of paths of each length
++path_count(Src, Dst, Len, count<Path>) <-
+  path_with_length(Src, Dst, Len, Path)
 ```
 
 ### Recursive Sum
@@ -243,17 +243,17 @@ Classic manufacturing example - compute all parts needed:
 Total quantity of each part needed (with multipliers):
 
 ```datalog
-% Direct quantity needed
-+qty(Asm, Part, Qty) :- component(Asm, Part, Qty).
+// Direct quantity needed
++qty(Asm, Part, Qty) <- component(Asm, Part, Qty)
 
-% Transitive quantity (multiplied through levels)
-+qty(Asm, Part, TotalQty) :-
+// Transitive quantity (multiplied through levels)
++qty(Asm, Part, TotalQty) <-
   component(Asm, Sub, SubQty),
   qty(Sub, Part, PartQty),
-  TotalQty = SubQty * PartQty.
+  TotalQty = SubQty * PartQty
 
-% Sum all quantities per part
-+total_qty(Asm, Part, sum<Qty>) :- qty(Asm, Part, Qty).
+// Sum all quantities per part
++total_qty(Asm, Part, sum<Qty>) <- qty(Asm, Part, Qty)
 ```
 
 ## Common Patterns
@@ -261,38 +261,38 @@ Total quantity of each part needed (with multipliers):
 ### Pattern 1: Transitive Closure
 
 ```datalog
-+closure(X, Y) :- base_relation(X, Y).
-+closure(X, Z) :- closure(X, Y), base_relation(Y, Z).
++closure(X, Y) <- base_relation(X, Y)
++closure(X, Z) <- closure(X, Y), base_relation(Y, Z)
 ```
 
 ### Pattern 2: Reflexive-Transitive Closure
 
 ```datalog
-+rt_closure(X, X) :- domain(X).  % Reflexive: X reaches itself
-+rt_closure(X, Y) :- base_relation(X, Y).
-+rt_closure(X, Z) :- rt_closure(X, Y), base_relation(Y, Z).
++rt_closure(X, X) <- domain(X)  // Reflexive: X reaches itself
++rt_closure(X, Y) <- base_relation(X, Y)
++rt_closure(X, Z) <- rt_closure(X, Y), base_relation(Y, Z)
 ```
 
 ### Pattern 3: Inductive Definition
 
 ```datalog
-% Base case
-+inductive(0, "base").
+// Base case
++inductive(0, "base")
 
-% Inductive step
-+inductive(N, "derived") :-
+// Inductive step
++inductive(N, "derived") <-
   inductive(M, _),
   N = M + 1,
-  N < 10.
+  N < 10
 ```
 
 ### Pattern 4: Graph Algorithms
 
 ```datalog
-% Node with maximum reachability
-+reach_count(X, count<Y>) :- reachable(X, Y).
-+max_reach(max<Count>) :- reach_count(_, Count).
-+most_connected(X) :- reach_count(X, C), max_reach(C).
+// Node with maximum reachability
++reach_count(X, count<Y>) <- reachable(X, Y)
++max_reach(max<Count>) <- reach_count(_, Count)
++most_connected(X) <- reach_count(X, C), max_reach(C)
 ```
 
 ## Debugging Recursion
@@ -300,12 +300,12 @@ Total quantity of each part needed (with multipliers):
 ### Check Intermediate Results
 
 ```datalog
-% Query the recursive relation directly
-?- reachable(X, Y).
+// Query the recursive relation directly
+?reachable(X, Y)
 
-% See how many facts are derived
-count_reachable(count<X>) :- reachable(X, _).
-?- count_reachable(N).
+// See how many facts are derived
+count_reachable(count<X>) <- reachable(X, _)
+?count_reachable(N)
 ```
 
 ### Limit Depth for Testing
@@ -313,10 +313,10 @@ count_reachable(count<X>) :- reachable(X, _).
 For debugging, you can create bounded versions:
 
 ```datalog
-+reach1(X, Y) :- edge(X, Y).
-+reach2(X, Y) :- reach1(X, Y).
-+reach2(X, Z) :- reach1(X, Y), edge(Y, Z).
-% etc.
++reach1(X, Y) <- edge(X, Y)
++reach2(X, Y) <- reach1(X, Y)
++reach2(X, Z) <- reach1(X, Y), edge(Y, Z)
+// etc.
 ```
 
 ## Performance Considerations

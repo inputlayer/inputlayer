@@ -151,8 +151,8 @@ Show the definition of a rule.
 ```
 Rule: reachable
 Clauses:
-  1. reachable(X, Y) :- edge(X, Y).
-  2. reachable(X, Z) :- reachable(X, Y), edge(Y, Z).
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 ```
 
 ### `.rule drop <name>`
@@ -173,16 +173,16 @@ Remove a specific clause from a rule by index (1-based).
 
 **Output:**
 ```
-Clause 2 removed from rule 'reachable'.
+Clause 2 removed from rule 'reachable'
 ```
 
 **Note:** If the last clause is removed, the entire rule is deleted:
 ```
-Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining).
+Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining)
 ```
 
 **Errors:**
-- If clause index is out of bounds: `Clause index 5 out of bounds. Rule 'reachable' has 2 clause(s).`
+- If clause index is out of bounds: `Clause index 5 out of bounds. Rule 'reachable' has 2 clause(s)`
 - If rule doesn't exist: `Rule 'nonexistent' does not exist`
 
 ### `.rule clear <name>`
@@ -198,7 +198,7 @@ Clear all clauses from a rule for re-registration.
 Edit a specific clause in a rule.
 
 ```
-.rule edit reachable 2 +reachable(X, Z) :- edge(X, Y), reachable(Y, Z).
+.rule edit reachable 2 +reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
 ```
 
 **Note:** Index is 1-based.
@@ -218,8 +218,8 @@ List current session rules.
 **Output:**
 ```
 Session rules:
-  1. temp(X) :- edge(X, _).
-  2. filtered(X, Y) :- temp(X), edge(X, Y).
+  1. temp(X) <- edge(X, _)
+  2. filtered(X, Y) <- temp(X), edge(X, Y)
 ```
 
 ### `.session clear`
@@ -249,7 +249,7 @@ The `.load` command executes statements from a file.
 Load and execute a file in strict mode.
 
 ```
-.load schema.dl
+.load schema.idl
 ```
 
 **Behavior:**
@@ -262,7 +262,7 @@ Load and execute a file in strict mode.
 Atomically replace existing definitions.
 
 ```
-.load views/access_control.dl --replace
+.load views/access_control.idl --replace
 ```
 
 **Behavior:**
@@ -278,7 +278,7 @@ Atomically replace existing definitions.
 Merge with existing definitions.
 
 ```
-.load additional_rules.dl --merge
+.load additional_rules.idl --merge
 ```
 
 **Behavior:**
@@ -300,7 +300,7 @@ Merge with existing definitions.
 
 | Extension | Description |
 |-----------|-------------|
-| `.dl` | Datalog script (statements) |
+| `.idl` | Datalog script (statements) |
 
 ## System Commands
 
@@ -493,5 +493,5 @@ Usage: .kg create <name>
 
 **Output:**
 ```
-Rule 'nonexistent' not found.
+Rule 'nonexistent' not found
 ```

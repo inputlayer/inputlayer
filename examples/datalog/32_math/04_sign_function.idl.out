@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_math_sign_n32t04
+Knowledge graph 'test_math_sign_n32t04' created.
+Switched to knowledge graph: test_math_sign_n32t04
+> .kg use test_math_sign_n32t04
+Switched to knowledge graph: test_math_sign_n32t04
+> +nums[(-5), (-1), (0), (1), (5)]
+Inserted 5 fact(s) into 'nums'.

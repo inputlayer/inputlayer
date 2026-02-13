@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_int_n11t02
+Knowledge graph 'test_int_n11t02' created.
+Switched to knowledge graph: test_int_n11t02
+> .kg use test_int_n11t02
+Switched to knowledge graph: test_int_n11t02
+> +positive[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'positive'.
+> +negative[(-1, -100), (-2, -200), (-3, -300)]
+Inserted 3 fact(s) into 'negative'.
+> +zeros[(0, 0), (0, 1), (1, 0)]
+Inserted 3 fact(s) into 'zeros'.
+> ?positive(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    2 │  200 │
+│    3 │  300 │
+└──────┴──────┘
+3 rows
+> ?negative(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -3 │ -300 │
+│   -2 │ -200 │
+│   -1 │ -100 │
+└──────┴──────┘
+3 rows
+> ?zeros(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    0 │    0 │
+│    0 │    1 │
+│    1 │    0 │
+└──────┴──────┘
+3 rows

@@ -1,0 +1,40 @@
+// Test: BOM Cost Rollup
+// Verifies: Aggregating costs up a parts tree
+
+.kg create test_bom_cost_n20t06
+.kg use test_bom_cost_n20t06
+
+// Simple BOM: part_of(child, parent, quantity)
++part_of[(10, 1, 2),   // 2 of part 10 in assembly 1
+         (20, 1, 3),   // 3 of part 20 in assembly 1
+         (30, 10, 4),  // 4 of part 30 in sub-assembly 10
+         (40, 10, 1),  // 1 of part 40 in sub-assembly 10
+         (50, 20, 2)]. // 2 of part 50 in sub-assembly 20
+
+// Base costs for leaf parts
++base_cost[(30, 5), (40, 20), (50, 15)]
+
+// Direct leaf cost contribution to assembly
+// For leaf parts directly in an assembly
++leaf_contribution(Assembly, Part, Cost*Qty) <- part_of(Part, Assembly, Qty), base_cost(Part, Cost)
+
+// Query leaf contributions
+?leaf_contribution(A, P, C)
+
+// Sum costs per assembly (from direct leaves only)
++assembly_direct_cost(Assembly, sum<C>) <- leaf_contribution(Assembly, _, C)
+?assembly_direct_cost(A, C)
+
+// Parts with no sub-components (true leaves)
++has_children(P) <- part_of(_, P, _)
++is_leaf(P) <- base_cost(P, _), !has_children(P)
+?is_leaf(P)
+
+// All descendants of assembly 1
++descendant(1, Child) <- part_of(Child, 1, _)
++descendant(1, Desc) <- descendant(1, Mid), part_of(Desc, Mid, _)
+?descendant(1, D)
+
+// Cleanup
+.kg use default
+.kg drop test_bom_cost_n20t06

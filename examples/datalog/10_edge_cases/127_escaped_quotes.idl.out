@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_escaped_n10t127
+Knowledge graph 'test_escaped_n10t127' created.
+Switched to knowledge graph: test_escaped_n10t127
+> .kg use test_escaped_n10t127
+Switched to knowledge graph: test_escaped_n10t127
+> +messages[("Hello World",), ("Say \"hi\"",), ("It's fine",)]
+Inserted 3 fact(s) into 'messages'.
+> ?messages(M)
+┌───────────────┐
+│ col0          │
+├───────────────┤
+│ "Hello World" │
+│ "It's fine"   │
+│ "Say \"hi\""  │
+└───────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_escaped_n10t127
+Knowledge graph 'test_escaped_n10t127' dropped.

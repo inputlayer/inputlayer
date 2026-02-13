@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_self_join_n18t80
+Knowledge graph 'test_self_join_n18t80' created.
+Switched to knowledge graph: test_self_join_n18t80
+> .kg use test_self_join_n18t80
+Switched to knowledge graph: test_self_join_n18t80
+> +friends[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave"), ("Alice", "Carol")]
+Inserted 4 fact(s) into 'friends'.

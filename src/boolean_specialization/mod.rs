@@ -641,6 +641,8 @@ impl BooleanSpecializer {
             | Predicate::ColumnLtFloat(_, _)
             | Predicate::ColumnGeFloat(_, _)
             | Predicate::ColumnLeFloat(_, _)
+            | Predicate::ColumnEqBool(_, _)
+            | Predicate::ColumnNeBool(_, _)
             | Predicate::ColumnsEq(_, _)
             | Predicate::ColumnsNe(_, _)
             | Predicate::ColumnsLt(_, _)

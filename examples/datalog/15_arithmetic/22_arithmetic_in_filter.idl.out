@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arith_filter_n15t22
+Knowledge graph 'test_arith_filter_n15t22' created.
+Switched to knowledge graph: test_arith_filter_n15t22
+> .kg use test_arith_filter_n15t22
+Switched to knowledge graph: test_arith_filter_n15t22
+> +nums[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]
+Inserted 5 fact(s) into 'nums'.
+> ?nums(Id, Val), Val > Id * 15
+No results.
+> ?nums(Id, Val), Val = Id * 10
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+│    4 │   40 │
+│    5 │   50 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arith_filter_n15t22
+Knowledge graph 'test_arith_filter_n15t22' dropped.

@@ -1,0 +1,14 @@
+// Test: N-tile simulation
+
+.kg create test_ntile_n18t126
+.kg use test_ntile_n18t126
+
++scores[(1, 95), (2, 85), (3, 75), (4, 65)]
+
+// Quartile by counting higher scores
++quartile(Id, Score, count<OtherId>) <- scores(Id, Score), scores(OtherId, OtherScore), OtherScore >= Score
+
+?quartile(Id, Score, Q)
+
+.kg use default
+.kg drop test_ntile_n18t126

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_syntax_schemas_n28t08
+Knowledge graph 'test_syntax_schemas_n28t08' created.
+Switched to knowledge graph: test_syntax_schemas_n28t08
+> .kg use test_syntax_schemas_n28t08
+Switched to knowledge graph: test_syntax_schemas_n28t08
+> +employee(id: int, name: string, dept: string)
+Script error: Query execution failed: Invalid term: 'id: int'

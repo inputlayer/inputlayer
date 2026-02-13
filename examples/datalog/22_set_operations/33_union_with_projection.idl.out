@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union_proj_n22t33
+Knowledge graph 'test_union_proj_n22t33' created.
+Switched to knowledge graph: test_union_proj_n22t33
+> .kg use test_union_proj_n22t33
+Switched to knowledge graph: test_union_proj_n22t33
+> +employees[(1, "Alice", "Eng"), (2, "Bob", "Sales")]
+Inserted 2 fact(s) into 'employees'.
+> +contractors[(3, "Carol", "Eng"), (4, "Dave", "Marketing")]
+Inserted 2 fact(s) into 'contractors'.

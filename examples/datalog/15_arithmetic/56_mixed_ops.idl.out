@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_ops_n15t56
+Knowledge graph 'test_mixed_ops_n15t56' created.
+Switched to knowledge graph: test_mixed_ops_n15t56
+> .kg use test_mixed_ops_n15t56
+Switched to knowledge graph: test_mixed_ops_n15t56
+> +data[(10, 3, 2)]
+Inserted 1 fact(s) into 'data'.

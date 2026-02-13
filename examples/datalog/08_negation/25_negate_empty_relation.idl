@@ -1,0 +1,30 @@
+// Test: Negation on Empty Relation
+// Description: Tests negation behavior when the negated relation is empty
+
+.kg create test_neg_empty_n08t25
+.kg use test_neg_empty_n08t25
+
+// Insert base facts
++items[(1), (2), (3), (4), (5)]
+
+// excluded is empty - not inserting anything
+
+// Query: items that are not excluded (should be all items)
++not_excluded(X) <- items(X), !excluded(X)
+?not_excluded(X)
+
+// Now add some exclusions
++excluded[(2), (4)]
+
+// Query again
+?not_excluded(X)
+
+// Delete all exclusions
+-excluded(X) <- excluded(X)
+
+// Query again - back to all items
+?not_excluded(X)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_empty_n08t25

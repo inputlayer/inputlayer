@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_overlap_n10t06
+Knowledge graph 'test_overlap_n10t06' created.
+Switched to knowledge graph: test_overlap_n10t06
+> .kg use test_overlap_n10t06
+Switched to knowledge graph: test_overlap_n10t06
+> +rel_a[(1, 2), (2, 3), (3, 4), (4, 5)]
+Inserted 4 fact(s) into 'rel_a'.
+> +rel_b[(2, 3), (3, 4), (5, 6), (6, 7)]
+Inserted 4 fact(s) into 'rel_b'.

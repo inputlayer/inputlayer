@@ -38,7 +38,7 @@ use super::Statement;
 /// +name(col: type, ...). = persistent schema
 /// name(col: type, ...). = session schema
 pub fn parse_schema_decl(input: &str, persistent: bool) -> Result<Statement, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
     // Extract relation name and column definitions
     let paren_pos = input
@@ -139,9 +139,7 @@ fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
         // Validate column name (may include aggregation syntax)
         validate_column_name(&col_name)?;
 
-        // Parse the type (ignore any @annotations that may be present - they're deprecated)
-        let type_str = strip_annotations(type_str);
-        let col_type = parse_type_expr(&type_str)?;
+        let col_type = parse_type_expr(type_str)?;
 
         columns.push(ColumnDef {
             name: col_name,
@@ -156,35 +154,15 @@ fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
     Ok(columns)
 }
 
-/// Strip any @annotations from a type string for backwards compatibility
-fn strip_annotations(type_str: &str) -> String {
-    // Find the first @ that isn't inside parentheses
-    let mut paren_depth: i32 = 0;
-
-    for (i, c) in type_str.char_indices() {
-        match c {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            '@' if paren_depth == 0 => {
-                // Found annotation - return everything before it
-                return type_str[..i].trim().to_string();
-            }
-            _ => {}
-        }
-    }
-
-    type_str.trim().to_string()
-}
-
 // Schema Definition Parsing
 /// Try to parse a schema definition: `Name = schema(col: type, ...)`
 /// Returns None if input doesn't match schema definition pattern
 #[allow(dead_code)]
 pub fn try_parse_schema_definition(input: &str) -> Result<Option<RelationSchema>, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
-    // Must contain '=' but not ':=' or ':-'
-    if !input.contains('=') || input.contains(":=") || input.contains(":-") {
+    // Must contain '=' but not ':=' or '<-'
+    if !input.contains('=') || input.contains(":=") || input.contains("<-") {
         return Ok(None);
     }
 
@@ -261,9 +239,7 @@ fn parse_schema_columns(content: &str) -> Result<Vec<ColumnSchema>, String> {
             return Err(format!("Invalid column name: '{col_name}'"));
         }
 
-        // Strip any annotations and parse the type
-        let type_str = strip_annotations(type_str);
-        let data_type = SchemaType::from_str(&type_str)
+        let data_type = SchemaType::from_str(type_str)
             .ok_or_else(|| format!("Unknown type '{type_str}' for column '{col_name}'"))?;
 
         columns.push(ColumnSchema::new(col_name, data_type));
@@ -345,14 +321,6 @@ mod tests {
         } else {
             panic!("Expected SchemaDecl");
         }
-    }
-
-    #[test]
-    fn test_strip_annotations() {
-        // strip_annotations removes anything after @ for backwards compatibility
-        assert_eq!(strip_annotations("int"), "int");
-        assert_eq!(strip_annotations("int @something"), "int");
-        assert_eq!(strip_annotations("string @foo @bar"), "string");
     }
 
     #[test]

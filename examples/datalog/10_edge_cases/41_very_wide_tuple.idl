@@ -1,0 +1,18 @@
+// Test: Very wide tuple (many columns)
+
+.kg create test_wide_n10t41
+.kg use test_wide_n10t41
+
+// 8-column relation
++wide[(1, "a", 10, 1.5, "x", 100, 2.5, "y")]
++wide[(2, "b", 20, 2.5, "z", 200, 3.5, "w")]
+
+?wide(A, B, C, D, E, F, G, H)
+
+// Project from wide tuple
+narrow(A, C, F) <- wide(A, _, C, _, _, F, _, _)
+
+?narrow(A, C, F)
+
+.kg use default
+.kg drop test_wide_n10t41

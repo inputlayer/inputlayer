@@ -1,0 +1,11 @@
+// Test: Type inference from values
+
+.kg create test_type_infer_n11t65
+.kg use test_type_infer_n11t65
+
++mixed[(1, "text", 1.5, true)]
+
+?mixed(A, B, C, D)
+
+.kg use default
+.kg drop test_type_infer_n11t65

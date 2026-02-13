@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_manhattan_int8_n30t08
+Knowledge graph 'test_manhattan_int8_n30t08' created.
+Switched to knowledge graph: test_manhattan_int8_n30t08
+> .kg use test_manhattan_int8_n30t08
+Switched to knowledge graph: test_manhattan_int8_n30t08
+> +embedding[(1, [1.0, 0.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(2, [0.0, 1.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(3, [0.5, 0.5, 0.5, 0.5])]
+Inserted 1 fact(s) into 'embedding'.

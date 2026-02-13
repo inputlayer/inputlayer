@@ -1,0 +1,25 @@
+// Test: Rule Drop Command
+// Description: Tests .rule drop <name> to remove a rule
+
+.kg create test_rule_drop_n17t03
+.kg use test_rule_drop_n17t03
+
+// Insert base data
++edge[(1,2), (2,3)]
+
+// Define rules
++reverse(X, Y) <- edge(Y, X)
++paths(X, Y) <- edge(X, Y)
+
+// List rules before drop
+.rule
+
+// Drop one rule
+.rule drop reverse
+
+// List rules after drop
+.rule
+
+// Cleanup
+.kg use default
+.kg drop test_rule_drop_n17t03

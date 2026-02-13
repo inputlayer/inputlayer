@@ -1,0 +1,21 @@
+// Test: Manhattan Distance
+// Description: Tests Manhattan (L1) distance between vectors
+
+.kg create test_vec_manhattan_n16t04
+.kg use test_vec_manhattan_n16t04
+
+// Insert vectors on a grid: vectors(id, vector)
++vectors[(1, [0.0, 0.0]), (2, [1.0, 1.0]), (3, [2.0, 2.0]), (4, [3.0, 0.0])]
+
+// Insert query at origin
++query[([0.0, 0.0])]
+
+// Calculate manhattan distance from query
+l1_dist(Id, Dist) <- vectors(Id, V), query(Q), Dist = manhattan(V, Q)
+
+// Query distances
+?l1_dist(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_vec_manhattan_n16t04

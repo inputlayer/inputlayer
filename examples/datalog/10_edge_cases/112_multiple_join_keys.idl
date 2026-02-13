@@ -1,0 +1,15 @@
+// Test: Join on multiple keys simultaneously
+
+.kg create test_multi_join_key_n10t112
+.kg use test_multi_join_key_n10t112
+
++left[(1, "A", "X"), (2, "B", "Y"), (3, "A", "Z")]
++right[(1, "A", 100), (2, "B", 200), (1, "B", 150)]
+
+// Join on first two columns
+joined(K1, K2, Val1, Val2) <- left(K1, K2, Val1), right(K1, K2, Val2)
+
+?joined(K1, K2, Val1, Val2)
+
+.kg use default
+.kg drop test_multi_join_key_n10t112

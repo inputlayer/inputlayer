@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_universal_n08t31
+Knowledge graph 'test_universal_n08t31' created.
+Switched to knowledge graph: test_universal_n08t31
+> .kg use test_universal_n08t31
+Switched to knowledge graph: test_universal_n08t31
+> +students[(1, "Alice"), (2, "Bob"), (3, "Carol")]
+Inserted 3 fact(s) into 'students'.
+> +courses[("Math",), ("Physics",), ("Chemistry",)]
+Inserted 3 fact(s) into 'courses'.
+> +enrolled[(1, "Math"), (1, "Physics"), (1, "Chemistry"), (2, "Math"), (2, "Physics"), (3, "Math")]
+Inserted 6 fact(s) into 'enrolled'.

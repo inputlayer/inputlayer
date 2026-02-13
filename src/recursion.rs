@@ -5,7 +5,7 @@
 //!
 //! A rule is recursive if its head relation appears in its body:
 //! ```datalog
-//! tc(x, z) :- tc(x, y), edge(y, z).
+//! tc(x, z) <- tc(x, y), edge(y, z).
 //! ```
 //!
 //! Stratification groups rules into evaluation layers so that negated relations
@@ -397,9 +397,9 @@ impl StratificationResult {
 ///
 /// For unreachable nodes:
 /// ```datalog
-/// reach(x) :- source(x).             // Stratum 0
-/// reach(y) :- reach(x), edge(x, y).  // Stratum 0 (recursive)
-/// unreachable(x) :- node(x), !reach(x). // Stratum 1 (negates reach)
+/// reach(x) <- source(x).             // Stratum 0
+/// reach(y) <- reach(x), edge(x, y).  // Stratum 0 (recursive)
+/// unreachable(x) <- node(x), !reach(x). // Stratum 1 (negates reach)
 /// ```
 pub fn stratify_with_negation(program: &Program) -> StratificationResult {
     if program.rules.is_empty() {
@@ -538,9 +538,9 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
 ///
 /// For transitive closure:
 /// ```datalog
-/// tc(x, y) :- edge(x, y).           // Stratum 0 (base case)
-/// tc(x, z) :- tc(x, y), edge(y, z). // Stratum 0 (recursive - same SCC)
-/// result(x, y) :- tc(x, y).         // Stratum 1 (depends on tc)
+/// tc(x, y) <- edge(x, y).           // Stratum 0 (base case)
+/// tc(x, z) <- tc(x, y), edge(y, z). // Stratum 0 (recursive - same SCC)
+/// result(x, y) <- tc(x, y).         // Stratum 1 (depends on tc)
 /// ```
 ///
 /// Note: For programs with negation, use `stratify_with_negation` instead.
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_is_recursive_rule() {
-        // tc(x, z) :- tc(x, y), edge(y, z).  -> RECURSIVE
+        // tc(x, z) <- tc(x, y), edge(y, z).  -> RECURSIVE
         let rule = Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn test_non_recursive_rule() {
-        // result(x, y) :- edge(x, y).  -> NOT RECURSIVE
+        // result(x, y) <- edge(x, y).  -> NOT RECURSIVE
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -717,7 +717,7 @@ mod tests {
     fn test_build_dependency_graph() {
         let mut program = Program::new();
 
-        // tc(x, y) :- edge(x, y).
+        // tc(x, y) <- edge(x, y).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -735,7 +735,7 @@ mod tests {
             )],
         ));
 
-        // tc(x, z) :- tc(x, y), edge(y, z).
+        // tc(x, z) <- tc(x, y), edge(y, z).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -808,7 +808,7 @@ mod tests {
     fn test_stratify_non_recursive() {
         let mut program = Program::new();
 
-        // result(x, y) :- edge(x, y).
+        // result(x, y) <- edge(x, y).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -838,7 +838,7 @@ mod tests {
     fn test_stratify_recursive() {
         let mut program = Program::new();
 
-        // tc(x, y) :- edge(x, y).
+        // tc(x, y) <- edge(x, y).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -856,7 +856,7 @@ mod tests {
             )],
         ));
 
-        // tc(x, z) :- tc(x, y), edge(y, z). [RECURSIVE]
+        // tc(x, z) <- tc(x, y), edge(y, z). [RECURSIVE]
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -901,11 +901,11 @@ mod tests {
     // Tests for stratification with negation
     #[test]
     fn test_stratify_with_negation_simple() {
-        // unreachable(x) :- node(x), !reach(x).
+        // unreachable(x) <- node(x), !reach(x).
         // This should be stratifiable: reach must be computed before unreachable
         let mut program = Program::new();
 
-        // reach(x) :- source(x).
+        // reach(x) <- source(x).
         program.add_rule(Rule::new_simple(
             Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -914,7 +914,7 @@ mod tests {
             )],
         ));
 
-        // unreachable(x) :- node(x), !reach(x).
+        // unreachable(x) <- node(x), !reach(x).
         program.add_rule(Rule::new(
             Atom::new(
                 "unreachable".to_string(),
@@ -948,7 +948,7 @@ mod tests {
     #[test]
     fn test_stratify_with_negation_not_stratifiable() {
         // This is NOT stratifiable: negation through recursion
-        // p(x) :- q(x), !p(x).  -- p depends negatively on itself
+        // p(x) <- q(x), !p(x).  -- p depends negatively on itself
         let mut program = Program::new();
 
         program.add_rule(Rule::new(
@@ -978,13 +978,13 @@ mod tests {
 
     #[test]
     fn test_stratify_with_negation_chain() {
-        // a(x) :- base(x).
-        // b(x) :- a(x), !c(x).   -- b depends negatively on c
-        // c(x) :- base(x).
+        // a(x) <- base(x).
+        // b(x) <- a(x), !c(x).   -- b depends negatively on c
+        // c(x) <- base(x).
         // This is stratifiable: c computed first, then b
         let mut program = Program::new();
 
-        // a(x) :- base(x).
+        // a(x) <- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -993,7 +993,7 @@ mod tests {
             )],
         ));
 
-        // b(x) :- a(x), !c(x).
+        // b(x) <- a(x), !c(x).
         program.add_rule(Rule::new(
             Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
@@ -1008,7 +1008,7 @@ mod tests {
             ],
         ));
 
-        // c(x) :- base(x).
+        // c(x) <- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -1031,12 +1031,12 @@ mod tests {
     #[test]
     fn test_stratify_with_negation_recursive_and_negation() {
         // Transitive closure with negation (stratifiable)
-        // tc(x, y) :- edge(x, y).
-        // tc(x, z) :- tc(x, y), edge(y, z).
-        // not_connected(x, y) :- node(x), node(y), !tc(x, y).
+        // tc(x, y) <- edge(x, y).
+        // tc(x, z) <- tc(x, y), edge(y, z).
+        // not_connected(x, y) <- node(x), node(y), !tc(x, y).
         let mut program = Program::new();
 
-        // tc(x, y) :- edge(x, y).
+        // tc(x, y) <- edge(x, y).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -1054,7 +1054,7 @@ mod tests {
             )],
         ));
 
-        // tc(x, z) :- tc(x, y), edge(y, z).
+        // tc(x, z) <- tc(x, y), edge(y, z).
         program.add_rule(Rule::new_simple(
             Atom::new(
                 "tc".to_string(),
@@ -1081,7 +1081,7 @@ mod tests {
             ],
         ));
 
-        // not_connected(x, y) :- node(x), node(y), !tc(x, y).
+        // not_connected(x, y) <- node(x), node(y), !tc(x, y).
         program.add_rule(Rule::new(
             Atom::new(
                 "not_connected".to_string(),
@@ -1130,7 +1130,7 @@ mod tests {
         // Test building extended dependency graph with positive/negative edges
         let mut program = Program::new();
 
-        // a(x) :- b(x), !c(x).
+        // a(x) <- b(x), !c(x).
         program.add_rule(Rule::new(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
             vec![
@@ -1161,11 +1161,11 @@ mod tests {
 
     #[test]
     fn test_stratify_multiple_negations() {
-        // d(x) :- a(x), !b(x), !c(x).
+        // d(x) <- a(x), !b(x), !c(x).
         // All of a, b, c must be computed before d
         let mut program = Program::new();
 
-        // a(x) :- base(x).
+        // a(x) <- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -1174,7 +1174,7 @@ mod tests {
             )],
         ));
 
-        // b(x) :- base(x).
+        // b(x) <- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -1183,7 +1183,7 @@ mod tests {
             )],
         ));
 
-        // c(x) :- base(x).
+        // c(x) <- base(x).
         program.add_rule(Rule::new_simple(
             Atom::new("c".to_string(), vec![Term::Variable("x".to_string())]),
             vec![Atom::new(
@@ -1192,7 +1192,7 @@ mod tests {
             )],
         ));
 
-        // d(x) :- a(x), !b(x), !c(x).
+        // d(x) <- a(x), !b(x), !c(x).
         program.add_rule(Rule::new(
             Atom::new("d".to_string(), vec![Term::Variable("x".to_string())]),
             vec![

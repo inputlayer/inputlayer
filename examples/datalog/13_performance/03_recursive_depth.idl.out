@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_perf_rec_n13t03
+Knowledge graph 'test_perf_rec_n13t03' created.
+Switched to knowledge graph: test_perf_rec_n13t03
+> .kg use test_perf_rec_n13t03
+Switched to knowledge graph: test_perf_rec_n13t03
+> +edge[(1,2), (2,3), (3,4), (4,5), (5,6), (6,7), (7,8), (8,9), (9,10), (10,11), (11,12), (12,13), (13,14), (14,15), (15,16), (16,17), (17,18), (18,19), (19,20)]
+Inserted 19 fact(s) into 'edge'.

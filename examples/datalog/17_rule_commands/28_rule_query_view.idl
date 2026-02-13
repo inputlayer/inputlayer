@@ -1,0 +1,20 @@
+// Test: Querying rules and views
+
+.kg create test_rule_query_n17t28
+.kg use test_rule_query_n17t28
+
+// Base data
++edges[(1, 2), (2, 3), (3, 4)]
+
+// Define a view
++reachable(X, Y) <- edges(X, Y)
++reachable(X, Z) <- reachable(X, Y), edges(Y, Z)
+
+// Query the view
+?reachable(1, Y)
+
+// List rules
+.rule list
+
+.kg use default
+.kg drop test_rule_query_n17t28

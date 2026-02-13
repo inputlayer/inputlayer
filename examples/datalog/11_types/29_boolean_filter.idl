@@ -1,0 +1,18 @@
+// Test: Boolean filter
+
+.kg create test_bool_filter_n11t29
+.kg use test_bool_filter_n11t29
+
++features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)]
+
+// Enabled features
+enabled(Id, Name) <- features(Id, Name, true)
+
+// Disabled features
+disabled(Id, Name) <- features(Id, Name, false)
+
+?enabled(Id, N)
+?disabled(Id, N)
+
+.kg use default
+.kg drop test_bool_filter_n11t29

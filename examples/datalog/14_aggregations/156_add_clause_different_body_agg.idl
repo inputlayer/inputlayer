@@ -1,0 +1,23 @@
+// Test: Same head with agg, slightly different body (user "fixes" a filter)
+// Description: User expects updated filter, but gets UNION of both clauses
+
+.kg create test_diff_body_agg_n14t156
+.kg use test_diff_body_agg_n14t156
+
++score[("Alice", 90), ("Bob", 80), ("Charlie", 70), ("Dave", 60)]
+
++top_score(Name, max<Grade>) <- score(Name, Grade), Grade > 75
+
+?top_score(N, G)
+
+// Add second clause with different filter — user expects "update"
++top_score(Name, max<Grade>) <- score(Name, Grade), Grade > 65
+
+// Gets UNION: both clauses contribute
+?top_score(N, G)
+
+// Should show top_score with 2 clauses
+.rule list
+
+.kg use default
+.kg drop test_diff_body_agg_n14t156

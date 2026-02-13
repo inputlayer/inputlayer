@@ -1,0 +1,36 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dup_key_n27t10
+Knowledge graph 'test_dup_key_n27t10' created.
+Switched to knowledge graph: test_dup_key_n27t10
+> .kg use test_dup_key_n27t10
+Switched to knowledge graph: test_dup_key_n27t10
+> +data[(1, "first"), (2, "second")]
+Inserted 2 fact(s) into 'data'.
+> ?data(X, Y)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    1 │ "first"  │
+│    2 │ "second" │
+└──────┴──────────┘
+2 rows
+> +data[(1, "updated")]
+Inserted 1 fact(s) into 'data'.
+> ?data(X, Y)
+┌──────┬───────────┐
+│ col0 │ col1      │
+├──────┼───────────┤
+│    1 │ "first"   │
+│    1 │ "updated" │
+│    2 │ "second"  │
+└──────┴───────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_key_n27t10
+Knowledge graph 'test_dup_key_n27t10' dropped.

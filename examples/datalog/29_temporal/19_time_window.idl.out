@@ -1,0 +1,21 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_win_n29t19
+Knowledge graph 'test_time_win_n29t19' created.
+Switched to knowledge graph: test_time_win_n29t19
+> .kg use test_time_win_n29t19
+Switched to knowledge graph: test_time_win_n29t19
+> +readings[(1, 100, 10), (2, 105, 20), (3, 110, 15), (4, 200, 30), (5, 205, 25)]
+Inserted 5 fact(s) into 'readings'.
+> window_count(Start, count<Id>) <- readings(Id, Time, _), Start = 100, Time >= Start,
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    5 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))

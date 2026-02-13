@@ -1,0 +1,24 @@
+// Test: Sign and Comparison Functions
+// Description: Tests sign-related math operations
+
+.kg create test_math_sign_n32t04
+.kg use test_math_sign_n32t04
+
++nums[(-5), (-1), (0), (1), (5)]
+
+// Test absolute value on integers
+with_abs(X, A) <- nums(X), A = abs_int64(X)
+?with_abs(X, A)
+
+// Positive vs negative classification using comparisons
+positive(X) <- nums(X), X > 0
+negative(X) <- nums(X), X < 0
+zero(X) <- nums(X), X = 0
+
+?positive(X)
+?negative(X)
+?zero(X)
+
+// Cleanup
+.kg use default
+.kg drop test_math_sign_n32t04

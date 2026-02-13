@@ -13,72 +13,19 @@ pub struct QueryGoal {
 }
 
 // String Utilities
-/// Strip % comments, respecting string literals and % as modulo inside expressions.
+/// Strip `//` comments, respecting string literals.
 pub fn strip_inline_comment(input: &str) -> &str {
     let mut in_string = false;
-    let mut escape_next = false;
-    let chars: Vec<char> = input.chars().collect();
-    let mut paren_depth: i32 = 0;
+    let bytes = input.as_bytes();
 
-    for i in 0..chars.len() {
-        if escape_next {
-            escape_next = false;
-            continue;
-        }
-
-        let c = chars[i];
-
-        if c == '\\' && in_string {
-            escape_next = true;
-            continue;
-        }
-
-        if c == '"' {
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
             in_string = !in_string;
-            continue;
+        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return input[..i].trim_end();
         }
-
-        if !in_string {
-            if c == '(' {
-                paren_depth += 1;
-            } else if c == ')' {
-                paren_depth -= 1;
-            } else if c == '%' {
-                // Inside parenthesized expression, treat as modulo
-                if paren_depth > 0 {
-                    continue;
-                }
-                // Check if this is a modulo operator (between operands)
-                let is_modulo = if i > 0 && i + 1 < chars.len() {
-                    let mut pi = i - 1;
-                    while pi > 0 && chars[pi].is_whitespace() {
-                        pi -= 1;
-                    }
-                    let prev = chars[pi];
-                    let mut ni = i + 1;
-                    while ni < chars.len() && chars[ni].is_whitespace() {
-                        ni += 1;
-                    }
-                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
-                    let next_is_operand = ni < chars.len() && {
-                        let next = chars[ni];
-                        next.is_alphanumeric() || next == '_' || next == '('
-                    };
-                    prev_is_operand && next_is_operand
-                } else {
-                    false
-                };
-
-                if !is_modulo {
-                    // byte position for slicing
-                    let byte_pos: usize = input
-                        .char_indices()
-                        .nth(i)
-                        .map_or(input.len(), |(pos, _)| pos);
-                    return input[..byte_pos].trim_end();
-                }
-            }
-        }
+        i += 1;
     }
 
     input
@@ -186,9 +133,9 @@ pub fn extract_args_content(input: &str) -> Option<&str> {
 
 /// Check if input is a simple name without arguments: "-name." pattern
 pub fn is_simple_name_deletion(input: &str) -> bool {
-    let input = input.trim().trim_end_matches('.');
-    // Must not contain parentheses or `:-`
-    !input.contains('(') && !input.contains(":-")
+    let input = input.trim();
+    // Must not contain parentheses or `<-`
+    !input.contains('(') && !input.contains("<-")
 }
 
 /// Validate a relation name (must be lowercase identifier)
@@ -282,7 +229,7 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
 
             // Boolean literals: true and false are special constants
             if input == "true" || input == "false" {
-                return Ok(Term::StringConstant(input.to_string()));
+                return Ok(Term::BoolConstant(input == "true"));
             }
 
             // Lowercase identifier - reject with helpful error message
@@ -317,36 +264,14 @@ fn parse_vector_literal(input: &str) -> Result<Term, String> {
     Ok(Term::VectorLiteral(values?))
 }
 
-/// Parse an aggregate function like count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>, or <FUNC:VAR>
+/// Parse an aggregate function like count<X>, sum<Y>, min<Z>, max<Z>, avg<Z>
 fn parse_aggregate(input: &str) -> Option<Term> {
-    // Check for pattern: func<params> or <FUNC:VAR> where func is an aggregate
+    // Check for pattern: func<params> where func is an aggregate
     if let Some(lt_pos) = input.find('<') {
         if let Some(gt_pos) = input.rfind('>') {
             if gt_pos > lt_pos && gt_pos == input.len() - 1 {
                 let func_name = &input[..lt_pos];
                 let params = &input[lt_pos + 1..gt_pos].trim();
-
-                // Handle <FUNC:VAR> syntax (function name inside angle brackets with colon)
-                if func_name.is_empty() && params.contains(':') {
-                    if let Some(colon_pos) = params.find(':') {
-                        let inner_func = params[..colon_pos].trim().to_lowercase();
-                        let inner_var = params[colon_pos + 1..].trim();
-                        let agg_func = match inner_func.as_str() {
-                            "count" => Some(AggregateFunc::Count),
-                            "count_distinct" | "countdistinct" => {
-                                Some(AggregateFunc::CountDistinct)
-                            }
-                            "sum" => Some(AggregateFunc::Sum),
-                            "min" => Some(AggregateFunc::Min),
-                            "max" => Some(AggregateFunc::Max),
-                            "avg" => Some(AggregateFunc::Avg),
-                            _ => None,
-                        };
-                        if let Some(func) = agg_func {
-                            return Some(Term::Aggregate(func, inner_var.to_string()));
-                        }
-                    }
-                }
 
                 let func_lower = func_name.to_lowercase();
 
@@ -468,10 +393,10 @@ pub fn term_to_string(term: &Term) -> String {
 // Query Parsing
 /// Parse a query: ?- goal.
 pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
-    let input = input.trim().trim_end_matches('.');
+    let input = input.trim();
 
     // Try to parse as a simple rule body
-    let dummy_rule_str = format!("__query__(X) :- {input}.");
+    let dummy_rule_str = format!("__query__(X) <- {input}");
     let rule = parse_rule(&dummy_rule_str)?;
 
     if rule.body.is_empty() {
@@ -494,31 +419,24 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     Ok(QueryGoal { goal, body })
 }
 
-/// Parse a transient rule: head :- body.
+/// Parse a transient rule: head <- body.
 pub fn parse_transient_rule(input: &str) -> Result<Rule, String> {
     parse_rule(input.trim())
 }
 
-/// Parse a persistent rule: +name(...) :- body.
+/// Parse a persistent rule: +name(...) <- body.
 pub fn parse_persistent_rule(input: &str) -> Result<Rule, String> {
     let input = input.trim();
     parse_rule(input)
 }
 
-/// Parse a rule definition: head :- body.
+/// Parse a rule definition: head <- body.
 pub fn parse_rule_definition(input: &str) -> Result<super::serialize::RuleDef, String> {
     use super::serialize::{RuleDef, SerializableRule};
 
     let input = input.trim();
 
-    // Ensure the rule ends with a period
-    let rule_str = if input.ends_with('.') {
-        input.to_string()
-    } else {
-        format!("{input}.")
-    };
-
-    let rule = parse_rule(&rule_str)?;
+    let rule = parse_rule(input)?;
 
     Ok(RuleDef {
         name: rule.head.relation.clone(),

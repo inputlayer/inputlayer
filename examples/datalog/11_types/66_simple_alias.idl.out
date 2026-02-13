@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_type_alias_n11t66
+Knowledge graph 'test_type_alias_n11t66' created.
+Switched to knowledge graph: test_type_alias_n11t66
+> .kg use test_type_alias_n11t66
+Switched to knowledge graph: test_type_alias_n11t66
+> type Email: string
+Type 'Email' declared (local only).
+> type UserId: int
+Type 'UserId' declared (local only).
+> type Score: int
+Type 'Score' declared (local only).
+> +users(id: UserId, email: Email, score: Score)
+Script error: Query execution failed: Invalid term: 'id: UserId'

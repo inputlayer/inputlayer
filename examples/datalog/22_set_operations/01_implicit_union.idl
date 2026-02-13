@@ -1,0 +1,34 @@
+// Test: Implicit Union (Multiple Rules)
+// Description: Tests union via multiple rules with same head predicate
+
+.kg create test_union_n22t01
+.kg use test_union_n22t01
+
+// Two separate data sources
++source_a[(1, 100), (2, 200)]
++source_b[(3, 300), (4, 400)]
+
+// Union via multiple rules (Datalog's natural union)
++combined(X, Y) <- source_a(X, Y)
++combined(X, Y) <- source_b(X, Y)
+
+// Query the union
+?combined(X, Y)
+// Should contain all 4 tuples from both sources
+
+// Three-way union
++source_c[(5, 500)]
++all_sources(X, Y) <- source_a(X, Y)
++all_sources(X, Y) <- source_b(X, Y)
++all_sources(X, Y) <- source_c(X, Y)
+
+?all_sources(X, Y)
+// Should contain 5 tuples
+
+// Count union results
++union_count(count<X>) <- all_sources(X, _)
+?union_count(C)
+
+// Cleanup
+.kg use default
+.kg drop test_union_n22t01

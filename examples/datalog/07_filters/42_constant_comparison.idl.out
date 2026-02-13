@@ -1,0 +1,42 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_const_cmp_n07t42
+Knowledge graph 'test_const_cmp_n07t42' created.
+Switched to knowledge graph: test_const_cmp_n07t42
+> .kg use test_const_cmp_n07t42
+Switched to knowledge graph: test_const_cmp_n07t42
+> +data[(1, "a"), (2, "b"), (3, "c")]
+Inserted 3 fact(s) into 'data'.
+> always_true(X, V) <- data(X, V), 5 > 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+│    3 │ "c"  │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?always_true(X, V)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+│    3 │ "c"  │
+└──────┴──────┘
+3 rows
+> always_false(X, V) <- data(X, V), 3 > 5
+No results.
+(session: 2 rule(s))
+> ?always_false(X, V)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_const_cmp_n07t42
+Knowledge graph 'test_const_cmp_n07t42' dropped.

@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_proj_filter_n21t31
+Knowledge graph 'test_proj_filter_n21t31' created.
+Switched to knowledge graph: test_proj_filter_n21t31
+> .kg use test_proj_filter_n21t31
+Switched to knowledge graph: test_proj_filter_n21t31
+> +data[(1, "A", 100), (2, "B", 200), (3, "A", 300)]
+Inserted 3 fact(s) into 'data'.
+> filtered(Name, Val) <- data(_, Name, Val), Val > 150
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │  300 │
+│ "B"  │  200 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?filtered(Name, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │  300 │
+│ "B"  │  200 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_proj_filter_n21t31
+Knowledge graph 'test_proj_filter_n21t31' dropped.

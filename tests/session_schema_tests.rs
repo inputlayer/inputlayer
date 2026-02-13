@@ -20,7 +20,7 @@ use std::sync::Arc;
 // patterns that session management relies on.
 //
 // For integration tests of actual StorageEngine session functionality, see:
-// - examples/datalog/04_session/*.dl (snapshot tests for session lifecycle)
+// - examples/datalog/04_session/*.idl (snapshot tests for session lifecycle)
 // - tests/storage_engine_tests.rs (integration tests)
 mod session_data_pattern_tests {
     use super::*;
@@ -35,10 +35,10 @@ mod session_data_pattern_tests {
         let mut persistent_rules: Vec<String> = Vec::new();
 
         // Add session rule
-        session_rules.push("path(X, Y) :- edge(X, Y).".to_string());
+        session_rules.push("path(X, Y) <- edge(X, Y)".to_string());
 
         // Add persistent rule
-        persistent_rules.push("+connected(X, Y) :- path(X, Y).".to_string());
+        persistent_rules.push("+connected(X, Y) <- path(X, Y)".to_string());
 
         assert_eq!(session_rules.len(), 1);
         assert_eq!(persistent_rules.len(), 1);
@@ -78,8 +78,8 @@ mod session_data_pattern_tests {
         // Add some session data
         session_facts.push(Tuple::new(vec![Value::Int64(1)]));
         session_facts.push(Tuple::new(vec![Value::Int64(2)]));
-        session_rules.push("rule1(X) :- fact(X).".to_string());
-        session_rules.push("rule2(X) :- rule1(X).".to_string());
+        session_rules.push("rule1(X) <- fact(X)".to_string());
+        session_rules.push("rule2(X) <- rule1(X)".to_string());
 
         // Clear all
         let facts_count = session_facts.len();
@@ -98,16 +98,16 @@ mod session_data_pattern_tests {
     fn test_session_rule_removal_by_index() {
         let mut session_rules: Vec<String> = Vec::new();
 
-        session_rules.push("rule1(X) :- fact(X).".to_string());
-        session_rules.push("rule2(X) :- rule1(X).".to_string());
-        session_rules.push("rule3(X) :- rule2(X).".to_string());
+        session_rules.push("rule1(X) <- fact(X)".to_string());
+        session_rules.push("rule2(X) <- rule1(X)".to_string());
+        session_rules.push("rule3(X) <- rule2(X)".to_string());
 
         // Remove by 0-based index (simulating 1-based UI)
         let removed = session_rules.remove(1); // Remove rule2
-        assert_eq!(removed, "rule2(X) :- rule1(X).");
+        assert_eq!(removed, "rule2(X) <- rule1(X)");
         assert_eq!(session_rules.len(), 2);
-        assert_eq!(session_rules[0], "rule1(X) :- fact(X).");
-        assert_eq!(session_rules[1], "rule3(X) :- rule2(X).");
+        assert_eq!(session_rules[0], "rule1(X) <- fact(X)");
+        assert_eq!(session_rules[1], "rule3(X) <- rule2(X)");
     }
 
     /// Test session data isolation between logical sessions
@@ -130,11 +130,11 @@ mod session_data_pattern_tests {
 
         // Add data to session 1
         session1.facts.push(Tuple::new(vec![Value::Int64(1)]));
-        session1.rules.push("s1_rule(X) :- fact(X).".to_string());
+        session1.rules.push("s1_rule(X) <- fact(X)".to_string());
 
         // Add data to session 2
         session2.facts.push(Tuple::new(vec![Value::Int64(2)]));
-        session2.rules.push("s2_rule(X) :- fact(X).".to_string());
+        session2.rules.push("s2_rule(X) <- fact(X)".to_string());
 
         // Sessions are isolated
         assert_eq!(session1.facts.len(), 1);
@@ -151,8 +151,8 @@ mod session_data_pattern_tests {
         let mut session_rules: Vec<String> = Vec::new();
 
         // Add rules
-        session_rules.push("rule1(X) :- a(X).".to_string());
-        session_rules.push("rule2(X) :- b(X).".to_string());
+        session_rules.push("rule1(X) <- a(X)".to_string());
+        session_rules.push("rule2(X) <- b(X)".to_string());
 
         // Build program text from session rules
         let program_text = session_rules.join("\n");
@@ -161,7 +161,7 @@ mod session_data_pattern_tests {
 
         // Clear and rebuild
         session_rules.clear();
-        session_rules.push("new_rule(X) :- c(X).".to_string());
+        session_rules.push("new_rule(X) <- c(X)".to_string());
 
         let new_program_text = session_rules.join("\n");
         assert!(!new_program_text.contains("rule1"));

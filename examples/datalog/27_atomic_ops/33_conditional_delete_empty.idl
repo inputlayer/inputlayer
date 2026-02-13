@@ -1,0 +1,16 @@
+// Test: Conditional delete with no matches
+
+.kg create test_cond_del_empty_n27t33
+.kg use test_cond_del_empty_n27t33
+
++items[(1, 10), (2, 20), (3, 30)]
+
+?items(Id, Val)
+
+// Condition that matches nothing
+-items(Id, Val) <- items(Id, Val), Val > 1000
+
+?items(Id, Val)
+
+.kg use default
+.kg drop test_cond_del_empty_n27t33

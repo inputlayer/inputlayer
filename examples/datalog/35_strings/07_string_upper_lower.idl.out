@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_case_n35t07
+Knowledge graph 'test_case_n35t07' created.
+Switched to knowledge graph: test_case_n35t07
+> .kg use test_case_n35t07
+Switched to knowledge graph: test_case_n35t07
+> +words[("Hello",), ("WORLD",), ("MiXeD",)]
+Inserted 3 fact(s) into 'words'.

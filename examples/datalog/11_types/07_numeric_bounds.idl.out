@@ -1,0 +1,32 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bounds_n11t07
+Knowledge graph 'test_bounds_n11t07' created.
+Switched to knowledge graph: test_bounds_n11t07
+> .kg use test_bounds_n11t07
+Switched to knowledge graph: test_bounds_n11t07
+> +large_pos[(1, 1000000), (2, 2000000), (3, 999999999)]
+Inserted 3 fact(s) into 'large_pos'.
+> +large_neg[(1, -1000000), (2, -2000000)]
+Inserted 2 fact(s) into 'large_neg'.
+> ?large_pos(Id, Val)
+┌──────┬───────────┐
+│ col0 │ col1      │
+├──────┼───────────┤
+│    1 │   1000000 │
+│    2 │   2000000 │
+│    3 │ 999999999 │
+└──────┴───────────┘
+3 rows
+> ?large_neg(Id, Val)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    1 │ -1000000 │
+│    2 │ -2000000 │
+└──────┴──────────┘
+2 rows

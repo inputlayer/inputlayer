@@ -1,0 +1,18 @@
+// Test: Comparison as filter
+
+.kg create test_compare_n15t30
+.kg use test_compare_n15t30
+
++pairs[(10, 5), (3, 7), (5, 5), (8, 2)]
+
+// First greater than second
+first_bigger(A, B) <- pairs(A, B), A > B
+
+// Equal values
+equal_vals(A, B) <- pairs(A, B), A = B
+
+?first_bigger(A, B)
+?equal_vals(A, B)
+
+.kg use default
+.kg drop test_compare_n15t30

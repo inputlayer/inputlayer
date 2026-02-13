@@ -1,0 +1,47 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_float_special_n11t43
+Knowledge graph 'test_float_special_n11t43' created.
+Switched to knowledge graph: test_float_special_n11t43
+> .kg use test_float_special_n11t43
+Switched to knowledge graph: test_float_special_n11t43
+> +small_float(0.0000001)
+Inserted 1 fact(s) into 'small_float'.
+> +large_float(999999999999.99)
+Inserted 1 fact(s) into 'large_float'.
+> +neg_float(-123.456)
+Inserted 1 fact(s) into 'neg_float'.
+> +near_zero(0.0)
+Inserted 1 fact(s) into 'near_zero'.
+> ?small_float(X)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1e-7 │
+└──────┘
+1 rows
+> ?large_float(X)
+┌─────────────────┐
+│ col0            │
+├─────────────────┤
+│ 999999999999.99 │
+└─────────────────┘
+1 rows
+> ?neg_float(X)
+┌──────────┐
+│ col0     │
+├──────────┤
+│ -123.456 │
+└──────────┘
+1 rows
+> ?near_zero(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  0.0 │
+└──────┘
+1 rows

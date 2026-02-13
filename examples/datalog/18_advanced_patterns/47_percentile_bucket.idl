@@ -1,0 +1,18 @@
+// Test: Percentile bucket simulation
+
+.kg create test_percentile_n18t47
+.kg use test_percentile_n18t47
+
++scores[(1, 50), (2, 75), (3, 85), (4, 95), (5, 60)]
+
+// Bucket by ranges
+low(Id, Score) <- scores(Id, Score), Score < 60
+medium(Id, Score) <- scores(Id, Score), Score >= 60, Score < 80
+high(Id, Score) <- scores(Id, Score), Score >= 80
+
+?low(Id, Score)
+?medium(Id, Score)
+?high(Id, Score)
+
+.kg use default
+.kg drop test_percentile_n18t47

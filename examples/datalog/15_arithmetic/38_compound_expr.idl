@@ -1,0 +1,14 @@
+// Test: Compound arithmetic expression
+
+.kg create test_compound_n15t38
+.kg use test_compound_n15t38
+
++vals[(10, 5, 2)]
+
+// (a - b) * c + a
+result(A, B, C, R) <- vals(A, B, C), R = (A - B) * C + A
+
+?result(A, B, C, R)
+
+.kg use default
+.kg drop test_compound_n15t38

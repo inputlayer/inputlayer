@@ -1,0 +1,15 @@
+// Test: Negation with multiple variables
+
+.kg create test_neg_multi_var_n08t47
+.kg use test_neg_multi_var_n08t47
+
++pairs[(1, 2), (2, 3), (3, 4)]
++forbidden[(1, 2)]
+
+// Filter out forbidden pairs
+allowed(X, Y) <- pairs(X, Y), !forbidden(X, Y)
+
+?allowed(X, Y)
+
+.kg use default
+.kg drop test_neg_multi_var_n08t47

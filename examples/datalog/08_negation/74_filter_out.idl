@@ -1,0 +1,15 @@
+// Test: Filter out specific values
+
+.kg create test_filter_out_n08t74
+.kg use test_filter_out_n08t74
+
++items[(1, "good"), (2, "bad"), (3, "good"), (4, "bad"), (5, "ok")]
++exclude[("bad",)]
+
+// Keep items not in exclude list
++kept(Id, Status) <- items(Id, Status), !exclude(Status)
+
+?kept(Id, S)
+
+.kg use default
+.kg drop test_filter_out_n08t74

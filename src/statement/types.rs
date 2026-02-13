@@ -144,11 +144,8 @@ pub enum RefinementArg {
 // Parsing
 /// Parse a type declaration: `type Name: TypeExpr.`
 pub fn parse_type_decl(input: &str) -> Result<TypeDecl, String> {
-    // Remove "type " prefix and trailing period
-    let input = input
-        .trim_start_matches("type ")
-        .trim()
-        .trim_end_matches('.');
+    // Remove "type " prefix
+    let input = input.trim_start_matches("type ").trim();
 
     // Split on first ':' to get name and type expression
     let colon_pos = input

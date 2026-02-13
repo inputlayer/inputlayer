@@ -1,0 +1,18 @@
+// Test: Min Aggregation
+// Description: Tests min aggregation to find minimum value per group
+
+.kg create test_agg_min_n14t03
+.kg use test_agg_min_n14t03
+
+// Insert temperature readings: reading(sensor_id, temperature)
++reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35), (3, 18)]
+
+// Find minimum temperature per sensor
++min_temp(Sensor, min<Temp>) <- reading(Sensor, Temp)
+
+// Query the min result
+?min_temp(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_agg_min_n14t03

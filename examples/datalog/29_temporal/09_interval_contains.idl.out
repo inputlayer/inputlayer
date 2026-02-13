@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_interval_contains_n29t09
+Knowledge graph 'test_interval_contains_n29t09' created.
+Switched to knowledge graph: test_interval_contains_n29t09
+> .kg use test_interval_contains_n29t09
+Switched to knowledge graph: test_interval_contains_n29t09
+> +intervals[(1, 100, 300, 150, 250), (2, 100, 200, 150, 250), (3, 100, 300, 100, 300), (4, 100, 300, 50, 150)]
+Inserted 4 fact(s) into 'intervals'.

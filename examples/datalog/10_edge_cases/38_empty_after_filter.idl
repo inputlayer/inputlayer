@@ -1,0 +1,19 @@
+// Test: Empty result after filter
+
+.kg create test_empty_filter_n10t38
+.kg use test_empty_filter_n10t38
+
++data[(1, 10), (2, 20), (3, 30)]
+
+// Filter that matches nothing
+empty_result(Id, Val) <- data(Id, Val), Val > 100
+
+?empty_result(Id, Val)
+
+// Aggregation on empty result
++empty_count(count<Id>) <- empty_result(Id, _)
+
+?empty_count(C)
+
+.kg use default
+.kg drop test_empty_filter_n10t38

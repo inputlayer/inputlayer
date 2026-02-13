@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_key_n06t60
+Knowledge graph 'test_multi_key_n06t60' created.
+Switched to knowledge graph: test_multi_key_n06t60
+> .kg use test_multi_key_n06t60
+Switched to knowledge graph: test_multi_key_n06t60
+> +table_a[(1, "x", "A"), (1, "y", "B"), (2, "x", "C")]
+Inserted 3 fact(s) into 'table_a'.
+> +table_b[(1, "x", 100), (1, "y", 200), (3, "z", 300)]
+Inserted 3 fact(s) into 'table_b'.

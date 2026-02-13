@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_diag_n06t64
+Knowledge graph 'test_diag_n06t64' created.
+Switched to knowledge graph: test_diag_n06t64
+> .kg use test_diag_n06t64
+Switched to knowledge graph: test_diag_n06t64
+> +matrix[(1, 1, 10), (1, 2, 20), (2, 2, 30), (3, 3, 40), (2, 3, 50)]
+Inserted 5 fact(s) into 'matrix'.

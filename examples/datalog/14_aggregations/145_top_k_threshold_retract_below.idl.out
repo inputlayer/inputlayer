@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_thresh_boundary_n14t145
+Knowledge graph 'test_topk_thresh_boundary_n14t145' created.
+Switched to knowledge graph: test_topk_thresh_boundary_n14t145
+> .kg use test_topk_thresh_boundary_n14t145
+Switched to knowledge graph: test_topk_thresh_boundary_n14t145
+> +score[(1, 300), (2, 200), (3, 150), (4, 100), (5, 50)]
+Inserted 5 fact(s) into 'score'.

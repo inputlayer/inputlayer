@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cube_n18t22
+Knowledge graph 'test_cube_n18t22' created.
+Switched to knowledge graph: test_cube_n18t22
+> .kg use test_cube_n18t22
+Switched to knowledge graph: test_cube_n18t22
+> +sales[("2024", "Q1", "Widget", 100), ("2024", "Q1", "Gadget", 200), ("2024", "Q2", "Widget", 150), ("2024", "Q2", "Gadget", 250)]
+Inserted 4 fact(s) into 'sales'.

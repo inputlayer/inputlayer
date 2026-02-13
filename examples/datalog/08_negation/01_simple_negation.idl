@@ -1,0 +1,19 @@
+// Test: Simple Negation (Antijoin)
+// Description: Tests negation for set difference operations
+
+.kg create test_neg_n08t01
+.kg use test_neg_n08t01
+
+// Two sets of edges
++edge[(1,2), (2,3), (3,4), (4,5)]
++skip[(2,3), (4,5)]
+
+// Edges not in skip (set difference using negation)
++filtered(X, Y) <- edge(X, Y), !skip(X, Y)
+
+// Query filtered edges - returns edges NOT in skip
+?filtered(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_n08t01

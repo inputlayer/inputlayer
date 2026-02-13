@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_err_n12t04
+Knowledge graph 'test_arity_err_n12t04' created.
+Switched to knowledge graph: test_arity_err_n12t04
+> .kg use test_arity_err_n12t04
+Switched to knowledge graph: test_arity_err_n12t04
+> +mixed[(1, 2), (3, 4)]
+Inserted 2 fact(s) into 'mixed'.
+> ?mixed(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    3 │    4 │
+└──────┴──────┘
+2 rows
+> +mixed[(5, 6, 7)]
+Script error: Insert failed: Arity mismatch for relation 'mixed': existing arity is 2, but trying to insert tuples with arity 3

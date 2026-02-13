@@ -13,13 +13,13 @@
 //!     .var("y")
 //!     .build();
 //!
-//! // Build a rule: path(x, y) :- edge(x, y).
+//! // Build a rule: path(x, y) <- edge(x, y)
 //! let rule = RuleBuilder::new("path")
 //!     .head_vars(["x", "y"])
 //!     .body_atom("edge", ["x", "y"])
 //!     .build();
 //!
-//! // Build a recursive rule: path(x, z) :- path(x, y), edge(y, z).
+//! // Build a recursive rule: path(x, z) <- path(x, y), edge(y, z)
 //! let recursive = RuleBuilder::new("path")
 //!     .head_vars(["x", "z"])
 //!     .body_atom("path", ["x", "y"])
@@ -177,7 +177,7 @@ where
     RuleBuilder::new(relation).head_vars(args).build()
 }
 
-/// Create a simple rule: head(vars...) :- body(vars...).
+/// Create a simple rule: head(vars...) <- body(vars...)
 pub fn simple_rule<I1, S1, I2, S2>(
     head_rel: impl Into<String>,
     head_vars: I1,
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_rule_builder_basic() {
-        // path(x, y) :- edge(x, y).
+        // path(x, y) <- edge(x, y)
         let rule = RuleBuilder::new("path")
             .head_vars(["x", "y"])
             .body_atom("edge", ["x", "y"])
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_rule_builder_recursive() {
-        // path(x, z) :- path(x, y), edge(y, z).
+        // path(x, z) <- path(x, y), edge(y, z)
         let rule = RuleBuilder::new("path")
             .head_vars(["x", "z"])
             .body_atom("path", ["x", "y"])
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_rule_builder_with_negation() {
-        // result(x) :- source(x), !excluded(x).
+        // result(x) <- source(x), !excluded(x)
         let rule = RuleBuilder::new("result")
             .head_vars(["x"])
             .body_atom("source", ["x"])

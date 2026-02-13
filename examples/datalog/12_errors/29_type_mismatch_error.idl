@@ -1,0 +1,16 @@
+// Test: Type mismatch with schema
+//
+// Schema validation is per-knowledge-graph. Inserting data that violates
+// the declared schema types should produce a validation error.
+
+.kg create test_type_mismatch_n12t29
+.kg use test_type_mismatch_n12t29
+
+// Define schema with explicit types
++typed_rel(id: int, name: string, score: float)
+
+// Try to insert wrong types - should error
++typed_rel("not_an_int", 123, "not_a_float")
+
+.kg use default
+.kg drop test_type_mismatch_n12t29

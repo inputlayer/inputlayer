@@ -1,0 +1,25 @@
+// Test: Rule drop with top_k_threshold aggregation
+// Description: Tests dropping and re-adding a top_k_threshold rule
+
+.kg create test_drop_topk_thresh_n14t114
+.kg use test_drop_topk_thresh_n14t114
+
++score[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 200)]
+
+// Top 3 with threshold >= 100, descending
++top_high(top_k_threshold<3, 100, Player, Points:desc>) <- score(Player, Points)
+
+?top_high(X, Y)
+
+// Drop the rule
+.rule drop top_high
+
+?top_high(X, Y)
+
+// Redefine with different threshold
++top_high(top_k_threshold<3, 200, Player, Points:desc>) <- score(Player, Points)
+
+?top_high(X, Y)
+
+.kg use default
+.kg drop test_drop_topk_thresh_n14t114

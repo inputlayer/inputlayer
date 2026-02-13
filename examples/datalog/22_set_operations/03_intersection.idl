@@ -1,0 +1,37 @@
+// Test: Intersection (via Join)
+// Description: Tests intersection using join semantics
+
+.kg create test_intersect_n22t03
+.kg use test_intersect_n22t03
+
+// Two sets with some overlap
++set_a[(1), (2), (3), (4)]
++set_b[(3), (4), (5), (6)]
+
+// Intersection via join (common elements)
++intersection(X) <- set_a(X), set_b(X)
+?intersection(X)
+// Should show: 3, 4
+
+// Intersection count
++intersect_count(count<X>) <- intersection(X)
+?intersect_count(C)
+
+// Intersection of pairs
++pairs_a[(1, 10), (2, 20), (3, 30)]
++pairs_b[(2, 20), (3, 30), (4, 40)]
+
++common_pairs(X, Y) <- pairs_a(X, Y), pairs_b(X, Y)
+?common_pairs(X, Y)
+// Should show: (2, 20), (3, 30)
+
+// Empty intersection
++set_x[(1), (2)]
++set_y[(3), (4)]
++empty_intersect(X) <- set_x(X), set_y(X)
+?empty_intersect(X)
+// Should be empty
+
+// Cleanup
+.kg use default
+.kg drop test_intersect_n22t03

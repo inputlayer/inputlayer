@@ -1,0 +1,22 @@
+// Test: Drop rule, re-add with completely different definition
+// Description: Drop aggregation rule, re-add as non-aggregation with different schema
+
+.kg create test_drop_diff_n14t162
+.kg use test_drop_diff_n14t162
+
++data[(1, 10), (2, 20), (3, 30)]
+
++result(sum<V>) <- data(_, V)
+
+?result(X)
+
+// Drop the rule
+.rule drop result
+
+// Re-add with completely different schema (no agg, 2 columns, with filter)
++result(X, Y) <- data(X, Y), Y > 15
+
+?result(X, Y)
+
+.kg use default
+.kg drop test_drop_diff_n14t162

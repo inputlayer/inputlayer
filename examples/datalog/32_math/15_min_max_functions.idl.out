@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_minmax_fn_n32t15
+Knowledge graph 'test_minmax_fn_n32t15' created.
+Switched to knowledge graph: test_minmax_fn_n32t15
+> .kg use test_minmax_fn_n32t15
+Switched to knowledge graph: test_minmax_fn_n32t15
+> +pairs[(10, 20), (30, 15), (5, 5), (100, 50)]
+Inserted 4 fact(s) into 'pairs'.

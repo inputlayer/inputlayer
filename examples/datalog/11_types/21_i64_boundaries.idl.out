@@ -1,0 +1,40 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_i64_boundary_n11t21
+Knowledge graph 'test_i64_boundary_n11t21' created.
+Switched to knowledge graph: test_i64_boundary_n11t21
+> .kg use test_i64_boundary_n11t21
+Switched to knowledge graph: test_i64_boundary_n11t21
+> +large_ints[(1000000000000, "trillion"), (9999999999999, "near_max")]
+Inserted 2 fact(s) into 'large_ints'.
+> ?large_ints(Val, Name)
+┌───────────────┬────────────┐
+│ col0          │ col1       │
+├───────────────┼────────────┤
+│ 1000000000000 │ "trillion" │
+│ 9999999999999 │ "near_max" │
+└───────────────┴────────────┘
+2 rows
+> large_compare(Val, Name) <- large_ints(Val, Name), Val > 999999999999
+┌───────────────┬────────────┐
+│ col0          │ col1       │
+├───────────────┼────────────┤
+│ 1000000000000 │ "trillion" │
+│ 9999999999999 │ "near_max" │
+└───────────────┴────────────┘
+2 rows
+(session: 1 rule(s))
+> ?large_compare(Val, Name)
+┌───────────────┬────────────┐
+│ col0          │ col1       │
+├───────────────┼────────────┤
+│ 1000000000000 │ "trillion" │
+│ 9999999999999 │ "near_max" │
+└───────────────┴────────────┘
+2 rows
+> +pair[(5000000000000, 4000000000000)]
+Inserted 1 fact(s) into 'pair'.

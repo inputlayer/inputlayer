@@ -1,0 +1,13 @@
+// Test: Multiple aggregates in same query
+
+.kg create test_multi_agg_n21t13
+.kg use test_multi_agg_n21t13
+
++vals[(10,), (20,), (30,), (40,), (50,)]
+
++stats(sum<X>, count<X>, min<X>, max<X>, avg<X>) <- vals(X)
+
+?stats(Sum, Count, Min, Max, Avg)
+
+.kg use default
+.kg drop test_multi_agg_n21t13

@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_safe_neg_n08t38
+Knowledge graph 'test_safe_neg_n08t38' created.
+Switched to knowledge graph: test_safe_neg_n08t38
+> .kg use test_safe_neg_n08t38
+Switched to knowledge graph: test_safe_neg_n08t38
+> +orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Alice", 150)]
+Inserted 3 fact(s) into 'orders'.
+> +vip[("Alice",)]
+Inserted 1 fact(s) into 'vip'.
+> non_vip_high(Id, Name, Val) <- orders(Id, Name, Val), !vip(Name), Val > 100
+┌──────┬───────┬──────┐
+│ col0 │ col1  │ col2 │
+├──────┼───────┼──────┤
+│    2 │ "Bob" │  200 │
+└──────┴───────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?non_vip_high(Id, Name, Val)
+┌──────┬───────┬──────┐
+│ col0 │ col1  │ col2 │
+├──────┼───────┼──────┤
+│    2 │ "Bob" │  200 │
+└──────┴───────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_safe_neg_n08t38
+Knowledge graph 'test_safe_neg_n08t38' dropped.

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ternary_n10t51
+Knowledge graph 'test_ternary_n10t51' created.
+Switched to knowledge graph: test_ternary_n10t51
+> .kg use test_ternary_n10t51
+Switched to knowledge graph: test_ternary_n10t51
+> +triple[(1, 2, 3), (2, 3, 4), (3, 4, 5)]
+Inserted 3 fact(s) into 'triple'.

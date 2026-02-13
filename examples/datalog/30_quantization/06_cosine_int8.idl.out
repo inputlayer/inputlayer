@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cosine_int8_n30t06
+Knowledge graph 'test_cosine_int8_n30t06' created.
+Switched to knowledge graph: test_cosine_int8_n30t06
+> .kg use test_cosine_int8_n30t06
+Switched to knowledge graph: test_cosine_int8_n30t06
+> +embedding[(1, [1.0, 0.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(2, [0.0, 1.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(3, [0.707, 0.707, 0.0, 0.0])]
+Inserted 1 fact(s) into 'embedding'.

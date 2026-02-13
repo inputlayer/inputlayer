@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_all_n27t22
+Knowledge graph 'test_del_all_n27t22' created.
+Switched to knowledge graph: test_del_all_n27t22
+> .kg use test_del_all_n27t22
+Switched to knowledge graph: test_del_all_n27t22
+> +items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 50)]
+Inserted 4 fact(s) into 'items'.
+> ?items(Id, Cat, Val)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "A"  │  100 │
+│    2 │ "B"  │  200 │
+│    3 │ "A"  │  150 │
+│    4 │ "C"  │   50 │
+└──────┴──────┴──────┘
+4 rows

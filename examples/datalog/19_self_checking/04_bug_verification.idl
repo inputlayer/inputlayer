@@ -1,0 +1,17 @@
+// Bug Verification Test
+// Tests 3-column wildcard pattern with arithmetic in head
+
+.kg create test_bug_verification_n19t04
+.kg use test_bug_verification_n19t04
+
+// 3-column source relation with unique values
++src3[(1, 7777, 999), (2, 8888, 888)]
++link[(1, 1001), (2, 1002)]
+
+// D+1 should produce 7778 and 8889
+result(Y, D+1) <- src3(X, D, _), link(X, Y)
+
+?result(A, B)
+
+.kg use default
+.kg drop test_bug_verification_n19t04

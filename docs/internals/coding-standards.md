@@ -465,8 +465,8 @@ fn test_aggregation_empty_group_returns_zero() { ... }
 ```
 examples/datalog/
 ├── 01_basics/
-│   ├── 01_simple_query.dl      # Input
-│   └── 01_simple_query.dl.out  # Expected output
+│   ├── 01_simple_query.idl      # Input
+│   └── 01_simple_query.idl.out  # Expected output
 ```
 
 Update snapshots with:
@@ -543,7 +543,7 @@ fn process(data: &[Tuple]) { ... }    // Borrows
 ```
 feat: add TopK aggregate function
 
-Implements top-k selection with ordering column support.
+Implements top-k selection with ordering column support
 Syntax: top_k<10, name, score:desc>
 
 refactor: split statement.rs into focused modules

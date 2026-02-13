@@ -1,0 +1,29 @@
+// Test: Top-K with join + fact retraction
+// Description: Tests top_k aggregation over joined data with fact changes
+
+.kg create test_topk_join_n14t139
+.kg use test_topk_join_n14t139
+
++student[(1, "Alice"), (2, "Bob"), (3, "Charlie"), (4, "Diana")]
++grade[(1, 95), (2, 85), (3, 90), (4, 80)]
+
+// Top 2 students by grade (descending)
++top_students(top_k<2, Name, Grade:desc>) <- student(Id, Name), grade(Id, Grade)
+
+?top_students(X, Y)
+
+// Change a grade
+-grade(3, 90)
++grade[(3, 99)]
+
+// Charlie should now be top with 99
+?top_students(X, Y)
+
+// Remove a student entirely
+-student(1, "Alice")
+-grade(1, 95)
+
+?top_students(X, Y)
+
+.kg use default
+.kg drop test_topk_join_n14t139

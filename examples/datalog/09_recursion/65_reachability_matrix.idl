@@ -1,0 +1,15 @@
+// Test: Full reachability matrix
+
+.kg create test_reach_matrix_n09t65
+.kg use test_reach_matrix_n09t65
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("a", "c")]
+
+// Full transitive closure
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
+?reach(X, Y)
+
+.kg use default
+.kg drop test_reach_matrix_n09t65

@@ -1,0 +1,15 @@
+// Test: Depth-limited recursion
+
+.kg create test_depth_limit_n09t30
+.kg use test_depth_limit_n09t30
+
++edge[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7)]
+
+// Path with depth limit
++path(X, Y, 1) <- edge(X, Y)
++path(X, Z, D) <- path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3
+
+?path(1, Y, D)
+
+.kg use default
+.kg drop test_depth_limit_n09t30

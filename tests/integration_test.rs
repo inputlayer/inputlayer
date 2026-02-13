@@ -28,8 +28,8 @@ fn test_simple_scan_query() {
     // Add base facts
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
-    // Query: result(X, Y) :- edge(X, Y)
-    let program = "result(X, Y) :- edge(X, Y).";
+    // Query: result(X, Y) <- edge(X, Y)
+    let program = "result(X, Y) <- edge(X, Y)";
 
     let results = engine.execute(program).unwrap();
 
@@ -47,8 +47,8 @@ fn test_filter_query() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 5), (3, 10), (4, 1)]);
 
-    // Query: result(X, Y) :- edge(X, Y), Y > 3
-    let program = "result(X, Y) :- edge(X, Y), Y > 3.";
+    // Query: result(X, Y) <- edge(X, Y), Y > 3
+    let program = "result(X, Y) <- edge(X, Y), Y > 3";
 
     let results = engine.execute(program).unwrap();
 
@@ -64,8 +64,8 @@ fn test_projection_query() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
-    // Query: result(Y, X) :- edge(X, Y) (swap columns)
-    let program = "result(Y, X) :- edge(X, Y).";
+    // Query: result(Y, X) <- edge(X, Y) (swap columns)
+    let program = "result(Y, X) <- edge(X, Y)";
 
     let results = engine.execute(program).unwrap();
 
@@ -83,9 +83,9 @@ fn test_join_query() {
     // Create a simple graph: 1->2->3
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
-    // Query: result(X, Z) :- edge(X, Y), edge(Y, Z)
+    // Query: result(X, Z) <- edge(X, Y), edge(Y, Z)
     // This computes 2-hop paths
-    let program = "result(X, Z) :- edge(X, Y), edge(Y, Z).";
+    let program = "result(X, Z) <- edge(X, Y), edge(Y, Z)";
 
     let results = engine.execute(program).unwrap();
 
@@ -101,8 +101,8 @@ fn test_multiple_filters() {
 
     engine.add_fact("edge", vec![(1, 5), (2, 10), (3, 15), (4, 20)]);
 
-    // Query: result(X, Y) :- edge(X, Y), X > 1, Y < 20
-    let program = "result(X, Y) :- edge(X, Y), X > 1, Y < 20.";
+    // Query: result(X, Y) <- edge(X, Y), X > 1, Y < 20
+    let program = "result(X, Y) <- edge(X, Y), X > 1, Y < 20";
 
     let results = engine.execute(program).unwrap();
 
@@ -118,9 +118,9 @@ fn test_self_join() {
 
     engine.add_fact("edge", vec![(1, 1), (2, 2), (3, 4)]);
 
-    // Query: result(X, Y) :- edge(X, Y), edge(Y, X)
+    // Query: result(X, Y) <- edge(X, Y), edge(Y, X)
     // Finds bidirectional edges (including self-loops)
-    let program = "result(X, Y) :- edge(X, Y), edge(Y, X).";
+    let program = "result(X, Y) <- edge(X, Y), edge(Y, X)";
 
     let results = engine.execute(program).unwrap();
 
@@ -136,8 +136,8 @@ fn test_inequality_constraint() {
 
     engine.add_fact("edge", vec![(1, 1), (1, 2), (2, 2), (2, 3)]);
 
-    // Query: result(X, Y) :- edge(X, Y), X != Y
-    let program = "result(X, Y) :- edge(X, Y), X != Y.";
+    // Query: result(X, Y) <- edge(X, Y), X != Y
+    let program = "result(X, Y) <- edge(X, Y), X != Y";
 
     let results = engine.execute(program).unwrap();
 
@@ -155,8 +155,8 @@ fn test_complex_join_with_filter() {
     // Graph: 1->2, 2->3, 3->4, 4->5
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
-    // Query: result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3
-    let program = "result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3.";
+    // Query: result(X, Z) <- edge(X, Y), edge(Y, Z), X < 3
+    let program = "result(X, Z) <- edge(X, Y), edge(Y, Z), X < 3";
 
     let results = engine.execute(program).unwrap();
 
@@ -173,11 +173,11 @@ fn test_parse_with_comments() {
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
     let program = "
-        % This is a comment
-        % This is also a comment (Prolog-style)
-        result(X, Y) :- edge(X, Y).
+        // This is a comment
+        // This is also a comment (Prolog-style)
+        result(X, Y) <- edge(X, Y)
 
-        % Another comment
+        // Another comment
     ";
 
     let results = engine.execute(program).unwrap();
@@ -192,8 +192,8 @@ fn test_multiple_rules() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let program = "
-        path1(X, Y) :- edge(X, Y).
-        path2(X, Z) :- edge(X, Y), edge(Y, Z).
+        path1(X, Y) <- edge(X, Y)
+        path2(X, Z) <- edge(X, Y), edge(Y, Z)
     ";
 
     // Execute returns results from the LAST rule (query semantics)
@@ -226,7 +226,7 @@ fn test_safety_validation() {
     let mut engine = DatalogEngine::new();
 
     // Unsafe rule: z appears in head but not in body
-    let program = "result(X, Z) :- edge(X, Y).";
+    let program = "result(X, Z) <- edge(X, Y)";
 
     let result = engine.execute(program);
 
@@ -239,7 +239,7 @@ fn test_empty_relation() {
     let mut engine = DatalogEngine::new();
 
     // No facts added
-    let program = "result(X, Y) :- edge(X, Y).";
+    let program = "result(X, Y) <- edge(X, Y)";
 
     let results = engine.execute(program).unwrap();
 
@@ -254,8 +254,8 @@ fn test_constant_in_body() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
-    // Query with constant equality: result(X, Y) :- edge(X, Y), X = 2
-    let program = "result(X, Y) :- edge(X, Y), X = 2.";
+    // Query with constant equality: result(X, Y) <- edge(X, Y), X = 2
+    let program = "result(X, Y) <- edge(X, Y), X = 2";
 
     let results = engine.execute(program).unwrap();
 
@@ -284,8 +284,8 @@ fn test_optimization_removes_identity_projection() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
-    // This query has identity projection (x, y) :- edge(X, Y)
-    let program = "result(X, Y) :- edge(X, Y).";
+    // This query has identity projection (x, y) <- edge(X, Y)
+    let program = "result(X, Y) <- edge(X, Y)";
 
     engine.parse(program).unwrap();
     engine.build_ir().unwrap();
@@ -311,7 +311,7 @@ fn test_large_dataset() {
     engine.add_fact("edge", edges);
 
     // Count edges
-    let program = "result(X, Y) :- edge(X, Y).";
+    let program = "result(X, Y) <- edge(X, Y)";
 
     let results = engine.execute(program).unwrap();
 
@@ -325,8 +325,8 @@ fn test_triangles_query() {
     // Create a triangle: 1->2, 2->3, 3->1
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 1)]);
 
-    // Find triangles: result(X, Z) :- edge(X, Y), edge(Y, Z), edge(Z, X)
-    let program = "result(X, Z) :- edge(X, Y), edge(Y, Z), edge(Z, X).";
+    // Find triangles: result(X, Z) <- edge(X, Y), edge(Y, Z), edge(Z, X)
+    let program = "result(X, Z) <- edge(X, Y), edge(Y, Z), edge(Z, X)";
 
     let results = engine.execute(program).unwrap();
 
@@ -344,10 +344,10 @@ fn test_three_rule_same_component() {
 
     // Three rules for same_component (like session rules would create)
     let program = r#"
-same_component(X, Y) :- edge(X, Y).
-same_component(X, Y) :- edge(Y, X).
-same_component(X, Z) :- same_component(X, Y), same_component(Y, Z), X != Z.
-__result__(X, Y) :- same_component(X, Y).
+same_component(X, Y) <- edge(X, Y)
+same_component(X, Y) <- edge(Y, X)
+same_component(X, Z) <- same_component(X, Y), same_component(Y, Z), X != Z
+__result__(X, Y) <- same_component(X, Y)
 "#;
 
     let results = engine.execute(program).unwrap();
@@ -387,7 +387,7 @@ fn test_parse_multiple_constraints() {
 
     // Multiple constraint types
     let program = "
-        result(X, Y) :- data(X, Y), X >= 2, Y <= 30, X != 3.
+        result(X, Y) <- data(X, Y), X >= 2, Y <= 30, X != 3
     ";
 
     let results = engine.execute(program).unwrap();
@@ -401,7 +401,7 @@ fn test_parse_multiple_constraints() {
 fn test_parse_simple_rule() {
     let mut engine = DatalogEngine::new();
 
-    let program = "result(X, Y) :- edge(X, Y).";
+    let program = "result(X, Y) <- edge(X, Y)";
 
     // Test parsing
     let parse_result = engine.parse(program);
@@ -449,19 +449,13 @@ fn test_all_comparison_operators() {
 
     // Test each operator
     let tests = vec![
-        ("result(X, Y) :- data(X, Y), X > 2.", vec![(3, 30), (4, 40)]),
-        ("result(X, Y) :- data(X, Y), X < 3.", vec![(1, 10), (2, 20)]),
+        ("result(X, Y) <- data(X, Y), X > 2", vec![(3, 30), (4, 40)]),
+        ("result(X, Y) <- data(X, Y), X < 3", vec![(1, 10), (2, 20)]),
+        ("result(X, Y) <- data(X, Y), X >= 3", vec![(3, 30), (4, 40)]),
+        ("result(X, Y) <- data(X, Y), X <= 2", vec![(1, 10), (2, 20)]),
+        ("result(X, Y) <- data(X, Y), X = 2", vec![(2, 20)]),
         (
-            "result(X, Y) :- data(X, Y), X >= 3.",
-            vec![(3, 30), (4, 40)],
-        ),
-        (
-            "result(X, Y) :- data(X, Y), X <= 2.",
-            vec![(1, 10), (2, 20)],
-        ),
-        ("result(X, Y) :- data(X, Y), X = 2.", vec![(2, 20)]),
-        (
-            "result(X, Y) :- data(X, Y), X != 2.",
+            "result(X, Y) <- data(X, Y), X != 2",
             vec![(1, 10), (3, 30), (4, 40)],
         ),
     ];
@@ -492,7 +486,7 @@ fn test_pipeline_stages() {
 
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
-    let program = "result(X, Y) :- edge(X, Y), X > 1.";
+    let program = "result(X, Y) <- edge(X, Y), X > 1";
 
     // Stage 1: Parse
     let parsed = engine.parse(program).unwrap();
@@ -541,8 +535,8 @@ fn test_simple_negation() {
     engine.add_fact("on_leave", vec![(2, 0), (4, 0)]);
 
     // Query: active employees (not on leave)
-    // active(EmpId, DeptId) :- employee(EmpId, DeptId), !on_leave(EmpId, _).
-    let program = "active(X, Y) :- employee(X, Y), !on_leave(X, _).";
+    // active(EmpId, DeptId) <- employee(EmpId, DeptId), !on_leave(EmpId, _)
+    let program = "active(X, Y) <- employee(X, Y), !on_leave(X, _)";
 
     let results = engine.execute(program).unwrap();
 
@@ -583,8 +577,8 @@ fn test_negation_with_join() {
     engine.add_fact("on_leave", vec![(2, 0), (4, 0)]);
 
     // Query: active employees with their manager
-    // active_mgr(EmpId, MgrId) :- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _).
-    let program = "active_mgr(X, Z) :- employee(X, Y), department(Y, Z), !on_leave(X, _).";
+    // active_mgr(EmpId, MgrId) <- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _)
+    let program = "active_mgr(X, Z) <- employee(X, Y), department(Y, Z), !on_leave(X, _)";
 
     let results = engine.execute(program).unwrap();
 
@@ -622,20 +616,20 @@ fn test_negation_with_join() {
 #[test]
 fn test_negation_on_view() {
     // Test case: negation where the negated relation is another rule's result (a view)
-    // This mimics the failing snapshot test 06_negation_self_relation.dl
+    // This mimics the failing snapshot test 06_negation_self_relation.idl
     let mut engine = DatalogEngine::new();
 
     // Base relation: edges in a graph
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)]);
 
     // Program with multiple rules (views):
-    // source_node(X, Y) :- edge(X, Y).           -- wraps edge
-    // target_node(Y, X) :- edge(X, Y).           -- swaps X and Y from edge
-    // pure_source(X, Y) :- source_node(X, Y), !target_node(X, _).  -- negation on a view
+    // source_node(X, Y) <- edge(X, Y)             -- wraps edge
+    // target_node(Y, X) <- edge(X, Y)             -- swaps X and Y from edge
+    // pure_source(X, Y) <- source_node(X, Y), !target_node(X, _)   -- negation on a view
     let program = r#"
-        source_node(X, Y) :- edge(X, Y).
-        target_node(Y, X) :- edge(X, Y).
-        pure_source(X, Y) :- source_node(X, Y), !target_node(X, _).
+        source_node(X, Y) <- edge(X, Y)
+        target_node(Y, X) <- edge(X, Y)
+        pure_source(X, Y) <- source_node(X, Y), !target_node(X, _)
     "#;
 
     let results = engine.execute(program).unwrap();
@@ -643,7 +637,7 @@ fn test_negation_on_view() {
     // Analysis:
     // edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
     // source_node = edge = [(1,2), (2,3), (3,4), (1,3), (2,4)]
-    // target_node(Y, X) :- edge(X, Y) gives: [(2,1), (3,2), (4,3), (3,1), (4,2)]
+    // target_node(Y, X) <- edge(X, Y) gives: [(2,1), (3,2), (4,3), (3,1), (4,2)]
     // target_node's first column values: {2, 3, 4}
     //
     // pure_source = source_node where X NOT in target_node's first column
@@ -721,7 +715,7 @@ fn test_sip_four_way_join() {
         ],
     );
 
-    let program = "full_user_info(Name, Email, Role, Dept) :- users(Id, Name), emails(Id, Email), roles(Id, Role), departments(Id, Dept).";
+    let program = "full_user_info(Name, Email, Role, Dept) <- users(Id, Name), emails(Id, Email), roles(Id, Role), departments(Id, Dept)";
 
     let results = engine.execute_tuples(program).unwrap();
     eprintln!("SIP four-way join results: {:?}", results);
@@ -753,7 +747,7 @@ fn test_sip_self_join() {
     );
 
     // Self-join: edge(X, Y), edge(Y, Z) -> 2-hop paths
-    let program = "connected(X, Z) :- edge(X, Y), edge(Y, Z).";
+    let program = "connected(X, Z) <- edge(X, Y), edge(Y, Z)";
 
     let results = engine.execute_tuples(program).unwrap();
     eprintln!("SIP self-join results: {:?}", results);
@@ -855,7 +849,7 @@ fn test_boolean_diff_full_pipeline() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
-    let mut results = engine.execute("path(X, Y) :- edge(X, Y).").unwrap();
+    let mut results = engine.execute("path(X, Y) <- edge(X, Y)").unwrap();
     results.sort();
 
     // Boolean specialization is always on; verify results are correct
@@ -870,8 +864,8 @@ fn test_boolean_diff_transitive_closure() {
 
     let mut results = engine
         .execute(
-            "path(X, Y) :- edge(X, Y).\n\
-             path(X, Z) :- path(X, Y), edge(Y, Z).",
+            "path(X, Y) <- edge(X, Y)\n\
+             path(X, Z) <- path(X, Y), edge(Y, Z)",
         )
         .unwrap();
     results.sort();
@@ -963,9 +957,9 @@ fn test_recursive_shortest_path_min_aggregation() {
 
     // Compute all distances (no aggregation in recursive rule)
     let program = "\
-        dist(X, Y, D) :- edge(X, Y, D).\n\
-        dist(X, Z, D) :- dist(X, Y, D1), edge(Y, Z, D2), D = D1 + D2, D < 100.\n\
-        shortest(X, Y, min<D>) :- dist(X, Y, D).";
+        dist(X, Y, D) <- edge(X, Y, D)\n\
+        dist(X, Z, D) <- dist(X, Y, D1), edge(Y, Z, D2), D = D1 + D2, D < 100\n\
+        shortest(X, Y, min<D>) <- dist(X, Y, D)";
 
     let mut results = engine.execute_tuples(program).unwrap();
     results.sort();
@@ -1009,9 +1003,9 @@ fn test_recursive_widest_path_max_aggregation() {
     // For simplicity, we just compute all paths with their last-hop bandwidth
     // and take max, which tests the max<> aggregation path
     let program = "\
-        bw(X, Y, B) :- link(X, Y, B).\n\
-        bw(X, Z, B) :- bw(X, Y, _), link(Y, Z, B), B > 0.\n\
-        max_bw(X, Y, max<B>) :- bw(X, Y, B).";
+        bw(X, Y, B) <- link(X, Y, B)\n\
+        bw(X, Z, B) <- bw(X, Y, _), link(Y, Z, B), B > 0\n\
+        max_bw(X, Y, max<B>) <- bw(X, Y, B)";
 
     let mut results = engine.execute_tuples(program).unwrap();
     results.sort();

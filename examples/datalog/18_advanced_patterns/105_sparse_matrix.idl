@@ -1,0 +1,18 @@
+// Test: Sparse matrix representation
+
+.kg create test_sparse_n18t105
+.kg use test_sparse_n18t105
+
++matrix[(1, 1, 5), (1, 3, 7), (2, 2, 3), (3, 1, 9)]
+
+// Get row 1 entries
+row1(Col, Val) <- matrix(1, Col, Val)
+
+// Get column 1 entries
+col1(Row, Val) <- matrix(Row, 1, Val)
+
+?row1(Col, Val)
+?col1(Row, Val)
+
+.kg use default
+.kg drop test_sparse_n18t105

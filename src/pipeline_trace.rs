@@ -146,7 +146,7 @@ impl PipelineTrace {
 
             for (i, rule) in ast.rules.iter().enumerate() {
                 output.push_str(&format!(
-                    "  Rule {}: {}({}) :- ",
+                    "  Rule {}: {}({}) <- ",
                     i + 1,
                     rule.head.relation,
                     rule.head
@@ -205,7 +205,7 @@ impl PipelineTrace {
                     .collect();
 
                 output.push_str(&body_str.join(", "));
-                output.push_str(".\n");
+                output.push('\n');
             }
             output.push('\n');
         }
