@@ -1,0 +1,254 @@
+// InputLayer Datalog PEG Tokenizer Grammar
+//
+// This grammar tokenizes a line of Datalog input into classified spans
+// for syntax highlighting. It is designed to be robust to partial/incomplete
+// input (user is mid-keystroke in a REPL).
+//
+// The grammar uses ordered choice (|) to match the most specific token first.
+// Each rule captures a span that the Rust code maps to a color category.
+
+line = { SOI ~ token* ~ EOI }
+
+token = _{
+    COMMENT
+  | string_literal
+  | meta_command
+  | query_marker
+  | rule_arrow
+  | negation_prefix
+  | comparison_op
+  | operator_prefix
+  | number
+  | aggregate
+  | builtin_fn
+  | keyword
+  | variable
+  | identifier
+  | arith_op
+  | punctuation
+  | whitespace
+  | any_char
+}
+
+// ---------- Comments ----------
+
+COMMENT = @{
+    block_comment
+  | line_comment
+}
+
+block_comment = _{ "/*" ~ (block_comment | (!"*/" ~ ANY))* ~ "*/" }
+line_comment  = _{ "%" ~ (!NEWLINE ~ ANY)* }
+
+// ---------- String literals ----------
+// Handles both complete and incomplete strings (for mid-keystroke highlighting)
+
+string_literal = @{ "\"" ~ (escape_seq | (!("\"" | NEWLINE) ~ ANY))* ~ "\"" }
+escape_seq     = _{ "\\" ~ ANY }
+
+// ---------- Meta commands ----------
+// Dot-prefixed commands with their subcommands
+
+meta_command = @{
+    ".kg" ~ (" " ~ ("create" | "list" | "use" | "drop"))?
+  | ".rel"
+  | ".rule" ~ (" " ~ ("list" | "drop" | "remove" | "def" | "clear" | "edit"))?
+  | ".session" ~ (" " ~ ("clear" | "drop"))?
+  | ".index" ~ (" " ~ ("list" | "create" | "drop" | "stats" | "rebuild"))?
+  | ".load"
+  | ".compact"
+  | ".status"
+  | ".help"
+  | ".quit"
+  | ".exit"
+  | ".?"
+  | ".q"
+}
+
+// ---------- Structural markers ----------
+
+query_marker    = @{ "?-" }
+rule_arrow      = @{ ":-" }
+operator_prefix = @{ ("+" | "-") ~ &(ASCII_ALPHA_LOWER | "\"" | "[") }
+
+// ---------- Negation ----------
+// ! followed by a letter (to distinguish from != operator)
+
+negation_prefix = @{ "!" ~ &ASCII_ALPHA }
+
+// ---------- Comparison operators ----------
+
+comparison_op = @{
+    ">="
+  | "<="
+  | "!="
+  | "=="
+  | "<"
+  | ">"
+  | "="
+}
+
+// ---------- Number literals ----------
+
+number = @{
+    float_number
+  | integer_number
+}
+
+float_number    = _{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
+integer_number  = _{ ASCII_DIGIT+ ~ !("." ~ ASCII_DIGIT) }
+
+// ---------- Aggregate functions ----------
+// Must be checked before general identifiers
+
+aggregate = @{
+    ( "count_distinct"
+    | "count"
+    | "sum"
+    | "avg"
+    | "top_k_threshold"
+    | "top_k"
+    | "within_radius"
+    | "min"
+    | "max"
+    ) ~ !ident_continue
+}
+
+// ---------- Builtin functions ----------
+// Distance, vector, math, string, temporal, HNSW, quantization, LSH functions
+
+builtin_fn = @{
+    ( "euclidean_int8"
+    | "euclidean"
+    | "cosine_int8"
+    | "cosine"
+    | "dot_int8"
+    | "dot"
+    | "manhattan_int8"
+    | "manhattan"
+    | "normalize"
+    | "vec_dim"
+    | "vec_add"
+    | "vec_scale"
+    | "quantize_linear"
+    | "quantize_symmetric"
+    | "dequantize_scaled"
+    | "dequantize"
+    | "lsh_multi_probe"
+    | "lsh_bucket"
+    | "lsh_probes"
+    | "hnsw_nearest"
+    | "time_decay_linear"
+    | "time_decay"
+    | "time_diff"
+    | "time_add"
+    | "time_sub"
+    | "time_now"
+    | "time_before"
+    | "time_after"
+    | "time_between"
+    | "within_last"
+    | "intervals_overlap"
+    | "interval_contains"
+    | "interval_duration"
+    | "point_in_interval"
+    | "abs_int64"
+    | "abs_float64"
+    | "abs"
+    | "sqrt"
+    | "power"
+    | "pow"
+    | "log"
+    | "ln"
+    | "exp"
+    | "sin"
+    | "cos"
+    | "tan"
+    | "floor"
+    | "ceiling"
+    | "ceil"
+    | "signum"
+    | "sign"
+    | "min_val"
+    | "min_int64"
+    | "min_float64"
+    | "max_val"
+    | "max_int64"
+    | "max_float64"
+    | "strlen"
+    | "length"
+    | "len"
+    | "uppercase"
+    | "toupper"
+    | "upper"
+    | "lowercase"
+    | "tolower"
+    | "lower"
+    | "trim"
+    | "substring"
+    | "substr"
+    | "replace"
+    | "string_concat"
+    | "concat"
+    ) ~ !ident_continue
+}
+
+// ---------- Keywords ----------
+
+keyword = @{
+    ( "type"
+    | "true"
+    | "false"
+    | "int"
+    | "string"
+    | "bool"
+    | "float"
+    | "list"
+    ) ~ !ident_continue
+}
+
+// ---------- Variables ----------
+// Start with uppercase letter or underscore
+
+variable = @{
+    (ASCII_ALPHA_UPPER | "_") ~ ident_continue*
+}
+
+// ---------- Identifiers (relations, etc.) ----------
+// Start with lowercase letter
+
+identifier = @{
+    ASCII_ALPHA_LOWER ~ ident_continue*
+}
+
+// ---------- Identifier continuation characters ----------
+
+ident_continue = _{ ASCII_ALPHANUMERIC | "_" }
+
+// ---------- Arithmetic operators ----------
+
+arith_op = @{ "+" | "-" | "*" | "/" }
+
+// ---------- Punctuation ----------
+
+punctuation = @{
+    "("
+  | ")"
+  | "["
+  | "]"
+  | "{"
+  | "}"
+  | ","
+  | "."
+  | ":"
+  | "<"
+  | ">"
+}
+
+// ---------- Whitespace ----------
+
+whitespace = @{ (" " | "\t" | NEWLINE)+ }
+
+// ---------- Catch-all ----------
+
+any_char = @{ ANY }

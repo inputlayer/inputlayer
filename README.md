@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
-**Context graph for AI agents.**
+**Reasoning context graph for AI agents.**
 
 Vector search finds what's similar. InputLayer finds what follows.
 
@@ -112,7 +112,7 @@ facts + rules → derived facts (updated incrementally)
 ```prolog
 +accessible_doc(User, Doc, Score) :-
     document(Doc, Embedding),
-    NOT confidential(Doc),
+    !confidential(Doc),
     has_permission(User, Doc),
     query_embedding(User, QEmb),
     Score = cosine(Embedding, QEmb),
