@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_drop_diff_n14t162
+Knowledge graph 'test_drop_diff_n14t162' created.
+Switched to knowledge graph: test_drop_diff_n14t162
+> .kg use test_drop_diff_n14t162
+Switched to knowledge graph: test_drop_diff_n14t162
+> +data[(1, 10), (2, 20), (3, 30)]
+Inserted 3 fact(s) into 'data'.

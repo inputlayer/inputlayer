@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n14t40
+Knowledge graph 'test_multi_agg_n14t40' created.
+Switched to knowledge graph: test_multi_agg_n14t40
+> .kg use test_multi_agg_n14t40
+Switched to knowledge graph: test_multi_agg_n14t40
+> +sales[("A", 100), ("A", 200), ("A", 150), ("B", 300), ("B", 100)]
+Inserted 5 fact(s) into 'sales'.

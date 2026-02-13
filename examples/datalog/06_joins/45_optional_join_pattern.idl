@@ -1,0 +1,19 @@
+// Test: Optional/left outer join pattern
+
+.kg create test_optional_n06t45
+.kg use test_optional_n06t45
+
++employees[(1, "Alice"), (2, "Bob"), (3, "Carol")]
++managers[(1, "Dept A"), (2, "Dept B")]
+
+// Employees with manager info (inner join)
+with_manager(Id, Name, Dept) <- employees(Id, Name), managers(Id, Dept)
+
+// Employees without manager
+without_manager(Id, Name) <- employees(Id, Name), !managers(Id, _)
+
+?with_manager(Id, Name, Dept)
+?without_manager(Id, Name)
+
+.kg use default
+.kg drop test_optional_n06t45

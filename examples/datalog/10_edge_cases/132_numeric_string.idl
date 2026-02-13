@@ -1,0 +1,13 @@
+// Test: Numeric strings vs numbers
+
+.kg create test_num_str_n10t132
+.kg use test_num_str_n10t132
+
++str_data[("123",), ("456",)]
++int_data[(123,), (456,)]
+
+?str_data(S)
+?int_data(I)
+
+.kg use default
+.kg drop test_num_str_n10t132

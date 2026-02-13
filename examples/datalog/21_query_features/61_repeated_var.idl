@@ -1,0 +1,15 @@
+// Test: Repeated variable across relations
+
+.kg create test_repeat_var_n21t61
+.kg use test_repeat_var_n21t61
+
++left[(1, "a"), (2, "b"), (3, "c")]
++right[(1, 100), (3, 300), (5, 500)]
+
+// Join where key matches
+joined(K, L, R) <- left(K, L), right(K, R)
+
+?joined(K, L, R)
+
+.kg use default
+.kg drop test_repeat_var_n21t61

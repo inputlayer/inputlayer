@@ -1,0 +1,19 @@
+// Test: Aggregation over empty result
+
+.kg create test_empty_agg_n10t120
+.kg use test_empty_agg_n10t120
+
++numbers[(1,), (2,), (3,)]
+
+// Sum of numbers > 100 (none exist)
+big_sum(sum<X>) <- numbers(X), X > 100
+
+?big_sum(S)
+
+// Count of numbers > 100
+big_count(count<X>) <- numbers(X), X > 100
+
+?big_count(C)
+
+.kg use default
+.kg drop test_empty_agg_n10t120

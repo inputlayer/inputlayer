@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_lit_n11t61
+Knowledge graph 'test_str_lit_n11t61' created.
+Switched to knowledge graph: test_str_lit_n11t61
+> .kg use test_str_lit_n11t61
+Switched to knowledge graph: test_str_lit_n11t61
+> +items[(1, "active"), (2, "pending"), (3, "active")]
+Inserted 3 fact(s) into 'items'.

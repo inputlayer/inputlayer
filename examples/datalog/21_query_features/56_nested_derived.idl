@@ -1,0 +1,18 @@
+// Test: Nested derived relations
+
+.kg create test_nested_n21t56
+.kg use test_nested_n21t56
+
++base[(1, 10), (2, 20), (3, 30)]
+
+// First derived
++doubled(Id, D) <- base(Id, V), D = V * 2
+
+// Second derived (uses first)
++quadrupled(Id, Q) <- doubled(Id, D), Q = D * 2
+
+?doubled(Id, D)
+?quadrupled(Id, Q)
+
+.kg use default
+.kg drop test_nested_n21t56

@@ -1,0 +1,10 @@
+// Test: Invalid identifier
+
+.kg create test_invalid_id_n12t37
+.kg use test_invalid_id_n12t37
+
+// Try to use invalid identifier (starts with number)
++123invalid(1, 2)
+
+.kg use default
+.kg drop test_invalid_id_n12t37

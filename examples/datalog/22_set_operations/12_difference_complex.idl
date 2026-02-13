@@ -1,0 +1,15 @@
+// Test: Set difference with complex condition
+
+.kg create test_diff_complex_n22t12
+.kg use test_diff_complex_n22t12
+
++all_items[(1, 100), (2, 200), (3, 150), (4, 50)]
++high_value[(100,), (200,)]
+
+// Items not in high value list
+low_value_items(Id, Val) <- all_items(Id, Val), !high_value(Val)
+
+?low_value_items(Id, Val)
+
+.kg use default
+.kg drop test_diff_complex_n22t12

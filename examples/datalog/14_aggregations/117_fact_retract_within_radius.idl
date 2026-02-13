@@ -1,0 +1,25 @@
+// Test: Fact retraction with within_radius
+// Description: Tests that retracting facts correctly updates within_radius results
+
+.kg create test_retract_radius_n14t117
+.kg use test_retract_radius_n14t117
+
++dist[(1, 0.1), (2, 0.5), (3, 1.2), (4, 0.3), (5, 2.0), (6, 0.45)]
+
++nearby(within_radius<0.5, Id, D:asc>) <- dist(Id, D)
+
+// Initial: 1(0.1), 4(0.3), 6(0.45), 2(0.5) — all within 0.5
+?nearby(X, Y)
+
+// Retract an item that was within radius
+-dist(1, 0.1)
+
+?nearby(X, Y)
+
+// Add a new item within radius
++dist[(7, 0.2)]
+
+?nearby(X, Y)
+
+.kg use default
+.kg drop test_retract_radius_n14t117

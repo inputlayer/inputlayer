@@ -1,0 +1,21 @@
+// Test: Gap detection in sequences
+
+.kg create test_gaps_n18t65
+.kg use test_gaps_n18t65
+
++ids[(1,), (2,), (4,), (5,), (8,)]
+
+// Find pairs where there's a gap (next > current + 1)
+has_gap_after(X) <-
+    ids(X),
+    ids(Y),
+    Y > X,
+    Y = X + 1
+
+// IDs followed by a gap
+gap_after(X) <- ids(X), !has_gap_after(X), ids(Y), Y > X
+
+?gap_after(X)
+
+.kg use default
+.kg drop test_gaps_n18t65

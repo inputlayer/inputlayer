@@ -1,0 +1,13 @@
+// Test: Batch insert operation
+
+.kg create test_batch_n27t11
+.kg use test_batch_n27t11
+
++items[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")]
+
+count_items(count<X>) <- items(X, _)
+
+?count_items(N)
+
+.kg use default
+.kg drop test_batch_n27t11

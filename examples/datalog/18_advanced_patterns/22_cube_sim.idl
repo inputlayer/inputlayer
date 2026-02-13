@@ -1,0 +1,29 @@
+// Test: OLAP cube simulation
+
+.kg create test_cube_n18t22
+.kg use test_cube_n18t22
+
++sales[("2024", "Q1", "Widget", 100),
+       ("2024", "Q1", "Gadget", 200),
+       ("2024", "Q2", "Widget", 150),
+       ("2024", "Q2", "Gadget", 250)]
+
+// By year-quarter-product
++cube_yqp(Year, Quarter, Product, sum<Amt>) <- sales(Year, Quarter, Product, Amt)
+
+// By year-quarter
++cube_yq(Year, Quarter, sum<Amt>) <- sales(Year, Quarter, _, Amt)
+
+// By year-product
++cube_yp(Year, Product, sum<Amt>) <- sales(Year, _, Product, Amt)
+
+// By product only
++cube_p(Product, sum<Amt>) <- sales(_, _, Product, Amt)
+
+?cube_yqp(Y, Q, P, S)
+?cube_yq(Y, Q, S)
+?cube_yp(Y, P, S)
+?cube_p(P, S)
+
+.kg use default
+.kg drop test_cube_n18t22

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n14t174
+Knowledge graph 'test_multi_agg_n14t174' created.
+Switched to knowledge graph: test_multi_agg_n14t174
+> .kg use test_multi_agg_n14t174
+Switched to knowledge graph: test_multi_agg_n14t174
+> +score[(1, 100), (2, 200), (3, 150)]
+Inserted 3 fact(s) into 'score'.

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_pct_n18t70
+Knowledge graph 'test_pct_n18t70' created.
+Switched to knowledge graph: test_pct_n18t70
+> .kg use test_pct_n18t70
+Switched to knowledge graph: test_pct_n18t70
+> +scores[(1, 50), (2, 60), (3, 70), (4, 80), (5, 90), (6, 100)]
+Inserted 6 fact(s) into 'scores'.

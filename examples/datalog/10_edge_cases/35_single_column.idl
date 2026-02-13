@@ -1,0 +1,27 @@
+// Test: Single column relation
+
+.kg create test_single_col_n10t35
+.kg use test_single_col_n10t35
+
+// Single column relation
++ids[(1,), (2,), (3,), (4,), (5,)]
+
+?ids(X)
+
+// Aggregation on single column
++id_count(count<X>) <- ids(X)
+
+?id_count(C)
+
+// Filter on single column
+big_ids(X) <- ids(X), X > 3
+
+?big_ids(X)
+
+// Self-join on single column
+pairs(X, Y) <- ids(X), ids(Y), X < Y
+
+?pairs(X, Y)
+
+.kg use default
+.kg drop test_single_col_n10t35

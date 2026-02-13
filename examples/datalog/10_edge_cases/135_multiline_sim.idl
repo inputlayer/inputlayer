@@ -1,0 +1,11 @@
+// Test: Long multiline-like strings
+
+.kg create test_multiline_n10t135
+.kg use test_multiline_n10t135
+
++text[("This is a longer text string that spans multiple words",)]
+
+?text(T)
+
+.kg use default
+.kg drop test_multiline_n10t135

@@ -1,0 +1,16 @@
+// Test: Three-way negation cycle
+
+.kg create test_3way_cycle_n12t36
+.kg use test_3way_cycle_n12t36
+
++base(1)
+
+// Three-way cycle: a -> !b -> !c -> !a
+cycle_a(X) <- base(X), !cycle_b(X)
+cycle_b(X) <- base(X), !cycle_c(X)
+cycle_c(X) <- base(X), !cycle_a(X)
+
+?cycle_a(X)
+
+.kg use default
+.kg drop test_3way_cycle_n12t36

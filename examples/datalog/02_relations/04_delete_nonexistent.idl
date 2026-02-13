@@ -1,0 +1,27 @@
+// Test: Delete Nonexistent Facts
+// Description: Tests deleting facts that don't exist
+
+.kg create test_del_nonexist_n02t04
+.kg use test_del_nonexist_n02t04
+
+// Insert initial data
++edge[(1,2), (2,3), (3,4)]
+
+// Show initial state
+?edge(X, Y)
+
+// Try to delete a fact that doesn't exist
+-edge(99, 100)
+
+// Show state after - should be unchanged
+?edge(X, Y)
+
+// Try conditional delete that matches nothing
+-edge(X, Y) <- edge(X, Y), X > 100
+
+// Show final state - should still be unchanged
+?edge(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_del_nonexist_n02t04

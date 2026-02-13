@@ -1,0 +1,18 @@
+// Test: Ancestor relation
+
+.kg create test_ancestor_n09t79
+.kg use test_ancestor_n09t79
+
++parent[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave")]
+
+// Direct parent is ancestor
++ancestor(A, D) <- parent(A, D)
+
+// Transitive
++ancestor(A, D) <- parent(A, C), ancestor(C, D)
+
+// Ancestors of Dave
+?ancestor(A, "Dave")
+
+.kg use default
+.kg drop test_ancestor_n09t79

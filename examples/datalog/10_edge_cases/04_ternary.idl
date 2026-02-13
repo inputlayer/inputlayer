@@ -1,0 +1,19 @@
+// Test: Ternary (3-column) Relations
+// Description: Tests support for relations with 3 or more columns
+
+.kg create test_ternary_n10t04
+.kg use test_ternary_n10t04
+
+// Insert binary edge data
++edge[(1,2), (2,3), (3,1)]
+
+// Ternary relation: path2 has 3 columns (A, B, C)
++path2(A, B, C) <- edge(A, B), edge(B, C)
+?path2(X, Y, Z)
+
+// Another example: find all 2-hop paths starting from node 1
+?path2(1, Y, Z)
+
+// Cleanup
+.kg use default
+.kg drop test_ternary_n10t04

@@ -30,7 +30,7 @@ Every InputLayer program runs in a knowledge graph. Let's create one:
 
 Output:
 ```
-Knowledge graph 'social' created.
+Knowledge graph 'social' created
 Switched to knowledge graph: social
 ```
 
@@ -49,31 +49,31 @@ Current knowledge graph: social
 Facts are the base data in your knowledge graph. Let's add some "follows" relationships:
 
 ```datalog
-+follows(1, 2).
++follows(1, 2)
 ```
 
 Output:
 ```
-Inserted 1 fact into 'follows'.
+Inserted 1 fact into 'follows'
 ```
 
 Let's add more facts using bulk insert:
 
 ```datalog
-+follows[(2, 3), (3, 4), (1, 3)].
++follows[(2, 3), (3, 4), (1, 3)]
 ```
 
 Output:
 ```
-Inserted 3 facts into 'follows'.
+Inserted 3 facts into 'follows'
 ```
 
 ## Step 4: Query Facts
 
-Use `?-` to query data:
+Use `?` to query data:
 
 ```datalog
-?- follows(1, X).
+?follows(1, X)
 ```
 
 Output:
@@ -90,12 +90,12 @@ This shows everyone that user 1 directly follows.
 Rules derive new data from existing facts. Let's define "reachable" - who can you reach through any chain of follows?
 
 ```datalog
-+reachable(X, Y) :- follows(X, Y).
++reachable(X, Y) <- follows(X, Y)
 ```
 
 Output:
 ```
-Rule 'reachable' registered.
+Rule 'reachable' registered
 ```
 
 This says: "X can reach Y if X follows Y directly."
@@ -103,12 +103,12 @@ This says: "X can reach Y if X follows Y directly."
 But we also want transitive reachability. Add another clause:
 
 ```datalog
-+reachable(X, Z) :- follows(X, Y), reachable(Y, Z).
++reachable(X, Z) <- follows(X, Y), reachable(Y, Z)
 ```
 
 Output:
 ```
-Rule added to 'reachable' (2 rules total).
+Rule added to 'reachable' (2 rules total)
 ```
 
 This says: "X can reach Z if X follows someone Y who can reach Z."
@@ -118,7 +118,7 @@ This says: "X can reach Z if X follows someone Y who can reach Z."
 Now query the derived relation:
 
 ```datalog
-?- reachable(1, X).
+?reachable(1, X)
 ```
 
 Output:
@@ -155,8 +155,8 @@ Output:
 ```
 Rule: reachable
 Clauses:
-  1. reachable(X, Y) :- follows(X, Y).
-  2. reachable(X, Z) :- follows(X, Y), reachable(Y, Z).
+  1. reachable(X, Y) <- follows(X, Y)
+  2. reachable(X, Z) <- follows(X, Y), reachable(Y, Z)
 ```
 
 ## Step 8: Add More Data and See Incremental Updates
@@ -164,13 +164,13 @@ Clauses:
 Add a new follows relationship:
 
 ```datalog
-+follows(4, 5).
++follows(4, 5)
 ```
 
 Now query reachable again:
 
 ```datalog
-?- reachable(1, X).
+?reachable(1, X)
 ```
 
 Output:
@@ -189,37 +189,37 @@ User 1 can now reach user 5! InputLayer automatically recomputed the derived rel
 Here's everything we did in one script:
 
 ```datalog
-% Create and use knowledge graph
+// Create and use knowledge graph
 .kg create social
 .kg use social
 
-% Add base facts
-+follows[(1, 2), (2, 3), (3, 4), (1, 3)].
+// Add base facts
++follows[(1, 2), (2, 3), (3, 4), (1, 3)]
 
-% Define transitive reachability
-+reachable(X, Y) :- follows(X, Y).
-+reachable(X, Z) :- follows(X, Y), reachable(Y, Z).
+// Define transitive reachability
++reachable(X, Y) <- follows(X, Y)
++reachable(X, Z) <- follows(X, Y), reachable(Y, Z)
 
-% Query: who can user 1 reach?
-?- reachable(1, X).
+// Query: who can user 1 reach?
+?reachable(1, X)
 ```
 
-You can save this to a file `social.dl` and run it:
+You can save this to a file `social.idl` and run it:
 
 ```bash
-inputlayer-client < social.dl
+inputlayer-client < social.idl
 ```
 
 Or use the `.load` command:
 ```datalog
-.load social.dl
+.load social.idl
 ```
 
 ## Key Takeaways
 
 1. **Facts** (`+relation(...)`) are base data you insert
-2. **Rules** (`+head(...) :- body.`) derive new data from existing data
-3. **Queries** (`?- pattern.`) ask questions about your data
+2. **Rules** (`+head(...) <- body`) derive new data from existing data
+3. **Queries** (`? pattern`) ask questions about your data
 4. **Incremental** - When you add/remove facts, derived data updates automatically
 5. **Persistent** - Facts and rules are saved to disk
 
@@ -227,9 +227,9 @@ Or use the `.load` command:
 
 | SQL | InputLayer (Datalog) |
 |-----|---------------------|
-| `INSERT INTO follows VALUES (1, 2)` | `+follows(1, 2).` |
-| `CREATE VIEW` (limited recursion) | `+rule(...) :- body.` (full recursion) |
-| `SELECT * FROM follows WHERE a = 1` | `?- follows(1, X).` |
+| `INSERT INTO follows VALUES (1, 2)` | `+follows(1, 2)` |
+| `CREATE VIEW` (limited recursion) | `+rule(...) <- body` (full recursion) |
+| `SELECT * FROM follows WHERE a = 1` | `? follows(1, X)` |
 | Explicit JOINs | Implicit joins via shared variables |
 
 ## Next Steps

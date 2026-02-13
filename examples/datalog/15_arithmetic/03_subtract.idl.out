@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arith_sub_n15t03
+Knowledge graph 'test_arith_sub_n15t03' created.
+Switched to knowledge graph: test_arith_sub_n15t03
+> .kg use test_arith_sub_n15t03
+Switched to knowledge graph: test_arith_sub_n15t03
+> +value[(1, 100), (2, 250), (3, 175)]
+Inserted 3 fact(s) into 'value'.

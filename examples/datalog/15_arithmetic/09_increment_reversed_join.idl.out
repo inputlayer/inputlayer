@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_inc_rev_n15t09
+Knowledge graph 'test_inc_rev_n15t09' created.
+Switched to knowledge graph: test_inc_rev_n15t09
+> .kg use test_inc_rev_n15t09
+Switched to knowledge graph: test_inc_rev_n15t09
+> +edge[(1, 2), (2, 3)]
+Inserted 2 fact(s) into 'edge'.
+> +dist[(1, 0)]
+Inserted 1 fact(s) into 'dist'.

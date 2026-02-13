@@ -1,0 +1,27 @@
+// Test: Rule drop with top_k aggregation
+// Description: Tests dropping a rule that uses top_k and verifying results clear
+
+.kg create test_drop_topk_n14t110
+.kg use test_drop_topk_n14t110
+
+// Insert base data
++score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125)]
+
+// Define top_k rule
++top_players(top_k<3, Player, Points:desc>) <- score(Player, Points)
+
+// Query before drop
+?top_players(X, Y)
+
+// Drop the top_k rule
+.rule drop top_players
+
+// Verify rule is gone
+.rule list
+
+// Query after drop - should return no results
+?top_players(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_drop_topk_n14t110

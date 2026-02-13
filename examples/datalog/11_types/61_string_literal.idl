@@ -1,0 +1,14 @@
+// Test: String literal in rule
+
+.kg create test_str_lit_n11t61
+.kg use test_str_lit_n11t61
+
++items[(1, "active"), (2, "pending"), (3, "active")]
+
+// Filter by string literal
+active_items(Id) <- items(Id, "active")
+
+?active_items(Id)
+
+.kg use default
+.kg drop test_str_lit_n11t61

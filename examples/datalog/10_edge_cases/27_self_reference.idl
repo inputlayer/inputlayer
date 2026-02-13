@@ -1,0 +1,20 @@
+// Test: Self-referencing patterns
+
+.kg create test_self_ref_n10t27
+.kg use test_self_ref_n10t27
+
+// Self-loop (node points to itself)
++edges[(1, 2), (2, 3), (3, 3), (4, 4)]
+
+// Find self-loops
+self_loop(X) <- edges(X, X)
+
+?self_loop(X)
+
+// Find non-self-loops
+non_self(X, Y) <- edges(X, Y), X != Y
+
+?non_self(X, Y)
+
+.kg use default
+.kg drop test_self_ref_n10t27

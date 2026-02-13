@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_large_tuple_n10t121
+Knowledge graph 'test_large_tuple_n10t121' created.
+Switched to knowledge graph: test_large_tuple_n10t121
+> .kg use test_large_tuple_n10t121
+Switched to knowledge graph: test_large_tuple_n10t121
+> +wide_table[(1, "a", 10, 1.5, "x", 100, "y", 2.5, "z", 1000)]
+Inserted 1 fact(s) into 'wide_table'.
+> ?wide_table(A, B, C, D, E, F, G, H, I, J)
+┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │ col4 │ col5 │ col6 │ col7 │ col8 │ col9 │
+├──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤
+│    1 │ "a"  │   10 │  1.5 │ "x"  │  100 │ "y"  │  2.5 │ "z"  │ 1000 │
+└──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+1 rows

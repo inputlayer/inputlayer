@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ancestor_n09t79
+Knowledge graph 'test_ancestor_n09t79' created.
+Switched to knowledge graph: test_ancestor_n09t79
+> .kg use test_ancestor_n09t79
+Switched to knowledge graph: test_ancestor_n09t79
+> +parent[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave")]
+Inserted 3 fact(s) into 'parent'.

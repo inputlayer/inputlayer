@@ -1,0 +1,20 @@
+// Test: Negation with Empty Result
+// Description: Tests negation where all tuples are filtered out
+
+.kg create test_neg_empty_n08t03
+.kg use test_neg_empty_n08t03
+
+// All edges
++edge[(1,2), (2,3), (3,4)]
+
+// Block all edges
++blocked[(1,2), (2,3), (3,4)]
+
+// Filter - should return empty since all edges are blocked
++allowed(X, Y) <- edge(X, Y), !blocked(X, Y)
+
+?allowed(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_empty_n08t03

@@ -1,0 +1,44 @@
+// Test: Edge Case Rule Patterns
+// Verifies: Unusual but valid rule patterns
+
+.kg create test_edge_rules_n12t15
+.kg use test_edge_rules_n12t15
+
+// Rule with constant in head (ground fact via rule)
++trigger[(1)]
++constant_fact(0, 1) <- trigger(_)
+?constant_fact(X, Y)
+
+// Rule that produces duplicate results (should be deduplicated)
++source[(1, 100), (2, 100), (3, 100)]
++extract_second(Y) <- source(_, Y)
+?extract_second(X)
+
+
+// Rule with all variables bound by constants
++any_data[(1), (2), (3)]
++always_true(0, 1) <- any_data(_)
+?always_true(X, Y)
+
+// Rule with same variable appearing multiple times
++pairs[(1, 1), (2, 2), (3, 4), (5, 5)]
++diagonal(X) <- pairs(X, X)
+?diagonal(X)
+
+
+// Rule with arithmetic producing same result
++nums[(1), (2), (3), (4)]
++doubled(X, X*2) <- nums(X)
++same_double(X, Y) <- doubled(X, D), doubled(Y, D), X != Y
+?same_double(X, Y)
+
+
+// Self-join pattern
++edges[(1, 2), (2, 3), (1, 3)]
++triangle(A, B, C) <- edges(A, B), edges(B, C), edges(A, C), A < B, B < C
+?triangle(A, B, C)
+
+
+// Cleanup
+.kg use default
+.kg drop test_edge_rules_n12t15

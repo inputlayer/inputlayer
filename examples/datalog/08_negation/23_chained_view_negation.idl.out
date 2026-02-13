@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_chain_neg_n08t23
+Knowledge graph 'test_chain_neg_n08t23' created.
+Switched to knowledge graph: test_chain_neg_n08t23
+> .kg use test_chain_neg_n08t23
+Switched to knowledge graph: test_chain_neg_n08t23
+> +all_users[(1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]
+Inserted 5 fact(s) into 'all_users'.
+> +banned[(2, 0)]
+Inserted 1 fact(s) into 'banned'.
+> +premium[(1, 0), (3, 0)]
+Inserted 2 fact(s) into 'premium'.

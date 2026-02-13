@@ -120,7 +120,7 @@ Content-Type: application/json
 
 {
   "knowledge_graph": "default",
-  "query": "?- user(Id, Name, Age), Age > 25."
+  "query": "?user(Id, Name, Age), Age > 25"
 }
 ```
 
@@ -152,7 +152,7 @@ Content-Type: application/json
 ```json
 {
   "knowledge_graph": "default",
-  "query": "+senior(Name) :- user(_, Name, Age), Age >= 65."
+  "query": "+senior(Name) <- user(_, Name, Age), Age >= 65"
 }
 ```
 
@@ -166,7 +166,7 @@ Content-Type: application/json
 
 {
   "knowledge_graph": "default",
-  "query": "?- user(Id, Name, _), orders(Id, Product)."
+  "query": "?user(Id, Name, _), orders(Id, Product)"
 }
 ```
 
@@ -328,8 +328,8 @@ GET /api/v1/knowledge-graphs/:kg/rules/:name
   "data": {
     "name": "path",
     "clauses": [
-      "path(X, Y) :- edge(X, Y).",
-      "path(X, Z) :- edge(X, Y), path(Y, Z)."
+      "path(X, Y) <- edge(X, Y)",
+      "path(X, Z) <- edge(X, Y), path(Y, Z)"
     ]
   }
 }
@@ -379,7 +379,7 @@ Content-Type: application/json
 
 {
   "name": "active_orders",
-  "query": "active_orders(UserId, Product) :- orders(UserId, Product, Status), Status = \"active\"."
+  "query": "active_orders(UserId, Product) <- orders(UserId, Product, Status), Status = \"active\""
 }
 ```
 
@@ -478,7 +478,7 @@ curl -X POST http://localhost:8080/api/v1/query/execute \
   -H "Content-Type: application/json" \
   -d '{
     "knowledge_graph": "mydb",
-    "query": "?- user(Id, Name, Age)."
+    "query": "?user(Id, Name, Age)"
   }'
 ```
 
@@ -492,7 +492,7 @@ BASE_URL = "http://localhost:8080/api/v1"
 # Execute query
 response = requests.post(f"{BASE_URL}/query/execute", json={
     "knowledge_graph": "default",
-    "query": "?- user(Id, Name, Age), Age > 25."
+    "query": "?user(Id, Name, Age), Age > 25"
 })
 
 result = response.json()
@@ -512,7 +512,7 @@ const response = await fetch(`${BASE_URL}/query/execute`, {
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     knowledge_graph: "default",
-    query: "?- user(Id, Name, Age), Age > 25."
+    query: "?user(Id, Name, Age), Age > 25"
   })
 });
 

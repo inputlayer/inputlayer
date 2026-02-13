@@ -1,0 +1,16 @@
+// Test: Update non-existent tuple
+
+.kg create test_update_noexist_n27t32
+.kg use test_update_noexist_n27t32
+
+// Some initial data
++items[(1, "apple"), (2, "banana")]
+
+// Try to update non-existent item
++items(99, "grape")
+-items(99, "grape")
+
+?items(Id, Name)
+
+.kg use default
+.kg drop test_update_noexist_n27t32

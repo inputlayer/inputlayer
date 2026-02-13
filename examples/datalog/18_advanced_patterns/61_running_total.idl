@@ -1,0 +1,17 @@
+// Test: Running total pattern
+
+.kg create test_running_total_n18t61
+.kg use test_running_total_n18t61
+
++transactions[(1, 100), (2, 50), (3, 75), (4, 25)]
+
+// Running total: sum of all transactions with ID <= current
+running_total(Id, Val, sum<V2>) <-
+    transactions(Id, Val),
+    transactions(Id2, V2),
+    Id2 <= Id
+
+?running_total(Id, Val, Total)
+
+.kg use default
+.kg drop test_running_total_n18t61

@@ -1,0 +1,14 @@
+// Test: COUNT_DISTINCT with grouping
+
+.kg create test_count_dist_grp_n14t70
+.kg use test_count_dist_grp_n14t70
+
++visits[(1, "Alice", "homepage"), (2, "Bob", "homepage"), (3, "Alice", "products"), (4, "Alice", "homepage"), (5, "Bob", "checkout")]
+
+// Count distinct pages per user
++pages_per_user(User, <COUNT_DISTINCT:Page>) <- visits(_, User, Page)
+
+?pages_per_user(U, C)
+
+.kg use default
+.kg drop test_count_dist_grp_n14t70

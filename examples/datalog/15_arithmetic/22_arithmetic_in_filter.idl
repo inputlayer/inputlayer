@@ -1,0 +1,16 @@
+// Test: Arithmetic expressions in filter conditions
+
+.kg create test_arith_filter_n15t22
+.kg use test_arith_filter_n15t22
+
+// Numbers to test
++nums[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]
+
+// Filter where value > id * 10 (should return nothing since value = id * 10)
+?nums(Id, Val), Val > Id * 15
+
+// Filter where value equals id * 10
+?nums(Id, Val), Val = Id * 10
+
+.kg use default
+.kg drop test_arith_filter_n15t22

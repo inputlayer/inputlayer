@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bidir_n09t88
+Knowledge graph 'test_bidir_n09t88' created.
+Switched to knowledge graph: test_bidir_n09t88
+> .kg use test_bidir_n09t88
+Switched to knowledge graph: test_bidir_n09t88
+> +edge[(1, 2), (2, 3), (4, 3)]
+Inserted 3 fact(s) into 'edge'.

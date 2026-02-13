@@ -41,16 +41,16 @@ Distance functions for f32 vectors. All return `Float64`.
 Euclidean (L2) distance between two vectors.
 
 ```datalog
-% Syntax
+// Syntax
 D = euclidean(V1, V2)
 
-% Example
-similar(Id1, Id2, Dist) :-
+// Example
+similar(Id1, Id2, Dist) <-
     vectors(Id1, V1),
     vectors(Id2, V2),
     Id1 < Id2,
     Dist = euclidean(V1, V2),
-    Dist < 1.0.
+    Dist < 1.0
 ```
 
 | Parameter | Type | Description |
@@ -61,7 +61,7 @@ similar(Id1, Id2, Dist) :-
 
 **Aliases**: `euclidean_distance`
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_euclidean_distance`, snapshot `16_vectors/01_euclidean_distance.dl`
+**Tests**: `test_euclidean_distance`, snapshot `16_vectors/01_euclidean_distance.idl`
 
 ---
 
@@ -70,15 +70,15 @@ similar(Id1, Id2, Dist) :-
 Cosine distance (1 - cosine similarity) between two vectors.
 
 ```datalog
-% Syntax
+// Syntax
 D = cosine(V1, V2)
 
-% Example - Find similar documents
-similar_docs(Id1, Id2) :-
+// Example - Find similar documents
+similar_docs(Id1, Id2) <-
     doc_embedding(Id1, V1),
     doc_embedding(Id2, V2),
     D = cosine(V1, V2),
-    D < 0.1.  % Very similar (close to 0)
+    D < 0.1  // Very similar (close to 0)
 ```
 
 | Parameter | Type | Description |
@@ -90,7 +90,7 @@ similar_docs(Id1, Id2) :-
 **Note**: Returns 0 for identical directions, 1 for orthogonal, 2 for opposite directions.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_cosine_distance`, snapshot `16_vectors/02_cosine_distance.dl`
+**Tests**: `test_cosine_distance`, snapshot `16_vectors/02_cosine_distance.idl`
 
 ---
 
@@ -99,14 +99,14 @@ similar_docs(Id1, Id2) :-
 Dot product of two vectors.
 
 ```datalog
-% Syntax
+// Syntax
 Score = dot(V1, V2)
 
-% Example - Compute relevance scores
-relevance(QueryId, DocId, Score) :-
+// Example - Compute relevance scores
+relevance(QueryId, DocId, Score) <-
     query_vector(QueryId, Q),
     doc_vector(DocId, D),
-    Score = dot(Q, D).
+    Score = dot(Q, D)
 ```
 
 | Parameter | Type | Description |
@@ -116,7 +116,7 @@ relevance(QueryId, DocId, Score) :-
 | **Returns** | Float64 | Dot product |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dot_product`, snapshot `16_vectors/03_dot_product.dl`
+**Tests**: `test_dot_product`, snapshot `16_vectors/03_dot_product.idl`
 
 ---
 
@@ -125,15 +125,15 @@ relevance(QueryId, DocId, Score) :-
 Manhattan (L1) distance between two vectors. Good for sparse vectors.
 
 ```datalog
-% Syntax
+// Syntax
 D = manhattan(V1, V2)
 
-% Example
-nearby(Id1, Id2) :-
+// Example
+nearby(Id1, Id2) <-
     location(Id1, V1),
     location(Id2, V2),
     D = manhattan(V1, V2),
-    D < 10.0.
+    D < 10.0
 ```
 
 | Parameter | Type | Description |
@@ -143,7 +143,7 @@ nearby(Id1, Id2) :-
 | **Returns** | Float64 | Manhattan distance (>= 0) |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_manhattan_distance`, snapshot `16_vectors/04_manhattan_distance.dl`
+**Tests**: `test_manhattan_distance`, snapshot `16_vectors/04_manhattan_distance.idl`
 
 ---
 
@@ -156,13 +156,13 @@ Operations for manipulating vectors.
 Normalize vector to unit length.
 
 ```datalog
-% Syntax
+// Syntax
 Normalized = normalize(V)
 
-% Example - Normalize before cosine similarity
-normalized_embedding(Id, NormV) :-
+// Example - Normalize before cosine similarity
+normalized_embedding(Id, NormV) <-
     raw_embedding(Id, V),
-    NormV = normalize(V).
+    NormV = normalize(V)
 ```
 
 | Parameter | Type | Description |
@@ -173,7 +173,7 @@ normalized_embedding(Id, NormV) :-
 **Note**: Returns zero vector if input is zero vector.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_normalize`, `test_normalize_zero`, snapshot `16_vectors/07_normalize.dl`
+**Tests**: `test_normalize`, `test_normalize_zero`, snapshot `16_vectors/07_normalize.idl`
 
 ---
 
@@ -182,14 +182,14 @@ normalized_embedding(Id, NormV) :-
 Get the dimension (length) of a float32 vector.
 
 ```datalog
-% Syntax
+// Syntax
 Dim = vec_dim(V)
 
-% Example - Filter by dimension
-valid_embedding(Id, V) :-
+// Example - Filter by dimension
+valid_embedding(Id, V) <-
     embedding(Id, V),
     Dim = vec_dim(V),
-    Dim = 128.
+    Dim = 128
 ```
 
 | Parameter | Type | Description |
@@ -198,7 +198,7 @@ valid_embedding(Id, V) :-
 | **Returns** | Int64 | Number of dimensions |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: snapshot `16_vectors/05_vec_operations.dl`
+**Tests**: snapshot `16_vectors/05_vec_operations.idl`
 
 ---
 
@@ -207,14 +207,14 @@ valid_embedding(Id, V) :-
 Element-wise addition of two vectors.
 
 ```datalog
-% Syntax
+// Syntax
 Sum = vec_add(V1, V2)
 
-% Example - Combine embeddings
-combined(Id, SumV) :-
+// Example - Combine embeddings
+combined(Id, SumV) <-
     text_embedding(Id, T),
     image_embedding(Id, I),
-    SumV = vec_add(T, I).
+    SumV = vec_add(T, I)
 ```
 
 | Parameter | Type | Description |
@@ -226,7 +226,7 @@ combined(Id, SumV) :-
 **Note**: Vectors must have same dimension.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_vector_add`, snapshot `16_vectors/08_vec_add.dl`
+**Tests**: `test_vector_add`, snapshot `16_vectors/08_vec_add.idl`
 
 ---
 
@@ -235,14 +235,14 @@ combined(Id, SumV) :-
 Scale vector by a scalar value.
 
 ```datalog
-% Syntax
+// Syntax
 Scaled = vec_scale(V, S)
 
-% Example - Apply weight
-weighted(Id, ScaledV) :-
+// Example - Apply weight
+weighted(Id, ScaledV) <-
     embedding(Id, V),
     weight(Id, W),
-    ScaledV = vec_scale(V, W).
+    ScaledV = vec_scale(V, W)
 ```
 
 | Parameter | Type | Description |
@@ -252,7 +252,7 @@ weighted(Id, ScaledV) :-
 | **Returns** | Vector (f32) | Scaled vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_vector_scale`, snapshot `16_vectors/09_vec_scale.dl`
+**Tests**: `test_vector_scale`, snapshot `16_vectors/09_vec_scale.idl`
 
 ---
 
@@ -265,14 +265,14 @@ Functions for approximate nearest neighbor search.
 Compute LSH bucket ID for a float32 vector.
 
 ```datalog
-% Syntax
+// Syntax
 Bucket = lsh_bucket(V, TableIdx, NumHyperplanes)
 
-% Example - Build LSH index
-lsh_index(Id, Table, Bucket) :-
+// Example - Build LSH index
+lsh_index(Id, Table, Bucket) <-
     embedding(Id, V),
     Table = 0,
-    Bucket = lsh_bucket(V, Table, 8).  % 8 hyperplanes = 256 buckets
+    Bucket = lsh_bucket(V, Table, 8)  // 8 hyperplanes = 256 buckets
 ```
 
 | Parameter | Type | Description |
@@ -285,7 +285,7 @@ lsh_index(Id, Table, Bucket) :-
 **Note**: More hyperplanes = more buckets = higher precision but lower recall.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_lsh_bucket_*` (6 tests), snapshot `31_lsh/01_lsh_bucket.dl`
+**Tests**: `test_lsh_bucket_*` (6 tests), snapshot `31_lsh/01_lsh_bucket.idl`
 
 ---
 
@@ -294,13 +294,13 @@ lsh_index(Id, Table, Bucket) :-
 Generate multi-probe sequence for a bucket by Hamming distance.
 
 ```datalog
-% Syntax
+// Syntax
 Probes = lsh_probes(Bucket, NumHyperplanes, NumProbes)
 
-% Example - Get probe sequence
-probe_buckets(OrigBucket, Probes) :-
+// Example - Get probe sequence
+probe_buckets(OrigBucket, Probes) <-
     query_bucket(OrigBucket),
-    Probes = lsh_probes(OrigBucket, 8, 4).
+    Probes = lsh_probes(OrigBucket, 8, 4)
 ```
 
 | Parameter | Type | Description |
@@ -311,7 +311,7 @@ probe_buckets(OrigBucket, Probes) :-
 | **Returns** | Vector | Probe bucket IDs |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_lsh_probes_*` (8 tests), snapshot `31_lsh/02_lsh_probes.dl`
+**Tests**: `test_lsh_probes_*` (8 tests), snapshot `31_lsh/02_lsh_probes.idl`
 
 ---
 
@@ -320,7 +320,7 @@ probe_buckets(OrigBucket, Probes) :-
 Compute LSH bucket and probes in one call for float32 vectors.
 
 ```datalog
-% Syntax
+// Syntax
 Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 ```
 
@@ -333,7 +333,7 @@ Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 | **Returns** | Vector | Bucket IDs to probe |
 
 **Implementation**: `src/code_generator/mod.rs`
-**Tests**: `test_lsh_multi_probe_*` (4 tests), snapshot `31_lsh/03_lsh_multi_probe.dl`
+**Tests**: `test_lsh_multi_probe_*` (4 tests), snapshot `31_lsh/03_lsh_multi_probe.idl`
 
 ---
 
@@ -346,13 +346,13 @@ Functions for int8 vector quantization (memory-efficient storage).
 Linear quantization: maps [min, max] to [-128, 127].
 
 ```datalog
-% Syntax
+// Syntax
 QV = quantize_linear(V)
 
-% Example - Compress embeddings
-compressed(Id, QV) :-
+// Example - Compress embeddings
+compressed(Id, QV) <-
     embedding(Id, V),
-    QV = quantize_linear(V).
+    QV = quantize_linear(V)
 ```
 
 | Parameter | Type | Description |
@@ -361,7 +361,7 @@ compressed(Id, QV) :-
 | **Returns** | VectorInt8 | Quantized vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_quantize_linear_basic`, snapshot `30_quantization/01_quantize_linear.dl`
+**Tests**: `test_quantize_linear_basic`, snapshot `30_quantization/01_quantize_linear.idl`
 
 ---
 
@@ -381,7 +381,7 @@ QV = quantize_symmetric(V)
 **Note**: Better preserves zero values; recommended for normalized vectors.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_quantize_symmetric_basic`, snapshot `30_quantization/02_quantize_symmetric.dl`
+**Tests**: `test_quantize_symmetric_basic`, snapshot `30_quantization/02_quantize_symmetric.idl`
 
 ---
 
@@ -401,7 +401,7 @@ FV = dequantize(QV)
 **Note**: Lossy conversion - original precision not fully recovered.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dequantize_basic`, snapshot `30_quantization/03_dequantize.dl`
+**Tests**: `test_dequantize_basic`, snapshot `30_quantization/03_dequantize.idl`
 
 ---
 
@@ -420,7 +420,7 @@ FV = dequantize_scaled(QV, Scale)
 | **Returns** | Vector (f32) | Dequantized vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dequantize_with_scale`, snapshot `30_quantization/04_dequantize_scaled.dl`
+**Tests**: `test_dequantize_with_scale`, snapshot `30_quantization/04_dequantize_scaled.idl`
 
 ---
 
@@ -445,7 +445,7 @@ D = euclidean_int8(QV1, QV2)
 | **Returns** | Float64 | Euclidean distance |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_euclidean_distance_int8_*` (3 tests), snapshot `30_quantization/05_euclidean_int8.dl`
+**Tests**: `test_euclidean_distance_int8_*` (3 tests), snapshot `30_quantization/05_euclidean_int8.idl`
 
 ---
 
@@ -464,7 +464,7 @@ D = cosine_int8(QV1, QV2)
 | **Returns** | Float64 | Cosine distance [0, 2] |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_cosine_distance_int8_*` (3 tests), snapshot `30_quantization/06_cosine_int8.dl`
+**Tests**: `test_cosine_distance_int8_*` (3 tests), snapshot `30_quantization/06_cosine_int8.idl`
 
 ---
 
@@ -483,7 +483,7 @@ Score = dot_int8(QV1, QV2)
 | **Returns** | Float64 | Dot product |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dot_product_int8`, snapshot `30_quantization/07_dot_int8.dl`
+**Tests**: `test_dot_product_int8`, snapshot `30_quantization/07_dot_int8.idl`
 
 ---
 
@@ -502,7 +502,7 @@ D = manhattan_int8(QV1, QV2)
 | **Returns** | Float64 | Manhattan distance |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_manhattan_distance_int8`, snapshot `30_quantization/08_manhattan_int8.dl`
+**Tests**: `test_manhattan_distance_int8`, snapshot `30_quantization/08_manhattan_int8.idl`
 
 ---
 
@@ -524,7 +524,7 @@ Now = time_now()
 | **Returns** | Int64 | Unix timestamp (milliseconds) |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_now_returns_reasonable_value`, snapshot `29_temporal/01_time_now.dl`
+**Tests**: `test_time_now_returns_reasonable_value`, snapshot `29_temporal/01_time_now.idl`
 
 ---
 
@@ -543,7 +543,7 @@ Diff = time_diff(T1, T2)
 | **Returns** | Int64 | Difference (t1 - t2) in milliseconds |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_diff_*` (4 tests), snapshot `29_temporal/02_time_diff.dl`
+**Tests**: `test_time_diff_*` (4 tests), snapshot `29_temporal/02_time_diff.idl`
 
 ---
 
@@ -562,7 +562,7 @@ NewTime = time_add(Ts, DurationMs)
 | **Returns** | Int64 | New timestamp |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_add_*` (3 tests), snapshot `29_temporal/03_time_add_sub.dl`
+**Tests**: `test_time_add_*` (3 tests), snapshot `29_temporal/03_time_add_sub.idl`
 
 ---
 
@@ -581,7 +581,7 @@ NewTime = time_sub(Ts, DurationMs)
 | **Returns** | Int64 | New timestamp |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_sub_*` (2 tests), snapshot `29_temporal/03_time_add_sub.dl`
+**Tests**: `test_time_sub_*` (2 tests), snapshot `29_temporal/03_time_add_sub.idl`
 
 ---
 
@@ -603,7 +603,7 @@ Weight = time_decay(Ts, Now, HalfLifeMs)
 **Note**: Returns 1.0 at ts=now, 0.5 at age=half_life, approaches 0 for old events.
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_decay_*` (7 tests), snapshot `29_temporal/04_time_decay.dl`
+**Tests**: `test_time_decay_*` (7 tests), snapshot `29_temporal/04_time_decay.idl`
 
 ---
 
@@ -625,7 +625,7 @@ Weight = time_decay_linear(Ts, Now, MaxAgeMs)
 **Note**: Returns 1.0 at ts=now, 0.5 at age=max_age/2, 0.0 at age>=max_age.
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_decay_linear_*` (6 tests), snapshot `29_temporal/05_time_decay_linear.dl`
+**Tests**: `test_time_decay_linear_*` (6 tests), snapshot `29_temporal/05_time_decay_linear.idl`
 
 ---
 
@@ -640,7 +640,7 @@ Check if t1 is before t2.
 | **Returns** | Bool | true if t1 < t2 |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_before`, snapshot `29_temporal/06_time_comparisons.dl`
+**Tests**: `test_time_before`, snapshot `29_temporal/06_time_comparisons.idl`
 
 ---
 
@@ -655,7 +655,7 @@ Check if t1 is after t2.
 | **Returns** | Bool | true if t1 > t2 |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_after`, snapshot `29_temporal/06_time_comparisons.dl`
+**Tests**: `test_time_after`, snapshot `29_temporal/06_time_comparisons.idl`
 
 ---
 
@@ -671,7 +671,7 @@ Check if timestamp is within range [start, end] (inclusive).
 | **Returns** | Bool | true if start <= ts <= end |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_between*` (2 tests), snapshot `29_temporal/06_time_comparisons.dl`
+**Tests**: `test_time_between*` (2 tests), snapshot `29_temporal/06_time_comparisons.idl`
 
 ---
 
@@ -687,7 +687,7 @@ Check if timestamp is within the last duration from now.
 | **Returns** | Bool | true if (now - duration_ms) <= ts <= now |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_within_last_*` (5 tests), snapshot `29_temporal/07_within_last.dl`
+**Tests**: `test_within_last_*` (5 tests), snapshot `29_temporal/07_within_last.idl`
 
 ---
 
@@ -704,7 +704,7 @@ Check if two time intervals overlap.
 | **Returns** | Bool | true if intervals overlap |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_intervals_overlap_*` (5 tests), snapshot `29_temporal/08_intervals_overlap.dl`
+**Tests**: `test_intervals_overlap_*` (5 tests), snapshot `29_temporal/08_intervals_overlap.idl`
 
 ---
 
@@ -721,7 +721,7 @@ Check if interval [s1, e1] fully contains interval [s2, e2].
 | **Returns** | Bool | true if [s1,e1] contains [s2,e2] |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_interval_contains_*` (2 tests), snapshot `29_temporal/09_interval_contains.dl`
+**Tests**: `test_interval_contains_*` (2 tests), snapshot `29_temporal/09_interval_contains.idl`
 
 ---
 
@@ -736,7 +736,7 @@ Get the duration of an interval.
 | **Returns** | Int64 | Duration (end - start) in milliseconds |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_interval_duration_*` (3 tests), snapshot `29_temporal/10_interval_duration.dl`
+**Tests**: `test_interval_duration_*` (3 tests), snapshot `29_temporal/10_interval_duration.idl`
 
 ---
 
@@ -752,7 +752,7 @@ Check if a point is within an interval [start, end] (inclusive).
 | **Returns** | Bool | true if start <= ts <= end |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_point_in_interval_*` (4 tests), snapshot `29_temporal/12_point_in_interval.dl`
+**Tests**: `test_point_in_interval_*` (4 tests), snapshot `29_temporal/12_point_in_interval.idl`
 
 ---
 
@@ -792,7 +792,7 @@ AbsVal = abs_int64(X)
 **Note**: Uses saturating arithmetic for `i64::MIN`.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_abs_i64_*` (4 tests), snapshot `32_math/01_abs_int64.dl`
+**Tests**: `test_abs_i64_*` (4 tests), snapshot `32_math/01_abs_int64.idl`
 
 ---
 
@@ -812,7 +812,7 @@ AbsVal = abs_float64(X)
 **Aliases**: `abs_f64`
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_abs_f64_*` (4 tests), snapshot `32_math/02_abs_float64.dl`
+**Tests**: `test_abs_f64_*` (4 tests), snapshot `32_math/02_abs_float64.idl`
 
 ---
 
@@ -1010,11 +1010,11 @@ Get string length (byte count).
 ```datalog
 L = len(S)
 
-% Example
-long_names(Name, L) :-
+// Example
+long_names(Name, L) <-
     names(Name),
     L = len(Name),
-    L > 10.
+    L > 10
 ```
 
 | Parameter | Type | Description |
@@ -1090,10 +1090,10 @@ Extract a substring.
 ```datalog
 Sub = substr(S, Start, Len)
 
-% Example - Get first 3 characters
-prefix(Name, P) :-
+// Example - Get first 3 characters
+prefix(Name, P) <-
     names(Name),
-    P = substr(Name, 0, 3).
+    P = substr(Name, 0, 3)
 ```
 
 | Parameter | Type | Description |
@@ -1117,10 +1117,10 @@ Replace all occurrences of a substring.
 ```datalog
 R = replace(S, Find, Replacement)
 
-% Example
-cleaned(R) :-
+// Example
+cleaned(R) <-
     raw("hello-world"),
-    R = replace("hello-world", "-", " ").
+    R = replace("hello-world", "-", " ")
 ```
 
 | Parameter | Type | Description |
@@ -1141,10 +1141,10 @@ Concatenate multiple values into a string. Variable arity (2+ arguments).
 ```datalog
 R = concat(S1, S2)
 
-% Example - Build full name
-full_name(First, Last, Full) :-
+// Example - Build full name
+full_name(First, Last, Full) <-
     person(First, Last),
-    Full = concat(First, " ", Last).
+    Full = concat(First, " ", Last)
 ```
 
 | Parameter | Type | Description |
@@ -1170,10 +1170,10 @@ Return the smaller of two values.
 ```datalog
 M = min_val(A, B)
 
-% Example - Clamp to range
-clamped(X, C) :-
+// Example - Clamp to range
+clamped(X, C) <-
     values(X),
-    C = max_val(0, min_val(X, 100)).
+    C = max_val(0, min_val(X, 100))
 ```
 
 | Parameter | Type | Description |

@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_del_n02t03
+Knowledge graph 'test_del_n02t03' created.
+Switched to knowledge graph: test_del_n02t03
+> .kg use test_del_n02t03
+Switched to knowledge graph: test_del_n02t03
+> +edge[(1,2), (2,3), (3,4), (4,5), (5,6)]
+Inserted 5 fact(s) into 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+│    4 │    5 │
+│    5 │    6 │
+└──────┴──────┘
+5 rows
+> -edge(3, 4)
+Deleted 1 facts from 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    4 │    5 │
+│    5 │    6 │
+└──────┴──────┘
+4 rows
+> -edge(X, Y) <- edge(X, Y), X > 3
+Conditional delete: 2 fact(s) deleted from 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_n02t03
+Knowledge graph 'test_del_n02t03' dropped.

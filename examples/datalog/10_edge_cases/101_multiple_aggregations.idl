@@ -1,0 +1,21 @@
+// Test: Multiple different aggregations on same data
+
+.kg create test_multi_agg_n10t101
+.kg use test_multi_agg_n10t101
+
++values[(10,), (20,), (30,), (40,), (50,)]
+
+sum_val(sum<X>) <- values(X)
+count_val(count<X>) <- values(X)
+min_val(min<X>) <- values(X)
+max_val(max<X>) <- values(X)
+avg_val(avg<X>) <- values(X)
+
+?sum_val(S)
+?count_val(C)
+?min_val(Mi)
+?max_val(Ma)
+?avg_val(A)
+
+.kg use default
+.kg drop test_multi_agg_n10t101

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_pivot_n18t41
+Knowledge graph 'test_pivot_n18t41' created.
+Switched to knowledge graph: test_pivot_n18t41
+> .kg use test_pivot_n18t41
+Switched to knowledge graph: test_pivot_n18t41
+> +sales[("Q1", 100), ("Q2", 200), ("Q3", 150), ("Q4", 300)]
+Inserted 4 fact(s) into 'sales'.

@@ -4,22 +4,22 @@ Rules define derived relations (views) by computing new facts from existing data
 
 | Type | Syntax | Persistence |
 |------|--------|-------------|
-| **Session rule** | `head :- body.` | Temporary, cleared on disconnect |
-| **Persistent rule** | `+head :- body.` | Saved to disk, survives restarts |
+| **Session rule** | `head <- body` | Temporary, cleared on disconnect |
+| **Persistent rule** | `+head <- body` | Saved to disk, survives restarts |
 
 ## Session Rules
 
 Session rules exist only for your current connection:
 
 ```datalog
-% Define a session rule
-ancestor(X, Y) :- parent(X, Y).
-ancestor(X, Z) :- ancestor(X, Y), parent(Y, Z).
+// Define a session rule
+ancestor(X, Y) <- parent(X, Y)
+ancestor(X, Z) <- ancestor(X, Y), parent(Y, Z)
 
-% Use it immediately
-?- ancestor("alice", X).
+// Use it immediately
+?ancestor("alice", X)
 
-% Rule is gone when you disconnect
+// Rule is gone when you disconnect
 ```
 
 Session rules are useful for:
@@ -30,9 +30,9 @@ Session rules are useful for:
 ### Managing Session Rules
 
 ```
-.session              % List all session rules
-.session clear        % Clear all session rules
-.session drop 1       % Drop session rule #1
+.session              // List all session rules
+.session clear        // Clear all session rules
+.session drop 1       // Drop session rule #1
 ```
 
 ## Persistent Rules
@@ -40,12 +40,12 @@ Session rules are useful for:
 Persistent rules are saved to disk and automatically loaded:
 
 ```datalog
-% Create a persistent rule (saved)
-+path(X, Y) :- edge(X, Y).
-+path(X, Z) :- path(X, Y), edge(Y, Z).
+// Create a persistent rule (saved)
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
 
-% Works immediately and after restart
-?- path(1, X).
+// Works immediately and after restart
+?path(1, X)
 ```
 
 Persistent rules are stored in `{data_dir}/{kg}/rules/catalog.json`.
@@ -55,11 +55,11 @@ Persistent rules are stored in `{data_dir}/{kg}/rules/catalog.json`.
 A view can be defined by multiple rules (clauses):
 
 ```datalog
-% First clause: base case
-+ancestor(X, Y) :- parent(X, Y).
+// First clause: base case
++ancestor(X, Y) <- parent(X, Y)
 
-% Second clause: recursive case
-+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+// Second clause: recursive case
++ancestor(X, Z) <- parent(X, Y), ancestor(Y, Z)
 ```
 
 Both clauses define `ancestor`. Results are the union of all matching clauses.
@@ -69,14 +69,14 @@ Both clauses define `ancestor`. Results are the union of all matching clauses.
 Remove a persistent rule with `-`:
 
 ```datalog
--path(X, Y).    % Removes all rules defining 'path'
+-path(X, Y)    // Removes all rules defining 'path'
 ```
 
 Or use meta commands:
 
 ```
-.rule drop path        % Drop 'path' rule
-.rule clear path       % Clear for re-registration
+.rule drop path        // Drop 'path' rule
+.rule clear path       // Clear for re-registration
 ```
 
 ## Rule Structure
@@ -84,7 +84,7 @@ Or use meta commands:
 A rule has two parts:
 
 ```
-head(Variables) :- body.
+head(Variables) <- body
      ↑              ↑
   What to         What must
   produce         be true
@@ -95,9 +95,9 @@ head(Variables) :- body.
 The head is an atom that defines what the rule produces:
 
 ```datalog
-+path(X, Y) :- edge(X, Y).
-% ^^^^^^^^
-% Head: produces facts for 'path' relation
++path(X, Y) <- edge(X, Y)
+// ^^^^^^^^
+// Head: produces facts for 'path' relation
 ```
 
 The head must use a **lowercase** predicate name.
@@ -107,16 +107,16 @@ The head must use a **lowercase** predicate name.
 The body specifies conditions using literals separated by commas (AND):
 
 ```datalog
-+employee_in_dept(Name, Dept) :- employee(Id, Name), works_in(Id, Dept).
-%                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-%                                Body: both conditions must match
++employee_in_dept(Name, Dept) <- employee(Id, Name), works_in(Id, Dept)
+//                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                                Body: both conditions must match
 ```
 
 ## Grammar
 
 ```ebnf
-session_rule    ::= head ":-" body "." ;
-persistent_rule ::= "+" head ":-" body "." ;
+session_rule    ::= head "<-" body "." ;
+persistent_rule ::= "+" head "<-" body "." ;
 delete_rule     ::= "-" predicate "(" variables ")" "." ;
 head            ::= predicate "(" term ("," term)* ")" ;
 body            ::= literal ("," literal)* ;
@@ -139,9 +139,9 @@ The body can contain:
 Rules can reference themselves (recursion):
 
 ```datalog
-% Transitive closure - find all reachable nodes
-+reach(X, Y) :- edge(X, Y).
-+reach(X, Z) :- reach(X, Y), edge(Y, Z).
+// Transitive closure - find all reachable nodes
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
 ```
 
 InputLayer handles recursion automatically. It keeps computing until no new facts are found (fixpoint).
@@ -151,9 +151,9 @@ InputLayer handles recursion automatically. It keeps computing until no new fact
 Rules can reference each other:
 
 ```datalog
-+even(0).
-+odd(X) :- even(Y), succ(Y, X).
-+even(X) :- odd(Y), succ(Y, X).
++even(0)
++odd(X) <- even(Y), succ(Y, X)
++even(X) <- odd(Y), succ(Y, X)
 ```
 
 ## Variable Safety Rules
@@ -161,21 +161,21 @@ Rules can reference each other:
 All variables in the **head** must appear in a **positive** body literal:
 
 ```datalog
-% GOOD: X appears in edge(X, Y)
-+start_nodes(X) :- edge(X, Y).
+// GOOD: X appears in edge(X, Y)
++start_nodes(X) <- edge(X, Y)
 
-% BAD: X only in head, not in positive body literal
-+broken(X) :- edge(A, B).   % ERROR: X is unbound
+// BAD: X only in head, not in positive body literal
++broken(X) <- edge(A, B)   // ERROR: X is unbound
 ```
 
 Variables in **negations** or **comparisons** must also appear in a positive literal:
 
 ```datalog
-% GOOD: X is bound by edge, then filtered
-+filtered(X) :- edge(X, Y), X > 5.
+// GOOD: X is bound by edge, then filtered
++filtered(X) <- edge(X, Y), X > 5
 
-% BAD: X only in comparison
-+broken(X) :- Y > 5.   % ERROR: X unbound, Y only in comparison
+// BAD: X only in comparison
++broken(X) <- Y > 5   // ERROR: X unbound, Y only in comparison
 ```
 
 ## Common Patterns
@@ -183,28 +183,28 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 ### Filter
 
 ```datalog
-+adults(Name, Age) :- person(Name, Age), Age >= 18.
++adults(Name, Age) <- person(Name, Age), Age >= 18
 ```
 
 ### Join
 
 ```datalog
-+employee_dept(Name, DeptName) :-
++employee_dept(Name, DeptName) <-
     employee(Id, Name),
     works_in(Id, DeptId),
-    department(DeptId, DeptName).
+    department(DeptId, DeptName)
 ```
 
 ### Set Difference
 
 ```datalog
-+not_in_b(X) :- a(X), !b(X).
++not_in_b(X) <- a(X), !b(X)
 ```
 
 ### Aggregation
 
 ```datalog
-+dept_count(Dept, count<Id>) :- works_in(Id, Dept).
++dept_count(Dept, count<Id>) <- works_in(Id, Dept)
 ```
 
 ## Examples
@@ -212,42 +212,42 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 ### Social Network
 
 ```datalog
-% Facts
-+follows[(1, 2), (2, 3), (3, 4), (2, 4)].
+// Facts
++follows[(1, 2), (2, 3), (3, 4), (2, 4)]
 
-% Find who user 1 can reach (transitive)
-+can_reach(X, Y) :- follows(X, Y).
-+can_reach(X, Z) :- can_reach(X, Y), follows(Y, Z).
+// Find who user 1 can reach (transitive)
++can_reach(X, Y) <- follows(X, Y)
++can_reach(X, Z) <- can_reach(X, Y), follows(Y, Z)
 
-% Query
-?- can_reach(1, X).
+// Query
+?can_reach(1, X)
 ```
 
 ### Access Control
 
 ```datalog
-% Facts
-+user_role[("alice", "admin"), ("bob", "viewer")].
-+role_perm[("admin", "read"), ("admin", "write"), ("viewer", "read")].
+// Facts
++user_role[("alice", "admin"), ("bob", "viewer")]
++role_perm[("admin", "read"), ("admin", "write"), ("viewer", "read")]
 
-% Rule: user has permission via role
-+has_perm(User, Perm) :- user_role(User, Role), role_perm(Role, Perm).
+// Rule: user has permission via role
++has_perm(User, Perm) <- user_role(User, Role), role_perm(Role, Perm)
 
-% Query
-?- has_perm("alice", Perm).
+// Query
+?has_perm("alice", Perm)
 ```
 
 ### Graph Analysis
 
 ```datalog
-% Facts
-+edge[(1, 2), (2, 3), (3, 1), (4, 5)].
+// Facts
++edge[(1, 2), (2, 3), (3, 1), (4, 5)]
 
-% Nodes in same strongly connected component
-+same_scc(X, Y) :- reach(X, Y), reach(Y, X).
-+reach(X, Y) :- edge(X, Y).
-+reach(X, Z) :- reach(X, Y), edge(Y, Z).
+// Nodes in same strongly connected component
++same_scc(X, Y) <- reach(X, Y), reach(Y, X)
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
 
-% Query
-?- same_scc(1, X).
+// Query
+?same_scc(1, X)
 ```

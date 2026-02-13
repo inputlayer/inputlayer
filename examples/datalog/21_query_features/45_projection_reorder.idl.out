@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_reorder_n21t45
+Knowledge graph 'test_reorder_n21t45' created.
+Switched to knowledge graph: test_reorder_n21t45
+> .kg use test_reorder_n21t45
+Switched to knowledge graph: test_reorder_n21t45
+> +records[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)]
+Inserted 3 fact(s) into 'records'.

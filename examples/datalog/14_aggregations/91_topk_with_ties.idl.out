@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_topk_ties_n14t91
+Knowledge graph 'test_topk_ties_n14t91' created.
+Switched to knowledge graph: test_topk_ties_n14t91
+> .kg use test_topk_ties_n14t91
+Switched to knowledge graph: test_topk_ties_n14t91
+> +scores[(1, 100), (2, 100), (3, 90), (4, 90), (5, 80)]
+Inserted 5 fact(s) into 'scores'.

@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_agg_n18t100
+Knowledge graph 'test_cond_agg_n18t100' created.
+Switched to knowledge graph: test_cond_agg_n18t100
+> .kg use test_cond_agg_n18t100
+Switched to knowledge graph: test_cond_agg_n18t100
+> +orders[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "B", 50)]
+Inserted 4 fact(s) into 'orders'.
+> large_order_total(sum<Amount>) <- orders(_, _, Amount), Amount > 100
+┌──────┐
+│ col0 │
+├──────┤
+│  350 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> count_large_per_cat(Cat, count<Id>) <- orders(Id, Cat, Amount), Amount > 75
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │    2 │
+│ "B"  │    1 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?large_order_total(T)
+┌──────┐
+│ col0 │
+├──────┤
+│  350 │
+└──────┘
+1 rows
+> ?count_large_per_cat(Cat, N)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │    2 │
+│ "B"  │    1 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_cond_agg_n18t100
+Knowledge graph 'test_cond_agg_n18t100' dropped.

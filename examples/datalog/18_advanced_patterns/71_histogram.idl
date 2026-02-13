@@ -1,0 +1,17 @@
+// Test: Histogram/bucketing pattern
+
+.kg create test_hist_n18t71
+.kg use test_hist_n18t71
+
++values[(5,), (15,), (25,), (35,), (45,), (55,), (8,), (22,), (48,)]
+
+// Bucket by 20s: 0-19, 20-39, 40-59
+bucket(V, B) <- values(V), B = (V / 20) * 20
+
+// Count per bucket
+bucket_count(B, count<V>) <- bucket(V, B)
+
+?bucket_count(B, N)
+
+.kg use default
+.kg drop test_hist_n18t71

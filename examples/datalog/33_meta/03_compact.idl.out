@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_compact_n33t03
+Knowledge graph 'test_compact_n33t03' created.
+Switched to knowledge graph: test_compact_n33t03
+> .kg use test_compact_n33t03
+Switched to knowledge graph: test_compact_n33t03
+> +data[(1, "a"), (2, "b"), (3, "c")]
+Inserted 3 fact(s) into 'data'.
+> -data[(2, "b")]
+Deleted 1 facts from 'data'.
+> .compact
+Compaction command not available over HTTP.
+> ?data(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    3 │ "c"  │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_compact_n33t03
+Knowledge graph 'test_compact_n33t03' dropped.

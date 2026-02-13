@@ -1,0 +1,32 @@
+// Test: Wildcard Pattern Matching
+// Description: Tests various uses of _ (placeholder/wildcard) in patterns
+
+.kg create test_wildcards_n10t14
+.kg use test_wildcards_n10t14
+
+// Insert test data
++data[(1, "a", 100), (2, "b", 200), (3, "c", 100)]
+
+// Test: Wildcard in first position
+exists_with_value(Val) <- data(_, _, Val)
+?exists_with_value(Val)
+
+// Test: Wildcard in multiple positions
+has_name(Name) <- data(_, Name, _)
+?has_name(Name)
+
+// Test: Wildcard to check existence
+has_any_data() <- data(_, _, _)
+?has_any_data()
+
+// Test: Multiple wildcards in same rule
+count_distinct_values(Val) <- data(_, _, Val), data(_, _, Val)
+?count_distinct_values(Val)
+
+// Test: Wildcard in join condition
++other[(100, "x"), (200, "y"), (300, "z")]
+joined(Name, Label) <- data(_, Name, Val), other(Val, Label)
+?joined(Name, Label)
+
+.kg use default
+.kg drop test_wildcards_n10t14

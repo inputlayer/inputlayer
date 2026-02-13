@@ -1,0 +1,47 @@
+// Test: Multiple Aggregates in Same Query Context
+// Verifies: Using COUNT + SUM + AVG + MIN + MAX together
+
+.kg create test_multi_agg_n14t14
+.kg use test_multi_agg_n14t14
+
+// Employee data: dept_id, employee_id, salary
++employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000),
+           (2, 201, 70000), (2, 202, 80000),
+           (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)]
+
+// Multiple aggregates per department
++dept_count(Dept, count<Emp>) <- employees(Dept, Emp, _)
++dept_sum(Dept, sum<Sal>) <- employees(Dept, _, Sal)
++dept_avg(Dept, avg<Sal>) <- employees(Dept, _, Sal)
++dept_min(Dept, min<Sal>) <- employees(Dept, _, Sal)
++dept_max(Dept, max<Sal>) <- employees(Dept, _, Sal)
+
+// Query all aggregates
+?dept_count(D, C)
+?dept_sum(D, S)
+?dept_avg(D, A)
+?dept_min(D, M)
+?dept_max(D, M)
+
+// Expected dept_count: (1,3), (2,2), (3,4)
+// Expected dept_sum: (1,165000), (2,150000), (3,192000)
+// Expected dept_min: (1,50000), (2,70000), (3,45000)
+// Expected dept_max: (1,60000), (2,80000), (3,52000)
+
+// Global aggregates (no grouping)
++total_employees(count<E>) <- employees(_, E, _)
++total_payroll(sum<S>) <- employees(_, _, S)
++avg_salary(avg<S>) <- employees(_, _, S)
++min_salary(min<S>) <- employees(_, _, S)
++max_salary(max<S>) <- employees(_, _, S)
+
+?total_employees(N)
+?total_payroll(T)
+?avg_salary(A)
+?min_salary(M)
+?max_salary(M)
+
+
+// Cleanup
+.kg use default
+.kg drop test_multi_agg_n14t14

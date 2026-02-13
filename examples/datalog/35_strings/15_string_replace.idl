@@ -1,0 +1,13 @@
+// Test: String replace function
+
+.kg create test_replace_n35t15
+.kg use test_replace_n35t15
+
++words[("hello world",), ("hello there",)]
+
+replaced(S, R) <- words(S), R = REPLACE(S, "hello", "hi")
+
+?replaced(S, R)
+
+.kg use default
+.kg drop test_replace_n35t15

@@ -1,0 +1,28 @@
+// Test: Drop top_k rule, change data, re-add rule
+// Description: Tests that re-added top_k rule uses current data, not stale state
+
+.kg create test_topk_readd_data_n14t142
+.kg use test_topk_readd_data_n14t142
+
++score[(1, 100), (2, 200), (3, 300)]
+
++top(top_k<2, Player, Points:desc>) <- score(Player, Points)
+
+// Initial: 3(300), 2(200)
+?top(X, Y)
+
+// Drop rule
+.rule drop top
+
+// Change data while rule is dropped
+-score(3, 300)
++score[(4, 400), (5, 500)]
+
+// Re-add same rule definition
++top(top_k<2, Player, Points:desc>) <- score(Player, Points)
+
+// Should use current data: 5(500), 4(400)
+?top(X, Y)
+
+.kg use default
+.kg drop test_topk_readd_data_n14t142

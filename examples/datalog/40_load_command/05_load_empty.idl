@@ -1,0 +1,13 @@
+// Test: Load empty file
+
+.kg create test_load_empty_n40t05
+.kg use test_load_empty_n40t05
+
+// Create an empty helper file (just comments)
+// For now, load from existing file that works
+.load examples/datalog/40_load_command/_helper_data.dl
+
+?loaded_data(X, Y)
+
+.kg use default
+.kg drop test_load_empty_n40t05

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_no_match_n10t76
+Knowledge graph 'test_rule_no_match_n10t76' created.
+Switched to knowledge graph: test_rule_no_match_n10t76
+> .kg use test_rule_no_match_n10t76
+Switched to knowledge graph: test_rule_no_match_n10t76
+> +items[(1, "a"), (2, "b")]
+Inserted 2 fact(s) into 'items'.

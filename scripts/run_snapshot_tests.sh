@@ -1,6 +1,6 @@
 #!/bin/bash
 # Snapshot Test Runner for InputLayer Datalog
-# Compares actual output against expected .dl.out files
+# Compares actual output against expected .idl.out files
 #
 # Supports parallel execution (default) for speed and sequential
 # mode for update/verbose/debugging.
@@ -388,7 +388,7 @@ echo ""
 
 # Find all test files (exclude files starting with _ which are helpers)
 # Also exclude _pending_* tests which are for features not yet implemented
-TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.dl" -type f ! -name "_*" ! -name "*_pending_*" | sort)
+TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.idl" -type f ! -name "_*" ! -name "*_pending_*" | sort)
 
 # Apply filter if specified
 if [[ -n "$FILTER" ]]; then
@@ -402,7 +402,7 @@ else
 fi
 
 # Count pending tests for reporting
-PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.dl" -type f | wc -l | tr -d ' ')
+PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.idl" -type f | wc -l | tr -d ' ')
 
 # Run tests
 if [[ "$PARALLEL_JOBS" -le 1 ]]; then

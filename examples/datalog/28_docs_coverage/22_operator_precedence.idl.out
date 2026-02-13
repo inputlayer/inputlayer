@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_precedence_n28t22
+Knowledge graph 'test_precedence_n28t22' created.
+Switched to knowledge graph: test_precedence_n28t22
+> .kg use test_precedence_n28t22
+Switched to knowledge graph: test_precedence_n28t22
+> +nums[(1), (2), (3)]
+Inserted 3 fact(s) into 'nums'.

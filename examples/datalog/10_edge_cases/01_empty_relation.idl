@@ -1,0 +1,22 @@
+// Test: Empty Relation Query
+// Description: Tests querying relations with no data
+
+.kg create test_empty_n10t01
+.kg use test_empty_n10t01
+
+// Create a relation but insert nothing
+// Actually, just query a non-existent relation
+
+// Define a view over empty base relation
++empty_view(X, Y) <- nonexistent(X, Y)
+
+// Query the view (should be empty)
+?empty_view(X, Y)
+
+// Insert some data to edge, then query empty relation
++edge[(1,2)]
+?nonexistent(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_empty_n10t01

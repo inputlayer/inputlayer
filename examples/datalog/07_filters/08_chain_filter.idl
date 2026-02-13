@@ -1,0 +1,18 @@
+// Test: Chained filter pattern
+
+.kg create test_chain_filt_n07t08
+.kg use test_chain_filt_n07t08
+
++data[(1, 10, "active"), (2, 20, "inactive"), (3, 30, "active"), (4, 5, "active"), (5, 25, "inactive")]
+
+// Multiple conditions
+filtered(Id, Val, Status) <-
+    data(Id, Val, Status),
+    Status = "active",
+    Val > 5,
+    Id != 4
+
+?filtered(Id, Val, Status)
+
+.kg use default
+.kg drop test_chain_filt_n07t08

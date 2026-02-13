@@ -1,0 +1,18 @@
+// Test: Variance preparation pattern
+
+.kg create test_var_n14t44
+.kg use test_var_n14t44
+
++vals[(10,), (20,), (30,)]
+
+// Sum and sum of squares
++total(sum<V>) <- vals(V)
++sum_sq(sum<Sq>) <- vals(V), Sq = V * V
++n(count<V>) <- vals(V)
+
+?total(S)
+?sum_sq(Sq)
+?n(N)
+
+.kg use default
+.kg drop test_var_n14t44

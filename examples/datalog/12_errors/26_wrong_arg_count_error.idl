@@ -1,0 +1,12 @@
+// Test: Wrong argument count error
+
+.kg create test_wrong_args_n12t26
+.kg use test_wrong_args_n12t26
+
++embeddings[(1, [0.1, 0.2, 0.3]), (2, [0.4, 0.5, 0.6])]
+
+// Call euclidean with wrong number of arguments - should error
+?embeddings(Id, V), Dist = euclidean(V)
+
+.kg use default
+.kg drop test_wrong_args_n12t26

@@ -1,0 +1,14 @@
+// Test: Multiple wildcards in query
+
+.kg create test_multi_wild_n21t36
+.kg use test_multi_wild_n21t36
+
++wide[(1, "a", 10, true, 1.5), (2, "b", 20, false, 2.5)]
+
+// Query with multiple wildcards
+ids_only(Id) <- wide(Id, _, _, _, _)
+
+?ids_only(Id)
+
+.kg use default
+.kg drop test_multi_wild_n21t36

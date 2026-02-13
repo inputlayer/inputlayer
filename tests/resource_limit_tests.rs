@@ -363,7 +363,7 @@ fn test_storage_engine_query_completes_quickly() {
 
     // Query should complete quickly (well under any timeout)
     let start = std::time::Instant::now();
-    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
     let elapsed = start.elapsed();
 
     assert_eq!(results.len(), 3);
@@ -387,7 +387,7 @@ fn test_large_result_set_handling() {
 
     // Query should handle 1000 results without issue
     let results = storage
-        .execute_query("result(X,Y) :- numbers(X,Y).")
+        .execute_query("result(X,Y) <- numbers(X,Y)")
         .unwrap();
     assert_eq!(results.len(), 1000);
 }
@@ -405,7 +405,7 @@ fn test_recursive_query_terminates() {
         .unwrap();
 
     // Simple query should complete without timeout
-    let results = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+    let results = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
 
     // Should find all edges
     assert_eq!(results.len(), 4);
@@ -490,7 +490,7 @@ fn test_many_small_queries() {
 
     // Run many queries
     for _ in 0..100 {
-        let results = storage.execute_query("result(X,Y) :- data(X,Y).").unwrap();
+        let results = storage.execute_query("result(X,Y) <- data(X,Y)").unwrap();
         assert_eq!(results.len(), 3);
     }
 }

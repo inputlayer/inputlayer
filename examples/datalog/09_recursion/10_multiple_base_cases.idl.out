@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_base_n09t10
+Knowledge graph 'test_multi_base_n09t10' created.
+Switched to knowledge graph: test_multi_base_n09t10
+> .kg use test_multi_base_n09t10
+Switched to knowledge graph: test_multi_base_n09t10
+> +edge[(1, 2), (2, 3), (10, 11), (11, 12), (20, 21), (21, 22), (22, 23)]
+Inserted 7 fact(s) into 'edge'.
+> +start[(1), (10), (20)]
+Inserted 3 fact(s) into 'start'.

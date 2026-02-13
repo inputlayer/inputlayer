@@ -1,0 +1,24 @@
+// Test: Knowledge Graph List Command
+// Description: Tests listing all knowledge graphs
+
+// Create multiple knowledge graphs
+.kg create test_kg_list1_n01t02
+.kg create test_kg_list2_n01t02
+.kg create test_kg_list3_n01t02
+
+// List all knowledge graphs
+.kg list
+
+// Use one and add data
+.kg use test_kg_list1_n01t02
++data[(1), (2), (3)]
+?data(X)
+
+// Clean up
+.kg use default
+.kg drop test_kg_list1_n01t02
+.kg drop test_kg_list2_n01t02
+.kg drop test_kg_list3_n01t02
+
+// List again to verify cleanup
+.kg list

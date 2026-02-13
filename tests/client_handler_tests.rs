@@ -101,7 +101,7 @@ fn test_get_storage_write() {
     assert!(result.is_ok(), "Insert failed: {:?}", result.err());
 
     // Verify data was inserted (use rule-style query for binary tuple result)
-    let result = storage.execute_query("result(X, Y) :- test(X, Y).");
+    let result = storage.execute_query("result(X, Y) <- test(X, Y)");
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
     let rows = result.unwrap();
     assert_eq!(rows.len(), 3);
@@ -133,14 +133,14 @@ async fn test_query_count_increments() {
     assert_eq!(handler.total_queries(), 0);
 
     // Execute a query via query_program
-    let result = handler.query_program(None, "?- foo(X).".to_string()).await;
+    let result = handler.query_program(None, "?foo(X)".to_string()).await;
     // Query might fail if relation doesn't exist, but counter should still increment
     let _ = result;
 
     assert_eq!(handler.total_queries(), 1);
 
     // Execute another query
-    let _ = handler.query_program(None, "?- bar(X).".to_string()).await;
+    let _ = handler.query_program(None, "?bar(X)".to_string()).await;
 
     assert_eq!(handler.total_queries(), 2);
 }
@@ -187,9 +187,7 @@ async fn test_query_program_simple() {
     }
 
     // Query the data
-    let result = handler
-        .query_program(None, "?- numbers(X).".to_string())
-        .await;
+    let result = handler.query_program(None, "?numbers(X)".to_string()).await;
 
     assert!(result.is_ok());
     let query_result = result.unwrap();
@@ -212,7 +210,7 @@ async fn test_query_program_with_knowledge_graph() {
 
     // Query the specific knowledge graph
     let result = handler
-        .query_program(Some("test_kg".to_string()), "?- kg_data(X).".to_string())
+        .query_program(Some("test_kg".to_string()), "?kg_data(X)".to_string())
         .await;
 
     assert!(result.is_ok());
@@ -226,7 +224,7 @@ async fn test_query_program_nonexistent_relation() {
 
     // Query a relation that doesn't exist
     let result = handler
-        .query_program(None, "?- nonexistent(X).".to_string())
+        .query_program(None, "?nonexistent(X)".to_string())
         .await;
 
     assert!(result.is_ok());
@@ -251,7 +249,7 @@ async fn test_query_program_with_join() {
 
     // Query with join
     let result = handler
-        .query_program(None, "?- edge(X, Y), node(X).".to_string())
+        .query_program(None, "?edge(X, Y), node(X)".to_string())
         .await;
 
     assert!(result.is_ok());
@@ -265,7 +263,7 @@ async fn test_query_program_invalid_syntax() {
 
     // Query with invalid syntax
     let result = handler
-        .query_program(None, "?- invalid syntax here".to_string())
+        .query_program(None, "?invalid syntax here".to_string())
         .await;
 
     // Should return error
@@ -291,7 +289,7 @@ async fn test_concurrent_queries() {
     for i in 0..5 {
         let h = Arc::clone(&handler);
         let handle = tokio::spawn(async move {
-            let result = h.query_program(None, "?- data(X).".to_string()).await;
+            let result = h.query_program(None, "?data(X)".to_string()).await;
             (i, result.is_ok())
         });
         handles.push(handle);
@@ -388,7 +386,7 @@ async fn test_query_program_error_recovery() {
         storage.insert_tuples("test", make_tuples(&[1])).unwrap();
     }
 
-    let result2 = handler.query_program(None, "?- test(X).".to_string()).await;
+    let result2 = handler.query_program(None, "?test(X)".to_string()).await;
     assert!(result2.is_ok());
 }
 
@@ -398,10 +396,7 @@ async fn test_query_nonexistent_knowledge_graph() {
 
     // Query a knowledge graph that doesn't exist
     let result = handler
-        .query_program(
-            Some("nonexistent_kg".to_string()),
-            "?- data(X).".to_string(),
-        )
+        .query_program(Some("nonexistent_kg".to_string()), "?data(X)".to_string())
         .await;
 
     // Should return error
@@ -432,21 +427,21 @@ async fn test_query_with_kg_switch() {
 
     // Query kg1
     let result1 = handler
-        .query_program(Some("kg1".to_string()), "?- kg1_data(X).".to_string())
+        .query_program(Some("kg1".to_string()), "?kg1_data(X)".to_string())
         .await;
     assert!(result1.is_ok());
     assert_eq!(result1.unwrap().rows.len(), 1);
 
     // Query kg2
     let result2 = handler
-        .query_program(Some("kg2".to_string()), "?- kg2_data(X).".to_string())
+        .query_program(Some("kg2".to_string()), "?kg2_data(X)".to_string())
         .await;
     assert!(result2.is_ok());
     assert_eq!(result2.unwrap().rows.len(), 1);
 
     // kg1 data should not be visible in kg2
     let result3 = handler
-        .query_program(Some("kg2".to_string()), "?- kg1_data(X).".to_string())
+        .query_program(Some("kg2".to_string()), "?kg1_data(X)".to_string())
         .await;
     assert!(result3.is_ok());
     assert_eq!(result3.unwrap().rows.len(), 0);
@@ -469,7 +464,7 @@ async fn test_query_result_schema() {
 
     // Query
     let result = handler
-        .query_program(None, "?- people(Name, Age).".to_string())
+        .query_program(None, "?people(Name, Age)".to_string())
         .await;
 
     assert!(result.is_ok());
@@ -502,7 +497,7 @@ async fn test_query_result_with_different_types() {
 
     // Query
     let result = handler
-        .query_program(None, "?- typed_data(I, F, S).".to_string())
+        .query_program(None, "?typed_data(I, F, S)".to_string())
         .await;
 
     assert!(result.is_ok());
@@ -526,7 +521,7 @@ async fn test_query_comment_only() {
     let (handler, _temp) = create_test_handler();
 
     let result = handler
-        .query_program(None, "% This is a comment".to_string())
+        .query_program(None, "// This is a comment".to_string())
         .await;
 
     // Comment-only should be valid (no-op) - depending on parser
@@ -562,7 +557,7 @@ fn test_handler_with_large_data() {
     // Query should work (2-column query for binary tuple result)
     {
         let storage = handler.get_storage_mut();
-        let result = storage.execute_query("result(X, Y) :- large_data(X, Y).");
+        let result = storage.execute_query("result(X, Y) <- large_data(X, Y)");
         assert!(result.is_ok(), "Query failed: {:?}", result.err());
         assert_eq!(result.unwrap().len(), 1000);
     }
@@ -585,7 +580,7 @@ fn test_statistics_consistency() {
     {
         let storage = handler.get_storage_mut();
         let _ = storage.insert_tuples("stat_test", make_tuples_2col(&[(1, 10)]));
-        let _ = storage.execute_query("result(X, Y) :- stat_test(X, Y).");
+        let _ = storage.execute_query("result(X, Y) <- stat_test(X, Y)");
     }
 
     // Counters should be consistent (storage operations don't increment handler counters)

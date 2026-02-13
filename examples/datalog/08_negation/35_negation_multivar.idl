@@ -1,0 +1,15 @@
+// Test: Negation with multiple variables
+
+.kg create test_neg_multi_n08t35
+.kg use test_neg_multi_n08t35
+
++pairs[(1, 2), (2, 3), (3, 4)]
++exclude[(1, 2), (3, 4)]
+
+// Exclude specific pairs
+not_excluded(A, B) <- pairs(A, B), !exclude(A, B)
+
+?not_excluded(A, B)
+
+.kg use default
+.kg drop test_neg_multi_n08t35

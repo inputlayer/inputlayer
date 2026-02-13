@@ -1,0 +1,21 @@
+// Test: Negation Combined with Join
+// Description: Tests negation used together with a join operation
+
+.kg create test_neg_join_n08t02
+.kg use test_neg_join_n08t02
+
+// Employees and their departments
++employee[(1, 100), (2, 100), (3, 200), (4, 200), (5, 300)]
+
+// Departments to exclude (using dummy second column for binary tuple requirement)
++excluded_dept[(200, 0)]
+
+// Find employees NOT in excluded departments
+// This combines a scan and negation with partial key match
++active_employee(EmpId, DeptId) <- employee(EmpId, DeptId), !excluded_dept(DeptId, _)
+
+?active_employee(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_join_n08t02

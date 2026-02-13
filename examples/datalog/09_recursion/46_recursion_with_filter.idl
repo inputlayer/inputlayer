@@ -1,0 +1,15 @@
+// Test: Recursion with filter condition
+
+.kg create test_rec_filter_n09t46
+.kg use test_rec_filter_n09t46
+
++edge[("a", "b", 1), ("b", "c", 2), ("c", "d", 3), ("d", "e", 4)]
+
+// Path only through low-weight edges
++light_path(X, Y) <- edge(X, Y, W), W <= 2
++light_path(X, Z) <- light_path(X, Y), edge(Y, Z, W), W <= 2
+
+?light_path(X, Y)
+
+.kg use default
+.kg drop test_rec_filter_n09t46

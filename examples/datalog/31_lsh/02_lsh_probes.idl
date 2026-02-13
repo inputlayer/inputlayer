@@ -1,0 +1,21 @@
+// Test: lsh_probes function
+// Generate probe sequence by Hamming distance
+.kg create test_lsh_probes_n31t02
+.kg use test_lsh_probes_n31t02
+
+// Create a vector and get its bucket
++vectors[(1, [1.0, 0.5, 0.0, -0.5])]
+
+// Get bucket then generate probes
+// lsh_probes(bucket, num_hyperplanes, num_probes)
+probe_result(Id, Bucket, Probes) <-
+    vectors(Id, V),
+    Bucket = lsh_bucket(V, 0, 4),
+    Probes = lsh_probes(Bucket, 4, 5)
+?probe_result(Id, Bucket, Probes)
+
+// The probes should include the original bucket and nearby buckets
+// (differing by 1-2 bits via Hamming distance)
+
+.kg use default
+.kg drop test_lsh_probes_n31t02

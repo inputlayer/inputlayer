@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_remove_readd_n14t160
+Knowledge graph 'test_remove_readd_n14t160' created.
+Switched to knowledge graph: test_remove_readd_n14t160
+> .kg use test_remove_readd_n14t160
+Switched to knowledge graph: test_remove_readd_n14t160
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.
+> +link[(10, 20)]
+Inserted 1 fact(s) into 'link'.

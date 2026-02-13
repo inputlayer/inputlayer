@@ -1,0 +1,19 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cheatsheet_agg_n28t04
+Knowledge graph 'test_cheatsheet_agg_n28t04' created.
+Switched to knowledge graph: test_cheatsheet_agg_n28t04
+> .kg use test_cheatsheet_agg_n28t04
+Switched to knowledge graph: test_cheatsheet_agg_n28t04
+> +sales[("electronics", 100, 500), ("electronics", 101, 300), ("clothing", 102, 200)]
+Inserted 3 fact(s) into 'sales'.
+> +employee[(1, "engineering"), (2, "engineering"), (3, "sales"), (4, "engineering")]
+Inserted 4 fact(s) into 'employee'.
+> +person[("alice", 30), ("bob", 25), ("carol", 35), ("dave", 28)]
+Inserted 4 fact(s) into 'person'.
+> +test_results[("alice", 85), ("bob", 90), ("carol", 78)]
+Inserted 3 fact(s) into 'test_results'.

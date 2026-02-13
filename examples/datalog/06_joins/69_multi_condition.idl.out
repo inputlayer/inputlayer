@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_cond_n06t69
+Knowledge graph 'test_multi_cond_n06t69' created.
+Switched to knowledge graph: test_multi_cond_n06t69
+> .kg use test_multi_cond_n06t69
+Switched to knowledge graph: test_multi_cond_n06t69
+> +orders[(1, 100, "2024-01"), (2, 101, "2024-01"), (3, 100, "2024-02")]
+Inserted 3 fact(s) into 'orders'.
+> +customers[(100, "Alice", "VIP"), (101, "Bob", "Regular")]
+Inserted 2 fact(s) into 'customers'.

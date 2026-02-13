@@ -1,0 +1,21 @@
+// Test: Multiple paths in recursion
+
+.kg create test_multi_path_n09t23
+.kg use test_multi_path_n09t23
+
+// Multiple paths from 1 to 4: 1->2->4, 1->3->4
++edge[(1, 2), (1, 3), (2, 4), (3, 4)]
+
+// All reachable nodes
++reachable(X, Y) <- edge(X, Y)
++reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
+?reachable(X, Y)
+
+// All intermediate nodes from 1 to 4
+intermediate(M) <- reachable(1, M), reachable(M, 4)
+
+?intermediate(M)
+
+.kg use default
+.kg drop test_multi_path_n09t23

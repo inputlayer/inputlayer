@@ -1,0 +1,46 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_num_n11t18
+Knowledge graph 'test_mixed_num_n11t18' created.
+Switched to knowledge graph: test_mixed_num_n11t18
+> .kg use test_mixed_num_n11t18
+Switched to knowledge graph: test_mixed_num_n11t18
+> +values[(1, 100), (2, 200.5), (3, 300), (4, 400.75)]
+Inserted 4 fact(s) into 'values'.
+> ?values(Id, Val)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    1 │    100 │
+│    2 │  200.5 │
+│    3 │    300 │
+│    4 │ 400.75 │
+└──────┴────────┘
+4 rows
+> ?values(Id, Val), Val > 200.0
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    2 │  200.5 │
+│    3 │    300 │
+│    4 │ 400.75 │
+└──────┴────────┘
+3 rows
+> +int_vals[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'int_vals'.
+> ?int_vals(I, V), V > 150
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  300 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_mixed_num_n11t18
+Knowledge graph 'test_mixed_num_n11t18' dropped.

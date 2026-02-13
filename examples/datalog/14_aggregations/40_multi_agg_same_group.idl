@@ -1,0 +1,17 @@
+// Test: Multiple aggregations on same group
+
+.kg create test_multi_agg_n14t40
+.kg use test_multi_agg_n14t40
+
++sales[("A", 100), ("A", 200), ("A", 150), ("B", 300), ("B", 100)]
+
+sum_by_cat(Cat, sum<Val>) <- sales(Cat, Val)
+count_by_cat(Cat, count<Val>) <- sales(Cat, Val)
+avg_by_cat(Cat, avg<Val>) <- sales(Cat, Val)
+
+?sum_by_cat(Cat, S)
+?count_by_cat(Cat, N)
+?avg_by_cat(Cat, A)
+
+.kg use default
+.kg drop test_multi_agg_n14t40

@@ -230,30 +230,29 @@ impl BuiltinFunc {
             "lsh_probes" => Some(BuiltinFunc::LshProbes),
             "lsh_multi_probe" => Some(BuiltinFunc::LshMultiProbe),
             // Math utilities
-            "abs_int64" | "abs_i64" => Some(BuiltinFunc::AbsInt64),
-            "abs_float64" | "abs_f64" => Some(BuiltinFunc::AbsFloat64),
+            "abs_int64" => Some(BuiltinFunc::AbsInt64),
+            "abs_float64" => Some(BuiltinFunc::AbsFloat64),
             "abs" => Some(BuiltinFunc::Abs),
             "sqrt" => Some(BuiltinFunc::Sqrt),
-            "pow" | "power" => Some(BuiltinFunc::Pow),
-            "log" | "ln" => Some(BuiltinFunc::Log),
+            "pow" => Some(BuiltinFunc::Pow),
+            "log" => Some(BuiltinFunc::Log),
             "exp" => Some(BuiltinFunc::Exp),
             "sin" => Some(BuiltinFunc::Sin),
             "cos" => Some(BuiltinFunc::Cos),
             "tan" => Some(BuiltinFunc::Tan),
             "floor" => Some(BuiltinFunc::Floor),
-            "ceil" | "ceiling" => Some(BuiltinFunc::Ceil),
-            "sign" | "signum" => Some(BuiltinFunc::Sign),
+            "ceil" => Some(BuiltinFunc::Ceil),
+            "sign" => Some(BuiltinFunc::Sign),
             // String functions
-            "len" | "length" | "strlen" => Some(BuiltinFunc::Len),
-            "upper" | "uppercase" | "toupper" => Some(BuiltinFunc::Upper),
-            "lower" | "lowercase" | "tolower" => Some(BuiltinFunc::Lower),
+            "len" => Some(BuiltinFunc::Len),
+            "upper" => Some(BuiltinFunc::Upper),
+            "lower" => Some(BuiltinFunc::Lower),
             "trim" => Some(BuiltinFunc::Trim),
-            "substr" | "substring" => Some(BuiltinFunc::Substr),
+            "substr" => Some(BuiltinFunc::Substr),
             "replace" => Some(BuiltinFunc::Replace),
-            "concat" | "string_concat" => Some(BuiltinFunc::Concat),
-            "min_val" | "min_int64" | "min_float64" | "min" => Some(BuiltinFunc::MinVal),
-            "max_val" | "max_int64" | "max_float64" | "max" => Some(BuiltinFunc::MaxVal),
-            "euclidean_distance" => Some(BuiltinFunc::Euclidean),
+            "concat" => Some(BuiltinFunc::Concat),
+            "min_val" => Some(BuiltinFunc::MinVal),
+            "max_val" => Some(BuiltinFunc::MaxVal),
             _ => None,
         }
     }
@@ -704,6 +703,8 @@ pub enum Term {
     FloatConstant(f64),
     /// String constant
     StringConstant(String),
+    /// Boolean constant (true / false)
+    BoolConstant(bool),
     /// Field access on a record variable: `U.id`, `P.amount`
     FieldAccess(Box<Term>, String),
     /// Record pattern for destructuring in atom arguments: `{ id: x, name: y }`
@@ -1115,14 +1116,20 @@ impl Rule {
                         // Y = constant - Y is bound by the constant
                         if let (
                             Term::Variable(v),
-                            Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                            Term::Constant(_)
+                            | Term::FloatConstant(_)
+                            | Term::StringConstant(_)
+                            | Term::BoolConstant(_),
                         ) = (left, right)
                         {
                             changed |= vars.insert(v.clone());
                         }
                         // constant = Y - Y is bound by the constant
                         if let (
-                            Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                            Term::Constant(_)
+                            | Term::FloatConstant(_)
+                            | Term::StringConstant(_)
+                            | Term::BoolConstant(_),
                             Term::Variable(v),
                         ) = (left, right)
                         {
@@ -1429,6 +1436,7 @@ impl std::fmt::Display for Term {
             Term::Variable(name) => write!(f, "{name}"),
             Term::Constant(val) => write!(f, "{val}"),
             Term::StringConstant(s) => write!(f, "\"{s}\""),
+            Term::BoolConstant(b) => write!(f, "{b}"),
             Term::FloatConstant(val) => write!(f, "{val}"),
             Term::Placeholder => write!(f, "_"),
             Term::Arithmetic(expr) => write!(f, "{expr}"),
@@ -1521,10 +1529,10 @@ impl std::fmt::Display for BodyPredicate {
 impl std::fmt::Display for Rule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.body.is_empty() {
-            write!(f, "{}.", self.head)
+            write!(f, "{}", self.head)
         } else {
             let body_str: Vec<String> = self.body.iter().map(ToString::to_string).collect();
-            write!(f, "{} :- {}.", self.head, body_str.join(", "))
+            write!(f, "{} <- {}", self.head, body_str.join(", "))
         }
     }
 }

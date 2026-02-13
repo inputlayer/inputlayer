@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_forall_n08t33
+Knowledge graph 'test_forall_n08t33' created.
+Switched to knowledge graph: test_forall_n08t33
+> .kg use test_forall_n08t33
+Switched to knowledge graph: test_forall_n08t33
+> +students[(1, "Alice"), (2, "Bob"), (3, "Carol")]
+Inserted 3 fact(s) into 'students'.
+> +passed[(1, "Math"), (1, "English"), (2, "Math"), (3, "Math"), (3, "English")]
+Inserted 5 fact(s) into 'passed'.
+> +required[("Math",), ("English",)]
+Inserted 2 fact(s) into 'required'.

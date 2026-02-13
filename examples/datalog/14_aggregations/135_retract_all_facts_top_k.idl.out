@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_retract_all_topk_n14t135
+Knowledge graph 'test_retract_all_topk_n14t135' created.
+Switched to knowledge graph: test_retract_all_topk_n14t135
+> .kg use test_retract_all_topk_n14t135
+Switched to knowledge graph: test_retract_all_topk_n14t135
+> +score[(1, 100), (2, 200), (3, 300)]
+Inserted 3 fact(s) into 'score'.

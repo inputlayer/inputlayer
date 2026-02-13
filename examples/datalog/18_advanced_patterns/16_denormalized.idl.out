@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_denorm_n18t16
+Knowledge graph 'test_denorm_n18t16' created.
+Switched to knowledge graph: test_denorm_n18t16
+> .kg use test_denorm_n18t16
+Switched to knowledge graph: test_denorm_n18t16
+> +orders[(1, "widget", "Alice", 100), (2, "gadget", "Bob", 200), (3, "widget", "Alice", 150), (4, "gizmo", "Carol", 75), (5, "widget", "Bob", 100)]
+Inserted 5 fact(s) into 'orders'.

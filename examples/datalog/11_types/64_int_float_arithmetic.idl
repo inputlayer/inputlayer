@@ -1,0 +1,15 @@
+// Test: Mixed int/float arithmetic
+
+.kg create test_int_float_n11t64
+.kg use test_int_float_n11t64
+
++ints[(1,), (2,), (3,)]
++floats[(1.5,), (2.5,), (3.5,)]
+
+// Int + float constant
+int_plus_float(X, Y) <- ints(X), Y = X + 0.5
+
+?int_plus_float(X, Y)
+
+.kg use default
+.kg drop test_int_float_n11t64

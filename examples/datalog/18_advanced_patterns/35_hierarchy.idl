@@ -1,0 +1,20 @@
+// Test: Hierarchy traversal pattern
+
+.kg create test_hierarchy_n18t35
+.kg use test_hierarchy_n18t35
+
++reports_to[("Alice", "Bob"), ("Bob", "Carol"), ("Dave", "Bob"), ("Eve", "Carol")]
+
+// Direct reports
+direct_report(Mgr, Emp) <- reports_to(Emp, Mgr)
+
+?direct_report(Mgr, Emp)
+
+// All reports (direct and indirect)
++all_reports(Mgr, Emp) <- reports_to(Emp, Mgr)
++all_reports(Mgr, Emp) <- reports_to(Emp, Mid), all_reports(Mgr, Mid)
+
+?all_reports("Carol", Emp)
+
+.kg use default
+.kg drop test_hierarchy_n18t35

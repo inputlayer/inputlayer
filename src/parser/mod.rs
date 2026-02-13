@@ -42,7 +42,7 @@ pub fn strip_block_comments(source: &str) -> String {
     result
 }
 
-/// Parse a Datalog program (supports % and /* */ comments).
+/// Parse a Datalog program (supports // and /* */ comments).
 pub fn parse_program(source: &str) -> Result<Program, String> {
     let mut program = Program::new();
 
@@ -53,13 +53,13 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
     for line in source.lines() {
         let line = line.trim();
 
-        // Skip empty lines and line comments (% is the standard style)
-        if line.is_empty() || line.starts_with('%') {
+        // Skip empty lines and line comments (// style)
+        if line.is_empty() || line.starts_with("//") {
             continue;
         }
 
-        // Strip inline % comments
-        let line = if let Some(pos) = find_comment_start(line) {
+        // Strip inline // comments
+        let line = if let Some(pos) = find_double_slash_comment(line) {
             line[..pos].trim()
         } else {
             line
@@ -77,58 +77,16 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
     Ok(program)
 }
 
-/// Find the start position of a % comment, respecting string literals and modulo operator.
-/// `%` is a modulo operator when preceded by an operand (alphanumeric, _, ), >)
-/// and followed (possibly after spaces) by an operand start (digit, letter, _, (, -digit).
-/// Otherwise it's a comment delimiter.
-fn find_comment_start(line: &str) -> Option<usize> {
+/// Find the start position of a // comment, respecting string literals.
+fn find_double_slash_comment(line: &str) -> Option<usize> {
     let mut in_string = false;
-    let chars: Vec<char> = line.chars().collect();
-    let mut paren_depth: i32 = 0;
+    let bytes = line.as_bytes();
 
-    for i in 0..chars.len() {
-        let c = chars[i];
-        if c == '"' && !in_string {
-            in_string = true;
-        } else if c == '"' && in_string {
-            in_string = false;
-        } else if !in_string {
-            if c == '(' {
-                paren_depth += 1;
-            } else if c == ')' {
-                paren_depth -= 1;
-            } else if c == '%' {
-                // Inside parenthesized expression, treat % as modulo
-                if paren_depth > 0 {
-                    continue;
-                }
-                // Check if this % is a modulo operator (between operands)
-                let is_modulo = if i > 0 && i + 1 < chars.len() {
-                    // Look at previous non-space char
-                    let mut pi = i - 1;
-                    while pi > 0 && chars[pi].is_whitespace() {
-                        pi -= 1;
-                    }
-                    let prev = chars[pi];
-                    // Look at next non-space char
-                    let mut ni = i + 1;
-                    while ni < chars.len() && chars[ni].is_whitespace() {
-                        ni += 1;
-                    }
-                    let prev_is_operand = prev.is_alphanumeric() || prev == '_' || prev == ')';
-                    let next_is_operand = ni < chars.len() && {
-                        let next = chars[ni];
-                        next.is_alphanumeric() || next == '_' || next == '('
-                    };
-                    prev_is_operand && next_is_operand
-                } else {
-                    false
-                };
-
-                if !is_modulo {
-                    return Some(i);
-                }
-            }
+    for i in 0..bytes.len() {
+        if bytes[i] == b'"' {
+            in_string = !in_string;
+        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            return Some(i);
         }
     }
 
@@ -137,11 +95,10 @@ fn find_comment_start(line: &str) -> Option<usize> {
 
 /// Parse a single rule
 pub fn parse_rule(line: &str) -> Result<Rule, String> {
-    // Remove trailing period if present
-    let line = line.trim_end_matches('.').trim();
+    let line = line.trim();
 
-    // Split by ":-"
-    let parts: Vec<&str> = line.split(":-").collect();
+    // Split by "<-"
+    let parts: Vec<&str> = line.split("<-").collect();
 
     if parts.len() == 1 {
         // Fact: just a head atom
@@ -161,7 +118,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
     let body = parse_body(body_str)?;
 
     // Check: if body is empty but head has variables, this is an invalid rule
-    // A rule with ":-" must have at least one body predicate
+    // A rule with "<-" must have at least one body predicate
     if body.is_empty() {
         // Check if head has any variables
         let has_head_vars = head.args.iter().any(|arg| matches!(arg, Term::Variable(_)));
@@ -206,13 +163,16 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
 /// Try to parse a comparison predicate (X = Y, X != 5, X < Y, etc.)
 /// Returns None if this is not a comparison, Ok(Some(...)) if it is
 fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
+    // Check for == and give a helpful error
+    if s.contains("==") {
+        return Err("Use '=' for equality, not '=='".to_string());
+    }
+
     // Check for comparison operators (order matters: check multi-char ops before single-char)
-    // Important: == must come before = to prevent partial matching
     let operators = [
         ("!=", ComparisonOp::NotEqual),
         ("<=", ComparisonOp::LessOrEqual),
         (">=", ComparisonOp::GreaterOrEqual),
-        ("==", ComparisonOp::Equal), // Must come before "="
         ("<", ComparisonOp::LessThan),
         (">", ComparisonOp::GreaterThan),
         ("=", ComparisonOp::Equal),
@@ -453,18 +413,6 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
             let func_name = s[..angle_pos].trim();
             let params = &s[angle_pos + 1..s.len() - 1];
 
-            // Handle <FUNC:VAR> syntax (function name inside angle brackets with colon)
-            if func_name.is_empty() && params.contains(':') {
-                if let Some(colon_pos) = params.find(':') {
-                    let inner_func = params[..colon_pos].trim();
-                    let inner_var = params[colon_pos + 1..].trim();
-                    if let Some(func) = AggregateFunc::parse(inner_func) {
-                        return Ok(Term::Aggregate(func, inner_var.to_string()));
-                    }
-                    return Err(format!("Unknown aggregate function: {inner_func}"));
-                }
-            }
-
             // Try standard aggregates first: func<params>
             if let Some(func) = AggregateFunc::parse(func_name) {
                 return Ok(Term::Aggregate(func, params.trim().to_string()));
@@ -556,7 +504,7 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
 
             // Boolean literals: true and false are special constants
             if s == "true" || s == "false" {
-                return Ok(Term::StringConstant(s.to_string()));
+                return Ok(Term::BoolConstant(s == "true"));
             }
 
             // Lowercase identifier - reject with helpful error message
@@ -868,7 +816,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_rule() {
-        let rule = parse_rule("path(X, Y) :- edge(X, Y)").unwrap();
+        let rule = parse_rule("path(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(rule.head.relation, "path");
         assert_eq!(rule.body.len(), 1);
         assert!(rule.body[0].is_positive());
@@ -876,7 +824,7 @@ mod tests {
 
     #[test]
     fn test_parse_rule_with_multiple_body_atoms() {
-        let rule = parse_rule("path(X, Z) :- edge(X, Y), edge(Y, Z)").unwrap();
+        let rule = parse_rule("path(X, Z) <- edge(X, Y), edge(Y, Z)").unwrap();
         assert_eq!(rule.head.relation, "path");
         assert_eq!(rule.body.len(), 2);
     }
@@ -884,8 +832,8 @@ mod tests {
     #[test]
     fn test_parse_program() {
         let source = "
-            path(X, Y) :- edge(X, Y).
-            path(X, Z) :- path(X, Y), edge(Y, Z).
+            path(X, Y) <- edge(X, Y)
+            path(X, Z) <- path(X, Y), edge(Y, Z)
         ";
 
         let program = parse_program(source).unwrap();
@@ -894,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_parse_with_negation() {
-        let rule = parse_rule("unreachable(X) :- node(X), !reach(X)").unwrap();
+        let rule = parse_rule("unreachable(X) <- node(X), !reach(X)").unwrap();
         assert_eq!(rule.body.len(), 2);
         assert!(rule.body[0].is_positive());
         assert!(rule.body[1].is_negated());
@@ -963,7 +911,7 @@ mod tests {
     #[test]
     fn test_parse_aggregation_rule() {
         let rule =
-            parse_rule("total_sales(Category, sum<Amount>) :- sales(Category, Amount).").unwrap();
+            parse_rule("total_sales(Category, sum<Amount>) <- sales(Category, Amount)").unwrap();
         assert_eq!(rule.head.relation, "total_sales");
         assert_eq!(rule.head.args.len(), 2);
         assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Category"));
@@ -976,7 +924,7 @@ mod tests {
     #[test]
     fn test_parse_count_rule() {
         let rule =
-            parse_rule("item_count(Category, count<Item>) :- inventory(Category, Item).").unwrap();
+            parse_rule("item_count(Category, count<Item>) <- inventory(Category, Item)").unwrap();
         assert_eq!(rule.head.relation, "item_count");
         assert!(rule.head.has_aggregates());
         assert_eq!(rule.head.aggregates().len(), 1);
@@ -1106,8 +1054,7 @@ mod tests {
 
     #[test]
     fn test_parse_rule_with_parens_in_body() {
-        // result_paren(X, R) :- nums(X), R = (X + 5) * 2.
-        let rule = parse_rule("result_paren(X, R) :- nums(X), R = (X + 5) * 2.").unwrap();
+        let rule = parse_rule("result_paren(X, R) <- nums(X), R = (X + 5) * 2").unwrap();
         assert_eq!(rule.head.relation, "result_paren");
         assert_eq!(rule.body.len(), 2);
         // Second body predicate should be a comparison R = Arithmetic(Mul(Add(X, 5), 2))
@@ -1154,8 +1101,7 @@ mod tests {
 
     #[test]
     fn test_parse_arithmetic_rule() {
-        // dist(Y, D+1) :- dist(X, D), edge(X, Y).
-        let rule = parse_rule("next_dist(Y, D+1) :- dist(X, D), edge(X, Y).").unwrap();
+        let rule = parse_rule("next_dist(Y, D+1) <- dist(X, D), edge(X, Y)").unwrap();
         assert_eq!(rule.head.relation, "next_dist");
         assert_eq!(rule.head.args.len(), 2);
         assert!(matches!(rule.head.args[0], Term::Variable(ref v) if v == "Y"));
@@ -1565,7 +1511,7 @@ mod tests {
     #[test]
     fn test_parse_top_k_rule() {
         // New syntax: pass-through vars go inside the aggregate
-        let rule = parse_rule("top_results(Id, top_k<10, Dist>) :- distances(Id, Dist).").unwrap();
+        let rule = parse_rule("top_results(Id, top_k<10, Dist>) <- distances(Id, Dist)").unwrap();
         assert_eq!(rule.head.relation, "top_results");
         assert_eq!(rule.head.args.len(), 2); // Id, top_k<...>
         assert_eq!(rule.head.effective_arity(), 2); // Id + Dist (1 output_var)
@@ -1626,39 +1572,39 @@ mod tests {
 
     #[test]
     fn test_find_comment_start_simple() {
-        let line = "edge(1, 2). % comment";
-        let pos = find_comment_start(line);
-        assert_eq!(pos, Some(12));
+        let line = "edge(1, 2) // comment";
+        let pos = find_double_slash_comment(line);
+        assert_eq!(pos, Some(11));
     }
 
     #[test]
     fn test_find_comment_start_no_comment() {
-        let line = "edge(1, 2).";
-        let pos = find_comment_start(line);
+        let line = "edge(1, 2)";
+        let pos = find_double_slash_comment(line);
         assert_eq!(pos, None);
     }
 
     #[test]
     fn test_find_comment_start_in_string_ignored() {
-        let line = r#"message("hello % world")."#;
-        let pos = find_comment_start(line);
+        let line = r#"message("hello // world")"#;
+        let pos = find_double_slash_comment(line);
         assert_eq!(pos, None);
     }
 
     #[test]
     fn test_find_comment_start_after_string() {
-        let line = r#"message("hello"). % comment"#;
-        let pos = find_comment_start(line);
-        assert_eq!(pos, Some(18));
+        let line = r#"message("hello") // comment"#;
+        let pos = find_double_slash_comment(line);
+        assert_eq!(pos, Some(17));
     }
 
     #[test]
     fn test_parse_program_with_line_comments() {
         let source = "
-            % This is a comment
-            path(X, Y) :- edge(X, Y).
-            % Another comment
-            path(X, Z) :- path(X, Y), edge(Y, Z).
+            // This is a comment
+            path(X, Y) <- edge(X, Y)
+            // Another comment
+            path(X, Z) <- path(X, Y), edge(Y, Z)
         ";
         let program = parse_program(source).unwrap();
         assert_eq!(program.rules.len(), 2);
@@ -1667,8 +1613,8 @@ mod tests {
     #[test]
     fn test_parse_program_with_inline_comments() {
         let source = "
-            path(X, Y) :- edge(X, Y). % base case
-            path(X, Z) :- path(X, Y), edge(Y, Z). % recursive case
+            path(X, Y) <- edge(X, Y) // base case
+            path(X, Z) <- path(X, Y), edge(Y, Z) // recursive case
         ";
         let program = parse_program(source).unwrap();
         assert_eq!(program.rules.len(), 2);
@@ -1678,12 +1624,12 @@ mod tests {
     fn test_parse_program_with_block_comments() {
         let source = "
             /* This rule defines direct paths */
-            path(X, Y) :- edge(X, Y).
+            path(X, Y) <- edge(X, Y)
             /*
              * This rule defines transitive paths
              * through recursive evaluation
              */
-            path(X, Z) :- path(X, Y), edge(Y, Z).
+            path(X, Z) <- path(X, Y), edge(Y, Z)
         ";
         let program = parse_program(source).unwrap();
         assert_eq!(program.rules.len(), 2);
@@ -1692,10 +1638,10 @@ mod tests {
     #[test]
     fn test_parse_program_with_mixed_comments() {
         let source = "
-            % Line comment
-            path(X, Y) :- edge(X, Y). % inline comment
+            // Line comment
+            path(X, Y) <- edge(X, Y) // inline comment
             /* Block comment */
-            path(X, Z) :- path(X, Y), edge(Y, Z).
+            path(X, Z) <- path(X, Y), edge(Y, Z)
         ";
         let program = parse_program(source).unwrap();
         assert_eq!(program.rules.len(), 2);
@@ -1704,7 +1650,7 @@ mod tests {
     #[test]
     fn test_parse_program_comment_only() {
         let source = "
-            % Just comments
+            // Just comments
             /* No rules here */
         ";
         let program = parse_program(source).unwrap();
@@ -1715,7 +1661,7 @@ mod tests {
     fn test_top_k_rule_failing_case() {
         // New syntax: Points:desc annotation inside aggregate
         let result =
-            parse_rule("top_players(Player, top_k<3, Points:desc>) :- score(Player, Points).");
+            parse_rule("top_players(Player, top_k<3, Points:desc>) <- score(Player, Points)");
         println!("Result: {:?}", result);
         let rule = result.unwrap();
         assert_eq!(rule.head.relation, "top_players");

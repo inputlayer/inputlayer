@@ -158,7 +158,7 @@ pub async fn get_view_data(
     let vars: Vec<String> = (0..arity)
         .map(|i| ((b'A' + i as u8) as char).to_string())
         .collect();
-    let query = format!("?- {}({}).", name, vars.join(", "));
+    let query = format!("?{}({})", name, vars.join(", "));
 
     let result = handler
         .query_program(Some(kg.clone()), query)

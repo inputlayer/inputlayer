@@ -1,0 +1,18 @@
+// Test: Divide Computed Column
+// Description: Tests division in rule head
+
+.kg create test_arith_div_n15t04
+.kg use test_arith_div_n15t04
+
+// Insert amounts: total(id, amount)
++total[(1, 100), (2, 200), (3, 150)]
+
+// Compute half value
+half(Id, Amount/2) <- total(Id, Amount)
+
+// Query halved values
+?half(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_arith_div_n15t04

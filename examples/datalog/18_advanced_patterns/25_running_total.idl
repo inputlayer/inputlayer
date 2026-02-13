@@ -1,0 +1,19 @@
+// Test: Running total pattern
+
+.kg create test_running_n18t25
+.kg use test_running_n18t25
+
++transactions[(1, 100), (2, 50), (3, 75), (4, 200), (5, 25)]
+
+// Running count (how many transactions up to and including this one)
+running_count(Id, count<OtherId>) <- transactions(Id, _), transactions(OtherId, _), OtherId <= Id
+
+?running_count(Id, Count)
+
+// Running sum (sum of all transactions up to and including this one)
+running_sum(Id, sum<Amt>) <- transactions(Id, _), transactions(OtherId, Amt), OtherId <= Id
+
+?running_sum(Id, Sum)
+
+.kg use default
+.kg drop test_running_n18t25

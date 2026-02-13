@@ -1,0 +1,14 @@
+// Test: Deduplication pattern
+
+.kg create test_dedup_n18t116
+.kg use test_dedup_n18t116
+
++records[(1, "Alice", "NYC"), (2, "Bob", "NYC"), (3, "Carol", "LA"), (4, "Dave", "NYC")]
+
+// Get unique cities
++unique_cities(City) <- records(_, _, City)
+
+?unique_cities(C)
+
+.kg use default
+.kg drop test_dedup_n18t116

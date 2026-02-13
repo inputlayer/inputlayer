@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_serializable_rule_roundtrip() {
-        let rule_str = "path(X, Y) :- edge(X, Y).";
+        let rule_str = "path(X, Y) <- edge(X, Y)";
         let rule = parse_rule(rule_str).unwrap();
         let serializable = SerializableRule::from_rule(&rule);
         let json = serde_json::to_string(&serializable).unwrap();

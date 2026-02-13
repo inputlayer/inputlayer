@@ -1,0 +1,14 @@
+// Test: Multiple comparison operations
+
+.kg create test_cmp_chain_n15t21
+.kg use test_cmp_chain_n15t21
+
++values[(1,), (5,), (10,), (15,), (20,)]
+
+// Value between 5 and 15 inclusive
+in_range(X) <- values(X), X >= 5, X <= 15
+
+?in_range(X)
+
+.kg use default
+.kg drop test_cmp_chain_n15t21

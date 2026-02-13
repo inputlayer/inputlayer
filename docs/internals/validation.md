@@ -256,18 +256,18 @@ impl ValidationLayer {
 Schemas follow the same session vs persistent pattern as rules:
 
 ```datalog
-% Persistent schema - saved with knowledge graph
-+user(id: int, name: string).
+// Persistent schema - saved with knowledge graph
++user(id: int, name: string)
 
-% Session schema - temporary, current connection only
-user(id: int, name: string).
+// Session schema - temporary, current connection only
+user(id: int, name: string)
 ```
 
 ### Lifecycle Comparison
 
 | Aspect | Session Schema | Persistent Schema |
 |--------|---------------|-------------------|
-| Syntax | `rel(col: type).` | `+rel(col: type).` |
+| Syntax | `rel(col: type)` | `+rel(col: type)` |
 | Storage | Memory only | Persisted to disk |
 | Lifetime | Until disconnect | Survives restart |
 | Use case | Scripts, testing | Production data |
@@ -284,13 +284,13 @@ Define the schema before inserting data. All inserts are validated immediately.
 .kg create mydb
 .kg use mydb
 
-% 1. Define schema
-+user(id: int, email: string, active: bool).
+// 1. Define schema
++user(id: int, email: string, active: bool)
 
-% 2. Insert data - each insert is validated
-+user(1, "alice@x.com", true).        % OK
-+user(2, "bob@x.com", false).         % OK
-+user("bad", "charlie@x.com", true).  % ERROR: "bad" is not int
+// 2. Insert data - each insert is validated
++user(1, "alice@x.com", true)        // OK
++user(2, "bob@x.com", false)         // OK
++user("bad", "charlie@x.com", true)  // ERROR: "bad" is not int
 ```
 
 **Advantages:**
@@ -300,21 +300,21 @@ Define the schema before inserting data. All inserts are validated immediately.
 
 **Bulk loading with schema-first:**
 ```datalog
-+product(sku: string, name: string, price: float).
++product(sku: string, name: string, price: float)
 
-% Bulk insert - all tuples validated before any are inserted
+// Bulk insert - all tuples validated before any are inserted
 +product[
     ("SKU001", "Widget", 9.99),
     ("SKU002", "Gadget", 19.99),
     ("SKU003", "Gizmo", 29.99)
-].
+]
 ```
 
 **File loading with schema-first:**
 ```datalog
-+sensor_reading(timestamp: int, sensor_id: string, value: float).
++sensor_reading(timestamp: int, sensor_id: string, value: float)
 
-% Load validates each row against schema
+// Load validates each row against schema
 .load sensors.csv into sensor_reading
 ```
 
@@ -325,14 +325,14 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 ```datalog
 .kg use mydb
 
-% 1. Insert data freely - no validation
-+user(1, "alice@x.com").
-+user(2, "bob@x.com").
-+user(3, "charlie@x.com").
+// 1. Insert data freely - no validation
++user(1, "alice@x.com")
++user(2, "bob@x.com")
++user(3, "charlie@x.com")
 
-% 2. Later, add schema - validates existing data
-+user(id: int, email: string).
-% Success: all existing data matches schema
+// 2. Later, add schema - validates existing data
++user(id: int, email: string)
+// Success: all existing data matches schema
 ```
 
 **Advantages:**
@@ -342,30 +342,30 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 
 **Schema-less behavior:**
 ```datalog
-% Without schema, anything goes
-+mixed(1, "text").
-+mixed("also text", 42).
-+mixed(true, [1.0, 2.0, 3.0]).
-% All accepted - no type enforcement
+// Without schema, anything goes
++mixed(1, "text")
++mixed("also text", 42)
++mixed(true, [1.0, 2.0, 3.0])
+// All accepted - no type enforcement
 ```
 
 **Adding schema to existing data:**
 ```datalog
-% Existing data
-+event(1, "click", 1704067200).
-+event(2, "view", 1704067260).
+// Existing data
++event(1, "click", 1704067200)
++event(2, "view", 1704067260)
 
-% Try to add schema
-+event(id: int, type: string, timestamp: int).
-% Success: existing data matches
+// Try to add schema
++event(id: int, type: string, timestamp: int)
+// Success: existing data matches
 
-% But if data doesn't match...
-+log(1, "info", "message").
-+log("bad", "error", "another").  % String in first column
+// But if data doesn't match...
++log(1, "info", "message")
++log("bad", "error", "another")  // String in first column
 
-+log(id: int, level: string, msg: string).
-% ERROR: Existing data violates schema
-%   Row ("bad", "error", "another"): column 'id' expected int, got string
++log(id: int, level: string, msg: string)
+// ERROR: Existing data violates schema
+//   Row ("bad", "error", "another"): column 'id' expected int, got string
 ```
 
 ### Schema Rejection on Type Mismatch
@@ -373,21 +373,21 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 If existing data doesn't match the proposed schema, the schema definition is **rejected** (not the data):
 
 ```datalog
-+user(1, "alice").
-+user("not-an-int", "bob").     % String in first column - allowed without schema
++user(1, "alice")
++user("not-an-int", "bob")     // String in first column - allowed without schema
 
-+user(id: int, name: string).
-% Error: Cannot register schema for 'user'
-%   Existing data violates type requirements
-%   Row ("not-an-int", "bob"): column 'id' expected int, got string
-%   Fix the data before registering the schema
++user(id: int, name: string)
+// Error: Cannot register schema for 'user'
+//   Existing data violates type requirements
+//   Row ("not-an-int", "bob"): column 'id' expected int, got string
+//   Fix the data before registering the schema
 ```
 
 The user must fix the data first:
 
 ```datalog
--user("not-an-int", "bob").     % Remove bad row
-+user(id: int, name: string).   % Now schema can be registered
+-user("not-an-int", "bob")     // Remove bad row
++user(id: int, name: string)   // Now schema can be registered
 ```
 
 ### Mixed Workflow
@@ -395,19 +395,19 @@ The user must fix the data first:
 You can switch between modes as needed:
 
 ```datalog
-% Start schema-less for exploration
-+experiment(1, "trial-a", 0.5).
-+experiment(2, "trial-b", 0.7).
+// Start schema-less for exploration
++experiment(1, "trial-a", 0.5)
++experiment(2, "trial-b", 0.7)
 
-% Query and analyze
-?- experiment(Id, Name, Score), Score > 0.6.
+// Query and analyze
+?experiment(Id, Name, Score), Score > 0.6
 
-% Happy with structure? Lock it down with persistent schema
-+experiment(id: int, name: string, score: float).
+// Happy with structure? Lock it down with persistent schema
++experiment(id: int, name: string, score: float)
 
-% Future inserts are now validated
-+experiment(3, "trial-c", 0.8).     % OK
-+experiment("bad", "trial-d", 0.9). % ERROR
+// Future inserts are now validated
++experiment(3, "trial-c", 0.8)     // OK
++experiment("bad", "trial-d", 0.9) // ERROR
 ```
 
 ### Session Schema for Testing
@@ -415,16 +415,16 @@ You can switch between modes as needed:
 Use session schemas to temporarily validate without persisting:
 
 ```datalog
-% Production has no schema (legacy data)
-% But you want to validate a batch before inserting
+// Production has no schema (legacy data)
+// But you want to validate a batch before inserting
 
-% Define session schema (not persisted)
-user(id: int, email: string).
+// Define session schema (not persisted)
+user(id: int, email: string)
 
-% Test your data
-+user(1, "test@x.com").  % Validated against session schema
+// Test your data
++user(1, "test@x.com")  // Validated against session schema
 
-% Clear session when done
+// Clear session when done
 .session clear
 ```
 
@@ -601,9 +601,9 @@ vector_type ::= "vector" "[" integer "]" ;
 
 Examples:
 ```datalog
-+user(id: int, name: string, active: bool).
-+embedding(id: int, vec: vector[128]).
-product(sku: string, price: float).  % Session schema
++user(id: int, name: string, active: bool)
++embedding(id: int, vec: vector[128])
+product(sku: string, price: float)  // Session schema
 ```
 
 ## Error Messages

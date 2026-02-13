@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_union3_n22t28
+Knowledge graph 'test_union3_n22t28' created.
+Switched to knowledge graph: test_union3_n22t28
+> .kg use test_union3_n22t28
+Switched to knowledge graph: test_union3_n22t28
+> +set_a[(1,), (2,)]
+Inserted 2 fact(s) into 'set_a'.
+> +set_b[(2,), (3,)]
+Inserted 2 fact(s) into 'set_b'.
+> +set_c[(3,), (4,)]
+Inserted 2 fact(s) into 'set_c'.

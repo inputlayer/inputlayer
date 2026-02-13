@@ -29,13 +29,13 @@ With an HNSW index:
 ### Simple Example
 
 ```datalog
-% Create a documents table with embeddings
-+documents(id: int, title: string, embedding: vector).
+// Create a documents table with embeddings
++documents(id: int, title: string, embedding: vector)
 
-% Insert some documents
-+documents(1, "Introduction to ML", [0.1, 0.2, 0.3, 0.4]).
-+documents(2, "Vector Databases", [0.15, 0.25, 0.28, 0.42]).
-+documents(3, "Graph Theory", [0.8, 0.1, 0.05, 0.05]).
+// Insert some documents
++documents(1, "Introduction to ML", [0.1, 0.2, 0.3, 0.4])
++documents(2, "Vector Databases", [0.15, 0.25, 0.28, 0.42])
++documents(3, "Graph Theory", [0.8, 0.1, 0.05, 0.05])
 ```
 
 ```
@@ -166,16 +166,16 @@ Indexes are used automatically when you perform vector similarity searches. The 
 ### Automatic Index Usage
 
 ```datalog
-% Query vector (from your embedding model)
-query_vec([0.11, 0.21, 0.29]).
+// Query vector (from your embedding model)
+query_vec([0.11, 0.21, 0.29])
 
-% Find similar documents - index is used automatically
-+similar(Id, Title, top_k<10, Dist>) :-
+// Find similar documents - index is used automatically
++similar(Id, Title, top_k<10, Dist>) <-
     query_vec(QV),
     documents(Id, Title, V),
-    Dist = cosine(QV, V).
+    Dist = cosine(QV, V)
 
-?- similar(Id, Title, Dist).
+?similar(Id, Title, Dist)
 ```
 
 ### Index Selection
@@ -188,11 +188,11 @@ If multiple indexes exist on the same column, the one matching the distance func
 ```
 
 ```datalog
-% Uses idx_cosine (matches cosine distance function)
-?- docs(Id, _, V), D = cosine([0.1, 0.2], V).
+// Uses idx_cosine (matches cosine distance function)
+?docs(Id, _, V), D = cosine([0.1, 0.2], V)
 
-% Uses idx_l2 (matches euclidean distance function)
-?- docs(Id, _, V), D = euclidean([0.1, 0.2], V).
+// Uses idx_l2 (matches euclidean distance function)
+?docs(Id, _, V), D = euclidean([0.1, 0.2], V)
 ```
 
 ---
@@ -333,7 +333,7 @@ For large initial loads, create the index first:
 ```
 .index create my_idx on docs(emb)
 
-% Then bulk insert
+// Then bulk insert
 +docs[(1, "...", [0.1, ...]),
       (2, "...", [0.2, ...]),
       ...].
@@ -372,7 +372,7 @@ Higher dimensions = more memory, slower search.
 **Debug**:
 ```
 .index stats my_idx
-?- documents(Id, _, V).  % Check if data exists
+?documents(Id, _, V)  // Check if data exists
 ```
 
 ### Poor Search Quality
@@ -384,13 +384,13 @@ Higher dimensions = more memory, slower search.
 
 **Solutions**:
 ```
-% Check metric matches embedding type
+// Check metric matches embedding type
 .index stats my_idx
 
-% Increase ef_search
+// Increase ef_search
 .index create my_idx on docs(emb) ef_search 100
 
-% Rebuild to remove tombstones
+// Rebuild to remove tombstones
 .index rebuild my_idx
 ```
 

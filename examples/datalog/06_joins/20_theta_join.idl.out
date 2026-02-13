@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_theta_n06t20
+Knowledge graph 'test_theta_n06t20' created.
+Switched to knowledge graph: test_theta_n06t20
+> .kg use test_theta_n06t20
+Switched to knowledge graph: test_theta_n06t20
+> +products[(1, "Widget", 50), (2, "Gadget", 100), (3, "Gizmo", 75)]
+Inserted 3 fact(s) into 'products'.
+> +budgets[(1, "Alice", 80), (2, "Bob", 120)]
+Inserted 2 fact(s) into 'budgets'.

@@ -1,0 +1,21 @@
+// Test: Mixed session and persistent rules
+
+.kg create test_mixed_n25t03
+.kg use test_mixed_n25t03
+
++base[(1,), (2,), (3,)]
+
+// Persistent rule
++doubled(X, Y) <- base(X), Y = X * 2
+
+// Session rule
+tripled(X, Y) <- base(X), Y = X * 3
+
+?doubled(X, Y)
+
+?tripled(X, Y)
+
+.rule
+
+.kg use default
+.kg drop test_mixed_n25t03

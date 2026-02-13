@@ -1,0 +1,35 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bulk_delete_n27t03
+Knowledge graph 'test_bulk_delete_n27t03' created.
+Switched to knowledge graph: test_bulk_delete_n27t03
+> .kg use test_bulk_delete_n27t03
+Switched to knowledge graph: test_bulk_delete_n27t03
+> +entry(1, 1)
+Inserted 1 fact(s) into 'entry'.
+> +entry(2, 2)
+Inserted 1 fact(s) into 'entry'.
+> +entry(3, 1)
+Inserted 1 fact(s) into 'entry'.
+> +entry(4, 2)
+Inserted 1 fact(s) into 'entry'.
+> +entry(5, 1)
+Inserted 1 fact(s) into 'entry'.
+> +entry(6, 3)
+Inserted 1 fact(s) into 'entry'.
+> ?entry(Id, Type)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    2 │
+│    3 │    1 │
+│    4 │    2 │
+│    5 │    1 │
+│    6 │    3 │
+└──────┴──────┘
+6 rows

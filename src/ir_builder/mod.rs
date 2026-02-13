@@ -108,6 +108,12 @@ impl IRBuilder {
                                 predicate: Predicate::ColumnEqFloat(i, *f),
                             };
                         }
+                        Term::BoolConstant(b) => {
+                            scan = IRNode::Filter {
+                                input: Box::new(scan),
+                                predicate: Predicate::ColumnEqBool(i, *b),
+                            };
+                        }
                         _ => {} // Variables, placeholders, aggregates, etc. - no filter needed
                     }
                 }
@@ -170,6 +176,8 @@ impl IRBuilder {
                 Term::FloatConstant(_) => format!("_float_a{atom_idx}_c{i}"),
                 // String constants - generate a name
                 Term::StringConstant(_) => format!("_str_a{atom_idx}_c{i}"),
+                // Bool constants - generate a name
+                Term::BoolConstant(_) => format!("_bool_a{atom_idx}_c{i}"),
                 // Field access - use the field name
                 Term::FieldAccess(_, field) => field.clone(),
                 // Record pattern - generate a name
@@ -264,6 +272,12 @@ impl IRBuilder {
                         predicate: Predicate::ColumnEqFloat(i, *f),
                     };
                 }
+                Term::BoolConstant(b) => {
+                    right = IRNode::Filter {
+                        input: Box::new(right),
+                        predicate: Predicate::ColumnEqBool(i, *b),
+                    };
+                }
                 _ => {} // Variables, placeholders, etc. - no filter needed
             }
         }
@@ -308,6 +322,7 @@ impl IRBuilder {
             if right_col.starts_with("_const_")
                 || right_col.starts_with("_str_")
                 || right_col.starts_with("_float_")
+                || right_col.starts_with("_bool_")
                 || right_col.starts_with("_ph_")
                 || right_col.starts_with("expr")
                 || right_col.starts_with("func")
@@ -436,6 +451,12 @@ impl IRBuilder {
                     (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
                         Some((v, IRExpression::StringConstant(val.clone())))
                     }
+                    (Term::Variable(v), Term::BoolConstant(val)) if !schema.contains(v) => {
+                        Some((v, IRExpression::BoolConstant(*val)))
+                    }
+                    (Term::BoolConstant(val), Term::Variable(v)) if !schema.contains(v) => {
+                        Some((v, IRExpression::BoolConstant(*val)))
+                    }
                     _ => None,
                 } {
                     expressions.push((var_name.clone(), ir_expr));
@@ -537,6 +558,7 @@ impl IRBuilder {
             Term::Constant(val) => Ok(IRExpression::IntConstant(*val)),
             Term::FloatConstant(val) => Ok(IRExpression::FloatConstant(*val)),
             Term::StringConstant(s) => Ok(IRExpression::StringConstant(s.clone())),
+            Term::BoolConstant(b) => Ok(IRExpression::BoolConstant(*b)),
             Term::VectorLiteral(v) => {
                 // Convert f64 to f32 for IR representation
                 let v32: Vec<f32> = v.iter().map(|&x| x as f32).collect();
@@ -616,13 +638,19 @@ impl IRBuilder {
                 !(schema.contains(v1) && schema.contains(v2))
             }
 
-            // Constant/float/string assignment: only if the variable is new (not in schema)
+            // Constant/float/string/bool assignment: only if the variable is new (not in schema)
             (
                 Term::Variable(v),
-                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                Term::Constant(_)
+                | Term::FloatConstant(_)
+                | Term::StringConstant(_)
+                | Term::BoolConstant(_),
             )
             | (
-                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_),
+                Term::Constant(_)
+                | Term::FloatConstant(_)
+                | Term::StringConstant(_)
+                | Term::BoolConstant(_),
                 Term::Variable(v),
             ) => !schema.contains(v),
 
@@ -759,6 +787,45 @@ impl IRBuilder {
                     ComparisonOp::LessOrEqual => left_val <= right_val,
                     ComparisonOp::GreaterThan => left_val > right_val,
                     ComparisonOp::GreaterOrEqual => left_val >= right_val,
+                };
+                Ok(if result {
+                    Predicate::True
+                } else {
+                    Predicate::False
+                })
+            }
+            // Variable vs Bool constant
+            (Term::Variable(var), Term::BoolConstant(val)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqBool(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeBool(col, *val)),
+                    _ => Err(format!(
+                        "Unsupported comparison operator {op:?} for boolean values"
+                    )),
+                }
+            }
+            // Bool constant vs Variable (swap operands)
+            (Term::BoolConstant(val), Term::Variable(var)) => {
+                let col = get_col(var)?;
+                match op {
+                    ComparisonOp::Equal => Ok(Predicate::ColumnEqBool(col, *val)),
+                    ComparisonOp::NotEqual => Ok(Predicate::ColumnNeBool(col, *val)),
+                    _ => Err(format!(
+                        "Unsupported comparison operator {op:?} for boolean values"
+                    )),
+                }
+            }
+            // Bool constant vs Bool constant: evaluate at compile time
+            (Term::BoolConstant(left_val), Term::BoolConstant(right_val)) => {
+                let result = match op {
+                    ComparisonOp::Equal => left_val == right_val,
+                    ComparisonOp::NotEqual => left_val != right_val,
+                    _ => {
+                        return Err(format!(
+                            "Unsupported comparison operator {op:?} for boolean values"
+                        ))
+                    }
                 };
                 Ok(if result {
                     Predicate::True
@@ -1012,7 +1079,10 @@ impl IRBuilder {
         let has_constants = head.args.iter().any(|t| {
             matches!(
                 t,
-                Term::Constant(_) | Term::FloatConstant(_) | Term::StringConstant(_)
+                Term::Constant(_)
+                    | Term::FloatConstant(_)
+                    | Term::StringConstant(_)
+                    | Term::BoolConstant(_)
             )
         });
         if head.has_arithmetic() || has_constants {
@@ -1070,6 +1140,12 @@ impl IRBuilder {
                     // Should not reach here - handled by has_constants check above
                     unreachable!(
                         "String constants should be handled by build_projection_with_computed"
+                    );
+                }
+                Term::BoolConstant(_) => {
+                    // Should not reach here - handled by has_constants check above
+                    unreachable!(
+                        "Bool constants should be handled by build_projection_with_computed"
                     );
                 }
                 Term::FieldAccess(_, _) => {
@@ -1205,6 +1281,25 @@ impl IRBuilder {
                     if std::env::var("IL_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] StringConstant({s}) -> compute col {computed_col_idx} ({col_name})"
+                        );
+                    }
+                }
+                Term::BoolConstant(b) => {
+                    // Bool constants in head are computed as constant columns
+                    let ir_expr = IRExpression::BoolConstant(*b);
+
+                    // Generate a name for the constant column
+                    let col_name = format!("_bconst_{head_idx}");
+                    compute_expressions.push((col_name.clone(), ir_expr));
+
+                    // The computed column will be appended at the end of extended schema
+                    let computed_col_idx = extended_schema.len();
+                    extended_schema.push(col_name.clone());
+                    final_projection.push(computed_col_idx);
+                    final_output_schema.push(col_name.clone());
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "  head[{head_idx}] BoolConstant({b}) -> compute col {computed_col_idx} ({col_name})"
                         );
                     }
                 }
@@ -1447,6 +1542,9 @@ impl IRBuilder {
                 Term::StringConstant(_) => {
                     return Err("String constants in aggregation head not supported".to_string());
                 }
+                Term::BoolConstant(_) => {
+                    return Err("Bool constants in aggregation head not supported".to_string());
+                }
                 Term::FieldAccess(_, _) => {
                     return Err("Field access in aggregation head not supported".to_string());
                 }
@@ -1521,7 +1619,7 @@ mod tests {
         let catalog = make_catalog();
         let builder = IRBuilder::new(catalog);
 
-        // result(x, y) :- edge(x, y)
+        // result(x, y) <- edge(x, y)
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1550,7 +1648,7 @@ mod tests {
         let catalog = make_catalog();
         let builder = IRBuilder::new(catalog);
 
-        // result(x, z) :- edge(x, y), edge(y, z)
+        // result(x, z) <- edge(x, y), edge(y, z)
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1598,7 +1696,7 @@ mod tests {
     #[test]
     fn test_string_constant_in_body_atom() {
         // Tests that string constants in body atoms create proper filters
-        // e.g., active(Id, Name) :- user(Id, Name, "true")
+        // e.g., active(Id, Name) <- user(Id, Name, "true")
         let mut catalog = Catalog::new();
         catalog.register_relation(
             "user".to_string(),
@@ -1606,7 +1704,7 @@ mod tests {
         );
         let builder = IRBuilder::new(catalog);
 
-        // active(Id, Name) :- user(Id, Name, "true")
+        // active(Id, Name) <- user(Id, Name, "true")
         let rule = Rule::new_simple(
             Atom::new(
                 "active".to_string(),
@@ -1661,13 +1759,13 @@ mod tests {
     #[test]
     fn test_integer_constant_in_head() {
         // Tests that integer constants in rule heads create Compute nodes
-        // e.g., result(X, 42) :- data(X)
+        // e.g., result(X, 42) <- data(X)
         let mut catalog = Catalog::new();
         catalog.register_relation("data".to_string(), vec!["x".to_string()]);
 
         let builder = IRBuilder::new(catalog);
 
-        // result(X, 42) :- data(X).
+        // result(X, 42) <- data(X).
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1713,13 +1811,13 @@ mod tests {
     #[test]
     fn test_float_constant_in_head() {
         // Tests that float constants in rule heads create Compute nodes
-        // e.g., result(X, 3.14) :- data(X)
+        // e.g., result(X, 3.14) <- data(X)
         let mut catalog = Catalog::new();
         catalog.register_relation("data".to_string(), vec!["x".to_string()]);
 
         let builder = IRBuilder::new(catalog);
 
-        // result(X, 3.14) :- data(X).
+        // result(X, 3.14) <- data(X).
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1765,13 +1863,13 @@ mod tests {
     #[test]
     fn test_string_constant_in_head() {
         // Tests that string constants in rule heads create Compute nodes
-        // e.g., result(X, "active") :- data(X)
+        // e.g., result(X, "active") <- data(X)
         let mut catalog = Catalog::new();
         catalog.register_relation("data".to_string(), vec!["x".to_string()]);
 
         let builder = IRBuilder::new(catalog);
 
-        // result(X, "active") :- data(X).
+        // result(X, "active") <- data(X).
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1820,13 +1918,13 @@ mod tests {
     #[test]
     fn test_mixed_constants_in_head() {
         // Tests that mixed constant types in rule heads all work together
-        // e.g., result(X, 42, 3.14, "label") :- data(X)
+        // e.g., result(X, 42, 3.14, "label") <- data(X)
         let mut catalog = Catalog::new();
         catalog.register_relation("data".to_string(), vec!["x".to_string()]);
 
         let builder = IRBuilder::new(catalog);
 
-        // result(X, 42, 3.14, "label") :- data(X).
+        // result(X, 42, 3.14, "label") <- data(X).
         let rule = Rule::new_simple(
             Atom::new(
                 "result".to_string(),
@@ -1883,7 +1981,7 @@ mod tests {
     #[test]
     fn test_float_constant_in_body_atom() {
         // Tests that float constants in body atoms create proper ColumnEqFloat filters
-        // e.g., cheap(Id, Name) :- product(Id, Name, 9.99)
+        // e.g., cheap(Id, Name) <- product(Id, Name, 9.99)
         let mut catalog = Catalog::new();
         catalog.register_relation(
             "product".to_string(),
@@ -1892,7 +1990,7 @@ mod tests {
 
         let builder = IRBuilder::new(catalog);
 
-        // cheap(Id, Name) :- product(Id, Name, 9.99)
+        // cheap(Id, Name) <- product(Id, Name, 9.99)
         let rule = Rule::new_simple(
             Atom::new(
                 "cheap".to_string(),

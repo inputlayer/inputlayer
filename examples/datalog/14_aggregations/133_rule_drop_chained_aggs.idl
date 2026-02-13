@@ -1,0 +1,27 @@
+// Test: Drop rule in a chain of aggregations
+// Description: Tests dropping an intermediate rule in a chain: data -> agg1 -> agg2
+
+.kg create test_drop_chain_n14t133
+.kg use test_drop_chain_n14t133
+
++sales[("US", "Widget", 100), ("US", "Gadget", 200), ("US", "Widget", 150),
+       ("EU", "Widget", 300), ("EU", "Gadget", 250)]
+
+// First aggregation: sum per region-product
++product_total(Region, Product, sum<Amount>) <- sales(Region, Product, Amount)
+
+?product_total(R, P, T)
+
+// Second aggregation: max product total per region
++region_best(Region, max<Total>) <- product_total(Region, _, Total)
+
+?region_best(R, M)
+
+// Drop the first aggregation rule - second should become empty
+.rule drop product_total
+
+?product_total(R, P, T)
+?region_best(R, M)
+
+.kg use default
+.kg drop test_drop_chain_n14t133

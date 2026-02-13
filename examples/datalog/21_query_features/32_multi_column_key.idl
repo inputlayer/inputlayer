@@ -1,0 +1,12 @@
+// Test: Multi-column key lookup
+
+.kg create test_multi_col_n21t32
+.kg use test_multi_col_n21t32
+
++inventory[(1, "A", 100), (1, "B", 200), (2, "A", 150), (2, "B", 250)]
+
+// Query with multi-column filter
+?inventory(1, "A", Qty)
+
+.kg use default
+.kg drop test_multi_col_n21t32

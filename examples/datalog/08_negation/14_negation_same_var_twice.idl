@@ -1,0 +1,21 @@
+// Test: Negation with Same Variable Twice
+// Description: Tests negation where the same variable appears in both positive and negative atoms
+
+.kg create test_neg_same_var_n08t14
+.kg use test_neg_same_var_n08t14
+
+// Friendships
++friend[(1, 2), (1, 3), (2, 3), (2, 4), (3, 4), (3, 5)]
+
+// Blocked relationships
++blocked[(1, 3), (2, 4)]
+
+// Find friends that aren't blocked (same pair of variables)
++allowed_friend(X, Y) <- friend(X, Y), !blocked(X, Y)
+?allowed_friend(X, Y)
+
+// Should return: (1, 2), (2, 3), (3, 4), (3, 5)
+
+// Cleanup
+.kg use default
+.kg drop test_neg_same_var_n08t14

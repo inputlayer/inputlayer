@@ -1,0 +1,17 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_intersect3_n22t08
+Knowledge graph 'test_intersect3_n22t08' created.
+Switched to knowledge graph: test_intersect3_n22t08
+> .kg use test_intersect3_n22t08
+Switched to knowledge graph: test_intersect3_n22t08
+> +set_a[(1,), (2,), (3,)]
+Inserted 3 fact(s) into 'set_a'.
+> +set_b[(2,), (3,), (4,)]
+Inserted 3 fact(s) into 'set_b'.
+> +set_c[(3,), (4,), (5,)]
+Inserted 3 fact(s) into 'set_c'.

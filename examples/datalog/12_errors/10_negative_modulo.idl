@@ -1,0 +1,30 @@
+// Test: Negative Modulo Behavior
+// Verifies: Modulo operation with negative numbers
+
+.kg create test_neg_mod_n12t10
+.kg use test_neg_mod_n12t10
+
+// Test cases for modulo with negative numbers
+// Different languages handle this differently!
+// Rust (like C): -5 % 3 = -2
+// Python: -5 % 3 = 1
+
++mod_cases[(10, 3), (11, 3), (12, 3),
+           (-10, 3), (-11, 3), (-12, 3),
+           (10, -3), (11, -3), (12, -3),
+           (-10, -3), (-11, -3), (-12, -3)]
+
+// Compute modulo for all cases
++mod_result(X, Y, X%Y) <- mod_cases(X, Y)
+?mod_result(A, B, C)
+
+// Expected results depend on implementation:
+// If using Rust/C semantics:
+//   10 % 3 = 1, 11 % 3 = 2, 12 % 3 = 0
+//   -10 % 3 = -1, -11 % 3 = -2, -12 % 3 = 0
+//   10 % -3 = 1, 11 % -3 = 2, 12 % -3 = 0
+//   -10 % -3 = -1, -11 % -3 = -2, -12 % -3 = 0
+
+// Cleanup
+.kg use default
+.kg drop test_neg_mod_n12t10

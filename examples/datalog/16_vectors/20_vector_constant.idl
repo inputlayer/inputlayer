@@ -1,0 +1,12 @@
+// Test: Vector constant in query
+
+.kg create test_vec_const_n16t20
+.kg use test_vec_const_n16t20
+
++vectors[(1, [1, 2, 3]), (2, [4, 5, 6]), (3, [1, 2, 3])]
+
+// Find entries with specific vector
+?vectors(Id, [1, 2, 3])
+
+.kg use default
+.kg drop test_vec_const_n16t20

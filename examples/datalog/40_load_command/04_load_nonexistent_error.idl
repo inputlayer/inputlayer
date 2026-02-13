@@ -1,0 +1,5 @@
+// Test: .load Nonexistent File Error
+// Description: Tests error handling when loading a file that doesn't exist
+
+// Try to load a file that doesn't exist - should produce an error
+.load examples/datalog/nonexistent_file_that_does_not_exist.dl

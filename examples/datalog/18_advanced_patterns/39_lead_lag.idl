@@ -1,0 +1,19 @@
+// Test: Lead/lag pattern simulation
+
+.kg create test_lead_lag_n18t39
+.kg use test_lead_lag_n18t39
+
++time_series[(1, 100), (2, 110), (3, 105), (4, 120)]
+
+// Lag: previous value (if exists)
+lag(T, Val, PrevVal) <- time_series(T, Val), T1 = T - 1, time_series(T1, PrevVal)
+
+?lag(T, Val, PrevVal)
+
+// Lead: next value (if exists)
+lead(T, Val, NextVal) <- time_series(T, Val), T1 = T + 1, time_series(T1, NextVal)
+
+?lead(T, Val, NextVal)
+
+.kg use default
+.kg drop test_lead_lag_n18t39

@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_unicode_n10t126
+Knowledge graph 'test_unicode_n10t126' created.
+Switched to knowledge graph: test_unicode_n10t126
+> .kg use test_unicode_n10t126
+Switched to knowledge graph: test_unicode_n10t126
+> +names[("Alice",), ("Böb",), ("日本語",), ("émoji",)]
+Inserted 4 fact(s) into 'names'.
+> ?names(N)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Böb"   │
+│ "émoji" │
+│ "日本語"   │
+└─────────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unicode_n10t126
+Knowledge graph 'test_unicode_n10t126' dropped.

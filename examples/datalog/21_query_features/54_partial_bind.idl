@@ -1,0 +1,15 @@
+// Test: Partial binding in query
+
+.kg create test_partial_n21t54
+.kg use test_partial_n21t54
+
++data[(1, "a", 100), (2, "a", 200), (3, "b", 100)]
+
+// First column bound, rest free
+?data(1, Y, Z)
+
+// Middle column bound
+?data(X, "a", Z)
+
+.kg use default
+.kg drop test_partial_n21t54

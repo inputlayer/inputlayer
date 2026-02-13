@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_closure_data_n09t72
+Knowledge graph 'test_closure_data_n09t72' created.
+Switched to knowledge graph: test_closure_data_n09t72
+> .kg use test_closure_data_n09t72
+Switched to knowledge graph: test_closure_data_n09t72
+> +edge[(1, 2, "road"), (2, 3, "highway"), (3, 4, "road")]
+Inserted 3 fact(s) into 'edge'.

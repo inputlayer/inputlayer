@@ -1,0 +1,22 @@
+// Test basic join query optimization
+// This demonstrates a join pattern that benefits from SIP optimization
+// when enabled in the OptimizationConfig.
+
+// Setup: Create test KG
+.kg create test_sip_basic_n80t01
+.kg use test_sip_basic_n80t01
+
+// Base relations - users and their orders
+// SIP would filter orders to only those with user_id in users,
+// reducing intermediate results before the join.
++user[(1, "alice"), (2, "bob"), (3, "charlie")]
++order[(101, 1, 100), (102, 1, 200), (103, 2, 150), (104, 5, 300)]
+
+// Query joining users with orders
+// Without SIP: join processes all 3 users x 4 orders = 12 tuple comparisons
+// With SIP: filter orders first (3 match), then join = 3 users x 3 orders
+?user(UserId, Name), order(OrderId, UserId, Amount)
+
+// Cleanup
+.kg use default
+.kg drop test_sip_basic_n80t01

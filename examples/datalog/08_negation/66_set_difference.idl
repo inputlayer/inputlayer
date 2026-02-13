@@ -1,0 +1,15 @@
+// Test: Set difference via negation
+
+.kg create test_set_diff_n08t66
+.kg use test_set_diff_n08t66
+
++set_a[(1,), (2,), (3,), (4,), (5,)]
++set_b[(2,), (4,)]
+
+// A - B (elements in A but not in B)
++difference(X) <- set_a(X), !set_b(X)
+
+?difference(X)
+
+.kg use default
+.kg drop test_set_diff_n08t66

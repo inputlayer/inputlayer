@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_long_str_n10t80
+Knowledge graph 'test_long_str_n10t80' created.
+Switched to knowledge graph: test_long_str_n10t80
+> .kg use test_long_str_n10t80
+Switched to knowledge graph: test_long_str_n10t80
+> +data[(1, "this_is_a_very_long_string_that_goes_on_and_on_and_on_for_quite_some_time_to_test_handling_of_longer_values")]
+Inserted 1 fact(s) into 'data'.

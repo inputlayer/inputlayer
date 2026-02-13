@@ -1,0 +1,42 @@
+// Test: Role-Based Access Control (RBAC) Permissions
+// Verifies: Permission inheritance through role hierarchies
+
+.kg create test_rbac_n20t01
+.kg use test_rbac_n20t01
+
+// Role hierarchy: admin -> manager -> employee -> guest
+// role_inherits(child_role, parent_role)
++role_inherits[(1, 2), (2, 3), (3, 4)].  // admin(1) < manager(2) < employee(3) < guest(4)
+
+// Direct role assignments
+// user_role(user_id, role_id)
++user_role[(100, 1), (101, 2), (102, 3), (103, 4)]
+
+// Direct permissions for roles
+// role_permission(role_id, permission_id)
++role_permission[(1, 1000), (1, 1001),   // admin: delete, admin_panel
+                 (2, 1002), (2, 1003),   // manager: approve, reports
+                 (3, 1004), (3, 1005),   // employee: read, write
+                 (4, 1006)].             // guest: public_read
+
+// Inherited role membership (transitive)
++has_role(User, Role) <- user_role(User, Role)
++has_role(User, ParentRole) <- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole)
+
+// Effective permissions (direct + inherited)
++has_permission(User, Perm) <- has_role(User, Role), role_permission(Role, Perm)
+
+// Query: What roles does each user have?
+?has_role(User, Role)
+
+// Query: What permissions does user 100 (admin) have?
++admin_perms(Perm) <- has_permission(100, Perm)
+?admin_perms(P)
+
+// Query: What permissions does user 102 (employee) have?
++employee_perms(Perm) <- has_permission(102, Perm)
+?employee_perms(P)
+
+// Cleanup
+.kg use default
+.kg drop test_rbac_n20t01

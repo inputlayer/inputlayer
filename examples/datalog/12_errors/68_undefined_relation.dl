@@ -1,9 +1,0 @@
-% Test: Query on undefined relation
-
-.kg create test_undef_rel_n12t68
-.kg use test_undef_rel_n12t68
-
-?- nonexistent_relation(X, Y).
-
-.kg use default
-.kg drop test_undef_rel_n12t68

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_radius_mixed_n14t146
+Knowledge graph 'test_radius_mixed_n14t146' created.
+Switched to knowledge graph: test_radius_mixed_n14t146
+> .kg use test_radius_mixed_n14t146
+Switched to knowledge graph: test_radius_mixed_n14t146
+> +point[(1, 0.1), (2, 0.5), (3, 1.5)]
+Inserted 3 fact(s) into 'point'.

@@ -1,0 +1,18 @@
+// Test: Sum and Average aggregations
+
+.kg create test_sum_avg_n14t90
+.kg use test_sum_avg_n14t90
+
+// Sample data
++sales[(1, 100), (1, 150), (1, 200), (2, 300), (2, 250)]
+
+// Sum per group
++total_sales(Group, sum<Amount>) <- sales(Group, Amount)
+?total_sales(G, T)
+
+// Average per group
++avg_sales(Group, avg<Amount>) <- sales(Group, Amount)
+?avg_sales(G, A)
+
+.kg use default
+.kg drop test_sum_avg_n14t90

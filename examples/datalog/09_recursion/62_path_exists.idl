@@ -1,0 +1,17 @@
+// Test: Path existence check
+
+.kg create test_path_exists_n09t62
+.kg use test_path_exists_n09t62
+
++edge[("a", "b"), ("b", "c"), ("c", "d"), ("x", "y")]
+
+// Reachability
++reaches(X, Y) <- edge(X, Y)
++reaches(X, Z) <- reaches(X, Y), edge(Y, Z)
+
+// Check specific paths
+?reaches("a", "d")
+?reaches("a", "y")
+
+.kg use default
+.kg drop test_path_exists_n09t62

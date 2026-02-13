@@ -1,0 +1,66 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_syntax_literals_n28t07
+Knowledge graph 'test_syntax_literals_n28t07' created.
+Switched to knowledge graph: test_syntax_literals_n28t07
+> .kg use test_syntax_literals_n28t07
+Switched to knowledge graph: test_syntax_literals_n28t07
+> +int_values[(42), (-17), (0)]
+Inserted 3 fact(s) into 'int_values'.
+> ?int_values(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  -17 │
+│    0 │
+│   42 │
+└──────┘
+3 rows
+> +float_values[(3.14), (-0.5)]
+Inserted 2 fact(s) into 'float_values'.
+> ?float_values(X)
+┌──────┐
+│ col0 │
+├──────┤
+│ -0.5 │
+│ 3.14 │
+└──────┘
+2 rows
+> +string_values[("hello"), ("hello world")]
+Inserted 2 fact(s) into 'string_values'.
+> ?string_values(X)
+┌───────────────┐
+│ col0          │
+├───────────────┤
+│ "hello"       │
+│ "hello world" │
+└───────────────┘
+2 rows
+> +vectors[([1.0, 2.0, 3.0]), ([0.1, 0.2, 0.3, 0.4])]
+Inserted 2 fact(s) into 'vectors'.
+> ?vectors(X)
+┌──────────────────────────────────────────┐
+│ col0                                     │
+├──────────────────────────────────────────┤
+│ [1.0, 2.0, 3.0]                          │
+│ [0.10000000149011612, 0.200000002980232… │
+└──────────────────────────────────────────┘
+2 rows
+> +location[("NYC", 40.7, -74.0), ("LA", 34.0, -118.2)]
+Inserted 2 fact(s) into 'location'.
+> ?location(Name, Lat, Lon)
+┌───────┬──────┬────────┐
+│ col0  │ col1 │ col2   │
+├───────┼──────┼────────┤
+│ "LA"  │ 34.0 │ -118.2 │
+│ "NYC" │ 40.7 │  -74.0 │
+└───────┴──────┴────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_literals_n28t07
+Knowledge graph 'test_syntax_literals_n28t07' dropped.

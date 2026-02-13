@@ -486,7 +486,7 @@ fn test_sip_rewriter_analyzes_joins() {
 
     let mut rewriter = SipRewriter::new();
 
-    // Create a rule: result(X, Z) :- r(X, Y), s(Y, Z).
+    // Create a rule: result(X, Z) <- r(X, Y), s(Y, Z)
     let rule = Rule::new(
         Atom::new(
             "result".to_string(),

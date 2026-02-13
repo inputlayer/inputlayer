@@ -1,0 +1,19 @@
+// Test: Filters combined with wildcards
+
+.kg create test_filter_wild_n07t31
+.kg use test_filter_wild_n07t31
+
+// Sample data
++records[(1, "alice", 100), (2, "bob", 200), (3, "carol", 150), (4, "dave", 100)]
+
+// Filter with wildcard for unused column
+?records(Id, _, Value), Value > 120
+
+// Filter first column, wildcard middle, use last
+?records(Id, _, Value), Id < 3
+
+// Multiple wildcards with filter
+?records(_, _, Value), Value = 100
+
+.kg use default
+.kg drop test_filter_wild_n07t31

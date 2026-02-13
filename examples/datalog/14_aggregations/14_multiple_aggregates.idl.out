@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_multi_agg_n14t14
+Knowledge graph 'test_multi_agg_n14t14' created.
+Switched to knowledge graph: test_multi_agg_n14t14
+> .kg use test_multi_agg_n14t14
+Switched to knowledge graph: test_multi_agg_n14t14
+> +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 55000), (2, 201, 70000), (2, 202, 80000), (3, 301, 45000), (3, 302, 48000), (3, 303, 52000), (3, 304, 47000)]
+Inserted 9 fact(s) into 'employees'.

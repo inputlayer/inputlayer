@@ -1,0 +1,19 @@
+// Test: Linear recursion (single recursive call)
+
+.kg create test_linear_rec_n09t17
+.kg use test_linear_rec_n09t17
+
+// Linear chain
++link[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
+
+// Linear recursion - single recursive call in body
++chain(X, Y) <- link(X, Y)
++chain(X, Z) <- link(X, Y), chain(Y, Z)
+
+?chain(1, Y)
+
+// Count depth (number of hops from 1)
+?chain(1, 6)
+
+.kg use default
+.kg drop test_linear_rec_n09t17

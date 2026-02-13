@@ -1,0 +1,18 @@
+// Test: Subtract Computed Column
+// Description: Tests subtraction in rule head
+
+.kg create test_arith_sub_n15t03
+.kg use test_arith_sub_n15t03
+
+// Insert values: value(id, amount)
++value[(1, 100), (2, 250), (3, 175)]
+
+// Compute value minus 50
+reduced(Id, Amount-50) <- value(Id, Amount)
+
+// Query reduced values
+?reduced(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_arith_sub_n15t03

@@ -1,0 +1,23 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dequantize_scaled_n30t04
+Knowledge graph 'test_dequantize_scaled_n30t04' created.
+Switched to knowledge graph: test_dequantize_scaled_n30t04
+> .kg use test_dequantize_scaled_n30t04
+Switched to knowledge graph: test_dequantize_scaled_n30t04
+> +embedding[(1, [1.0, 0.5, -0.5, -1.0])]
+Inserted 1 fact(s) into 'embedding'.
+> +embedding[(2, [2.0, -2.0, 1.0, -1.0])]
+Inserted 1 fact(s) into 'embedding'.
+> ?embedding(Id, V), Q = quantize_linear(V), D = dequantize_scaled(Q, 0.5)
+┌──────┬────────────────────────┬──────────────────────┬────────────────────────────┐
+│ col0 │ col1                   │ col2                 │ col3                       │
+├──────┼────────────────────────┼──────────────────────┼────────────────────────────┤
+│    1 │ [1.0, 0.5, -0.5, -1.0] │ [127, 63, -64, -128] │ [63.5, 31.5, -32.0, -64.0] │
+│    2 │ [2.0, -2.0, 1.0, -1.0] │ [127, -128, 63, -64] │ [63.5, -64.0, 31.5, -32.0] │
+└──────┴────────────────────────┴──────────────────────┴────────────────────────────┘
+2 rows

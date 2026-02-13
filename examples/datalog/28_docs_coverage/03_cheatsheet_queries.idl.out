@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cheatsheet_queries_n28t03
+Knowledge graph 'test_cheatsheet_queries_n28t03' created.
+Switched to knowledge graph: test_cheatsheet_queries_n28t03
+> .kg use test_cheatsheet_queries_n28t03
+Switched to knowledge graph: test_cheatsheet_queries_n28t03
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.
+> +person[("alice", 30), ("bob", 25), ("carol", 35)]
+Inserted 3 fact(s) into 'person'.

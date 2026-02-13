@@ -1,0 +1,18 @@
+// Test: Diamond-shaped join pattern
+
+.kg create test_diamond_n06t11
+.kg use test_diamond_n06t11
+
+// Diamond: A -> B, A -> C, B -> D, C -> D
++ab[(1, 10), (2, 20)]
++ac[(1, 100), (2, 200)]
++bd[(10, 1000), (20, 2000)]
++cd[(100, 1000), (200, 2000)]
+
+// Join through both paths to D
+diamond(A, B, C, D) <- ab(A, B), ac(A, C), bd(B, D), cd(C, D)
+
+?diamond(A, B, C, D)
+
+.kg use default
+.kg drop test_diamond_n06t11

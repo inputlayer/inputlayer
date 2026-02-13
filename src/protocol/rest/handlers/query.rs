@@ -95,12 +95,17 @@ pub async fn explain_query(
     Extension(handler): Extension<Arc<Handler>>,
     Json(request): Json<ExplainRequest>,
 ) -> Result<Json<ApiResponse<ExplainResponse>>, RestError> {
-    // Transform ?- query syntax into a rule (same as execute endpoint)
-    let query = if request.query.trim().starts_with("?-") {
-        let q = request.query.trim().trim_start_matches("?-").trim();
-        // Strip trailing period if present
-        let q = q.strip_suffix('.').unwrap_or(q).trim();
-        format!("__explain__(X, Y) :- {q}.")
+    // Transform ?query syntax into a rule (same as execute endpoint)
+    let query = if request.query.trim().starts_with('?')
+        && request
+            .query
+            .trim()
+            .chars()
+            .nth(1)
+            .is_some_and(char::is_alphabetic)
+    {
+        let q = request.query.trim()[1..].trim();
+        format!("__explain__(X, Y) <- {q}")
     } else {
         request.query.clone()
     };

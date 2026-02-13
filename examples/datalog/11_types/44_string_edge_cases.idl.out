@@ -1,0 +1,74 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_edge_n11t44
+Knowledge graph 'test_str_edge_n11t44' created.
+Switched to knowledge graph: test_str_edge_n11t44
+> .kg use test_str_edge_n11t44
+Switched to knowledge graph: test_str_edge_n11t44
+> +empty[("")]
+Inserted 1 fact(s) into 'empty'.
+> ?empty(X)
+┌──────┐
+│ col0 │
+├──────┤
+│ ""   │
+└──────┘
+1 rows
+> +spaces[("hello world")]
+Inserted 1 fact(s) into 'spaces'.
+> ?spaces(X)
+┌───────────────┐
+│ col0          │
+├───────────────┤
+│ "hello world" │
+└───────────────┘
+1 rows
+> +special[("@#$%^&*"), ("a,b,c"), ("x=y")]
+Inserted 3 fact(s) into 'special'.
+> ?special(X)
+┌───────────┐
+│ col0      │
+├───────────┤
+│ "@#$%^&*" │
+│ "a,b,c"   │
+│ "x=y"     │
+└───────────┘
+3 rows
+> +long[("this_is_a_very_long_string_that_tests_the_handling_of_longer_values")]
+Inserted 1 fact(s) into 'long'.
+> ?long(X)
+┌──────────────────────────────────────────┐
+│ col0                                     │
+├──────────────────────────────────────────┤
+│ "this_is_a_very_long_string_that_tests_… │
+└──────────────────────────────────────────┘
+1 rows
+> +unicode[("cafe"), ("naïve")]
+Inserted 2 fact(s) into 'unicode'.
+> ?unicode(X)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "cafe"  │
+│ "naïve" │
+└─────────┘
+2 rows
+> +numstr[("123"), ("45.67"), ("-999")]
+Inserted 3 fact(s) into 'numstr'.
+> ?numstr(X)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "-999"  │
+│ "123"   │
+│ "45.67" │
+└─────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_str_edge_n11t44
+Knowledge graph 'test_str_edge_n11t44' dropped.

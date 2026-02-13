@@ -1,0 +1,15 @@
+// Test: Full trigonometry suite
+
+.kg create test_trig_full_n32t20
+.kg use test_trig_full_n32t20
+
++angles[(0.0,), (1.0,), (1.5707963,)]
+
+sin_val(A, S) <- angles(A), S = SIN(A)
+cos_val(A, C) <- angles(A), C = COS(A)
+
+?sin_val(A, S)
+?cos_val(A, C)
+
+.kg use default
+.kg drop test_trig_full_n32t20

@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wildcard_n21t23
+Knowledge graph 'test_wildcard_n21t23' created.
+Switched to knowledge graph: test_wildcard_n21t23
+> .kg use test_wildcard_n21t23
+Switched to knowledge graph: test_wildcard_n21t23
+> +data[(1, "a", 100), (2, "b", 200), (3, "a", 300)]
+Inserted 3 fact(s) into 'data'.

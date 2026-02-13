@@ -1,0 +1,37 @@
+// Test: Package Version Conflict Detection
+// Verifies: Finding conflicting version requirements
+
+.kg create test_conflicts_n20t08
+.kg use test_conflicts_n20t08
+
+// Package requirements: requires(package, dependency, min_version, max_version)
++requires[(1, 100, 1, 3),   // pkg 1 needs dep 100 v1-3
+          (1, 101, 2, 5),   // pkg 1 needs dep 101 v2-5
+          (2, 100, 2, 4),   // pkg 2 needs dep 100 v2-4
+          (2, 101, 1, 2),   // pkg 2 needs dep 101 v1-2 (conflicts with pkg1!)
+          (3, 100, 4, 6),   // pkg 3 needs dep 100 v4-6 (conflicts with pkg1!)
+          (3, 102, 1, 10)]. // pkg 3 needs dep 102 v1-10
+
+// Direct dependencies of a root package
++root_pkg[(1), (2)]
+
+// Find all requirements from root packages
++root_requires(Dep, MinV, MaxV) <- root_pkg(Pkg), requires(Pkg, Dep, MinV, MaxV)
+?root_requires(D, Min, Max)
+
+// Detect conflicts: same dep with non-overlapping version ranges
+// Two requirements conflict if max of one < min of other
++version_conflict(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 < Min2
+
++version_conflict(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max2 < Min1
+
+// Query conflicts
+?version_conflict(Dep, P1, P2)
+
+// Compatible requirements (overlapping ranges)
++compatible(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 >= Min2, Max2 >= Min1
+?compatible(Dep, P1, P2)
+
+// Cleanup
+.kg use default
+.kg drop test_conflicts_n20t08

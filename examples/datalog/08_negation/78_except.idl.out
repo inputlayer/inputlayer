@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_except_n08t78
+Knowledge graph 'test_except_n08t78' created.
+Switched to knowledge graph: test_except_n08t78
+> .kg use test_except_n08t78
+Switched to knowledge graph: test_except_n08t78
+> +query1[(1, "a"), (2, "b"), (3, "c")]
+Inserted 3 fact(s) into 'query1'.
+> +query2[(2, "b"), (3, "c")]
+Inserted 2 fact(s) into 'query2'.

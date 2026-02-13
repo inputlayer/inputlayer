@@ -47,7 +47,7 @@ fn test_concurrent_reads_do_not_block() {
             for _ in 0..5 {
                 let storage_guard = storage_clone.write().expect("Lock acquisition failed");
                 let results = storage_guard
-                    .execute_query_on("concurrent_test", "result(X,Y) :- edge(X,Y).")
+                    .execute_query_on("concurrent_test", "result(X,Y) <- edge(X,Y)")
                     .expect(&format!("Reader {} failed to execute query", i));
                 assert_eq!(results.len(), 5);
             }
@@ -86,7 +86,7 @@ fn test_concurrent_reads_across_multiple_kgs() {
                 for _ in 0..10 {
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
-                        .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+                        .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
                         .expect("Query failed");
                     assert_eq!(results.len(), 1);
                     assert_eq!(results[0], (kg_num, kg_num * 10));
@@ -123,7 +123,7 @@ fn test_readers_see_consistent_snapshot() {
             for iteration in 0..20 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("snapshot_test", "result(X,Y) :- counter(X,Y).")
+                    .execute_query_on("snapshot_test", "result(X,Y) <- counter(X,Y)")
                     .expect("Query failed");
 
                 // Results should be non-empty (at least the initial data)
@@ -174,7 +174,7 @@ fn test_high_contention_many_readers() {
             for query_num in 0..queries_per_thread {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("contention_test", "result(X,Y) :- edge(X,Y).")
+                    .execute_query_on("contention_test", "result(X,Y) <- edge(X,Y)")
                     .expect(&format!("Thread {} query {} failed", thread_id, query_num));
                 assert_eq!(results.len(), 100);
             }
@@ -220,7 +220,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
                     let kg_name = format!("deadlock_test_kg{}", kg_num);
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
-                        .execute_query_on(&kg_name, "result(X,Y) :- data(X,Y).")
+                        .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
                         .expect("Query failed - possible deadlock?");
                     assert_eq!(results.len(), 1);
                 }
@@ -248,7 +248,7 @@ fn test_graceful_error_on_nonexistent_kg() {
         let handle = thread::spawn(move || {
             let storage_guard = storage_clone.write().expect("Lock failed");
             let result =
-                storage_guard.execute_query_on("nonexistent_kg", "result(X,Y) :- edge(X,Y).");
+                storage_guard.execute_query_on("nonexistent_kg", "result(X,Y) <- edge(X,Y)");
             // Should return error, not panic
             assert!(result.is_err());
         });
@@ -282,13 +282,13 @@ fn test_mixed_valid_invalid_queries_concurrent() {
             if i % 2 == 0 {
                 // Valid query
                 let result = storage_guard
-                    .execute_query_on("valid_kg", "result(X,Y) :- edge(X,Y).")
+                    .execute_query_on("valid_kg", "result(X,Y) <- edge(X,Y)")
                     .expect("Valid query should succeed");
                 assert_eq!(result.len(), 1);
             } else {
                 // Invalid KG
                 let result =
-                    storage_guard.execute_query_on("invalid_kg", "result(X,Y) :- edge(X,Y).");
+                    storage_guard.execute_query_on("invalid_kg", "result(X,Y) <- edge(X,Y)");
                 assert!(result.is_err());
             }
         });
@@ -322,7 +322,7 @@ fn test_list_kgs_under_read_contention() {
         let handle = thread::spawn(move || {
             for _ in 0..20 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
-                let _ = storage_guard.execute_query_on(&kg_name, "result(X,Y) :- edge(X,Y).");
+                let _ = storage_guard.execute_query_on(&kg_name, "result(X,Y) <- edge(X,Y)");
             }
         });
         handles.push(handle);
@@ -370,10 +370,10 @@ fn test_parallel_api_under_concurrent_access() {
         let handle = thread::spawn(move || {
             for _ in 0..10 {
                 let queries: Vec<(&str, &str)> = vec![
-                    ("parallel_api_kg1", "result(X,Y) :- data(X,Y)."),
-                    ("parallel_api_kg2", "result(X,Y) :- data(X,Y)."),
-                    ("parallel_api_kg3", "result(X,Y) :- data(X,Y)."),
-                    ("parallel_api_kg4", "result(X,Y) :- data(X,Y)."),
+                    ("parallel_api_kg1", "result(X,Y) <- data(X,Y)"),
+                    ("parallel_api_kg2", "result(X,Y) <- data(X,Y)"),
+                    ("parallel_api_kg3", "result(X,Y) <- data(X,Y)"),
+                    ("parallel_api_kg4", "result(X,Y) <- data(X,Y)"),
                 ];
 
                 let storage_guard = storage_clone.read().expect("Lock failed");
@@ -416,7 +416,7 @@ fn test_sustained_concurrent_load() {
             for iter in 0..iterations {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
-                    .execute_query_on("sustained_test", "result(X,Y) :- values(X,Y).")
+                    .execute_query_on("sustained_test", "result(X,Y) <- values(X,Y)")
                     .expect(&format!("Thread {} iteration {} failed", thread_id, iter));
                 assert_eq!(results.len(), 50);
             }
@@ -453,7 +453,7 @@ fn test_lock_poisoning_recovery_at_storage_level() {
     let handle = thread::spawn(move || {
         // Successfully get data
         let guard = storage_clone.write().unwrap();
-        let results = guard.execute_query_on("poison_test", "result(X,Y) :- data(X,Y).");
+        let results = guard.execute_query_on("poison_test", "result(X,Y) <- data(X,Y)");
         assert!(results.is_ok());
         // Explicitly drop the guard before any potential panic
         drop(guard);
@@ -464,7 +464,7 @@ fn test_lock_poisoning_recovery_at_storage_level() {
     // After thread completes, we should still be able to use the storage
     let storage_guard = storage.write().unwrap();
     let results = storage_guard
-        .execute_query_on("poison_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("poison_test", "result(X,Y) <- data(X,Y)")
         .expect("Should still work after thread completed");
     assert_eq!(results.len(), 1);
 }
@@ -477,7 +477,7 @@ fn test_storage_engine_returns_errors_not_panics() {
     // These operations should return errors, not panic
 
     // Query non-existent KG
-    let result = storage.execute_query_on("nonexistent", "result(X,Y) :- edge(X,Y).");
+    let result = storage.execute_query_on("nonexistent", "result(X,Y) <- edge(X,Y)");
     assert!(result.is_err());
 
     // Try to use non-existent KG
@@ -498,7 +498,7 @@ fn test_storage_engine_returns_errors_not_panics() {
         .insert_into("working", "edge", vec![(1, 2)])
         .unwrap();
     let results = storage
-        .execute_query_on("working", "result(X,Y) :- edge(X,Y).")
+        .execute_query_on("working", "result(X,Y) <- edge(X,Y)")
         .expect("Should work after errors");
     assert_eq!(results.len(), 1);
 }

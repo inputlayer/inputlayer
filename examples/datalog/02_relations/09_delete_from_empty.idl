@@ -1,0 +1,17 @@
+// Test: Delete from empty relation
+
+.kg create test_delete_empty_n02t09
+.kg use test_delete_empty_n02t09
+
+// Create an empty relation by inserting and deleting
++empty_rel(1)
+-empty_rel(1)
+
+// Try to delete from empty relation - should succeed gracefully
+-empty_rel(99)
+
+// Verify relation is empty
+?empty_rel(X)
+
+.kg use default
+.kg drop test_delete_empty_n02t09

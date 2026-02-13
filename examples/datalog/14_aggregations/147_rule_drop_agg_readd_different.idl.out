@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_switch_agg_n14t147
+Knowledge graph 'test_switch_agg_n14t147' created.
+Switched to knowledge graph: test_switch_agg_n14t147
+> .kg use test_switch_agg_n14t147
+Switched to knowledge graph: test_switch_agg_n14t147
+> +data[(1, 10), (1, 20), (2, 30), (2, 40), (2, 50)]
+Inserted 5 fact(s) into 'data'.

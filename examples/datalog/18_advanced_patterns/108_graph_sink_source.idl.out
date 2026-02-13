@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sink_src_n18t108
+Knowledge graph 'test_sink_src_n18t108' created.
+Switched to knowledge graph: test_sink_src_n18t108
+> .kg use test_sink_src_n18t108
+Switched to knowledge graph: test_sink_src_n18t108
+> +edge[("a", "b"), ("b", "c"), ("c", "d")]
+Inserted 3 fact(s) into 'edge'.
+> +nodes[("a",), ("b",), ("c",), ("d",)]
+Inserted 4 fact(s) into 'nodes'.

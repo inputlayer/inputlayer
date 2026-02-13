@@ -1,0 +1,26 @@
+// Test: Multi-Rule View with Negation (Symmetric Difference)
+// Description: Tests a view with multiple rules, each containing negation
+// This computes symmetric difference: (A - B) ∪ (B - A)
+
+.kg create test_multi_rule_neg_n08t22
+.kg use test_multi_rule_neg_n08t22
+
+// Two sets
++set_a[(1, 0), (2, 0), (3, 0), (4, 0)]
++set_b[(3, 0), (4, 0), (5, 0), (6, 0)]
+
+// Symmetric difference using two rules with negation
+// Rule 1: elements in A but not B
++sym_diff(X, Y) <- set_a(X, Y), !set_b(X, _)
+// Rule 2: elements in B but not A
++sym_diff(X, Y) <- set_b(X, Y), !set_a(X, _)
+
+// Query the symmetric difference
+?sym_diff(X, Y)
+
+// Elements unique to A: 1, 2
+// Elements unique to B: 5, 6
+
+// Cleanup
+.kg use default
+.kg drop test_multi_rule_neg_n08t22

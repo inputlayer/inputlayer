@@ -1,0 +1,14 @@
+// Test: String contains check
+
+.kg create test_contains_n35t10
+.kg use test_contains_n35t10
+
++words[("hello world",), ("goodbye",), ("hello there",)]
+
+// Find words containing "hello"
+has_hello(S) <- words(S), CONTAINS(S, "hello")
+
+?has_hello(S)
+
+.kg use default
+.kg drop test_contains_n35t10

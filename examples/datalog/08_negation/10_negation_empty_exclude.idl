@@ -1,0 +1,22 @@
+// Test: Negation with Empty Exclusion Set
+// Description: Tests negation when the exclusion relation is empty
+
+.kg create test_neg_empty_excl_n08t10
+.kg use test_neg_empty_excl_n08t10
+
+// Data to filter
++data[(1, 10), (2, 20), (3, 30)]
+
+// Empty exclusion set (no facts)
++empty_exclude[(999, 999)]
+-empty_exclude(999, 999)
+
+// All data should pass through since nothing to exclude
++result(X, Y) <- data(X, Y), !empty_exclude(X, _)
+?result(X, Y)
+
+// Should return all 3 tuples
+
+// Cleanup
+.kg use default
+.kg drop test_neg_empty_excl_n08t10

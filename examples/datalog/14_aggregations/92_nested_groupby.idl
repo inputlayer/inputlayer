@@ -1,0 +1,25 @@
+// Test: Nested group by operations
+
+.kg create test_nested_group_n14t92
+.kg use test_nested_group_n14t92
+
+// Sales by region and product
++sales[("North", "Widget", 100),
+       ("North", "Widget", 150),
+       ("North", "Gadget", 200),
+       ("South", "Widget", 300),
+       ("South", "Gadget", 250)]
+
+// First level: sum by region and product
++region_product_sum(Region, Product, sum<Amount>) <-
+    sales(Region, Product, Amount)
+
+?region_product_sum(Region, Product, Sum)
+
+// Second level: max product sum by region
++region_max(Region, max<Total>) <- region_product_sum(Region, _, Total)
+
+?region_max(Region, MaxProduct)
+
+.kg use default
+.kg drop test_nested_group_n14t92

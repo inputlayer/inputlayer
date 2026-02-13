@@ -1,0 +1,23 @@
+// Test: Delete and insert in sequence, verify agg updates
+// Description: Remove the max element, add a new one, check aggregation
+
+.kg create test_ins_del_agg_n14t171
+.kg use test_ins_del_agg_n14t171
+
++score[(1, 100), (2, 200), (3, 300)]
+
++best(max<S>) <- score(_, S)
+
+?best(X)
+
+// Remove the max element
+-score(3, 300)
+
+// Add a new one
++score[(4, 250)]
+
+// New max
+?best(X)
+
+.kg use default
+.kg drop test_ins_del_agg_n14t171

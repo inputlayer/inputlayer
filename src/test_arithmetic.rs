@@ -17,8 +17,8 @@ mod tests {
         catalog.register_relation("source".to_string(), vec!["X".to_string(), "D".to_string()]);
         catalog.register_relation("dist".to_string(), vec!["X".to_string(), "D".to_string()]);
 
-        // Build IR for: dist(Y, D+1) :- dist(X, D), edge(X, Y).
-        let rule = parse_rule("dist(Y, D+1) :- dist(X, D), edge(X, Y).").unwrap();
+        // Build IR for: dist(Y, D+1) <- dist(X, D), edge(X, Y)
+        let rule = parse_rule("dist(Y, D+1) <- dist(X, D), edge(X, Y)").unwrap();
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 
@@ -75,8 +75,8 @@ mod tests {
         catalog.register_relation("dist".to_string(), vec!["X".to_string(), "D".to_string()]);
         catalog.register_relation("edge".to_string(), vec!["X".to_string(), "Y".to_string()]);
 
-        // Build IR for: result(X, D, Y) :- dist(X, D), edge(X, Y).
-        let rule = parse_rule("result(X, D, Y) :- dist(X, D), edge(X, Y).").unwrap();
+        // Build IR for: result(X, D, Y) <- dist(X, D), edge(X, Y)
+        let rule = parse_rule("result(X, D, Y) <- dist(X, D), edge(X, Y)").unwrap();
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 

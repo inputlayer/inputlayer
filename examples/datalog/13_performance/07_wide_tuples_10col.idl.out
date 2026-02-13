@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_wide_10_n13t07
+Knowledge graph 'test_wide_10_n13t07' created.
+Switched to knowledge graph: test_wide_10_n13t07
+> .kg use test_wide_10_n13t07
+Switched to knowledge graph: test_wide_10_n13t07
+> +wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000), (2, 20, 200, 2000, 20000, 3, 30, 300, 3000, 30000), (3, 30, 300, 3000, 30000, 4, 40, 400, 4000, 40000), (4, 40, 400, 4000, 40000, 5, 50, 500, 5000, 50000), (5, 50, 500, 5000, 50000, 6, 60, 600, 6000, 60000)]
+Inserted 5 fact(s) into 'wide_data'.

@@ -66,10 +66,10 @@ fn test_invalid_rule_syntax_returns_error() {
     let mut engine = create_engine();
 
     let test_cases = vec![
-        "path(X, Y) :- .",        // Empty body
-        "path :- edge(X, Y).",    // Invalid head
-        "path(X, Y) :- edge(X).", // Arity mismatch in body
-        ":- edge(X, Y).",         // Missing head entirely
+        "path(X, Y) <- ",        // Empty body
+        "path <- edge(X, Y)",    // Invalid head
+        "path(X, Y) <- edge(X)", // Arity mismatch in body
+        "<- edge(X, Y)",         // Missing head entirely
     ];
 
     for query in test_cases {
@@ -82,20 +82,20 @@ fn test_invalid_rule_syntax_returns_error() {
 #[test]
 fn test_unknown_function_returns_error() {
     let mut engine = create_engine();
-    engine.execute("data(1, 2).").ok();
+    engine.execute("data(1, 2)").ok();
 
-    let result = engine.execute("result(X) :- data(X, Y), Z = nonexistent_function(Y).");
+    let result = engine.execute("result(X) <- data(X, Y), Z = nonexistent_function(Y)");
     assert!(result.is_err(), "Unknown function should return error");
 }
 
 #[test]
 fn test_malformed_aggregation_returns_error() {
     let mut engine = create_engine();
-    engine.execute("data(1, 10).").ok();
+    engine.execute("data(1, 10)").ok();
 
     let test_cases = vec![
-        "result(count<) :- data(X, Y).",     // Empty aggregation
-        "result(count<X Y>) :- data(X, Y).", // Missing comma
+        "result(count<) <- data(X, Y)",     // Empty aggregation
+        "result(count<X Y>) <- data(X, Y)", // Missing comma
     ];
 
     for query in test_cases {
@@ -108,10 +108,10 @@ fn test_malformed_aggregation_returns_error() {
 #[test]
 fn test_unbound_head_variable_returns_error() {
     let mut engine = create_engine();
-    engine.execute("edge(1, 2).").ok();
+    engine.execute("edge(1, 2)").ok();
 
     // Z is not bound in the body
-    let result = engine.execute("path(X, Z) :- edge(X, Y).");
+    let result = engine.execute("path(X, Z) <- edge(X, Y)");
     assert!(result.is_err(), "Unbound head variable should return error");
 }
 
@@ -120,7 +120,7 @@ fn test_unbound_head_variable_returns_error() {
 fn test_query_nonexistent_kg_returns_error() {
     let (storage, _temp) = create_test_storage();
 
-    let result = storage.execute_query_on("nonexistent_kg", "result(X) :- data(X).");
+    let result = storage.execute_query_on("nonexistent_kg", "result(X) <- data(X)");
     assert!(
         result.is_err(),
         "Query on non-existent KG should return error"
@@ -187,7 +187,7 @@ fn test_query_undefined_relation_returns_error() {
 
     // Querying an undefined relation with a free variable is unsafe in Datalog
     // The variable X in ?undefined_relation(X) doesn't appear in any positive body atom
-    let result = storage.execute_query_on("test", "?undefined_relation(X).");
+    let result = storage.execute_query_on("test", "?undefined_relation(X)");
     // Should return error because the query is unsafe (unbound variable in head)
     assert!(
         result.is_err(),
@@ -208,7 +208,7 @@ fn test_recursive_query_on_empty_relation() {
     // Then query with recursion - should return empty, not panic
     let result = storage.execute_query_on(
         "test",
-        "path(X, Y) :- edge(X, Y). path(X, Z) :- path(X, Y), edge(Y, Z). ?path(A, B).",
+        "path(X, Y) <- edge(X, Y)\npath(X, Z) <- path(X, Y), edge(Y, Z)\n?path(A, B)",
     );
     // Should succeed with empty result or return error - but not panic
     let _ = result;
@@ -217,10 +217,10 @@ fn test_recursive_query_on_empty_relation() {
 #[test]
 fn test_negation_only_rule_returns_error() {
     let mut engine = create_engine();
-    engine.execute("node(1).").ok();
+    engine.execute("node(1)").ok();
 
     // Rule with only negation is unsafe
-    let result = engine.execute("isolated(X) :- !edge(X, _).");
+    let result = engine.execute("isolated(X) <- !edge(X, _)");
     assert!(result.is_err(), "Negation-only rule should return error");
 }
 
@@ -275,7 +275,7 @@ fn test_concurrent_errors_dont_cause_panic() {
             // Half threads do invalid operations
             if i % 2 == 0 {
                 let _ = storage_guard.insert_into("nonexistent_kg", "data", vec![(i, i)]);
-                let _ = storage_guard.execute_query_on("nonexistent_kg", "result(X) :- data(X).");
+                let _ = storage_guard.execute_query_on("nonexistent_kg", "result(X) <- data(X)");
             } else {
                 // Half do valid operations
                 let _ = storage_guard.insert_into(
@@ -283,8 +283,8 @@ fn test_concurrent_errors_dont_cause_panic() {
                     "data",
                     vec![(i as i32, i as i32)],
                 );
-                let _ = storage_guard
-                    .execute_query_on("concurrent_errors", "result(X,Y) :- data(X,Y).");
+                let _ =
+                    storage_guard.execute_query_on("concurrent_errors", "result(X,Y) <- data(X,Y)");
             }
         });
         handles.push(handle);
@@ -319,7 +319,7 @@ fn test_error_after_successful_operations() {
         .insert_into("mixed", "data", vec![(1, 10), (2, 20)])
         .unwrap();
     let result = storage
-        .execute_query_on("mixed", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("mixed", "result(X,Y) <- data(X,Y)")
         .unwrap();
     assert_eq!(result.len(), 2);
 
@@ -329,7 +329,7 @@ fn test_error_after_successful_operations() {
 
     // Previous data should still be accessible
     let result = storage
-        .execute_query_on("mixed", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("mixed", "result(X,Y) <- data(X,Y)")
         .unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -357,7 +357,7 @@ fn test_invalid_meta_commands_return_error() {
 fn test_load_nonexistent_file_returns_error() {
     let mut engine = create_engine();
 
-    let result = engine.execute(".load /nonexistent/path/file.dl");
+    let result = engine.execute(".load /nonexistent/path/file.idl");
     assert!(
         result.is_err(),
         "Loading non-existent file should return error"
@@ -382,7 +382,7 @@ fn test_very_long_query_handled() {
 
     // Generate a very long query
     let long_query = format!(
-        "result(X) :- {}.",
+        "result(X) <- {}",
         (0..100)
             .map(|i| format!("rel{}(X)", i))
             .collect::<Vec<_>>()
@@ -397,11 +397,11 @@ fn test_very_long_query_handled() {
 #[test]
 fn test_deeply_nested_arithmetic_handled() {
     let mut engine = create_engine();
-    engine.execute("data(1).").ok();
+    engine.execute("data(1)").ok();
 
     // Deeply nested arithmetic
     let nested = "(((((X+1)+1)+1)+1)+1)";
-    let query = format!("result(Y) :- data(X), Y = {}.", nested);
+    let query = format!("result(Y) <- data(X), Y = {}", nested);
 
     let result = engine.execute(&query);
     // Should succeed or error, but not panic
@@ -413,11 +413,11 @@ fn test_unicode_in_queries_handled() {
     let mut engine = create_engine();
 
     // Unicode in string literals
-    engine.execute(r#"data("日本語")."#).ok();
-    engine.execute(r#"data("Привет")."#).ok();
-    engine.execute(r#"data("مرحبا")."#).ok();
+    engine.execute(r#"data("日本語")"#).ok();
+    engine.execute(r#"data("Привет")"#).ok();
+    engine.execute(r#"data("مرحبا")"#).ok();
 
-    let result = engine.execute("result(X) :- data(X).");
+    let result = engine.execute("result(X) <- data(X)");
     assert!(result.is_ok());
 }
 
@@ -426,11 +426,11 @@ fn test_special_characters_in_strings_handled() {
     let mut engine = create_engine();
 
     // Various special characters
-    engine.execute(r#"data("hello\nworld")."#).ok();
-    engine.execute(r#"data("tab\there")."#).ok();
-    engine.execute(r#"data("quote\"inside")."#).ok();
+    engine.execute(r#"data("hello\nworld")"#).ok();
+    engine.execute(r#"data("tab\there")"#).ok();
+    engine.execute(r#"data("quote\"inside")"#).ok();
 
-    let result = engine.execute("result(X) :- data(X).");
+    let result = engine.execute("result(X) <- data(X)");
     assert!(result.is_ok());
 }
 
@@ -438,10 +438,10 @@ fn test_special_characters_in_strings_handled() {
 #[test]
 fn test_division_by_zero_handled() {
     let mut engine = create_engine();
-    engine.execute("data(0).").ok();
+    engine.execute("data(0)").ok();
 
     // Division by zero should be handled
-    let result = engine.execute("result(Y) :- data(X), Y = 10 / X.");
+    let result = engine.execute("result(Y) <- data(X), Y = 10 / X");
     // Should return error or special value, but not panic
     let _ = result;
 }
@@ -449,10 +449,10 @@ fn test_division_by_zero_handled() {
 #[test]
 fn test_overflow_arithmetic_handled() {
     let mut engine = create_engine();
-    engine.execute(&format!("data({}).", i64::MAX)).ok();
+    engine.execute(&format!("data({})", i64::MAX)).ok();
 
     // Overflow should be handled
-    let result = engine.execute("result(Y) :- data(X), Y = X + 1.");
+    let result = engine.execute("result(Y) <- data(X), Y = X + 1");
     // Should return error or wrap, but not panic
     let _ = result;
 }
@@ -460,10 +460,10 @@ fn test_overflow_arithmetic_handled() {
 #[test]
 fn test_underflow_arithmetic_handled() {
     let mut engine = create_engine();
-    engine.execute(&format!("data({}).", i64::MIN)).ok();
+    engine.execute(&format!("data({})", i64::MIN)).ok();
 
     // Underflow should be handled
-    let result = engine.execute("result(Y) :- data(X), Y = X - 1.");
+    let result = engine.execute("result(Y) <- data(X), Y = X - 1");
     // Should return error or wrap, but not panic
     let _ = result;
 }
@@ -474,11 +474,11 @@ fn test_vector_dimension_mismatch_handled() {
     let mut engine = create_engine();
 
     // Insert vectors of different dimensions
-    engine.execute("vec1([1.0, 2.0, 3.0]).").ok();
-    engine.execute("vec2([1.0, 2.0]).").ok(); // Different dimension
+    engine.execute("vec1([1.0, 2.0, 3.0])").ok();
+    engine.execute("vec2([1.0, 2.0])").ok(); // Different dimension
 
     // Distance calculation with mismatched dimensions
-    let result = engine.execute("result(D) :- vec1(V1), vec2(V2), D = euclidean(V1, V2).");
+    let result = engine.execute("result(D) <- vec1(V1), vec2(V2), D = euclidean(V1, V2)");
     // Should return error, but not panic
     assert!(
         result.is_err() || result.unwrap().is_empty(),
@@ -490,10 +490,10 @@ fn test_vector_dimension_mismatch_handled() {
 fn test_empty_vector_operations_handled() {
     let mut engine = create_engine();
 
-    engine.execute("vec([]).").ok(); // Empty vector
+    engine.execute("vec([])").ok(); // Empty vector
 
     // Operations on empty vector
-    let result = engine.execute("result(D) :- vec(V), D = normalize(V).");
+    let result = engine.execute("result(D) <- vec(V), D = normalize(V)");
     // Should handle gracefully
     let _ = result;
 }
@@ -514,7 +514,7 @@ fn test_state_consistent_after_parse_error() {
 
     // State should still be consistent
     let result = storage
-        .execute_query_on("state_test", "result(X,Y) :- edge(X,Y).")
+        .execute_query_on("state_test", "result(X,Y) <- edge(X,Y)")
         .unwrap();
     assert_eq!(result.len(), 2);
 }
@@ -534,7 +534,7 @@ fn test_state_consistent_after_execution_error() {
 
     // State should still be consistent
     let result = storage
-        .execute_query_on("exec_test", "result(X,Y) :- data(X,Y).")
+        .execute_query_on("exec_test", "result(X,Y) <- data(X,Y)")
         .unwrap();
     assert_eq!(result.len(), 1);
 }
@@ -550,11 +550,11 @@ fn test_partial_batch_error_handling() {
         .unwrap();
 
     // Try to query with error
-    let _ = storage.execute_query_on("batch_test", "result(X) :- undefined(X).");
+    let _ = storage.execute_query_on("batch_test", "result(X) <- undefined(X)");
 
     // Original data should be intact
     let result = storage
-        .execute_query_on("batch_test", "result(X, Y) :- data(X, Y).")
+        .execute_query_on("batch_test", "result(X, Y) <- data(X, Y)")
         .unwrap();
     assert_eq!(result.len(), 2);
 }

@@ -890,6 +890,9 @@ impl JoinPlanner {
             Predicate::ColumnLtFloat(col, val) => Predicate::ColumnLtFloat(remap_idx(*col), *val),
             Predicate::ColumnGeFloat(col, val) => Predicate::ColumnGeFloat(remap_idx(*col), *val),
             Predicate::ColumnLeFloat(col, val) => Predicate::ColumnLeFloat(remap_idx(*col), *val),
+            // Boolean comparisons
+            Predicate::ColumnEqBool(col, val) => Predicate::ColumnEqBool(remap_idx(*col), *val),
+            Predicate::ColumnNeBool(col, val) => Predicate::ColumnNeBool(remap_idx(*col), *val),
             // Column to column comparisons
             Predicate::ColumnsEq(l, r) => Predicate::ColumnsEq(remap_idx(*l), remap_idx(*r)),
             Predicate::ColumnsNe(l, r) => Predicate::ColumnsNe(remap_idx(*l), remap_idx(*r)),
@@ -952,6 +955,7 @@ impl JoinPlanner {
             IRExpression::IntConstant(val) => IRExpression::IntConstant(*val),
             IRExpression::FloatConstant(val) => IRExpression::FloatConstant(*val),
             IRExpression::StringConstant(s) => IRExpression::StringConstant(s.clone()),
+            IRExpression::BoolConstant(b) => IRExpression::BoolConstant(*b),
             IRExpression::VectorLiteral(vals) => IRExpression::VectorLiteral(vals.clone()),
             IRExpression::FunctionCall(func, args) => {
                 let remapped_args: Vec<IRExpression> = args

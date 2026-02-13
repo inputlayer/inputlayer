@@ -24,7 +24,7 @@
 //! storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 //!
 //! // Execute query (variables must be uppercase)
-//! let results = storage.execute_query("path(X,Y) :- edge(X,Y).").unwrap();
+//! let results = storage.execute_query("path(X,Y) <- edge(X,Y)").unwrap();
 //!
 //! // Persist to disk
 //! storage.save_knowledge_graph("analytics").unwrap();
@@ -1420,9 +1420,9 @@ impl StorageEngine {
     /// # Example
     /// ```text
     /// let queries = vec![
-    ///     ("kg1", "result(X,Y) :- edge(X,Y)."),
-    ///     ("kg2", "result(X,Y) :- person(X,Y)."),
-    ///     ("kg3", "result(X,Y) :- data(X,Y)."),
+    ///     ("kg1", "result(X,Y) <- edge(X,Y)"),
+    ///     ("kg2", "result(X,Y) <- person(X,Y)"),
+    ///     ("kg3", "result(X,Y) <- data(X,Y)"),
     /// ];
     ///
     /// let results = storage.execute_parallel_queries_on_knowledge_graphs(queries)?;
@@ -1466,7 +1466,7 @@ impl StorageEngine {
     /// # Example
     /// ```text
     /// let knowledge_graphs = vec!["kg1", "kg2", "kg3"];
-    /// let query = "result(X,Y) :- edge(X,Y), X > 5.";
+    /// let query = "result(X,Y) <- edge(X,Y), X > 5";
     ///
     /// let results = storage.execute_query_on_multiple_knowledge_graphs(knowledge_graphs, query)?;
     /// ```
@@ -1488,9 +1488,9 @@ impl StorageEngine {
     /// # Example
     /// ```text
     /// let queries = vec![
-    ///     "q1(X,Y) :- edge(X,Y).",
-    ///     "q2(X,Z) :- path(X,Y), path(Y,Z).",
-    ///     "q3(X) :- person(X,_), edge(X,_).",
+    ///     "q1(X,Y) <- edge(X,Y)",
+    ///     "q2(X,Z) <- path(X,Y), path(Y,Z)",
+    ///     "q3(X) <- person(X,_), edge(X,_)",
     /// ];
     ///
     /// let results = storage.execute_parallel_queries_on_knowledge_graph("kg1", queries)?;
@@ -1940,12 +1940,12 @@ impl KnowledgeGraph {
             program.push('\n');
         }
 
-        // Query for all results: ?- rule_name(X, Y, ...).
+        // Query for all results: ?rule_name(X, Y, ...)
         // We need to figure out the arity from the head
         let first_clause = &clauses[0];
         let arity = first_clause.head.effective_arity();
         let vars: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
-        let query = format!("?- {}({}).", rule_name, vars.join(", "));
+        let query = format!("?{}({})", rule_name, vars.join(", "));
         program.push_str(&query);
 
         // Execute using a fresh engine with cloned data (like snapshot execution)
@@ -2392,7 +2392,7 @@ mod tests {
         storage.use_knowledge_graph("kg2").unwrap();
 
         // Query for edge in kg2 - should return empty results (knowledge graph isolation)
-        let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+        let result = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
         assert_eq!(result.len(), 0); // No edge relation in kg2 - empty result
     }
 
@@ -2420,7 +2420,7 @@ mod tests {
 
             storage.use_knowledge_graph("persist_test").unwrap();
 
-            let result = storage.execute_query("result(X,Y) :- edge(X,Y).").unwrap();
+            let result = storage.execute_query("result(X,Y) <- edge(X,Y)").unwrap();
             assert_eq!(result.len(), 3);
             assert!(result.contains(&(1, 2)));
             assert!(result.contains(&(2, 3)));
@@ -2472,7 +2472,7 @@ mod tests {
             .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
             .unwrap();
 
-        // Define first rule: connected(X, Y) :- edge(X, Y).
+        // Define first rule: connected(X, Y) <- edge(X, Y)
         let rule1 = Rule::new(
             Atom::new(
                 "connected".to_string(),
@@ -2495,7 +2495,7 @@ mod tests {
         };
         storage.register_rule(&rule_def1).unwrap();
 
-        // Define second rule: connected(X, Z) :- edge(X, Y), connected(Y, Z).
+        // Define second rule: connected(X, Z) <- edge(X, Y), connected(Y, Z)
         let rule2 = Rule::new(
             Atom::new(
                 "connected".to_string(),
@@ -2556,7 +2556,7 @@ mod tests {
         // Query all connected pairs
         eprintln!("\n=== Executing query with views ===");
         let result = storage
-            .execute_query_with_rules("result(X,Y) :- connected(X,Y).")
+            .execute_query_with_rules("result(X,Y) <- connected(X,Y)")
             .unwrap();
         println!("All connected pairs: {:?}", result);
 
@@ -2585,7 +2585,7 @@ mod tests {
         // Query specific: connected(1, 3) - should return 1 row
         // Use constants directly in the atom instead of constraint syntax
         let specific_result = storage
-            .execute_query_with_rules("result(1, 3) :- connected(1, 3).")
+            .execute_query_with_rules("result(1, 3) <- connected(1, 3)")
             .unwrap();
         println!("connected(1, 3): {:?}", specific_result);
         assert_eq!(
@@ -3503,7 +3503,7 @@ mod tests {
 
         // Query path - should get 3 results (from materialized), not 2 (from rule)
         let results = storage
-            .execute_query_with_rules_tuples("result(X, Y) :- path(X, Y).")
+            .execute_query_with_rules_tuples("result(X, Y) <- path(X, Y)")
             .unwrap();
         assert_eq!(
             results.len(),

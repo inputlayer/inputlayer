@@ -1,0 +1,27 @@
+// Test: Left Recursion Pattern
+// Verifies: Left-recursive rules work correctly (recursive call appears first in body)
+// Pattern: path(X,Y) :- path(X,Z), edge(Z,Y) - recursive call before base relation
+
+.kg create test_left_recursion_n09t05
+.kg use test_left_recursion_n09t05
+
+// Simple chain: 1 -> 2 -> 3 -> 4 -> 5
++edge[(1, 2), (2, 3), (3, 4), (4, 5)]
+
+// Base case: direct edges are paths
++path(X, Y) <- edge(X, Y)
+
+// Left recursion: recursive call appears FIRST in the body
+// This tests if the engine handles left recursion correctly
++path(X, Y) <- path(X, Z), edge(Z, Y)
+
+// Query all paths
+?path(A, B)
+
+// (1,2), (1,3), (1,4), (1,5)
+// (2,3), (2,4), (2,5)
+// (3,4), (3,5)
+// (4,5)
+
+.kg use default
+.kg drop test_left_recursion_n09t05

@@ -1,0 +1,15 @@
+// Test: Count when some groups have zero
+
+.kg create test_count_zero_n14t32
+.kg use test_count_zero_n14t32
+
++categories[("A",), ("B",), ("C",)]
++items[("A", 1), ("A", 2), ("C", 3)]
+
+// Count items per category (B has none)
+items_per_cat(Cat, count<Id>) <- items(Cat, Id)
+
+?items_per_cat(Cat, N)
+
+.kg use default
+.kg drop test_count_zero_n14t32

@@ -1,0 +1,47 @@
+// Test: Arithmetic Operations on Aggregation Results
+// Verifies: Applying arithmetic to aggregated values
+// CRITICAL: Tests integration between aggregation and arithmetic
+
+.kg create test_arith_agg_n15t17
+.kg use test_arith_agg_n15t17
+
+// Sales data: store, product, amount
++sales[(1, 100, 500), (1, 101, 300), (1, 102, 200),
+       (2, 100, 400), (2, 101, 600),
+       (3, 100, 700), (3, 101, 100), (3, 102, 200), (3, 103, 300)]
+
+// Basic aggregations
++store_total(Store, sum<Amount>) <- sales(Store, _, Amount)
++store_count(Store, count<Product>) <- sales(Store, Product, _)
+
+?store_total(S, T)
+?store_count(S, C)
+
+// Arithmetic on aggregation results: double the total
++doubled_total(Store, Total*2) <- store_total(Store, Total)
+?doubled_total(S, D)
+
+
+// Calculate average from sum and count (manual avg)
++manual_avg(Store, Total/Count) <- store_total(Store, Total), store_count(Store, Count)
+?manual_avg(S, A)
+
+// Compare with built-in avg
++builtin_avg(Store, avg<Amount>) <- sales(Store, _, Amount)
+?builtin_avg(S, A)
+
+// Percentage of grand total
++grand_total(sum<A>) <- sales(_, _, A)
+?grand_total(G)
+
+// Store percentage (requires join with grand total)
+// +store_pct(Store, Total*100/Grand) :- store_total(Store, Total), grand_total(Grand).
+// Note: This pattern may not work - depends on how global aggregates are handled
+
+// Derived metrics: total + 10% bonus
++with_bonus(Store, Total + Total/10) <- store_total(Store, Total)
+?with_bonus(S, B)
+
+// Cleanup
+.kg use default
+.kg drop test_arith_agg_n15t17

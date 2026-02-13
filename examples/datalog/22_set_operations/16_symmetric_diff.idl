@@ -1,0 +1,19 @@
+// Test: Symmetric difference
+
+.kg create test_sym_diff_n22t16
+.kg use test_sym_diff_n22t16
+
++set_a[(1,), (2,), (3,)]
++set_b[(2,), (3,), (4,)]
+
+// In A but not B
+only_a(X) <- set_a(X), !set_b(X)
+
+// In B but not A
+only_b(X) <- set_b(X), !set_a(X)
+
+?only_a(X)
+?only_b(X)
+
+.kg use default
+.kg drop test_sym_diff_n22t16

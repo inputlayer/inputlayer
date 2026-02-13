@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_agg_negation_n14t15
+Knowledge graph 'test_agg_negation_n14t15' created.
+Switched to knowledge graph: test_agg_negation_n14t15
+> .kg use test_agg_negation_n14t15
+Switched to knowledge graph: test_agg_negation_n14t15
+> +employees[(1, 101, 50000), (1, 102, 60000), (1, 103, 45000), (2, 201, 70000), (2, 202, 55000), (2, 203, 80000), (3, 301, 40000), (3, 302, 65000)]
+Inserted 8 fact(s) into 'employees'.
+> +excluded[(102), (203), (301)]
+Inserted 3 fact(s) into 'excluded'.

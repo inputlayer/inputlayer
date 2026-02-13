@@ -1,0 +1,38 @@
+// Test: Session Clear All
+// Description: Tests .session clear command clears all session data
+
+.kg create test_session_clear_n04t10
+.kg use test_session_clear_n04t10
+
+// Insert persistent data
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Add session rules
+path(X, Y) <- edge(X, Y)
+path(X, Z) <- edge(X, Y), path(Y, Z)
+
+// Add session facts
+node(1)
+node(2)
+
+// Show session data (should have rules and facts)
+.session
+
+// Query using session rules
+?path(1, X)
+
+// Clear all session data
+.session clear
+
+// Show session data (should be empty)
+.session
+
+// Session rules no longer work
+?path(1, X)
+
+// Persistent data still exists
+?edge(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_session_clear_n04t10

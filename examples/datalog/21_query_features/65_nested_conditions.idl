@@ -1,0 +1,18 @@
+// Test: Nested query conditions
+
+.kg create test_nested_n21t65
+.kg use test_nested_n21t65
+
+// Sample data
++products[(1, "laptop", 999, 50), (2, "phone", 599, 100), (3, "tablet", 399, 75), (4, "watch", 199, 200)]
+
+// Multiple nested conditions
+// Find products: price > 300 AND (stock > 60 OR price < 500)
+?products(Id, Name, Price, Stock), Price > 300, Stock > 60
+
+// Alternative: low price OR high stock
+?products(Id, Name, Price, Stock), Price < 300
+?products(Id, Name, Price, Stock), Stock > 150
+
+.kg use default
+.kg drop test_nested_n21t65

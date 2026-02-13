@@ -32,13 +32,13 @@ pub enum Statement {
     Meta(MetaCommand),
     /// Insert operation: +relation(args). or +relation[(t1), (t2), ...].
     Insert(InsertOp),
-    /// Delete operation: -relation(args). or -relation(X) :- condition.
+    /// Delete operation: -relation(args). or -relation(X) <- condition.
     Delete(DeleteOp),
-    /// Update operation: -old, +new :- condition. (atomic)
+    /// Update operation: -old, +new <- condition. (atomic)
     Update(UpdateOp),
     /// Type declaration: type Name: `TypeExpr`.
     TypeDecl(TypeDecl),
-    /// Session rule: head :- body. (query-only, not materialized)
+    /// Session rule: head <- body. (query-only, not materialized)
     SessionRule(Rule),
     /// Fact: relation(args). (base data)
     Fact(Rule),
@@ -46,7 +46,7 @@ pub enum Statement {
     Query(QueryGoal),
     /// Schema declaration via typed arguments: +name(col: type, ...). or name(col: type, ...).
     SchemaDecl(SchemaDecl),
-    /// Persistent rule: +name(...) :- body. (DD materialized view)
+    /// Persistent rule: +name(...) <- body. (DD materialized view)
     PersistentRule(Rule),
     /// Delete relation or rule: -name.
     DeleteRelationOrRule(String),
@@ -84,10 +84,10 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         return types::parse_type_decl(input).map(Statement::TypeDecl);
     }
 
-    // Check for update pattern: -rel(...), +rel(...) :- body.
+    // Check for update pattern: -rel(...), +rel(...) <- body.
     // This must be checked before simple +/- to handle atomic updates
     if input.starts_with('-') || input.starts_with('+') {
-        // Check if this is an update pattern (has both - and + before :-)
+        // Check if this is an update pattern (has both - and + before <-)
         if let Some(update) = data::try_parse_update(input)? {
             return Ok(Statement::Update(update));
         }
@@ -95,8 +95,8 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // Handle + prefix: schema declaration, persistent rule, or fact insert
     if let Some(rest) = input.strip_prefix('+') {
-        // Check for persistent rule: +name(...) :- body.
-        if rest.contains(":-") {
+        // Check for persistent rule: +name(...) <- body.
+        if rest.contains("<-") {
             return parse_persistent_rule(rest).map(Statement::PersistentRule);
         }
 
@@ -114,9 +114,9 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
 
     // Handle - prefix: delete tuple, conditional delete, or delete relation/view
     if let Some(rest) = input.strip_prefix('-') {
-        // Check for simple name deletion: -name.
+        // Check for simple name deletion: -name
         if is_simple_name_deletion(rest) {
-            let name = rest.trim().trim_end_matches('.').trim().to_string();
+            let name = rest.trim().to_string();
             validate_relation_name(&name)?;
             return Ok(Statement::DeleteRelationOrRule(name));
         }
@@ -125,18 +125,18 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
         return data::parse_delete(rest).map(Statement::Delete);
     }
 
-    // Query: ?- goal.
-    if input.starts_with("?-") {
-        return parse_query(&input[2..]).map(Statement::Query);
+    // Query: ?goal
+    if input.starts_with('?') && input.chars().nth(1).is_some_and(char::is_alphabetic) {
+        return parse_query(&input[1..]).map(Statement::Query);
     }
 
-    // Session rule: head :- body. (query-only, not materialized)
-    if input.contains(":-") {
+    // Session rule: head <- body (query-only, not materialized)
+    if input.contains("<-") {
         return parse_transient_rule(input).map(Statement::SessionRule);
     }
 
     // No prefix - could be transient schema or transient fact
-    if input.ends_with('.') && input.contains('(') {
+    if input.contains('(') {
         // Check if this has typed arguments (transient schema) or value arguments (fact)
         if let Some(args_content) = extract_args_content(input) {
             if has_typed_arguments(args_content) {
@@ -164,7 +164,7 @@ mod tests {
     // Insert tests
     #[test]
     fn test_parse_single_insert() {
-        let stmt = parse_statement("+edge(1, 2).").unwrap();
+        let stmt = parse_statement("+edge(1, 2)").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 1);
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_parse_bulk_insert() {
-        let stmt = parse_statement("+edge[(1,2), (3,4), (5,6)].").unwrap();
+        let stmt = parse_statement("+edge[(1,2), (3,4), (5,6)]").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert_eq!(op.tuples.len(), 3);
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_parse_insert_with_strings() {
-        let stmt = parse_statement("+person(\"alice\", 30).").unwrap();
+        let stmt = parse_statement("+person(\"alice\", 30)").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "person");
             assert_eq!(op.tuples.len(), 1);
@@ -201,7 +201,7 @@ mod tests {
     // Delete tests
     #[test]
     fn test_parse_single_delete() {
-        let stmt = parse_statement("-edge(1, 2).").unwrap();
+        let stmt = parse_statement("-edge(1, 2)").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert!(matches!(op.pattern, DeletePattern::SingleTuple(_)));
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_parse_conditional_delete() {
-        let stmt = parse_statement("-edge(X, Y) :- source(X).").unwrap();
+        let stmt = parse_statement("-edge(X, Y) <- source(X)").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "edge");
             assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -224,7 +224,7 @@ mod tests {
     // Query tests
     #[test]
     fn test_parse_simple_query() {
-        let stmt = parse_statement("?- path(1, X).").unwrap();
+        let stmt = parse_statement("?path(1, X)").unwrap();
         if let Statement::Query(q) = stmt {
             assert_eq!(q.goal.relation, "path");
         } else {
@@ -235,7 +235,7 @@ mod tests {
     // Session rule tests
     #[test]
     fn test_parse_session_rule() {
-        let stmt = parse_statement("result(X, Y) :- edge(X, Y), node(X).").unwrap();
+        let stmt = parse_statement("result(X, Y) <- edge(X, Y), node(X)").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert_eq!(rule.head.relation, "result");
         } else {
@@ -246,7 +246,7 @@ mod tests {
     // Update tests
     #[test]
     fn test_parse_update() {
-        let stmt = parse_statement("-edge(1, Y), +edge(1, 100) :- edge(1, Y).").unwrap();
+        let stmt = parse_statement("-edge(1, Y), +edge(1, 100) <- edge(1, Y)").unwrap();
         if let Statement::Update(op) = stmt {
             assert_eq!(op.deletes.len(), 1);
             assert_eq!(op.inserts.len(), 1);
@@ -260,7 +260,7 @@ mod tests {
     // Atom vs Variable Parsing Tests
     #[test]
     fn test_uppercase_is_variable() {
-        let stmt = parse_statement("+edge(X, Y).").unwrap();
+        let stmt = parse_statement("+edge(X, Y)").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::Variable(v) if v == "X"));
             assert!(matches!(&op.tuples[0][1], Term::Variable(v) if v == "Y"));
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn test_unquoted_atom_rejected() {
         // Unquoted lowercase identifiers should be rejected
-        let result = parse_statement("+parent(tom, liz).");
+        let result = parse_statement("+parent(tom, liz)");
         assert!(result.is_err(), "Unquoted atom should be rejected");
         let err = result.unwrap_err();
         assert!(err.contains("Unquoted atom") || err.contains("tom"));
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn test_quoted_strings_with_variables() {
         // Quoted strings should work with variables
-        let stmt = parse_statement("?- parent(\"tom\", X).").unwrap();
+        let stmt = parse_statement("?parent(\"tom\", X)").unwrap();
         if let Statement::Query(q) = stmt {
             assert_eq!(q.goal.relation, "parent");
             assert!(matches!(&q.goal.args[0], Term::StringConstant(s) if s == "tom"));
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_underscore_prefix_is_variable() {
-        let stmt = parse_statement("result(X) :- edge(_from, X).").unwrap();
+        let stmt = parse_statement("result(X) <- edge(_from, X)").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             let body_atom = match &rule.body[0] {
                 BodyPredicate::Positive(atom) => atom,
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_placeholder_underscore() {
-        let stmt = parse_statement("?- edge(_, X).").unwrap();
+        let stmt = parse_statement("?edge(_, X)").unwrap();
         if let Statement::Query(q) = stmt {
             assert!(matches!(&q.goal.args[0], Term::Placeholder));
             assert!(matches!(&q.goal.args[1], Term::Variable(v) if v == "X"));
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_multichar_variables() {
-        let stmt = parse_statement("result(Foo, BarBaz) :- data(Foo, BarBaz).").unwrap();
+        let stmt = parse_statement("result(Foo, BarBaz) <- data(Foo, BarBaz)").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "Foo"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "BarBaz"));
@@ -331,20 +331,20 @@ mod tests {
     #[test]
     fn test_multichar_unquoted_rejected() {
         // Multi-character unquoted atoms should be rejected
-        let result = parse_statement("+likes(alice, bob).");
+        let result = parse_statement("+likes(alice, bob)");
         assert!(result.is_err(), "Unquoted atoms should be rejected");
     }
 
     #[test]
     fn test_unquoted_with_numbers_rejected() {
         // Unquoted atoms with numbers should be rejected
-        let result = parse_statement("+data(item1, item2).");
+        let result = parse_statement("+data(item1, item2)");
         assert!(result.is_err(), "Unquoted atoms should be rejected");
     }
 
     #[test]
     fn test_variables_with_underscores() {
-        let stmt = parse_statement("result(X_val, Y_val) :- data(X_val, Y_val).").unwrap();
+        let stmt = parse_statement("result(X_val, Y_val) <- data(X_val, Y_val)").unwrap();
         if let Statement::SessionRule(rule) = stmt {
             assert!(matches!(&rule.head.args[0], Term::Variable(v) if v == "X_val"));
             assert!(matches!(&rule.head.args[1], Term::Variable(v) if v == "Y_val"));
@@ -356,14 +356,14 @@ mod tests {
     #[test]
     fn test_unquoted_with_underscores_rejected() {
         // Unquoted atoms with underscores should be rejected
-        let result = parse_statement("+data(my_item, other_thing).");
+        let result = parse_statement("+data(my_item, other_thing)");
         assert!(result.is_err(), "Unquoted atoms should be rejected");
     }
 
     #[test]
     fn test_persistent_rule_with_quoted_strings() {
         // Rules with quoted strings should work
-        let stmt = parse_statement("+child(X) :- parent(\"mary\", X).").unwrap();
+        let stmt = parse_statement("+child(X) <- parent(\"mary\", X)").unwrap();
         if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "child");
             let body_atom = match &rule.body[0] {
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn test_query_with_unquoted_atoms_rejected() {
         // Query with unquoted atoms should be rejected
-        let result = parse_statement("?- parent(tom, liz).");
+        let result = parse_statement("?parent(tom, liz)");
         assert!(
             result.is_err(),
             "Unquoted atoms in query should be rejected"
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_integers_still_work() {
-        let stmt = parse_statement("+edge(1, 2).").unwrap();
+        let stmt = parse_statement("+edge(1, 2)").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::Constant(1)));
             assert!(matches!(&op.tuples[0][1], Term::Constant(2)));
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_floats_still_work() {
-        let stmt = parse_statement("+data(3.14, 2.71).").unwrap();
+        let stmt = parse_statement("+data(3.14, 2.71)").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(
                 matches!(&op.tuples[0][0], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001)
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_quoted_strings_still_work() {
-        let stmt = parse_statement("+data(\"hello world\", \"test\").").unwrap();
+        let stmt = parse_statement("+data(\"hello world\", \"test\")").unwrap();
         if let Statement::Insert(op) = stmt {
             assert!(matches!(&op.tuples[0][0], Term::StringConstant(s) if s == "hello world"));
             assert!(matches!(&op.tuples[0][1], Term::StringConstant(s) if s == "test"));
@@ -426,7 +426,7 @@ mod tests {
     // Unified Prefix Syntax Tests
     #[test]
     fn test_parse_persistent_schema() {
-        let stmt = parse_statement("+person(id: int, name: string).").unwrap();
+        let stmt = parse_statement("+person(id: int, name: string)").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "person");
             assert!(decl.persistent);
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn test_parse_transient_schema() {
-        let stmt = parse_statement("temp(x: int, y: int).").unwrap();
+        let stmt = parse_statement("temp(x: int, y: int)").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "temp");
             assert!(!decl.persistent);
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_parse_persistent_rule() {
-        let stmt = parse_statement("+reachable(X, Y) :- edge(X, Y).").unwrap();
+        let stmt = parse_statement("+reachable(X, Y) <- edge(X, Y)").unwrap();
         if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "reachable");
             assert_eq!(rule.body.len(), 1);
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_parse_persistent_recursive_rule() {
-        let stmt = parse_statement("+reachable(X, Z) :- reachable(X, Y), edge(Y, Z).").unwrap();
+        let stmt = parse_statement("+reachable(X, Z) <- reachable(X, Y), edge(Y, Z)").unwrap();
         if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "reachable");
             assert_eq!(rule.body.len(), 2);
@@ -475,10 +475,9 @@ mod tests {
     #[test]
     fn test_parse_persistent_rule_with_top_k() {
         // New syntax: Points:desc annotation inside aggregate
-        let stmt = parse_statement(
-            "+top_players(Player, top_k<3, Points:desc>) :- score(Player, Points).",
-        )
-        .unwrap();
+        let stmt =
+            parse_statement("+top_players(Player, top_k<3, Points:desc>) <- score(Player, Points)")
+                .unwrap();
         if let Statement::PersistentRule(rule) = stmt {
             assert_eq!(rule.head.relation, "top_players");
             assert_eq!(rule.head.args.len(), 2);
@@ -491,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_parse_delete_relation_or_rule() {
-        let stmt = parse_statement("-reachable.").unwrap();
+        let stmt = parse_statement("-reachable").unwrap();
         if let Statement::DeleteRelationOrRule(name) = stmt {
             assert_eq!(name, "reachable");
         } else {
@@ -501,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_parse_schema_with_constraints() {
-        let stmt = parse_statement("+user(id: int, email: string).").unwrap();
+        let stmt = parse_statement("+user(id: int, email: string)").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "user");
             assert!(decl.persistent);
@@ -512,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_insert_not_schema() {
-        let stmt = parse_statement("+person(1, \"alice\").").unwrap();
+        let stmt = parse_statement("+person(1, \"alice\")").unwrap();
         if let Statement::Insert(op) = stmt {
             assert_eq!(op.relation, "person");
             assert!(matches!(&op.tuples[0][0], Term::Constant(1)));
@@ -523,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_fact_not_schema() {
-        let stmt = parse_statement("person(1, \"alice\").").unwrap();
+        let stmt = parse_statement("person(1, \"alice\")").unwrap();
         if let Statement::Fact(rule) = stmt {
             assert_eq!(rule.head.relation, "person");
         } else {
@@ -533,8 +532,8 @@ mod tests {
 
     #[test]
     fn test_distinguish_schema_from_insert() {
-        let schema = parse_statement("+person(id: int, name: string).").unwrap();
-        let insert = parse_statement("+person(1, \"alice\").").unwrap();
+        let schema = parse_statement("+person(id: int, name: string)").unwrap();
+        let insert = parse_statement("+person(1, \"alice\")").unwrap();
 
         assert!(matches!(schema, Statement::SchemaDecl(_)));
         assert!(matches!(insert, Statement::Insert(_)));
@@ -542,8 +541,8 @@ mod tests {
 
     #[test]
     fn test_distinguish_transient_schema_from_fact() {
-        let schema = parse_statement("temp(x: int, y: int).").unwrap();
-        let fact = parse_statement("temp(1, 2).").unwrap();
+        let schema = parse_statement("temp(x: int, y: int)").unwrap();
+        let fact = parse_statement("temp(1, 2)").unwrap();
 
         assert!(matches!(schema, Statement::SchemaDecl(_)));
         assert!(matches!(fact, Statement::Fact(_)));
@@ -551,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_conditional_delete_not_view_delete() {
-        let stmt = parse_statement("-person(X, Y) :- person(X, Y), filter(X).").unwrap();
+        let stmt = parse_statement("-person(X, Y) <- person(X, Y), filter(X)").unwrap();
         if let Statement::Delete(op) = stmt {
             assert_eq!(op.relation, "person");
             assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
@@ -561,24 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_schema_ignores_annotations() {
-        // Annotations are silently ignored for backwards compatibility
-        let stmt = parse_statement("+user(id: int @foo, name: string).").unwrap();
-        if let Statement::SchemaDecl(decl) = stmt {
-            assert_eq!(decl.name, "user");
-            assert!(decl.persistent);
-            assert_eq!(decl.columns.len(), 2);
-            assert_eq!(decl.columns[0].name, "id");
-            assert_eq!(decl.columns[1].name, "name");
-            // Annotations are ignored, not stored
-        } else {
-            panic!("Expected SchemaDecl, got {:?}", stmt);
-        }
-    }
-
-    #[test]
     fn test_parse_schema_with_multiple_types() {
-        let stmt = parse_statement("+user(id: int, email: string, active: bool).").unwrap();
+        let stmt = parse_statement("+user(id: int, email: string, active: bool)").unwrap();
         if let Statement::SchemaDecl(decl) = stmt {
             assert_eq!(decl.name, "user");
             assert_eq!(decl.columns.len(), 3);

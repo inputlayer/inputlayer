@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_ends_n35t21
+Knowledge graph 'test_ends_n35t21' created.
+Switched to knowledge graph: test_ends_n35t21
+> .kg use test_ends_n35t21
+Switched to knowledge graph: test_ends_n35t21
+> +files[("test.txt",), ("data.csv",), ("report.txt",), ("image.png",)]
+Inserted 4 fact(s) into 'files'.

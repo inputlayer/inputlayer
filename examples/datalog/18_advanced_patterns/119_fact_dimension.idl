@@ -1,0 +1,17 @@
+// Test: Fact-dimension lookup
+
+.kg create test_fact_dim_n18t119
+.kg use test_fact_dim_n18t119
+
++fact_events[(1, 100, 10), (2, 101, 20), (3, 100, 15)]
++dim_users[(100, "Alice", "NYC"), (101, "Bob", "LA")]
+
+// Enrich events with user info
++enriched(EventId, UserName, City, Value) <-
+    fact_events(EventId, UserId, Value),
+    dim_users(UserId, UserName, City)
+
+?enriched(E, N, C, V)
+
+.kg use default
+.kg drop test_fact_dim_n18t119

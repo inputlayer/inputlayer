@@ -1,9 +1,0 @@
-% Test: .rel on nonexistent relation
-
-.kg create test_rel_noexist_n33t14
-.kg use test_rel_noexist_n33t14
-
-.rel nonexistent_relation
-
-.kg use default
-.kg drop test_rel_noexist_n33t14

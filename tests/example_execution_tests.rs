@@ -1,4 +1,4 @@
-//! Tests for the example .dl files work correctly.
+//! Tests for the example .idl files work correctly.
 
 use inputlayer::DatalogEngine;
 use std::collections::HashSet;
@@ -13,7 +13,7 @@ fn test_simple_scan() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
 
-    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
 
     assert_eq!(results.len(), 5);
     let result_set = to_set(results);
@@ -30,9 +30,7 @@ fn test_filter_greater_than() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
 
-    let results = engine
-        .execute("result(X, Y) :- edge(X, Y), X > 2.")
-        .unwrap();
+    let results = engine.execute("result(X, Y) <- edge(X, Y), X > 2").unwrap();
 
     assert_eq!(results.len(), 3);
     let result_set = to_set(results);
@@ -48,7 +46,7 @@ fn test_multiple_filters() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), X > 1, Y < 5.")
+        .execute("result(X, Y) <- edge(X, Y), X > 1, Y < 5")
         .unwrap();
 
     assert_eq!(results.len(), 2);
@@ -62,7 +60,7 @@ fn test_projection_column_swap() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
 
-    let results = engine.execute("result(Y, X) :- edge(X, Y).").unwrap();
+    let results = engine.execute("result(Y, X) <- edge(X, Y)").unwrap();
 
     assert_eq!(results.len(), 5);
     let result_set = to_set(results);
@@ -80,7 +78,7 @@ fn test_inequality_filter() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), X != 3.")
+        .execute("result(X, Y) <- edge(X, Y), X != 3")
         .unwrap();
 
     assert_eq!(results.len(), 4);
@@ -99,7 +97,7 @@ fn test_two_hop_path() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     let results = engine
-        .execute("result(X, Z) :- edge(X, Y), edge(Y, Z).")
+        .execute("result(X, Z) <- edge(X, Y), edge(Y, Z)")
         .unwrap();
 
     assert_eq!(results.len(), 3);
@@ -115,7 +113,7 @@ fn test_three_hop_path() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     let results = engine
-        .execute("result(X, W) :- edge(X, Y), edge(Y, Z), edge(Z, W).")
+        .execute("result(X, W) <- edge(X, Y), edge(Y, Z), edge(Z, W)")
         .unwrap();
 
     assert_eq!(results.len(), 2);
@@ -131,7 +129,7 @@ fn test_join_with_filter() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     let results = engine
-        .execute("result(X, Z) :- edge(X, Y), edge(Y, Z), X < 3.")
+        .execute("result(X, Z) <- edge(X, Y), edge(Y, Z), X < 3")
         .unwrap();
 
     assert_eq!(results.len(), 2);
@@ -146,7 +144,7 @@ fn test_bidirectional_edges() {
     engine.add_fact("edge", vec![(1, 2), (2, 1), (2, 3), (4, 5), (5, 4)]);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), edge(Y, X).")
+        .execute("result(X, Y) <- edge(X, Y), edge(Y, X)")
         .unwrap();
 
     // Should find bidirectional pairs
@@ -159,7 +157,7 @@ fn test_triangle_detection() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 1), (4, 5), (5, 6)]);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), edge(Y, Z), edge(Z, X).")
+        .execute("result(X, Y) <- edge(X, Y), edge(Y, Z), edge(Z, X)")
         .unwrap();
 
     // Triangle 1-2-3 should be detected
@@ -175,7 +173,7 @@ fn test_pipeline_stages() {
 
     // Parse
     let program = engine
-        .parse("result(X, Z) :- edge(X, Y), edge(Y, Z), X > 1.")
+        .parse("result(X, Z) <- edge(X, Y), edge(Y, Z), X > 1")
         .unwrap();
     assert!(!program.rules.is_empty());
 
@@ -199,7 +197,7 @@ fn test_pipeline_with_trace() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let (results, trace) = engine
-        .execute_with_trace("result(X, Y) :- edge(X, Y).")
+        .execute_with_trace("result(X, Y) <- edge(X, Y)")
         .unwrap();
 
     // Verify trace contains information
@@ -218,32 +216,28 @@ fn test_all_comparison_operators() {
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
 
     // Greater than
-    let results = engine
-        .execute("result(X, Y) :- data(X, Y), X > 2.")
-        .unwrap();
+    let results = engine.execute("result(X, Y) <- data(X, Y), X > 2").unwrap();
     assert_eq!(results.len(), 3);
 
     // Less than
-    let results = engine
-        .execute("result(X, Y) :- data(X, Y), X < 3.")
-        .unwrap();
+    let results = engine.execute("result(X, Y) <- data(X, Y), X < 3").unwrap();
     assert_eq!(results.len(), 2);
 
     // Greater or equal
     let results = engine
-        .execute("result(X, Y) :- data(X, Y), X >= 3.")
+        .execute("result(X, Y) <- data(X, Y), X >= 3")
         .unwrap();
     assert_eq!(results.len(), 3);
 
     // Less or equal
     let results = engine
-        .execute("result(X, Y) :- data(X, Y), X <= 3.")
+        .execute("result(X, Y) <- data(X, Y), X <= 3")
         .unwrap();
     assert_eq!(results.len(), 3);
 
     // Not equal
     let results = engine
-        .execute("result(X, Y) :- data(X, Y), X != 3.")
+        .execute("result(X, Y) <- data(X, Y), X != 3")
         .unwrap();
     assert_eq!(results.len(), 4);
 }
@@ -256,7 +250,7 @@ fn test_empty_result() {
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), X > 100.")
+        .execute("result(X, Y) <- edge(X, Y), X > 100")
         .unwrap();
     assert!(results.is_empty());
 }
@@ -266,7 +260,7 @@ fn test_empty_relation() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![]);
 
-    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
     assert!(results.is_empty());
 }
 
@@ -275,7 +269,7 @@ fn test_single_tuple() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
-    let results = engine.execute("result(X, Y) :- edge(X, Y).").unwrap();
+    let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], (1, 2));
 }
@@ -288,7 +282,7 @@ fn test_large_dataset() {
     engine.add_fact("edge", data);
 
     let results = engine
-        .execute("result(X, Y) :- edge(X, Y), X > 50.")
+        .execute("result(X, Y) <- edge(X, Y), X > 50")
         .unwrap();
     assert_eq!(results.len(), 50);
 }

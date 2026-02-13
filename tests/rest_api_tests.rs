@@ -230,7 +230,7 @@ async fn test_execute_simple_query() {
         "/api/v1/query/execute",
         Some(json!({
             "knowledge_graph": "query_test",
-            "query": "?- edge(X, Y)."
+            "query": "?edge(X, Y)"
         })),
     )
     .await;
@@ -293,7 +293,7 @@ async fn test_explain_query() {
         "/api/v1/query/explain",
         Some(json!({
             "knowledge_graph": "explain_test",
-            "query": "?- edge(X, Y)."
+            "query": "?edge(X, Y)"
         })),
     )
     .await;
@@ -464,7 +464,7 @@ async fn test_create_and_list_rules() {
         "/api/v1/query/execute",
         Some(json!({
             "knowledge_graph": "rules_test",
-            "query": "+path(X, Y) :- edge(X, Y)."
+            "query": "+path(X, Y) <- edge(X, Y)"
         })),
     )
     .await;
@@ -503,7 +503,7 @@ async fn test_delete_rule() {
         "/api/v1/knowledge-graphs/delete_rule_test/views",
         Some(json!({
             "name": "temp",
-            "definition": "temp(X) :- source(X)."
+            "definition": "temp(X) <- source(X)"
         })),
     )
     .await;
@@ -542,7 +542,7 @@ async fn test_create_and_list_views() {
         "/api/v1/knowledge-graphs/views_test/views",
         Some(json!({
             "name": "connected",
-            "definition": "connected(X, Y) :- edge(X, Y)."
+            "definition": "connected(X, Y) <- edge(X, Y)"
         })),
     )
     .await;
@@ -592,7 +592,7 @@ async fn test_get_view_data() {
         "/api/v1/knowledge-graphs/view_data_test/views",
         Some(json!({
             "name": "path",
-            "definition": "path(X, Y) :- edge(X, Y)."
+            "definition": "path(X, Y) <- edge(X, Y)"
         })),
     )
     .await;
@@ -631,7 +631,7 @@ async fn test_delete_view() {
         "/api/v1/knowledge-graphs/delete_view_test/views",
         Some(json!({
             "name": "temp_view",
-            "definition": "temp_view(X) :- source(X)."
+            "definition": "temp_view(X) <- source(X)"
         })),
     )
     .await;
@@ -814,7 +814,7 @@ async fn test_empty_relation_query() {
         "/api/v1/query/execute",
         Some(json!({
             "knowledge_graph": "empty_test",
-            "query": "?- items(X)."
+            "query": "?items(X)"
         })),
     )
     .await;
@@ -941,7 +941,7 @@ async fn test_view_with_different_arities() {
         "/api/v1/knowledge-graphs/arity_test/views",
         Some(json!({
             "name": "triple_view",
-            "definition": "triple_view(A, B, C) :- triple(A, B, C)."
+            "definition": "triple_view(A, B, C) <- triple(A, B, C)"
         })),
     )
     .await;

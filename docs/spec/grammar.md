@@ -11,15 +11,15 @@ InputLayer programs are UTF-8 encoded text. You can use Unicode characters in st
 Spaces, tabs, and newlines separate tokens. Extra whitespace is ignored:
 
 ```datalog
-+edge(1, 2).           % Fine
-+edge( 1 , 2 ).        % Also fine
-+edge(1,2).            % Also fine
++edge(1, 2)           // Fine
++edge( 1 , 2 )        // Also fine
++edge(1,2)            // Also fine
 ```
 
 Whitespace inside strings is preserved:
 
 ```datalog
-+message("hello world").  % String contains space
++message("hello world")  // String contains space
 ```
 
 ## Comments
@@ -27,34 +27,34 @@ Whitespace inside strings is preserved:
 Two styles of comments are supported:
 
 ```datalog
-% Line comment: everything after % is ignored
+// Line comment: everything after // is ignored
 
 /* Block comment:
    spans multiple lines
    until closing */
 
-+edge(1, 2).  % Inline comment after statement
++edge(1, 2)  // Inline comment after statement
 ```
 
 Comments cannot be nested:
 ```datalog
-/* outer /* inner */ still in outer? */  % Error!
+/* outer /* inner */ still in outer? */  // Error!
 ```
 
 ## Statement Types
 
-Every statement ends with a period `.`
+Statements do not require a trailing period (unlike traditional Prolog/Datalog).
 
 | Statement | Syntax | Purpose |
 |-----------|--------|---------|
-| Insert fact | `+relation(args).` | Add data |
-| Bulk insert | `+relation[(tuple), ...].` | Add multiple facts |
-| Delete fact | `-relation(args).` | Remove data |
-| Conditional delete | `-relation(vars) :- body.` | Remove matching data |
-| Persistent rule | `+head(vars) :- body.` | Define saved rule |
-| Session rule | `head(vars) :- body.` | Define temporary rule |
-| Query | `?- pattern.` | Retrieve data |
-| Schema | `+relation(col: type, ...).` | Declare structure |
+| Insert fact | `+relation(args)` | Add data |
+| Bulk insert | `+relation[(tuple), ...]` | Add multiple facts |
+| Delete fact | `-relation(args)` | Remove data |
+| Conditional delete | `-relation(vars) <- body` | Remove matching data |
+| Persistent rule | `+head(vars) <- body` | Define saved rule |
+| Session rule | `head(vars) <- body` | Define temporary rule |
+| Query | `?pattern` | Retrieve data |
+| Schema | `+relation(col: type, ...)` | Declare structure |
 | Meta command | `.command args` | System operations |
 
 ## Grammar Sections
@@ -90,17 +90,17 @@ symbol ::= expression ;
 ### Facts
 
 ```ebnf
-insert_fact  ::= "+" predicate "(" term ("," term)* ")" "." ;
-bulk_insert  ::= "+" predicate "[" tuple ("," tuple)* "]" "." ;
-delete_fact  ::= "-" predicate "(" term ("," term)* ")" "." ;
+insert_fact  ::= "+" predicate "(" term ("," term)* ")" ;
+bulk_insert  ::= "+" predicate "[" tuple ("," tuple)* "]" ;
+delete_fact  ::= "-" predicate "(" term ("," term)* ")" ;
 tuple        ::= "(" term ("," term)* ")" ;
 ```
 
 ### Rules
 
 ```ebnf
-persistent_rule ::= "+" head ":-" body "." ;
-session_rule    ::= head ":-" body "." ;
+persistent_rule ::= "+" head "<-" body ;
+session_rule    ::= head "<-" body ;
 head            ::= predicate "(" term ("," term)* ")" ;
 body            ::= literal ("," literal)* ;
 ```
@@ -108,7 +108,7 @@ body            ::= literal ("," literal)* ;
 ### Queries
 
 ```ebnf
-query ::= "?-" body "." ;
+query ::= "?" body ;
 ```
 
 ### Terms

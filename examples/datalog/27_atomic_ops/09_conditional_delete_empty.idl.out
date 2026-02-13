@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_cond_del_empty_n27t09
+Knowledge graph 'test_cond_del_empty_n27t09' created.
+Switched to knowledge graph: test_cond_del_empty_n27t09
+> .kg use test_cond_del_empty_n27t09
+Switched to knowledge graph: test_cond_del_empty_n27t09
+> +data[(1, "a"), (2, "b"), (3, "c")]
+Inserted 3 fact(s) into 'data'.
+> +to_delete[(99)]
+Inserted 1 fact(s) into 'to_delete'.
+> ?data(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+│    3 │ "c"  │
+└──────┴──────┘
+3 rows

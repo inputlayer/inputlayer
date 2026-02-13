@@ -1,0 +1,15 @@
+// Test: Bidirectional edges
+
+.kg create test_bidir_n09t88
+.kg use test_bidir_n09t88
+
++edge[(1, 2), (2, 3), (4, 3)]
+
+// Undirected version
++undirected(X, Y) <- edge(X, Y)
++undirected(X, Y) <- edge(Y, X)
+
+?undirected(X, Y)
+
+.kg use default
+.kg drop test_bidir_n09t88

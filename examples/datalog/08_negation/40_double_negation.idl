@@ -1,0 +1,20 @@
+// Test: Double negation pattern
+
+.kg create test_double_neg_n08t40
+.kg use test_double_neg_n08t40
+
++all_items[(1,), (2,), (3,), (4,), (5,)]
++set_a[(1,), (2,), (3,)]
++set_b[(2,), (3,), (4,)]
+
+// Items in all_items but not in set_a
+not_in_a(X) <- all_items(X), !set_a(X)
+
+// Items in all_items that ARE in set_a (via double negation concept)
+in_a(X) <- all_items(X), set_a(X)
+
+?not_in_a(X)
+?in_a(X)
+
+.kg use default
+.kg drop test_double_neg_n08t40

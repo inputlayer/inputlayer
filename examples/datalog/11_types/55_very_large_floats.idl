@@ -1,0 +1,19 @@
+// Test: Very large float values
+
+.kg create test_large_floats_n11t55
+.kg use test_large_floats_n11t55
+
++huge[(1.0e100,), (2.0e100,), (3.0e100,)]
+
+// Arithmetic on large floats
++sum_huge(sum<X>) <- huge(X)
+
+?sum_huge(S)
+
+// Comparison
+huge_cmp(A, B) <- huge(A), huge(B), A < B
+
+?huge_cmp(A, B)
+
+.kg use default
+.kg drop test_large_floats_n11t55

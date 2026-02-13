@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_str_n11t01
+Knowledge graph 'test_str_n11t01' created.
+Switched to knowledge graph: test_str_n11t01
+> .kg use test_str_n11t01
+Switched to knowledge graph: test_str_n11t01
+> +person[("alice", 25), ("bob", 30), ("charlie", 35)]
+Inserted 3 fact(s) into 'person'.
+> ?person(Name, Age)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "alice"   │   25 │
+│ "bob"     │   30 │
+│ "charlie" │   35 │
+└───────────┴──────┘
+3 rows
+> +city[("alice", "new_york"), ("bob", "boston"), ("charlie", "chicago")]
+Inserted 3 fact(s) into 'city'.

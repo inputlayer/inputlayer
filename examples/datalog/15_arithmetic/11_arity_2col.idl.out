@@ -1,0 +1,15 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_arity_2col_n15t11
+Knowledge graph 'test_arity_2col_n15t11' created.
+Switched to knowledge graph: test_arity_2col_n15t11
+> .kg use test_arity_2col_n15t11
+Switched to knowledge graph: test_arity_2col_n15t11
+> +src2[(1, 5), (2, 10), (3, 0), (4, -5)]
+Inserted 4 fact(s) into 'src2'.
+> +link[(1, 100), (2, 200), (3, 300), (4, 400)]
+Inserted 4 fact(s) into 'link'.

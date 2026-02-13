@@ -1,0 +1,39 @@
+// Arity Variation Tests - 3-column source relations
+// KNOWN BUG: Arithmetic with wildcards in 3+ column relations produces incomplete results
+
+.kg create test_arity_3col_n15t12
+.kg use test_arity_3col_n15t12
+
+// 3-column source relation: (id, value, extra)
++src3[(1, 5, 100), (2, 10, 200), (3, 0, 300), (4, -5, 400)]
++link[(1, 10), (2, 20), (3, 30), (4, 40)]
+
+// Test 1: Wildcard at end position - BUG: produces incomplete result
+inc_wildcard_end(Y, D+1) <- src3(X, D, _), link(X, Y)
+?inc_wildcard_end(A, B)
+// BUG: May produce tuples with missing computed column
+
+// Test 2: All variables bound - should work correctly
+inc_all_bound(Y, D+1) <- src3(X, D, Z), link(X, Y)
+?inc_all_bound(A, B)
+
+// Test 3: Project the extra column too
+inc_with_extra(Y, D+1, Z) <- src3(X, D, Z), link(X, Y)
+?inc_with_extra(A, B, C)
+
+// Test 4: Arithmetic on 3rd column instead of 2nd
+inc_third_col(Y, Z+1) <- src3(X, D, Z), link(X, Y)
+?inc_third_col(A, B)
+
+// Test 5: Multiple wildcards - only bind arithmetic variable
+inc_double_wildcard(D+1) <- src3(_, D, _)
+?inc_double_wildcard(A)
+
+// Test 6: Wildcard at start position
++src3b[(100, 1, 5), (200, 2, 10), (300, 3, 0)]
++link_b[(1, 1000), (2, 2000), (3, 3000)]
+inc_wildcard_start(Y, D+1) <- src3b(_, X, D), link_b(X, Y)
+?inc_wildcard_start(A, B)
+
+.kg use default
+.kg drop test_arity_3col_n15t12

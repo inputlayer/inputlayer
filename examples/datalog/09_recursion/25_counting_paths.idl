@@ -1,0 +1,21 @@
+// Test: Counting paths in DAG
+
+.kg create test_count_paths_n09t25
+.kg use test_count_paths_n09t25
+
+// DAG with multiple paths
++edge[(1, 2), (1, 3), (2, 4), (3, 4), (2, 5), (4, 5)]
+
+// All paths to each node
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+?path(X, Y)
+
+// Count incoming paths per node
++incoming(Node, count<Src>) <- path(Src, Node)
+
+?incoming(Node, Count)
+
+.kg use default
+.kg drop test_count_paths_n09t25

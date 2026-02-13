@@ -1,0 +1,25 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_complex_query_n21t05
+Knowledge graph 'test_complex_query_n21t05' created.
+Switched to knowledge graph: test_complex_query_n21t05
+> .kg use test_complex_query_n21t05
+Switched to knowledge graph: test_complex_query_n21t05
+> +orders[(1, 100, 10), (2, 100, 20), (3, 200, 15), (4, 200, 5)]
+Inserted 4 fact(s) into 'orders'.
+> +customers[(100, 1000), (200, 2000)]
+Inserted 2 fact(s) into 'customers'.
+> +large_orders(OrderId, CustCredit) <- orders(OrderId, CustId, Qty), customers(CustId, CustCredit), Qty > 10
+Rule 'large_orders' registered.
+> ?large_orders(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ 1000 │
+│    3 │ 2000 │
+└──────┴──────┘
+2 rows

@@ -1,0 +1,15 @@
+// Test: Negation with partial key match
+
+.kg create test_neg_partial_n08t36
+.kg use test_neg_partial_n08t36
+
++items[(1, "a", 100), (2, "b", 200), (3, "a", 300)]
++blocked[("a",)]
+
+// Exclude items with blocked category
+not_blocked(Id, Cat, Val) <- items(Id, Cat, Val), !blocked(Cat)
+
+?not_blocked(Id, Cat, Val)
+
+.kg use default
+.kg drop test_neg_partial_n08t36

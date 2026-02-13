@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_time_edge_n29t13
+Knowledge graph 'test_time_edge_n29t13' created.
+Switched to knowledge graph: test_time_edge_n29t13
+> .kg use test_time_edge_n29t13
+Switched to knowledge graph: test_time_edge_n29t13
+> +events[(1, 1000000), (2, 1000000), (3, 2000000)]
+Inserted 3 fact(s) into 'events'.

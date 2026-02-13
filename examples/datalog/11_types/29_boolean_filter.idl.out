@@ -1,0 +1,13 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_bool_filter_n11t29
+Knowledge graph 'test_bool_filter_n11t29' created.
+Switched to knowledge graph: test_bool_filter_n11t29
+> .kg use test_bool_filter_n11t29
+Switched to knowledge graph: test_bool_filter_n11t29
+> +features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)]
+Inserted 3 fact(s) into 'features'.

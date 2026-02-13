@@ -1,0 +1,21 @@
+// Test: K larger than dataset
+// Description: top_k with K=5 but only 2 rows — should return all rows, not crash
+
+.kg create test_topk_exceed_n14t167
+.kg use test_topk_exceed_n14t167
+
++score[(1, 100), (2, 200)]
+
++top5(top_k<5, Id, Score:desc>) <- score(Id, Score)
+
+// Should return 2 rows, not crash
+?top5(X, Y)
+
+// Add one more
++score[(3, 300)]
+
+// 3 rows
+?top5(X, Y)
+
+.kg use default
+.kg drop test_topk_exceed_n14t167

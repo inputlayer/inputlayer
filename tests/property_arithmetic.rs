@@ -94,7 +94,7 @@ proptest! {
         let results = execute_two_column_rule(
             vec![(1, base)],
             vec![(1, 100)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         ).expect("Execution should succeed");
 
         prop_assert_eq!(results.len(), 1, "Should have exactly one result");
@@ -113,7 +113,7 @@ proptest! {
     /// Test that D+constant produces correct results
     #[test]
     fn prop_add_constant_correct(base in -1000i32..1000, constant in 1i32..100) {
-        let rule = format!("result(Y, D+{}) :- data(X, D), link(X, Y).", constant);
+        let rule = format!("result(Y, D+{}) <- data(X, D), link(X, Y)", constant);
         let results = execute_two_column_rule(
             vec![(1, base)],
             vec![(1, 100)],
@@ -139,7 +139,7 @@ proptest! {
         catalog.register_relation("right".to_string(), vec!["X".to_string(), "B".to_string()]);
         catalog.register_relation("result".to_string(), vec!["X".to_string(), "D".to_string()]);
 
-        let rule = parse_rule("result(X, A-B) :- left(X, A), right(X, B).").unwrap();
+        let rule = parse_rule("result(X, A-B) <- left(X, A), right(X, B)").unwrap();
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 
@@ -171,7 +171,7 @@ proptest! {
     /// Test that D*constant produces correct results for multiplication
     #[test]
     fn prop_multiplication_correct(base in -100i32..100, factor in 1i32..10) {
-        let rule = format!("result(Y, D*{}) :- data(X, D), link(X, Y).", factor);
+        let rule = format!("result(Y, D*{}) <- data(X, D), link(X, Y)", factor);
         let results = execute_two_column_rule(
             vec![(1, base)],
             vec![(1, 100)],
@@ -197,7 +197,7 @@ proptest! {
         let results = execute_two_column_rule(
             vec![(1, v1), (2, v2), (3, v3)],
             vec![(1, 10), (2, 20), (3, 30)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         ).expect("Execution should succeed");
 
         prop_assert_eq!(results.len(), 3, "Should have 3 results");
@@ -228,7 +228,7 @@ proptest! {
         let results = execute_two_column_rule(
             vec![(1, value)],
             vec![(1, 100)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         ).expect("Execution should succeed");
 
         prop_assert_eq!(results.len(), 1);
@@ -248,7 +248,7 @@ mod deterministic_tests {
         let results = execute_two_column_rule(
             vec![(1, 5)],
             vec![(1, 100)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         )
         .expect("Should succeed");
 
@@ -263,7 +263,7 @@ mod deterministic_tests {
         let results = execute_two_column_rule(
             vec![(1, -5)],
             vec![(1, 100)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         )
         .expect("Should succeed");
 
@@ -277,7 +277,7 @@ mod deterministic_tests {
         let results = execute_two_column_rule(
             vec![(1, 0)],
             vec![(1, 100)],
-            "result(Y, D+1) :- data(X, D), link(X, Y).",
+            "result(Y, D+1) <- data(X, D), link(X, Y)",
         )
         .expect("Should succeed");
 
@@ -294,7 +294,7 @@ mod deterministic_tests {
         catalog.register_relation("right".to_string(), vec!["X".to_string(), "B".to_string()]);
         catalog.register_relation("result".to_string(), vec!["X".to_string(), "D".to_string()]);
 
-        let rule = parse_rule("result(X, A-B) :- left(X, A), right(X, B).").unwrap();
+        let rule = parse_rule("result(X, A-B) <- left(X, A), right(X, B)").unwrap();
         let builder = IRBuilder::new(catalog);
         let ir = builder.build_ir(&rule).unwrap();
 

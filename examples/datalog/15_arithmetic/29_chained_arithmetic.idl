@@ -1,0 +1,14 @@
+// Test: Chained arithmetic assignments
+
+.kg create test_chained_n15t29
+.kg use test_chained_n15t29
+
++base[(10,)]
+
+// Chain of calculations
+result(V, A, B, C) <- base(V), A = V + 5, B = A * 2, C = B - 10
+
+?result(V, A, B, C)
+
+.kg use default
+.kg drop test_chained_n15t29

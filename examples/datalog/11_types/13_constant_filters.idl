@@ -1,0 +1,32 @@
+// Test: Constant Filters in Body
+// Description: Tests constant filtering in rule bodies (string and integer)
+
+.kg create test_const_filter_n11t13
+.kg use test_const_filter_n11t13
+
+// Create test data with various types
++products[(1, "apple", 199, "fruit"), (2, "banana", 99, "fruit"), (3, "bread", 250, "bakery"), (4, "milk", 150, "dairy")]
+
+// Test integer constant filter
++id_one(Name) <- products(1, Name, _, _)
+?id_one(X)
+
+// Test string constant filter on category
++fruits(Id, Name, Price) <- products(Id, Name, Price, "fruit")
+?fruits(X, Y, Z)
+
+// Test string constant filter on name
++find_apple(Id, Price) <- products(Id, "apple", Price, _)
+?find_apple(X, Y)
+
+// Test inequality with string constant (non-fruit items)
++non_fruit(Id, Name) <- products(Id, Name, _, Category), Category != "fruit"
+?non_fruit(X, Y)
+
+// Test integer comparison - cheap products (price < 200 cents)
++cheap(Id, Name, Price) <- products(Id, Name, Price, _), Price < 200
+?cheap(X, Y, Z)
+
+// Cleanup
+.kg use default
+.kg drop test_const_filter_n11t13
