@@ -33,6 +33,9 @@ pub enum TokenKind {
     Keyword,
     Variable,
     Identifier,
+    BodyIdentifier,
+    SchemaColumn,
+    SortOrder,
     ArithOp,
     Punctuation,
     Whitespace,
@@ -47,7 +50,7 @@ impl TokenKind {
             Self::StringLiteral => "\x1b[32m",    // green
             Self::MetaCommand => "\x1b[1;35m",    // bold magenta
             Self::QueryMarker => "\x1b[1;36m",    // bold cyan
-            Self::RuleArrow => "\x1b[1;36m",      // bold cyan
+            Self::RuleArrow => "\x1b[1;35m",      // bold magenta
             Self::OperatorPrefix => "\x1b[1;36m", // bold cyan
             Self::NegationPrefix => "\x1b[1;31m", // bold red
             Self::ComparisonOp => "\x1b[31m",     // red
@@ -55,8 +58,11 @@ impl TokenKind {
             Self::Aggregate => "\x1b[1;33m",      // bold yellow
             Self::BuiltinFn => "\x1b[33m",        // yellow
             Self::Keyword => "\x1b[1;34m",        // bold blue
-            Self::Variable => "\x1b[1;37m",       // bold white
+            Self::Variable => "\x1b[94m",         // bright blue
             Self::Identifier => "\x1b[97m",       // bright white (relations)
+            Self::BodyIdentifier => "\x1b[36m",   // cyan (body relations)
+            Self::SchemaColumn => "\x1b[3;94m",   // italic bright blue
+            Self::SortOrder => "\x1b[1;34m",      // bold blue
             Self::ArithOp => "\x1b[31m",          // red
             Self::Punctuation => "\x1b[90m",      // dark gray
             Self::Whitespace => "",               // no color
@@ -121,6 +127,112 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     }
 
     tokens
+}
+
+/// Schema type names recognized for `name: type` column detection.
+const SCHEMA_TYPES: &[&str] = &[
+    "int",
+    "integer",
+    "i32",
+    "i64",
+    "float",
+    "double",
+    "f64",
+    "number",
+    "symbol",
+    "string",
+    "str",
+    "text",
+    "bool",
+    "boolean",
+    "timestamp",
+    "time",
+    "datetime",
+    "vector",
+    "embedding",
+    "vec",
+    "any",
+    "list",
+];
+
+/// Promote flat tokens to semantic variants based on structural context.
+///
+/// Applies three passes over the token stream:
+/// 1. **Head/body split** — identifiers after `<-` become `BodyIdentifier`
+/// 2. **Schema columns** — `name: type` patterns promote name to `SchemaColumn`
+/// 3. **Sort order** — `:desc`/`:asc` annotations become `SortOrder`
+pub fn semanticize(tokens: &mut [Token], input: &str) {
+    // Pass 1: Head/body split — find RuleArrow and promote identifiers after it
+    if let Some(arrow_idx) = tokens.iter().position(|t| t.kind == TokenKind::RuleArrow) {
+        for token in &mut tokens[arrow_idx + 1..] {
+            if token.kind == TokenKind::Identifier {
+                token.kind = TokenKind::BodyIdentifier;
+            }
+        }
+    }
+
+    // Pass 2: Schema columns — look for `Identifier + Punctuation(":") + type`
+    // Scan windows of 3 non-whitespace tokens
+    let non_ws: Vec<usize> = tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.kind != TokenKind::Whitespace)
+        .map(|(i, _)| i)
+        .collect();
+
+    for window in non_ws.windows(3) {
+        let (i_name, i_colon, i_type) = (window[0], window[1], window[2]);
+        let name_tok = &tokens[i_name];
+        let colon_tok = &tokens[i_colon];
+        let type_tok = &tokens[i_type];
+
+        // Name must be an identifier (head or body)
+        if !matches!(
+            name_tok.kind,
+            TokenKind::Identifier | TokenKind::BodyIdentifier
+        ) {
+            continue;
+        }
+
+        // Colon punctuation
+        if colon_tok.kind != TokenKind::Punctuation || &input[colon_tok.span.clone()] != ":" {
+            continue;
+        }
+
+        // Type must be a keyword or an identifier matching a schema type
+        let type_text = &input[type_tok.span.clone()];
+        let is_schema_type = match type_tok.kind {
+            TokenKind::Keyword => true,
+            TokenKind::Identifier | TokenKind::BodyIdentifier => SCHEMA_TYPES.contains(&type_text),
+            _ => false,
+        };
+
+        if is_schema_type {
+            tokens[i_name].kind = TokenKind::SchemaColumn;
+            tokens[i_type].kind = TokenKind::Keyword;
+        }
+    }
+
+    // Pass 3: Sort order — look for `Punctuation(":") + Identifier("desc"|"asc")`
+    for window in non_ws.windows(2) {
+        let (i_colon, i_sort) = (window[0], window[1]);
+        let colon_tok = &tokens[i_colon];
+        let sort_tok = &tokens[i_sort];
+
+        if colon_tok.kind != TokenKind::Punctuation || &input[colon_tok.span.clone()] != ":" {
+            continue;
+        }
+
+        if matches!(
+            sort_tok.kind,
+            TokenKind::Identifier | TokenKind::BodyIdentifier
+        ) {
+            let text = &input[sort_tok.span.clone()];
+            if text == "desc" || text == "asc" {
+                tokens[i_sort].kind = TokenKind::SortOrder;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -338,5 +450,86 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Number));
         assert!(kinds.contains(&TokenKind::ComparisonOp));
         assert!(kinds.contains(&TokenKind::BuiltinFn));
+    }
+
+    // --- Semantic highlighting tests ---
+
+    fn semantic_token_kinds(input: &str) -> Vec<(TokenKind, &str)> {
+        let mut tokens = tokenize(input);
+        semanticize(&mut tokens, input);
+        tokens
+            .into_iter()
+            .filter(|t| t.kind != TokenKind::Whitespace)
+            .map(|t| (t.kind, &input[t.span]))
+            .collect()
+    }
+
+    #[test]
+    fn test_semanticize_body_identifiers() {
+        let input = "+path(X, Z) <- edge(X, Y), edge(Y, Z)";
+        let tokens = semantic_token_kinds(input);
+        // Head: "path" stays Identifier
+        assert_eq!(tokens[1], (TokenKind::Identifier, "path"));
+        // Body: "edge" tokens become BodyIdentifier
+        let body_idents: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.0 == TokenKind::BodyIdentifier)
+            .collect();
+        assert_eq!(body_idents.len(), 2);
+        assert_eq!(body_idents[0].1, "edge");
+        assert_eq!(body_idents[1].1, "edge");
+    }
+
+    #[test]
+    fn test_semanticize_schema_columns() {
+        let input = "+employee(emp_id: int, name: string, embedding: vector)";
+        let tokens = semantic_token_kinds(input);
+        // Schema columns
+        let schema_cols: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.0 == TokenKind::SchemaColumn)
+            .collect();
+        assert_eq!(schema_cols.len(), 3);
+        assert_eq!(schema_cols[0].1, "emp_id");
+        assert_eq!(schema_cols[1].1, "name");
+        assert_eq!(schema_cols[2].1, "embedding");
+        // Types should be Keyword
+        let keywords: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.0 == TokenKind::Keyword)
+            .collect();
+        assert!(keywords.iter().any(|t| t.1 == "int"));
+        assert!(keywords.iter().any(|t| t.1 == "string"));
+        assert!(keywords.iter().any(|t| t.1 == "vector"));
+    }
+
+    #[test]
+    fn test_semanticize_sort_order() {
+        let input = "top_k<3, Name, Score:desc>";
+        let tokens = semantic_token_kinds(input);
+        let sort: Vec<_> = tokens
+            .iter()
+            .filter(|t| t.0 == TokenKind::SortOrder)
+            .collect();
+        assert_eq!(sort.len(), 1);
+        assert_eq!(sort[0].1, "desc");
+    }
+
+    #[test]
+    fn test_semanticize_no_arrow() {
+        // Fact assertions have no body — all identifiers stay as Identifier
+        let input = "+edge(1, 2)";
+        let tokens = semantic_token_kinds(input);
+        assert!(!tokens.iter().any(|t| t.0 == TokenKind::BodyIdentifier));
+        assert_eq!(tokens[1], (TokenKind::Identifier, "edge"));
+    }
+
+    #[test]
+    fn test_semanticize_preserves_head() {
+        // Query marker — identifiers in head position stay as Identifier
+        let input = "?relation(X, Y)";
+        let tokens = semantic_token_kinds(input);
+        assert_eq!(tokens[1], (TokenKind::Identifier, "relation"));
+        assert!(!tokens.iter().any(|t| t.0 == TokenKind::BodyIdentifier));
     }
 }
