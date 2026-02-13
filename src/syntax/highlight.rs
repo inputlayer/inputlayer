@@ -11,7 +11,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Context, Helper, Result};
 
-use super::{tokenize, TokenKind};
+use super::{semanticize, tokenize, TokenKind};
 
 const RESET: &str = "\x1b[0m";
 const PROMPT_COLOR: &str = "\x1b[1;32m"; // bold green
@@ -66,12 +66,14 @@ impl Highlighter for DatalogHelper {
             return Cow::Borrowed(line);
         }
 
-        let tokens = tokenize(line);
+        let mut tokens = tokenize(line);
 
         // If there's only one Unknown token spanning everything, skip highlighting
         if tokens.len() == 1 && tokens[0].kind == TokenKind::Unknown {
             return Cow::Borrowed(line);
         }
+
+        semanticize(&mut tokens, line);
 
         let mut result = String::with_capacity(line.len() * 2);
         let mut last_end = 0;
@@ -175,6 +177,21 @@ mod tests {
         // Strip ANSI codes and verify text is preserved
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, input);
+    }
+
+    #[test]
+    fn test_highlight_body_distinct_from_head() {
+        let h = DatalogHelper::new();
+        let result = h.highlight("+path(X, Z) <- edge(X, Y)", 0);
+        let result_str = result.as_ref();
+        // Head identifier "path" uses bright white (\x1b[97m)
+        assert!(result_str.contains("\x1b[97mpath"));
+        // Body identifier "edge" uses cyan (\x1b[36m)
+        assert!(result_str.contains("\x1b[36medge"));
+        // Variables use bright blue (\x1b[94m)
+        assert!(result_str.contains("\x1b[94mX"));
+        // Rule arrow uses bold magenta (\x1b[1;35m)
+        assert!(result_str.contains("\x1b[1;35m<-"));
     }
 
     fn strip_ansi(s: &str) -> String {
