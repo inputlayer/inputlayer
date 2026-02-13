@@ -1,0 +1,313 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "InputLayer Datalog",
+  "scopeName": "source.idl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#meta-commands" },
+    { "include": "#type-record-declaration" },
+    { "include": "#schema-column" },
+    { "include": "#sort-order" },
+    { "include": "#rule-body" },
+    { "include": "#query-marker" },
+    { "include": "#operator-prefix" },
+    { "include": "#negation" },
+    { "include": "#comparison-operators" },
+    { "include": "#numbers" },
+    { "include": "#aggregates" },
+    { "include": "#builtin-functions" },
+    { "include": "#keywords" },
+    { "include": "#wildcard" },
+    { "include": "#variables" },
+    { "include": "#head-identifiers" },
+    { "include": "#arithmetic-operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.idl",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.idl",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [
+            { "include": "#comments" }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.idl",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.idl",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "meta-commands": {
+      "patterns": [
+        {
+          "match": "^\\s*(\\.kg)\\s+(create|list|use|drop)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.idl" },
+            "2": { "name": "keyword.control.meta.subcommand.idl" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.rule)\\s+(list|drop|remove|def|clear|edit)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.idl" },
+            "2": { "name": "keyword.control.meta.subcommand.idl" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.session)\\s+(clear|drop)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.idl" },
+            "2": { "name": "keyword.control.meta.subcommand.idl" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.index)\\s+(list|create|drop|stats|rebuild)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.idl" },
+            "2": { "name": "keyword.control.meta.subcommand.idl" }
+          }
+        },
+        {
+          "name": "keyword.control.meta.idl",
+          "match": "^\\s*\\.(kg|rel|rule|session|index|load|compact|status|help|quit|exit|q|\\?)\\b"
+        }
+      ]
+    },
+    "type-record-declaration": {
+      "begin": "\\b(type)\\s+([A-Z_][A-Za-z0-9_]*)\\s*(:)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.keyword.idl" },
+        "2": { "name": "entity.name.type.idl" },
+        "3": { "name": "punctuation.separator.colon.idl" },
+        "4": { "name": "punctuation.brace.open.idl" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.close.idl" }
+      },
+      "name": "meta.type.record.idl",
+      "patterns": [
+        { "include": "#schema-column" },
+        { "include": "#keywords" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "schema-column": {
+      "patterns": [
+        {
+          "match": "\\b([a-z][A-Za-z0-9_]*)\\s*(:)\\s*(integer|int|i32|i64|float|double|f64|number|symbol|string|str|text|boolean|bool|timestamp|datetime|time|vector|embedding|vec|any|list)\\b",
+          "captures": {
+            "1": { "name": "variable.other.member.idl" },
+            "2": { "name": "punctuation.separator.colon.idl" },
+            "3": { "name": "storage.type.idl" }
+          }
+        }
+      ]
+    },
+    "sort-order": {
+      "patterns": [
+        {
+          "match": ":(desc|asc)\\b",
+          "captures": {
+            "0": { "name": "keyword.other.sort-order.idl" }
+          }
+        }
+      ]
+    },
+    "rule-body": {
+      "begin": "<-",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.arrow.idl" }
+      },
+      "end": "(?=^\\s*[?+\\-.])|(?=^\\s*$)|(?=^[a-z])",
+      "name": "meta.rule.body.idl",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#sort-order" },
+        { "include": "#negation" },
+        { "include": "#comparison-operators" },
+        { "include": "#numbers" },
+        { "include": "#aggregates" },
+        { "include": "#builtin-functions" },
+        { "include": "#keywords" },
+        { "include": "#wildcard" },
+        { "include": "#variables" },
+        { "include": "#body-identifiers" },
+        { "include": "#arithmetic-operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "query-marker": {
+      "patterns": [
+        {
+          "name": "keyword.control.query.idl",
+          "match": "\\?(?=[A-Za-z])"
+        }
+      ]
+    },
+    "operator-prefix": {
+      "patterns": [
+        {
+          "name": "keyword.control.mutation.idl",
+          "match": "^\\s*[+\\-](?=[a-z\"\\[])"
+        }
+      ]
+    },
+    "negation": {
+      "patterns": [
+        {
+          "name": "keyword.control.negation.idl",
+          "match": "!(?=[A-Za-z])"
+        }
+      ]
+    },
+    "comparison-operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.idl",
+          "match": ">=|<=|!=|[<>=]"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.idl",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+\\-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.idl",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "aggregates": {
+      "patterns": [
+        {
+          "name": "support.function.aggregate.idl",
+          "match": "\\b(count_distinct|count|sum|avg|top_k_threshold|top_k|within_radius|min|max)\\b"
+        }
+      ]
+    },
+    "builtin-functions": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.idl",
+          "match": "\\b(euclidean_int8|euclidean|cosine_int8|cosine|dot_int8|dot|manhattan_int8|manhattan|normalize|vec_dim|vec_add|vec_scale|quantize_linear|quantize_symmetric|dequantize_scaled|dequantize|lsh_multi_probe|lsh_bucket|lsh_probes|hnsw_nearest|time_decay_linear|time_decay|time_diff|time_add|time_sub|time_now|time_before|time_after|time_between|within_last|intervals_overlap|interval_contains|interval_duration|point_in_interval|abs_int64|abs_float64|abs|sqrt|pow|log|exp|sin|cos|tan|floor|ceil|sign|min_val|max_val|len|upper|lower|trim|substr|replace|concat)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.idl",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "storage.type.idl",
+          "match": "\\b(type|int|string|bool|float|list)\\b"
+        }
+      ]
+    },
+    "wildcard": {
+      "patterns": [
+        {
+          "name": "variable.language.wildcard.idl",
+          "match": "\\b_\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.parameter.idl",
+          "match": "\\b[A-Z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "head-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.function.idl",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "body-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.idl",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "arithmetic-operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arithmetic.idl",
+          "match": "[+\\-*/]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.parenthesis.open.idl",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.parenthesis.close.idl",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.bracket.open.idl",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.bracket.close.idl",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.brace.open.idl",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.brace.close.idl",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.separator.comma.idl",
+          "match": ","
+        },
+        {
+          "name": "punctuation.accessor.dot.idl",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.separator.colon.idl",
+          "match": ":"
+        }
+      ]
+    }
+  }
+}
