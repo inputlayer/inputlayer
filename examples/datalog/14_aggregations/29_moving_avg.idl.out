@@ -11,3 +11,54 @@ Switched to knowledge graph: test_moving_avg_n14t29
 Switched to knowledge graph: test_moving_avg_n14t29
 > +values[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)]
 Inserted 5 fact(s) into 'values'.
+> moving_sum_3(Id, sum<Val>) <- values(Id, _), values(OtherId, Val), OtherId <= Id, OtherId >= Id - 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   30 │
+│    3 │   45 │
+│    4 │   60 │
+│    5 │   70 │
+└──────┴──────┘
+5 rows
+(session: 1 rule(s))
+> ?moving_sum_3(Id, Sum)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   30 │
+│    3 │   45 │
+│    4 │   60 │
+│    5 │   70 │
+└──────┴──────┘
+5 rows
+> moving_count_3(Id, count<Val>) <- values(Id, _), values(OtherId, Val), OtherId <= Id, OtherId >= Id - 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    2 │
+│    3 │    3 │
+│    4 │    3 │
+│    5 │    3 │
+└──────┴──────┘
+5 rows
+(session: 2 rule(s))
+> ?moving_count_3(Id, Count)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    2 │
+│    3 │    3 │
+│    4 │    3 │
+│    5 │    3 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_moving_avg_n14t29
+Knowledge graph 'test_moving_avg_n14t29' dropped.

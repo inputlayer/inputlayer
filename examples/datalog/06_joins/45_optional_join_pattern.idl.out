@@ -13,3 +13,40 @@ Switched to knowledge graph: test_optional_n06t45
 Inserted 3 fact(s) into 'employees'.
 > +managers[(1, "Dept A"), (2, "Dept B")]
 Inserted 2 fact(s) into 'managers'.
+> with_manager(Id, Name, Dept) <- employees(Id, Name), managers(Id, Dept)
+┌──────┬─────────┬──────────┐
+│ col0 │ col1    │ col2     │
+├──────┼─────────┼──────────┤
+│    1 │ "Alice" │ "Dept A" │
+│    2 │ "Bob"   │ "Dept B" │
+└──────┴─────────┴──────────┘
+2 rows
+(session: 1 rule(s))
+> without_manager(Id, Name) <- employees(Id, Name), !managers(Id, _)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "Carol" │
+└──────┴─────────┘
+1 rows
+(session: 2 rule(s))
+> ?with_manager(Id, Name, Dept)
+┌──────┬─────────┬──────────┐
+│ col0 │ col1    │ col2     │
+├──────┼─────────┼──────────┤
+│    1 │ "Alice" │ "Dept A" │
+│    2 │ "Bob"   │ "Dept B" │
+└──────┴─────────┴──────────┘
+2 rows
+> ?without_manager(Id, Name)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "Carol" │
+└──────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_optional_n06t45
+Knowledge graph 'test_optional_n06t45' dropped.

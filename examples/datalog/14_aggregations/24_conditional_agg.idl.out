@@ -11,3 +11,55 @@ Switched to knowledge graph: test_cond_agg_n14t24
 Switched to knowledge graph: test_cond_agg_n14t24
 > +transactions[(1, "credit", 100), (2, "debit", 50), (3, "credit", 200), (4, "debit", 75), (5, "credit", 150)]
 Inserted 5 fact(s) into 'transactions'.
+> credit_sum(sum<Amt>) <- transactions(_, "credit", Amt)
+┌──────┐
+│ col0 │
+├──────┤
+│  450 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?credit_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  450 │
+└──────┘
+1 rows
+> debit_sum(sum<Amt>) <- transactions(_, "debit", Amt)
+┌──────┐
+│ col0 │
+├──────┤
+│  125 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> ?debit_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  125 │
+└──────┘
+1 rows
+> type_count(Type, count<Amt>) <- transactions(_, Type, Amt)
+┌──────────┬──────┐
+│ col0     │ col1 │
+├──────────┼──────┤
+│ "credit" │    3 │
+│ "debit"  │    2 │
+└──────────┴──────┘
+2 rows
+(session: 3 rule(s))
+> ?type_count(Type, Count)
+┌──────────┬──────┐
+│ col0     │ col1 │
+├──────────┼──────┤
+│ "credit" │    3 │
+│ "debit"  │    2 │
+└──────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_cond_agg_n14t24
+Knowledge graph 'test_cond_agg_n14t24' dropped.

@@ -1,0 +1,20 @@
+// Test: Duplicate ephemeral facts
+// Description: Inserting same session fact twice should deduplicate
+
+.kg create test_sess_dup_n04t40
+.kg use test_sess_dup_n04t40
+
++base[(1,)]
+
+// Add same session fact twice
+base(2)
+base(2)
+base(3)
+
+// Should show 3 distinct values, not 4
+?base(X)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_dup_n04t40

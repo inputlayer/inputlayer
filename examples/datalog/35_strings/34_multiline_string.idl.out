@@ -19,3 +19,23 @@ Inserted 2 fact(s) into 'text'.
 │ "single"       │
 └────────────────┘
 2 rows
+> has_newline(T) <- text(T), T = "line1\nline2"
+┌────────────────┐
+│ col0           │
+├────────────────┤
+│ "line1\nline2" │
+└────────────────┘
+1 rows
+(session: 1 rule(s))
+> ?has_newline(T)
+┌────────────────┐
+│ col0           │
+├────────────────┤
+│ "line1\nline2" │
+└────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multiline_n35t34
+Knowledge graph 'test_multiline_n35t34' dropped.

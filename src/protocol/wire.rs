@@ -153,18 +153,35 @@ impl std::fmt::Display for WireValue {
 /// Wire-serializable tuple (row of values).
 ///
 /// Represents a single row in a relation or query result.
+/// Optionally includes per-tuple provenance when executing in a session context.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WireTuple {
     pub values: Vec<WireValue>,
+    /// Per-tuple provenance (present only for session queries with ephemeral data)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::session::Provenance>,
 }
 
 impl WireTuple {
     pub fn new(values: Vec<WireValue>) -> Self {
-        Self { values }
+        Self {
+            values,
+            provenance: None,
+        }
+    }
+
+    pub fn with_provenance(values: Vec<WireValue>, provenance: crate::session::Provenance) -> Self {
+        Self {
+            values,
+            provenance: Some(provenance),
+        }
     }
 
     pub fn empty() -> Self {
-        Self { values: Vec::new() }
+        Self {
+            values: Vec::new(),
+            provenance: None,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -189,6 +206,7 @@ impl From<(i32, i32)> for WireTuple {
     fn from((a, b): (i32, i32)) -> Self {
         WireTuple {
             values: vec![WireValue::Int32(a), WireValue::Int32(b)],
+            provenance: None,
         }
     }
 }
@@ -217,6 +235,7 @@ impl From<&(i32, i32)> for WireTuple {
     fn from((a, b): &(i32, i32)) -> Self {
         WireTuple {
             values: vec![WireValue::Int32(*a), WireValue::Int32(*b)],
+            provenance: None,
         }
     }
 }
@@ -260,6 +279,9 @@ impl ColumnDef {
 
 // Query Result
 /// Result of a query execution.
+///
+/// Includes optional provenance metadata when ephemeral session data
+/// participates in the query result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResult {
     /// Result rows
@@ -268,6 +290,40 @@ pub struct QueryResult {
     pub schema: Vec<ColumnDef>,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
+    /// Provenance metadata (present when ephemeral data participates)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ResultMetadata>,
+}
+
+/// Provenance and audit metadata for a query result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResultMetadata {
+    /// Whether any ephemeral data participated in this result
+    pub has_ephemeral: bool,
+    /// Relations that contributed ephemeral data
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ephemeral_sources: Vec<String>,
+    /// Warnings about ephemeral/persistent mixing
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// Session ID that produced this result (if session-scoped)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<u64>,
+}
+
+impl ResultMetadata {
+    /// Create metadata from session query metadata
+    pub fn from_session(meta: &crate::session::QueryMetadata, session_id: u64) -> Option<Self> {
+        if !meta.has_ephemeral {
+            return None;
+        }
+        Some(Self {
+            has_ephemeral: true,
+            ephemeral_sources: meta.ephemeral_sources.clone(),
+            warnings: meta.warnings.clone(),
+            session_id: Some(session_id),
+        })
+    }
 }
 
 impl QueryResult {
@@ -276,6 +332,7 @@ impl QueryResult {
             rows: Vec::new(),
             schema: Vec::new(),
             execution_time_ms: 0,
+            metadata: None,
         }
     }
 
@@ -284,6 +341,22 @@ impl QueryResult {
             rows,
             schema,
             execution_time_ms,
+            metadata: None,
+        }
+    }
+
+    /// Create a query result with provenance metadata
+    pub fn with_metadata(
+        rows: Vec<WireTuple>,
+        schema: Vec<ColumnDef>,
+        execution_time_ms: u64,
+        metadata: Option<ResultMetadata>,
+    ) -> Self {
+        Self {
+            rows,
+            schema,
+            execution_time_ms,
+            metadata,
         }
     }
 }
@@ -359,12 +432,242 @@ mod tests {
             WireValue::Vector(vec![1.0, 2.0, 3.0]),
         ]);
 
-        // Serialize to bincode
-        let bytes = bincode::serialize(&original).unwrap();
-
-        // Deserialize back
-        let restored: WireTuple = bincode::deserialize(&bytes).unwrap();
-
+        // JSON roundtrip (primary wire format)
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: WireTuple = serde_json::from_str(&json).unwrap();
         assert_eq!(original, restored);
+
+        // Verify provenance is omitted when None
+        assert!(!json.contains("provenance"));
+
+        // Roundtrip with provenance present
+        let with_prov = WireTuple::with_provenance(
+            vec![WireValue::Int32(1)],
+            crate::session::Provenance::Ephemeral,
+        );
+        let json2 = serde_json::to_string(&with_prov).unwrap();
+        let restored2: WireTuple = serde_json::from_str(&json2).unwrap();
+        assert_eq!(with_prov, restored2);
+        assert!(json2.contains("\"provenance\":\"ephemeral\""));
+    }
+
+    #[test]
+    fn test_wire_tuple_with_provenance() {
+        use crate::session::Provenance;
+
+        let tuple = WireTuple::with_provenance(
+            vec![WireValue::Int32(1), WireValue::Int32(2)],
+            Provenance::Ephemeral,
+        );
+        assert_eq!(tuple.provenance, Some(Provenance::Ephemeral));
+
+        // Provenance present → serialized in JSON
+        let json = serde_json::to_string(&tuple).unwrap();
+        assert!(json.contains("\"provenance\":\"ephemeral\""));
+    }
+
+    #[test]
+    fn test_wire_tuple_without_provenance() {
+        let tuple = WireTuple::new(vec![WireValue::Int32(1)]);
+        assert_eq!(tuple.provenance, None);
+
+        // No provenance → field omitted from JSON
+        let json = serde_json::to_string(&tuple).unwrap();
+        assert!(!json.contains("provenance"));
+    }
+
+    #[test]
+    fn test_result_metadata_from_session() {
+        use crate::session::QueryMetadata;
+
+        // Clean session → no metadata
+        let clean = QueryMetadata::default();
+        assert!(ResultMetadata::from_session(&clean, 1).is_none());
+
+        // Dirty session → metadata with session_id
+        let dirty = QueryMetadata {
+            has_ephemeral: true,
+            ephemeral_sources: vec!["edge".to_string()],
+            warnings: vec!["test warning".to_string()],
+        };
+        let meta = ResultMetadata::from_session(&dirty, 42).unwrap();
+        assert!(meta.has_ephemeral);
+        assert_eq!(meta.session_id, Some(42));
+        assert_eq!(meta.ephemeral_sources, vec!["edge"]);
+    }
+
+    // --- Additional edge case tests ---
+
+    #[test]
+    fn test_wire_value_cross_type_accessors() {
+        // Int32 → i64 widening works
+        assert_eq!(WireValue::Int32(42).as_i64(), Some(42));
+        // Int64 → i32 narrowing works if in range
+        assert_eq!(WireValue::Int64(42).as_i32(), Some(42));
+        // Int64 → i32 fails if out of range
+        assert_eq!(WireValue::Int64(i64::MAX).as_i32(), None);
+        // Int32 → f64 widening works
+        assert_eq!(WireValue::Int32(42).as_f64(), Some(42.0));
+        // Int64 → f64 conversion works
+        assert_eq!(WireValue::Int64(100).as_f64(), Some(100.0));
+        // Wrong type returns None
+        assert_eq!(WireValue::Int32(42).as_str(), None);
+        assert_eq!(WireValue::Int32(42).as_bool(), None);
+        assert_eq!(WireValue::String("x".to_string()).as_i32(), None);
+        assert_eq!(WireValue::Float64(3.14).as_i32(), None);
+        assert_eq!(WireValue::Bool(true).as_i32(), None);
+        assert!(!WireValue::Int32(42).is_null());
+    }
+
+    #[test]
+    fn test_wire_value_vector_types() {
+        let vec_val = WireValue::Vector(vec![1.0, 2.0, 3.0]);
+        assert_eq!(vec_val.data_type(), WireDataType::Vector { dim: Some(3) });
+
+        let vec_int8 = WireValue::VectorInt8(vec![1, 2, 3, 4]);
+        assert_eq!(
+            vec_int8.data_type(),
+            WireDataType::VectorInt8 { dim: Some(4) }
+        );
+    }
+
+    #[test]
+    fn test_wire_value_bytes_type() {
+        let bytes = WireValue::Bytes(vec![0xFF, 0x00, 0xAB]);
+        assert_eq!(bytes.data_type(), WireDataType::Bytes);
+    }
+
+    #[test]
+    fn test_wire_value_null_type() {
+        assert!(WireValue::Null.is_null());
+        assert_eq!(WireValue::Null.as_i32(), None);
+        assert_eq!(WireValue::Null.as_str(), None);
+    }
+
+    #[test]
+    fn test_wire_value_timestamp() {
+        let ts = WireValue::Timestamp(1700000000);
+        assert_eq!(ts.data_type(), WireDataType::Timestamp);
+    }
+
+    #[test]
+    fn test_wire_tuple_empty() {
+        let empty = WireTuple::empty();
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+        assert_eq!(empty.get(0), None);
+    }
+
+    #[test]
+    fn test_wire_tuple_get_out_of_bounds() {
+        let tuple = WireTuple::new(vec![WireValue::Int32(1)]);
+        assert_eq!(tuple.get(0), Some(&WireValue::Int32(1)));
+        assert_eq!(tuple.get(1), None);
+        assert_eq!(tuple.get(100), None);
+    }
+
+    #[test]
+    fn test_wire_tuple_from_ref_tuple() {
+        let pair = (5, 10);
+        let tuple: WireTuple = (&pair).into();
+        assert_eq!(tuple.len(), 2);
+        assert_eq!(tuple.get(0), Some(&WireValue::Int32(5)));
+    }
+
+    #[test]
+    fn test_wire_tuple_try_into_extra_values_ok() {
+        // TryFrom<WireTuple> for (i32, i32) only requires >= 2 values
+        let wire = WireTuple::new(vec![
+            WireValue::Int32(1),
+            WireValue::Int32(2),
+            WireValue::Int32(3),
+        ]);
+        let result: Result<(i32, i32), _> = wire.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (1, 2));
+    }
+
+    #[test]
+    fn test_wire_tuple_try_into_wrong_type() {
+        let wire = WireTuple::new(vec![
+            WireValue::String("hello".to_string()),
+            WireValue::Int32(2),
+        ]);
+        let result: Result<(i32, i32), _> = wire.try_into();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wire_data_type_display() {
+        assert_eq!(WireDataType::Int32.to_string(), "Int32");
+        assert_eq!(WireDataType::Int64.to_string(), "Int64");
+        assert_eq!(WireDataType::Float64.to_string(), "Float64");
+        assert_eq!(WireDataType::String.to_string(), "String");
+        assert_eq!(WireDataType::Bool.to_string(), "Bool");
+        assert_eq!(WireDataType::Bytes.to_string(), "Bytes");
+        assert_eq!(
+            WireDataType::Vector { dim: Some(128) }.to_string(),
+            "Vector[128]"
+        );
+        assert_eq!(WireDataType::Vector { dim: None }.to_string(), "Vector");
+        assert_eq!(
+            WireDataType::VectorInt8 { dim: Some(64) }.to_string(),
+            "VectorInt8[64]"
+        );
+    }
+
+    #[test]
+    fn test_column_def_constructors() {
+        assert_eq!(ColumnDef::int32("a").data_type, WireDataType::Int32);
+        assert_eq!(ColumnDef::int64("b").data_type, WireDataType::Int64);
+        assert_eq!(ColumnDef::float64("c").data_type, WireDataType::Float64);
+        assert_eq!(ColumnDef::string("d").data_type, WireDataType::String);
+    }
+
+    #[test]
+    fn test_query_result_empty() {
+        let result = QueryResult {
+            rows: vec![],
+            schema: vec![ColumnDef::int32("x")],
+            execution_time_ms: 0,
+            metadata: None,
+        };
+        assert_eq!(result.rows.len(), 0);
+        assert_eq!(result.schema.len(), 1);
+    }
+
+    #[test]
+    fn test_wire_tuple_provenance_variants() {
+        use crate::session::Provenance;
+
+        let persistent =
+            WireTuple::with_provenance(vec![WireValue::Int32(1)], Provenance::Persistent);
+        let json = serde_json::to_string(&persistent).unwrap();
+        assert!(json.contains("\"provenance\":\"persistent\""));
+
+        let mixed = WireTuple::with_provenance(vec![WireValue::Int32(1)], Provenance::Mixed);
+        let json = serde_json::to_string(&mixed).unwrap();
+        assert!(json.contains("\"provenance\":\"mixed\""));
+    }
+
+    #[test]
+    fn test_wire_value_json_roundtrip_all_types() {
+        let values = vec![
+            WireValue::Null,
+            WireValue::Int32(i32::MAX),
+            WireValue::Int64(i64::MAX),
+            WireValue::Float64(f64::MIN),
+            WireValue::String("test\nwith\nnewlines".to_string()),
+            WireValue::Bool(false),
+            WireValue::Timestamp(0),
+            WireValue::Vector(vec![]),
+            WireValue::VectorInt8(vec![-128, 127]),
+            WireValue::Bytes(vec![]),
+        ];
+        for val in values {
+            let json = serde_json::to_string(&val).unwrap();
+            let restored: WireValue = serde_json::from_str(&json).unwrap();
+            assert_eq!(val, restored);
+        }
     }
 }

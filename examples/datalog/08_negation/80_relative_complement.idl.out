@@ -13,3 +13,18 @@ Switched to knowledge graph: test_rel_comp_n08t80
 Inserted 5 fact(s) into 'universe'.
 > +subset[(2,), (4,)]
 Inserted 2 fact(s) into 'subset'.
+> +complement(X) <- universe(X), !subset(X)
+Rule 'complement' registered.
+> ?complement(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_comp_n08t80
+Knowledge graph 'test_rel_comp_n08t80' dropped.

@@ -11,3 +11,18 @@ Switched to knowledge graph: test_true_false_n11t40
 Switched to knowledge graph: test_true_false_n11t40
 > +flags[(1, true), (2, false), (3, true)]
 Inserted 3 fact(s) into 'flags'.
+> is_true(Id) <- flags(Id, true)
+No results.
+(session: 1 rule(s))
+> is_false(Id) <- flags(Id, false)
+No results.
+(session: 2 rule(s))
+> ?is_true(Id)
+No results.
+> ?is_false(Id)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_true_false_n11t40
+Knowledge graph 'test_true_false_n11t40' dropped.

@@ -11,3 +11,33 @@ Switched to knowledge graph: test_drop_topk_thresh_n14t114
 Switched to knowledge graph: test_drop_topk_thresh_n14t114
 > +score[(1, 50), (2, 250), (3, 175), (4, 300), (5, 80), (6, 200)]
 Inserted 6 fact(s) into 'score'.
+> +top_high(top_k_threshold<3, 100, Player, Points:desc>) <- score(Player, Points)
+Rule 'top_high' registered.
+> ?top_high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    4 │  300 │
+│    6 │  200 │
+└──────┴──────┘
+3 rows
+> .rule drop top_high
+Rule 'top_high' dropped.
+> ?top_high(X, Y)
+No results.
+> +top_high(top_k_threshold<3, 200, Player, Points:desc>) <- score(Player, Points)
+Rule 'top_high' registered.
+> ?top_high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    4 │  300 │
+│    6 │  200 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_topk_thresh_n14t114
+Knowledge graph 'test_drop_topk_thresh_n14t114' dropped.

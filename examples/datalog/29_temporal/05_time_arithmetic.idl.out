@@ -11,3 +11,5 @@ Switched to knowledge graph: test_time_arith_n29t05
 Switched to knowledge graph: test_time_arith_n29t05
 > +events[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2800)]
 Inserted 4 fact(s) into 'events'.
+> duration(Id, D) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

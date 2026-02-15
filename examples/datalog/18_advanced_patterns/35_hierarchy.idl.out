@@ -11,3 +11,43 @@ Switched to knowledge graph: test_hierarchy_n18t35
 Switched to knowledge graph: test_hierarchy_n18t35
 > +reports_to[("Alice", "Bob"), ("Bob", "Carol"), ("Dave", "Bob"), ("Eve", "Carol")]
 Inserted 4 fact(s) into 'reports_to'.
+> direct_report(Mgr, Emp) <- reports_to(Emp, Mgr)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Bob"   │ "Alice" │
+│ "Bob"   │ "Dave"  │
+│ "Carol" │ "Bob"   │
+│ "Carol" │ "Eve"   │
+└─────────┴─────────┘
+4 rows
+(session: 1 rule(s))
+> ?direct_report(Mgr, Emp)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Bob"   │ "Alice" │
+│ "Bob"   │ "Dave"  │
+│ "Carol" │ "Bob"   │
+│ "Carol" │ "Eve"   │
+└─────────┴─────────┘
+4 rows
+> +all_reports(Mgr, Emp) <- reports_to(Emp, Mgr)
+Rule 'all_reports' registered.
+> +all_reports(Mgr, Emp) <- reports_to(Emp, Mid), all_reports(Mgr, Mid)
+Rule 'all_reports' registered.
+> ?all_reports("Carol", Emp)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Carol" │ "Alice" │
+│ "Carol" │ "Bob"   │
+│ "Carol" │ "Dave"  │
+│ "Carol" │ "Eve"   │
+└─────────┴─────────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_hierarchy_n18t35
+Knowledge graph 'test_hierarchy_n18t35' dropped.

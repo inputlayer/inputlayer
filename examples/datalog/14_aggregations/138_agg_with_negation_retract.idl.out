@@ -13,3 +13,34 @@ Switched to knowledge graph: test_neg_agg_retract_n14t138
 Inserted 4 fact(s) into 'employee'.
 > +manager[(2), (4)]
 Inserted 2 fact(s) into 'manager'.
+> +non_mgr_count(count<Name>) <- employee(Id, Name, _), !manager(Id)
+Rule 'non_mgr_count' registered.
+> ?non_mgr_count(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> +manager[(1)]
+Inserted 1 fact(s) into 'manager'.
+> ?non_mgr_count(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> -manager(2)
+Deleted 1 facts from 'manager'.
+> ?non_mgr_count(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_retract_n14t138
+Knowledge graph 'test_neg_agg_retract_n14t138' dropped.

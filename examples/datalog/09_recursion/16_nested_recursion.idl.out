@@ -11,3 +11,25 @@ Switched to knowledge graph: test_nested_rec_n09t16
 Switched to knowledge graph: test_nested_rec_n09t16
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)]
 Inserted 4 fact(s) into 'edge'.
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- path(X, Y), edge(Y, Z)
+Rule 'path' registered.
+> +extended_path(X, Y) <- path(X, Y)
+Rule 'extended_path' registered.
+> +extended_path(X, Z) <- extended_path(X, Y), path(Y, Z)
+Rule 'extended_path' registered.
+> ?extended_path(1, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    1 │    5 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_rec_n09t16
+Knowledge graph 'test_nested_rec_n09t16' dropped.

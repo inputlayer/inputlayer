@@ -13,3 +13,40 @@ Switched to knowledge graph: test_exists_n10t30
 Inserted 3 fact(s) into 'customers'.
 > +orders[(1, 100), (1, 200), (3, 150)]
 Inserted 3 fact(s) into 'orders'.
+> has_orders(Name) <- customers(Id, Name), orders(Id, _)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Carol" │
+└─────────┘
+2 rows
+(session: 1 rule(s))
+> ?has_orders(Name)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Carol" │
+└─────────┘
+2 rows
+> no_orders(Name) <- customers(Id, Name), !orders(Id, _)
+┌───────┐
+│ col0  │
+├───────┤
+│ "Bob" │
+└───────┘
+1 rows
+(session: 2 rule(s))
+> ?no_orders(Name)
+┌───────┐
+│ col0  │
+├───────┤
+│ "Bob" │
+└───────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_exists_n10t30
+Knowledge graph 'test_exists_n10t30' dropped.

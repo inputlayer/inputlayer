@@ -13,3 +13,25 @@ Switched to knowledge graph: test_intersect_comp_n22t11
 Inserted 4 fact(s) into 'set_a'.
 > +set_b[(2,), (4,), (6,), (8,)]
 Inserted 4 fact(s) into 'set_b'.
+> common(X) <- set_a(X), set_b(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?common(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_intersect_comp_n22t11
+Knowledge graph 'test_intersect_comp_n22t11' dropped.

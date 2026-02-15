@@ -13,3 +13,33 @@ Switched to knowledge graph: test_mixed_rules_n25t07
 Inserted 3 fact(s) into 'base'.
 > +step1(X, Y) <- base(X, Y), Y > 10
 Rule 'step1' registered.
+> step2(X, Z) <- step1(X, Y), Z = Y + 5
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   25 │
+│    3 │   35 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?step1(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+2 rows
+> ?step2(X, Z)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   25 │
+│    3 │   35 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mixed_rules_n25t07
+Knowledge graph 'test_mixed_rules_n25t07' dropped.

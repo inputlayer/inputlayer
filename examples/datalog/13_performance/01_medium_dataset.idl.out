@@ -66,3 +66,16 @@ Inserted 49 fact(s) into 'edge'.
 │   49 │   50 │
 └──────┴──────┘
 49 rows
+> +two_hop(X, Z) <- edge(X, Y), edge(Y, Z)
+Rule 'two_hop' registered.
+> ?two_hop(1, Z)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    3 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_perf_med_n13t01
+Knowledge graph 'test_perf_med_n13t01' dropped.

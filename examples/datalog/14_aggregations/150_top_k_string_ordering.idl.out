@@ -11,3 +11,47 @@ Switched to knowledge graph: test_topk_str_n14t150
 Switched to knowledge graph: test_topk_str_n14t150
 > +item[(1, "zebra"), (2, "apple"), (3, "mango"), (4, "banana")]
 Inserted 4 fact(s) into 'item'.
+> +top_desc(top_k<2, Id, Name:desc>) <- item(Id, Name)
+Rule 'top_desc' registered.
+> +top_asc(top_k<2, Id, Name:asc>) <- item(Id, Name)
+Rule 'top_asc' registered.
+> ?top_desc(X, Y)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "zebra" │
+│    3 │ "mango" │
+└──────┴─────────┘
+2 rows
+> ?top_asc(X, Y)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    2 │ "apple"  │
+│    4 │ "banana" │
+└──────┴──────────┘
+2 rows
+> -item(1, "zebra")
+Deleted 1 facts from 'item'.
+> ?top_desc(X, Y)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    3 │ "mango"  │
+│    4 │ "banana" │
+└──────┴──────────┘
+2 rows
+> +item[(5, "zoo")]
+Inserted 1 fact(s) into 'item'.
+> ?top_desc(X, Y)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "mango" │
+│    5 │ "zoo"   │
+└──────┴─────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_str_n14t150
+Knowledge graph 'test_topk_str_n14t150' dropped.

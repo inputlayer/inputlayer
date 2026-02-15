@@ -11,3 +11,37 @@ Switched to knowledge graph: test_retract_min_n14t125
 Switched to knowledge graph: test_retract_min_n14t125
 > +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 15)]
 Inserted 5 fact(s) into 'reading'.
+> +min_temp(Sensor, min<Temp>) <- reading(Sensor, Temp)
+Rule 'min_temp' registered.
+> ?min_temp(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   22 │
+│    2 │   15 │
+└──────┴──────┘
+2 rows
+> -reading(1, 22)
+Deleted 1 facts from 'reading'.
+> ?min_temp(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   25 │
+│    2 │   15 │
+└──────┴──────┘
+2 rows
+> +reading[(1, 10)]
+Inserted 1 fact(s) into 'reading'.
+> ?min_temp(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   15 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_retract_min_n14t125
+Knowledge graph 'test_retract_min_n14t125' dropped.

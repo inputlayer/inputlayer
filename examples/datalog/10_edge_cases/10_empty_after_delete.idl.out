@@ -32,3 +32,31 @@ Rule 'big_items' registered.
 │    5 │
 └──────┘
 2 rows
+> -items(X) <- items(X)
+Conditional delete: 5 fact(s) deleted from 'items'.
+> ?items(X)
+No results.
+> ?big_items(X)
+No results.
+> +items[(10), (20)]
+Inserted 2 fact(s) into 'items'.
+> ?items(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+└──────┘
+2 rows
+> ?big_items(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_del_n10t10
+Knowledge graph 'test_empty_del_n10t10' dropped.

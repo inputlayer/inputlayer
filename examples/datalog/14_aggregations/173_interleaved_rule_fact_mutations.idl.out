@@ -11,3 +11,47 @@ Switched to knowledge graph: test_interleave_n14t173
 Switched to knowledge graph: test_interleave_n14t173
 > +data[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'data'.
+> +agg(sum<V>) <- data(_, V)
+Rule 'agg' registered.
+> ?agg(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> +data[(4, 40)]
+Inserted 1 fact(s) into 'data'.
+> ?agg(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> .rule drop agg
+Rule 'agg' dropped.
+> ?agg(X)
+No results.
+> +agg(max<V>) <- data(_, V)
+Rule 'agg' registered.
+> ?agg(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   40 │
+└──────┘
+1 rows
+> -data(4, 40)
+Deleted 1 facts from 'data'.
+> ?agg(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   30 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_interleave_n14t173
+Knowledge graph 'test_interleave_n14t173' dropped.

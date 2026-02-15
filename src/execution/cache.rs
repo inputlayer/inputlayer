@@ -455,4 +455,166 @@ mod tests {
         assert_eq!(cache.compiled_size(), 0);
         assert_eq!(cache.results_size(), 0);
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_cache_entry_touch() {
+        let mut entry: CacheEntry<i32> = CacheEntry::new(42, None);
+        assert_eq!(entry.access_count, 1);
+        entry.touch();
+        assert_eq!(entry.access_count, 2);
+        entry.touch();
+        assert_eq!(entry.access_count, 3);
+    }
+
+    #[test]
+    fn test_cache_entry_age_and_idle() {
+        let entry: CacheEntry<i32> = CacheEntry::new(42, None);
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(entry.age() >= Duration::from_millis(5));
+        assert!(entry.idle_time() >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn test_hit_rate_zero_total() {
+        let stats = CacheStats::default();
+        assert_eq!(stats.hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_hit_rate_all_hits() {
+        let stats = CacheStats {
+            hits: 100,
+            misses: 0,
+            ..Default::default()
+        };
+        assert!((stats.hit_rate() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_reset_stats() {
+        let mut stats = CacheStats {
+            hits: 10,
+            misses: 5,
+            evictions: 3,
+            expirations: 1,
+            size: 20,
+        };
+        stats.reset();
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+        assert_eq!(stats.evictions, 0);
+        assert_eq!(stats.expirations, 0);
+        // size is NOT reset by reset()
+    }
+
+    #[test]
+    fn test_cache_default() {
+        let cache = QueryCache::default();
+        assert_eq!(cache.compiled_size(), 0);
+        assert_eq!(cache.results_size(), 0);
+    }
+
+    #[test]
+    fn test_cache_with_defaults() {
+        let cache = QueryCache::with_defaults();
+        assert_eq!(cache.max_compiled_entries, 1000);
+        assert_eq!(cache.max_result_entries, 1000);
+    }
+
+    #[test]
+    fn test_clear_results_only() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+        cache.put_compiled("query", vec![]);
+        cache.put_results("query", 123, vec![(1, 2)]);
+
+        cache.clear_results();
+
+        assert_eq!(cache.compiled_size(), 1); // compiled not cleared
+        assert_eq!(cache.results_size(), 0); // results cleared
+    }
+
+    #[test]
+    fn test_invalidate_query() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+        cache.put_compiled("query1", vec![]);
+        cache.put_compiled("query2", vec![]);
+
+        cache.invalidate_query("query1");
+
+        assert!(cache.get_compiled("query1").is_none());
+        assert!(cache.get_compiled("query2").is_some());
+    }
+
+    #[test]
+    fn test_result_cache_expiration() {
+        let cache = QueryCache::new(100, 100, Duration::from_millis(10));
+        cache.put_results("query", 1, vec![(1, 2)]);
+
+        assert!(cache.get_results("query", 1).is_some());
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert!(cache.get_results("query", 1).is_none());
+    }
+
+    #[test]
+    fn test_compiled_cache_no_expiration() {
+        let cache = QueryCache::new(100, 100, Duration::from_millis(10));
+        cache.put_compiled("query", vec![]);
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        // Compiled cache entries have no TTL
+        assert!(cache.get_compiled("query").is_some());
+    }
+
+    #[test]
+    fn test_result_cache_eviction_prefers_expired() {
+        let cache = QueryCache::new(100, 2, Duration::from_millis(10));
+        cache.put_results("a", 1, vec![(1, 2)]);
+        cache.put_results("b", 1, vec![(3, 4)]);
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        // Adding a new entry should evict expired ones
+        cache.put_results("c", 1, vec![(5, 6)]);
+        // cache size should be 1 (only "c" survives)
+        assert_eq!(cache.results_size(), 1);
+    }
+
+    #[test]
+    fn test_stats_tracking() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+
+        cache.get_compiled("miss1"); // miss
+        cache.get_compiled("miss2"); // miss
+        cache.put_compiled("hit", vec![]);
+        cache.get_compiled("hit"); // hit
+
+        let stats = cache.stats();
+        assert_eq!(stats.misses, 2);
+        assert_eq!(stats.hits, 1);
+    }
+
+    #[test]
+    fn test_reset_stats_on_cache() {
+        let cache = QueryCache::new(100, 100, Duration::from_secs(60));
+        cache.get_compiled("miss"); // miss
+        assert_eq!(cache.stats().misses, 1);
+
+        cache.reset_stats();
+        assert_eq!(cache.stats().misses, 0);
+        assert_eq!(cache.stats().hits, 0);
+    }
+
+    #[test]
+    fn test_cache_clone_shares_state() {
+        let cache1 = QueryCache::new(100, 100, Duration::from_secs(60));
+        let cache2 = cache1.clone();
+
+        cache1.put_compiled("shared", vec![]);
+        assert!(cache2.get_compiled("shared").is_some());
+    }
 }

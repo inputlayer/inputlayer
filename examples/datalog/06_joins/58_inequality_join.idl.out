@@ -13,5 +13,5 @@ Switched to knowledge graph: test_ineq_join_n06t58
 Inserted 3 fact(s) into 'employees'.
 > +salary_grades[(1, 0, 40000), (2, 40001, 55000), (3, 55001, 100000)]
 Inserted 3 fact(s) into 'salary_grades'.
-> +emp_grade(Name, Salary, Grade) <- employees(_, Name, Salary), salary_grades(Grade, MinSal, MaxSal), Salary >= MinSal,
-Rule 'emp_grade' registered.
+> +emp_grade(Name, Salary, Grade) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

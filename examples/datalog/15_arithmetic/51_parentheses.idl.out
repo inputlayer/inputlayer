@@ -11,3 +11,46 @@ Switched to knowledge graph: test_parens_n15t51
 Switched to knowledge graph: test_parens_n15t51
 > +nums[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'nums'.
+> expr1(X, Y) <- nums(X), Y = X + 2 * 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    8 │
+│    3 │    9 │
+│    4 │   10 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> expr2(X, Y) <- nums(X), Y = (X + 2) * 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   12 │
+│    3 │   15 │
+│    4 │   18 │
+└──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?expr1(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    8 │
+│    3 │    9 │
+│    4 │   10 │
+└──────┴──────┘
+3 rows
+> ?expr2(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   12 │
+│    3 │   15 │
+│    4 │   18 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_parens_n15t51
+Knowledge graph 'test_parens_n15t51' dropped.

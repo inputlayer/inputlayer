@@ -20,3 +20,23 @@ Inserted 3 fact(s) into 'names'.
 │    3 │ "Bob"        │
 └──────┴──────────────┘
 3 rows
+> has_space(Id, Name) <- names(Id, Name), Name = "John Doe"
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "John Doe" │
+└──────┴────────────┘
+1 rows
+(session: 1 rule(s))
+> ?has_space(Id, Name)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "John Doe" │
+└──────┴────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_whitespace_n10t61
+Knowledge graph 'test_whitespace_n10t61' dropped.

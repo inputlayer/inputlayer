@@ -13,3 +13,64 @@ Switched to knowledge graph: test_empty_agg_n14t16
 Inserted 3 fact(s) into 'data'.
 > +filtered(X, V) <- data(X, V), V > 1000
 Rule 'filtered' registered.
+> +empty_sum(sum<V>) <- filtered(_, V)
+Rule 'empty_sum' registered.
+> ?empty_sum(S)
+No results.
+> +empty_avg(avg<V>) <- filtered(_, V)
+Rule 'empty_avg' registered.
+> ?empty_avg(A)
+No results.
+> +empty_min(min<V>) <- filtered(_, V)
+Rule 'empty_min' registered.
+> +empty_max(max<V>) <- filtered(_, V)
+Rule 'empty_max' registered.
+> ?empty_min(M)
+No results.
+> ?empty_max(M)
+No results.
+> +normal_count(count<X>) <- data(X, _)
+Rule 'normal_count' registered.
+> +normal_sum(sum<V>) <- data(_, V)
+Rule 'normal_sum' registered.
+> +normal_avg(avg<V>) <- data(_, V)
+Rule 'normal_avg' registered.
+> ?normal_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> ?normal_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> ?normal_avg(A)
+┌──────┐
+│ col0 │
+├──────┤
+│ 20.0 │
+└──────┘
+1 rows
+> +groups[(1), (2), (3), (4), (5)]
+Inserted 5 fact(s) into 'groups'.
+> +group_data[(1, 100), (1, 200), (3, 300)]
+Inserted 3 fact(s) into 'group_data'.
+> +group_count(G, count<V>) <- groups(G), group_data(G, V)
+Rule 'group_count' registered.
+> ?group_count(G, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    3 │    1 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_agg_n14t16
+Knowledge graph 'test_empty_agg_n14t16' dropped.

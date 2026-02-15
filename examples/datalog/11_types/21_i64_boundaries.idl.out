@@ -38,3 +38,23 @@ Inserted 2 fact(s) into 'large_ints'.
 2 rows
 > +pair[(5000000000000, 4000000000000)]
 Inserted 1 fact(s) into 'pair'.
+> large_sum(A, B, R) <- pair(A, B), R = A + B
+┌───────────────┬───────────────┬───────────────┐
+│ col0          │ col1          │ col2          │
+├───────────────┼───────────────┼───────────────┤
+│ 5000000000000 │ 4000000000000 │ 9000000000000 │
+└───────────────┴───────────────┴───────────────┘
+1 rows
+(session: 2 rule(s))
+> ?large_sum(A, B, R)
+┌───────────────┬───────────────┬───────────────┐
+│ col0          │ col1          │ col2          │
+├───────────────┼───────────────┼───────────────┤
+│ 5000000000000 │ 4000000000000 │ 9000000000000 │
+└───────────────┴───────────────┴───────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_i64_boundary_n11t21
+Knowledge graph 'test_i64_boundary_n11t21' dropped.

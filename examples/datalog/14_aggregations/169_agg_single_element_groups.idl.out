@@ -11,3 +11,18 @@ Switched to knowledge graph: test_agg_single_n14t169
 Switched to knowledge graph: test_agg_single_n14t169
 > +data[("a", 10), ("b", 20), ("c", 30)]
 Inserted 3 fact(s) into 'data'.
+> +result(Group, count<Val>, sum<Val>, min<Val>, max<Val>) <- data(Group, Val)
+Rule 'result' registered.
+> ?result(G, C, S, Mi, Ma)
+┌──────┬──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │ col4 │
+├──────┼──────┼──────┼──────┼──────┤
+│ "a"  │    1 │   10 │   10 │   10 │
+│ "b"  │    1 │   20 │   20 │   20 │
+│ "c"  │    1 │   30 │   30 │   30 │
+└──────┴──────┴──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_single_n14t169
+Knowledge graph 'test_agg_single_n14t169' dropped.

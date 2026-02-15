@@ -17,3 +17,54 @@ Inserted 4 fact(s) into 'employee'.
 Inserted 4 fact(s) into 'person'.
 > +test_results[("alice", 85), ("bob", 90), ("carol", 78)]
 Inserted 3 fact(s) into 'test_results'.
+> +total_sales(Dept, sum<Amount>) <- sales(Dept, _, Amount)
+Rule 'total_sales' registered.
+> ?total_sales(Dept, Total)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "clothing"    │  200 │
+│ "electronics" │  800 │
+└───────────────┴──────┘
+2 rows
+> +employee_count(Dept, count<Id>) <- employee(Id, Dept)
+Rule 'employee_count' registered.
+> ?employee_count(Dept, Count)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "engineering" │    3 │
+│ "sales"       │    1 │
+└───────────────┴──────┘
+2 rows
+> +max_age(max<Age>) <- person(_, Age)
+Rule 'max_age' registered.
+> ?max_age(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   35 │
+└──────┘
+1 rows
+> +min_age(min<Age>) <- person(_, Age)
+Rule 'min_age' registered.
+> ?min_age(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   25 │
+└──────┘
+1 rows
+> +avg_score(avg<Score>) <- test_results(_, Score)
+Rule 'avg_score' registered.
+> ?avg_score(A)
+┌───────────────────┐
+│ col0              │
+├───────────────────┤
+│ 84.33333333333333 │
+└───────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cheatsheet_agg_n28t04
+Knowledge graph 'test_cheatsheet_agg_n28t04' dropped.

@@ -11,3 +11,25 @@ Switched to knowledge graph: test_str_lit_n11t61
 Switched to knowledge graph: test_str_lit_n11t61
 > +items[(1, "active"), (2, "pending"), (3, "active")]
 Inserted 3 fact(s) into 'items'.
+> active_items(Id) <- items(Id, "active")
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?active_items(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_str_lit_n11t61
+Knowledge graph 'test_str_lit_n11t61' dropped.

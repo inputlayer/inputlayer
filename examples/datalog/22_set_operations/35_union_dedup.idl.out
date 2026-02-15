@@ -13,3 +13,30 @@ Switched to knowledge graph: test_union_dedup_n22t35
 Inserted 3 fact(s) into 'set_a'.
 > +set_b[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set_b'.
+> +union_ab(X) <- set_a(X)
+Rule 'union_ab' registered.
+> +union_ab(X) <- set_b(X)
+Rule 'union_ab' registered.
+> ?union_ab(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+4 rows
+> +count_union(count<X>) <- union_ab(X)
+Rule 'count_union' registered.
+> ?count_union(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union_dedup_n22t35
+Knowledge graph 'test_union_dedup_n22t35' dropped.

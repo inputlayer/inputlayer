@@ -13,3 +13,17 @@ Switched to knowledge graph: test_neg_const_n08t16
 Inserted 5 fact(s) into 'data'.
 > +blacklist[(100, 0), (300, 0)]
 Inserted 2 fact(s) into 'blacklist'.
+> +not_blacklisted(Id, Val) <- data(Id, Val), !blacklist(Val, 0)
+Rule 'not_blacklisted' registered.
+> ?not_blacklisted(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    5 │  200 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_const_n08t16
+Knowledge graph 'test_neg_const_n08t16' dropped.

@@ -11,3 +11,30 @@ Switched to knowledge graph: test_dup_rule_n14t151
 Switched to knowledge graph: test_dup_rule_n14t151
 > +edge[(1, 2), (2, 3)]
 Inserted 2 fact(s) into 'edge'.
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> .rule list
+Rules:
+  reach (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_rule_n14t151
+Knowledge graph 'test_dup_rule_n14t151' dropped.

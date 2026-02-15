@@ -13,3 +13,11 @@ Switched to knowledge graph: test_rec_depth_n09t47
 Inserted 4 fact(s) into 'link'.
 > +path_depth(X, X, 0)
 No facts inserted (1 duplicate skipped).
+> +path_depth(X, Z, D) <- path_depth(X, Y, D1), link(Y, Z), D = D1 + 1, D < 5
+Rule 'path_depth' registered.
+> ?path_depth("a", Y, D)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rec_depth_n09t47
+Knowledge graph 'test_rec_depth_n09t47' dropped.

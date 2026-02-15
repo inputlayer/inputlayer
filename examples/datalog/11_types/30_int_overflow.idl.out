@@ -11,3 +11,23 @@ Switched to knowledge graph: test_large_int_n11t30
 Switched to knowledge graph: test_large_int_n11t30
 > +big_nums[(1000000000,), (2000000000,), (3000000000,)]
 Inserted 3 fact(s) into 'big_nums'.
+> sum_big(sum<X>) <- big_nums(X)
+┌────────────┐
+│ col0       │
+├────────────┤
+│ 6000000000 │
+└────────────┘
+1 rows
+(session: 1 rule(s))
+> ?sum_big(S)
+┌────────────┐
+│ col0       │
+├────────────┤
+│ 6000000000 │
+└────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_int_n11t30
+Knowledge graph 'test_large_int_n11t30' dropped.

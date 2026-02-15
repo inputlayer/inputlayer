@@ -13,3 +13,28 @@ Switched to knowledge graph: test_double_neg_n08t60
 Inserted 5 fact(s) into 'all_items'.
 > +excluded[(2,), (4,)]
 Inserted 2 fact(s) into 'excluded'.
+> +not_excluded(X) <- all_items(X), !excluded(X)
+Rule 'not_excluded' registered.
+> +double_neg(X) <- all_items(X), !not_excluded(X)
+Rule 'double_neg' registered.
+> ?not_excluded(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+> ?double_neg(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_double_neg_n08t60
+Knowledge graph 'test_double_neg_n08t60' dropped.

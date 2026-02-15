@@ -34,3 +34,14 @@ Inserted 1 fact(s) into 'neg_large'.
 │ 2147483647 │
 └────────────┘
 1 rows
+> ?neg_large(X), X < -2147483640
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ -2147483648 │
+└─────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int_bounds_n15t43
+Knowledge graph 'test_int_bounds_n15t43' dropped.

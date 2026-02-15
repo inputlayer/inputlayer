@@ -11,3 +11,36 @@ Switched to knowledge graph: test_cube_n18t43
 Switched to knowledge graph: test_cube_n18t43
 > +sales[("East", "Q1", 100), ("East", "Q2", 150), ("West", "Q1", 200), ("West", "Q2", 250)]
 Inserted 4 fact(s) into 'sales'.
+> +by_region(Region, sum<Amount>) <- sales(Region, _, Amount)
+Rule 'by_region' registered.
+> +by_quarter(Quarter, sum<Amount>) <- sales(_, Quarter, Amount)
+Rule 'by_quarter' registered.
+> +grand_total(sum<Amount>) <- sales(_, _, Amount)
+Rule 'grand_total' registered.
+> ?by_region(Region, Sum)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "East" │  250 │
+│ "West" │  450 │
+└────────┴──────┘
+2 rows
+> ?by_quarter(Quarter, Sum)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "Q1" │  300 │
+│ "Q2" │  400 │
+└──────┴──────┘
+2 rows
+> ?grand_total(Total)
+┌──────┐
+│ col0 │
+├──────┤
+│  700 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cube_n18t43
+Knowledge graph 'test_cube_n18t43' dropped.

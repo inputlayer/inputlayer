@@ -9,3 +9,29 @@ Knowledge graph 'test_agg_empty_n14t163' created.
 Switched to knowledge graph: test_agg_empty_n14t163
 > .kg use test_agg_empty_n14t163
 Switched to knowledge graph: test_agg_empty_n14t163
+> +total(sum<X>) <- numbers(X)
+Rule 'total' registered.
+> ?total(X)
+No results.
+> +numbers[(10), (20), (30)]
+Inserted 3 fact(s) into 'numbers'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> -numbers(10)
+Deleted 1 facts from 'numbers'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   50 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_empty_n14t163
+Knowledge graph 'test_agg_empty_n14t163' dropped.

@@ -11,3 +11,25 @@ Switched to knowledge graph: test_multi_wild_n21t36
 Switched to knowledge graph: test_multi_wild_n21t36
 > +wide[(1, "a", 10, true, 1.5), (2, "b", 20, false, 2.5)]
 Inserted 2 fact(s) into 'wide'.
+> ids_only(Id) <- wide(Id, _, _, _, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?ids_only(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multi_wild_n21t36
+Knowledge graph 'test_multi_wild_n21t36' dropped.

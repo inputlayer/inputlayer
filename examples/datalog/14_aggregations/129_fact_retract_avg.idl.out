@@ -11,3 +11,37 @@ Switched to knowledge graph: test_retract_avg_n14t129
 Switched to knowledge graph: test_retract_avg_n14t129
 > +score[(1, 80), (1, 90), (1, 100), (2, 60), (2, 80)]
 Inserted 5 fact(s) into 'score'.
+> +avg_score(Student, avg<Points>) <- score(Student, Points)
+Rule 'avg_score' registered.
+> ?avg_score(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ 90.0 │
+│    2 │ 70.0 │
+└──────┴──────┘
+2 rows
+> -score(1, 100)
+Deleted 1 facts from 'score'.
+> ?avg_score(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ 85.0 │
+│    2 │ 70.0 │
+└──────┴──────┘
+2 rows
+> +score[(1, 70)]
+Inserted 1 fact(s) into 'score'.
+> ?avg_score(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ 80.0 │
+│    2 │ 70.0 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_retract_avg_n14t129
+Knowledge graph 'test_retract_avg_n14t129' dropped.

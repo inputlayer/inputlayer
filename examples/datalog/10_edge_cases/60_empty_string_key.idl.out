@@ -20,3 +20,23 @@ Inserted 3 fact(s) into 'data'.
 │ "b"  │  300 │
 └──────┴──────┘
 3 rows
+> empty_key(Val) <- data("", Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?empty_key(Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_key_n10t60
+Knowledge graph 'test_empty_key_n10t60' dropped.

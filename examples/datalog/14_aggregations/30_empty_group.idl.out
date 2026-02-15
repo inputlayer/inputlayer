@@ -11,3 +11,40 @@ Switched to knowledge graph: test_empty_group_n14t30
 Switched to knowledge graph: test_empty_group_n14t30
 > +sales[("North", 100), ("North", 150), ("South", 200)]
 Inserted 3 fact(s) into 'sales'.
+> +region_sum(Region, sum<Amt>) <- sales(Region, Amt)
+Rule 'region_sum' registered.
+> ?region_sum(Region, Sum)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "North" │  250 │
+│ "South" │  200 │
+└─────────┴──────┘
+2 rows
+> north_only(Amt) <- sales("North", Amt)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  150 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?north_only(Amt)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  150 │
+└──────┘
+2 rows
+> east_only(Amt) <- sales("East", Amt)
+No results.
+(session: 2 rule(s))
+> ?east_only(Amt)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_empty_group_n14t30
+Knowledge graph 'test_empty_group_n14t30' dropped.

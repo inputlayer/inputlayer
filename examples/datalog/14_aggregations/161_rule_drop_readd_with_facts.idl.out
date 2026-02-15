@@ -11,3 +11,31 @@ Switched to knowledge graph: test_drop_readd_n14t161
 Switched to knowledge graph: test_drop_readd_n14t161
 > +data[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'data'.
+> +total(sum<V>) <- data(_, V)
+Rule 'total' registered.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> .rule drop total
+Rule 'total' dropped.
+> ?total(X)
+No results.
+> +data[(4, 40)]
+Inserted 1 fact(s) into 'data'.
+> +total(sum<V>) <- data(_, V)
+Rule 'total' registered.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_readd_n14t161
+Knowledge graph 'test_drop_readd_n14t161' dropped.

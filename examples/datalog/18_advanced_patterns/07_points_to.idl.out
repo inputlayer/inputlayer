@@ -15,3 +15,21 @@ Inserted 2 fact(s) into 'alloc'.
 Inserted 1 fact(s) into 'store'.
 > +load[(3, 1)]
 Inserted 1 fact(s) into 'load'.
+> +pt(X, H) <- alloc(X, H)
+Rule 'pt' registered.
+> +pt(H, Z) <- store(P, Q), pt(P, H), pt(Q, Z)
+Rule 'pt' registered.
+> +pt(X, Z) <- load(X, P), pt(P, H), pt(H, Z)
+Rule 'pt' registered.
+> ?pt(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  101 │
+│    2 │  102 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_points_to_n18t07
+Knowledge graph 'test_points_to_n18t07' dropped.

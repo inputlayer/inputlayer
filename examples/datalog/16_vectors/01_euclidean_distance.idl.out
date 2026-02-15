@@ -13,3 +13,27 @@ Switched to knowledge graph: test_vec_euclidean_n16t01
 Inserted 3 fact(s) into 'vectors'.
 > +query[([0.0, 0.0, 0.0])]
 Inserted 1 fact(s) into 'query'.
+> nearest(Id, Dist) <- vectors(Id, V), query(Q), Dist = euclidean(V, Q)
+┌──────┬────────────────────┐
+│ col0 │ col1               │
+├──────┼────────────────────┤
+│    1 │                1.0 │
+│    2 │                1.0 │
+│    3 │ 1.4142135623730951 │
+└──────┴────────────────────┘
+3 rows
+(session: 1 rule(s))
+> ?nearest(X, Y)
+┌──────┬────────────────────┐
+│ col0 │ col1               │
+├──────┼────────────────────┤
+│    1 │                1.0 │
+│    2 │                1.0 │
+│    3 │ 1.4142135623730951 │
+└──────┴────────────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_euclidean_n16t01
+Knowledge graph 'test_vec_euclidean_n16t01' dropped.

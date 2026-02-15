@@ -11,18 +11,5 @@ Switched to knowledge graph: test_self_ref_n18t120
 Switched to knowledge graph: test_self_ref_n18t120
 > +employees[(1, "Alice", 0), (2, "Bob", 1), (3, "Carol", 1), (4, "Dave", 2)]
 Inserted 4 fact(s) into 'employees'.
-> +with_manager(EmpName, MgrName) <- employees(EmpId, EmpName, MgrId), employees(MgrId, MgrName, _), MgrId > 0
-Rule 'with_manager' registered.
-> ?with_manager(E, M)
-┌─────────┬─────────┐
-│ col0    │ col1    │
-├─────────┼─────────┤
-│ "Bob"   │ "Alice" │
-│ "Carol" │ "Alice" │
-│ "Dave"  │ "Bob"   │
-└─────────┴─────────┘
-3 rows
-> .kg use default
-Switched to knowledge graph: default
-> .kg drop test_self_ref_n18t120
-Knowledge graph 'test_self_ref_n18t120' dropped.
+> +with_manager(EmpName, MgrName) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

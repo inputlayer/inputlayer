@@ -11,3 +11,13 @@ Switched to knowledge graph: test_rule_def_n17t04
 Switched to knowledge graph: test_rule_def_n17t04
 > +edge[(1,2), (2,3)]
 Inserted 2 fact(s) into 'edge'.
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> +reach(X, Z) <- reach(X, Y), edge(Y, Z)
+Rule 'reach' registered.
+> .rule def reach
+This command is available in embedded mode. HTTP support is planned for a future release.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_def_n17t04
+Knowledge graph 'test_rule_def_n17t04' dropped.

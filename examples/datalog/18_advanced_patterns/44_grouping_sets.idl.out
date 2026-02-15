@@ -11,3 +11,37 @@ Switched to knowledge graph: test_grouping_n18t44
 Switched to knowledge graph: test_grouping_n18t44
 > +orders[(1, "Alice", "Widget", 100), (2, "Bob", "Gadget", 200), (3, "Alice", "Widget", 150)]
 Inserted 3 fact(s) into 'orders'.
+> +by_customer(Customer, sum<Amount>) <- orders(_, Customer, _, Amount)
+Rule 'by_customer' registered.
+> +by_product(Product, sum<Amount>) <- orders(_, _, Product, Amount)
+Rule 'by_product' registered.
+> +by_both(Customer, Product, sum<Amount>) <- orders(_, Customer, Product, Amount)
+Rule 'by_both' registered.
+> ?by_customer(C, Sum)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "Alice" │  250 │
+│ "Bob"   │  200 │
+└─────────┴──────┘
+2 rows
+> ?by_product(P, Sum)
+┌──────────┬──────┐
+│ col0     │ col1 │
+├──────────┼──────┤
+│ "Gadget" │  200 │
+│ "Widget" │  250 │
+└──────────┴──────┘
+2 rows
+> ?by_both(C, P, Sum)
+┌─────────┬──────────┬──────┐
+│ col0    │ col1     │ col2 │
+├─────────┼──────────┼──────┤
+│ "Alice" │ "Widget" │  250 │
+│ "Bob"   │ "Gadget" │  200 │
+└─────────┴──────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_grouping_n18t44
+Knowledge graph 'test_grouping_n18t44' dropped.

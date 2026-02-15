@@ -11,3 +11,36 @@ Switched to knowledge graph: test_small_floats_n11t54
 Switched to knowledge graph: test_small_floats_n11t54
 > +tiny[(1.0e-100,), (2.0e-100,), (3.0e-100,)]
 Inserted 3 fact(s) into 'tiny'.
+> +sum_tiny(sum<X>) <- tiny(X)
+Rule 'sum_tiny' registered.
+> ?sum_tiny(S)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+> tiny_cmp(A, B) <- tiny(A), tiny(B), A < B
+┌────────┬────────┐
+│ col0   │ col1   │
+├────────┼────────┤
+│ 1e-100 │ 2e-100 │
+│ 1e-100 │ 3e-100 │
+│ 2e-100 │ 3e-100 │
+└────────┴────────┘
+3 rows
+(session: 1 rule(s))
+> ?tiny_cmp(A, B)
+┌────────┬────────┐
+│ col0   │ col1   │
+├────────┼────────┤
+│ 1e-100 │ 2e-100 │
+│ 1e-100 │ 3e-100 │
+│ 2e-100 │ 3e-100 │
+└────────┴────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_small_floats_n11t54
+Knowledge graph 'test_small_floats_n11t54' dropped.

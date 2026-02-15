@@ -11,3 +11,29 @@ Switched to knowledge graph: test_retract_cd_n14t131
 Switched to knowledge graph: test_retract_cd_n14t131
 > +sales[(1, "A", 5), (1, "A", 3), (1, "B", 2), (2, "A", 10), (2, "C", 4)]
 Inserted 5 fact(s) into 'sales'.
+> +unique_products(Store, Product) <- sales(Store, Product, _)
+Rule 'unique_products' registered.
+> +product_count(Store, count<Product>) <- unique_products(Store, Product)
+Rule 'product_count' registered.
+> ?product_count(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    2 │
+└──────┴──────┘
+2 rows
+> -sales(1, "B", 2)
+Deleted 1 facts from 'sales'.
+> ?product_count(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    2 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_retract_cd_n14t131
+Knowledge graph 'test_retract_cd_n14t131' dropped.

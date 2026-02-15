@@ -13,3 +13,29 @@ Switched to knowledge graph: test_neg_join_n08t81
 Inserted 3 fact(s) into 'users'.
 > +admins[(1,), (3,)]
 Inserted 2 fact(s) into 'admins'.
+> +regular_users(Id, Name) <- users(Id, Name), !admins(Id)
+Rule 'regular_users' registered.
+> ?regular_users(Id, Name)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    2 │ "bob" │
+└──────┴───────┘
+1 rows
+> +products[(100, "laptop"), (200, "phone"), (300, "tablet")]
+Inserted 3 fact(s) into 'products'.
+> +discounted[(100,), (300,)]
+Inserted 2 fact(s) into 'discounted'.
+> +full_price(Id, Name) <- products(Id, Name), !discounted(Id)
+Rule 'full_price' registered.
+> ?full_price(Id, Name)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│  200 │ "phone" │
+└──────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_join_n08t81
+Knowledge graph 'test_neg_join_n08t81' dropped.

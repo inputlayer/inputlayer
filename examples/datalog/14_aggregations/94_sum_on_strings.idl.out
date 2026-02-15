@@ -11,3 +11,16 @@ Switched to knowledge graph: test_sum_strings_n14t94
 Switched to knowledge graph: test_sum_strings_n14t94
 > +data[("a",), ("b",), ("c",)]
 Inserted 3 fact(s) into 'data'.
+> +bad_sum(sum<X>) <- data(X)
+Rule 'bad_sum' registered.
+> ?bad_sum(R)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sum_strings_n14t94
+Knowledge graph 'test_sum_strings_n14t94' dropped.

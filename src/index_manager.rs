@@ -7,7 +7,7 @@
 //! ## Architecture
 //!
 //! ```text
-//! Base Relations (DDComputation)
+//! Base Relations (IncrementalEngine)
 //!        |
 //!        |--- documents(id, title, embedding)
 //!        `--- ...

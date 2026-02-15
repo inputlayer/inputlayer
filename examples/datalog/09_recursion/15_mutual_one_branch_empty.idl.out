@@ -11,3 +11,64 @@ Switched to knowledge graph: test_mutual_empty_n09t15
 Switched to knowledge graph: test_mutual_empty_n09t15
 > +a_base[(1), (2), (3)]
 Inserted 3 fact(s) into 'a_base'.
+> a_derived(X) <- a_base(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> a_derived(X) <- b_derived(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> b_derived(X) <- b_base(X)
+No results.
+(session: 3 rule(s))
+> b_derived(X) <- a_derived(X), X > 10
+No results.
+(session: 4 rule(s))
+> ?a_derived(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> ?b_derived(X)
+No results.
+> +b_base[(10), (20)]
+Inserted 2 fact(s) into 'b_base'.
+> ?a_derived(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> ?b_derived(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_mutual_empty_n09t15
+Knowledge graph 'test_mutual_empty_n09t15' dropped.

@@ -17,3 +17,17 @@ Inserted 2 fact(s) into 'sold'.
 Inserted 2 fact(s) into 'reserved'.
 > +damaged[(4, 0), (7, 0)]
 Inserted 2 fact(s) into 'damaged'.
+> +available(X, Y) <- item(X, Y), !sold(X, _), !reserved(X, _), !damaged(X, _)
+Rule 'available' registered.
+> ?available(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    6 │    0 │
+│    8 │    0 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triple_neg_n08t08
+Knowledge graph 'test_triple_neg_n08t08' dropped.

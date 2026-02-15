@@ -11,3 +11,52 @@ Switched to knowledge graph: test_projection_n21t02
 Switched to knowledge graph: test_projection_n21t02
 > +employees[(1, 50000, 10), (2, 60000, 20), (3, 55000, 10), (4, 70000, 30)]
 Inserted 4 fact(s) into 'employees'.
+> +departments(D) <- employees(_, _, D)
+Rule 'departments' registered.
+> ?departments(D)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+│   30 │
+└──────┘
+3 rows
+> +id_salary(Id, Sal) <- employees(Id, Sal, _)
+Rule 'id_salary' registered.
+> ?id_salary(X, Y)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ 50000 │
+│    2 │ 60000 │
+│    3 │ 55000 │
+│    4 │ 70000 │
+└──────┴───────┘
+4 rows
+> +id_dept(Id, D) <- employees(Id, _, D)
+Rule 'id_dept' registered.
+> ?id_dept(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   10 │
+│    4 │   30 │
+└──────┴──────┘
+4 rows
+> +high_earners(Emp, Pay) <- employees(Emp, Pay, _), Pay > 55000
+Rule 'high_earners' registered.
+> ?high_earners(X, Y)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    2 │ 60000 │
+│    4 │ 70000 │
+└──────┴───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_projection_n21t02
+Knowledge graph 'test_projection_n21t02' dropped.

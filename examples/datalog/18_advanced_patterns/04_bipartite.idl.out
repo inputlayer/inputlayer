@@ -13,3 +13,27 @@ Switched to knowledge graph: test_bipartite_n18t04
 Inserted 4 fact(s) into 'edge'.
 > +start[(1, 0)]
 Inserted 1 fact(s) into 'start'.
+> +color(X, C) <- start(X, C)
+Rule 'color' registered.
+> +color(Y, 1) <- color(X, 0), edge(X, Y)
+Rule 'color' registered.
+> +color(Y, 1) <- color(X, 0), edge(Y, X)
+Rule 'color' registered.
+> +color(Y, 0) <- color(X, 1), edge(X, Y)
+Rule 'color' registered.
+> +color(Y, 0) <- color(X, 1), edge(Y, X)
+Rule 'color' registered.
+> ?color(X, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+│    2 │    1 │
+│    3 │    0 │
+│    4 │    1 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bipartite_n18t04
+Knowledge graph 'test_bipartite_n18t04' dropped.

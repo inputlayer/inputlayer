@@ -11,3 +11,23 @@ Switched to knowledge graph: test_chained_n15t29
 Switched to knowledge graph: test_chained_n15t29
 > +base[(10,)]
 Inserted 1 fact(s) into 'base'.
+> result(V, A, B, C) <- base(V), A = V + 5, B = A * 2, C = B - 10
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │   15 │   30 │   20 │
+└──────┴──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?result(V, A, B, C)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │   15 │   30 │   20 │
+└──────┴──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_chained_n15t29
+Knowledge graph 'test_chained_n15t29' dropped.

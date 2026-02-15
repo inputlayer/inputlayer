@@ -11,3 +11,5 @@ Switched to knowledge graph: test_unbound_head_n12t27
 Switched to knowledge graph: test_unbound_head_n12t27
 > +edges[(1, 2), (2, 3)]
 Inserted 2 fact(s) into 'edges'.
+> +bad_rule(X, Y, Z) <- edges(X, Y)
+Script error: Failed to register rule: Unsafe rule 'bad_rule': Head variable(s) Z not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

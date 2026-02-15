@@ -13,3 +13,19 @@ Switched to knowledge graph: test_join_n06t01
 Inserted 4 fact(s) into 'employee'.
 > +department[(100, 10), (200, 20)]
 Inserted 2 fact(s) into 'department'.
+> +emp_dept(EmpId, DeptName) <- employee(EmpId, DeptId), department(DeptId, DeptName)
+Rule 'emp_dept' registered.
+> ?emp_dept(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   10 │
+│    3 │   20 │
+│    4 │   20 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_join_n06t01
+Knowledge graph 'test_join_n06t01' dropped.

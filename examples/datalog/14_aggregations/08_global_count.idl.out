@@ -11,3 +11,16 @@ Switched to knowledge graph: test_global_count_n14t08
 Switched to knowledge graph: test_global_count_n14t08
 > +event[(1, 10), (2, 10), (3, 20), (4, 10), (5, 20)]
 Inserted 5 fact(s) into 'event'.
+> +total_events(count<Id>) <- event(Id, _)
+Rule 'total_events' registered.
+> ?total_events(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_global_count_n14t08
+Knowledge graph 'test_global_count_n14t08' dropped.

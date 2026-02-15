@@ -13,3 +13,38 @@ Switched to knowledge graph: test_sym_diff_n22t16
 Inserted 3 fact(s) into 'set_a'.
 > +set_b[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set_b'.
+> only_a(X) <- set_a(X), !set_b(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> only_b(X) <- set_b(X), !set_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> ?only_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> ?only_b(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_sym_diff_n22t16
+Knowledge graph 'test_sym_diff_n22t16' dropped.

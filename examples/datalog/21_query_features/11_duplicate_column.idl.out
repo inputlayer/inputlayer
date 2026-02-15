@@ -11,3 +11,42 @@ Switched to knowledge graph: test_dup_col_n21t11
 Switched to knowledge graph: test_dup_col_n21t11
 > +nums[(1, 10), (2, 20)]
 Inserted 2 fact(s) into 'nums'.
+> dup(X, X, Y) <- nums(X, Y)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    1 │   10 │
+│    2 │    2 │   20 │
+└──────┴──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?dup(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    1 │   10 │
+│    2 │    2 │   20 │
+└──────┴──────┴──────┘
+2 rows
+> same_val(X, Y, Y) <- nums(X, Y)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │   10 │
+│    2 │   20 │   20 │
+└──────┴──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?same_val(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │   10 │
+│    2 │   20 │   20 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_dup_col_n21t11
+Knowledge graph 'test_dup_col_n21t11' dropped.

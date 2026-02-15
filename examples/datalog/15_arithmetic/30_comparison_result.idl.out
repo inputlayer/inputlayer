@@ -20,3 +20,31 @@ Inserted 4 fact(s) into 'pairs'.
 └──────┴──────┘
 2 rows
 (session: 1 rule(s))
+> equal_vals(A, B) <- pairs(A, B), A = B
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    5 │    5 │
+└──────┴──────┘
+1 rows
+(session: 2 rule(s))
+> ?first_bigger(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    8 │    2 │
+│   10 │    5 │
+└──────┴──────┘
+2 rows
+> ?equal_vals(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    5 │    5 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_compare_n15t30
+Knowledge graph 'test_compare_n15t30' dropped.

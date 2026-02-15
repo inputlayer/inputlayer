@@ -1,0 +1,17 @@
+// Test: Empty session queries
+// Description: Queries on empty/nonexistent relations should handle gracefully
+
+.kg create test_sess_empty_n04t39
+.kg use test_sess_empty_n04t39
+
+// Query a relation that doesn't exist anywhere
+?nonexistent(X)
+
+// Add ephemeral fact then clear, then query
+temp(42)
+?temp(X)
+.session clear
+?temp(X)
+
+.kg use default
+.kg drop test_sess_empty_n04t39

@@ -11,3 +11,74 @@ Switched to knowledge graph: test_del_view_n02t06
 Switched to knowledge graph: test_del_view_n02t06
 > +edge[(1,2), (2,3), (3,4), (4,5)]
 Inserted 4 fact(s) into 'edge'.
+> path(X, Y) <- edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+│    4 │    5 │
+└──────┴──────┘
+4 rows
+(session: 1 rule(s))
+> path(X, Z) <- edge(X, Y), path(Y, Z)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    1 │    5 │
+│    2 │    3 │
+│    2 │    4 │
+│    2 │    5 │
+│    3 │    4 │
+│    3 │    5 │
+│    4 │    5 │
+└──────┴──────┘
+10 rows
+(session: 2 rule(s))
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    1 │    5 │
+│    2 │    3 │
+│    2 │    4 │
+│    2 │    5 │
+│    3 │    4 │
+│    3 │    5 │
+│    4 │    5 │
+└──────┴──────┘
+10 rows
+> -edge(2, 3)
+Deleted 1 facts from 'edge'.
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    3 │    4 │
+│    3 │    5 │
+│    4 │    5 │
+└──────┴──────┘
+4 rows
+> -edge(3, 4)
+Deleted 1 facts from 'edge'.
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    4 │    5 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_del_view_n02t06
+Knowledge graph 'test_del_view_n02t06' dropped.

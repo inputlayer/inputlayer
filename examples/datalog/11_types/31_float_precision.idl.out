@@ -11,3 +11,23 @@ Switched to knowledge graph: test_float_prec_n11t31
 Switched to knowledge graph: test_float_prec_n11t31
 > +floats[(0.1,), (0.2,), (0.3,)]
 Inserted 3 fact(s) into 'floats'.
+> sum_float(sum<X>) <- floats(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?sum_float(S)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_float_prec_n11t31
+Knowledge graph 'test_float_prec_n11t31' dropped.

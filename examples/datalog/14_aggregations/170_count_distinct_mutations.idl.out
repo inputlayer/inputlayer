@@ -11,3 +11,43 @@ Switched to knowledge graph: test_cnt_dist_n14t170
 Switched to knowledge graph: test_cnt_dist_n14t170
 > +items[(1, "apple"), (2, "banana"), (3, "apple"), (4, "cherry")]
 Inserted 4 fact(s) into 'items'.
+> +unique(count_distinct<Name>) <- items(_, Name)
+Rule 'unique' registered.
+> ?unique(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> -items(4, "cherry")
+Deleted 1 facts from 'items'.
+> ?unique(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> +items[(5, "banana")]
+Inserted 1 fact(s) into 'items'.
+> ?unique(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> +items[(6, "date")]
+Inserted 1 fact(s) into 'items'.
+> ?unique(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cnt_dist_n14t170
+Knowledge graph 'test_cnt_dist_n14t170' dropped.

@@ -443,3 +443,425 @@ pub fn parse_rule_definition(input: &str) -> Result<super::serialize::RuleDef, S
         rule: SerializableRule::from_rule(&rule),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === strip_inline_comment ===
+
+    #[test]
+    fn test_strip_inline_comment_no_comment() {
+        assert_eq!(strip_inline_comment("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_strip_inline_comment_with_comment() {
+        assert_eq!(strip_inline_comment("hello // world"), "hello");
+    }
+
+    #[test]
+    fn test_strip_inline_comment_in_string() {
+        assert_eq!(
+            strip_inline_comment("\"hello // world\""),
+            "\"hello // world\""
+        );
+    }
+
+    #[test]
+    fn test_strip_inline_comment_after_string() {
+        assert_eq!(strip_inline_comment("\"hello\" // comment"), "\"hello\"");
+    }
+
+    #[test]
+    fn test_strip_inline_comment_empty() {
+        assert_eq!(strip_inline_comment(""), "");
+    }
+
+    // === strip_block_comments ===
+
+    #[test]
+    fn test_strip_block_comments_none() {
+        assert_eq!(strip_block_comments("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_strip_block_comments_simple() {
+        // "hello " + space (replacement) + " world" = 3 spaces total
+        assert_eq!(
+            strip_block_comments("hello /* comment */ world"),
+            "hello   world"
+        );
+    }
+
+    #[test]
+    fn test_strip_block_comments_nested() {
+        // "a " + space (replacement) + " b" = 3 spaces total
+        assert_eq!(
+            strip_block_comments("a /* outer /* inner */ still outer */ b"),
+            "a   b"
+        );
+    }
+
+    #[test]
+    fn test_strip_block_comments_unclosed() {
+        // Unclosed block comment: everything after /* is consumed
+        let result = strip_block_comments("hello /* unclosed");
+        assert_eq!(result, "hello ");
+    }
+
+    // === has_typed_arguments ===
+
+    #[test]
+    fn test_has_typed_arguments_true() {
+        assert!(has_typed_arguments("name: string, age: int"));
+    }
+
+    #[test]
+    fn test_has_typed_arguments_false_values() {
+        assert!(!has_typed_arguments("1, 2, 3"));
+    }
+
+    #[test]
+    fn test_has_typed_arguments_false_variables() {
+        assert!(!has_typed_arguments("X, Y, Z"));
+    }
+
+    #[test]
+    fn test_has_typed_arguments_empty() {
+        assert!(!has_typed_arguments(""));
+    }
+
+    #[test]
+    fn test_has_typed_arguments_type_ref() {
+        assert!(has_typed_arguments("email: Email"));
+    }
+
+    // === extract_args_content ===
+
+    #[test]
+    fn test_extract_args_content_simple() {
+        assert_eq!(extract_args_content("name(a, b)"), Some("a, b"));
+    }
+
+    #[test]
+    fn test_extract_args_content_empty_parens() {
+        assert_eq!(extract_args_content("name()"), Some(""));
+    }
+
+    #[test]
+    fn test_extract_args_content_no_parens() {
+        assert_eq!(extract_args_content("name"), None);
+    }
+
+    // === is_simple_name_deletion ===
+
+    #[test]
+    fn test_is_simple_name_deletion_true() {
+        assert!(is_simple_name_deletion("relation"));
+    }
+
+    #[test]
+    fn test_is_simple_name_deletion_false_with_parens() {
+        assert!(!is_simple_name_deletion("relation(X)"));
+    }
+
+    #[test]
+    fn test_is_simple_name_deletion_false_with_arrow() {
+        assert!(!is_simple_name_deletion("foo(X) <- bar(X)"));
+    }
+
+    // === validate_relation_name ===
+
+    #[test]
+    fn test_validate_relation_name_valid() {
+        assert!(validate_relation_name("edge").is_ok());
+        assert!(validate_relation_name("my_relation").is_ok());
+        assert!(validate_relation_name("r2d2").is_ok());
+    }
+
+    #[test]
+    fn test_validate_relation_name_uppercase() {
+        let result = validate_relation_name("Edge");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("lowercase"));
+    }
+
+    #[test]
+    fn test_validate_relation_name_empty() {
+        assert!(validate_relation_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_relation_name_invalid_chars() {
+        assert!(validate_relation_name("my-relation").is_err());
+    }
+
+    // === parse_single_term ===
+
+    #[test]
+    fn test_parse_single_term_placeholder() {
+        let result = parse_single_term("_").unwrap();
+        assert!(matches!(result, Term::Placeholder));
+    }
+
+    #[test]
+    fn test_parse_single_term_string() {
+        let result = parse_single_term("\"hello\"").unwrap();
+        assert!(matches!(result, Term::StringConstant(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn test_parse_single_term_integer() {
+        let result = parse_single_term("42").unwrap();
+        assert!(matches!(result, Term::Constant(42)));
+    }
+
+    #[test]
+    fn test_parse_single_term_float() {
+        let result = parse_single_term("3.14").unwrap();
+        assert!(matches!(result, Term::FloatConstant(f) if (f - 3.14).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_parse_single_term_variable() {
+        let result = parse_single_term("X").unwrap();
+        assert!(matches!(result, Term::Variable(ref n) if n == "X"));
+    }
+
+    #[test]
+    fn test_parse_single_term_underscore_var() {
+        // Single underscore is placeholder, but _temp is a variable
+        let result = parse_single_term("_temp").unwrap();
+        assert!(matches!(result, Term::Variable(ref n) if n == "_temp"));
+    }
+
+    #[test]
+    fn test_parse_single_term_bool_true() {
+        let result = parse_single_term("true").unwrap();
+        assert!(matches!(result, Term::BoolConstant(true)));
+    }
+
+    #[test]
+    fn test_parse_single_term_bool_false() {
+        let result = parse_single_term("false").unwrap();
+        assert!(matches!(result, Term::BoolConstant(false)));
+    }
+
+    #[test]
+    fn test_parse_single_term_unquoted_atom_error() {
+        let result = parse_single_term("alice");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("quoted string"));
+    }
+
+    #[test]
+    fn test_parse_single_term_vector_literal() {
+        let result = parse_single_term("[1.0, 2.0, 3.0]").unwrap();
+        if let Term::VectorLiteral(v) = result {
+            assert_eq!(v.len(), 3);
+        } else {
+            panic!("Expected VectorLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_single_term_empty_vector() {
+        let result = parse_single_term("[]").unwrap();
+        if let Term::VectorLiteral(v) = result {
+            assert!(v.is_empty());
+        } else {
+            panic!("Expected VectorLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_single_term_negative_int() {
+        let result = parse_single_term("-5").unwrap();
+        assert!(matches!(result, Term::Constant(-5)));
+    }
+
+    #[test]
+    fn test_parse_single_term_negative_float() {
+        let result = parse_single_term("-2.5").unwrap();
+        assert!(matches!(result, Term::FloatConstant(f) if (f - (-2.5)).abs() < 0.001));
+    }
+
+    // === parse_atom_args ===
+
+    #[test]
+    fn test_parse_atom_args_simple() {
+        let result = parse_atom_args("(X, Y)").unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_atom_args_empty() {
+        let result = parse_atom_args("()").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_atom_args_no_parens() {
+        assert!(parse_atom_args("X, Y").is_err());
+    }
+
+    // === split_by_comma ===
+
+    #[test]
+    fn test_split_by_comma_simple() {
+        let result = split_by_comma("a, b, c");
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_split_by_comma_nested_parens() {
+        let result = split_by_comma("f(a, b), c");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_by_comma_nested_brackets() {
+        let result = split_by_comma("[1, 2], c");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_by_comma_nested_angles() {
+        let result = split_by_comma("top_k<3, X, Y:desc>, Z");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_by_comma_in_string() {
+        let result = split_by_comma("\"a,b\", c");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_by_comma_empty() {
+        let result = split_by_comma("");
+        assert!(result.is_empty());
+    }
+
+    // === term_to_string ===
+
+    #[test]
+    fn test_term_to_string_variable() {
+        assert_eq!(term_to_string(&Term::Variable("X".to_string())), "X");
+    }
+
+    #[test]
+    fn test_term_to_string_constant() {
+        assert_eq!(term_to_string(&Term::Constant(42)), "42");
+    }
+
+    #[test]
+    fn test_term_to_string_string_constant() {
+        assert_eq!(
+            term_to_string(&Term::StringConstant("hello".to_string())),
+            "\"hello\""
+        );
+    }
+
+    #[test]
+    fn test_term_to_string_float() {
+        let result = term_to_string(&Term::FloatConstant(3.14));
+        assert!(result.starts_with("3.14"));
+    }
+
+    #[test]
+    fn test_term_to_string_placeholder() {
+        assert_eq!(term_to_string(&Term::Placeholder), "_");
+    }
+
+    // === parse_query ===
+
+    #[test]
+    fn test_parse_query_simple() {
+        let result = parse_query("edge(X, Y)").unwrap();
+        assert_eq!(result.goal.relation, "edge");
+        assert_eq!(result.goal.args.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_query_with_extra_body() {
+        let result = parse_query("edge(X, Y), X > 1").unwrap();
+        assert_eq!(result.goal.relation, "edge");
+        assert!(!result.body.is_empty());
+    }
+
+    // === parse_transient_rule / parse_persistent_rule ===
+
+    #[test]
+    fn test_parse_transient_rule() {
+        let result = parse_transient_rule("path(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(result.head.relation, "path");
+    }
+
+    #[test]
+    fn test_parse_persistent_rule() {
+        let result = parse_persistent_rule("path(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(result.head.relation, "path");
+    }
+
+    // === parse_rule_definition ===
+
+    #[test]
+    fn test_parse_rule_definition() {
+        let result = parse_rule_definition("path(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(result.name, "path");
+    }
+
+    // === parse_aggregate ===
+
+    #[test]
+    fn test_parse_aggregate_count() {
+        let result = parse_aggregate("count<X>").unwrap();
+        assert!(matches!(result, Term::Aggregate(AggregateFunc::Count, _)));
+    }
+
+    #[test]
+    fn test_parse_aggregate_sum() {
+        let result = parse_aggregate("sum<Y>").unwrap();
+        assert!(matches!(result, Term::Aggregate(AggregateFunc::Sum, _)));
+    }
+
+    #[test]
+    fn test_parse_aggregate_min() {
+        let result = parse_aggregate("min<Z>").unwrap();
+        assert!(matches!(result, Term::Aggregate(AggregateFunc::Min, _)));
+    }
+
+    #[test]
+    fn test_parse_aggregate_max() {
+        let result = parse_aggregate("max<Z>").unwrap();
+        assert!(matches!(result, Term::Aggregate(AggregateFunc::Max, _)));
+    }
+
+    #[test]
+    fn test_parse_aggregate_avg() {
+        let result = parse_aggregate("avg<X>").unwrap();
+        assert!(matches!(result, Term::Aggregate(AggregateFunc::Avg, _)));
+    }
+
+    #[test]
+    fn test_parse_aggregate_count_distinct() {
+        let result = parse_aggregate("count_distinct<X>").unwrap();
+        assert!(matches!(
+            result,
+            Term::Aggregate(AggregateFunc::CountDistinct, _)
+        ));
+    }
+
+    #[test]
+    fn test_parse_aggregate_not_aggregate() {
+        assert!(parse_aggregate("hello").is_none());
+    }
+
+    #[test]
+    fn test_parse_aggregate_lowercase_var() {
+        // Lowercase first char = not a valid variable, so not a valid aggregate
+        assert!(parse_aggregate("count<x>").is_none());
+    }
+}

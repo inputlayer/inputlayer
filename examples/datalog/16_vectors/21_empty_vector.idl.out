@@ -19,3 +19,23 @@ Inserted 2 fact(s) into 'empty_vec'.
 │    2 │ []   │
 └──────┴──────┘
 2 rows
+> dist(Id1, Id2, D) <- empty_vec(Id1, V1), empty_vec(Id2, V2), Id1 < Id2, D = euclidean(V1, V2)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │ -0.0 │
+└──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?dist(Id1, Id2, D)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │ -0.0 │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_vec_n16t21
+Knowledge graph 'test_empty_vec_n16t21' dropped.

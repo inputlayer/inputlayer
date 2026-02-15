@@ -13,3 +13,24 @@ Switched to knowledge graph: test_all_excluded_n08t26
 Inserted 3 fact(s) into 'items'.
 > +excluded[(1), (2), (3)]
 Inserted 3 fact(s) into 'excluded'.
+> +not_excluded(X) <- items(X), !excluded(X)
+Rule 'not_excluded' registered.
+> ?not_excluded(X)
+No results.
+> +items(4)
+Inserted 1 fact(s) into 'items'.
+> ?not_excluded(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> +excluded(4)
+Inserted 1 fact(s) into 'excluded'.
+> ?not_excluded(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_excluded_n08t26
+Knowledge graph 'test_all_excluded_n08t26' dropped.

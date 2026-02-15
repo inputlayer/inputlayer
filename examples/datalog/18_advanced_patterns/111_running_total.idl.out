@@ -11,3 +11,16 @@ Switched to knowledge graph: test_running_n18t111
 Switched to knowledge graph: test_running_n18t111
 > +txns[(1, 100), (2, 50), (3, 75), (4, 25)]
 Inserted 4 fact(s) into 'txns'.
+> +total_sum(sum<Amt>) <- txns(_, Amt)
+Rule 'total_sum' registered.
+> ?total_sum(T)
+┌──────┐
+│ col0 │
+├──────┤
+│  250 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_running_n18t111
+Knowledge graph 'test_running_n18t111' dropped.

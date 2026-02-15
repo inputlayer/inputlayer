@@ -215,4 +215,150 @@ mod tests {
         let err: InputLayerError = "something went wrong".into();
         assert!(matches!(err, InputLayerError::InternalError { .. }));
     }
+
+    #[test]
+    fn test_from_string_owned() {
+        let err: InputLayerError = String::from("owned error").into();
+        assert!(
+            matches!(err, InputLayerError::InternalError { ref message } if message == "owned error")
+        );
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err: InputLayerError = io_err.into();
+        assert!(matches!(err, InputLayerError::InternalError { .. }));
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn test_error_display_all_variants() {
+        let errors = vec![
+            InputLayerError::KnowledgeGraphNotFound {
+                name: "test".to_string(),
+            },
+            InputLayerError::KnowledgeGraphExists {
+                name: "test".to_string(),
+            },
+            InputLayerError::RelationNotFound {
+                relation: "edge".to_string(),
+                knowledge_graph: "test".to_string(),
+            },
+            InputLayerError::CannotDropDefault {
+                name: "default".to_string(),
+            },
+            InputLayerError::CannotDropCurrent {
+                name: "test".to_string(),
+            },
+            InputLayerError::NoCurrentKnowledgeGraph,
+            InputLayerError::ExecutionError {
+                message: "failed".to_string(),
+            },
+            InputLayerError::Timeout { timeout_ms: 5000 },
+            InputLayerError::SchemaViolation {
+                expected: "int".to_string(),
+                got: "string".to_string(),
+            },
+            InputLayerError::VectorDimensionMismatch {
+                expected: 3,
+                got: 5,
+            },
+            InputLayerError::TypeMismatch {
+                expected: "int".to_string(),
+                got: "string".to_string(),
+            },
+            InputLayerError::InvalidData {
+                message: "bad data".to_string(),
+            },
+            InputLayerError::ConnectionFailed {
+                address: "localhost:8080".to_string(),
+                reason: "refused".to_string(),
+            },
+            InputLayerError::ConnectionLost {
+                reason: "timeout".to_string(),
+            },
+            InputLayerError::AuthenticationFailed {
+                reason: "bad token".to_string(),
+            },
+            InputLayerError::InternalError {
+                message: "oops".to_string(),
+            },
+            InputLayerError::ServerOverloaded {
+                active_queries: 100,
+                max_queries: 50,
+            },
+            InputLayerError::ShuttingDown,
+            InputLayerError::ResourceLimitExceeded {
+                resource: "memory".to_string(),
+                limit: "1GB".to_string(),
+            },
+            InputLayerError::SerializationError {
+                message: "encode fail".to_string(),
+            },
+            InputLayerError::DeserializationError {
+                message: "decode fail".to_string(),
+            },
+        ];
+
+        for err in &errors {
+            let display = err.to_string();
+            assert!(!display.is_empty(), "Empty display for: {err:?}");
+        }
+    }
+
+    #[test]
+    fn test_error_json_roundtrip() {
+        let err = InputLayerError::RelationNotFound {
+            relation: "edge".to_string(),
+            knowledge_graph: "test".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        let back: InputLayerError = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            back,
+            InputLayerError::RelationNotFound { ref relation, ref knowledge_graph }
+            if relation == "edge" && knowledge_graph == "test"
+        ));
+    }
+
+    #[test]
+    fn test_from_storage_error_kg_not_found() {
+        let storage_err = crate::storage::StorageError::KnowledgeGraphNotFound("mykg".to_string());
+        let err: InputLayerError = storage_err.into();
+        assert!(
+            matches!(err, InputLayerError::KnowledgeGraphNotFound { ref name } if name == "mykg")
+        );
+    }
+
+    #[test]
+    fn test_from_storage_error_kg_exists() {
+        let storage_err = crate::storage::StorageError::KnowledgeGraphExists("mykg".to_string());
+        let err: InputLayerError = storage_err.into();
+        assert!(
+            matches!(err, InputLayerError::KnowledgeGraphExists { ref name } if name == "mykg")
+        );
+    }
+
+    #[test]
+    fn test_from_storage_error_cannot_drop_default() {
+        let storage_err = crate::storage::StorageError::CannotDropDefault;
+        let err: InputLayerError = storage_err.into();
+        assert!(matches!(err, InputLayerError::CannotDropDefault { .. }));
+    }
+
+    #[test]
+    fn test_from_storage_error_no_current_kg() {
+        let storage_err = crate::storage::StorageError::NoCurrentKnowledgeGraph;
+        let err: InputLayerError = storage_err.into();
+        assert!(matches!(err, InputLayerError::NoCurrentKnowledgeGraph));
+    }
+
+    #[test]
+    fn test_from_storage_error_relation_not_found() {
+        let storage_err =
+            crate::storage::StorageError::RelationNotFound("edge".to_string(), "test".to_string());
+        let err: InputLayerError = storage_err.into();
+        assert!(matches!(err, InputLayerError::RelationNotFound { .. }));
+    }
 }

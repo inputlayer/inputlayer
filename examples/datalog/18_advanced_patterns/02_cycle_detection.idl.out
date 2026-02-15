@@ -13,3 +13,23 @@ Switched to knowledge graph: test_cycle_n18t02
 Inserted 5 fact(s) into 'edge'.
 > +node[(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)]
 Inserted 6 fact(s) into 'node'.
+> +reachable(X, Y) <- edge(X, Y)
+Rule 'reachable' registered.
+> +reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+Rule 'reachable' registered.
+> +in_cycle(X, X) <- reachable(X, X)
+Rule 'in_cycle' registered.
+> ?in_cycle(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    2 │
+│    3 │    3 │
+│    4 │    4 │
+│    5 │    5 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cycle_n18t02
+Knowledge graph 'test_cycle_n18t02' dropped.

@@ -9,3 +9,13 @@ Knowledge graph 'test_missing_body_n12t44' created.
 Switched to knowledge graph: test_missing_body_n12t44
 > .kg use test_missing_body_n12t44
 Switched to knowledge graph: test_missing_body_n12t44
+> derived(X) <- undefined_source(X)
+No results.
+(session: 1 rule(s))
+> ?derived(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_missing_body_n12t44
+Knowledge graph 'test_missing_body_n12t44' dropped.

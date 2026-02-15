@@ -9,3 +9,11 @@ Knowledge graph 'test_sess_invalid_n33t08' created.
 Switched to knowledge graph: test_sess_invalid_n33t08
 > .kg use test_sess_invalid_n33t08
 Switched to knowledge graph: test_sess_invalid_n33t08
+> test_rule(X) <- items(X)
+No results.
+(session: 1 rule(s))
+> .session
+Session rules (1):
+  1. test_rule(X) <- items(X)
+> .session drop 99
+Script error: Rule index 99 out of bounds.

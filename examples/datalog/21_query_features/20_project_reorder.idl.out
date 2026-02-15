@@ -11,3 +11,25 @@ Switched to knowledge graph: test_proj_reorder_n21t20
 Switched to knowledge graph: test_proj_reorder_n21t20
 > +data[(1, "Alice", 100), (2, "Bob", 200)]
 Inserted 2 fact(s) into 'data'.
+> reordered(Name, Val, Id) <- data(Id, Name, Val)
+┌─────────┬──────┬──────┐
+│ col0    │ col1 │ col2 │
+├─────────┼──────┼──────┤
+│ "Alice" │  100 │    1 │
+│ "Bob"   │  200 │    2 │
+└─────────┴──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?reordered(Name, Val, Id)
+┌─────────┬──────┬──────┐
+│ col0    │ col1 │ col2 │
+├─────────┼──────┼──────┤
+│ "Alice" │  100 │    1 │
+│ "Bob"   │  200 │    2 │
+└─────────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_proj_reorder_n21t20
+Knowledge graph 'test_proj_reorder_n21t20' dropped.

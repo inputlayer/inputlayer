@@ -13,3 +13,19 @@ Switched to knowledge graph: test_xor_n08t72
 Inserted 3 fact(s) into 'set_a'.
 > +set_b[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set_b'.
+> +xor_result(X) <- set_a(X), !set_b(X)
+Rule 'xor_result' registered.
+> +xor_result(X) <- set_b(X), !set_a(X)
+Rule 'xor_result' registered.
+> ?xor_result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_xor_n08t72
+Knowledge graph 'test_xor_n08t72' dropped.

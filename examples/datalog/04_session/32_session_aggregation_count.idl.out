@@ -1,0 +1,68 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_agg_n04t32
+Knowledge graph 'test_sess_agg_n04t32' created.
+Switched to knowledge graph: test_sess_agg_n04t32
+> .kg use test_sess_agg_n04t32
+Switched to knowledge graph: test_sess_agg_n04t32
+> +score[(1, 100), (2, 200)]
+Inserted 2 fact(s) into 'score'.
+> total_count(count<X>) <- score(X, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?total_count(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> score(3, 300)
+Session fact added for 'score'. (Use +score(...) to persist)
+> score(4, 400)
+Session fact added for 'score'. (Use +score(...) to persist)
+> total_count2(count<X>) <- score(X, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> ?total_count2(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> total_sum(sum<V>) <- score(_, V)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1000 │
+└──────┘
+1 rows
+(session: 3 rule(s))
+> ?total_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1000 │
+└──────┘
+1 rows
+> .session clear
+Cleared 2 session fact(s), 3 session rule(s).
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_agg_n04t32
+Knowledge graph 'test_sess_agg_n04t32' dropped.

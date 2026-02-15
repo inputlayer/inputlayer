@@ -15,3 +15,39 @@ Inserted 4 fact(s) into 'items'.
 Inserted 1 fact(s) into 'excluded_1'.
 > +excluded_2[(2)]
 Inserted 1 fact(s) into 'excluded_2'.
+> +level_1(Id, Val) <- items(Id, Val), !excluded_1(Id)
+Rule 'level_1' registered.
+> ?level_1(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "b"  │
+│    3 │ "c"  │
+│    4 │ "d"  │
+└──────┴──────┘
+3 rows
+> +level_2(Id, Val) <- level_1(Id, Val), !excluded_2(Id)
+Rule 'level_2' registered.
+> ?level_2(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │ "c"  │
+│    4 │ "d"  │
+└──────┴──────┘
+2 rows
+> +special[(3)]
+Inserted 1 fact(s) into 'special'.
+> +level_3(Id, Val) <- level_2(Id, Val), !special(Id)
+Rule 'level_3' registered.
+> ?level_3(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │ "d"  │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_stratified_n08t30
+Knowledge graph 'test_stratified_n08t30' dropped.

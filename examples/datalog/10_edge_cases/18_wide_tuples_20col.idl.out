@@ -21,3 +21,25 @@ Inserted 1 fact(s) into 'wide20'.
 │   21 │   22 │   23 │   24 │   25 │   26 │   27 │   28 │   29 │   30 │    31 │    32 │    33 │    34 │    35 │    36 │    37 │    38 │    39 │    40 │
 └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┴───────┘
 2 rows
+> first_last(A, T) <- wide20(A, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   20 │
+│   21 │   40 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?first_last(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   20 │
+│   21 │   40 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_wide20_n10t18
+Knowledge graph 'test_wide20_n10t18' dropped.

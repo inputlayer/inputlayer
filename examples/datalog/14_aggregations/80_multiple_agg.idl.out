@@ -11,3 +11,52 @@ Switched to knowledge graph: test_multi_agg_n14t80
 Switched to knowledge graph: test_multi_agg_n14t80
 > +values[(10,), (20,), (30,), (40,), (50,)]
 Inserted 5 fact(s) into 'values'.
+> +stats_sum(sum<V>) <- values(V)
+Rule 'stats_sum' registered.
+> +stats_avg(avg<V>) <- values(V)
+Rule 'stats_avg' registered.
+> +stats_min(min<V>) <- values(V)
+Rule 'stats_min' registered.
+> +stats_max(max<V>) <- values(V)
+Rule 'stats_max' registered.
+> +stats_count(count<V>) <- values(V)
+Rule 'stats_count' registered.
+> ?stats_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  150 │
+└──────┘
+1 rows
+> ?stats_avg(A)
+┌──────┐
+│ col0 │
+├──────┤
+│ 30.0 │
+└──────┘
+1 rows
+> ?stats_min(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+└──────┘
+1 rows
+> ?stats_max(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   50 │
+└──────┘
+1 rows
+> ?stats_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n14t80
+Knowledge graph 'test_multi_agg_n14t80' dropped.

@@ -11,3 +11,7 @@ Switched to knowledge graph: test_window_n18t117
 Switched to knowledge graph: test_window_n18t117
 > +sales[(1, "East", 100), (2, "East", 150), (3, "West", 200), (4, "West", 120)]
 Inserted 4 fact(s) into 'sales'.
+> +region_total(Region, sum<Amount>) <- sales(_, Region, Amount)
+Rule 'region_total' registered.
+> +sale_with_total(Id, Region, Amount, Total) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

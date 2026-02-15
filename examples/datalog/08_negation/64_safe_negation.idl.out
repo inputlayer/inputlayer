@@ -13,3 +13,18 @@ Switched to knowledge graph: test_safe_neg_n08t64
 Inserted 5 fact(s) into 'all_ids'.
 > +processed[(1,), (3,)]
 Inserted 2 fact(s) into 'processed'.
+> +unprocessed(X) <- all_ids(X), !processed(X)
+Rule 'unprocessed' registered.
+> ?unprocessed(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+│    5 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_safe_neg_n08t64
+Knowledge graph 'test_safe_neg_n08t64' dropped.

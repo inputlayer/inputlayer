@@ -13,3 +13,18 @@ Switched to knowledge graph: test_set_diff_n08t66
 Inserted 5 fact(s) into 'set_a'.
 > +set_b[(2,), (4,)]
 Inserted 2 fact(s) into 'set_b'.
+> +difference(X) <- set_a(X), !set_b(X)
+Rule 'difference' registered.
+> ?difference(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_set_diff_n08t66
+Knowledge graph 'test_set_diff_n08t66' dropped.

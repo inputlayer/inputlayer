@@ -17,3 +17,17 @@ Inserted 2 fact(s) into 'b'.
 Inserted 2 fact(s) into 'c'.
 > +d[(4, 5), (40, 50)]
 Inserted 2 fact(s) into 'd'.
+> +chain(W, Z) <- a(W, X), b(X, Y), c(Y, Z)
+Rule 'chain' registered.
+> ?chain(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    4 │
+│   10 │   40 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_n06t04
+Knowledge graph 'test_multi_n06t04' dropped.

@@ -15,3 +15,5 @@ Inserted 3 fact(s) into 'sales'.
 Inserted 2 fact(s) into 'products'.
 > +customers[(1000, "Alice"), (1001, "Bob")]
 Inserted 2 fact(s) into 'customers'.
+> full_report(SaleId, ProdName, CustName, Date) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

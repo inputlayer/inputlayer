@@ -11,3 +11,25 @@ Switched to knowledge graph: test_vec_ops_n16t05
 Switched to knowledge graph: test_vec_ops_n16t05
 > +vectors[(1, [3.0, 4.0]), (2, [1.0, 0.0])]
 Inserted 2 fact(s) into 'vectors'.
+> vec_info(Id, Dim) <- vectors(Id, V), Dim = vec_dim(V)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    2 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?vec_info(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    2 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_ops_n16t05
+Knowledge graph 'test_vec_ops_n16t05' dropped.

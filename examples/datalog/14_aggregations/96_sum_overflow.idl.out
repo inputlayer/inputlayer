@@ -11,3 +11,16 @@ Switched to knowledge graph: test_sum_large_n14t96
 Switched to knowledge graph: test_sum_large_n14t96
 > +big_nums[(1000000000,), (2000000000,), (3000000000,)]
 Inserted 3 fact(s) into 'big_nums'.
+> +big_sum(sum<X>) <- big_nums(X)
+Rule 'big_sum' registered.
+> ?big_sum(S)
+┌────────────┐
+│ col0       │
+├────────────┤
+│ 6000000000 │
+└────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sum_large_n14t96
+Knowledge graph 'test_sum_large_n14t96' dropped.

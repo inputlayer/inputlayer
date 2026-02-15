@@ -21,3 +21,11 @@ Inserted 4 fact(s) into 'items'.
 │    4 │ "d"  │
 └──────┴──────┘
 4 rows
+> -items(X, Y) <- items(X, Y)
+Conditional delete: 4 fact(s) deleted from 'items'.
+> ?items(Id, Val)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_all_n27t07
+Knowledge graph 'test_cond_del_all_n27t07' dropped.

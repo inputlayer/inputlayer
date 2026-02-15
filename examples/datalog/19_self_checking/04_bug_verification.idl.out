@@ -13,3 +13,25 @@ Switched to knowledge graph: test_bug_verification_n19t04
 Inserted 2 fact(s) into 'src3'.
 > +link[(1, 1001), (2, 1002)]
 Inserted 2 fact(s) into 'link'.
+> result(Y, D+1) <- src3(X, D, _), link(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ 1001 │ 7778 │
+│ 1002 │ 8889 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?result(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ 1001 │ 7778 │
+│ 1002 │ 8889 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_bug_verification_n19t04
+Knowledge graph 'test_bug_verification_n19t04' dropped.

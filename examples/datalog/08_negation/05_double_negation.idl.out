@@ -15,3 +15,17 @@ Inserted 5 fact(s) into 'candidate'.
 Inserted 2 fact(s) into 'blacklist'.
 > +already_hired[(3, 0)]
 Inserted 1 fact(s) into 'already_hired'.
+> +eligible(X, Y) <- candidate(X, Y), !blacklist(X, _), !already_hired(X, _)
+Rule 'eligible' registered.
+> ?eligible(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+│    5 │    0 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_double_neg_n08t05
+Knowledge graph 'test_double_neg_n08t05' dropped.

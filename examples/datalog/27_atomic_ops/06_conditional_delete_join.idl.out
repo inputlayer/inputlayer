@@ -22,3 +22,16 @@ Inserted 1 fact(s) into 'banned'.
 │    3 │ "Alice" │  300 │
 └──────┴─────────┴──────┘
 3 rows
+> -orders(Id, Name, Amount) <- banned(Name)
+Conditional delete: 2 fact(s) deleted from 'orders'.
+> ?orders(Id, Name, Amount)
+┌──────┬───────┬──────┐
+│ col0 │ col1  │ col2 │
+├──────┼───────┼──────┤
+│    2 │ "Bob" │  200 │
+└──────┴───────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_join_n27t06
+Knowledge graph 'test_cond_del_join_n27t06' dropped.

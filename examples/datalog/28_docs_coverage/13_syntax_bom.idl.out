@@ -11,3 +11,7 @@ Switched to knowledge graph: test_syntax_bom_n28t13
 Switched to knowledge graph: test_syntax_bom_n28t13
 > +contains[(100, 10, 2), (100, 20, 1), (20, 30, 4), (20, 40, 2)]
 Inserted 4 fact(s) into 'contains'.
+> +requires(Asm, Part) <- contains(Asm, Part, _)
+Rule 'requires' registered.
+> +requires(Asm, Part) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

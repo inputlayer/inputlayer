@@ -11,3 +11,37 @@ Switched to knowledge graph: test_strong_conn_n09t66
 Switched to knowledge graph: test_strong_conn_n09t66
 > +edge[("a", "b"), ("b", "c"), ("c", "a"), ("d", "e")]
 Inserted 4 fact(s) into 'edge'.
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> +reach(X, Z) <- reach(X, Y), edge(Y, Z)
+Rule 'reach' registered.
+> strongly_connected(X, Y) <- reach(X, Y), reach(Y, X), X != Y
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "b"  │
+│ "a"  │ "c"  │
+│ "b"  │ "a"  │
+│ "b"  │ "c"  │
+│ "c"  │ "a"  │
+│ "c"  │ "b"  │
+└──────┴──────┘
+6 rows
+(session: 1 rule(s))
+> ?strongly_connected(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "b"  │
+│ "a"  │ "c"  │
+│ "b"  │ "a"  │
+│ "b"  │ "c"  │
+│ "c"  │ "a"  │
+│ "c"  │ "b"  │
+└──────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_strong_conn_n09t66
+Knowledge graph 'test_strong_conn_n09t66' dropped.

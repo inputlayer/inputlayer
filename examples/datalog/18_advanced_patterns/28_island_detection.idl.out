@@ -11,3 +11,84 @@ Switched to knowledge graph: test_islands_n18t28
 Switched to knowledge graph: test_islands_n18t28
 > +data[(1, 1), (2, 1), (3, 0), (4, 1), (5, 1), (6, 1), (7, 0), (8, 1)]
 Inserted 8 fact(s) into 'data'.
+> island_start(Id) <- data(Id, 1), PrevId = Id - 1, data(PrevId, 0)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+(session: 1 rule(s))
+> island_start(1) <- data(1, 1)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+(session: 2 rule(s))
+> ?island_start(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+> island_end(Id) <- data(Id, 1), NextId = Id + 1, data(NextId, 0)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+(session: 3 rule(s))
+> island_end(Id) <- data(Id, 1), NextId = Id + 1, !data(NextId, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+(session: 4 rule(s))
+> ?island_end(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+│    6 │
+│    8 │
+└──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_islands_n18t28
+Knowledge graph 'test_islands_n18t28' dropped.

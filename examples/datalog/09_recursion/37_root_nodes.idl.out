@@ -11,3 +11,27 @@ Switched to knowledge graph: test_roots_n09t37
 Switched to knowledge graph: test_roots_n09t37
 > +parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)]
 Inserted 5 fact(s) into 'parent'.
+> +all_nodes(X) <- parent(X, _)
+Rule 'all_nodes' registered.
+> +all_nodes(X) <- parent(_, X)
+Rule 'all_nodes' registered.
+> root(X) <- all_nodes(X), !parent(_, X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?root(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_roots_n09t37
+Knowledge graph 'test_roots_n09t37' dropped.

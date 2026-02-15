@@ -15,3 +15,27 @@ Inserted 1 fact(s) into 'vectors'.
 Inserted 1 fact(s) into 'vectors'.
 > +vectors[(3, [1.0, 1.0, 1.0], 0.0)]
 Inserted 1 fact(s) into 'vectors'.
+> scaled(Id, Result) <- vectors(Id, V, S), Result = vec_scale(V, S)
+┌──────┬─────────────────┐
+│ col0 │ col1            │
+├──────┼─────────────────┤
+│    1 │ [2.0, 4.0, 6.0] │
+│    2 │ [2.5, 5.0]      │
+│    3 │ [0.0, 0.0, 0.0] │
+└──────┴─────────────────┘
+3 rows
+(session: 1 rule(s))
+> ?scaled(Id, Result)
+┌──────┬─────────────────┐
+│ col0 │ col1            │
+├──────┼─────────────────┤
+│    1 │ [2.0, 4.0, 6.0] │
+│    2 │ [2.5, 5.0]      │
+│    3 │ [0.0, 0.0, 0.0] │
+└──────┴─────────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_scale_n16t09
+Knowledge graph 'test_vec_scale_n16t09' dropped.

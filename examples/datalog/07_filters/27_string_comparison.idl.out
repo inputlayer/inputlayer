@@ -27,5 +27,36 @@ Inserted 4 fact(s) into 'words'.
 │ "cherry"  │
 └───────────┘
 3 rows
-> ?words(W), W < "banana" ?words(W), W > "banana"
-Script error: Parse error: Invalid term: '"banana" ?words(W)'
+> ?words(W), W < "banana"
+┌───────────┐
+│ col0      │
+├───────────┤
+│ "apple"   │
+│ "apricot" │
+└───────────┘
+2 rows
+> ?words(W), W > "banana"
+┌──────────┐
+│ col0     │
+├──────────┤
+│ "cherry" │
+└──────────┘
+1 rows
+> ?words(W), W <= "apple"
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "apple" │
+└─────────┘
+1 rows
+> ?words(W), W >= "cherry"
+┌──────────┐
+│ col0     │
+├──────────┤
+│ "cherry" │
+└──────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_str_cmp_n07t27
+Knowledge graph 'test_str_cmp_n07t27' dropped.

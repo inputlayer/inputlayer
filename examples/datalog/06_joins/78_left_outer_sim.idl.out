@@ -13,3 +13,40 @@ Switched to knowledge graph: test_left_outer_n06t78
 Inserted 3 fact(s) into 'employees'.
 > +departments[(1, "Engineering"), (2, "Sales")]
 Inserted 2 fact(s) into 'departments'.
+> inner_joined(EmpId, Name, Dept) <- employees(EmpId, Name), departments(EmpId, Dept)
+┌──────┬─────────┬───────────────┐
+│ col0 │ col1    │ col2          │
+├──────┼─────────┼───────────────┤
+│    1 │ "Alice" │ "Engineering" │
+│    2 │ "Bob"   │ "Sales"       │
+└──────┴─────────┴───────────────┘
+2 rows
+(session: 1 rule(s))
+> ?inner_joined(EmpId, Name, Dept)
+┌──────┬─────────┬───────────────┐
+│ col0 │ col1    │ col2          │
+├──────┼─────────┼───────────────┤
+│    1 │ "Alice" │ "Engineering" │
+│    2 │ "Bob"   │ "Sales"       │
+└──────┴─────────┴───────────────┘
+2 rows
+> no_dept(EmpId, Name) <- employees(EmpId, Name), !departments(EmpId, _)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "Carol" │
+└──────┴─────────┘
+1 rows
+(session: 2 rule(s))
+> ?no_dept(EmpId, Name)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "Carol" │
+└──────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_left_outer_n06t78
+Knowledge graph 'test_left_outer_n06t78' dropped.

@@ -30,3 +30,16 @@ Inserted 3 fact(s) into 'child'.
 │    3 │    2 │ "c3" │
 └──────┴──────┴──────┘
 3 rows
+> -parent(Id, Name) <- parent(Id, Name), Id = 1
+Conditional delete: 1 fact(s) deleted from 'parent'.
+> ?parent(Id, Name)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "B"  │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cascade_n27t30
+Knowledge graph 'test_cascade_n27t30' dropped.

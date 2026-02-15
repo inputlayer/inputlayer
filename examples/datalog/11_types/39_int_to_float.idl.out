@@ -11,3 +11,25 @@ Switched to knowledge graph: test_int_float_n11t39
 Switched to knowledge graph: test_int_float_n11t39
 > +data[(10, 2.5), (20, 3.0)]
 Inserted 2 fact(s) into 'data'.
+> result(A, B, R) <- data(A, B), R = A * B
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│   10 │  2.5 │ 25.0 │
+│   20 │  3.0 │ 60.0 │
+└──────┴──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?result(A, B, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│   10 │  2.5 │ 25.0 │
+│   20 │  3.0 │ 60.0 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_int_float_n11t39
+Knowledge graph 'test_int_float_n11t39' dropped.

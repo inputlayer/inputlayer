@@ -19,3 +19,64 @@ Inserted 3 fact(s) into 'r3'.
 Inserted 3 fact(s) into 'r4'.
 > +r5[(10000, 100000), (20000, 200000), (30000, 300000)]
 Inserted 3 fact(s) into 'r5'.
+> +chain5(A, F) <- r1(A, B), r2(B, C), r3(C, D), r4(D, E), r5(E, F)
+Rule 'chain5' registered.
+> ?chain5(A, F)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    1 │ 100000 │
+│    2 │ 200000 │
+│    3 │ 300000 │
+└──────┴────────┘
+3 rows
+> +center[(1, 2, 3)]
+Inserted 1 fact(s) into 'center'.
+> +left[(1, 100)]
+Inserted 1 fact(s) into 'left'.
+> +right[(3, 300)]
+Inserted 1 fact(s) into 'right'.
+> +top[(2, 200)]
+Inserted 1 fact(s) into 'top'.
+> +star_join(L, T, R) <- center(A, B, C), left(A, L), top(B, T), right(C, R)
+Rule 'star_join' registered.
+> ?star_join(L, T, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│  100 │  200 │  300 │
+└──────┴──────┴──────┘
+1 rows
+> +nodes[(1), (2), (3), (4), (5)]
+Inserted 5 fact(s) into 'nodes'.
+> +links[(1, 2), (2, 3), (3, 4), (4, 5), (1, 3), (2, 4), (3, 5)]
+Inserted 7 fact(s) into 'links'.
+> +path3(A, B, C) <- links(A, B), links(B, C), A != C
+Rule 'path3' registered.
+> ?path3(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │    3 │
+│    1 │    2 │    4 │
+│    1 │    3 │    4 │
+│    1 │    3 │    5 │
+│    2 │    3 │    4 │
+│    2 │    3 │    5 │
+│    2 │    4 │    5 │
+│    3 │    4 │    5 │
+└──────┴──────┴──────┘
+8 rows
+> +path3_count(count<A>) <- path3(A, _, _)
+Rule 'path3_count' registered.
+> ?path3_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    8 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_many_joins_n13t08
+Knowledge graph 'test_many_joins_n13t08' dropped.

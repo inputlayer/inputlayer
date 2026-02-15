@@ -20,3 +20,23 @@ Inserted 3 fact(s) into 'data'.
 │    1 │ "one"     │
 └──────┴───────────┘
 3 rows
+> negative(Key, Val) <- data(Key, Val), Key < 0
+┌──────┬───────────┐
+│ col0 │ col1      │
+├──────┼───────────┤
+│   -1 │ "neg_one" │
+└──────┴───────────┘
+1 rows
+(session: 1 rule(s))
+> ?negative(Key, Val)
+┌──────┬───────────┐
+│ col0 │ col1      │
+├──────┼───────────┤
+│   -1 │ "neg_one" │
+└──────┴───────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_key_n10t63
+Knowledge graph 'test_neg_key_n10t63' dropped.

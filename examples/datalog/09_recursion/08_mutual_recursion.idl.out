@@ -17,3 +17,19 @@ Inserted 1 fact(s) into 'base_even'.
 Inserted 1 fact(s) into 'base_odd'.
 > +succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10)]
 Inserted 10 fact(s) into 'succ'.
+> +is_even(N) <- base_even(N)
+Rule 'is_even' registered.
+> +is_even(N) <- succ(M, N), is_odd(M)
+Rule 'is_even' registered.
+> +is_odd(N) <- base_odd(N)
+Rule 'is_odd' registered.
+> +is_odd(N) <- succ(M, N), is_even(M)
+Rule 'is_odd' registered.
+> ?is_even(X)
+No results.
+> ?is_odd(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_mutual_recursion_n09t08
+Knowledge graph 'test_mutual_recursion_n09t08' dropped.

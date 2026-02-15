@@ -11,3 +11,24 @@ Switched to knowledge graph: test_connected_n09t81
 Switched to knowledge graph: test_connected_n09t81
 > +edge[(1, 2), (2, 3), (4, 5)]
 Inserted 3 fact(s) into 'edge'.
+> +connected(X, Y) <- edge(X, Y)
+Rule 'connected' registered.
+> +connected(X, Y) <- edge(Y, X)
+Rule 'connected' registered.
+> +connected(X, Z) <- connected(X, Y), edge(Y, Z)
+Rule 'connected' registered.
+> +connected(X, Z) <- connected(X, Y), edge(Z, Y)
+Rule 'connected' registered.
+> ?connected(1, X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    1 │    2 │
+│    1 │    3 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_connected_n09t81
+Knowledge graph 'test_connected_n09t81' dropped.

@@ -13,3 +13,26 @@ Switched to knowledge graph: test_exists_n08t63
 Inserted 3 fact(s) into 'customers'.
 > +orders[(101, 1), (102, 1), (103, 2)]
 Inserted 3 fact(s) into 'orders'.
+> +has_orders(CustId, Name) <- customers(CustId, Name), orders(_, CustId)
+Rule 'has_orders' registered.
+> +no_orders(CustId, Name) <- customers(CustId, Name), !orders(_, CustId)
+Rule 'no_orders' registered.
+> ?has_orders(Id, Name)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "Alice" │
+│    2 │ "Bob"   │
+└──────┴─────────┘
+2 rows
+> ?no_orders(Id, Name)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    3 │ "Carol" │
+└──────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_exists_n08t63
+Knowledge graph 'test_exists_n08t63' dropped.

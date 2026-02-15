@@ -239,4 +239,96 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].update.data, Tuple::from_pair(3, 4));
     }
+
+    #[test]
+    fn test_wal_empty_read() {
+        let temp = TempDir::new().unwrap();
+        let wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        let entries = wal.read_all().unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_wal_read_shard_empty() {
+        let temp = TempDir::new().unwrap();
+        let wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        let updates = wal.read_shard("nonexistent").unwrap();
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn test_wal_file_size() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        assert_eq!(wal.file_size(), 0);
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        assert!(wal.file_size() > 0);
+    }
+
+    #[test]
+    fn test_wal_entries_written() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        assert_eq!(wal.entries_written(), 0);
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        assert_eq!(wal.entries_written(), 1);
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        assert_eq!(wal.entries_written(), 2);
+    }
+
+    #[test]
+    fn test_wal_append_batch() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 10),
+            Update::delete(Tuple::from_pair(5, 6), 10),
+        ];
+
+        wal.append_batch("db:edge", &updates).unwrap();
+        assert_eq!(wal.entries_written(), 3);
+
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[test]
+    fn test_wal_append_buffered() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.append_buffered("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        wal.sync().unwrap();
+
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_wal_sync_no_writer() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        // Sync with no writer should not error
+        wal.sync().unwrap();
+    }
+
+    #[test]
+    fn test_wal_entry_serde() {
+        let entry = WalEntry {
+            shard: "db:edge".to_string(),
+            update: Update::insert(Tuple::from_pair(1, 2), 10),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: WalEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.shard, "db:edge");
+    }
 }

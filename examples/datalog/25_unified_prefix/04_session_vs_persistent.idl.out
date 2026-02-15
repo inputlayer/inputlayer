@@ -11,3 +11,41 @@ Switched to knowledge graph: test_sess_vs_pers_n25t04
 Switched to knowledge graph: test_sess_vs_pers_n25t04
 > +data[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'data'.
+> +persistent_doubled(X, Y) <- data(X), Y = X * 2
+Rule 'persistent_doubled' registered.
+> session_doubled(X, Y) <- data(X), Y = X * 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+│    3 │    6 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?persistent_doubled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+│    3 │    6 │
+└──────┴──────┘
+3 rows
+> ?session_doubled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+│    3 │    6 │
+└──────┴──────┘
+3 rows
+> .rule
+Rules:
+  persistent_doubled (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_sess_vs_pers_n25t04
+Knowledge graph 'test_sess_vs_pers_n25t04' dropped.

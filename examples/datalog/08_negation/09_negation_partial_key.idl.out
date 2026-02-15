@@ -13,3 +13,25 @@ Switched to knowledge graph: test_neg_partial_n08t09
 Inserted 7 fact(s) into 'assignment'.
 > +restricted[(100, 0), (300, 0)]
 Inserted 2 fact(s) into 'restricted'.
+> +has_open_project(Emp, Proj) <- assignment(Emp, Proj), !restricted(Proj, _)
+Rule 'has_open_project' registered.
+> ?has_open_project(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  200 │
+│    3 │  200 │
+└──────┴──────┘
+2 rows
+> ?has_open_project(E, P)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  200 │
+│    3 │  200 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_partial_n08t09
+Knowledge graph 'test_neg_partial_n08t09' dropped.

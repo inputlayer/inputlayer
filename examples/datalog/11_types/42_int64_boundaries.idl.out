@@ -39,3 +39,16 @@ Inserted 1 fact(s) into 'min_val'.
 1 rows
 > +nums[(9223372036854775800,), (10,)]
 Inserted 2 fact(s) into 'nums'.
+> +sum_big(sum<X>) <- nums(X)
+Rule 'sum_big' registered.
+> ?sum_big(S)
+┌─────────────────────┐
+│ col0                │
+├─────────────────────┤
+│ 9223372036854775807 │
+└─────────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int64_bounds_n11t42
+Knowledge graph 'test_int64_bounds_n11t42' dropped.

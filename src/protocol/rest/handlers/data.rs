@@ -124,6 +124,11 @@ pub async fn insert_data(
         .insert_tuples_into(&kg, &name, tuples)
         .map_err(|e| RestError::bad_request(format!("Insert failed: {e}")))?;
 
+    // Notify WebSocket subscribers of persistent data change
+    if inserted > 0 {
+        handler.notify_persistent_update(&kg, &name, "insert", inserted);
+    }
+
     let response = InsertDataResponse {
         rows_inserted: inserted,
         duplicates: duplicates + skipped,
@@ -178,9 +183,123 @@ pub async fn delete_data(
         .delete_tuples_from(&kg, &name, tuples)
         .map_err(|e| RestError::internal(format!("Delete failed: {e}")))?;
 
+    // Notify WebSocket subscribers of persistent data change
+    if deleted_count > 0 {
+        handler.notify_persistent_update(&kg, &name, "delete", deleted_count);
+    }
+
     let response = DeleteDataResponse {
         rows_deleted: deleted_count,
     };
 
     Ok(Json(ApiResponse::success(response)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_json_to_value_integer() {
+        let val = json_to_value(&serde_json::json!(42));
+        assert_eq!(val, Some(Value::Int64(42)));
+    }
+
+    #[test]
+    fn test_json_to_value_negative() {
+        let val = json_to_value(&serde_json::json!(-100));
+        assert_eq!(val, Some(Value::Int64(-100)));
+    }
+
+    #[test]
+    fn test_json_to_value_float() {
+        let val = json_to_value(&serde_json::json!(3.14));
+        assert_eq!(val, Some(Value::Float64(3.14)));
+    }
+
+    #[test]
+    fn test_json_to_value_string() {
+        let val = json_to_value(&serde_json::json!("hello"));
+        assert_eq!(val, Some(Value::string("hello")));
+    }
+
+    #[test]
+    fn test_json_to_value_bool_true() {
+        let val = json_to_value(&serde_json::json!(true));
+        assert_eq!(val, Some(Value::Int64(1)));
+    }
+
+    #[test]
+    fn test_json_to_value_bool_false() {
+        let val = json_to_value(&serde_json::json!(false));
+        assert_eq!(val, Some(Value::Int64(0)));
+    }
+
+    #[test]
+    fn test_json_to_value_null() {
+        let val = json_to_value(&serde_json::json!(null));
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn test_json_to_value_object() {
+        let val = json_to_value(&serde_json::json!({"key": "val"}));
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn test_json_to_value_array_floats() {
+        let val = json_to_value(&serde_json::json!([1.0, 2.0, 3.0]));
+        assert_eq!(val, Some(Value::vector(vec![1.0, 2.0, 3.0])));
+    }
+
+    #[test]
+    fn test_json_to_value_array_mixed() {
+        let val = json_to_value(&serde_json::json!([1.0, "bad"]));
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn test_json_to_value_empty_array() {
+        let val = json_to_value(&serde_json::json!([]));
+        assert_eq!(val, Some(Value::vector(vec![])));
+    }
+
+    #[test]
+    fn test_json_to_value_large_int() {
+        let val = json_to_value(&serde_json::json!(i64::MAX));
+        assert_eq!(val, Some(Value::Int64(i64::MAX)));
+    }
+
+    #[test]
+    fn test_insert_data_request_deserialize() {
+        let json = r#"{"rows": [[1, 2], [3, 4]]}"#;
+        let req: InsertDataRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_delete_data_request_deserialize() {
+        let json = r#"{"rows": [[1, 2]]}"#;
+        let req: DeleteDataRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.rows.len(), 1);
+    }
+
+    #[test]
+    fn test_insert_data_response_serialize() {
+        let resp = InsertDataResponse {
+            rows_inserted: 5,
+            duplicates: 2,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"rows_inserted\":5"));
+        assert!(json.contains("\"duplicates\":2"));
+    }
+
+    #[test]
+    fn test_delete_data_response_serialize() {
+        let resp = DeleteDataResponse { rows_deleted: 3 };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"rows_deleted\":3"));
+    }
 }

@@ -19,3 +19,33 @@ Inserted 2 fact(s) into 'c'.
 Inserted 2 fact(s) into 'd'.
 > +e[(9,), (10,)]
 Inserted 2 fact(s) into 'e'.
+> +combined(X) <- a(X)
+Rule 'combined' registered.
+> +combined(X) <- b(X)
+Rule 'combined' registered.
+> +combined(X) <- c(X)
+Rule 'combined' registered.
+> +combined(X) <- d(X)
+Rule 'combined' registered.
+> +combined(X) <- e(X)
+Rule 'combined' registered.
+> ?combined(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+│    5 │
+│    6 │
+│    7 │
+│    8 │
+│    9 │
+│   10 │
+└──────┘
+10 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_many_rules_n10t20
+Knowledge graph 'test_many_rules_n10t20' dropped.

@@ -21,3 +21,25 @@ Inserted 4 fact(s) into 'temps'.
 │  10.5 │
 └───────┘
 4 rows
+> negative(T) <- temps(T), T < 0.0
+┌───────┐
+│ col0  │
+├───────┤
+│ -10.5 │
+│ -5.25 │
+└───────┘
+2 rows
+(session: 1 rule(s))
+> ?negative(T)
+┌───────┐
+│ col0  │
+├───────┤
+│ -10.5 │
+│ -5.25 │
+└───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_float_n11t28
+Knowledge graph 'test_neg_float_n11t28' dropped.

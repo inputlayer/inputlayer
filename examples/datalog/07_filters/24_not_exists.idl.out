@@ -13,3 +13,25 @@ Switched to knowledge graph: test_not_exists_n07t24
 Inserted 3 fact(s) into 'products'.
 > +orders[(101, 1), (102, 1)]
 Inserted 2 fact(s) into 'orders'.
+> no_orders(ProdId, Name) <- products(ProdId, Name), !orders(_, ProdId)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    2 │ "Gadget" │
+│    3 │ "Gizmo"  │
+└──────┴──────────┘
+2 rows
+(session: 1 rule(s))
+> ?no_orders(Id, N)
+┌──────┬──────────┐
+│ col0 │ col1     │
+├──────┼──────────┤
+│    2 │ "Gadget" │
+│    3 │ "Gizmo"  │
+└──────┴──────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_not_exists_n07t24
+Knowledge graph 'test_not_exists_n07t24' dropped.

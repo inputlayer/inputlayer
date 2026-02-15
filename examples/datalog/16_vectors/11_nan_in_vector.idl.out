@@ -11,3 +11,23 @@ Switched to knowledge graph: test_vec_nan_n16t11
 Switched to knowledge graph: test_vec_nan_n16t11
 > +vecs[(1, [1.0, 2.0, 3.0]), (2, [4.0, 5.0, 6.0])]
 Inserted 2 fact(s) into 'vecs'.
+> dist(Id1, Id2, D) <- vecs(Id1, V1), vecs(Id2, V2), Id1 < Id2, D = euclidean(V1, V2)
+┌──────┬──────┬───────────────────┐
+│ col0 │ col1 │ col2              │
+├──────┼──────┼───────────────────┤
+│    1 │    2 │ 5.196152422706632 │
+└──────┴──────┴───────────────────┘
+1 rows
+(session: 1 rule(s))
+> ?dist(Id1, Id2, D)
+┌──────┬──────┬───────────────────┐
+│ col0 │ col1 │ col2              │
+├──────┼──────┼───────────────────┤
+│    1 │    2 │ 5.196152422706632 │
+└──────┴──────┴───────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_nan_n16t11
+Knowledge graph 'test_vec_nan_n16t11' dropped.

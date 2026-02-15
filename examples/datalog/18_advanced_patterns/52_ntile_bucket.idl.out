@@ -20,3 +20,48 @@ Inserted 5 fact(s) into 'scores'.
 └──────┴──────┘
 2 rows
 (session: 1 rule(s))
+> medium(Id, Score) <- scores(Id, Score), Score >= 80, Score < 90
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   85 │
+│    5 │   88 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> low(Id, Score) <- scores(Id, Score), Score < 80
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │   78 │
+└──────┴──────┘
+1 rows
+(session: 3 rule(s))
+> ?high(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │   92 │
+└──────┴──────┘
+2 rows
+> ?medium(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   85 │
+│    5 │   88 │
+└──────┴──────┘
+2 rows
+> ?low(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │   78 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_ntile_n18t52
+Knowledge graph 'test_ntile_n18t52' dropped.

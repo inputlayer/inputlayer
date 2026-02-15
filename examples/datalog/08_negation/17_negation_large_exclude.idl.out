@@ -13,3 +13,25 @@ Switched to knowledge graph: test_neg_large_n08t17
 Inserted 20 fact(s) into 'data'.
 > +exclude[(2, 0), (4, 0), (6, 0), (8, 0), (10, 0), (12, 0), (14, 0), (16, 0), (18, 0), (20, 0)]
 Inserted 10 fact(s) into 'exclude'.
+> +odd_data(X, Y) <- data(X, Y), !exclude(X, _)
+Rule 'odd_data' registered.
+> ?odd_data(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    3 │    3 │
+│    5 │    5 │
+│    7 │    7 │
+│    9 │    9 │
+│   11 │   11 │
+│   13 │   13 │
+│   15 │   15 │
+│   17 │   17 │
+│   19 │   19 │
+└──────┴──────┘
+10 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_large_n08t17
+Knowledge graph 'test_neg_large_n08t17' dropped.

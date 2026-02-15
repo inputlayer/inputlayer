@@ -11,3 +11,29 @@ Switched to knowledge graph: test_div_trunc_n15t31
 Switched to knowledge graph: test_div_trunc_n15t31
 > +nums[(7,), (10,), (15,), (-7,)]
 Inserted 4 fact(s) into 'nums'.
+> div_by_3(X, Y) <- nums(X), Y = X / 3
+┌──────┬─────────────────────┐
+│ col0 │ col1                │
+├──────┼─────────────────────┤
+│   -7 │ -2.3333333333333335 │
+│    7 │  2.3333333333333335 │
+│   10 │  3.3333333333333335 │
+│   15 │                 5.0 │
+└──────┴─────────────────────┘
+4 rows
+(session: 1 rule(s))
+> ?div_by_3(X, Y)
+┌──────┬─────────────────────┐
+│ col0 │ col1                │
+├──────┼─────────────────────┤
+│   -7 │ -2.3333333333333335 │
+│    7 │  2.3333333333333335 │
+│   10 │  3.3333333333333335 │
+│   15 │                 5.0 │
+└──────┴─────────────────────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_div_trunc_n15t31
+Knowledge graph 'test_div_trunc_n15t31' dropped.

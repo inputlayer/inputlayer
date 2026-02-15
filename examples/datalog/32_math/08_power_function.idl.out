@@ -11,3 +11,31 @@ Switched to knowledge graph: test_pow_n32t08
 Switched to knowledge graph: test_pow_n32t08
 > +base_exp[(2, 0), (2, 1), (2, 3), (3, 2), (10, 2)]
 Inserted 5 fact(s) into 'base_exp'.
+> power_val(B, E, R) <- base_exp(B, E), R = POW(B, E)
+┌──────┬──────┬───────┐
+│ col0 │ col1 │ col2  │
+├──────┼──────┼───────┤
+│    2 │    0 │   1.0 │
+│    2 │    1 │   2.0 │
+│    2 │    3 │   8.0 │
+│    3 │    2 │   9.0 │
+│   10 │    2 │ 100.0 │
+└──────┴──────┴───────┘
+5 rows
+(session: 1 rule(s))
+> ?power_val(B, E, R)
+┌──────┬──────┬───────┐
+│ col0 │ col1 │ col2  │
+├──────┼──────┼───────┤
+│    2 │    0 │   1.0 │
+│    2 │    1 │   2.0 │
+│    2 │    3 │   8.0 │
+│    3 │    2 │   9.0 │
+│   10 │    2 │ 100.0 │
+└──────┴──────┴───────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_pow_n32t08
+Knowledge graph 'test_pow_n32t08' dropped.

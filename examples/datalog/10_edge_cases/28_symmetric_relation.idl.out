@@ -11,3 +11,43 @@ Switched to knowledge graph: test_symmetric_n10t28
 Switched to knowledge graph: test_symmetric_n10t28
 > +friends[(1, 2), (2, 3), (1, 4)]
 Inserted 3 fact(s) into 'friends'.
+> +symmetric_friends(X, Y) <- friends(X, Y)
+Rule 'symmetric_friends' registered.
+> +symmetric_friends(Y, X) <- friends(X, Y)
+Rule 'symmetric_friends' registered.
+> ?symmetric_friends(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    1 │
+│    2 │    3 │
+│    3 │    2 │
+│    4 │    1 │
+└──────┴──────┘
+6 rows
+> unique_friends(X, Y) <- symmetric_friends(X, Y), X < Y
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    3 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?unique_friends(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    3 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_symmetric_n10t28
+Knowledge graph 'test_symmetric_n10t28' dropped.

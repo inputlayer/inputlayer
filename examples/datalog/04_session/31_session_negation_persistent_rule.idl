@@ -1,0 +1,26 @@
+// Test: Persistent rule with negation
+// Description: Persistent rule with ! negation should work correctly
+
+.kg create test_sess_neg_pr_n04t31
+.kg use test_sess_neg_pr_n04t31
+
+// Persistent data and rule
++item[(10,), (20,), (30,)]
++excluded[(10,)]
++not_excluded(X) <- item(X), !excluded(X)
+
+// Verify persistent rule works: should return 20, 30
+?not_excluded(X)
+
+// Add ephemeral exclusion
+excluded(20)
+
+// With session facts, 20 should also be excluded
+?not_excluded(X)
+
+// Clear session - back to persistent results
+.session clear
+?not_excluded(X)
+
+.kg use default
+.kg drop test_sess_neg_pr_n04t31

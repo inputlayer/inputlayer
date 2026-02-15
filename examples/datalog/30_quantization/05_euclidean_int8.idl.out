@@ -21,3 +21,5 @@ Inserted 1 fact(s) into 'embedding'.
 │    2 │ [0.0, 1.0, 0.0, 0.0] │ [-128, 127, -128, -128] │
 └──────┴──────────────────────┴─────────────────────────┘
 2 rows
+> self_dist(Id, Dist) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

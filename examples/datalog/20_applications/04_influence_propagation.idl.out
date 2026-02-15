@@ -13,3 +13,49 @@ Switched to knowledge graph: test_influence_n20t04
 Inserted 8 fact(s) into 'follows'.
 > +influencer[(1)]
 Inserted 1 fact(s) into 'influencer'.
+> +influenced(X) <- influencer(X)
+Rule 'influenced' registered.
+> +influenced(Y) <- influenced(X), follows(Y, X)
+Rule 'influenced' registered.
+> ?influenced(U)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> +influence_reach(count<U>) <- influenced(U)
+Rule 'influence_reach' registered.
+> ?influence_reach(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> +influence_dist(X, 0) <- influencer(X)
+Rule 'influence_dist' registered.
+> +influence_dist(Y, D+1) <- influence_dist(X, D), follows(Y, X), D < 10
+Rule 'influence_dist' registered.
+> +min_dist(User, min<D>) <- influence_dist(User, D)
+Rule 'min_dist' registered.
+> ?min_dist(U, D)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+└──────┴──────┘
+1 rows
+> +at_distance(D, count<U>) <- min_dist(U, D)
+Rule 'at_distance' registered.
+> ?at_distance(D, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    0 │    1 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_influence_n20t04
+Knowledge graph 'test_influence_n20t04' dropped.

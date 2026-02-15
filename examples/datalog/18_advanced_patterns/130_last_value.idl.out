@@ -11,3 +11,16 @@ Switched to knowledge graph: test_last_n18t130
 Switched to knowledge graph: test_last_n18t130
 > +data[(1, 100), (2, 200), (3, 150)]
 Inserted 3 fact(s) into 'data'.
+> +max_id(max<Id>) <- data(Id, _)
+Rule 'max_id' registered.
+> ?max_id(M)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_last_n18t130
+Knowledge graph 'test_last_n18t130' dropped.

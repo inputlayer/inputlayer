@@ -15,3 +15,18 @@ Inserted 5 fact(s) into 'employee'.
 Inserted 3 fact(s) into 'department'.
 > +on_leave[(2, 0), (4, 0)]
 Inserted 2 fact(s) into 'on_leave'.
+> +active_emp_manager(EmpId, MgrId) <- employee(EmpId, DeptId), department(DeptId, MgrId), !on_leave(EmpId, _)
+Rule 'active_emp_manager' registered.
+> ?active_emp_manager(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │  200 │
+│    5 │  300 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_multi_join_n08t13
+Knowledge graph 'test_neg_multi_join_n08t13' dropped.

@@ -1,0 +1,17 @@
+// Test: Session negation combined with filter
+// Description: Ephemeral rule with both negation and comparison
+
+.kg create test_sess_neg_filt_n04t45
+.kg use test_sess_neg_filt_n04t45
+
++student[(1, 85), (2, 70), (3, 95), (4, 60), (5, 45)]
++honor_roll[(1,), (3,)]
+
+// Students with grade > 50 who are NOT on honor roll
+needs_improvement(Id, Grade) <- student(Id, Grade), !honor_roll(Id), Grade > 50
+?needs_improvement(Id, Grade)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_neg_filt_n04t45

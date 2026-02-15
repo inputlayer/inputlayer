@@ -1,0 +1,26 @@
+// Test: Session data isolation between KGs
+// Description: Switching KGs should clear session data
+
+.kg create test_sess_kg1_n04t42
+.kg create test_sess_kg2_n04t42
+
+// Add data and session rule to kg1
+.kg use test_sess_kg1_n04t42
++base1[(1,), (2,)]
+double(X, Y) <- base1(X), Y = X * 2
+?double(X, Y)
+
+// Switch to kg2 - session should clear
+.kg use test_sess_kg2_n04t42
++base2[(10,), (20,)]
+triple(X, Y) <- base2(X), Y = X * 3
+?triple(X, Y)
+
+// Switch back to kg1 - session rules from kg1 should be gone
+.kg use test_sess_kg1_n04t42
+?base1(X)
+
+// Cleanup
+.kg use default
+.kg drop test_sess_kg1_n04t42
+.kg drop test_sess_kg2_n04t42

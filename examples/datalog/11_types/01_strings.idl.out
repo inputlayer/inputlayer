@@ -22,3 +22,27 @@ Inserted 3 fact(s) into 'person'.
 3 rows
 > +city[("alice", "new_york"), ("bob", "boston"), ("charlie", "chicago")]
 Inserted 3 fact(s) into 'city'.
+> +person_city(Name, Age, City) <- person(Name, Age), city(Name, City)
+Rule 'person_city' registered.
+> ?person_city(N, A, C)
+┌───────────┬──────┬────────────┐
+│ col0      │ col1 │ col2       │
+├───────────┼──────┼────────────┤
+│ "alice"   │   25 │ "new_york" │
+│ "bob"     │   30 │ "boston"   │
+│ "charlie" │   35 │ "chicago"  │
+└───────────┴──────┴────────────┘
+3 rows
+> +in_boston(Name, Age) <- person(Name, Age), city(Name, "boston")
+Rule 'in_boston' registered.
+> ?in_boston(X, Y)
+┌───────┬──────┐
+│ col0  │ col1 │
+├───────┼──────┤
+│ "bob" │   30 │
+└───────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_str_n11t01
+Knowledge graph 'test_str_n11t01' dropped.

@@ -11,3 +11,23 @@ Switched to knowledge graph: test_mixed_ops_n15t56
 Switched to knowledge graph: test_mixed_ops_n15t56
 > +data[(10, 3, 2)]
 Inserted 1 fact(s) into 'data'.
+> result(A, B, C, R) <- data(A, B, C), R = A + B * C
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    3 │    2 │   16 │
+└──────┴──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?result(A, B, C, R)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    3 │    2 │   16 │
+└──────┴──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mixed_ops_n15t56
+Knowledge graph 'test_mixed_ops_n15t56' dropped.

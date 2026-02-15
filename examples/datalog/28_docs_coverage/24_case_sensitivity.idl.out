@@ -21,3 +21,26 @@ Inserted 1 fact(s) into 'edge'.
 │    2 │    3 │
 └──────┴──────┘
 2 rows
+> +derived(A, B) <- edge(A, B)
+Rule 'derived' registered.
+> ?derived(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> +triple(A, B, C) <- edge(A, B), edge(B, C)
+Rule 'triple' registered.
+> ?triple(X, Y, Z)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │    3 │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_case_n28t24
+Knowledge graph 'test_case_n28t24' dropped.

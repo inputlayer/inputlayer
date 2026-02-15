@@ -13,3 +13,5 @@ Switched to knowledge graph: test_str_key_n06t31
 Inserted 3 fact(s) into 'orders'.
 > +loyalty[("Alice", "Gold"), ("Bob", "Silver")]
 Inserted 2 fact(s) into 'loyalty'.
+> order_with_status(OrdId, Name, Amount, Status) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

@@ -13,19 +13,5 @@ Switched to knowledge graph: test_ineq_join_n06t30
 Inserted 3 fact(s) into 'ranges'.
 > +points[(3,), (12,), (25,), (35,)]
 Inserted 4 fact(s) into 'points'.
-> in_range(Start, End, P) <- ranges(Start, End), points(P), P >= Start,
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │   10 │    3 │
-│    1 │   10 │   12 │
-│    1 │   10 │   25 │
-│    1 │   10 │   35 │
-│    5 │   20 │   12 │
-│    5 │   20 │   25 │
-│    5 │   20 │   35 │
-│   15 │   30 │   25 │
-│   15 │   30 │   35 │
-└──────┴──────┴──────┘
-9 rows
-(session: 1 rule(s))
+> in_range(Start, End, P) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

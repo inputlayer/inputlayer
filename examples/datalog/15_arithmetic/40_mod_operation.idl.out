@@ -11,3 +11,29 @@ Switched to knowledge graph: test_mod_n15t40
 Switched to knowledge graph: test_mod_n15t40
 > +nums[(10,), (15,), (20,), (17,)]
 Inserted 4 fact(s) into 'nums'.
+> mod_result(N, R) <- nums(N), R = N % 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │    1 │
+│   15 │    0 │
+│   17 │    2 │
+│   20 │    2 │
+└──────┴──────┘
+4 rows
+(session: 1 rule(s))
+> ?mod_result(N, R)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │    1 │
+│   15 │    0 │
+│   17 │    2 │
+│   20 │    2 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mod_n15t40
+Knowledge graph 'test_mod_n15t40' dropped.

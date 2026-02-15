@@ -11,3 +11,25 @@ Switched to knowledge graph: test_dedup_n18t74
 Switched to knowledge graph: test_dedup_n18t74
 > +events[(1, "click"), (2, "click"), (3, "view"), (4, "click"), (5, "view")]
 Inserted 5 fact(s) into 'events'.
+> unique_types(T) <- events(_, T)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "click" │
+│ "view"  │
+└─────────┘
+2 rows
+(session: 1 rule(s))
+> ?unique_types(T)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "click" │
+│ "view"  │
+└─────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_dedup_n18t74
+Knowledge graph 'test_dedup_n18t74' dropped.

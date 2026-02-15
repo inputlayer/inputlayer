@@ -11,3 +11,43 @@ Switched to knowledge graph: test_negatives_n10t47
 Switched to knowledge graph: test_negatives_n10t47
 > +nums[(-5,), (-3,), (0,), (3,), (5,)]
 Inserted 5 fact(s) into 'nums'.
+> +sum_negs(sum<X>) <- nums(X), X < 0
+Rule 'sum_negs' registered.
+> ?sum_negs(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   -8 │
+└──────┘
+1 rows
+> +count_negs(count<X>) <- nums(X), X < 0
+Rule 'count_negs' registered.
+> ?count_negs(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> +min_val(min<X>) <- nums(X)
+Rule 'min_val' registered.
+> +max_val(max<X>) <- nums(X)
+Rule 'max_val' registered.
+> ?min_val(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   -5 │
+└──────┘
+1 rows
+> ?max_val(M)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_negatives_n10t47
+Knowledge graph 'test_negatives_n10t47' dropped.

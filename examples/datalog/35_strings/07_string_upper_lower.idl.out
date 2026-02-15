@@ -11,3 +11,46 @@ Switched to knowledge graph: test_case_n35t07
 Switched to knowledge graph: test_case_n35t07
 > +words[("Hello",), ("WORLD",), ("MiXeD",)]
 Inserted 3 fact(s) into 'words'.
+> upper_result(S, U) <- words(S), U = UPPER(S)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Hello" │ "HELLO" │
+│ "MiXeD" │ "MIXED" │
+│ "WORLD" │ "WORLD" │
+└─────────┴─────────┘
+3 rows
+(session: 1 rule(s))
+> lower_result(S, L) <- words(S), L = LOWER(S)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Hello" │ "hello" │
+│ "MiXeD" │ "mixed" │
+│ "WORLD" │ "world" │
+└─────────┴─────────┘
+3 rows
+(session: 2 rule(s))
+> ?upper_result(S, U)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Hello" │ "HELLO" │
+│ "MiXeD" │ "MIXED" │
+│ "WORLD" │ "WORLD" │
+└─────────┴─────────┘
+3 rows
+> ?lower_result(S, L)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Hello" │ "hello" │
+│ "MiXeD" │ "mixed" │
+│ "WORLD" │ "world" │
+└─────────┴─────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_case_n35t07
+Knowledge graph 'test_case_n35t07' dropped.

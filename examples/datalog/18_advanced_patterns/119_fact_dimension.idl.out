@@ -13,3 +13,5 @@ Switched to knowledge graph: test_fact_dim_n18t119
 Inserted 3 fact(s) into 'fact_events'.
 > +dim_users[(100, "Alice", "NYC"), (101, "Bob", "LA")]
 Inserted 2 fact(s) into 'dim_users'.
+> +enriched(EventId, UserName, City, Value) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

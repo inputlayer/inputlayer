@@ -11,3 +11,27 @@ Switched to knowledge graph: test_neg_mod_n12t10
 Switched to knowledge graph: test_neg_mod_n12t10
 > +mod_cases[(10, 3), (11, 3), (12, 3), (-10, 3), (-11, 3), (-12, 3), (10, -3), (11, -3), (12, -3), (-10, -3), (-11, -3), (-12, -3)]
 Inserted 12 fact(s) into 'mod_cases'.
+> +mod_result(X, Y, X%Y) <- mod_cases(X, Y)
+Rule 'mod_result' registered.
+> ?mod_result(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│  -12 │   -3 │    0 │
+│  -12 │    3 │    0 │
+│  -11 │   -3 │   -2 │
+│  -11 │    3 │   -2 │
+│  -10 │   -3 │   -1 │
+│  -10 │    3 │   -1 │
+│   10 │   -3 │    1 │
+│   10 │    3 │    1 │
+│   11 │   -3 │    2 │
+│   11 │    3 │    2 │
+│   12 │   -3 │    0 │
+│   12 │    3 │    0 │
+└──────┴──────┴──────┘
+12 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_mod_n12t10
+Knowledge graph 'test_neg_mod_n12t10' dropped.

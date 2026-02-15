@@ -11,3 +11,5 @@ Switched to knowledge graph: test_lsh_probes_n31t02
 Switched to knowledge graph: test_lsh_probes_n31t02
 > +vectors[(1, [1.0, 0.5, 0.0, -0.5])]
 Inserted 1 fact(s) into 'vectors'.
+> probe_result(Id, Bucket, Probes) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

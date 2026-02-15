@@ -1,0 +1,29 @@
+// Test: Session facts with aggregation
+// Description: Ephemeral facts should be included in aggregate computations
+
+.kg create test_sess_agg_n04t32
+.kg use test_sess_agg_n04t32
+
+// Persistent scores
++score[(1, 100), (2, 200)]
+
+// Count with persistent only via session rule
+total_count(count<X>) <- score(X, _)
+?total_count(N)
+
+// Add ephemeral scores
+score(3, 300)
+score(4, 400)
+
+// Count should include ephemeral (4 total)
+total_count2(count<X>) <- score(X, _)
+?total_count2(N)
+
+// Sum should include ephemeral (1000 total)
+total_sum(sum<V>) <- score(_, V)
+?total_sum(S)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_agg_n04t32

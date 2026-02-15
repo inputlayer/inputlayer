@@ -11,3 +11,35 @@ Switched to knowledge graph: test_drop_chain_n14t133
 Switched to knowledge graph: test_drop_chain_n14t133
 > +sales[("US", "Widget", 100), ("US", "Gadget", 200), ("US", "Widget", 150), ("EU", "Widget", 300), ("EU", "Gadget", 250)]
 Inserted 5 fact(s) into 'sales'.
+> +product_total(Region, Product, sum<Amount>) <- sales(Region, Product, Amount)
+Rule 'product_total' registered.
+> ?product_total(R, P, T)
+┌──────┬──────────┬──────┐
+│ col0 │ col1     │ col2 │
+├──────┼──────────┼──────┤
+│ "EU" │ "Gadget" │  250 │
+│ "EU" │ "Widget" │  300 │
+│ "US" │ "Gadget" │  200 │
+│ "US" │ "Widget" │  250 │
+└──────┴──────────┴──────┘
+4 rows
+> +region_best(Region, max<Total>) <- product_total(Region, _, Total)
+Rule 'region_best' registered.
+> ?region_best(R, M)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "EU" │  300 │
+│ "US" │  250 │
+└──────┴──────┘
+2 rows
+> .rule drop product_total
+Rule 'product_total' dropped.
+> ?product_total(R, P, T)
+No results.
+> ?region_best(R, M)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_chain_n14t133
+Knowledge graph 'test_drop_chain_n14t133' dropped.

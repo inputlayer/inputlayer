@@ -13,3 +13,25 @@ Switched to knowledge graph: test_vec_add_n16t08
 Inserted 1 fact(s) into 'vec_pairs'.
 > +vec_pairs[(2, [0.0, 0.0], [1.0, 1.0])]
 Inserted 1 fact(s) into 'vec_pairs'.
+> added(Id, Sum) <- vec_pairs(Id, V1, V2), Sum = vec_add(V1, V2)
+┌──────┬─────────────────┐
+│ col0 │ col1            │
+├──────┼─────────────────┤
+│    1 │ [5.0, 7.0, 9.0] │
+│    2 │ [1.0, 1.0]      │
+└──────┴─────────────────┘
+2 rows
+(session: 1 rule(s))
+> ?added(Id, Sum)
+┌──────┬─────────────────┐
+│ col0 │ col1            │
+├──────┼─────────────────┤
+│    1 │ [5.0, 7.0, 9.0] │
+│    2 │ [1.0, 1.0]      │
+└──────┴─────────────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_add_n16t08
+Knowledge graph 'test_vec_add_n16t08' dropped.

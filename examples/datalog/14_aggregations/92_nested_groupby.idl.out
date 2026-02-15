@@ -11,3 +11,5 @@ Switched to knowledge graph: test_nested_group_n14t92
 Switched to knowledge graph: test_nested_group_n14t92
 > +sales[("North", "Widget", 100), ("North", "Widget", 150), ("North", "Gadget", 200), ("South", "Widget", 300), ("South", "Gadget", 250)]
 Inserted 5 fact(s) into 'sales'.
+> +region_product_sum(Region, Product, sum<Amount>) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

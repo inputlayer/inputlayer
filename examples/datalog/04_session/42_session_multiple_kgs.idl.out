@@ -1,0 +1,72 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_kg1_n04t42
+Knowledge graph 'test_sess_kg1_n04t42' created.
+Switched to knowledge graph: test_sess_kg1_n04t42
+> .kg create test_sess_kg2_n04t42
+Knowledge graph 'test_sess_kg2_n04t42' created.
+Switched to knowledge graph: test_sess_kg2_n04t42
+> .kg use test_sess_kg1_n04t42
+Switched to knowledge graph: test_sess_kg1_n04t42
+> +base1[(1,), (2,)]
+Inserted 2 fact(s) into 'base1'.
+> double(X, Y) <- base1(X), Y = X * 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?double(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+└──────┴──────┘
+2 rows
+> .kg use test_sess_kg2_n04t42
+Switched to knowledge graph: test_sess_kg2_n04t42
+(Cleared 1 session rule(s), 0 session fact(s))
+> +base2[(10,), (20,)]
+Inserted 2 fact(s) into 'base2'.
+> triple(X, Y) <- base2(X), Y = X * 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │   30 │
+│   20 │   60 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?triple(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │   30 │
+│   20 │   60 │
+└──────┴──────┘
+2 rows
+> .kg use test_sess_kg1_n04t42
+Switched to knowledge graph: test_sess_kg1_n04t42
+(Cleared 1 session rule(s), 0 session fact(s))
+> ?base1(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_kg1_n04t42
+Knowledge graph 'test_sess_kg1_n04t42' dropped.
+> .kg drop test_sess_kg2_n04t42
+Knowledge graph 'test_sess_kg2_n04t42' dropped.

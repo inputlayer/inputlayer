@@ -11,3 +11,42 @@ Switched to knowledge graph: test_eq_filter_n07t07
 Switched to knowledge graph: test_eq_filter_n07t07
 > +items[(1, "A", 100), (2, "B", 200), (3, "A", 150), (4, "C", 100)]
 Inserted 4 fact(s) into 'items'.
+> category_a(Id, Price) <- items(Id, "A", Price)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │  150 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> price_100(Id, Cat) <- items(Id, Cat, 100)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "A"  │
+│    4 │ "C"  │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?category_a(Id, Price)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │  150 │
+└──────┴──────┘
+2 rows
+> ?price_100(Id, Cat)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "A"  │
+│    4 │ "C"  │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_eq_filter_n07t07
+Knowledge graph 'test_eq_filter_n07t07' dropped.

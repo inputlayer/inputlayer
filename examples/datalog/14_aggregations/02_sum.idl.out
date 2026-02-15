@@ -11,3 +11,18 @@ Switched to knowledge graph: test_agg_sum_n14t02
 Switched to knowledge graph: test_agg_sum_n14t02
 > +sales[(1, 100), (1, 200), (1, 150), (2, 300), (2, 250), (3, 500)]
 Inserted 6 fact(s) into 'sales'.
+> +region_total(Region, sum<Amount>) <- sales(Region, Amount)
+Rule 'region_total' registered.
+> ?region_total(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  450 │
+│    2 │  550 │
+│    3 │  500 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_sum_n14t02
+Knowledge graph 'test_agg_sum_n14t02' dropped.

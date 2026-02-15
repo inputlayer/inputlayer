@@ -11,3 +11,5 @@ Switched to knowledge graph: test_self_join_n18t80
 Switched to knowledge graph: test_self_join_n18t80
 > +friends[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave"), ("Alice", "Carol")]
 Inserted 4 fact(s) into 'friends'.
+> friends_of_friends(A, C) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

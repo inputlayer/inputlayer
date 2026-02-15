@@ -15,3 +15,18 @@ Inserted 3 fact(s) into 'set_a'.
 Inserted 5 fact(s) into 'set_b'.
 > +set_c[(1,), (2,)]
 Inserted 2 fact(s) into 'set_c'.
+> a_not_in_b(X) <- set_a(X), !set_b(X)
+No results.
+(session: 1 rule(s))
+> ?a_not_in_b(X)
+No results.
+> c_not_in_a(X) <- set_c(X), !set_a(X)
+No results.
+(session: 2 rule(s))
+> ?c_not_in_a(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_subset_n22t32
+Knowledge graph 'test_subset_n22t32' dropped.

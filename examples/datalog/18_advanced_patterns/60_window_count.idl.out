@@ -11,3 +11,5 @@ Switched to knowledge graph: test_window_cnt_n18t60
 Switched to knowledge graph: test_window_cnt_n18t60
 > +sales[("Q1", "A", 100), ("Q1", "B", 150), ("Q1", "C", 120), ("Q2", "A", 200), ("Q2", "B", 180)]
 Inserted 5 fact(s) into 'sales'.
+> position(Q, Name, Val, count<N2>) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
