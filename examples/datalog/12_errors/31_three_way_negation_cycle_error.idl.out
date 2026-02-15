@@ -11,3 +11,9 @@ Switched to knowledge graph: test_3way_neg_n12t31
 Switched to knowledge graph: test_3way_neg_n12t31
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
+> +a(X) <- base(X), !b(X)
+Rule 'a' registered.
+> +b(X) <- base(X), !c(X)
+Rule 'b' registered.
+> +c(X) <- base(X), !a(X)
+Script error: Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b, c]

@@ -11,3 +11,29 @@ Switched to knowledge graph: test_col_reorder_n21t08
 Switched to knowledge graph: test_col_reorder_n21t08
 > +data[(1, "alice", 100), (2, "bob", 200), (3, "carol", 300)]
 Inserted 3 fact(s) into 'data'.
+> +reordered(V, N, I) <- data(I, N, V)
+Rule 'reordered' registered.
+> ?reordered(V, N, I)
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│  100 │ "alice" │    1 │
+│  200 │ "bob"   │    2 │
+│  300 │ "carol" │    3 │
+└──────┴─────────┴──────┘
+3 rows
+> +partial(N, V) <- data(_, N, V)
+Rule 'partial' registered.
+> ?partial(N, V)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "alice" │  100 │
+│ "bob"   │  200 │
+│ "carol" │  300 │
+└─────────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_col_reorder_n21t08
+Knowledge graph 'test_col_reorder_n21t08' dropped.

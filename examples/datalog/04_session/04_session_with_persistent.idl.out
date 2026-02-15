@@ -21,3 +21,32 @@ Rule 'persistent_rule' registered.
 │    3 │
 └──────┘
 2 rows
+> session_combo(X) <- persistent_rule(X), X < 3
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?session_combo(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> .session clear
+Cleared 0 session fact(s), 1 session rule(s).
+> ?persistent_rule(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    3 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_persist_n04t04
+Knowledge graph 'test_sess_persist_n04t04' dropped.

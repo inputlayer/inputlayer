@@ -1,0 +1,21 @@
+// Test: Mixed persistent and ephemeral writes in same session
+// Description: Both +insert (persistent) and fact() (ephemeral) in same request
+
+.kg create test_sess_mixed_n04t36
+.kg use test_sess_mixed_n04t36
+
+// Persistent insert
++base[(100,), (200,)]
+
+// Ephemeral insert
+base(300)
+
+// Query should see all three
+?base(X)
+
+// Clear session - ephemeral removed, persistent remains
+.session clear
+?base(X)
+
+.kg use default
+.kg drop test_sess_mixed_n04t36

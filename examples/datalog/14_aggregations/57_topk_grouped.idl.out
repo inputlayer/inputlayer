@@ -11,3 +11,29 @@ Switched to knowledge graph: test_topk_grp_n14t57
 Switched to knowledge graph: test_topk_grp_n14t57
 > +scores[("Math", "Alice", 95), ("Math", "Bob", 87), ("Math", "Carol", 92), ("Science", "Dave", 88), ("Science", "Eve", 91), ("Science", "Frank", 85)]
 Inserted 6 fact(s) into 'scores'.
+> top2_by_subject(Subj, top_k<2, Name, Score:desc>) <- scores(Subj, Name, Score)
+┌───────────┬─────────┬──────┐
+│ col0      │ col1    │ col2 │
+├───────────┼─────────┼──────┤
+│ "Math"    │ "Alice" │   95 │
+│ "Math"    │ "Carol" │   92 │
+│ "Science" │ "Dave"  │   88 │
+│ "Science" │ "Eve"   │   91 │
+└───────────┴─────────┴──────┘
+4 rows
+(session: 1 rule(s))
+> ?top2_by_subject(Subj, Name, Score)
+┌───────────┬─────────┬──────┐
+│ col0      │ col1    │ col2 │
+├───────────┼─────────┼──────┤
+│ "Math"    │ "Alice" │   95 │
+│ "Math"    │ "Carol" │   92 │
+│ "Science" │ "Dave"  │   88 │
+│ "Science" │ "Eve"   │   91 │
+└───────────┴─────────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_topk_grp_n14t57
+Knowledge graph 'test_topk_grp_n14t57' dropped.

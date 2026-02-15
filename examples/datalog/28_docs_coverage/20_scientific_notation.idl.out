@@ -21,3 +21,19 @@ Inserted 4 fact(s) into 'floats'.
 │    4 │        -0.015 │
 └──────┴───────────────┘
 4 rows
+> +computed(X, V * 2) <- floats(X, V)
+Rule 'computed' registered.
+> ?computed(X, Y)
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│    1 │ 20000000000.0 │
+│    2 │       0.00002 │
+│    3 │        5000.0 │
+│    4 │         -0.03 │
+└──────┴───────────────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sci_notation_n28t20
+Knowledge graph 'test_sci_notation_n28t20' dropped.

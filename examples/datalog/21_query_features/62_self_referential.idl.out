@@ -11,3 +11,17 @@ Switched to knowledge graph: test_self_ref_rule_n21t62
 Switched to knowledge graph: test_self_ref_rule_n21t62
 > +base[(1,), (2,)]
 Inserted 2 fact(s) into 'base'.
+> +closure(X) <- base(X)
+Rule 'closure' registered.
+> ?closure(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_ref_rule_n21t62
+Knowledge graph 'test_self_ref_rule_n21t62' dropped.

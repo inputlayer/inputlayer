@@ -11,3 +11,42 @@ Switched to knowledge graph: test_nullish_n10t122
 Switched to knowledge graph: test_nullish_n10t122
 > +data[(1, "", 0), (2, "value", 100), (3, "", 50), (4, "other", 0)]
 Inserted 4 fact(s) into 'data'.
+> empty_name(Id) <- data(Id, "", _)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> zero_amount(Id) <- data(Id, _, 0)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    4 │
+└──────┘
+2 rows
+(session: 2 rule(s))
+> ?empty_name(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+> ?zero_amount(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_nullish_n10t122
+Knowledge graph 'test_nullish_n10t122' dropped.

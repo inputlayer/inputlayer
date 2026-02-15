@@ -11,3 +11,47 @@ Switched to knowledge graph: test_const_filter_n10t23
 Switched to knowledge graph: test_const_filter_n10t23
 > +data[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'data'.
+> const_true(X, Y) <- data(X, Y), 5 = 5
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?const_true(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+> const_false(X, Y) <- data(X, Y), 5 = 6
+No results.
+(session: 2 rule(s))
+> ?const_false(X, Y)
+No results.
+> match_const(X, Y) <- data(X, Y), X = 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+└──────┴──────┘
+1 rows
+(session: 3 rule(s))
+> ?match_const(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_const_filter_n10t23
+Knowledge graph 'test_const_filter_n10t23' dropped.

@@ -11,3 +11,20 @@ Switched to knowledge graph: test_rec_filter_n09t46
 Switched to knowledge graph: test_rec_filter_n09t46
 > +edge[("a", "b", 1), ("b", "c", 2), ("c", "d", 3), ("d", "e", 4)]
 Inserted 4 fact(s) into 'edge'.
+> +light_path(X, Y) <- edge(X, Y, W), W <= 2
+Rule 'light_path' registered.
+> +light_path(X, Z) <- light_path(X, Y), edge(Y, Z, W), W <= 2
+Rule 'light_path' registered.
+> ?light_path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "b"  │
+│ "a"  │ "c"  │
+│ "b"  │ "c"  │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rec_filter_n09t46
+Knowledge graph 'test_rec_filter_n09t46' dropped.

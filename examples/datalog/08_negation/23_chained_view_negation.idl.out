@@ -15,3 +15,29 @@ Inserted 5 fact(s) into 'all_users'.
 Inserted 1 fact(s) into 'banned'.
 > +premium[(1, 0), (3, 0)]
 Inserted 2 fact(s) into 'premium'.
+> +active_user(X, Y) <- all_users(X, Y), !banned(X, _)
+Rule 'active_user' registered.
+> ?active_user(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+│    3 │    0 │
+│    4 │    0 │
+│    5 │    0 │
+└──────┴──────┘
+4 rows
+> +basic_user(X, Y) <- active_user(X, Y), !premium(X, _)
+Rule 'basic_user' registered.
+> ?basic_user(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │    0 │
+│    5 │    0 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_chain_neg_n08t23
+Knowledge graph 'test_chain_neg_n08t23' dropped.

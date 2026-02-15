@@ -49,6 +49,12 @@ pub struct KnowledgeGraphSnapshot {
     /// their data is already present in `input_tuples` as base facts.
     /// This enables efficient incremental materialization.
     pub materialized_relations: Arc<HashSet<String>>,
+
+    /// Cached formatted rule prefix (computed once at snapshot creation).
+    ///
+    /// Contains all non-materialized rules formatted as text with trailing newline.
+    /// Reused across all query executions to avoid redundant formatting.
+    rule_prefix: Arc<String>,
 }
 
 impl KnowledgeGraphSnapshot {
@@ -91,6 +97,10 @@ impl KnowledgeGraphSnapshot {
         // This keeps the snapshot constructor simple and allows the caller to
         // decide how to handle conflicts (though typically there shouldn't be any).
 
+        // Pre-compute the rule prefix once (lazy rule compilation).
+        // This avoids re-formatting rules on every query execution.
+        let prefix = Self::build_rule_prefix(&rules, &materialized_names);
+
         Self {
             version,
             timestamp,
@@ -98,12 +108,31 @@ impl KnowledgeGraphSnapshot {
             rules: Arc::new(rules),
             num_workers,
             materialized_relations: Arc::new(materialized_names),
+            rule_prefix: Arc::new(prefix),
         }
     }
 
     /// Create an empty snapshot
     pub fn empty() -> Self {
         Self::new(HashMap::new(), Vec::new())
+    }
+
+    /// Build the formatted rule prefix text from rules, excluding materialized ones.
+    fn build_rule_prefix(rules: &[Rule], materialized: &HashSet<String>) -> String {
+        let mut prefix = String::new();
+        for rule in rules {
+            if materialized.contains(&rule.head.relation) {
+                continue;
+            }
+            prefix.push_str(&super::format_rule(rule));
+            prefix.push('\n');
+        }
+        prefix
+    }
+
+    /// Get the cached rule prefix (all non-materialized rules as text).
+    pub fn rule_prefix(&self) -> &str {
+        &self.rule_prefix
     }
 
     /// Execute a query against this snapshot
@@ -122,23 +151,11 @@ impl KnowledgeGraphSnapshot {
     /// Rules for materialized relations are skipped - their data is already
     /// present in `input_tuples` as base facts (injected at snapshot creation).
     pub fn execute_with_rules(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
-        if self.rules.is_empty() {
+        if self.rule_prefix.is_empty() {
             return self.execute(program);
         }
 
-        // Build combined program: rules + query
-        // Skip rules for relations that are already materialized
-        let mut combined = String::new();
-        for rule in self.rules.iter() {
-            // Skip rules whose head relation is materialized
-            if self.materialized_relations.contains(&rule.head.relation) {
-                continue;
-            }
-            combined.push_str(&super::format_rule(rule));
-            combined.push('\n');
-        }
-        combined.push_str(program);
-
+        let combined = format!("{}{}", self.rule_prefix, program);
         self.execute(&combined)
     }
 
@@ -155,24 +172,11 @@ impl KnowledgeGraphSnapshot {
     /// Rules for materialized relations are skipped - their data is already
     /// present in `input_tuples` as base facts (injected at snapshot creation).
     pub fn execute_with_rules_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        if self.rules.is_empty() {
+        if self.rule_prefix.is_empty() {
             return self.execute_tuples(program);
         }
 
-        // Build combined program: rules + query
-        // Skip rules for relations that are already materialized
-        let mut combined = String::new();
-        for rule in self.rules.iter() {
-            // Skip rules whose head relation is materialized
-            // (their data is already in input_tuples as base facts)
-            if self.materialized_relations.contains(&rule.head.relation) {
-                continue;
-            }
-            combined.push_str(&super::format_rule(rule));
-            combined.push('\n');
-        }
-        combined.push_str(program);
-
+        let combined = format!("{}{}", self.rule_prefix, program);
         self.execute_tuples(&combined)
     }
 
@@ -216,16 +220,8 @@ impl KnowledgeGraphSnapshot {
         // Set the isolated tuples on the engine
         engine.input_tuples = isolated_tuples;
 
-        // Build combined program with rules (skip materialized)
-        let mut combined = String::new();
-        for rule in self.rules.iter() {
-            if self.materialized_relations.contains(&rule.head.relation) {
-                continue;
-            }
-            combined.push_str(&super::format_rule(rule));
-            combined.push('\n');
-        }
-        combined.push_str(program);
+        // Build combined program using cached rule prefix
+        let combined = format!("{}{}", self.rule_prefix, program);
 
         // Execute against isolated state
         engine.execute_tuples(&combined)
@@ -540,5 +536,87 @@ mod tests {
 
         let debug_str = format!("{:?}", snapshot);
         assert!(debug_str.contains("materialized: 2"));
+    }
+
+    #[test]
+    fn test_cached_rule_prefix() {
+        use crate::ast::{Atom, BodyPredicate, Rule, Term};
+
+        let rule = Rule {
+            head: Atom {
+                relation: "path".to_string(),
+                args: vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "edge".to_string(),
+                args: vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            })],
+        };
+
+        let snapshot = KnowledgeGraphSnapshot::new(HashMap::new(), vec![rule]);
+
+        // Rule prefix should be cached at creation
+        let prefix = snapshot.rule_prefix();
+        assert!(!prefix.is_empty());
+        assert!(prefix.contains("path"));
+        assert!(prefix.contains("edge"));
+
+        // Calling again should return the same cached string
+        assert_eq!(prefix, snapshot.rule_prefix());
+    }
+
+    #[test]
+    fn test_cached_rule_prefix_skips_materialized() {
+        use crate::ast::{Atom, BodyPredicate, Rule, Term};
+
+        let rule1 = Rule {
+            head: Atom {
+                relation: "derived1".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "base".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            })],
+        };
+
+        let rule2 = Rule {
+            head: Atom {
+                relation: "derived2".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            },
+            body: vec![BodyPredicate::Positive(Atom {
+                relation: "base".to_string(),
+                args: vec![Term::Variable("X".to_string())],
+            })],
+        };
+
+        let mut mat = HashSet::new();
+        mat.insert("derived1".to_string());
+
+        let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            HashMap::new(),
+            vec![rule1, rule2],
+            1,
+            mat,
+        );
+
+        let prefix = snapshot.rule_prefix();
+        // derived1 is materialized → excluded from prefix
+        assert!(!prefix.contains("derived1"));
+        // derived2 is NOT materialized → included in prefix
+        assert!(prefix.contains("derived2"));
+    }
+
+    #[test]
+    fn test_empty_rules_empty_prefix() {
+        let snapshot = KnowledgeGraphSnapshot::empty();
+        assert!(snapshot.rule_prefix().is_empty());
     }
 }

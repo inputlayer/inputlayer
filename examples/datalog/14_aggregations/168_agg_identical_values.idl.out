@@ -11,3 +11,44 @@ Switched to knowledge graph: test_agg_ident_n14t168
 Switched to knowledge graph: test_agg_ident_n14t168
 > +score[(1, 50), (2, 50), (3, 50)]
 Inserted 3 fact(s) into 'score'.
+> +total(sum<S>) <- score(_, S)
+Rule 'total' registered.
+> +cnt(count<Id>) <- score(Id, _)
+Rule 'cnt' registered.
+> +biggest(max<S>) <- score(_, S)
+Rule 'biggest' registered.
+> +top2(top_k<2, Id, S:desc>) <- score(Id, S)
+Rule 'top2' registered.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  150 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> ?biggest(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   50 │
+└──────┘
+1 rows
+> ?top2(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+│    2 │   50 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_ident_n14t168
+Knowledge graph 'test_agg_ident_n14t168' dropped.

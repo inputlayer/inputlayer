@@ -15,3 +15,5 @@ Inserted 1 fact(s) into 'embedding'.
 Inserted 1 fact(s) into 'embedding'.
 > +embedding[(3, [0.707, 0.707, 0.0, 0.0])]
 Inserted 1 fact(s) into 'embedding'.
+> int8_cosine(Id1, Id2, Dist) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

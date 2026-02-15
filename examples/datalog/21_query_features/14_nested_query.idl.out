@@ -11,3 +11,26 @@ Switched to knowledge graph: test_nested_n21t14
 Switched to knowledge graph: test_nested_n21t14
 > +sales[(1, "North", 100), (2, "South", 200), (3, "North", 150), (4, "South", 50)]
 Inserted 4 fact(s) into 'sales'.
+> +regional_total(Region, sum<Amount>) <- sales(_, Region, Amount)
+Rule 'regional_total' registered.
+> +global_avg(avg<Total>) <- regional_total(_, Total)
+Rule 'global_avg' registered.
+> ?regional_total(Region, Total)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "North" │  250 │
+│ "South" │  250 │
+└─────────┴──────┘
+2 rows
+> ?global_avg(Avg)
+┌───────┐
+│ col0  │
+├───────┤
+│ 250.0 │
+└───────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_n21t14
+Knowledge graph 'test_nested_n21t14' dropped.

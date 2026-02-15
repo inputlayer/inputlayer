@@ -19,3 +19,23 @@ Inserted 4 fact(s) into 'records'.
 │    3 │ "carol" │  150 │
 └──────┴─────────┴──────┘
 2 rows
+> ?records(Id, _, Value), Id < 3
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "alice" │  100 │
+│    2 │ "bob"   │  200 │
+└──────┴─────────┴──────┘
+2 rows
+> ?records(_, _, Value), Value = 100
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "alice" │  100 │
+│    4 │ "dave"  │  100 │
+└──────┴─────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_filter_wild_n07t31
+Knowledge graph 'test_filter_wild_n07t31' dropped.

@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_neg_n04t30
+Knowledge graph 'test_sess_neg_n04t30' created.
+Switched to knowledge graph: test_sess_neg_n04t30
+> .kg use test_sess_neg_n04t30
+Switched to knowledge graph: test_sess_neg_n04t30
+> +person[(1,), (2,), (3,), (4,)]
+Inserted 4 fact(s) into 'person'.
+> blocked(2)
+Session fact added for 'blocked'. (Use +blocked(...) to persist)
+> blocked(4)
+Session fact added for 'blocked'. (Use +blocked(...) to persist)
+> allowed(X) <- person(X), !blocked(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?allowed(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
+> .session clear
+Cleared 2 session fact(s), 1 session rule(s).
+> ?person(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_neg_n04t30
+Knowledge graph 'test_sess_neg_n04t30' dropped.

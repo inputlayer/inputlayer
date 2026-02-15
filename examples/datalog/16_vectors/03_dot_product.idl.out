@@ -13,3 +13,27 @@ Switched to knowledge graph: test_vec_dot_n16t03
 Inserted 3 fact(s) into 'vectors'.
 > +query[([1.0, 1.0, 1.0])]
 Inserted 1 fact(s) into 'query'.
+> dot_result(Id, Score) <- vectors(Id, V), query(Q), Score = dot(V, Q)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  6.0 │
+│    2 │  3.0 │
+│    3 │  3.0 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?dot_result(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  6.0 │
+│    2 │  3.0 │
+│    3 │  3.0 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_vec_dot_n16t03
+Knowledge graph 'test_vec_dot_n16t03' dropped.

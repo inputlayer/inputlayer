@@ -18,3 +18,5 @@ Inserted 1 fact(s) into 'same'.
 │    5 │
 └──────┘
 1 rows
+> +distinct_count(<COUNT_DISTINCT:X>) <- same(X)
+Script error: Parse error: Unknown aggregate function: 

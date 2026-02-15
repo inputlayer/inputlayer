@@ -11,3 +11,19 @@ Switched to knowledge graph: test_within_radius_n14t103
 Switched to knowledge graph: test_within_radius_n14t103
 > +dist[(1, 0.1), (2, 0.5), (3, 1.2), (4, 0.3), (5, 2.0), (6, 0.45)]
 Inserted 6 fact(s) into 'dist'.
+> +nearby(within_radius<0.5, Id, D:asc>) <- dist(Id, D)
+Rule 'nearby' registered.
+> ?nearby(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  0.1 │
+│    2 │  0.5 │
+│    4 │  0.3 │
+│    6 │ 0.45 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_within_radius_n14t103
+Knowledge graph 'test_within_radius_n14t103' dropped.

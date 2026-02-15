@@ -11,3 +11,43 @@ Switched to knowledge graph: test_diamond_n10t87
 Switched to knowledge graph: test_diamond_n10t87
 > +start[(1,), (2,)]
 Inserted 2 fact(s) into 'start'.
+> left(X, Y) <- start(X), Y = X * 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> right(X, Y) <- start(X), Y = X + 10
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   11 │
+│    2 │   12 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> combined(X, L, R) <- left(X, L), right(X, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │   11 │
+│    2 │    4 │   12 │
+└──────┴──────┴──────┘
+2 rows
+(session: 3 rule(s))
+> ?combined(X, L, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │   11 │
+│    2 │    4 │   12 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_diamond_n10t87
+Knowledge graph 'test_diamond_n10t87' dropped.

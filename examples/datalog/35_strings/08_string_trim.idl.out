@@ -11,3 +11,27 @@ Switched to knowledge graph: test_trim_n35t08
 Switched to knowledge graph: test_trim_n35t08
 > +words[("  hello  ",), ("world",), (" spaced ",)]
 Inserted 3 fact(s) into 'words'.
+> trim_result(S, T) <- words(S), T = TRIM(S)
+┌─────────────┬──────────┐
+│ col0        │ col1     │
+├─────────────┼──────────┤
+│ "  hello  " │ "hello"  │
+│ " spaced "  │ "spaced" │
+│ "world"     │ "world"  │
+└─────────────┴──────────┘
+3 rows
+(session: 1 rule(s))
+> ?trim_result(S, T)
+┌─────────────┬──────────┐
+│ col0        │ col1     │
+├─────────────┼──────────┤
+│ "  hello  " │ "hello"  │
+│ " spaced "  │ "spaced" │
+│ "world"     │ "world"  │
+└─────────────┴──────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_trim_n35t08
+Knowledge graph 'test_trim_n35t08' dropped.

@@ -11,3 +11,27 @@ Switched to knowledge graph: test_sum_avg_n14t90
 Switched to knowledge graph: test_sum_avg_n14t90
 > +sales[(1, 100), (1, 150), (1, 200), (2, 300), (2, 250)]
 Inserted 5 fact(s) into 'sales'.
+> +total_sales(Group, sum<Amount>) <- sales(Group, Amount)
+Rule 'total_sales' registered.
+> ?total_sales(G, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  450 │
+│    2 │  550 │
+└──────┴──────┘
+2 rows
+> +avg_sales(Group, avg<Amount>) <- sales(Group, Amount)
+Rule 'avg_sales' registered.
+> ?avg_sales(G, A)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ 150.0 │
+│    2 │ 275.0 │
+└──────┴───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sum_avg_n14t90
+Knowledge graph 'test_sum_avg_n14t90' dropped.

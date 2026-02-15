@@ -13,3 +13,38 @@ Switched to knowledge graph: test_neg_agg_n14t172
 Inserted 3 fact(s) into 'score'.
 > +banned[("Bob")]
 Inserted 1 fact(s) into 'banned'.
+> +top(Name, max<Grade>) <- score(Name, Grade), !banned(Name)
+Rule 'top' registered.
+> ?top(N, G)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "Alice"   │   90 │
+│ "Charlie" │   70 │
+└───────────┴──────┘
+2 rows
+> -banned("Bob")
+Deleted 1 facts from 'banned'.
+> ?top(N, G)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "Alice"   │   90 │
+│ "Bob"     │   80 │
+│ "Charlie" │   70 │
+└───────────┴──────┘
+3 rows
+> +banned[("Alice")]
+Inserted 1 fact(s) into 'banned'.
+> ?top(N, G)
+┌───────────┬──────┐
+│ col0      │ col1 │
+├───────────┼──────┤
+│ "Bob"     │   80 │
+│ "Charlie" │   70 │
+└───────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_n14t172
+Knowledge graph 'test_neg_agg_n14t172' dropped.

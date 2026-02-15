@@ -22,3 +22,18 @@ Inserted 1 fact(s) into 'to_delete'.
 │    3 │ "c"  │
 └──────┴──────┘
 3 rows
+> -data(Id, Val) <- to_delete(Id), data(Id, Val)
+Conditional delete: 0 fact(s) deleted from 'data'.
+> ?data(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+│    3 │ "c"  │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_empty_n27t09
+Knowledge graph 'test_cond_del_empty_n27t09' dropped.

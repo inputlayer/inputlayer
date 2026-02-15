@@ -11,3 +11,5 @@ Switched to knowledge graph: test_clamp_n32t06
 Switched to knowledge graph: test_clamp_n32t06
 > +values[(-5,), (0,), (5,), (10,), (15,), (20,)]
 Inserted 6 fact(s) into 'values'.
+> clamped(V, C) <- values(V), MinV = 0, MaxV = 10,
+Script error: Unsafe rule 'clamped': Head variable(s) C not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

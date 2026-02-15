@@ -13,3 +13,27 @@ Switched to knowledge graph: test_join_comp_n06t25
 Inserted 3 fact(s) into 'items'.
 > +multipliers[(10, 2), (20, 3), (30, 4)]
 Inserted 3 fact(s) into 'multipliers'.
+> joined(Id, V, M) <- items(Id, V), multipliers(V, M)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │    2 │
+│    2 │   20 │    3 │
+│    3 │   30 │    4 │
+└──────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?joined(Id, V, M)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │    2 │
+│    2 │   20 │    3 │
+│    3 │   30 │    4 │
+└──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_join_comp_n06t25
+Knowledge graph 'test_join_comp_n06t25' dropped.

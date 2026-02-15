@@ -15,3 +15,31 @@ Inserted 1 fact(s) into 'edge'.
 Inserted 1 fact(s) into 'edge'.
 > +edge(3, 4)
 Inserted 1 fact(s) into 'edge'.
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- path(X, Y), edge(Y, Z)
+Rule 'path' registered.
+> reachable_from_one(Y) <- path(1, Y)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> ?reachable_from_one(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_session_mat_n04t20
+Knowledge graph 'test_session_mat_n04t20' dropped.

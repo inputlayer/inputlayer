@@ -11,3 +11,93 @@ Switched to knowledge graph: test_rapid_agg_n14t141
 Switched to knowledge graph: test_rapid_agg_n14t141
 > +data[(1, 10)]
 Inserted 1 fact(s) into 'data'.
+> +total(sum<V>) <- data(_, V)
+Rule 'total' registered.
+> +cnt(count<V>) <- data(_, V)
+Rule 'cnt' registered.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> +data[(2, 20)]
+Inserted 1 fact(s) into 'data'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   30 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> -data(1, 10)
+Deleted 1 facts from 'data'.
+> +data[(3, 30)]
+Inserted 1 fact(s) into 'data'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   50 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> +data[(4, 40), (5, 50)]
+Inserted 2 fact(s) into 'data'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  140 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> -data(2, 20)
+Deleted 1 facts from 'data'.
+> -data(3, 30)
+Deleted 1 facts from 'data'.
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   90 │
+└──────┘
+1 rows
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rapid_agg_n14t141
+Knowledge graph 'test_rapid_agg_n14t141' dropped.

@@ -11,3 +11,53 @@ Switched to knowledge graph: test_ratio_n18t45
 Switched to knowledge graph: test_ratio_n18t45
 > +metrics[("visits", 1000), ("clicks", 100), ("purchases", 10)]
 Inserted 3 fact(s) into 'metrics'.
+> visits(V) <- metrics("visits", V)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1000 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> clicks(C) <- metrics("clicks", C)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> purchases(P) <- metrics("purchases", P)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+└──────┘
+1 rows
+(session: 3 rule(s))
+> ?visits(V)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1000 │
+└──────┘
+1 rows
+> ?clicks(C)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?purchases(P)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_ratio_n18t45
+Knowledge graph 'test_ratio_n18t45' dropped.

@@ -11,3 +11,23 @@ Switched to knowledge graph: test_agg_err_n12t32
 Switched to knowledge graph: test_agg_err_n12t32
 > +nums[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'nums'.
+> total(sum<X>) <- nums(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    6 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?total(T)
+┌──────┐
+│ col0 │
+├──────┤
+│    6 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_agg_err_n12t32
+Knowledge graph 'test_agg_err_n12t32' dropped.

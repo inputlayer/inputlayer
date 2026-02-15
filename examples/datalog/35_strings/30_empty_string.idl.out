@@ -21,3 +21,42 @@ Inserted 4 fact(s) into 'name'.
 │    4 │ ""      │
 └──────┴─────────┘
 4 rows
+> empty(Id) <- name(Id, N), N = ""
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?empty(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+> nonempty(Id, N) <- name(Id, N), N != ""
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "alice" │
+│    3 │ "bob"   │
+└──────┴─────────┘
+2 rows
+(session: 2 rule(s))
+> ?nonempty(Id, N)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "alice" │
+│    3 │ "bob"   │
+└──────┴─────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_empty_string_n35t30
+Knowledge graph 'test_empty_string_n35t30' dropped.

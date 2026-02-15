@@ -83,3 +83,77 @@ impl From<String> for RestError {
         RestError::internal(err)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_error_not_found() {
+        let err = ApiError::not_found("item missing");
+        assert_eq!(err.code, "NOT_FOUND");
+        assert_eq!(err.message, "item missing");
+    }
+
+    #[test]
+    fn test_api_error_bad_request() {
+        let err = ApiError::bad_request("invalid input");
+        assert_eq!(err.code, "BAD_REQUEST");
+        assert_eq!(err.message, "invalid input");
+    }
+
+    #[test]
+    fn test_api_error_internal() {
+        let err = ApiError::internal("server error");
+        assert_eq!(err.code, "INTERNAL_ERROR");
+        assert_eq!(err.message, "server error");
+    }
+
+    #[test]
+    fn test_api_error_custom_code() {
+        let err = ApiError::new("CUSTOM", "custom message");
+        assert_eq!(err.code, "CUSTOM");
+        assert_eq!(err.message, "custom message");
+    }
+
+    #[test]
+    fn test_rest_error_not_found_status() {
+        let err = RestError::not_found("not here");
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.error.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn test_rest_error_bad_request_status() {
+        let err = RestError::bad_request("bad");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_rest_error_internal_status() {
+        let err = RestError::internal("oops");
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_rest_error_from_string() {
+        let err: RestError = "something went wrong".to_string().into();
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.error.message, "something went wrong");
+    }
+
+    #[test]
+    fn test_api_error_serialization() {
+        let err = ApiError::not_found("test");
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"code\":\"NOT_FOUND\""));
+        assert!(json.contains("\"message\":\"test\""));
+    }
+
+    #[test]
+    fn test_rest_error_into_response() {
+        let err = RestError::not_found("gone");
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}

@@ -11,3 +11,5 @@ Switched to knowledge graph: test_event_order_n29t15
 Switched to knowledge graph: test_event_order_n29t15
 > +events[(1, "login", 1000), (2, "click", 1100), (3, "logout", 1500), (4, "error", 1050)]
 Inserted 4 fact(s) into 'events'.
+> before_logout(Id, Action, Time) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

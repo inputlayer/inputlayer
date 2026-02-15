@@ -23,7 +23,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::config::HttpConfig;
 use crate::protocol::Handler;
 
-use self::handlers::{admin, data, knowledge_graph, query, relations, rules, views};
+use self::handlers::{admin, data, knowledge_graph, query, relations, rules, sessions, views, ws};
 use self::openapi::ApiDoc;
 
 /// Creates the Axum router for the REST API
@@ -87,6 +87,23 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
             "/knowledge-graphs/:kg/views/:name",
             delete(views::delete_view),
         )
+        // Session routes
+        .route(
+            "/sessions",
+            get(sessions::list_sessions).post(sessions::create_session),
+        )
+        .route(
+            "/sessions/:id",
+            get(sessions::get_session).delete(sessions::close_session),
+        )
+        .route("/sessions/:id/query", post(sessions::session_query))
+        .route(
+            "/sessions/:id/facts",
+            post(sessions::insert_ephemeral_facts).delete(sessions::retract_ephemeral_facts),
+        )
+        .route("/sessions/:id/rules", post(sessions::add_ephemeral_rule))
+        // WebSocket route (session-scoped real-time connection)
+        .route("/sessions/:id/ws", get(ws::session_websocket))
         // Admin routes
         .route("/health", get(admin::health))
         .route("/stats", get(admin::stats));

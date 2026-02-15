@@ -13,3 +13,25 @@ Switched to knowledge graph: test_diff_complex_n22t12
 Inserted 4 fact(s) into 'all_items'.
 > +high_value[(100,), (200,)]
 Inserted 2 fact(s) into 'high_value'.
+> low_value_items(Id, Val) <- all_items(Id, Val), !high_value(Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │  150 │
+│    4 │   50 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?low_value_items(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │  150 │
+│    4 │   50 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_diff_complex_n22t12
+Knowledge graph 'test_diff_complex_n22t12' dropped.

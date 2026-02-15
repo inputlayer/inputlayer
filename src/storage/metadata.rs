@@ -196,4 +196,93 @@ mod tests {
         assert!(loaded.relations.contains_key("edge"));
         assert_eq!(loaded.relations["edge"].tuple_count, 50);
     }
+
+    #[test]
+    fn test_knowledge_graphs_metadata_new() {
+        let metadata = KnowledgeGraphsMetadata::new();
+        assert_eq!(metadata.version, "1.0");
+        assert!(metadata.knowledge_graphs.is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_graphs_metadata_default() {
+        let metadata = KnowledgeGraphsMetadata::default();
+        assert_eq!(metadata.version, "1.0");
+        assert!(metadata.knowledge_graphs.is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_graphs_metadata_load_nonexistent() {
+        let path = Path::new("/tmp/nonexistent_metadata_test.json");
+        let metadata = KnowledgeGraphsMetadata::load(path).unwrap();
+        assert!(metadata.knowledge_graphs.is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_graph_metadata_new() {
+        let metadata = KnowledgeGraphMetadata::new("test".to_string());
+        assert_eq!(metadata.name, "test");
+        assert_eq!(metadata.version, "1.0");
+        assert_eq!(metadata.schema_version, 1);
+        assert!(metadata.relations.is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_graph_metadata_total_tuples() {
+        let mut metadata = KnowledgeGraphMetadata::new("test".to_string());
+        assert_eq!(metadata.total_tuples(), 0);
+
+        metadata.add_relation("a".to_string(), vec!["x".to_string()], 10);
+        metadata.add_relation("b".to_string(), vec!["y".to_string()], 20);
+        assert_eq!(metadata.total_tuples(), 30);
+    }
+
+    #[test]
+    fn test_knowledge_graph_metadata_add_relation_overwrites() {
+        let mut metadata = KnowledgeGraphMetadata::new("test".to_string());
+        metadata.add_relation("a".to_string(), vec!["x".to_string()], 10);
+        metadata.add_relation("a".to_string(), vec!["x".to_string()], 50);
+        assert_eq!(metadata.relations.len(), 1);
+        assert_eq!(metadata.relations["a"].tuple_count, 50);
+    }
+
+    #[test]
+    fn test_relation_metadata_new() {
+        let rm = RelationMetadata::new("edge", vec!["x".to_string(), "y".to_string()], 42);
+        assert_eq!(rm.file, "relations/edge.parquet");
+        assert_eq!(rm.schema.len(), 2);
+        assert_eq!(rm.tuple_count, 42);
+        assert!(!rm.last_modified.is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_graph_metadata_load_invalid_file() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("invalid.json");
+        fs::write(&path, "not json").unwrap();
+        let result = KnowledgeGraphMetadata::load(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_knowledge_graphs_metadata_multiple() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("multi_kg.json");
+
+        let mut metadata = KnowledgeGraphsMetadata::new();
+        for i in 0..5 {
+            metadata.knowledge_graphs.push(KnowledgeGraphInfo {
+                name: format!("kg_{i}"),
+                created_at: Utc::now().to_rfc3339(),
+                last_accessed: Utc::now().to_rfc3339(),
+                relations_count: i,
+                total_tuples: i * 100,
+            });
+        }
+
+        metadata.save(&path).unwrap();
+        let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
+        assert_eq!(loaded.knowledge_graphs.len(), 5);
+        assert_eq!(loaded.knowledge_graphs[3].name, "kg_3");
+    }
 }

@@ -13,3 +13,28 @@ Switched to knowledge graph: test_histogram_n18t110
 Inserted 10 fact(s) into 'scores'.
 > +grade_bucket(S, "A") <- scores(S), S >= 90
 Rule 'grade_bucket' registered.
+> +grade_bucket(S, "B") <- scores(S), S >= 80, S < 90
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "C") <- scores(S), S >= 70, S < 80
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "D") <- scores(S), S >= 60, S < 70
+Rule 'grade_bucket' registered.
+> +grade_bucket(S, "F") <- scores(S), S < 60
+Rule 'grade_bucket' registered.
+> +histogram(Grade, count<S>) <- grade_bucket(S, Grade)
+Rule 'histogram' registered.
+> ?histogram(Grade, Count)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │    2 │
+│ "B"  │    2 │
+│ "C"  │    2 │
+│ "D"  │    2 │
+│ "F"  │    2 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_histogram_n18t110
+Knowledge graph 'test_histogram_n18t110' dropped.

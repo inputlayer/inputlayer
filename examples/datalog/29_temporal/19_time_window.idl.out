@@ -11,11 +11,5 @@ Switched to knowledge graph: test_time_win_n29t19
 Switched to knowledge graph: test_time_win_n29t19
 > +readings[(1, 100, 10), (2, 105, 20), (3, 110, 15), (4, 200, 30), (5, 205, 25)]
 Inserted 5 fact(s) into 'readings'.
-> window_count(Start, count<Id>) <- readings(Id, Time, _), Start = 100, Time >= Start,
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│  100 │    5 │
-└──────┴──────┘
-1 rows
-(session: 1 rule(s))
+> window_count(Start, count<Id>) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

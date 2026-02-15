@@ -11,3 +11,23 @@ Switched to knowledge graph: test_reach_matrix_n09t65
 Switched to knowledge graph: test_reach_matrix_n09t65
 > +edge[("a", "b"), ("b", "c"), ("c", "d"), ("a", "c")]
 Inserted 4 fact(s) into 'edge'.
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> +reach(X, Z) <- reach(X, Y), edge(Y, Z)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "b"  │
+│ "a"  │ "c"  │
+│ "a"  │ "d"  │
+│ "b"  │ "c"  │
+│ "b"  │ "d"  │
+│ "c"  │ "d"  │
+└──────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_reach_matrix_n09t65
+Knowledge graph 'test_reach_matrix_n09t65' dropped.

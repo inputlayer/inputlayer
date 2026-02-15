@@ -13,3 +13,38 @@ Switched to knowledge graph: test_session_compat_n04t25
 Inserted 3 fact(s) into 'score'.
 > +bonus[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'bonus'.
+> best(top_k<2, X, Y:desc>) <- score(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  300 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> best(top_k<2, X, Y:desc>) <- bonus(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+│    2 │  200 │
+│    3 │   30 │
+│    3 │  300 │
+└──────┴──────┘
+4 rows
+(session: 2 rule(s))
+> ?best(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+│    2 │  200 │
+│    3 │   30 │
+│    3 │  300 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_session_compat_n04t25
+Knowledge graph 'test_session_compat_n04t25' dropped.

@@ -18,3 +18,41 @@ Inserted 1 fact(s) into 'single'.
 │    1 │ "only" │
 └──────┴────────┘
 1 rows
+> +single_count(count<V>) <- single(_, V)
+Rule 'single_count' registered.
+> +single_sum(sum<Id>) <- single(Id, _)
+Rule 'single_sum' registered.
+> ?single_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> ?single_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> self_join(A, B) <- single(A, _), single(B, _)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?self_join(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_single_row_n10t31
+Knowledge graph 'test_single_row_n10t31' dropped.

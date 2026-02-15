@@ -13,3 +13,38 @@ Switched to knowledge graph: test_union_proj_n22t33
 Inserted 2 fact(s) into 'employees'.
 > +contractors[(3, "Carol", "Eng"), (4, "Dave", "Marketing")]
 Inserted 2 fact(s) into 'contractors'.
+> all_names(Name) <- employees(_, Name, _)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Bob"   │
+└─────────┘
+2 rows
+(session: 1 rule(s))
+> all_names(Name) <- contractors(_, Name, _)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Bob"   │
+│ "Carol" │
+│ "Dave"  │
+└─────────┘
+4 rows
+(session: 2 rule(s))
+> ?all_names(Name)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Bob"   │
+│ "Carol" │
+│ "Dave"  │
+└─────────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_union_proj_n22t33
+Knowledge graph 'test_union_proj_n22t33' dropped.

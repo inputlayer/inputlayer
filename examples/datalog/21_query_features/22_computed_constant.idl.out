@@ -11,3 +11,27 @@ Switched to knowledge graph: test_comp_const_n21t22
 Switched to knowledge graph: test_comp_const_n21t22
 > +nums[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'nums'.
+> multiples(X, D, T) <- nums(X), D = X * 2, T = X * 3
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │    3 │
+│    2 │    4 │    6 │
+│    3 │    6 │    9 │
+└──────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?multiples(X, D, T)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │    3 │
+│    2 │    4 │    6 │
+│    3 │    6 │    9 │
+└──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_comp_const_n21t22
+Knowledge graph 'test_comp_const_n21t22' dropped.

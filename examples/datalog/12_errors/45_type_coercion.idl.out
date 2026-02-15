@@ -11,3 +11,13 @@ Switched to knowledge graph: test_inv_const_n12t45
 Switched to knowledge graph: test_inv_const_n12t45
 > +nums[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'nums'.
+> bad(X) <- nums(X), X = "one"
+No results.
+(session: 1 rule(s))
+> ?bad(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_inv_const_n12t45
+Knowledge graph 'test_inv_const_n12t45' dropped.

@@ -13,3 +13,33 @@ Switched to knowledge graph: test_add_clause_n14t153
 Inserted 3 fact(s) into 'edge'.
 > +shortcut[(1, 4)]
 Inserted 1 fact(s) into 'shortcut'.
+> +reach(X, Y) <- edge(X, Y)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+> +reach(X, Y) <- shortcut(X, Y)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+4 rows
+> .rule list
+Rules:
+  reach (2 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_add_clause_n14t153
+Knowledge graph 'test_add_clause_n14t153' dropped.

@@ -20,3 +20,42 @@ Inserted 3 fact(s) into 'mixed'.
 │    3 │  300 │ 30000 │
 └──────┴──────┴───────┘
 3 rows
+> +small_ids(Id, M, L) <- mixed(Id, M, L), Id < 10
+Rule 'small_ids' registered.
+> ?small_ids(X, Y, Z)
+┌──────┬──────┬───────┐
+│ col0 │ col1 │ col2  │
+├──────┼──────┼───────┤
+│    1 │  100 │ 10000 │
+│    2 │  200 │ 20000 │
+│    3 │  300 │ 30000 │
+└──────┴──────┴───────┘
+3 rows
+> +combined(Id, M+L) <- mixed(Id, M, L)
+Rule 'combined' registered.
+> ?combined(X, Y)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ 10100 │
+│    2 │ 20200 │
+│    3 │ 30300 │
+└──────┴───────┘
+3 rows
+> +lookup[(100, 1), (200, 2), (300, 3)]
+Inserted 3 fact(s) into 'lookup'.
+> +joined(Id, M, Rev) <- mixed(Id, M, _), lookup(M, Rev)
+Rule 'joined' registered.
+> ?joined(X, Y, Z)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │  100 │    1 │
+│    2 │  200 │    2 │
+│    3 │  300 │    3 │
+└──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_mixed_n11t05
+Knowledge graph 'test_mixed_n11t05' dropped.

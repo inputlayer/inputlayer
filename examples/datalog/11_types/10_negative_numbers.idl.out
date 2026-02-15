@@ -11,3 +11,78 @@ Switched to knowledge graph: test_negative_n11t10
 Switched to knowledge graph: test_negative_n11t10
 > +temps[(1, -10), (2, 5), (3, -20), (4, 15), (5, 0)]
 Inserted 5 fact(s) into 'temps'.
+> +negatives(Id, T) <- temps(Id, T), T < 0
+Rule 'negatives' registered.
+> ?negatives(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  -10 │
+│    3 │  -20 │
+└──────┴──────┘
+2 rows
+> +non_neg(Id, T) <- temps(Id, T), T >= 0
+Rule 'non_neg' registered.
+> ?non_neg(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    5 │
+│    4 │   15 │
+│    5 │    0 │
+└──────┴──────┘
+3 rows
+> +minus_ten(Id, T-10) <- temps(Id, T)
+Rule 'minus_ten' registered.
+> ?minus_ten(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  -20 │
+│    2 │   -5 │
+│    3 │  -30 │
+│    4 │    5 │
+│    5 │  -10 │
+└──────┴──────┘
+5 rows
+> +colder_than_neg5(Id, T) <- temps(Id, T), T < -5
+Rule 'colder_than_neg5' registered.
+> ?colder_than_neg5(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  -10 │
+│    3 │  -20 │
+└──────┴──────┘
+2 rows
+> +total_temp(sum<T>) <- temps(_, T)
+Rule 'total_temp' registered.
+> ?total_temp(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  -10 │
+└──────┘
+1 rows
+> +min_temp(min<T>) <- temps(_, T)
+Rule 'min_temp' registered.
+> +max_temp(max<T>) <- temps(_, T)
+Rule 'max_temp' registered.
+> ?min_temp(M)
+┌──────┐
+│ col0 │
+├──────┤
+│  -20 │
+└──────┘
+1 rows
+> ?max_temp(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   15 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_negative_n11t10
+Knowledge graph 'test_negative_n11t10' dropped.

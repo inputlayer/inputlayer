@@ -11,3 +11,25 @@ Switched to knowledge graph: test_replace_n35t15
 Switched to knowledge graph: test_replace_n35t15
 > +words[("hello world",), ("hello there",)]
 Inserted 2 fact(s) into 'words'.
+> replaced(S, R) <- words(S), R = REPLACE(S, "hello", "hi")
+┌───────────────┬────────────┐
+│ col0          │ col1       │
+├───────────────┼────────────┤
+│ "hello there" │ "hi there" │
+│ "hello world" │ "hi world" │
+└───────────────┴────────────┘
+2 rows
+(session: 1 rule(s))
+> ?replaced(S, R)
+┌───────────────┬────────────┐
+│ col0          │ col1       │
+├───────────────┼────────────┤
+│ "hello there" │ "hi there" │
+│ "hello world" │ "hi world" │
+└───────────────┴────────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_replace_n35t15
+Knowledge graph 'test_replace_n35t15' dropped.

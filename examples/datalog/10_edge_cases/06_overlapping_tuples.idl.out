@@ -13,3 +13,43 @@ Switched to knowledge graph: test_overlap_n10t06
 Inserted 4 fact(s) into 'rel_a'.
 > +rel_b[(2, 3), (3, 4), (5, 6), (6, 7)]
 Inserted 4 fact(s) into 'rel_b'.
+> +combined(X, Y) <- rel_a(X, Y)
+Rule 'combined' registered.
+> +combined(X, Y) <- rel_b(X, Y)
+Rule 'combined' registered.
+> ?combined(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+│    4 │    5 │
+│    5 │    6 │
+│    6 │    7 │
+└──────┴──────┘
+6 rows
+> +intersection(X, Y) <- rel_a(X, Y), rel_b(X, Y)
+Rule 'intersection' registered.
+> ?intersection(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+2 rows
+> +only_in_a(X, Y) <- rel_a(X, Y), !rel_b(X, Y)
+Rule 'only_in_a' registered.
+> ?only_in_a(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    4 │    5 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_overlap_n10t06
+Knowledge graph 'test_overlap_n10t06' dropped.

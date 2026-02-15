@@ -11,3 +11,10 @@ Switched to knowledge graph: test_rule_remove_err_n17t14
 Switched to knowledge graph: test_rule_remove_err_n17t14
 > +edge[(1,2)]
 Inserted 1 fact(s) into 'edge'.
+> +simple(X, Y) <- edge(X, Y)
+Rule 'simple' registered.
+> .rule list
+Rules:
+  simple (1 clause(s))
+> .rule remove simple 5
+Script error: Failed to remove rule clause: Clause index 5 out of bounds. Rule 'simple' has 1 clause(s).

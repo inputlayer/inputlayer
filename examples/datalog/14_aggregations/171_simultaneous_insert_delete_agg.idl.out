@@ -11,3 +11,27 @@ Switched to knowledge graph: test_ins_del_agg_n14t171
 Switched to knowledge graph: test_ins_del_agg_n14t171
 > +score[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'score'.
+> +best(max<S>) <- score(_, S)
+Rule 'best' registered.
+> ?best(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  300 │
+└──────┘
+1 rows
+> -score(3, 300)
+Deleted 1 facts from 'score'.
+> +score[(4, 250)]
+Inserted 1 fact(s) into 'score'.
+> ?best(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  250 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ins_del_agg_n14t171
+Knowledge graph 'test_ins_del_agg_n14t171' dropped.

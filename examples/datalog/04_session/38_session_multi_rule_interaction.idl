@@ -1,0 +1,22 @@
+// Test: Multiple session rules interacting
+// Description: Multiple ephemeral rules that reference each other
+
+.kg create test_sess_multi_n04t38
+.kg use test_sess_multi_n04t38
+
+// Persistent base
++num[(1,), (2,), (3,), (4,), (5,)]
+
+// Chain of session rules
+even(X) <- num(X), X % 2 = 0
+odd(X) <- num(X), X % 2 = 1
+even_plus_one(X, Y) <- even(X), Y = X + 1
+
+?even(X)
+?odd(X)
+?even_plus_one(X, Y)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_multi_n04t38

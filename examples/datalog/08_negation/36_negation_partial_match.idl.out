@@ -13,3 +13,23 @@ Switched to knowledge graph: test_neg_partial_n08t36
 Inserted 3 fact(s) into 'items'.
 > +blocked[("a",)]
 Inserted 1 fact(s) into 'blocked'.
+> not_blocked(Id, Cat, Val) <- items(Id, Cat, Val), !blocked(Cat)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │ "b"  │  200 │
+└──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?not_blocked(Id, Cat, Val)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │ "b"  │  200 │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_partial_n08t36
+Knowledge graph 'test_neg_partial_n08t36' dropped.

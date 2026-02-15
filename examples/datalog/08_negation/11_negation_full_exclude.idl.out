@@ -13,3 +13,11 @@ Switched to knowledge graph: test_neg_full_excl_n08t11
 Inserted 3 fact(s) into 'data'.
 > +exclude_all[(1, 0), (2, 0), (3, 0)]
 Inserted 3 fact(s) into 'exclude_all'.
+> +result(X, Y) <- data(X, Y), !exclude_all(X, _)
+Rule 'result' registered.
+> ?result(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_full_excl_n08t11
+Knowledge graph 'test_neg_full_excl_n08t11' dropped.

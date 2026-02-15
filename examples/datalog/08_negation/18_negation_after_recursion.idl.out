@@ -13,3 +13,26 @@ Switched to knowledge graph: test_neg_rec_n08t18
 Inserted 4 fact(s) into 'edge'.
 > +forbidden_edge[(2, 3), (4, 5)]
 Inserted 2 fact(s) into 'forbidden_edge'.
+> +path(X, Y) <- edge(X, Y), !forbidden_edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z)
+Rule 'path' registered.
+> ?path(1, X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    3 │    4 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_rec_n08t18
+Knowledge graph 'test_neg_rec_n08t18' dropped.

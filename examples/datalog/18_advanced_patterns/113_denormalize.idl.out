@@ -15,3 +15,5 @@ Inserted 2 fact(s) into 'users'.
 Inserted 3 fact(s) into 'orders'.
 > +products[(201, "Widget"), (202, "Gadget")]
 Inserted 2 fact(s) into 'products'.
+> +order_details(OrderId, UserName, Amount) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

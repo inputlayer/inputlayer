@@ -11,3 +11,16 @@ Switched to knowledge graph: test_percent_n18t131
 Switched to knowledge graph: test_percent_n18t131
 > +sales[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'sales'.
+> +total(sum<Amount>) <- sales(_, Amount)
+Rule 'total' registered.
+> ?total(T)
+┌──────┐
+│ col0 │
+├──────┤
+│  600 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_percent_n18t131
+Knowledge graph 'test_percent_n18t131' dropped.

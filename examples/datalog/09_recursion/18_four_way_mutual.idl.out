@@ -11,3 +11,43 @@ Switched to knowledge graph: test_four_way_n09t18
 Switched to knowledge graph: test_four_way_n09t18
 > +start(1)
 Inserted 1 fact(s) into 'start'.
+> +rel_a(X) <- start(X)
+Rule 'rel_a' registered.
+> +rel_b(X) <- rel_a(X)
+Rule 'rel_b' registered.
+> +rel_c(X) <- rel_b(X)
+Rule 'rel_c' registered.
+> +rel_d(X) <- rel_c(X)
+Rule 'rel_d' registered.
+> ?rel_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> ?rel_b(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> ?rel_c(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> ?rel_d(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_four_way_n09t18
+Knowledge graph 'test_four_way_n09t18' dropped.

@@ -11,3 +11,42 @@ Switched to knowledge graph: test_sparse_n18t105
 Switched to knowledge graph: test_sparse_n18t105
 > +matrix[(1, 1, 5), (1, 3, 7), (2, 2, 3), (3, 1, 9)]
 Inserted 4 fact(s) into 'matrix'.
+> row1(Col, Val) <- matrix(1, Col, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    5 │
+│    3 │    7 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> col1(Row, Val) <- matrix(Row, 1, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    5 │
+│    3 │    9 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?row1(Col, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    5 │
+│    3 │    7 │
+└──────┴──────┘
+2 rows
+> ?col1(Row, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    5 │
+│    3 │    9 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_sparse_n18t105
+Knowledge graph 'test_sparse_n18t105' dropped.

@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_empty_n04t39
+Knowledge graph 'test_sess_empty_n04t39' created.
+Switched to knowledge graph: test_sess_empty_n04t39
+> .kg use test_sess_empty_n04t39
+Switched to knowledge graph: test_sess_empty_n04t39
+> ?nonexistent(X)
+No results.
+> temp(42)
+Session fact added for 'temp'. (Use +temp(...) to persist)
+> ?temp(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   42 │
+└──────┘
+1 rows
+> .session clear
+Cleared 1 session fact(s), 0 session rule(s).
+> ?temp(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_empty_n04t39
+Knowledge graph 'test_sess_empty_n04t39' dropped.

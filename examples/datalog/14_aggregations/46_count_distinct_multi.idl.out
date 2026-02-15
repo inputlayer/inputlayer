@@ -11,3 +11,5 @@ Switched to knowledge graph: test_cd_multi_n14t46
 Switched to knowledge graph: test_cd_multi_n14t46
 > +purchases[("Alice", "Electronics", 1), ("Alice", "Electronics", 2), ("Alice", "Clothing", 1), ("Bob", "Electronics", 1), ("Bob", "Electronics", 1)]
 Inserted 4 fact(s) into 'purchases'.
+> distinct_products(Cust, <COUNT_DISTINCT:Cat>) <- purchases(Cust, Cat, _)
+Script error: Parse error: Unknown aggregate function: 

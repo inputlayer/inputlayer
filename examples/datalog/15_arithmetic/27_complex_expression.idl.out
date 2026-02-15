@@ -11,3 +11,23 @@ Switched to knowledge graph: test_complex_expr_n15t27
 Switched to knowledge graph: test_complex_expr_n15t27
 > +data[(10, 5, 2)]
 Inserted 1 fact(s) into 'data'.
+> result(A, B, C, R) <- data(A, B, C), R = (A + B) * C - A / C
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    5 │    2 │ 25.0 │
+└──────┴──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?result(A, B, C, R)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    5 │    2 │ 25.0 │
+└──────┴──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_complex_expr_n15t27
+Knowledge graph 'test_complex_expr_n15t27' dropped.

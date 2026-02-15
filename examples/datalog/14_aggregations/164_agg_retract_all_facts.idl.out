@@ -11,3 +11,33 @@ Switched to knowledge graph: test_agg_retract_all_n14t164
 Switched to knowledge graph: test_agg_retract_all_n14t164
 > +data[(1), (2), (3)]
 Inserted 3 fact(s) into 'data'.
+> +cnt(count<X>) <- data(X)
+Rule 'cnt' registered.
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> -data(1)
+Deleted 1 facts from 'data'.
+> -data(2)
+Deleted 1 facts from 'data'.
+> -data(3)
+Deleted 1 facts from 'data'.
+> ?cnt(X)
+No results.
+> +data[(10)]
+Inserted 1 fact(s) into 'data'.
+> ?cnt(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_retract_all_n14t164
+Knowledge graph 'test_agg_retract_all_n14t164' dropped.

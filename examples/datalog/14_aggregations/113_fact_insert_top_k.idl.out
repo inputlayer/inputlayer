@@ -11,3 +11,37 @@ Switched to knowledge graph: test_insert_topk_n14t113
 Switched to knowledge graph: test_insert_topk_n14t113
 > +score[(1, 100), (2, 250), (3, 175)]
 Inserted 3 fact(s) into 'score'.
+> +top_players(top_k<2, Player, Points:desc>) <- score(Player, Points)
+Rule 'top_players' registered.
+> ?top_players(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    3 │  175 │
+└──────┴──────┘
+2 rows
+> +score[(4, 400)]
+Inserted 1 fact(s) into 'score'.
+> ?top_players(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    4 │  400 │
+└──────┴──────┘
+2 rows
+> +score[(5, 50)]
+Inserted 1 fact(s) into 'score'.
+> ?top_players(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    4 │  400 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_insert_topk_n14t113
+Knowledge graph 'test_insert_topk_n14t113' dropped.

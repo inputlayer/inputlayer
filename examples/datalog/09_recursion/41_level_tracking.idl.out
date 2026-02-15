@@ -13,3 +13,17 @@ Switched to knowledge graph: test_level_track_n09t41
 Inserted 5 fact(s) into 'edge'.
 > +level("root", 0)
 Inserted 1 fact(s) into 'level'.
+> +level(Child, Depth) <- level(Parent, D), edge(Parent, Child), Depth = D + 1
+Rule 'level' registered.
+> ?level(Node, Depth)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │    1 │
+│ "b"  │    1 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_level_track_n09t41
+Knowledge graph 'test_level_track_n09t41' dropped.

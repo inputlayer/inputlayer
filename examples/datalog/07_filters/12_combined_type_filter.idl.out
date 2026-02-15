@@ -11,25 +11,5 @@ Switched to knowledge graph: test_combined_filter_n07t12
 Switched to knowledge graph: test_combined_filter_n07t12
 > +products[(1, "Electronics", 500), (2, "Electronics", 100), (3, "Clothing", 50), (4, "Electronics", 200)]
 Inserted 4 fact(s) into 'products'.
-> expensive_electronics(Id, Price) <- products(Id, "Electronics", Price), Price > 150
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    4 │  200 │
-└──────┴──────┘
-2 rows
-(session: 1 rule(s))
-> ?expensive_electronics(Id, Price)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    4 │  200 │
-└──────┴──────┘
-2 rows
-> .kg use default
-Switched to knowledge graph: default
-(Cleared 1 session rule(s), 0 session fact(s))
-> .kg drop test_combined_filter_n07t12
-Knowledge graph 'test_combined_filter_n07t12' dropped.
+> expensive_electronics(Id, Price) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

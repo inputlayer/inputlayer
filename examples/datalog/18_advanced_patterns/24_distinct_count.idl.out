@@ -11,3 +11,45 @@ Switched to knowledge graph: test_distinct_n18t24
 Switched to knowledge graph: test_distinct_n18t24
 > +orders[(1, "Alice", "Widget"), (2, "Bob", "Widget"), (3, "Alice", "Gadget"), (4, "Carol", "Widget"), (5, "Alice", "Widget")]
 Inserted 5 fact(s) into 'orders'.
+> distinct_cust(Cust) <- orders(_, Cust, _)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Alice" │
+│ "Bob"   │
+│ "Carol" │
+└─────────┘
+3 rows
+(session: 1 rule(s))
+> +cust_count(count<C>) <- distinct_cust(C)
+Rule 'cust_count' registered.
+> ?cust_count(Count)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> distinct_prod(Prod) <- orders(_, _, Prod)
+┌──────────┐
+│ col0     │
+├──────────┤
+│ "Gadget" │
+│ "Widget" │
+└──────────┘
+2 rows
+(session: 2 rule(s))
+> +prod_count(count<P>) <- distinct_prod(P)
+Rule 'prod_count' registered.
+> ?prod_count(Count)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_distinct_n18t24
+Knowledge graph 'test_distinct_n18t24' dropped.

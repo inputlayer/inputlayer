@@ -34,8 +34,8 @@ mod snapshot;
 pub use snapshot::KnowledgeGraphSnapshot;
 
 use crate::config::Config;
-use crate::dd_computation::DDComputation;
 use crate::derived_relations::CompiledRule;
+use crate::incremental::IncrementalEngine;
 use crate::rule_catalog::RuleCatalog;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::{RuleDef, SerializableBodyPred};
@@ -86,7 +86,7 @@ pub struct KnowledgeGraph {
     /// Current snapshot for lock-free reads (updated atomically on writes)
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
     /// Persistent DD computation for incremental updates (shadow writes)
-    dd_computation: Option<DDComputation>,
+    incremental: Option<IncrementalEngine>,
     /// Number of workers for parallel query execution
     num_workers: usize,
 }
@@ -1355,7 +1355,7 @@ impl StorageEngine {
             rule_catalog,
             schema_catalog,
             snapshot,
-            dd_computation: None,
+            incremental: None,
             num_workers,
         })
     }
@@ -1594,12 +1594,12 @@ impl KnowledgeGraph {
             rule_catalog,
             schema_catalog,
             snapshot,
-            dd_computation: None,
+            incremental: None,
             num_workers,
         }
     }
 
-    /// Enable the DDComputation for incremental updates.
+    /// Enable the IncrementalEngine for incremental updates.
     ///
     /// Creates a persistent DD computation worker thread for this knowledge graph.
     /// Once enabled, all inserts and deletes are shadow-written to DD.
@@ -1607,30 +1607,31 @@ impl KnowledgeGraph {
     ///
     /// # Errors
     /// Returns error if worker thread fails to spawn or replaying existing data fails.
-    pub fn enable_dd_computation(&mut self) -> StorageResult<()> {
-        if self.dd_computation.is_none() {
-            let dd = DDComputation::new(vec![]).map_err(StorageError::DDComputationError)?;
+    pub fn enable_incremental(&mut self) -> StorageResult<()> {
+        if self.incremental.is_none() {
+            let dd =
+                IncrementalEngine::new(vec![]).map_err(StorageError::IncrementalEngineError)?;
 
-            // Replay existing data into DDComputation so arrangements are
+            // Replay existing data into IncrementalEngine so arrangements are
             // populated immediately. This handles the case where data was
-            // loaded from persistence before DDComputation was enabled.
+            // loaded from persistence before IncrementalEngine was enabled.
             for (relation, tuples) in &self.engine.input_tuples {
                 if !tuples.is_empty() {
                     dd.insert(relation, tuples.clone(), 0)
-                        .map_err(StorageError::DDComputationError)?;
+                        .map_err(StorageError::IncrementalEngineError)?;
                 }
             }
 
-            self.dd_computation = Some(dd);
+            self.incremental = Some(dd);
         }
         Ok(())
     }
 
-    /// Get a reference to the DDComputation (if enabled).
+    /// Get a reference to the IncrementalEngine (if enabled).
     ///
     /// Used for reading from DD arrangements and verifying consistency.
-    pub fn dd_computation(&self) -> Option<&DDComputation> {
-        self.dd_computation.as_ref()
+    pub fn incremental(&self) -> Option<&IncrementalEngine> {
+        self.incremental.as_ref()
     }
 
     /// Publish a new snapshot atomically
@@ -1638,7 +1639,7 @@ impl KnowledgeGraph {
     /// Called after data modifications to make changes visible to readers.
     /// This is O(1) - just an atomic pointer swap.
     ///
-    /// If DDComputation has valid materializations, includes them
+    /// If IncrementalEngine has valid materializations, includes them
     /// in the snapshot. Materialized tuples are merged into input_tuples,
     /// and their rules are skipped during query execution.
     ///
@@ -1651,10 +1652,10 @@ impl KnowledgeGraph {
         let mut input_tuples = self.engine.input_tuples.clone();
         let rules = self.rule_catalog.all_rules();
 
-        // Gather valid materializations from DDComputation
+        // Gather valid materializations from IncrementalEngine
         // CRITICAL: Hold the lock through snapshot creation AND publication
         // to prevent TOCTOU race conditions.
-        if let Some(ref dd) = self.dd_computation {
+        if let Some(ref dd) = self.incremental {
             let manager = dd.derived_relations();
             let manager_guard = manager.lock();
 
@@ -1707,7 +1708,7 @@ impl KnowledgeGraph {
     /// Materialize a derived relation and publish a new snapshot
     ///
     /// This is the proper way to store materialized data:
-    /// 1. Stores the tuples in DDComputation's DerivedRelationsManager
+    /// 1. Stores the tuples in IncrementalEngine's DerivedRelationsManager
     /// 2. Publishes a new snapshot that includes the materialized data
     ///
     /// After this call, queries via `snapshot()` will see the materialized data.
@@ -1716,12 +1717,12 @@ impl KnowledgeGraph {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<(), String> {
-        if let Some(ref dd) = self.dd_computation {
+        if let Some(ref dd) = self.incremental {
             dd.set_materialized(relation, tuples)?;
             self.publish_snapshot();
             Ok(())
         } else {
-            Err("DDComputation not enabled".to_string())
+            Err("IncrementalEngine not enabled".to_string())
         }
     }
 
@@ -1774,19 +1775,19 @@ impl KnowledgeGraph {
         self.metadata
             .add_relation(relation.to_string(), schema, tuple_count);
 
-        // Shadow write new tuples to DDComputation (if enabled).
+        // Shadow write new tuples to IncrementalEngine (if enabled).
         // Uses the logical timestamp from StorageEngine for proper time tracking.
         // Time advancement is lazy  -  only happens when a consistent read is requested.
         if !new_tuples_for_dd.is_empty() {
-            if let Some(dd) = &self.dd_computation {
+            if let Some(dd) = &self.incremental {
                 dd.insert(relation, new_tuples_for_dd, time)
-                    .map_err(StorageError::DDComputationError)?;
+                    .map_err(StorageError::IncrementalEngineError)?;
                 // Invalidate derived relations that depend on this base
                 dd.notify_base_update(relation)
-                    .map_err(StorageError::DDComputationError)?;
+                    .map_err(StorageError::IncrementalEngineError)?;
                 // Invalidate indexes that depend on this base relation
                 dd.notify_indexes_base_update(relation)
-                    .map_err(StorageError::DDComputationError)?;
+                    .map_err(StorageError::IncrementalEngineError)?;
                 // Auto-rematerialize invalidated rules
                 self.auto_rematerialize_invalid_rules();
             }
@@ -1846,18 +1847,18 @@ impl KnowledgeGraph {
             self.metadata
                 .add_relation(relation.to_string(), schema, final_count);
 
-            // Shadow write deletes to DDComputation (only if DD exists).
+            // Shadow write deletes to IncrementalEngine (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
             if !deleted_tuples_for_dd.is_empty() {
-                if let Some(dd) = &self.dd_computation {
+                if let Some(dd) = &self.incremental {
                     dd.delete(relation, deleted_tuples_for_dd, time)
-                        .map_err(StorageError::DDComputationError)?;
+                        .map_err(StorageError::IncrementalEngineError)?;
                     // Invalidate derived relations that depend on this base
                     dd.notify_base_update(relation)
-                        .map_err(StorageError::DDComputationError)?;
+                        .map_err(StorageError::IncrementalEngineError)?;
                     // Invalidate indexes that depend on this base relation
                     dd.notify_indexes_base_update(relation)
-                        .map_err(StorageError::DDComputationError)?;
+                        .map_err(StorageError::IncrementalEngineError)?;
                     // Auto-rematerialize invalidated rules
                     self.auto_rematerialize_invalid_rules();
                 }
@@ -1885,7 +1886,7 @@ impl KnowledgeGraph {
     /// Returns whether view was created or rule was added
     ///
     /// When a persistent rule is registered, we automatically:
-    /// 1. Register it with DDComputation for dependency tracking
+    /// 1. Register it with IncrementalEngine for dependency tracking
     /// 2. Execute the rule against current base data
     /// 3. Store the results as materialized data
     /// This enables session rules to immediately use the materialized output.
@@ -1895,11 +1896,11 @@ impl KnowledgeGraph {
     ) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
         let result = self.rule_catalog.register_rule(rule_def)?;
 
-        // Register with DDComputation for materialization
-        if let Some(ref dd) = self.dd_computation {
+        // Register with IncrementalEngine for materialization
+        if let Some(ref dd) = self.incremental {
             let compiled_rule = self.compile_rule_for_dd(rule_def);
             if let Err(e) = dd.register_rule(compiled_rule) {
-                eprintln!("Warning: failed to register rule with DDComputation: {e}");
+                eprintln!("Warning: failed to register rule with IncrementalEngine: {e}");
             }
 
             // Auto-materialize the rule
@@ -1958,7 +1959,7 @@ impl KnowledgeGraph {
         let tuples = temp_engine.execute_tuples(&program)?;
 
         // Store as materialized
-        if let Some(ref dd) = self.dd_computation {
+        if let Some(ref dd) = self.incremental {
             dd.set_materialized(rule_name, tuples)?;
         }
 
@@ -1970,7 +1971,7 @@ impl KnowledgeGraph {
     /// Called after base data changes to ensure materializations stay current.
     /// This enables session rules to always see up-to-date materialized data.
     fn auto_rematerialize_invalid_rules(&self) {
-        let dd = match &self.dd_computation {
+        let dd = match &self.incremental {
             Some(dd) => dd,
             None => return,
         };
@@ -1991,7 +1992,7 @@ impl KnowledgeGraph {
         }
     }
 
-    /// Compile a RuleDef into a CompiledRule for DDComputation
+    /// Compile a RuleDef into a CompiledRule for IncrementalEngine
     fn compile_rule_for_dd(&self, rule_def: &RuleDef) -> CompiledRule {
         use std::collections::HashSet;
 
@@ -2040,10 +2041,10 @@ impl KnowledgeGraph {
     pub fn drop_rule(&mut self, name: &str) -> Result<(), String> {
         self.rule_catalog.drop(name)?;
 
-        // Remove from DDComputation
-        if let Some(ref dd) = self.dd_computation {
+        // Remove from IncrementalEngine
+        if let Some(ref dd) = self.incremental {
             if let Err(e) = dd.remove_rule(name) {
-                eprintln!("Warning: failed to remove rule from DDComputation: {e}");
+                eprintln!("Warning: failed to remove rule from IncrementalEngine: {e}");
             }
         }
 
@@ -2121,7 +2122,7 @@ impl KnowledgeGraph {
         }
 
         // Get materialized relation names (skip their rules)
-        let materialized: HashSet<String> = if let Some(ref dd) = self.dd_computation {
+        let materialized: HashSet<String> = if let Some(ref dd) = self.incremental {
             let manager = dd.derived_relations();
             let guard = manager.lock();
             guard.get_materialized_relation_names()
@@ -2166,7 +2167,7 @@ impl KnowledgeGraph {
         }
 
         // Get materialized relation names (skip their rules)
-        let materialized: HashSet<String> = if let Some(ref dd) = self.dd_computation {
+        let materialized: HashSet<String> = if let Some(ref dd) = self.incremental {
             let manager = dd.derived_relations();
             let guard = manager.lock();
             guard.get_materialized_relation_names()
@@ -2606,11 +2607,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation for shadow writes
+        // Enable IncrementalEngine for shadow writes
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert tuples through StorageEngine
@@ -2625,22 +2626,22 @@ mod tests {
             )
             .unwrap();
 
-        // Access the KG's DDComputation and verify it received the data
+        // Access the KG's IncrementalEngine and verify it received the data
         let kg = storage
             .knowledge_graphs
             .get("default")
             .expect("default KG should exist");
         let kg = kg.read();
         let dd = kg
-            .dd_computation()
-            .expect("DDComputation should be enabled");
+            .incremental()
+            .expect("IncrementalEngine should be enabled");
 
         // Use consistent read  -  lazily advances time and waits
         let dd_tuples = dd.read_relation_consistent("edge").unwrap();
         assert_eq!(
             dd_tuples.len(),
             3,
-            "DDComputation should have received all 3 tuples"
+            "IncrementalEngine should have received all 3 tuples"
         );
     }
 
@@ -2654,11 +2655,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
@@ -2675,16 +2676,16 @@ mod tests {
             .insert_tuples("data", vec![t1.clone(), t3.clone()])
             .unwrap();
 
-        // Verify DDComputation has exactly 3 tuples (not 4 with duplicate)
+        // Verify IncrementalEngine has exactly 3 tuples (not 4 with duplicate)
         let kg = storage.knowledge_graphs.get("default").expect("default KG");
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
 
         let dd_tuples = dd.read_relation_consistent("data").unwrap();
         assert_eq!(
             dd_tuples.len(),
             3,
-            "DDComputation should have 3 unique tuples (duplicates filtered)"
+            "IncrementalEngine should have 3 unique tuples (duplicates filtered)"
         );
     }
 
@@ -2698,11 +2699,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         let t1 = Tuple::new(vec![Value::Int32(1), Value::Int32(2)]);
@@ -2717,16 +2718,16 @@ mod tests {
         // Delete one tuple
         storage.delete_tuple("rel", &t2).unwrap();
 
-        // Verify DDComputation reflects the delete
+        // Verify IncrementalEngine reflects the delete
         let kg = storage.knowledge_graphs.get("default").expect("default KG");
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
 
         let dd_tuples = dd.read_relation_consistent("rel").unwrap();
         assert_eq!(
             dd_tuples.len(),
             2,
-            "DDComputation should have 2 tuples after delete"
+            "IncrementalEngine should have 2 tuples after delete"
         );
         assert!(dd_tuples.contains(&t1));
         assert!(dd_tuples.contains(&t3));
@@ -2741,25 +2742,25 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert via binary tuple API
         storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
-        // Verify DDComputation received the data
+        // Verify IncrementalEngine received the data
         let kg = storage.knowledge_graphs.get("default").expect("default KG");
         let kg = kg.read();
         let dd = kg
-            .dd_computation()
-            .expect("DDComputation should be enabled");
+            .incremental()
+            .expect("IncrementalEngine should be enabled");
 
         let dd_tuples = dd.read_relation_consistent("edge").unwrap();
-        assert_eq!(dd_tuples.len(), 2, "DDComputation should have 2 tuples");
+        assert_eq!(dd_tuples.len(), 2, "IncrementalEngine should have 2 tuples");
     }
 
     // Arrangement Read Consistency Verification Tests
@@ -2781,7 +2782,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert data
@@ -2804,7 +2805,7 @@ mod tests {
         let hashmap_tuples = kg.engine.input_tuples.get("edge").unwrap();
 
         // DD arrangement state
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("edge").unwrap();
         dd_tuples.sort();
 
@@ -2831,7 +2832,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Batch 1
@@ -2871,7 +2872,7 @@ mod tests {
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
         dd_tuples.sort();
 
@@ -2902,7 +2903,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         let t1 = Tuple::new(vec![Value::Int32(1), Value::string("a")]);
@@ -2930,7 +2931,7 @@ mod tests {
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = kg.engine.input_tuples.get("mixed").unwrap();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("mixed").unwrap();
         dd_tuples.sort();
 
@@ -2957,7 +2958,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert into multiple relations
@@ -2985,7 +2986,7 @@ mod tests {
         // Verify parity for each relation
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
 
         for rel_name in &["edges", "nodes"] {
             let hashmap_tuples = kg.engine.input_tuples.get(*rel_name).unwrap();
@@ -3015,7 +3016,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Record logical time before insert
@@ -3029,7 +3030,7 @@ mod tests {
         // DD's max_write_time should be >= time_before (the time used for this insert)
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
 
         assert!(
             dd.max_write_time() >= time_before,
@@ -3039,7 +3040,7 @@ mod tests {
         );
     }
 
-    // WAL Replay into DDComputation Tests
+    // WAL Replay into IncrementalEngine Tests
     #[test]
     fn test_dd_replay_existing_data_on_enable() {
         use crate::value::Value;
@@ -3050,7 +3051,7 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Insert data BEFORE enabling DDComputation
+        // Insert data BEFORE enabling IncrementalEngine
         storage
             .insert_tuples(
                 "edge",
@@ -3072,17 +3073,17 @@ mod tests {
             )
             .unwrap();
 
-        // NOW enable DDComputation  -  should replay existing data
+        // NOW enable IncrementalEngine  -  should replay existing data
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
-        // Verify DDComputation has all pre-existing data
+        // Verify IncrementalEngine has all pre-existing data
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
 
         let edges = dd.read_relation_consistent("edge").unwrap();
         assert_eq!(edges.len(), 3, "DD should have 3 edges from replay");
@@ -3117,14 +3118,14 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Verify exact parity between DD and HashMap
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
         dd_tuples.sort();
 
@@ -3162,7 +3163,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Now insert MORE data (after DD is enabled)
@@ -3179,7 +3180,7 @@ mod tests {
         // Verify DD has ALL data (replayed + new)
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("items").unwrap();
         dd_tuples.sort();
 
@@ -3216,13 +3217,13 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Verify DD has the replayed data
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let dd = kg.dd_computation().unwrap();
+        let dd = kg.incremental().unwrap();
         let dd_tuples = dd.read_relation_consistent("edge").unwrap();
         assert_eq!(
             dd_tuples.len(),
@@ -3252,17 +3253,17 @@ mod tests {
             let mut storage = StorageEngine::new(config).unwrap();
             storage.use_knowledge_graph("default").unwrap();
 
-            // Enable DDComputation  -  should replay persisted data
+            // Enable IncrementalEngine  -  should replay persisted data
             {
                 let kg = storage.knowledge_graphs.get("default").unwrap();
                 let mut kg = kg.write();
-                kg.enable_dd_computation().unwrap();
+                kg.enable_incremental().unwrap();
             }
 
             // Verify DD has the persisted data
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let kg = kg.read();
-            let dd = kg.dd_computation().unwrap();
+            let dd = kg.incremental().unwrap();
             let dd_tuples = dd.read_relation_consistent("edge").unwrap();
             assert_eq!(
                 dd_tuples.len(),
@@ -3320,11 +3321,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert base data
@@ -3390,11 +3391,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert base data and register rule
@@ -3459,11 +3460,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Insert base data
@@ -3519,11 +3520,11 @@ mod tests {
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
 
-        // Enable DDComputation
+        // Enable IncrementalEngine
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let mut kg = kg.write();
-            kg.enable_dd_computation().unwrap();
+            kg.enable_incremental().unwrap();
         }
 
         // Register two rules
@@ -3541,7 +3542,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let kg = kg.read();
-            let dd = kg.dd_computation().unwrap();
+            let dd = kg.incremental().unwrap();
             let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
             assert_eq!(total, 2, "should have 2 rules");
             assert_eq!(materialized, 0, "nothing materialized yet");
@@ -3552,7 +3553,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let kg = kg.read();
-            let dd = kg.dd_computation().unwrap();
+            let dd = kg.incremental().unwrap();
             dd.set_materialized("derived1", vec![]).unwrap();
         }
 
@@ -3560,7 +3561,7 @@ mod tests {
         {
             let kg = storage.knowledge_graphs.get("default").unwrap();
             let kg = kg.read();
-            let dd = kg.dd_computation().unwrap();
+            let dd = kg.incremental().unwrap();
             let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
             assert_eq!(total, 2);
             assert_eq!(materialized, 1);

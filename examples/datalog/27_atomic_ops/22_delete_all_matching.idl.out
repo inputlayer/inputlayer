@@ -21,3 +21,17 @@ Inserted 4 fact(s) into 'items'.
 │    4 │ "C"  │   50 │
 └──────┴──────┴──────┘
 4 rows
+> -items(Id, Cat, Val) <- items(Id, Cat, Val), Cat = "A"
+Conditional delete: 2 fact(s) deleted from 'items'.
+> ?items(Id, Cat, Val)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │ "B"  │  200 │
+│    4 │ "C"  │   50 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_all_n27t22
+Knowledge graph 'test_del_all_n27t22' dropped.

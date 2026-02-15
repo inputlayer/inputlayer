@@ -305,4 +305,224 @@ mod tests {
         let restored = deserialized.to_rule();
         assert_eq!(restored.head.relation, "path");
     }
+
+    #[test]
+    fn test_serializable_rule_with_negation() {
+        let rule_str = "safe(X) <- person(X), !banned(X)";
+        let rule = parse_rule(rule_str).unwrap();
+        let serializable = SerializableRule::from_rule(&rule);
+        let json = serde_json::to_string(&serializable).unwrap();
+        let deserialized: SerializableRule = serde_json::from_str(&json).unwrap();
+        let restored = deserialized.to_rule();
+        assert_eq!(restored.head.relation, "safe");
+        assert_eq!(restored.body.len(), 2);
+        assert!(matches!(restored.body[1], BodyPredicate::Negated(_)));
+    }
+
+    #[test]
+    fn test_serializable_rule_with_comparison() {
+        let rule_str = "adult(X) <- person(X, Age), Age >= 18";
+        let rule = parse_rule(rule_str).unwrap();
+        let serializable = SerializableRule::from_rule(&rule);
+        let json = serde_json::to_string(&serializable).unwrap();
+        let deserialized: SerializableRule = serde_json::from_str(&json).unwrap();
+        let restored = deserialized.to_rule();
+        assert_eq!(restored.body.len(), 2);
+        assert!(matches!(restored.body[1], BodyPredicate::Comparison(..)));
+    }
+
+    #[test]
+    fn test_serializable_term_variable() {
+        let term = Term::Variable("X".to_string());
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::Variable(ref n) if n == "X"));
+        let back = ser.to_term();
+        assert!(matches!(back, Term::Variable(ref n) if n == "X"));
+    }
+
+    #[test]
+    fn test_serializable_term_constant() {
+        let term = Term::Constant(42);
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::Constant(42)));
+        let back = ser.to_term();
+        assert!(matches!(back, Term::Constant(42)));
+    }
+
+    #[test]
+    fn test_serializable_term_string() {
+        let term = Term::StringConstant("hello".to_string());
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::StringConstant(ref s) if s == "hello"));
+        let back = ser.to_term();
+        assert!(matches!(back, Term::StringConstant(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn test_serializable_term_float() {
+        let term = Term::FloatConstant(3.14);
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::FloatConstant(f) if (f - 3.14).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_serializable_term_placeholder() {
+        let term = Term::Placeholder;
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::Placeholder));
+        let back = ser.to_term();
+        assert!(matches!(back, Term::Placeholder));
+    }
+
+    #[test]
+    fn test_serializable_term_aggregate() {
+        let term = Term::Aggregate(AggregateFunc::Count, "X".to_string());
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(
+            ser,
+            SerializableTerm::Aggregate(AggregateFunc::Count, _)
+        ));
+        let back = ser.to_term();
+        assert!(matches!(back, Term::Aggregate(AggregateFunc::Count, _)));
+    }
+
+    #[test]
+    fn test_serializable_term_vector_becomes_placeholder() {
+        // VectorLiteral is not directly serializable, becomes Placeholder
+        let term = Term::VectorLiteral(vec![1.0, 2.0]);
+        let ser = SerializableTerm::from_term(&term);
+        assert!(matches!(ser, SerializableTerm::Placeholder));
+    }
+
+    #[test]
+    fn test_serializable_arith_expr_variable() {
+        let expr = ArithExpr::Variable("X".to_string());
+        let ser = SerializableArithExpr::from_arith_expr(&expr);
+        assert!(matches!(ser, SerializableArithExpr::Variable(ref n) if n == "X"));
+        let back = ser.to_arith_expr();
+        assert!(matches!(back, ArithExpr::Variable(ref n) if n == "X"));
+    }
+
+    #[test]
+    fn test_serializable_arith_expr_constant() {
+        let expr = ArithExpr::Constant(42);
+        let ser = SerializableArithExpr::from_arith_expr(&expr);
+        assert!(matches!(ser, SerializableArithExpr::Constant(42)));
+    }
+
+    #[test]
+    fn test_serializable_arith_expr_float() {
+        let expr = ArithExpr::FloatConstant(3.14_f64.to_bits());
+        let ser = SerializableArithExpr::from_arith_expr(&expr);
+        if let SerializableArithExpr::FloatConstant(f) = ser {
+            assert!((f - 3.14).abs() < 0.001);
+        } else {
+            panic!("Expected FloatConstant");
+        }
+    }
+
+    #[test]
+    fn test_serializable_arith_expr_binary() {
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Variable("X".to_string())),
+            right: Box::new(ArithExpr::Constant(1)),
+        };
+        let ser = SerializableArithExpr::from_arith_expr(&expr);
+        let back = ser.to_arith_expr();
+        assert!(matches!(
+            back,
+            ArithExpr::Binary {
+                op: ArithOp::Add,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_serializable_arith_op_roundtrip() {
+        let ops = [
+            ArithOp::Add,
+            ArithOp::Sub,
+            ArithOp::Mul,
+            ArithOp::Div,
+            ArithOp::Mod,
+        ];
+        for op in &ops {
+            let ser = SerializableArithOp::from_arith_op(op);
+            let back = ser.to_arith_op();
+            assert_eq!(std::mem::discriminant(&back), std::mem::discriminant(op));
+        }
+    }
+
+    #[test]
+    fn test_serializable_comparison_op_roundtrip() {
+        let ops = [
+            ComparisonOp::Equal,
+            ComparisonOp::NotEqual,
+            ComparisonOp::LessThan,
+            ComparisonOp::LessOrEqual,
+            ComparisonOp::GreaterThan,
+            ComparisonOp::GreaterOrEqual,
+        ];
+        for op in &ops {
+            let ser = SerializableComparisonOp::from_op(op);
+            let back = ser.to_op();
+            assert_eq!(std::mem::discriminant(&back), std::mem::discriminant(op));
+        }
+    }
+
+    #[test]
+    fn test_serializable_body_pred_positive() {
+        let atom = Atom::new("edge".to_string(), vec![Term::Variable("X".to_string())]);
+        let pred = BodyPredicate::Positive(atom);
+        let ser = SerializableBodyPred::from_body_pred(&pred);
+        let back = ser.to_body_pred();
+        assert!(matches!(back, BodyPredicate::Positive(ref a) if a.relation == "edge"));
+    }
+
+    #[test]
+    fn test_serializable_body_pred_negated() {
+        let atom = Atom::new("banned".to_string(), vec![Term::Variable("X".to_string())]);
+        let pred = BodyPredicate::Negated(atom);
+        let ser = SerializableBodyPred::from_body_pred(&pred);
+        let back = ser.to_body_pred();
+        assert!(matches!(back, BodyPredicate::Negated(ref a) if a.relation == "banned"));
+    }
+
+    #[test]
+    fn test_serializable_body_pred_comparison() {
+        let pred = BodyPredicate::Comparison(
+            Term::Variable("X".to_string()),
+            ComparisonOp::GreaterThan,
+            Term::Constant(5),
+        );
+        let ser = SerializableBodyPred::from_body_pred(&pred);
+        let back = ser.to_body_pred();
+        assert!(matches!(back, BodyPredicate::Comparison(..)));
+    }
+
+    #[test]
+    fn test_rule_def_json_roundtrip() {
+        let rule = parse_rule("path(X, Y) <- edge(X, Y)").unwrap();
+        let def = RuleDef {
+            name: "path".to_string(),
+            rule: SerializableRule::from_rule(&rule),
+        };
+        let json = serde_json::to_string(&def).unwrap();
+        let back: RuleDef = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "path");
+        assert_eq!(back.rule.head_relation, "path");
+    }
+
+    #[test]
+    fn test_serializable_rule_with_arithmetic() {
+        let rule_str = "doubled(X, Y) <- data(X), Y = X * 2";
+        let rule = parse_rule(rule_str).unwrap();
+        let serializable = SerializableRule::from_rule(&rule);
+        let json = serde_json::to_string(&serializable).unwrap();
+        let deserialized: SerializableRule = serde_json::from_str(&json).unwrap();
+        let restored = deserialized.to_rule();
+        assert_eq!(restored.head.relation, "doubled");
+    }
 }

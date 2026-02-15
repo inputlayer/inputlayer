@@ -11,3 +11,57 @@ Switched to knowledge graph: test_percentile_n18t47
 Switched to knowledge graph: test_percentile_n18t47
 > +scores[(1, 50), (2, 75), (3, 85), (4, 95), (5, 60)]
 Inserted 5 fact(s) into 'scores'.
+> low(Id, Score) <- scores(Id, Score), Score < 60
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> medium(Id, Score) <- scores(Id, Score), Score >= 60, Score < 80
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   75 │
+│    5 │   60 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> high(Id, Score) <- scores(Id, Score), Score >= 80
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │   85 │
+│    4 │   95 │
+└──────┴──────┘
+2 rows
+(session: 3 rule(s))
+> ?low(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+└──────┴──────┘
+1 rows
+> ?medium(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   75 │
+│    5 │   60 │
+└──────┴──────┘
+2 rows
+> ?high(Id, Score)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │   85 │
+│    4 │   95 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_percentile_n18t47
+Knowledge graph 'test_percentile_n18t47' dropped.

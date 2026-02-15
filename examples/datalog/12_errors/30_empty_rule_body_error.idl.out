@@ -9,3 +9,5 @@ Knowledge graph 'test_empty_body_n12t30' created.
 Switched to knowledge graph: test_empty_body_n12t30
 > .kg use test_empty_body_n12t30
 Switched to knowledge graph: test_empty_body_n12t30
+> +foo(X) <- .
+Script error: Parse error: Invalid atom: .

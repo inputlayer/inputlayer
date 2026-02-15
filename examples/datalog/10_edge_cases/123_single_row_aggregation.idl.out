@@ -11,3 +11,53 @@ Switched to knowledge graph: test_single_agg_n10t123
 Switched to knowledge graph: test_single_agg_n10t123
 > +single[(42,)]
 Inserted 1 fact(s) into 'single'.
+> single_sum(sum<X>) <- single(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   42 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> single_avg(avg<X>) <- single(X)
+┌──────┐
+│ col0 │
+├──────┤
+│ 42.0 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> single_count(count<X>) <- single(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+(session: 3 rule(s))
+> ?single_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   42 │
+└──────┘
+1 rows
+> ?single_avg(A)
+┌──────┐
+│ col0 │
+├──────┤
+│ 42.0 │
+└──────┘
+1 rows
+> ?single_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_single_agg_n10t123
+Knowledge graph 'test_single_agg_n10t123' dropped.

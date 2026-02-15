@@ -11,3 +11,29 @@ Switched to knowledge graph: test_nested_n21t56
 Switched to knowledge graph: test_nested_n21t56
 > +base[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'base'.
+> +doubled(Id, D) <- base(Id, V), D = V * 2
+Rule 'doubled' registered.
+> +quadrupled(Id, Q) <- doubled(Id, D), Q = D * 2
+Rule 'quadrupled' registered.
+> ?doubled(Id, D)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   20 │
+│    2 │   40 │
+│    3 │   60 │
+└──────┴──────┘
+3 rows
+> ?quadrupled(Id, Q)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   40 │
+│    2 │   80 │
+│    3 │  120 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_n21t56
+Knowledge graph 'test_nested_n21t56' dropped.

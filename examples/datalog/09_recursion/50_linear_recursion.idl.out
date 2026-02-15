@@ -11,3 +11,21 @@ Switched to knowledge graph: test_linear_rec_n09t50
 Switched to knowledge graph: test_linear_rec_n09t50
 > +link[("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")]
 Inserted 4 fact(s) into 'link'.
+> +chain(X, Y) <- link(X, Y)
+Rule 'chain' registered.
+> +chain(X, Z) <- chain(X, Y), link(Y, Z)
+Rule 'chain' registered.
+> ?chain("a", Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "b"  │
+│ "a"  │ "c"  │
+│ "a"  │ "d"  │
+│ "a"  │ "e"  │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_linear_rec_n09t50
+Knowledge graph 'test_linear_rec_n09t50' dropped.

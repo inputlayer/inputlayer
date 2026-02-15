@@ -13,3 +13,34 @@ Switched to knowledge graph: test_combined_temporal_n29t11
 Inserted 4 fact(s) into 'events'.
 > +config[(10000, 2000)]
 Inserted 1 fact(s) into 'config'.
+> recent_weighted(Id, Weight) <- events(Id, Ts), config(Now, HalfLife), within_last(Ts, Now, 3000), Weight = time_decay(Ts, Now, HalfLife)
+No results.
+(session: 1 rule(s))
+> ?recent_weighted(Id, Weight)
+No results.
+> event_age(Id, Age) <- events(Id, Ts), config(Now, _), Age = time_diff(Now, Ts)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  500 │
+│    2 │ 2000 │
+│    3 │ 5000 │
+│    4 │    0 │
+└──────┴──────┘
+4 rows
+(session: 2 rule(s))
+> ?event_age(Id, Age)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  500 │
+│    2 │ 2000 │
+│    3 │ 5000 │
+│    4 │    0 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_combined_temporal_n29t11
+Knowledge graph 'test_combined_temporal_n29t11' dropped.

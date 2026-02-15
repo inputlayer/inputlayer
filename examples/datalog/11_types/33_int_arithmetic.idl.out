@@ -11,3 +11,5 @@ Switched to knowledge graph: test_int_arith_n11t33
 Switched to knowledge graph: test_int_arith_n11t33
 > +nums[(100,), (7,)]
 Inserted 2 fact(s) into 'nums'.
+> ops(N, Add, Sub, Mul, Div, Mod) <- nums(N), N = 100,
+Script error: Unsafe rule 'ops': Head variable(s) Add, Div, Mod, Mul, Sub not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

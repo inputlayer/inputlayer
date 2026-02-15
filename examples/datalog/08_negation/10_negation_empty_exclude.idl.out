@@ -15,3 +15,18 @@ Inserted 3 fact(s) into 'data'.
 Inserted 1 fact(s) into 'empty_exclude'.
 > -empty_exclude(999, 999)
 Deleted 1 facts from 'empty_exclude'.
+> +result(X, Y) <- data(X, Y), !empty_exclude(X, _)
+Rule 'result' registered.
+> ?result(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_empty_excl_n08t10
+Knowledge graph 'test_neg_empty_excl_n08t10' dropped.

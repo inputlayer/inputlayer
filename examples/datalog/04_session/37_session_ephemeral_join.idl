@@ -1,0 +1,22 @@
+// Test: Join between persistent and ephemeral relations
+// Description: Ephemeral facts join with persistent data
+
+.kg create test_sess_join_n04t37
+.kg use test_sess_join_n04t37
+
+// Persistent: students enrolled in courses
++enrolled[(1, "math"), (2, "math"), (3, "science")]
+
+// Ephemeral: grades for this session
+grade(1, "math", 95)
+grade(2, "math", 80)
+grade(3, "science", 90)
+
+// Session rule: join enrollment with grades
+student_grade(Id, Course, Grade) <- enrolled(Id, Course), grade(Id, Course, Grade)
+?student_grade(Id, Course, Grade)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_join_n04t37

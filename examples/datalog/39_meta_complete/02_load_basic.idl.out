@@ -19,3 +19,17 @@ Inserted 2 fact(s) into 'data'.
 │    2 │ "b"  │
 └──────┴──────┘
 2 rows
+> +derived(X, Y) <- data(X, Y)
+Rule 'derived' registered.
+> ?derived(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_meta_basic_n39t02
+Knowledge graph 'test_meta_basic_n39t02' dropped.

@@ -11,3 +11,42 @@ Switched to knowledge graph: test_self_cmp_n18t32
 Switched to knowledge graph: test_self_cmp_n18t32
 > +scores[(1, 85), (2, 90), (3, 75), (4, 90)]
 Inserted 4 fact(s) into 'scores'.
+> higher(Id1, Id2, S1, S2) <- scores(Id1, S1), scores(Id2, S2), Id1 < Id2, S1 < S2
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │    2 │   85 │   90 │
+│    1 │    4 │   85 │   90 │
+│    3 │    4 │   75 │   90 │
+└──────┴──────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?higher(Id1, Id2, S1, S2)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │    2 │   85 │   90 │
+│    1 │    4 │   85 │   90 │
+│    3 │    4 │   75 │   90 │
+└──────┴──────┴──────┴──────┘
+3 rows
+> same_score(Id1, Id2, S) <- scores(Id1, S), scores(Id2, S), Id1 < Id2
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │    4 │   90 │
+└──────┴──────┴──────┘
+1 rows
+(session: 2 rule(s))
+> ?same_score(Id1, Id2, S)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │    4 │   90 │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_cmp_n18t32
+Knowledge graph 'test_self_cmp_n18t32' dropped.

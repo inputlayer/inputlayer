@@ -11,3 +11,31 @@ Switched to knowledge graph: test_drop_max_n14t126
 Switched to knowledge graph: test_drop_max_n14t126
 > +reading[(1, 25), (1, 22), (1, 28), (2, 30), (2, 35)]
 Inserted 5 fact(s) into 'reading'.
+> +max_temp(Sensor, max<Temp>) <- reading(Sensor, Temp)
+Rule 'max_temp' registered.
+> ?max_temp(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   28 │
+│    2 │   35 │
+└──────┴──────┘
+2 rows
+> .rule drop max_temp
+Rule 'max_temp' dropped.
+> ?max_temp(X, Y)
+No results.
+> +max_temp(Sensor, max<Temp>) <- reading(Sensor, Temp)
+Rule 'max_temp' registered.
+> ?max_temp(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   28 │
+│    2 │   35 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_max_n14t126
+Knowledge graph 'test_drop_max_n14t126' dropped.

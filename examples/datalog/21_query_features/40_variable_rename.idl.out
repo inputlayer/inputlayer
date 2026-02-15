@@ -11,3 +11,23 @@ Switched to knowledge graph: test_var_rename_n21t40
 Switched to knowledge graph: test_var_rename_n21t40
 > +src[(1, "a", 100)]
 Inserted 1 fact(s) into 'src'.
+> renamed(Id, Name, Value) <- src(Id, Name, Value)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "a"  │  100 │
+└──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?renamed(X, Y, Z)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "a"  │  100 │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_var_rename_n21t40
+Knowledge graph 'test_var_rename_n21t40' dropped.

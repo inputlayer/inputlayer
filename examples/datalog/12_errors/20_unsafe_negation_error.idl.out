@@ -11,3 +11,5 @@ Switched to knowledge graph: test_unsafe_neg_err_n12t20
 Switched to knowledge graph: test_unsafe_neg_err_n12t20
 > +banned[(1), (2)]
 Inserted 2 fact(s) into 'banned'.
+> +unsafe_rule(X) <- !banned(X)
+Script error: Failed to register rule: Unsafe rule 'unsafe_rule': Head variable(s) X not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

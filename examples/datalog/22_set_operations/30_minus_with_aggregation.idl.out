@@ -13,3 +13,42 @@ Switched to knowledge graph: test_minus_agg_n22t30
 Inserted 5 fact(s) into 'all_values'.
 > +exclude_vals[(2,), (4,)]
 Inserted 2 fact(s) into 'exclude_vals'.
+> remaining(X) <- all_values(X), !exclude_vals(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> sum_remaining(sum<X>) <- remaining(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    9 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> ?remaining(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+> ?sum_remaining(S)
+┌──────┐
+│ col0 │
+├──────┤
+│    9 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_minus_agg_n22t30
+Knowledge graph 'test_minus_agg_n22t30' dropped.

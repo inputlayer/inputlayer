@@ -11,3 +11,42 @@ Switched to knowledge graph: test_self_ref_n10t27
 Switched to knowledge graph: test_self_ref_n10t27
 > +edges[(1, 2), (2, 3), (3, 3), (4, 4)]
 Inserted 4 fact(s) into 'edges'.
+> self_loop(X) <- edges(X, X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?self_loop(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+└──────┘
+2 rows
+> non_self(X, Y) <- edges(X, Y), X != Y
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?non_self(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_self_ref_n10t27
+Knowledge graph 'test_self_ref_n10t27' dropped.

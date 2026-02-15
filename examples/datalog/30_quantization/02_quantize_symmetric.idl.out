@@ -24,3 +24,27 @@ Inserted 1 fact(s) into 'embedding'.
 │    3 │ [2.0, -2.0, 1.0, -1.0] │ [127, -127, 64, -64] │
 └──────┴────────────────────────┴──────────────────────┘
 3 rows
+> quantized_sym(Id, Q) <- embedding(Id, V), Q = quantize_symmetric(V)
+┌──────┬──────────────────────┐
+│ col0 │ col1                 │
+├──────┼──────────────────────┤
+│    1 │ [127, 64, -64, -127] │
+│    2 │ [0, 0, 0, 0]         │
+│    3 │ [127, -127, 64, -64] │
+└──────┴──────────────────────┘
+3 rows
+(session: 1 rule(s))
+> ?quantized_sym(Id, Q)
+┌──────┬──────────────────────┐
+│ col0 │ col1                 │
+├──────┼──────────────────────┤
+│    1 │ [127, 64, -64, -127] │
+│    2 │ [0, 0, 0, 0]         │
+│    3 │ [127, -127, 64, -64] │
+└──────┴──────────────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_quantize_symmetric_n30t02
+Knowledge graph 'test_quantize_symmetric_n30t02' dropped.

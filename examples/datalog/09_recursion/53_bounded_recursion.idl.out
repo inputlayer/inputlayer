@@ -11,3 +11,20 @@ Switched to knowledge graph: test_bounded_n09t53
 Switched to knowledge graph: test_bounded_n09t53
 > +edge[("a", "b"), ("b", "c"), ("c", "d"), ("d", "e"), ("e", "f")]
 Inserted 5 fact(s) into 'edge'.
+> +limited_path(X, Y, 1) <- edge(X, Y)
+Rule 'limited_path' registered.
+> +limited_path(X, Z, D) <- limited_path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3
+Rule 'limited_path' registered.
+> ?limited_path("a", Y, D)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│ "a"  │ "b"  │    1 │
+│ "a"  │ "c"  │    2 │
+│ "a"  │ "d"  │    3 │
+└──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bounded_n09t53
+Knowledge graph 'test_bounded_n09t53' dropped.

@@ -11,3 +11,25 @@ Switched to knowledge graph: test_computed_proj_n21t55
 Switched to knowledge graph: test_computed_proj_n21t55
 > +items[(1, 10, 5), (2, 20, 3)]
 Inserted 2 fact(s) into 'items'.
+> with_total(Id, Total) <- items(Id, Price, Qty), Total = Price * Qty
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+│    2 │   60 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?with_total(Id, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+│    2 │   60 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_computed_proj_n21t55
+Knowledge graph 'test_computed_proj_n21t55' dropped.

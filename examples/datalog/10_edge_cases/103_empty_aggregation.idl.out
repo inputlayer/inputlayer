@@ -11,3 +11,18 @@ Switched to knowledge graph: test_empty_agg_n10t103
 Switched to knowledge graph: test_empty_agg_n10t103
 > +empty_rel[]
 Inserted 0 fact(s) into 'empty_rel'.
+> sum_empty(sum<X>) <- empty_rel(X)
+No results.
+(session: 1 rule(s))
+> count_empty(count<X>) <- empty_rel(X)
+No results.
+(session: 2 rule(s))
+> ?sum_empty(S)
+No results.
+> ?count_empty(C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_empty_agg_n10t103
+Knowledge graph 'test_empty_agg_n10t103' dropped.

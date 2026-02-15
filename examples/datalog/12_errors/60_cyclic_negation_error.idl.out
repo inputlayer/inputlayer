@@ -11,3 +11,7 @@ Switched to knowledge graph: test_cyclic_neg_n12t60
 Switched to knowledge graph: test_cyclic_neg_n12t60
 > +base[(1,)]
 Inserted 1 fact(s) into 'base'.
+> +a(X) <- base(X), !b(X)
+Rule 'a' registered.
+> +b(X) <- base(X), !a(X)
+Script error: Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b]

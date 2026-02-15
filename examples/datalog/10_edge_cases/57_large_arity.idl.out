@@ -21,3 +21,25 @@ Inserted 1 fact(s) into 'wide10'.
 │   10 │   20 │   30 │   40 │   50 │   60 │   70 │   80 │   90 │  100 │
 └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
 2 rows
+> project(A, E, J) <- wide10(A, _, _, _, E, _, _, _, _, J)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    5 │   10 │
+│   10 │   50 │  100 │
+└──────┴──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?project(A, E, J)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    5 │   10 │
+│   10 │   50 │  100 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_arity_n10t57
+Knowledge graph 'test_large_arity_n10t57' dropped.

@@ -11,16 +11,5 @@ Switched to knowledge graph: test_gaps_n18t65
 Switched to knowledge graph: test_gaps_n18t65
 > +ids[(1,), (2,), (4,), (5,), (8,)]
 Inserted 5 fact(s) into 'ids'.
-> has_gap_after(X) <- ids(X), ids(Y), Y > X,
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    4 │
-│    5 │
-└──────┘
-4 rows
-(session: 1 rule(s))
-> Y = X + 1
-Script error: Parse error: Unrecognized statement: Y = X + 1
+> has_gap_after(X) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

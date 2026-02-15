@@ -11,3 +11,50 @@ Switched to knowledge graph: test_float_special_n11t48
 Switched to knowledge graph: test_float_special_n11t48
 > +divs[(10.0, 0.0), (5.0, 2.0), (-10.0, 0.0)]
 Inserted 3 fact(s) into 'divs'.
+> div_result(A, B, R) <- divs(A, B), B != 0.0, R = A / B
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│  5.0 │  2.0 │  2.5 │
+└──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?div_result(A, B, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│  5.0 │  2.0 │  2.5 │
+└──────┴──────┴──────┘
+1 rows
+> +big_floats[(1.0e308, 1), (1.0e-308, 2)]
+Inserted 2 fact(s) into 'big_floats'.
+> ?big_floats(Val, Id)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ 1e-308 │    2 │
+│  1e308 │    1 │
+└────────┴──────┘
+2 rows
+> +tiny[(1.0e-100, 2.0e-100)]
+Inserted 1 fact(s) into 'tiny'.
+> tiny_add(A, B, R) <- tiny(A, B), R = A + B
+┌────────┬────────┬────────┐
+│ col0   │ col1   │ col2   │
+├────────┼────────┼────────┤
+│ 1e-100 │ 2e-100 │ 3e-100 │
+└────────┴────────┴────────┘
+1 rows
+(session: 2 rule(s))
+> ?tiny_add(A, B, R)
+┌────────┬────────┬────────┐
+│ col0   │ col1   │ col2   │
+├────────┼────────┼────────┤
+│ 1e-100 │ 2e-100 │ 3e-100 │
+└────────┴────────┴────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_float_special_n11t48
+Knowledge graph 'test_float_special_n11t48' dropped.

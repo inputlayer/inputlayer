@@ -11,3 +11,25 @@ Switched to knowledge graph: test_concat_n35t06
 Switched to knowledge graph: test_concat_n35t06
 > +parts[("hello", " ", "world"), ("foo", "", "bar")]
 Inserted 2 fact(s) into 'parts'.
+> concat_result(A, B, C, R) <- parts(A, B, C), R = CONCAT(A, B, C)
+┌─────────┬──────┬─────────┬───────────────┐
+│ col0    │ col1 │ col2    │ col3          │
+├─────────┼──────┼─────────┼───────────────┤
+│ "foo"   │ ""   │ "bar"   │ "foobar"      │
+│ "hello" │ " "  │ "world" │ "hello world" │
+└─────────┴──────┴─────────┴───────────────┘
+2 rows
+(session: 1 rule(s))
+> ?concat_result(A, B, C, R)
+┌─────────┬──────┬─────────┬───────────────┐
+│ col0    │ col1 │ col2    │ col3          │
+├─────────┼──────┼─────────┼───────────────┤
+│ "foo"   │ ""   │ "bar"   │ "foobar"      │
+│ "hello" │ " "  │ "world" │ "hello world" │
+└─────────┴──────┴─────────┴───────────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_concat_n35t06
+Knowledge graph 'test_concat_n35t06' dropped.

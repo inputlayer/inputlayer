@@ -11,3 +11,27 @@ Switched to knowledge graph: test_divide_n15t32
 Switched to knowledge graph: test_divide_n15t32
 > +nums[(10, 2), (15, 4), (20, 3)]
 Inserted 3 fact(s) into 'nums'.
+> quotient(A, B, Result) <- nums(A, B), Result = A / B
+┌──────┬──────┬───────────────────┐
+│ col0 │ col1 │ col2              │
+├──────┼──────┼───────────────────┤
+│   10 │    2 │               5.0 │
+│   15 │    4 │              3.75 │
+│   20 │    3 │ 6.666666666666667 │
+└──────┴──────┴───────────────────┘
+3 rows
+(session: 1 rule(s))
+> ?quotient(A, B, R)
+┌──────┬──────┬───────────────────┐
+│ col0 │ col1 │ col2              │
+├──────┼──────┼───────────────────┤
+│   10 │    2 │               5.0 │
+│   15 │    4 │              3.75 │
+│   20 │    3 │ 6.666666666666667 │
+└──────┴──────┴───────────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_divide_n15t32
+Knowledge graph 'test_divide_n15t32' dropped.

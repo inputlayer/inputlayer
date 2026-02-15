@@ -11,3 +11,13 @@ Switched to knowledge graph: test_contains_n35t10
 Switched to knowledge graph: test_contains_n35t10
 > +words[("hello world",), ("goodbye",), ("hello there",)]
 Inserted 3 fact(s) into 'words'.
+> has_hello(S) <- words(S), CONTAINS(S, "hello")
+No results.
+(session: 1 rule(s))
+> ?has_hello(S)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_contains_n35t10
+Knowledge graph 'test_contains_n35t10' dropped.

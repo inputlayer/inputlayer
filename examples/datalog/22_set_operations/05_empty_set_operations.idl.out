@@ -13,3 +13,66 @@ Switched to knowledge graph: test_empty_sets_n22t05
 Inserted 3 fact(s) into 'nonempty'.
 > +empty[]
 Inserted 0 fact(s) into 'empty'.
+> union_result(X) <- nonempty(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> union_result(X) <- empty(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> ?union_result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> inter_result(X) <- nonempty(X), empty(X)
+No results.
+(session: 3 rule(s))
+> ?inter_result(X)
+No results.
+> diff_empty(X) <- empty(X), !nonempty(X)
+No results.
+(session: 4 rule(s))
+> ?diff_empty(X)
+No results.
+> diff_result(X) <- nonempty(X), !empty(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 5 rule(s))
+> ?diff_result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_empty_sets_n22t05
+Knowledge graph 'test_empty_sets_n22t05' dropped.

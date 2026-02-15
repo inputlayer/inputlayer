@@ -11,3 +11,27 @@ Switched to knowledge graph: test_time_decay_n29t04
 Switched to knowledge graph: test_time_decay_n29t04
 > +events[(1, 1000000, 1000000, 1000), (2, 999000, 1000000, 1000), (3, 998000, 1000000, 1000)]
 Inserted 3 fact(s) into 'events'.
+> decay_result(Id, Weight) <- events(Id, Ts, Now, HalfLife), Weight = time_decay(Ts, Now, HalfLife)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  1.0 │
+│    2 │  0.5 │
+│    3 │ 0.25 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?decay_result(Id, Weight)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  1.0 │
+│    2 │  0.5 │
+│    3 │ 0.25 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_time_decay_n29t04
+Knowledge graph 'test_time_decay_n29t04' dropped.

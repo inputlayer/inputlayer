@@ -17,3 +17,29 @@ Inserted 1 fact(s) into 'vectors'.
 Inserted 1 fact(s) into 'vectors'.
 > +vectors[(4, [-1.0, 0.0, 0.0, 0.0])]
 Inserted 1 fact(s) into 'vectors'.
+> bucket_result(Id, Bucket) <- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    8 │
+│    2 │    8 │
+│    3 │    8 │
+│    4 │    7 │
+└──────┴──────┘
+4 rows
+(session: 1 rule(s))
+> ?bucket_result(Id, Bucket)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    8 │
+│    2 │    8 │
+│    3 │    8 │
+│    4 │    7 │
+└──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_bucket_n31t01
+Knowledge graph 'test_lsh_bucket_n31t01' dropped.

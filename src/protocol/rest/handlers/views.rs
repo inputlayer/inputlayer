@@ -281,3 +281,176 @@ pub async fn delete_view(
         error: None,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::rest::dto::CreateViewRequest;
+    use crate::Config;
+
+    fn make_handler() -> Arc<Handler> {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        Arc::new(Handler::from_config(config).unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_list_views_empty() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("views_empty_kg")
+            .unwrap();
+        let result = list_views(Extension(handler), Path("views_empty_kg".to_string()))
+            .await
+            .unwrap();
+        let data = result.0.data.unwrap();
+        assert!(data.views.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_and_list_view() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("views_create_kg".to_string()),
+                "+base[(1,), (2,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let request = CreateViewRequest {
+            name: "doubled".to_string(),
+            definition: "doubled(X, Y) <- base(X), Y = X * 2".to_string(),
+        };
+        let created = create_view(
+            Extension(handler.clone()),
+            Path("views_create_kg".to_string()),
+            Json(request),
+        )
+        .await
+        .unwrap();
+        let view = created.0.data.unwrap();
+        assert_eq!(view.name, "doubled");
+        assert_eq!(view.arity, 2);
+
+        let list = list_views(Extension(handler), Path("views_create_kg".to_string()))
+            .await
+            .unwrap();
+        let data = list.0.data.unwrap();
+        assert!(data.views.iter().any(|v| v.name == "doubled"));
+    }
+
+    #[tokio::test]
+    async fn test_get_view() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("views_get_kg".to_string()),
+                "+src[(1,)]\n+my_view(X) <- src(X)".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_view(
+            Extension(handler),
+            Path(("views_get_kg".to_string(), "my_view".to_string())),
+        )
+        .await
+        .unwrap();
+        let view = result.0.data.unwrap();
+        assert_eq!(view.name, "my_view");
+        assert_eq!(view.arity, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_view_not_found() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("views_nf_kg")
+            .unwrap();
+        let result = get_view(
+            Extension(handler),
+            Path(("views_nf_kg".to_string(), "ghost".to_string())),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_view_data() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("views_data_kg".to_string()),
+                "+numbers[(1,), (2,), (3,)]\n+tripled(X, Y) <- numbers(X), Y = X * 3".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_view_data(
+            Extension(handler),
+            Path(("views_data_kg".to_string(), "tripled".to_string())),
+            Query(RelationDataQuery {
+                offset: None,
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.total_count, 3);
+        assert_eq!(data.row_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_delete_view() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("views_del_kg".to_string()),
+                "+src[(1,)]\n+del_view(X) <- src(X)".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = delete_view(
+            Extension(handler),
+            Path(("views_del_kg".to_string(), "del_view".to_string())),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_view_not_found() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("views_delnf_kg")
+            .unwrap();
+        let result = delete_view(
+            Extension(handler),
+            Path(("views_delnf_kg".to_string(), "missing".to_string())),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_view_invalid_definition() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("views_inv_kg")
+            .unwrap();
+        let request = CreateViewRequest {
+            name: "bad_view".to_string(),
+            definition: "totally invalid!!!".to_string(),
+        };
+        let result = create_view(
+            Extension(handler),
+            Path("views_inv_kg".to_string()),
+            Json(request),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+}

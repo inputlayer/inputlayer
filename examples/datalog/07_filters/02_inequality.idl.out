@@ -11,3 +11,17 @@ Switched to knowledge graph: test_neq_n07t02
 Switched to knowledge graph: test_neq_n07t02
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)]
 Inserted 5 fact(s) into 'edge'.
+> +non_loop(X, Y) <- edge(X, Y), X != Y
+Rule 'non_loop' registered.
+> ?non_loop(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neq_n07t02
+Knowledge graph 'test_neq_n07t02' dropped.

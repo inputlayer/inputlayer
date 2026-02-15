@@ -11,3 +11,5 @@ Switched to knowledge graph: test_count_dist_grp_n14t70
 Switched to knowledge graph: test_count_dist_grp_n14t70
 > +visits[(1, "Alice", "homepage"), (2, "Bob", "homepage"), (3, "Alice", "products"), (4, "Alice", "homepage"), (5, "Bob", "checkout")]
 Inserted 5 fact(s) into 'visits'.
+> +pages_per_user(User, <COUNT_DISTINCT:Page>) <- visits(_, User, Page)
+Script error: Parse error: Unknown aggregate function: 

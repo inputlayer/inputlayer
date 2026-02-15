@@ -24,3 +24,17 @@ Inserted 3 fact(s) into 'source'.
 │    5 │    6 │
 └──────┴──────┘
 5 rows
+> -edge(X, Y) <- source(X)
+Conditional delete: 3 fact(s) deleted from 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │    4 │
+│    4 │    5 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cond_del_05_n27t05
+Knowledge graph 'test_cond_del_05_n27t05' dropped.

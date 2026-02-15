@@ -11,3 +11,66 @@ Switched to knowledge graph: test_sess_rules_facts_n04t03
 Switched to knowledge graph: test_sess_rules_facts_n04t03
 > human("socrates")
 Session fact added for 'human'. (Use +human(...) to persist)
+> mortal(X) <- human(X)
+┌────────────┐
+│ col0       │
+├────────────┤
+│ "socrates" │
+└────────────┘
+1 rows
+(session: 1 rule(s))
+> ?mortal(X)
+┌────────────┐
+│ col0       │
+├────────────┤
+│ "socrates" │
+└────────────┘
+1 rows
+> .session
+Session facts (1):
+  1. human("socrates")
+Session rules (1):
+  1. mortal(X) <- human(X)
+> human("plato")
+Session fact added for 'human'. (Use +human(...) to persist)
+> human("aristotle")
+Session fact added for 'human'. (Use +human(...) to persist)
+> ?mortal(X)
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ "aristotle" │
+│ "plato"     │
+│ "socrates"  │
+└─────────────┘
+3 rows
+> wise(X) <- mortal(X)
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ "aristotle" │
+│ "plato"     │
+│ "socrates"  │
+└─────────────┘
+3 rows
+(session: 2 rule(s))
+> ?wise(X)
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ "aristotle" │
+│ "plato"     │
+│ "socrates"  │
+└─────────────┘
+3 rows
+> .session clear
+Cleared 3 session fact(s), 2 session rule(s).
+> .session
+No session data defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_rules_facts_n04t03
+Knowledge graph 'test_sess_rules_facts_n04t03' dropped.
+> .kg list
+Knowledge Graphs:
+  default *

@@ -11,3 +11,25 @@ Switched to knowledge graph: test_const_head_n21t59
 Switched to knowledge graph: test_const_head_n21t59
 > +items[(1, 100), (2, 200)]
 Inserted 2 fact(s) into 'items'.
+> with_const(Id, Price, "USD") <- items(Id, Price)
+┌──────┬──────┬───────┐
+│ col0 │ col1 │ col2  │
+├──────┼──────┼───────┤
+│    1 │  100 │ "USD" │
+│    2 │  200 │ "USD" │
+└──────┴──────┴───────┘
+2 rows
+(session: 1 rule(s))
+> ?with_const(Id, P, C)
+┌──────┬──────┬───────┐
+│ col0 │ col1 │ col2  │
+├──────┼──────┼───────┤
+│    1 │  100 │ "USD" │
+│    2 │  200 │ "USD" │
+└──────┴──────┴───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_const_head_n21t59
+Knowledge graph 'test_const_head_n21t59' dropped.

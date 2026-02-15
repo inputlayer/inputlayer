@@ -22,3 +22,33 @@ Inserted 3 fact(s) into 'float_vals'.
 └──────┘
 2 rows
 (session: 1 rule(s))
+> small_float(X) <- float_vals(X), X < 3
+┌──────┐
+│ col0 │
+├──────┤
+│  1.5 │
+│  2.5 │
+└──────┘
+2 rows
+(session: 2 rule(s))
+> ?big_int(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    3 │
+└──────┘
+2 rows
+> ?small_float(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  1.5 │
+│  2.5 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_mixed_cmp_n11t50
+Knowledge graph 'test_mixed_cmp_n11t50' dropped.

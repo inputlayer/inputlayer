@@ -13,3 +13,27 @@ Switched to knowledge graph: test_neg_comp_n08t56
 Inserted 5 fact(s) into 'nums'.
 > +thresholds[(3,)]
 Inserted 1 fact(s) into 'thresholds'.
+> below_threshold(X) <- nums(X), thresholds(T), X <= T
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> ?below_threshold(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_comp_n08t56
+Knowledge graph 'test_neg_comp_n08t56' dropped.

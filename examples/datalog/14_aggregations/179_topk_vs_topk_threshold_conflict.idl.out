@@ -11,3 +11,15 @@ Switched to knowledge graph: test_topk_thresh_n14t179
 Switched to knowledge graph: test_topk_thresh_n14t179
 > +score[(1, 50), (2, 250), (3, 175), (4, 300)]
 Inserted 4 fact(s) into 'score'.
+> +best(top_k<2, Player, Points:desc>) <- score(Player, Points)
+Rule 'best' registered.
+> ?best(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    4 │  300 │
+└──────┴──────┘
+2 rows
+> +best(top_k_threshold<2, 100, Player, Points:desc>) <- score(Player, Points)
+Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'top_k_threshold<2, 100, Player, Points:desc>' to rule 'best' which already has a clause with 'top_k<2, Player, Points:desc>'. Drop the rule first with '.rule drop best' and re-create it.

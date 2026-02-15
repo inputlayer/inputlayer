@@ -7,7 +7,7 @@
 //! ## Architecture
 //!
 //! ```text
-//! Base Relations (DDComputation)
+//! Base Relations (IncrementalEngine)
 //!        |
 //!        |--- edge(u, v)
 //!        |--- embeddings(id, vec)
@@ -598,5 +598,190 @@ mod tests {
         assert_eq!(stats.materialized_count, 1);
         assert_eq!(stats.invalid_count, 1); // b is not materialized
         assert_eq!(stats.total_tuples, 2);
+    }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_new_manager_empty() {
+        let manager = DerivedRelationsManager::new();
+        assert!(!manager.is_derived("anything"));
+        assert!(manager.get_rule("anything").is_none());
+        assert!(manager.get_materialized("anything").is_none());
+        assert!(manager.get_execution_order().is_empty());
+        let stats = manager.stats();
+        assert_eq!(stats.total_rules, 0);
+        assert_eq!(stats.materialized_count, 0);
+    }
+
+    #[test]
+    fn test_default_trait() {
+        let manager = DerivedRelationsManager::default();
+        assert_eq!(manager.stats().total_rules, 0);
+    }
+
+    #[test]
+    fn test_materialized_relation_new() {
+        let tuples = vec![make_tuple(vec![1, 2])];
+        let mut base_versions = HashMap::new();
+        base_versions.insert("edge".to_string(), 5u64);
+        let mat = MaterializedRelation::new(tuples, base_versions.clone());
+        assert!(mat.valid);
+        assert_eq!(mat.tuples.len(), 1);
+        assert!(mat.materialized_at > 0);
+        assert!(mat.is_valid_for(&base_versions));
+    }
+
+    #[test]
+    fn test_materialized_relation_invalidate() {
+        let mat_tuples = vec![make_tuple(vec![1])];
+        let mut mat = MaterializedRelation::new(mat_tuples, HashMap::new());
+        assert!(mat.valid);
+        mat.invalidate();
+        assert!(!mat.valid);
+        assert!(!mat.is_valid_for(&HashMap::new()));
+    }
+
+    #[test]
+    fn test_materialized_relation_version_check() {
+        let mut base_versions = HashMap::new();
+        base_versions.insert("edge".to_string(), 5u64);
+        let mat = MaterializedRelation::new(vec![], base_versions);
+
+        // Same version → valid
+        let mut current = HashMap::new();
+        current.insert("edge".to_string(), 5u64);
+        assert!(mat.is_valid_for(&current));
+
+        // Higher version → invalid
+        current.insert("edge".to_string(), 6u64);
+        assert!(!mat.is_valid_for(&current));
+    }
+
+    #[test]
+    fn test_get_materialized_if_valid() {
+        let mut manager = DerivedRelationsManager::new();
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+        manager.set_materialized("path", vec![make_tuple(vec![1])]);
+
+        // Should be valid
+        assert!(manager.get_materialized_if_valid("path").is_some());
+
+        // After base update, should be invalid
+        manager.notify_base_update("edge");
+        assert!(manager.get_materialized_if_valid("path").is_none());
+    }
+
+    #[test]
+    fn test_get_base_dependencies() {
+        let mut manager = DerivedRelationsManager::new();
+        let rule = make_compiled_rule("path", vec!["edge", "node"], 0);
+        manager.register_rule(rule);
+
+        let deps = manager.get_base_dependencies("path").unwrap();
+        assert!(deps.contains("edge"));
+        assert!(deps.contains("node"));
+        assert_eq!(deps.len(), 2);
+
+        assert!(manager.get_base_dependencies("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_dependent_derived_nonexistent() {
+        let manager = DerivedRelationsManager::new();
+        assert!(manager.get_dependent_derived("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_notify_base_update_no_dependents() {
+        let mut manager = DerivedRelationsManager::new();
+        let invalidated = manager.notify_base_update("unrelated");
+        assert!(invalidated.is_empty());
+    }
+
+    #[test]
+    fn test_remove_rule_cleans_up_dependencies() {
+        let mut manager = DerivedRelationsManager::new();
+        let rule = make_compiled_rule("path", vec!["edge"], 0);
+        manager.register_rule(rule);
+
+        assert!(manager
+            .get_dependent_derived("edge")
+            .unwrap()
+            .contains("path"));
+
+        manager.remove_rule("path");
+
+        // edge should no longer point to path
+        let deps = manager.get_dependent_derived("edge");
+        assert!(deps.is_none() || !deps.unwrap().contains("path"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_rule() {
+        let mut manager = DerivedRelationsManager::new();
+        // Should not panic
+        manager.remove_rule("nonexistent");
+    }
+
+    #[test]
+    fn test_register_rule_with_recursive() {
+        let mut rule = make_compiled_rule("path", vec!["edge"], 0);
+        rule.is_recursive = true;
+        let mut manager = DerivedRelationsManager::new();
+        manager.register_rule(rule);
+        assert!(manager.get_rule("path").unwrap().is_recursive);
+    }
+
+    #[test]
+    fn test_execution_order_empty() {
+        let manager = DerivedRelationsManager::new();
+        assert!(manager.get_execution_order().is_empty());
+    }
+
+    #[test]
+    fn test_multiple_rules_same_base() {
+        let mut manager = DerivedRelationsManager::new();
+        manager.register_rule(make_compiled_rule("r1", vec!["edge"], 0));
+        manager.register_rule(make_compiled_rule("r2", vec!["edge"], 0));
+        manager.register_rule(make_compiled_rule("r3", vec!["edge"], 0));
+
+        let dependents = manager.get_dependent_derived("edge").unwrap();
+        assert_eq!(dependents.len(), 3);
+
+        // Invalidating edge should invalidate all 3
+        manager.set_materialized("r1", vec![]);
+        manager.set_materialized("r2", vec![]);
+        manager.set_materialized("r3", vec![]);
+        let invalidated = manager.notify_base_update("edge");
+        assert_eq!(invalidated.len(), 3);
+    }
+
+    #[test]
+    fn test_overwrite_rule() {
+        let mut manager = DerivedRelationsManager::new();
+        manager.register_rule(make_compiled_rule("path", vec!["edge"], 0));
+        manager.set_materialized("path", vec![make_tuple(vec![1])]);
+
+        // Re-register with different deps
+        manager.register_rule(make_compiled_rule("path", vec!["node"], 1));
+        assert_eq!(manager.get_rule("path").unwrap().stratum, 1);
+    }
+
+    #[test]
+    fn test_stats_after_invalidation() {
+        let mut manager = DerivedRelationsManager::new();
+        manager.register_rule(make_compiled_rule("path", vec!["edge"], 0));
+        manager.set_materialized("path", vec![make_tuple(vec![1])]);
+
+        let stats = manager.stats();
+        assert_eq!(stats.materialized_count, 1);
+        assert_eq!(stats.total_tuples, 1);
+
+        manager.notify_base_update("edge");
+        let stats = manager.stats();
+        assert_eq!(stats.materialized_count, 0);
+        assert_eq!(stats.invalid_count, 1);
     }
 }

@@ -11,3 +11,29 @@ Switched to knowledge graph: test_nested_grp_n14t60
 Switched to knowledge graph: test_nested_grp_n14t60
 > +sales[("2024", "Q1", "A", 100), ("2024", "Q1", "B", 150), ("2024", "Q2", "A", 200), ("2025", "Q1", "A", 300)]
 Inserted 4 fact(s) into 'sales'.
+> sum_by_all(Year, Qtr, Cat, sum<Val>) <- sales(Year, Qtr, Cat, Val)
+┌────────┬──────┬──────┬──────┐
+│ col0   │ col1 │ col2 │ col3 │
+├────────┼──────┼──────┼──────┤
+│ "2024" │ "Q1" │ "A"  │  100 │
+│ "2024" │ "Q1" │ "B"  │  150 │
+│ "2024" │ "Q2" │ "A"  │  200 │
+│ "2025" │ "Q1" │ "A"  │  300 │
+└────────┴──────┴──────┴──────┘
+4 rows
+(session: 1 rule(s))
+> ?sum_by_all(Year, Qtr, Cat, Total)
+┌────────┬──────┬──────┬──────┐
+│ col0   │ col1 │ col2 │ col3 │
+├────────┼──────┼──────┼──────┤
+│ "2024" │ "Q1" │ "A"  │  100 │
+│ "2024" │ "Q1" │ "B"  │  150 │
+│ "2024" │ "Q2" │ "A"  │  200 │
+│ "2025" │ "Q1" │ "A"  │  300 │
+└────────┴──────┴──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_nested_grp_n14t60
+Knowledge graph 'test_nested_grp_n14t60' dropped.

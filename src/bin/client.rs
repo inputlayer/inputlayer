@@ -133,6 +133,8 @@ struct ColumnDef {
 #[derive(Debug, Deserialize)]
 struct WireTuple {
     values: Vec<WireValue>,
+    #[serde(default)]
+    provenance: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -475,6 +477,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => {
                 println!("Script error: {e}");
                 if !args.repl {
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
                     std::process::exit(1);
                 }
             }
@@ -596,10 +599,11 @@ fn is_complete_statement(line: &str) -> bool {
     if stripped.starts_with('.') {
         return true;
     }
-    // Track delimiter balance: (), [], <>
+    // Track delimiter balance: (), []
+    // Note: angle brackets are NOT tracked because `<-` arrows
+    // would create false imbalance (the `<` is not a delimiter).
     let mut paren: i32 = 0;
     let mut bracket: i32 = 0;
-    let mut angle: i32 = 0;
     let mut in_string = false;
     for c in stripped.chars() {
         match c {
@@ -608,12 +612,10 @@ fn is_complete_statement(line: &str) -> bool {
             ')' if !in_string => paren -= 1,
             '[' if !in_string => bracket += 1,
             ']' if !in_string => bracket -= 1,
-            '<' if !in_string => angle += 1,
-            '>' if !in_string => angle -= 1,
             _ => {}
         }
     }
-    paren <= 0 && bracket <= 0 && angle <= 0
+    paren <= 0 && bracket <= 0
 }
 
 async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error>> {
@@ -2143,5 +2145,62 @@ mod tests {
             "Expected helpful suggestion, got: {}",
             err
         );
+    }
+
+    // is_complete_statement tests
+    #[test]
+    fn test_complete_statement_simple_fact() {
+        assert!(is_complete_statement("+edge(1, 2)"));
+    }
+
+    #[test]
+    fn test_complete_statement_rule_with_arrow() {
+        // The `<-` arrow must NOT cause the statement to be incomplete
+        assert!(is_complete_statement("path(X, Y) <- edge(X, Y)"));
+    }
+
+    #[test]
+    fn test_complete_statement_rule_with_comparison() {
+        assert!(is_complete_statement("path(X, Y) <- edge(X, Y), X > 1"));
+    }
+
+    #[test]
+    fn test_complete_statement_meta_command() {
+        assert!(is_complete_statement(".session clear"));
+        assert!(is_complete_statement(".kg list"));
+    }
+
+    #[test]
+    fn test_complete_statement_empty() {
+        assert!(!is_complete_statement(""));
+        assert!(!is_complete_statement("   "));
+    }
+
+    #[test]
+    fn test_complete_statement_unbalanced_parens() {
+        assert!(!is_complete_statement("edge(1, 2"));
+    }
+
+    #[test]
+    fn test_complete_statement_balanced_brackets() {
+        assert!(is_complete_statement("+edge[(1,2), (3,4)]"));
+    }
+
+    #[test]
+    fn test_complete_statement_aggregate_with_angle_brackets() {
+        // Aggregates use angle brackets but should still be complete
+        assert!(is_complete_statement(
+            "top2(top_k<2, X, Y:desc>) <- score(X, Y)"
+        ));
+    }
+
+    #[test]
+    fn test_complete_statement_query() {
+        assert!(is_complete_statement("?path(1, X)"));
+    }
+
+    #[test]
+    fn test_complete_statement_session_rule_no_plus() {
+        assert!(is_complete_statement("mortal(X) <- human(X)"));
     }
 }

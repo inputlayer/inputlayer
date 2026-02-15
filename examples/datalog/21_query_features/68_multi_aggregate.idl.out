@@ -11,3 +11,47 @@ Switched to knowledge graph: test_multi_agg_n21t68
 Switched to knowledge graph: test_multi_agg_n21t68
 > +sales[("Electronics", 100), ("Electronics", 200), ("Electronics", 150), ("Clothing", 50), ("Clothing", 75), ("Clothing", 60)]
 Inserted 6 fact(s) into 'sales'.
+> +stats_sum(Cat, sum<Amt>) <- sales(Cat, Amt)
+Rule 'stats_sum' registered.
+> +stats_count(Cat, count<Amt>) <- sales(Cat, Amt)
+Rule 'stats_count' registered.
+> +stats_min(Cat, min<Amt>) <- sales(Cat, Amt)
+Rule 'stats_min' registered.
+> +stats_max(Cat, max<Amt>) <- sales(Cat, Amt)
+Rule 'stats_max' registered.
+> ?stats_sum(Cat, Sum)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "Clothing"    │  185 │
+│ "Electronics" │  450 │
+└───────────────┴──────┘
+2 rows
+> ?stats_count(Cat, Count)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "Clothing"    │    3 │
+│ "Electronics" │    3 │
+└───────────────┴──────┘
+2 rows
+> ?stats_min(Cat, Min)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "Clothing"    │   50 │
+│ "Electronics" │  100 │
+└───────────────┴──────┘
+2 rows
+> ?stats_max(Cat, Max)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "Clothing"    │   75 │
+│ "Electronics" │  200 │
+└───────────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n21t68
+Knowledge graph 'test_multi_agg_n21t68' dropped.

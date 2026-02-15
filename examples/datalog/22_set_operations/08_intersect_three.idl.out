@@ -15,3 +15,23 @@ Inserted 3 fact(s) into 'set_a'.
 Inserted 3 fact(s) into 'set_b'.
 > +set_c[(3,), (4,), (5,)]
 Inserted 3 fact(s) into 'set_c'.
+> intersect_all(X) <- set_a(X), set_b(X), set_c(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?intersect_all(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_intersect3_n22t08
+Knowledge graph 'test_intersect3_n22t08' dropped.

@@ -13,3 +13,23 @@ Switched to knowledge graph: test_count_join_n14t37
 Inserted 4 fact(s) into 'orders'.
 > +vip[("Alice",), ("Bob",)]
 Inserted 2 fact(s) into 'vip'.
+> vip_order_count(count<OId>) <- orders(OId, Name), vip(Name)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?vip_order_count(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_count_join_n14t37
+Knowledge graph 'test_count_join_n14t37' dropped.

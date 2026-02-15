@@ -99,11 +99,12 @@
 
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
-pub mod dd_computation;
 pub mod derived_relations; // Derived relation materialization
 pub mod hnsw_index; // HNSW vector index implementation
+pub mod incremental;
 pub mod index_manager; // Index manager for vector similarity search
 pub mod ir;
+pub mod session; // Session manager for ephemeral triggers persistent
 
 // Re-export types from internal modules
 pub use crate::ast::builders::{fact, simple_rule, AtomBuilder, RuleBuilder};
@@ -247,6 +248,12 @@ pub use parser::{parse_program, parse_rule};
 
 // Re-export rule catalog
 pub use rule_catalog::{validate_rule, validate_rules_stratification, RuleCatalog, RuleDefinition};
+
+// Re-export session types
+pub use session::{
+    AuditEvent, AuditLog, Provenance, QueryMetadata, SessionConfig, SessionId, SessionManager,
+    SessionStats,
+};
 
 // Re-export index types
 pub use hnsw_index::HnswIndex;

@@ -13,3 +13,11 @@ Switched to knowledge graph: test_neg_empty_n08t03
 Inserted 3 fact(s) into 'edge'.
 > +blocked[(1,2), (2,3), (3,4)]
 Inserted 3 fact(s) into 'blocked'.
+> +allowed(X, Y) <- edge(X, Y), !blocked(X, Y)
+Rule 'allowed' registered.
+> ?allowed(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_empty_n08t03
+Knowledge graph 'test_neg_empty_n08t03' dropped.

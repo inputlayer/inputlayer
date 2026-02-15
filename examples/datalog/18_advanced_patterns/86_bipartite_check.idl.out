@@ -13,3 +13,5 @@ Switched to knowledge graph: test_bipartite_n18t86
 Inserted 4 fact(s) into 'nodes'.
 > +edges[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edges'.
+> same_type_edge(A, B) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

@@ -11,3 +11,42 @@ Switched to knowledge graph: test_lt_n07t40
 Switched to knowledge graph: test_lt_n07t40
 > +temps[(1, 30), (2, 15), (3, -5), (4, 25), (5, 0)]
 Inserted 5 fact(s) into 'temps'.
+> freezing(Id, Temp) <- temps(Id, Temp), Temp < 0
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │   -5 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> cold(Id, Temp) <- temps(Id, Temp), Temp < 20
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   15 │
+│    3 │   -5 │
+│    5 │    0 │
+└──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?freezing(Id, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │   -5 │
+└──────┴──────┘
+1 rows
+> ?cold(Id, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   15 │
+│    3 │   -5 │
+│    5 │    0 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_lt_n07t40
+Knowledge graph 'test_lt_n07t40' dropped.

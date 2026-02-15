@@ -188,3 +188,163 @@ pub async fn get_relation_data(
 
     Ok(Json(ApiResponse::success(data)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Config;
+
+    fn make_handler() -> Arc<Handler> {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        Arc::new(Handler::from_config(config).unwrap())
+    }
+
+    #[test]
+    fn test_generate_variables_small() {
+        let vars = generate_variables(3);
+        assert_eq!(vars, vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn test_generate_variables_zero() {
+        let vars = generate_variables(0);
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn test_generate_variables_26() {
+        let vars = generate_variables(26);
+        assert_eq!(vars[0], "A");
+        assert_eq!(vars[25], "Z");
+    }
+
+    #[test]
+    fn test_generate_variables_over_26() {
+        let vars = generate_variables(28);
+        assert_eq!(vars[26], "A1");
+        assert_eq!(vars[27], "B1");
+    }
+
+    #[tokio::test]
+    async fn test_list_relations_empty() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("list_rel_kg")
+            .unwrap();
+        let result = list_relations(Extension(handler), Path("list_rel_kg".to_string()))
+            .await
+            .unwrap();
+        let data = result.0.data.unwrap();
+        assert!(data.relations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_relations_with_data() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("list_rel_d_kg".to_string()),
+                "+alpha[(1, 2)]\n+beta[(3,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = list_relations(Extension(handler), Path("list_rel_d_kg".to_string()))
+            .await
+            .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.relations.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_relation() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("get_rel_d_kg".to_string()),
+                "+edge[(1, 2), (3, 4)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_relation(
+            Extension(handler),
+            Path(("get_rel_d_kg".to_string(), "edge".to_string())),
+        )
+        .await
+        .unwrap();
+        let rel = result.0.data.unwrap();
+        assert_eq!(rel.name, "edge");
+        assert_eq!(rel.arity, 2);
+        assert_eq!(rel.tuple_count, 2);
+        assert!(!rel.is_view);
+    }
+
+    #[tokio::test]
+    async fn test_get_relation_not_found() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("get_rel_nf_kg")
+            .unwrap();
+        let result = get_relation(
+            Extension(handler),
+            Path(("get_rel_nf_kg".to_string(), "missing".to_string())),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_relation_data() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("rel_data_kg".to_string()),
+                "+points[(1,), (2,), (3,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_relation_data(
+            Extension(handler),
+            Path(("rel_data_kg".to_string(), "points".to_string())),
+            Query(RelationDataQuery {
+                offset: None,
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.name, "points");
+        assert_eq!(data.total_count, 3);
+        assert_eq!(data.row_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_get_relation_data_with_pagination() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("rel_page_kg".to_string()),
+                "+nums[(1,), (2,), (3,), (4,), (5,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_relation_data(
+            Extension(handler),
+            Path(("rel_page_kg".to_string(), "nums".to_string())),
+            Query(RelationDataQuery {
+                offset: Some(1),
+                limit: Some(2),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.total_count, 5);
+        assert_eq!(data.row_count, 2);
+        assert_eq!(data.offset, Some(1));
+        assert_eq!(data.limit, Some(2));
+    }
+}

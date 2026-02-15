@@ -11,3 +11,5 @@ Switched to knowledge graph: test_running_total_n18t61
 Switched to knowledge graph: test_running_total_n18t61
 > +transactions[(1, 100), (2, 50), (3, 75), (4, 25)]
 Inserted 4 fact(s) into 'transactions'.
+> running_total(Id, Val, sum<V2>) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

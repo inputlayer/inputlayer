@@ -19,5 +19,21 @@ Inserted 4 fact(s) into 'products'.
 │    3 │ "tablet" │  399 │   75 │
 └──────┴──────────┴──────┴──────┘
 2 rows
-> ?products(Id, Name, Price, Stock), Price < 300 ?products(Id, Name, Price, Stock), Stock > 150
-Script error: Parse error: Invalid term: '300 ?products(Id, Name, Price, Stock)'
+> ?products(Id, Name, Price, Stock), Price < 300
+┌──────┬─────────┬──────┬──────┐
+│ col0 │ col1    │ col2 │ col3 │
+├──────┼─────────┼──────┼──────┤
+│    4 │ "watch" │  199 │  200 │
+└──────┴─────────┴──────┴──────┘
+1 rows
+> ?products(Id, Name, Price, Stock), Stock > 150
+┌──────┬─────────┬──────┬──────┐
+│ col0 │ col1    │ col2 │ col3 │
+├──────┼─────────┼──────┼──────┤
+│    4 │ "watch" │  199 │  200 │
+└──────┴─────────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_n21t65
+Knowledge graph 'test_nested_n21t65' dropped.

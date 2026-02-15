@@ -11,3 +11,63 @@ Switched to knowledge graph: test_having_n14t11
 Switched to knowledge graph: test_having_n14t11
 > +orders[(1, 100), (1, 200), (1, 50), (2, 500), (2, 300), (3, 25), (3, 30), (3, 20), (4, 1000), (5, 100), (5, 100), (5, 100), (5, 100)]
 Inserted 10 fact(s) into 'orders'.
+> +customer_total(Customer, sum<Amount>) <- orders(Customer, Amount)
+Rule 'customer_total' registered.
+> ?customer_total(C, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  350 │
+│    2 │  800 │
+│    3 │   75 │
+│    4 │ 1000 │
+│    5 │  100 │
+└──────┴──────┘
+5 rows
+> +big_spenders(Customer, Total) <- customer_total(Customer, Total), Total > 300
+Rule 'big_spenders' registered.
+> ?big_spenders(C, T)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  350 │
+│    2 │  800 │
+│    4 │ 1000 │
+└──────┴──────┘
+3 rows
+> +order_count(Customer, count<Amount>) <- orders(Customer, Amount)
+Rule 'order_count' registered.
+> ?order_count(C, N)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    3 │
+│    2 │    2 │
+│    3 │    3 │
+│    4 │    1 │
+│    5 │    1 │
+└──────┴──────┘
+5 rows
+> +frequent_buyers(Customer, Count) <- order_count(Customer, Count), Count > 2
+Rule 'frequent_buyers' registered.
+> ?frequent_buyers(C, N)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    3 │
+│    3 │    3 │
+└──────┴──────┘
+2 rows
+> +vip_customers(Customer) <- big_spenders(Customer, _), frequent_buyers(Customer, _)
+Rule 'vip_customers' registered.
+> ?vip_customers(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_having_n14t11
+Knowledge graph 'test_having_n14t11' dropped.

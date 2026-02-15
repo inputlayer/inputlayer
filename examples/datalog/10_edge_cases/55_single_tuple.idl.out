@@ -18,3 +18,16 @@ Inserted 1 fact(s) into 'single'.
 │   42 │ "answer" │
 └──────┴──────────┘
 1 rows
+> +one_sum(sum<X>) <- single(X, _)
+Rule 'one_sum' registered.
+> ?one_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   42 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_single_n10t55
+Knowledge graph 'test_single_n10t55' dropped.

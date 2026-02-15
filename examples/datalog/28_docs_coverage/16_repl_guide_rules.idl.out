@@ -25,3 +25,50 @@ Rule 'adult' registered.
 │ "carol" │   25 │
 └─────────┴──────┘
 2 rows
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- path(X, Y), edge(Y, Z)
+Rule 'path' registered.
+> ?path(1, X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+└──────┴──────┘
+3 rows
+> +dept_count(Dept, count<Id>) <- employee(Id, Dept)
+Rule 'dept_count' registered.
+> ?dept_count(Dept, Count)
+┌───────────────┬──────┐
+│ col0          │ col1 │
+├───────────────┼──────┤
+│ "engineering" │    2 │
+│ "sales"       │    1 │
+└───────────────┴──────┘
+2 rows
+> temp_result(X, Y) <- edge(X, Y), X < Y
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?temp_result(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_repl_rules_n28t16
+Knowledge graph 'test_repl_rules_n28t16' dropped.

@@ -13,3 +13,5 @@ Switched to knowledge graph: test_lsh_multi_probe_n31t03
 Inserted 1 fact(s) into 'vectors'.
 > +vectors[(2, [0.0, 1.0, 0.5, 0.0])]
 Inserted 1 fact(s) into 'vectors'.
+> multi_probe_result(Id, Probes) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

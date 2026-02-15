@@ -33,3 +33,63 @@ Session facts (3):
 │   30 │
 └──────┘
 3 rows
+> derived(X) <- temp_data(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+│   30 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> .session
+Session facts (3):
+  1. temp_data(10)
+  2. temp_data(20)
+  3. temp_data(30)
+Session rules (1):
+  1. derived(X) <- temp_data(X)
+> ?derived(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+│   20 │
+│   30 │
+└──────┘
+3 rows
+> .session drop 1
+Removed rule 1: derived(X) <- temp_data(X)
+> .session
+Session facts (3):
+  1. temp_data(10)
+  2. temp_data(20)
+  3. temp_data(30)
+> another_derived(X) <- base_data(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> .session clear
+Cleared 3 session fact(s), 1 session rule(s).
+> .session
+No session data defined.
+> ?base_data(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_n39t05
+Knowledge graph 'test_session_n39t05' dropped.

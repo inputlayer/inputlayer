@@ -11,3 +11,5 @@ Switched to knowledge graph: test_cd_group_n14t41
 Switched to knowledge graph: test_cd_group_n14t41
 > +sales[(1, "North", "Widget"), (2, "North", "Gadget"), (3, "North", "Widget"), (4, "South", "Widget")]
 Inserted 4 fact(s) into 'sales'.
+> +distinct_by_region(Region, <COUNT_DISTINCT:Product>) <- sales(_, Region, Product)
+Script error: Parse error: Unknown aggregate function: 

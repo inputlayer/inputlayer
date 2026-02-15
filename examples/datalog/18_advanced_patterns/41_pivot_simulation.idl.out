@@ -11,3 +11,47 @@ Switched to knowledge graph: test_pivot_n18t41
 Switched to knowledge graph: test_pivot_n18t41
 > +sales[("Q1", 100), ("Q2", 200), ("Q3", 150), ("Q4", 300)]
 Inserted 4 fact(s) into 'sales'.
+> q1_sales(Val) <- sales("Q1", Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> q2_sales(Val) <- sales("Q2", Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+(session: 2 rule(s))
+> ?q1_sales(V)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?q2_sales(V)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+> +total(sum<Val>) <- sales(_, Val)
+Rule 'total' registered.
+> ?total(T)
+┌──────┐
+│ col0 │
+├──────┤
+│  750 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_pivot_n18t41
+Knowledge graph 'test_pivot_n18t41' dropped.

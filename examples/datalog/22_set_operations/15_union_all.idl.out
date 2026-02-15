@@ -13,3 +13,39 @@ Switched to knowledge graph: test_union_all_n22t15
 Inserted 3 fact(s) into 'set1'.
 > +set2[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set2'.
+> combined(X) <- set1(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> combined(X) <- set2(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+4 rows
+(session: 2 rule(s))
+> ?combined(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_union_all_n22t15
+Knowledge graph 'test_union_all_n22t15' dropped.

@@ -11,3 +11,47 @@ Switched to knowledge graph: test_chain_n10t86
 Switched to knowledge graph: test_chain_n10t86
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
+> step1(X, Y) <- base(X), Y = X + 1
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> step2(X, Y) <- step1(X, A), Y = A * 2
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    4 │
+│    2 │    6 │
+│    3 │    8 │
+└──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> step3(X, Y) <- step2(X, B), Y = B + 100
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  104 │
+│    2 │  106 │
+│    3 │  108 │
+└──────┴──────┘
+3 rows
+(session: 3 rule(s))
+> ?step3(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  104 │
+│    2 │  106 │
+│    3 │  108 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_chain_n10t86
+Knowledge graph 'test_chain_n10t86' dropped.

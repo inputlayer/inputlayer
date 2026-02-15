@@ -24,3 +24,5 @@ Inserted 1 fact(s) into 'embedding'.
 │    3 │ [0.25, 0.75, -0.25, -0.75] │ [42, 127, -43, -128] │ [42.0, 127.0, -43.0, -128.0] │
 └──────┴────────────────────────────┴──────────────────────┴──────────────────────────────┘
 3 rows
+> roundtrip(Id, Original, Quantized, Dequantized) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

@@ -11,3 +11,29 @@ Switched to knowledge graph: test_dup_col_n21t67
 Switched to knowledge graph: test_dup_col_n21t67
 > +pairs[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'pairs'.
+> +dup_first(X, Y, X) <- pairs(X, Y)
+Rule 'dup_first' registered.
+> ?dup_first(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │    1 │
+│    2 │   20 │    2 │
+│    3 │   30 │    3 │
+└──────┴──────┴──────┘
+3 rows
+> +triple_val(X, Y, Y, Y) <- pairs(X, Y)
+Rule 'triple_val' registered.
+> ?triple_val(A, B, C, D)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │   10 │   10 │   10 │
+│    2 │   20 │   20 │   20 │
+│    3 │   30 │   30 │   30 │
+└──────┴──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_col_n21t67
+Knowledge graph 'test_dup_col_n21t67' dropped.

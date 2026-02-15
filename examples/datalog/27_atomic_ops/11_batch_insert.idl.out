@@ -11,3 +11,23 @@ Switched to knowledge graph: test_batch_n27t11
 Switched to knowledge graph: test_batch_n27t11
 > +items[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")]
 Inserted 5 fact(s) into 'items'.
+> count_items(count<X>) <- items(X, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?count_items(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_batch_n27t11
+Knowledge graph 'test_batch_n27t11' dropped.

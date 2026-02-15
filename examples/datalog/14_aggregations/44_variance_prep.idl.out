@@ -11,3 +11,34 @@ Switched to knowledge graph: test_var_n14t44
 Switched to knowledge graph: test_var_n14t44
 > +vals[(10,), (20,), (30,)]
 Inserted 3 fact(s) into 'vals'.
+> +total(sum<V>) <- vals(V)
+Rule 'total' registered.
+> +sum_sq(sum<Sq>) <- vals(V), Sq = V * V
+Rule 'sum_sq' registered.
+> +n(count<V>) <- vals(V)
+Rule 'n' registered.
+> ?total(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> ?sum_sq(Sq)
+┌──────┐
+│ col0 │
+├──────┤
+│ 1400 │
+└──────┘
+1 rows
+> ?n(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_var_n14t44
+Knowledge graph 'test_var_n14t44' dropped.

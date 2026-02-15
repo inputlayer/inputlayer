@@ -11,3 +11,23 @@ Switched to knowledge graph: test_compound_n15t38
 Switched to knowledge graph: test_compound_n15t38
 > +vals[(10, 5, 2)]
 Inserted 1 fact(s) into 'vals'.
+> result(A, B, C, R) <- vals(A, B, C), R = (A - B) * C + A
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    5 │    2 │   20 │
+└──────┴──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?result(A, B, C, R)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │    5 │    2 │   20 │
+└──────┴──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_compound_n15t38
+Knowledge graph 'test_compound_n15t38' dropped.
