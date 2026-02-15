@@ -11,3 +11,18 @@ Switched to knowledge graph: test_dense_rank_n18t123
 Switched to knowledge graph: test_dense_rank_n18t123
 > +scores[(1, 100), (2, 90), (3, 100), (4, 80)]
 Inserted 4 fact(s) into 'scores'.
+> +distinct_scores(S) <- scores(_, S)
+Rule 'distinct_scores' registered.
+> ?distinct_scores(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   80 │
+│   90 │
+│  100 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dense_rank_n18t123
+Knowledge graph 'test_dense_rank_n18t123' dropped.

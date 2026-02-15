@@ -11,3 +11,18 @@ Switched to knowledge graph: test_add_query_n17t26
 Switched to knowledge graph: test_add_query_n17t26
 > +facts[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'facts'.
+> +derived(X, Y) <- facts(X), Y = X * 10
+Rule 'derived' registered.
+> ?derived(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_add_query_n17t26
+Knowledge graph 'test_add_query_n17t26' dropped.

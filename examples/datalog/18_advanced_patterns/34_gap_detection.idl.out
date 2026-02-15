@@ -11,3 +11,27 @@ Switched to knowledge graph: test_gaps_n18t34
 Switched to knowledge graph: test_gaps_n18t34
 > +existing[(1,), (2,), (4,), (5,), (8,)]
 Inserted 5 fact(s) into 'existing'.
+> gap_start(X) <- existing(X), X1 = X + 1, !existing(X1)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    5 │
+│    8 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> ?gap_start(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    5 │
+│    8 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_gaps_n18t34
+Knowledge graph 'test_gaps_n18t34' dropped.

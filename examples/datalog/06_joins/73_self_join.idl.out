@@ -11,3 +11,5 @@ Switched to knowledge graph: test_self_join_n06t73
 Switched to knowledge graph: test_self_join_n06t73
 > +employees[(1, "Alice", 3), (2, "Bob", 3), (3, "Carol", 5), (4, "Dave", 5), (5, "Eve", 0)]
 Inserted 5 fact(s) into 'employees'.
+> +reports_to(EmpName, MgrName) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

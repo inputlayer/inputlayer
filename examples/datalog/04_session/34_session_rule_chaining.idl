@@ -1,0 +1,20 @@
+// Test: Ephemeral rule chaining
+// Description: Output of one ephemeral rule feeds into another ephemeral rule
+
+.kg create test_sess_chain_n04t34
+.kg use test_sess_chain_n04t34
+
+// Persistent base data
++employee[(1, 50000), (2, 75000), (3, 90000)]
+
+// Chain of session rules
+high_earner(Id, Salary) <- employee(Id, Salary), Salary > 60000
+bonus(Id, Bonus) <- high_earner(Id, Salary), Bonus = Salary * 10 / 100
+
+// Query the end of the chain
+?bonus(Id, Bonus)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_chain_n04t34

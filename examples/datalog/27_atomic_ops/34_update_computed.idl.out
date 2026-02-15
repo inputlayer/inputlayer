@@ -22,3 +22,18 @@ Inserted 3 fact(s) into 'prices'.
 3 rows
 > -prices(Id, Price)
 Deleted 0 facts from 'prices'.
+> +prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
+Rule 'prices' registered.
+> ?prices(Id, Price)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ 110.0 │
+│    2 │ 220.0 │
+│    3 │ 330.0 │
+└──────┴───────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_update_computed_n27t34
+Knowledge graph 'test_update_computed_n27t34' dropped.

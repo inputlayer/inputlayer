@@ -11,3 +11,34 @@ Switched to knowledge graph: test_same_val_n10t141
 Switched to knowledge graph: test_same_val_n10t141
 > +data[(1, 100), (2, 100), (3, 100)]
 Inserted 3 fact(s) into 'data'.
+> +sum_same(sum<V>) <- data(_, V)
+Rule 'sum_same' registered.
+> +count_same(count<Id>) <- data(Id, _)
+Rule 'count_same' registered.
+> +avg_same(avg<V>) <- data(_, V)
+Rule 'avg_same' registered.
+> ?sum_same(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  300 │
+└──────┘
+1 rows
+> ?count_same(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> ?avg_same(A)
+┌───────┐
+│ col0  │
+├───────┤
+│ 100.0 │
+└───────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_same_val_n10t141
+Knowledge graph 'test_same_val_n10t141' dropped.

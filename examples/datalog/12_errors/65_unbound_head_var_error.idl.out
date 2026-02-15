@@ -11,3 +11,5 @@ Switched to knowledge graph: test_unbound_head_n12t65
 Switched to knowledge graph: test_unbound_head_n12t65
 > +data[(1, 2), (3, 4)]
 Inserted 2 fact(s) into 'data'.
+> unsafe_rule(X, Y) <- data(X, _)
+Script error: Unsafe rule 'unsafe_rule': Head variable(s) Y not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

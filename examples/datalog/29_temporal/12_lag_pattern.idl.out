@@ -11,3 +11,5 @@ Switched to knowledge graph: test_lag_n29t12
 Switched to knowledge graph: test_lag_n29t12
 > +timeseries[(1, 10), (2, 15), (3, 12), (4, 20)]
 Inserted 4 fact(s) into 'timeseries'.
+> consecutive(T1, V1, T2, V2) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

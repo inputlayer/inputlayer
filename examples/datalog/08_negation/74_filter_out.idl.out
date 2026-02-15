@@ -13,3 +13,18 @@ Switched to knowledge graph: test_filter_out_n08t74
 Inserted 5 fact(s) into 'items'.
 > +exclude[("bad",)]
 Inserted 1 fact(s) into 'exclude'.
+> +kept(Id, Status) <- items(Id, Status), !exclude(Status)
+Rule 'kept' registered.
+> ?kept(Id, S)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    1 │ "good" │
+│    3 │ "good" │
+│    5 │ "ok"   │
+└──────┴────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_filter_out_n08t74
+Knowledge graph 'test_filter_out_n08t74' dropped.

@@ -457,4 +457,135 @@ mod tests {
         assert!(toml_str.contains("[storage.persistence]"));
         assert!(toml_str.contains("[optimization]"));
     }
+
+    #[test]
+    fn test_default_storage_config() {
+        let config = Config::default();
+        assert!(!config.storage.auto_create_knowledge_graphs);
+        assert_eq!(config.storage.persistence.auto_save_interval, 0);
+        assert!(!config.storage.persistence.enable_wal);
+    }
+
+    #[test]
+    fn test_default_optimization_config() {
+        let config = Config::default();
+        assert!(config.optimization.enable_join_planning);
+        assert!(config.optimization.enable_sip_rewriting);
+        assert!(config.optimization.enable_subplan_sharing);
+        assert!(config.optimization.enable_boolean_specialization);
+    }
+
+    #[test]
+    fn test_default_logging_config() {
+        let config = Config::default();
+        assert_eq!(config.logging.level, "info");
+        assert_eq!(config.logging.format, "text");
+    }
+
+    #[test]
+    fn test_default_http_config() {
+        let config = Config::default();
+        assert!(config.http.enabled);
+        assert_eq!(config.http.host, "127.0.0.1");
+        assert_eq!(config.http.port, 8080);
+        assert!(config.http.cors_origins.is_empty());
+    }
+
+    #[test]
+    fn test_default_gui_config() {
+        let gui = GuiConfig::default();
+        assert!(gui.enabled);
+        assert_eq!(gui.static_dir, "./gui/dist");
+    }
+
+    #[test]
+    fn test_default_auth_config() {
+        let auth = AuthConfig::default();
+        assert!(!auth.enabled);
+        assert_eq!(auth.session_timeout_secs, 86400);
+        // JWT secret should be a UUID
+        assert!(!auth.jwt_secret.is_empty());
+    }
+
+    #[test]
+    fn test_default_performance_config() {
+        let perf = PerformanceConfig::default();
+        assert_eq!(perf.initial_capacity, 10000);
+        assert_eq!(perf.batch_size, 1000);
+        assert!(perf.async_io);
+        assert_eq!(perf.num_threads, 0);
+    }
+
+    #[test]
+    fn test_default_persist_layer_config() {
+        let persist = PersistLayerConfig::default();
+        assert!(persist.enabled);
+        assert_eq!(persist.buffer_size, 10000);
+        assert!(persist.immediate_sync);
+        assert_eq!(persist.durability_mode, DurabilityMode::Immediate);
+        assert_eq!(persist.compaction_window, 0);
+    }
+
+    #[test]
+    fn test_durability_mode_default() {
+        let mode = DurabilityMode::default();
+        assert_eq!(mode, DurabilityMode::Immediate);
+    }
+
+    #[test]
+    fn test_config_toml_roundtrip() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        let back: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(back.storage.default_knowledge_graph, "default");
+        assert_eq!(back.storage.data_dir, PathBuf::from("./data"));
+        assert_eq!(back.logging.level, "info");
+        assert_eq!(back.http.port, 8080);
+    }
+
+    #[test]
+    fn test_config_json_roundtrip() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.storage.default_knowledge_graph, "default");
+    }
+
+    #[test]
+    fn test_storage_format_serde() {
+        let json = serde_json::to_string(&StorageFormat::Parquet).unwrap();
+        assert_eq!(json, "\"parquet\"");
+        let json = serde_json::to_string(&StorageFormat::Csv).unwrap();
+        assert_eq!(json, "\"csv\"");
+        let json = serde_json::to_string(&StorageFormat::Bincode).unwrap();
+        assert_eq!(json, "\"bincode\"");
+    }
+
+    #[test]
+    fn test_compression_type_serde() {
+        let json = serde_json::to_string(&CompressionType::Snappy).unwrap();
+        assert_eq!(json, "\"snappy\"");
+        let json = serde_json::to_string(&CompressionType::Gzip).unwrap();
+        assert_eq!(json, "\"gzip\"");
+        let json = serde_json::to_string(&CompressionType::None).unwrap();
+        assert_eq!(json, "\"none\"");
+    }
+
+    #[test]
+    fn test_durability_mode_serde() {
+        let json = serde_json::to_string(&DurabilityMode::Immediate).unwrap();
+        assert_eq!(json, "\"immediate\"");
+        let json = serde_json::to_string(&DurabilityMode::Batched).unwrap();
+        assert_eq!(json, "\"batched\"");
+        let json = serde_json::to_string(&DurabilityMode::Async).unwrap();
+        assert_eq!(json, "\"async\"");
+    }
+
+    #[test]
+    fn test_auth_jwt_secret_is_unique() {
+        let auth1 = AuthConfig::default();
+        let auth2 = AuthConfig::default();
+        // Each call generates a new UUID
+        assert_ne!(auth1.jwt_secret, auth2.jwt_secret);
+    }
 }

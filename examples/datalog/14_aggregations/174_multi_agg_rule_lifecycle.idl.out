@@ -11,3 +11,126 @@ Switched to knowledge graph: test_multi_agg_n14t174
 Switched to knowledge graph: test_multi_agg_n14t174
 > +score[(1, 100), (2, 200), (3, 150)]
 Inserted 3 fact(s) into 'score'.
+> +s(sum<V>) <- score(_, V)
+Rule 's' registered.
+> +c(count<V>) <- score(_, V)
+Rule 'c' registered.
+> +mx(max<V>) <- score(_, V)
+Rule 'mx' registered.
+> +mn(min<V>) <- score(_, V)
+Rule 'mn' registered.
+> +tk(top_k<2, Id, V:desc>) <- score(Id, V)
+Rule 'tk' registered.
+> ?s(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  450 │
+└──────┘
+1 rows
+> ?c(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> ?mx(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+> ?mn(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?tk(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  150 │
+└──────┴──────┘
+2 rows
+> +score[(4, 300)]
+Inserted 1 fact(s) into 'score'.
+> ?s(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  750 │
+└──────┘
+1 rows
+> ?c(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> ?mx(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  300 │
+└──────┘
+1 rows
+> ?mn(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?tk(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    4 │  300 │
+└──────┴──────┘
+2 rows
+> -score(4, 300)
+Deleted 1 facts from 'score'.
+> ?s(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  450 │
+└──────┘
+1 rows
+> ?mx(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+> ?tk(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  150 │
+└──────┴──────┘
+2 rows
+> .rule drop s
+Rule 's' dropped.
+> +s(sum<V>) <- score(_, V), V > 100
+Rule 's' registered.
+> ?s(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  350 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_agg_n14t174
+Knowledge graph 'test_multi_agg_n14t174' dropped.

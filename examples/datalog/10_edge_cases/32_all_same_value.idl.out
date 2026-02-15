@@ -11,3 +11,59 @@ Switched to knowledge graph: test_same_val_n10t32
 Switched to knowledge graph: test_same_val_n10t32
 > +uniform[(1, 100), (2, 100), (3, 100), (4, 100)]
 Inserted 4 fact(s) into 'uniform'.
+> +uniform_sum(sum<V>) <- uniform(_, V)
+Rule 'uniform_sum' registered.
+> +uniform_min(min<V>) <- uniform(_, V)
+Rule 'uniform_min' registered.
+> +uniform_max(max<V>) <- uniform(_, V)
+Rule 'uniform_max' registered.
+> +uniform_count(count<V>) <- uniform(_, V)
+Rule 'uniform_count' registered.
+> ?uniform_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│  400 │
+└──────┘
+1 rows
+> ?uniform_min(M)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?uniform_max(M)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> ?uniform_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> distinct_vals(V) <- uniform(_, V)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?distinct_vals(V)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_same_val_n10t32
+Knowledge graph 'test_same_val_n10t32' dropped.

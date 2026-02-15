@@ -13,3 +13,40 @@ Switched to knowledge graph: test_outer_n06t17
 Inserted 3 fact(s) into 'left_tbl'.
 > +right_tbl[(1, 100), (3, 300)]
 Inserted 2 fact(s) into 'right_tbl'.
+> inner(Id, Val, Num) <- left_tbl(Id, Val), right_tbl(Id, Num)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "a"  │  100 │
+│    3 │ "c"  │  300 │
+└──────┴──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?inner(Id, Val, Num)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "a"  │  100 │
+│    3 │ "c"  │  300 │
+└──────┴──────┴──────┘
+2 rows
+> no_match(Id, Val) <- left_tbl(Id, Val), !right_tbl(Id, _)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "b"  │
+└──────┴──────┘
+1 rows
+(session: 2 rule(s))
+> ?no_match(Id, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "b"  │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_outer_n06t17
+Knowledge graph 'test_outer_n06t17' dropped.

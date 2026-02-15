@@ -20,3 +20,21 @@ Inserted 3 fact(s) into 'edge'.
 │    3 │    4 │
 └──────┴──────┘
 3 rows
+> -edge(X, Y) <- edge(X, Y)
+Conditional delete: 3 fact(s) deleted from 'edge'.
+> ?edge(X, Y)
+No results.
+> +edge[(10,20), (20,30)]
+Inserted 2 fact(s) into 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │   20 │
+│   20 │   30 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_all_n02t05
+Knowledge graph 'test_del_all_n02t05' dropped.

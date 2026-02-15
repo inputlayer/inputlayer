@@ -11,3 +11,47 @@ Switched to knowledge graph: test_mode_n18t23
 Switched to knowledge graph: test_mode_n18t23
 > +values[("a",), ("b",), ("a",), ("c",), ("a",), ("b",)]
 Inserted 3 fact(s) into 'values'.
+> +freq(Val, count<Val>) <- values(Val)
+Rule 'freq' registered.
+> ?freq(Val, Count)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │    1 │
+│ "b"  │    1 │
+│ "c"  │    1 │
+└──────┴──────┘
+3 rows
+> +max_freq(max<C>) <- freq(_, C)
+Rule 'max_freq' registered.
+> ?max_freq(M)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> most_common(Val) <- freq(Val, C), max_freq(C)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+│ "b"  │
+│ "c"  │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> ?most_common(Val)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+│ "b"  │
+│ "c"  │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mode_n18t23
+Knowledge graph 'test_mode_n18t23' dropped.

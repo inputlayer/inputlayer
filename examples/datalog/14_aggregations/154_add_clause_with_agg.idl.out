@@ -13,3 +13,29 @@ Switched to knowledge graph: test_add_agg_clause_n14t154
 Inserted 2 fact(s) into 'score'.
 > +extra[("math", "Charlie", 90)]
 Inserted 1 fact(s) into 'extra'.
+> +total(Subject, sum<Grade>) <- score(Subject, _, Grade)
+Rule 'total' registered.
+> ?total(S, T)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "math" │  180 │
+└────────┴──────┘
+1 rows
+> +total(Subject, sum<Grade>) <- extra(Subject, _, Grade)
+Rule 'total' registered.
+> ?total(S, T)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "math" │   90 │
+│ "math" │  180 │
+└────────┴──────┘
+2 rows
+> .rule list
+Rules:
+  total (2 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_add_agg_clause_n14t154
+Knowledge graph 'test_add_agg_clause_n14t154' dropped.

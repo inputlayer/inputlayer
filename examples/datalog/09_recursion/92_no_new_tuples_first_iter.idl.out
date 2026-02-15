@@ -13,3 +13,39 @@ Switched to knowledge graph: test_no_new_n09t92
 Inserted 1 fact(s) into 'edge'.
 > +node[(1), (2), (3)]
 Inserted 3 fact(s) into 'node'.
+> reachable(X, Y) <- edge(X, Y), X = 3
+No results.
+(session: 1 rule(s))
+> reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+No results.
+(session: 2 rule(s))
+> ?reachable(X, Y)
+No results.
+> reachable2(X, Y) <- edge(X, Y), X = 1
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+(session: 3 rule(s))
+> reachable2(X, Z) <- reachable2(X, Y), edge(Y, Z)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+(session: 4 rule(s))
+> ?reachable2(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_no_new_n09t92
+Knowledge graph 'test_no_new_n09t92' dropped.

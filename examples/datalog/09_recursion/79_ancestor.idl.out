@@ -11,3 +11,20 @@ Switched to knowledge graph: test_ancestor_n09t79
 Switched to knowledge graph: test_ancestor_n09t79
 > +parent[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave")]
 Inserted 3 fact(s) into 'parent'.
+> +ancestor(A, D) <- parent(A, D)
+Rule 'ancestor' registered.
+> +ancestor(A, D) <- parent(A, C), ancestor(C, D)
+Rule 'ancestor' registered.
+> ?ancestor(A, "Dave")
+┌─────────┬────────┐
+│ col0    │ col1   │
+├─────────┼────────┤
+│ "Alice" │ "Dave" │
+│ "Bob"   │ "Dave" │
+│ "Carol" │ "Dave" │
+└─────────┴────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ancestor_n09t79
+Knowledge graph 'test_ancestor_n09t79' dropped.

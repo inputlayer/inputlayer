@@ -499,4 +499,260 @@ mod tests {
 
         assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);
     }
+
+    #[test]
+    fn test_default_trace() {
+        let trace = PipelineTrace::default();
+        assert!(trace.ast.is_none());
+        assert!(trace.ir_before.is_empty());
+        assert!(trace.ir_after.is_empty());
+        assert!(trace.results.is_empty());
+    }
+
+    #[test]
+    fn test_optimization_stats_default() {
+        let stats = OptimizationStats::default();
+        assert_eq!(stats.identity_maps_removed, 0);
+        assert_eq!(stats.true_filters_removed, 0);
+        assert_eq!(stats.false_filters_removed, 0);
+        assert_eq!(stats.nodes_before, 0);
+        assert_eq!(stats.nodes_after, 0);
+    }
+
+    #[test]
+    fn test_record_ir_before() {
+        let mut trace = PipelineTrace::new();
+        let ir = vec![IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }];
+        trace.record_ir_before(ir);
+        assert_eq!(trace.stats.nodes_before, 1);
+        assert_eq!(trace.ir_before.len(), 1);
+    }
+
+    #[test]
+    fn test_record_ir_after() {
+        let mut trace = PipelineTrace::new();
+        // Record before first (2 nodes)
+        let before = vec![IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: crate::ir::Predicate::True,
+        }];
+        trace.record_ir_before(before);
+        assert_eq!(trace.stats.nodes_before, 2);
+
+        // After optimization: 1 node (filter removed)
+        let after = vec![IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }];
+        trace.record_ir_after(after);
+        assert_eq!(trace.stats.nodes_after, 1);
+        // 1 node eliminated, stats should reflect this
+        assert!(trace.stats.identity_maps_removed + trace.stats.true_filters_removed > 0);
+    }
+
+    #[test]
+    fn test_record_results() {
+        let mut trace = PipelineTrace::new();
+        let results = vec![vec![(1, 2), (3, 4)]];
+        trace.record_results(results);
+        assert_eq!(trace.results.len(), 1);
+        assert_eq!(trace.results[0].len(), 2);
+    }
+
+    #[test]
+    fn test_record_ast() {
+        let mut trace = PipelineTrace::new();
+        let program = crate::ast::Program { rules: vec![] };
+        trace.record_ast(program);
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_count_ir_nodes_join() {
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 3);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_union() {
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "a".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "b".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+            ],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 3);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_distinct() {
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_map() {
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_antijoin() {
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 3);
+    }
+
+    #[test]
+    fn test_count_nodes_multiple() {
+        let irs = vec![
+            IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            },
+            IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["y".to_string()],
+            },
+        ];
+        assert_eq!(PipelineTrace::count_nodes(&irs), 2);
+    }
+
+    #[test]
+    fn test_format_trace_empty() {
+        let trace = PipelineTrace::new();
+        let output = trace.format_trace();
+        assert!(output.contains("PIPELINE TRACE"));
+    }
+
+    #[test]
+    fn test_format_trace_with_ir() {
+        let mut trace = PipelineTrace::new();
+        let ir = vec![IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }];
+        trace.record_ir_before(ir.clone());
+        trace.record_ir_after(ir);
+
+        let output = trace.format_trace();
+        assert!(output.contains("IR CONSTRUCTION"));
+        assert!(output.contains("Scan(edge)"));
+    }
+
+    #[test]
+    fn test_format_trace_with_results() {
+        let mut trace = PipelineTrace::new();
+        trace.record_results(vec![vec![(1, 2), (3, 4)]]);
+
+        let output = trace.format_trace();
+        assert!(output.contains("EXECUTION"));
+        assert!(output.contains("2 tuples"));
+    }
+
+    #[test]
+    fn test_format_trace_with_many_results() {
+        let mut trace = PipelineTrace::new();
+        let results: Vec<(i32, i32)> = (0..20).map(|i| (i, i * 2)).collect();
+        trace.record_results(vec![results]);
+
+        let output = trace.format_trace();
+        assert!(output.contains("... (15 more)"));
+    }
+
+    #[test]
+    fn test_display_trait() {
+        let trace = PipelineTrace::new();
+        let display = format!("{trace}");
+        assert!(display.contains("PIPELINE TRACE"));
+    }
+
+    #[test]
+    fn test_compute_stats_no_elimination() {
+        let mut trace = PipelineTrace::new();
+        let ir = vec![IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        }];
+        trace.record_ir_before(ir.clone());
+        trace.record_ir_after(ir);
+        assert_eq!(trace.stats.identity_maps_removed, 0);
+        assert_eq!(trace.stats.true_filters_removed, 0);
+    }
+
+    #[test]
+    fn test_format_ir_tree_aggregate() {
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(crate::ir::AggregateFunction::Sum, 1)],
+            output_schema: vec!["x".to_string(), "sum_y".to_string()],
+        };
+        let output = PipelineTrace::format_ir_tree(&ir, 0);
+        assert!(output.contains("Aggregate"));
+        assert!(output.contains("Sum"));
+    }
+
+    #[test]
+    fn test_format_ir_tree_compute() {
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![("y".to_string(), crate::ir::IRExpression::Column(0))],
+        };
+        let output = PipelineTrace::format_ir_tree(&ir, 0);
+        assert!(output.contains("Compute"));
+    }
 }

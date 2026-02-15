@@ -1,0 +1,25 @@
+// Test: Session clear removes ephemeral facts from derived results
+// Description: Clearing session should remove ephemeral facts and their derived results
+
+.kg create test_sess_retract_n04t35
+.kg use test_sess_retract_n04t35
+
+// Persistent base
++color[("red",), ("blue",)]
+
+// Add ephemeral facts
+color("green")
+color("yellow")
+
+// All four colors visible
+all_color(C) <- color(C)
+?all_color(C)
+
+// Clear session to remove ephemeral facts
+.session clear
+
+// Back to persistent only (2)
+?color(C)
+
+.kg use default
+.kg drop test_sess_retract_n04t35

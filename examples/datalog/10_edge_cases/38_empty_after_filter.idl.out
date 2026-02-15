@@ -16,3 +16,12 @@ No results.
 (session: 1 rule(s))
 > ?empty_result(Id, Val)
 No results.
+> +empty_count(count<Id>) <- empty_result(Id, _)
+Rule 'empty_count' registered.
+> ?empty_count(C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_filter_n10t38
+Knowledge graph 'test_empty_filter_n10t38' dropped.

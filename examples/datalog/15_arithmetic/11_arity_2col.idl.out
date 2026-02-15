@@ -13,3 +13,113 @@ Switched to knowledge graph: test_arity_2col_n15t11
 Inserted 4 fact(s) into 'src2'.
 > +link[(1, 100), (2, 200), (3, 300), (4, 400)]
 Inserted 4 fact(s) into 'link'.
+> inc_result(Y, D+1) <- src2(X, D), link(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    6 │
+│  200 │   11 │
+│  300 │    1 │
+│  400 │   -4 │
+└──────┴──────┘
+4 rows
+(session: 1 rule(s))
+> ?inc_result(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    6 │
+│  200 │   11 │
+│  300 │    1 │
+│  400 │   -4 │
+└──────┴──────┘
+4 rows
+> dec_result(Y, D-1) <- src2(X, D), link(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    4 │
+│  200 │    9 │
+│  300 │   -1 │
+│  400 │   -6 │
+└──────┴──────┘
+4 rows
+(session: 2 rule(s))
+> ?dec_result(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    4 │
+│  200 │    9 │
+│  300 │   -1 │
+│  400 │   -6 │
+└──────┴──────┘
+4 rows
+> mul_result(Y, D*2) <- src2(X, D), link(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   10 │
+│  200 │   20 │
+│  300 │    0 │
+│  400 │  -10 │
+└──────┴──────┘
+4 rows
+(session: 3 rule(s))
+> ?mul_result(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   10 │
+│  200 │   20 │
+│  300 │    0 │
+│  400 │  -10 │
+└──────┴──────┘
+4 rows
+> add_result(Y, D+10) <- src2(X, D), link(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   15 │
+│  200 │   20 │
+│  300 │   10 │
+│  400 │    5 │
+└──────┴──────┘
+4 rows
+(session: 4 rule(s))
+> ?add_result(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   15 │
+│  200 │   20 │
+│  300 │   10 │
+│  400 │    5 │
+└──────┴──────┘
+4 rows
+> full_bind(X, Y, D+1) <- src2(X, D), link(X, Y)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │  100 │    6 │
+│    2 │  200 │   11 │
+│    3 │  300 │    1 │
+│    4 │  400 │   -4 │
+└──────┴──────┴──────┘
+4 rows
+(session: 5 rule(s))
+> ?full_bind(A, B, C)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │  100 │    6 │
+│    2 │  200 │   11 │
+│    3 │  300 │    1 │
+│    4 │  400 │   -4 │
+└──────┴──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_arity_2col_n15t11
+Knowledge graph 'test_arity_2col_n15t11' dropped.

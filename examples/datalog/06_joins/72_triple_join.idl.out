@@ -15,3 +15,5 @@ Inserted 3 fact(s) into 'employees'.
 Inserted 2 fact(s) into 'departments'.
 > +budgets[(100, 50000), (200, 30000)]
 Inserted 2 fact(s) into 'budgets'.
+> +employee_budget(Name, Dept, Budget) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

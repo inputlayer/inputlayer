@@ -13,3 +13,13 @@ Switched to knowledge graph: test_empty_join_n10t140
 Inserted 2 fact(s) into 'left'.
 > +right[(10, 100), (20, 200)]
 Inserted 2 fact(s) into 'right'.
+> joined(L, R) <- left(K, L), right(K, R)
+No results.
+(session: 1 rule(s))
+> ?joined(L, R)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_join_n10t140
+Knowledge graph 'test_empty_join_n10t140' dropped.

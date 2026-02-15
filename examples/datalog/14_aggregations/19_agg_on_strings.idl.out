@@ -11,3 +11,59 @@ Switched to knowledge graph: test_agg_strings_n14t19
 Switched to knowledge graph: test_agg_strings_n14t19
 > +names[(1, "alice"), (1, "bob"), (2, "carol"), (2, "dave"), (2, "eve")]
 Inserted 5 fact(s) into 'names'.
+> string_count(G, count<N>) <- names(G, N)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?string_count(G, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> first_name(G, min<N>) <- names(G, N)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "alice" │
+│    2 │ "carol" │
+└──────┴─────────┘
+2 rows
+(session: 2 rule(s))
+> last_name(G, max<N>) <- names(G, N)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ "bob" │
+│    2 │ "eve" │
+└──────┴───────┘
+2 rows
+(session: 3 rule(s))
+> ?first_name(G, N)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "alice" │
+│    2 │ "carol" │
+└──────┴─────────┘
+2 rows
+> ?last_name(G, N)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ "bob" │
+│    2 │ "eve" │
+└──────┴───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_agg_strings_n14t19
+Knowledge graph 'test_agg_strings_n14t19' dropped.

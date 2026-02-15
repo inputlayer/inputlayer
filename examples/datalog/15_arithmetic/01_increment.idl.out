@@ -13,3 +13,23 @@ Switched to knowledge graph: test_arith_inc_n15t01
 Inserted 3 fact(s) into 'edge'.
 > +dist[(1, 0)]
 Inserted 1 fact(s) into 'dist'.
+> dist(Y, D+1) <- dist(X, D), edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    1 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?dist(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    1 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_arith_inc_n15t01
+Knowledge graph 'test_arith_inc_n15t01' dropped.

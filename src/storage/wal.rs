@@ -321,4 +321,106 @@ mod tests {
         wal.log_insert("edge", vec![(5, 6)]).unwrap();
         assert!(wal.needs_compaction()); // Threshold reached
     }
+
+    #[test]
+    fn test_wal_empty_read() {
+        let temp = TempDir::new().unwrap();
+        let wal = Wal::new(temp.path().to_path_buf()).unwrap();
+        let entries = wal.read_all().unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_wal_file_size() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+        assert_eq!(wal.file_size(), 0);
+
+        wal.log_insert("edge", vec![(1, 2)]).unwrap();
+        assert!(wal.file_size() > 0);
+    }
+
+    #[test]
+    fn test_wal_compaction_disabled() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+        wal.set_compaction_threshold(0);
+
+        for i in 0..100 {
+            wal.log_insert("edge", vec![(i, i + 1)]).unwrap();
+        }
+        assert!(!wal.needs_compaction());
+    }
+
+    #[test]
+    fn test_wal_op_serde() {
+        let json = serde_json::to_string(&WalOp::Insert).unwrap();
+        assert_eq!(json, "\"insert\"");
+        let json = serde_json::to_string(&WalOp::Delete).unwrap();
+        assert_eq!(json, "\"delete\"");
+    }
+
+    #[test]
+    fn test_wal_entry_serde_roundtrip() {
+        let entry = WalEntry {
+            op: WalOp::Insert,
+            relation: "edge".to_string(),
+            tuples: vec![(1, 2), (3, 4)],
+            ts: 12345,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: WalEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.op, WalOp::Insert);
+        assert_eq!(back.relation, "edge");
+        assert_eq!(back.tuples, vec![(1, 2), (3, 4)]);
+        assert_eq!(back.ts, 12345);
+    }
+
+    #[test]
+    fn test_replay_wal_insert_dedup() {
+        let entries = vec![
+            WalEntry {
+                op: WalOp::Insert,
+                relation: "edge".to_string(),
+                tuples: vec![(1, 2)],
+                ts: 1,
+            },
+            WalEntry {
+                op: WalOp::Insert,
+                relation: "edge".to_string(),
+                tuples: vec![(1, 2)], // Duplicate
+                ts: 2,
+            },
+        ];
+        let mut data = std::collections::HashMap::new();
+        replay_wal(&entries, &mut data);
+        assert_eq!(data["edge"].len(), 1); // Deduped
+    }
+
+    #[test]
+    fn test_replay_wal_delete_nonexistent() {
+        let entries = vec![WalEntry {
+            op: WalOp::Delete,
+            relation: "edge".to_string(),
+            tuples: vec![(1, 2)],
+            ts: 1,
+        }];
+        let mut data = std::collections::HashMap::new();
+        replay_wal(&entries, &mut data);
+        // Deleting from non-existent relation should not crash
+        assert!(!data.contains_key("edge"));
+    }
+
+    #[test]
+    fn test_wal_entries_since_compaction() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = Wal::new(temp.path().to_path_buf()).unwrap();
+        assert_eq!(wal.entries_since_compaction(), 0);
+
+        wal.log_insert("edge", vec![(1, 2)]).unwrap();
+        assert_eq!(wal.entries_since_compaction(), 1);
+
+        wal.log_delete("edge", vec![(1, 2)]).unwrap();
+        assert_eq!(wal.entries_since_compaction(), 2);
+    }
 }

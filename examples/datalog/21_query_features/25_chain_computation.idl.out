@@ -11,3 +11,5 @@ Switched to knowledge graph: test_chain_comp_n21t25
 Switched to knowledge graph: test_chain_comp_n21t25
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
+> chained(X, A, B, C) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

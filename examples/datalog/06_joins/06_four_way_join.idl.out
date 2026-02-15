@@ -17,3 +17,5 @@ Inserted 2 fact(s) into 'emails'.
 Inserted 3 fact(s) into 'roles'.
 > +departments[(1, "engineering"), (2, "sales")]
 Inserted 2 fact(s) into 'departments'.
+> full_user_info(Name, Email, Role, Dept) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

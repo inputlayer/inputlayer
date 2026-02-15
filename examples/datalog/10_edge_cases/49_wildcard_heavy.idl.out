@@ -11,3 +11,65 @@ Switched to knowledge graph: test_wildcards_n10t49
 Switched to knowledge graph: test_wildcards_n10t49
 > +data[(1, "a", 10, true), (2, "b", 20, false), (3, "c", 30, true)]
 Inserted 3 fact(s) into 'data'.
+> first_only(X) <- data(X, _, _, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> ?first_only(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> first_third(X, Z) <- data(X, _, Z, _)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?first_third(X, Z)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+> +other[(1, 100), (2, 200)]
+Inserted 2 fact(s) into 'other'.
+> joined(A, C) <- data(A, _, _, _), other(A, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    2 │  200 │
+└──────┴──────┘
+2 rows
+(session: 3 rule(s))
+> ?joined(A, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    2 │  200 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 3 session rule(s), 0 session fact(s))
+> .kg drop test_wildcards_n10t49
+Knowledge graph 'test_wildcards_n10t49' dropped.

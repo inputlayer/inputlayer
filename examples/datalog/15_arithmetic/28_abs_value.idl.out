@@ -13,3 +13,26 @@ Switched to knowledge graph: test_abs_n15t28
 Inserted 5 fact(s) into 'values'.
 > +positive(V) <- values(V), V >= 0
 Rule 'positive' registered.
+> +negative(V) <- values(V), V < 0
+Rule 'negative' registered.
+> ?positive(V)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+│    5 │
+│    7 │
+└──────┘
+3 rows
+> ?negative(V)
+┌──────┐
+│ col0 │
+├──────┤
+│  -10 │
+│   -3 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_abs_n15t28
+Knowledge graph 'test_abs_n15t28' dropped.

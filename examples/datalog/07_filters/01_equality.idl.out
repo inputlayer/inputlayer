@@ -11,3 +11,18 @@ Switched to knowledge graph: test_eq_n07t01
 Switched to knowledge graph: test_eq_n07t01
 > +edge[(1,1), (1,2), (2,2), (2,3), (3,3)]
 Inserted 5 fact(s) into 'edge'.
+> +self_loop(X, Y) <- edge(X, Y), X = Y
+Rule 'self_loop' registered.
+> ?self_loop(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    2 │
+│    3 │    3 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_eq_n07t01
+Knowledge graph 'test_eq_n07t01' dropped.

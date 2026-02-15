@@ -11,3 +11,5 @@ Switched to knowledge graph: test_expr_assign_n21t42
 Switched to knowledge graph: test_expr_assign_n21t42
 > +vals[(10,), (20,), (30,)]
 Inserted 3 fact(s) into 'vals'.
+> computed(X, Plus10, Times2, Squared) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

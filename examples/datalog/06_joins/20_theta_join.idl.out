@@ -13,3 +13,5 @@ Switched to knowledge graph: test_theta_n06t20
 Inserted 3 fact(s) into 'products'.
 > +budgets[(1, "Alice", 80), (2, "Bob", 120)]
 Inserted 2 fact(s) into 'budgets'.
+> affordable(BuyerName, ProductName, Price, Budget) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

@@ -45,3 +45,23 @@ Inserted 1 fact(s) into 'near_zero'.
 │  0.0 │
 └──────┘
 1 rows
+> float_calc(Y) <- small_float(X), Y = X * 1000000
+┌──────┐
+│ col0 │
+├──────┤
+│  0.1 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?float_calc(Y)
+┌──────┐
+│ col0 │
+├──────┤
+│  0.1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_float_special_n11t43
+Knowledge graph 'test_float_special_n11t43' dropped.

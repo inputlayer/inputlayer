@@ -15,3 +15,24 @@ Inserted 2 fact(s) into 'source1'.
 Inserted 2 fact(s) into 'source2'.
 > +source3[(5, "e"), (1, "a")]
 Inserted 2 fact(s) into 'source3'.
+> +combined(X, Y) <- source1(X, Y)
+Rule 'combined' registered.
+> +combined(X, Y) <- source2(X, Y)
+Rule 'combined' registered.
+> +combined(X, Y) <- source3(X, Y)
+Rule 'combined' registered.
+> ?combined(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ "a"  │
+│    2 │ "b"  │
+│    3 │ "c"  │
+│    4 │ "d"  │
+│    5 │ "e"  │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union_multi_n22t07
+Knowledge graph 'test_union_multi_n22t07' dropped.

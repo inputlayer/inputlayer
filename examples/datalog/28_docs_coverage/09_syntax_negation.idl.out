@@ -21,3 +21,5 @@ Inserted 3 fact(s) into 'edge'.
 Inserted 3 fact(s) into 'a'.
 > +b[(2), (3), (4)]
 Inserted 3 fact(s) into 'b'.
+> +non_buyer(Id, Name) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

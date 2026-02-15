@@ -11,3 +11,29 @@ Switched to knowledge graph: test_diff_agg_n14t155
 Switched to knowledge graph: test_diff_agg_n14t155
 > +data[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'data'.
+> +result(sum<V>) <- data(_, V)
+Rule 'result' registered.
+> ?result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   60 │
+└──────┘
+1 rows
+> +result(max<V>) <- data(_, V)
+Rule 'result' registered.
+> ?result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   30 │
+│   60 │
+└──────┘
+2 rows
+> .rule list
+Rules:
+  result (2 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_diff_agg_n14t155
+Knowledge graph 'test_diff_agg_n14t155' dropped.

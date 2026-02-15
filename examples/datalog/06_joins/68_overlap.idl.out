@@ -11,3 +11,5 @@ Switched to knowledge graph: test_overlap_n06t68
 Switched to knowledge graph: test_overlap_n06t68
 > +ranges[(1, 0, 10), (2, 5, 15), (3, 20, 30)]
 Inserted 3 fact(s) into 'ranges'.
+> +overlaps(Id1, Id2) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

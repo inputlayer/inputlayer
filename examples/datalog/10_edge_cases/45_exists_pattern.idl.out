@@ -13,3 +13,40 @@ Switched to knowledge graph: test_exists_n10t45
 Inserted 3 fact(s) into 'departments'.
 > +employees[(1, 1), (2, 1), (3, 2)]
 Inserted 3 fact(s) into 'employees'.
+> has_employees(DeptId, Name) <- departments(DeptId, Name), employees(_, DeptId)
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│    1 │ "Engineering" │
+│    2 │ "Sales"       │
+└──────┴───────────────┘
+2 rows
+(session: 1 rule(s))
+> ?has_employees(DeptId, Name)
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│    1 │ "Engineering" │
+│    2 │ "Sales"       │
+└──────┴───────────────┘
+2 rows
+> no_employees(DeptId, Name) <- departments(DeptId, Name), !employees(_, DeptId)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │ "HR" │
+└──────┴──────┘
+1 rows
+(session: 2 rule(s))
+> ?no_employees(DeptId, Name)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │ "HR" │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_exists_n10t45
+Knowledge graph 'test_exists_n10t45' dropped.

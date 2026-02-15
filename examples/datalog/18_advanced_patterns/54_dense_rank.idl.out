@@ -11,3 +11,7 @@ Switched to knowledge graph: test_dense_rank_n18t54
 Switched to knowledge graph: test_dense_rank_n18t54
 > +scores[("A", 100), ("B", 90), ("C", 100), ("D", 85)]
 Inserted 4 fact(s) into 'scores'.
+> +distinct_scores(min<Score>) <- scores(_, Score)
+Rule 'distinct_scores' registered.
+> +dense_rank(Name, Score, <COUNT_DISTINCT:Higher>) <- scores(Name, Score), scores(_, Higher), Higher > Score
+Script error: Parse error: Unknown aggregate function: 

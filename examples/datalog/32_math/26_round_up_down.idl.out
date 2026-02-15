@@ -11,3 +11,54 @@ Switched to knowledge graph: test_round_n32t26
 Switched to knowledge graph: test_round_n32t26
 > +values[(15,), (23,), (50,), (77,), (100,)]
 Inserted 5 fact(s) into 'values'.
+> round_down(V, R) <- values(V), R = (V / 10) * 10
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│   15 │  15.0 │
+│   23 │  23.0 │
+│   50 │  50.0 │
+│   77 │  77.0 │
+│  100 │ 100.0 │
+└──────┴───────┘
+5 rows
+(session: 1 rule(s))
+> ?round_down(V, R)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│   15 │  15.0 │
+│   23 │  23.0 │
+│   50 │  50.0 │
+│   77 │  77.0 │
+│  100 │ 100.0 │
+└──────┴───────┘
+5 rows
+> remainder(V, R) <- values(V), R = V - ((V / 10) * 10)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   15 │  0.0 │
+│   23 │  0.0 │
+│   50 │  0.0 │
+│   77 │  0.0 │
+│  100 │  0.0 │
+└──────┴──────┘
+5 rows
+(session: 2 rule(s))
+> ?remainder(V, R)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   15 │  0.0 │
+│   23 │  0.0 │
+│   50 │  0.0 │
+│   77 │  0.0 │
+│  100 │  0.0 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_round_n32t26
+Knowledge graph 'test_round_n32t26' dropped.

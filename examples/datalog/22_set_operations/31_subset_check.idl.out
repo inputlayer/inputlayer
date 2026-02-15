@@ -13,3 +13,13 @@ Switched to knowledge graph: test_subset_n22t31
 Inserted 2 fact(s) into 'small'.
 > +large[(1,), (2,), (3,), (4,)]
 Inserted 4 fact(s) into 'large'.
+> not_in_large(X) <- small(X), !large(X)
+No results.
+(session: 1 rule(s))
+> ?not_in_large(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_subset_n22t31
+Knowledge graph 'test_subset_n22t31' dropped.

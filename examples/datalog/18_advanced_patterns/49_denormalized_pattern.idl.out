@@ -11,3 +11,27 @@ Switched to knowledge graph: test_denorm_n18t49
 Switched to knowledge graph: test_denorm_n18t49
 > +orders[(1, "Alice", "alice@email.com", 100), (2, "Alice", "alice@email.com", 150), (3, "Bob", "bob@email.com", 200)]
 Inserted 3 fact(s) into 'orders'.
+> +unique_customers(Name, min<Email>) <- orders(_, Name, Email, _)
+Rule 'unique_customers' registered.
+> ?unique_customers(Name, Email)
+┌─────────┬───────────────────┐
+│ col0    │ col1              │
+├─────────┼───────────────────┤
+│ "Alice" │ "alice@email.com" │
+│ "Bob"   │ "bob@email.com"   │
+└─────────┴───────────────────┘
+2 rows
+> +customer_totals(Name, sum<Amount>) <- orders(_, Name, _, Amount)
+Rule 'customer_totals' registered.
+> ?customer_totals(Name, Total)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "Alice" │  250 │
+│ "Bob"   │  200 │
+└─────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_denorm_n18t49
+Knowledge graph 'test_denorm_n18t49' dropped.

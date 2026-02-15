@@ -11,3 +11,24 @@ Switched to knowledge graph: test_drop_topk_n14t110
 Switched to knowledge graph: test_drop_topk_n14t110
 > +score[(1, 100), (2, 250), (3, 175), (4, 300), (5, 125)]
 Inserted 5 fact(s) into 'score'.
+> +top_players(top_k<3, Player, Points:desc>) <- score(Player, Points)
+Rule 'top_players' registered.
+> ?top_players(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  250 │
+│    3 │  175 │
+│    4 │  300 │
+└──────┴──────┘
+3 rows
+> .rule drop top_players
+Rule 'top_players' dropped.
+> .rule list
+No rules defined.
+> ?top_players(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_topk_n14t110
+Knowledge graph 'test_drop_topk_n14t110' dropped.

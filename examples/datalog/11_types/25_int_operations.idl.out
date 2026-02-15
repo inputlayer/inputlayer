@@ -11,3 +11,5 @@ Switched to knowledge graph: test_int_ops_n11t25
 Switched to knowledge graph: test_int_ops_n11t25
 > +nums[(10,), (20,), (30,)]
 Inserted 3 fact(s) into 'nums'.
+> computed(X, Add, Sub, Mul, Div, Mod) <- nums(X),
+Script error: Unsafe rule 'computed': Head variable(s) Add, Div, Mod, Mul, Sub not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

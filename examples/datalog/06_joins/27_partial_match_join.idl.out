@@ -13,3 +13,5 @@ Switched to knowledge graph: test_partial_n06t27
 Inserted 3 fact(s) into 'orders'.
 > +customers[("Alice", "VIP"), ("Bob", "Regular"), ("Carol", "New")]
 Inserted 3 fact(s) into 'customers'.
+> enriched(OrdId, Name, Amount, Status) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

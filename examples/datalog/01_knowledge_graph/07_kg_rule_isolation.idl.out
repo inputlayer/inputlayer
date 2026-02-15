@@ -11,3 +11,31 @@ Switched to knowledge graph: test_rule_iso_a_n01t07
 Switched to knowledge graph: test_rule_iso_a_n01t07
 > +items[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'items'.
+> +doubled(X, Y) <- items(X), Y = X * 2
+Rule 'doubled' registered.
+> ?doubled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+│    3 │    6 │
+└──────┴──────┘
+3 rows
+> .kg create test_rule_iso_b_n01t07
+Knowledge graph 'test_rule_iso_b_n01t07' created.
+Switched to knowledge graph: test_rule_iso_b_n01t07
+> .kg use test_rule_iso_b_n01t07
+Switched to knowledge graph: test_rule_iso_b_n01t07
+> .rule
+No rules defined.
+> +items[(100,)]
+Inserted 1 fact(s) into 'items'.
+> ?doubled(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_iso_a_n01t07
+Knowledge graph 'test_rule_iso_a_n01t07' dropped.
+> .kg drop test_rule_iso_b_n01t07
+Knowledge graph 'test_rule_iso_b_n01t07' dropped.

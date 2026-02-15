@@ -22,3 +22,16 @@ Inserted 2 fact(s) into 'discontinued'.
 │    3 │ "Gizmo"  │  150 │
 └──────┴──────────┴──────┘
 3 rows
+> -products(Id, Name, Price) <- products(Id, Name, Price), discontinued(Id)
+Conditional delete: 2 fact(s) deleted from 'products'.
+> ?products(Id, Name, Price)
+┌──────┬──────────┬──────┐
+│ col0 │ col1     │ col2 │
+├──────┼──────────┼──────┤
+│    2 │ "Gadget" │  200 │
+└──────┴──────────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_del_join_n27t12
+Knowledge graph 'test_del_join_n27t12' dropped.

@@ -11,3 +11,27 @@ Switched to knowledge graph: test_overlap_n10t52
 Switched to knowledge graph: test_overlap_n10t52
 > +intervals[(1, 10, 20), (2, 15, 25), (3, 30, 40), (4, 18, 22)]
 Inserted 4 fact(s) into 'intervals'.
+> overlaps(Id1, Id2) <- intervals(Id1, S1, E1), intervals(Id2, S2, E2), Id1 < Id2, S1 < E2, S2 < E1
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    4 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?overlaps(Id1, Id2)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    4 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_overlap_n10t52
+Knowledge graph 'test_overlap_n10t52' dropped.

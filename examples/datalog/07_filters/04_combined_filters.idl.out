@@ -11,3 +11,51 @@ Switched to knowledge graph: test_combined_filters_n07t04
 Switched to knowledge graph: test_combined_filters_n07t04
 > +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 15), (7, 25), (8, 35), (9, 45), (10, 55)]
 Inserted 10 fact(s) into 'data'.
+> +filtered1(X, Y) <- data(X, Y), X > 3, Y < 50
+Rule 'filtered1' registered.
+> ?filtered1(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │   40 │
+│    6 │   15 │
+│    7 │   25 │
+│    8 │   35 │
+│    9 │   45 │
+└──────┴──────┘
+5 rows
+> +filtered2(X, Y) <- data(X, Y), Y >= 20, Y <= 40
+Rule 'filtered2' registered.
+> ?filtered2(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │   20 │
+│    3 │   30 │
+│    4 │   40 │
+│    7 │   25 │
+│    8 │   35 │
+└──────┴──────┘
+5 rows
+> +different(X, Y) <- data(X, Y), X != Y
+Rule 'different' registered.
+> ?different(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+│    4 │   40 │
+│    5 │   50 │
+│    6 │   15 │
+│    7 │   25 │
+│    8 │   35 │
+│    9 │   45 │
+│   10 │   55 │
+└──────┴──────┘
+10 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_combined_filters_n07t04
+Knowledge graph 'test_combined_filters_n07t04' dropped.

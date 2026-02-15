@@ -11,3 +11,18 @@ Switched to knowledge graph: test_bool_logic_n11t27
 Switched to knowledge graph: test_bool_logic_n11t27
 > +flags[(1, true), (2, false), (3, true), (4, false)]
 Inserted 4 fact(s) into 'flags'.
+> enabled(Id) <- flags(Id, true)
+No results.
+(session: 1 rule(s))
+> disabled(Id) <- flags(Id, false)
+No results.
+(session: 2 rule(s))
+> ?enabled(Id)
+No results.
+> ?disabled(Id)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_bool_logic_n11t27
+Knowledge graph 'test_bool_logic_n11t27' dropped.

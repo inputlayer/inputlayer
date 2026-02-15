@@ -13,3 +13,13 @@ Switched to knowledge graph: test_empty_left_n06t36
 Inserted 0 fact(s) into 'left_rel'.
 > +right_rel[(1, "a"), (2, "b")]
 Inserted 2 fact(s) into 'right_rel'.
+> joined(X, Y) <- left_rel(X), right_rel(X, Y)
+No results.
+(session: 1 rule(s))
+> ?joined(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_empty_left_n06t36
+Knowledge graph 'test_empty_left_n06t36' dropped.

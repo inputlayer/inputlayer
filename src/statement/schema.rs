@@ -332,4 +332,122 @@ mod tests {
         assert_eq!(cols[1].name, "name");
         assert_eq!(cols[1].data_type, SchemaType::String);
     }
+
+    #[test]
+    fn test_parse_schema_no_parens() {
+        let result = parse_schema_decl("person", true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_schema_uppercase_name() {
+        let result = parse_schema_decl("Person(id: int)", true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_schema_empty_columns() {
+        let result = parse_schema_decl("empty()", true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_schema_three_columns() {
+        let result = parse_schema_decl("triple(a: int, b: string, c: float)", true).unwrap();
+        if let Statement::SchemaDecl(decl) = result {
+            assert_eq!(decl.columns.len(), 3);
+        } else {
+            panic!("Expected SchemaDecl");
+        }
+    }
+
+    #[test]
+    fn test_parse_schema_bool_type() {
+        let result = parse_schema_decl("flags(active: bool)", true).unwrap();
+        if let Statement::SchemaDecl(decl) = result {
+            assert_eq!(decl.columns.len(), 1);
+            assert_eq!(decl.columns[0].name, "active");
+        } else {
+            panic!("Expected SchemaDecl");
+        }
+    }
+
+    #[test]
+    fn test_validate_column_name_valid() {
+        assert!(validate_column_name("name").is_ok());
+        assert!(validate_column_name("my_col").is_ok());
+        assert!(validate_column_name("col123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_column_name_empty() {
+        assert!(validate_column_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_column_name_invalid_chars() {
+        assert!(validate_column_name("my col").is_err());
+    }
+
+    #[test]
+    fn test_validate_column_name_aggregate() {
+        assert!(validate_column_name("count<X>").is_ok());
+        assert!(validate_column_name("sum<Y>").is_ok());
+        assert!(validate_column_name("min<Z>").is_ok());
+        assert!(validate_column_name("max<Z>").is_ok());
+        assert!(validate_column_name("avg<W>").is_ok());
+    }
+
+    #[test]
+    fn test_validate_column_name_unknown_agg() {
+        assert!(validate_column_name("foo<X>").is_err());
+    }
+
+    #[test]
+    fn test_validate_column_name_arithmetic() {
+        assert!(validate_column_name("P*Q").is_ok());
+        assert!(validate_column_name("X+1").is_ok());
+    }
+
+    #[test]
+    fn test_schema_decl_serde() {
+        let decl = SchemaDecl {
+            name: "test".to_string(),
+            columns: vec![ColumnDef {
+                name: "id".to_string(),
+                col_type: crate::statement::types::TypeExpr::Base(
+                    crate::statement::types::BaseType::Int,
+                ),
+            }],
+            persistent: true,
+        };
+        let json = serde_json::to_string(&decl).unwrap();
+        let back: SchemaDecl = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "test");
+        assert!(back.persistent);
+    }
+
+    #[test]
+    fn test_split_schema_columns_simple() {
+        let result = split_schema_columns("a: int, b: string");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_schema_columns_with_parens() {
+        let result = split_schema_columns("a: int, b: list(int)");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_schema_columns_empty() {
+        let result = parse_schema_columns("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_schema_columns_no_type() {
+        let result = parse_schema_columns("id");
+        assert!(result.is_err());
+    }
 }

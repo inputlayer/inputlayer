@@ -24,3 +24,20 @@ Inserted 1 fact(s) into 'temp_data'.
 │    3 │  300 │
 └──────┴──────┘
 3 rows
+> -temp_data(Id, Value) <- temp_data(Id, Value)
+Conditional delete: 3 fact(s) deleted from 'temp_data'.
+> ?temp_data(Id, Value)
+No results.
+> +temp_data(10, 999)
+Inserted 1 fact(s) into 'temp_data'.
+> ?temp_data(Id, Value)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │  999 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_delete_all_n27t04
+Knowledge graph 'test_delete_all_n27t04' dropped.

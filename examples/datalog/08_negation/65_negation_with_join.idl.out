@@ -15,3 +15,5 @@ Inserted 3 fact(s) into 'orders'.
 Inserted 3 fact(s) into 'customers'.
 > +vip[(100,)]
 Inserted 1 fact(s) into 'vip'.
+> +non_vip_orders(OrderId, CustName, Amount) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

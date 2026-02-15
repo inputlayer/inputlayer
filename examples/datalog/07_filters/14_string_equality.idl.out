@@ -11,3 +11,42 @@ Switched to knowledge graph: test_str_eq_n07t14
 Switched to knowledge graph: test_str_eq_n07t14
 > +users[(1, "admin", "active"), (2, "user", "active"), (3, "admin", "inactive")]
 Inserted 3 fact(s) into 'users'.
+> admins(Id, Status) <- users(Id, "admin", Status)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "active"   │
+│    3 │ "inactive" │
+└──────┴────────────┘
+2 rows
+(session: 1 rule(s))
+> active(Id, Role) <- users(Id, Role, "active")
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "admin" │
+│    2 │ "user"  │
+└──────┴─────────┘
+2 rows
+(session: 2 rule(s))
+> ?admins(Id, S)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "active"   │
+│    3 │ "inactive" │
+└──────┴────────────┘
+2 rows
+> ?active(Id, R)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "admin" │
+│    2 │ "user"  │
+└──────┴─────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_str_eq_n07t14
+Knowledge graph 'test_str_eq_n07t14' dropped.

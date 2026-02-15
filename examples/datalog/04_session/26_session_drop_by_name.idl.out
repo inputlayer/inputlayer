@@ -13,3 +13,40 @@ Switched to knowledge graph: test_session_drop_name_n04t26
 Inserted 3 fact(s) into 'score'.
 > +edge[(1, 2), (2, 3)]
 Inserted 2 fact(s) into 'edge'.
+> top2(top_k<2, X, Y:desc>) <- score(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  300 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> path(X, Y) <- edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> .session
+Session rules (2):
+  1. top2(top_k<2, X, Y:desc>) <- score(X, Y)
+  2. path(X, Y) <- edge(X, Y)
+> .session drop top2
+Dropped 1 session rule(s) for 'top2'.
+> .session
+Session rules (1):
+  1. path(X, Y) <- edge(X, Y)
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+└──────┴──────┘
+2 rows
+> .session drop nonexistent
+Script error: No session rules found for relation 'nonexistent'.

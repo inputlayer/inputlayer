@@ -11,3 +11,18 @@ Switched to knowledge graph: test_first_n18t129
 Switched to knowledge graph: test_first_n18t129
 > +data[(1, 100), (2, 200), (3, 150)]
 Inserted 3 fact(s) into 'data'.
+> +first_val(min<Id>, Val) <- data(Id, Val), data(MinId, _), Id = MinId
+Rule 'first_val' registered.
+> +min_id(min<Id>) <- data(Id, _)
+Rule 'min_id' registered.
+> ?min_id(M)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_first_n18t129
+Knowledge graph 'test_first_n18t129' dropped.

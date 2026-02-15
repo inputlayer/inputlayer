@@ -11,3 +11,23 @@ Switched to knowledge graph: test_symmetric_n10t43
 Switched to knowledge graph: test_symmetric_n10t43
 > +friend[(1, 2), (2, 3), (1, 4)]
 Inserted 3 fact(s) into 'friend'.
+> +symmetric(A, B) <- friend(A, B)
+Rule 'symmetric' registered.
+> +symmetric(A, B) <- friend(B, A)
+Rule 'symmetric' registered.
+> ?symmetric(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    4 │
+│    2 │    1 │
+│    2 │    3 │
+│    3 │    2 │
+│    4 │    1 │
+└──────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_symmetric_n10t43
+Knowledge graph 'test_symmetric_n10t43' dropped.

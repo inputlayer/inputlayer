@@ -11,3 +11,51 @@ Switched to knowledge graph: test_topk_thresh_boundary_n14t145
 Switched to knowledge graph: test_topk_thresh_boundary_n14t145
 > +score[(1, 300), (2, 200), (3, 150), (4, 100), (5, 50)]
 Inserted 5 fact(s) into 'score'.
+> +high(top_k_threshold<3, 100, Id, Points:desc>) <- score(Id, Points)
+Rule 'high' registered.
+> ?high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  300 │
+│    2 │  200 │
+│    3 │  150 │
+└──────┴──────┘
+3 rows
+> -score(1, 300)
+Deleted 1 facts from 'score'.
+> ?high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  150 │
+│    4 │  100 │
+└──────┴──────┘
+3 rows
+> +score[(6, 80)]
+Inserted 1 fact(s) into 'score'.
+> ?high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  150 │
+│    4 │  100 │
+└──────┴──────┘
+3 rows
+> +score[(7, 250)]
+Inserted 1 fact(s) into 'score'.
+> ?high(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  150 │
+│    7 │  250 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_thresh_boundary_n14t145
+Knowledge graph 'test_topk_thresh_boundary_n14t145' dropped.

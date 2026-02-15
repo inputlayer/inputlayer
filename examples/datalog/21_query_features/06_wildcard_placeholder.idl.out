@@ -36,3 +36,62 @@ Inserted 4 fact(s) into 'people'.
 │    2 │ "bob" │   30 │
 └──────┴───────┴──────┘
 1 rows
+> +just_names(Name) <- people(_, Name, _)
+Rule 'just_names' registered.
+> ?just_names(N)
+┌───────────┐
+│ col0      │
+├───────────┤
+│ "alice"   │
+│ "bob"     │
+│ "charlie" │
+│ "diana"   │
+└───────────┘
+4 rows
+> +departments[(1, "engineering"), (2, "sales"), (3, "marketing")]
+Inserted 3 fact(s) into 'departments'.
+> dept_for_person(Name, Dept) <- people(Id, Name, _), departments(Id, Dept)
+┌───────────┬───────────────┐
+│ col0      │ col1          │
+├───────────┼───────────────┤
+│ "alice"   │ "engineering" │
+│ "bob"     │ "sales"       │
+│ "charlie" │ "marketing"   │
+└───────────┴───────────────┘
+3 rows
+(session: 1 rule(s))
+> ?dept_for_person(Name, Dept)
+┌───────────┬───────────────┐
+│ col0      │ col1          │
+├───────────┼───────────────┤
+│ "alice"   │ "engineering" │
+│ "bob"     │ "sales"       │
+│ "charlie" │ "marketing"   │
+└───────────┴───────────────┘
+3 rows
+> +matrix[(1, 1, 10), (1, 2, 20), (2, 1, 30), (2, 2, 40)]
+Inserted 4 fact(s) into 'matrix'.
+> row_values(Row, Val) <- matrix(Row, _, Val)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    1 │   20 │
+│    2 │   30 │
+│    2 │   40 │
+└──────┴──────┘
+4 rows
+(session: 2 rule(s))
+> ?row_values(1, V)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    1 │   20 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_wildcard_n21t06
+Knowledge graph 'test_wildcard_n21t06' dropped.

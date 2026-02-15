@@ -462,3 +462,408 @@ pub fn split_respecting_strings(input: &str) -> Vec<String> {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === BaseType Display ===
+
+    #[test]
+    fn test_base_type_display() {
+        assert_eq!(format!("{}", BaseType::Int), "int");
+        assert_eq!(format!("{}", BaseType::String), "string");
+        assert_eq!(format!("{}", BaseType::Bool), "bool");
+        assert_eq!(format!("{}", BaseType::Float), "float");
+    }
+
+    // === TypeExpr Display ===
+
+    #[test]
+    fn test_type_expr_display_base() {
+        assert_eq!(format!("{}", TypeExpr::Base(BaseType::Int)), "int");
+    }
+
+    #[test]
+    fn test_type_expr_display_type_ref() {
+        assert_eq!(
+            format!("{}", TypeExpr::TypeRef("Email".to_string())),
+            "Email"
+        );
+    }
+
+    #[test]
+    fn test_type_expr_display_list() {
+        let list = TypeExpr::List(Box::new(TypeExpr::Base(BaseType::Int)));
+        assert_eq!(format!("{list}"), "list[int]");
+    }
+
+    #[test]
+    fn test_type_expr_display_record() {
+        let record = TypeExpr::Record(vec![
+            RecordField {
+                name: "name".to_string(),
+                field_type: TypeExpr::Base(BaseType::String),
+            },
+            RecordField {
+                name: "age".to_string(),
+                field_type: TypeExpr::Base(BaseType::Int),
+            },
+        ]);
+        assert_eq!(format!("{record}"), "{ name: string, age: int }");
+    }
+
+    #[test]
+    fn test_type_expr_display_refined() {
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::Int)),
+            refinements: vec![Refinement {
+                name: "range".to_string(),
+                args: vec![RefinementArg::Int(0), RefinementArg::Int(100)],
+            }],
+        };
+        assert_eq!(format!("{refined}"), "int(range(0, 100))");
+    }
+
+    #[test]
+    fn test_type_expr_display_refined_no_args() {
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::String)),
+            refinements: vec![Refinement {
+                name: "not_empty".to_string(),
+                args: vec![],
+            }],
+        };
+        assert_eq!(format!("{refined}"), "string(not_empty)");
+    }
+
+    #[test]
+    fn test_type_expr_display_refined_string_arg() {
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::String)),
+            refinements: vec![Refinement {
+                name: "pattern".to_string(),
+                args: vec![RefinementArg::String("^[a-z]+$".to_string())],
+            }],
+        };
+        assert_eq!(format!("{refined}"), "string(pattern(\"^[a-z]+$\"))");
+    }
+
+    #[test]
+    fn test_type_expr_display_refined_bool_arg() {
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::Int)),
+            refinements: vec![Refinement {
+                name: "positive".to_string(),
+                args: vec![RefinementArg::Bool(true)],
+            }],
+        };
+        assert_eq!(format!("{refined}"), "int(positive(true))");
+    }
+
+    #[test]
+    fn test_type_expr_display_refined_float_arg() {
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::Float)),
+            refinements: vec![Refinement {
+                name: "max".to_string(),
+                args: vec![RefinementArg::Float(3.14)],
+            }],
+        };
+        let result = format!("{refined}");
+        assert!(result.starts_with("float(max(3.14"));
+    }
+
+    // === TypeExpr::to_schema_type ===
+
+    #[test]
+    fn test_to_schema_type_base_types() {
+        use crate::schema::SchemaType;
+        assert!(matches!(
+            TypeExpr::Base(BaseType::Int).to_schema_type(),
+            SchemaType::Int
+        ));
+        assert!(matches!(
+            TypeExpr::Base(BaseType::Float).to_schema_type(),
+            SchemaType::Float
+        ));
+        assert!(matches!(
+            TypeExpr::Base(BaseType::String).to_schema_type(),
+            SchemaType::String
+        ));
+        assert!(matches!(
+            TypeExpr::Base(BaseType::Bool).to_schema_type(),
+            SchemaType::Bool
+        ));
+    }
+
+    #[test]
+    fn test_to_schema_type_type_ref() {
+        use crate::schema::SchemaType;
+        let result = TypeExpr::TypeRef("Email".to_string()).to_schema_type();
+        assert!(matches!(result, SchemaType::Named(ref n) if n == "Email"));
+    }
+
+    #[test]
+    fn test_to_schema_type_list_is_any() {
+        use crate::schema::SchemaType;
+        let list = TypeExpr::List(Box::new(TypeExpr::Base(BaseType::Int)));
+        assert!(matches!(list.to_schema_type(), SchemaType::Any));
+    }
+
+    #[test]
+    fn test_to_schema_type_record_is_any() {
+        use crate::schema::SchemaType;
+        let record = TypeExpr::Record(vec![]);
+        assert!(matches!(record.to_schema_type(), SchemaType::Any));
+    }
+
+    #[test]
+    fn test_to_schema_type_refined_uses_base() {
+        use crate::schema::SchemaType;
+        let refined = TypeExpr::Refined {
+            base: Box::new(TypeExpr::Base(BaseType::Int)),
+            refinements: vec![],
+        };
+        assert!(matches!(refined.to_schema_type(), SchemaType::Int));
+    }
+
+    // === parse_type_decl ===
+
+    #[test]
+    fn test_parse_type_decl_basic() {
+        // No trailing dot - parse_type_decl doesn't strip it
+        let result = parse_type_decl("type Email: string").unwrap();
+        assert_eq!(result.name, "Email");
+        assert!(matches!(result.type_expr, TypeExpr::Base(BaseType::String)));
+    }
+
+    #[test]
+    fn test_parse_type_decl_no_colon() {
+        let result = parse_type_decl("type Email string");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(":"));
+    }
+
+    #[test]
+    fn test_parse_type_decl_empty_name() {
+        let result = parse_type_decl("type : string");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_type_decl_lowercase_name() {
+        let result = parse_type_decl("type email: string");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("uppercase"));
+    }
+
+    // === parse_type_expr ===
+
+    #[test]
+    fn test_parse_type_expr_base_types() {
+        assert!(matches!(
+            parse_type_expr("int").unwrap(),
+            TypeExpr::Base(BaseType::Int)
+        ));
+        assert!(matches!(
+            parse_type_expr("string").unwrap(),
+            TypeExpr::Base(BaseType::String)
+        ));
+        assert!(matches!(
+            parse_type_expr("bool").unwrap(),
+            TypeExpr::Base(BaseType::Bool)
+        ));
+        assert!(matches!(
+            parse_type_expr("float").unwrap(),
+            TypeExpr::Base(BaseType::Float)
+        ));
+    }
+
+    #[test]
+    fn test_parse_type_expr_case_insensitive() {
+        assert!(matches!(
+            parse_type_expr("INT").unwrap(),
+            TypeExpr::Base(BaseType::Int)
+        ));
+        assert!(matches!(
+            parse_type_expr("String").unwrap(),
+            TypeExpr::Base(BaseType::String)
+        ));
+    }
+
+    #[test]
+    fn test_parse_type_expr_type_ref() {
+        let result = parse_type_expr("Email").unwrap();
+        assert!(matches!(result, TypeExpr::TypeRef(ref n) if n == "Email"));
+    }
+
+    #[test]
+    fn test_parse_type_expr_list() {
+        let result = parse_type_expr("list[int]").unwrap();
+        assert!(matches!(result, TypeExpr::List(_)));
+    }
+
+    #[test]
+    fn test_parse_type_expr_record() {
+        let result = parse_type_expr("{ name: string, age: int }").unwrap();
+        if let TypeExpr::Record(fields) = result {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "name");
+            assert_eq!(fields[1].name, "age");
+        } else {
+            panic!("Expected Record");
+        }
+    }
+
+    #[test]
+    fn test_parse_type_expr_empty() {
+        assert!(parse_type_expr("").is_err());
+    }
+
+    #[test]
+    fn test_parse_type_expr_unknown() {
+        assert!(parse_type_expr("foobar").is_err());
+    }
+
+    #[test]
+    fn test_parse_type_expr_empty_record() {
+        assert!(parse_type_expr("{}").is_err());
+    }
+
+    #[test]
+    fn test_parse_type_expr_refined() {
+        let result = parse_type_expr("int(range(0, 100))").unwrap();
+        if let TypeExpr::Refined { base, refinements } = result {
+            assert!(matches!(*base, TypeExpr::Base(BaseType::Int)));
+            assert_eq!(refinements.len(), 1);
+            assert_eq!(refinements[0].name, "range");
+            assert_eq!(refinements[0].args.len(), 2);
+        } else {
+            panic!("Expected Refined");
+        }
+    }
+
+    // === split_respecting_braces ===
+
+    #[test]
+    fn test_split_respecting_braces_simple() {
+        let result = split_respecting_braces("a, b, c");
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_split_respecting_braces_nested() {
+        let result = split_respecting_braces("a: {x: int, y: int}, b: string");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_respecting_braces_in_string() {
+        let result = split_respecting_braces("\"a,b\", c");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_respecting_braces_parens() {
+        let result = split_respecting_braces("range(1, 2), not_empty");
+        assert_eq!(result.len(), 2);
+    }
+
+    // === split_respecting_parens ===
+
+    #[test]
+    fn test_split_respecting_parens_simple() {
+        let result = split_respecting_parens("a, b");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_respecting_parens_nested() {
+        let result = split_respecting_parens("range(1, 2), not_empty");
+        assert_eq!(result.len(), 2);
+    }
+
+    // === split_respecting_strings ===
+
+    #[test]
+    fn test_split_respecting_strings_simple() {
+        let result = split_respecting_strings("a, b, c");
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_split_respecting_strings_in_quotes() {
+        let result = split_respecting_strings("\"a,b\", c");
+        assert_eq!(result.len(), 2);
+    }
+
+    // === Refinement parsing ===
+
+    #[test]
+    fn test_parse_refinement_args_int() {
+        let result = parse_refinement_args("42").unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], RefinementArg::Int(42)));
+    }
+
+    #[test]
+    fn test_parse_refinement_args_string() {
+        let result = parse_refinement_args("\"hello\"").unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], RefinementArg::String(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn test_parse_refinement_args_bool() {
+        let result = parse_refinement_args("true").unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], RefinementArg::Bool(true)));
+    }
+
+    #[test]
+    fn test_parse_refinement_args_float() {
+        let result = parse_refinement_args("3.14").unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], RefinementArg::Float(f) if (f - 3.14).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_parse_refinement_args_invalid() {
+        let result = parse_refinement_args("not_a_value");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_refinement_args_multiple() {
+        let result = parse_refinement_args("0, 100").unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0], RefinementArg::Int(0)));
+        assert!(matches!(result[1], RefinementArg::Int(100)));
+    }
+
+    // === TypeDecl serde roundtrip ===
+
+    #[test]
+    fn test_type_decl_serde_roundtrip() {
+        let decl = TypeDecl {
+            name: "Email".to_string(),
+            type_expr: TypeExpr::Base(BaseType::String),
+        };
+        let json = serde_json::to_string(&decl).unwrap();
+        let back: TypeDecl = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "Email");
+    }
+
+    #[test]
+    fn test_record_field_with_empty_name() {
+        let result = parse_record_type("{ : int }");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_field_missing_type() {
+        let result = parse_record_type("{ name }");
+        assert!(result.is_err());
+    }
+}

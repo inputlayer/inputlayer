@@ -11,3 +11,60 @@ Switched to knowledge graph: test_wide_10_n13t07
 Switched to knowledge graph: test_wide_10_n13t07
 > +wide_data[(1, 10, 100, 1000, 10000, 2, 20, 200, 2000, 20000), (2, 20, 200, 2000, 20000, 3, 30, 300, 3000, 30000), (3, 30, 300, 3000, 30000, 4, 40, 400, 4000, 40000), (4, 40, 400, 4000, 40000, 5, 50, 500, 5000, 50000), (5, 50, 500, 5000, 50000, 6, 60, 600, 6000, 60000)]
 Inserted 5 fact(s) into 'wide_data'.
+> +select_cols(A, E, J) <- wide_data(A, _, _, _, E, _, _, _, _, J)
+Rule 'select_cols' registered.
+> ?select_cols(A, E, J)
+┌──────┬───────┬───────┐
+│ col0 │ col1  │ col2  │
+├──────┼───────┼───────┤
+│    1 │ 10000 │ 20000 │
+│    2 │ 20000 │ 30000 │
+│    3 │ 30000 │ 40000 │
+│    4 │ 40000 │ 50000 │
+│    5 │ 50000 │ 60000 │
+└──────┴───────┴───────┘
+5 rows
+> +col_sum(A, B+C+D+E) <- wide_data(A, B, C, D, E, _, _, _, _, _)
+Rule 'col_sum' registered.
+> ?col_sum(A, S)
+┌──────┬───────┐
+│ col0 │ col1  │
+├──────┼───────┤
+│    1 │ 11110 │
+│    2 │ 22220 │
+│    3 │ 33330 │
+│    4 │ 44440 │
+│    5 │ 55550 │
+└──────┴───────┘
+5 rows
+> +filtered(A) <- wide_data(A, B, C, _, _, _, _, _, _, _), B > 15, C > 150
+Rule 'filtered' registered.
+> ?filtered(A)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    3 │
+│    4 │
+│    5 │
+└──────┘
+4 rows
+> +wide_data2[(1, 111), (2, 222), (3, 333), (4, 444), (5, 555)]
+Inserted 5 fact(s) into 'wide_data2'.
+> +joined(A, B, C, V) <- wide_data(A, B, C, _, _, _, _, _, _, _), wide_data2(A, V)
+Rule 'joined' registered.
+> ?joined(A, B, C, V)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │   10 │  100 │  111 │
+│    2 │   20 │  200 │  222 │
+│    3 │   30 │  300 │  333 │
+│    4 │   40 │  400 │  444 │
+│    5 │   50 │  500 │  555 │
+└──────┴──────┴──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_wide_10_n13t07
+Knowledge graph 'test_wide_10_n13t07' dropped.

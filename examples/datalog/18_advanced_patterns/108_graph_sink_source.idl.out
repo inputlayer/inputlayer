@@ -13,3 +13,58 @@ Switched to knowledge graph: test_sink_src_n18t108
 Inserted 3 fact(s) into 'edge'.
 > +nodes[("a",), ("b",), ("c",), ("d",)]
 Inserted 4 fact(s) into 'nodes'.
+> has_outgoing(N) <- edge(N, _)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+│ "b"  │
+│ "c"  │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> has_incoming(N) <- edge(_, N)
+┌──────┐
+│ col0 │
+├──────┤
+│ "b"  │
+│ "c"  │
+│ "d"  │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> source(N) <- nodes(N), !has_incoming(N)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+└──────┘
+1 rows
+(session: 3 rule(s))
+> sink(N) <- nodes(N), !has_outgoing(N)
+┌──────┐
+│ col0 │
+├──────┤
+│ "d"  │
+└──────┘
+1 rows
+(session: 4 rule(s))
+> ?source(N)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+└──────┘
+1 rows
+> ?sink(N)
+┌──────┐
+│ col0 │
+├──────┤
+│ "d"  │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_sink_src_n18t108
+Knowledge graph 'test_sink_src_n18t108' dropped.

@@ -11,3 +11,5 @@ Switched to knowledge graph: test_cd_global_n14t56
 Switched to knowledge graph: test_cd_global_n14t56
 > +events[("click",), ("view",), ("click",), ("purchase",), ("view",), ("click",)]
 Inserted 3 fact(s) into 'events'.
+> unique_events(<COUNT_DISTINCT:E>) <- events(E)
+Script error: Parse error: Unknown aggregate function: 

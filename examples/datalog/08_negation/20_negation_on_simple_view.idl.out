@@ -13,3 +13,31 @@ Switched to knowledge graph: test_neg_view_n08t20
 Inserted 5 fact(s) into 'data'.
 > +exclude_ids[(2, 0), (4, 0)]
 Inserted 2 fact(s) into 'exclude_ids'.
+> +data_view(X, Y) <- data(X, Y)
+Rule 'data_view' registered.
+> ?data_view(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+│    4 │   40 │
+│    5 │   50 │
+└──────┴──────┘
+5 rows
+> +result(X, Y) <- data_view(X, Y), !exclude_ids(X, _)
+Rule 'result' registered.
+> ?result(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    3 │   30 │
+│    5 │   50 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_view_n08t20
+Knowledge graph 'test_neg_view_n08t20' dropped.

@@ -18,3 +18,23 @@ Inserted 1 fact(s) into 'wide_table'.
 │    1 │ "a"  │   10 │  1.5 │ "x"  │  100 │ "y"  │  2.5 │ "z"  │ 1000 │
 └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
 1 rows
+> narrow(A, E, I) <- wide_table(A, _, _, _, E, _, _, _, I, _)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "x"  │ "z"  │
+└──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?narrow(A, E, I)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │ "x"  │ "z"  │
+└──────┴──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_large_tuple_n10t121
+Knowledge graph 'test_large_tuple_n10t121' dropped.

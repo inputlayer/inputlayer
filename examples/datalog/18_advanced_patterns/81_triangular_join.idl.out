@@ -11,3 +11,5 @@ Switched to knowledge graph: test_triangle_n18t81
 Switched to knowledge graph: test_triangle_n18t81
 > +edge[("a", "b"), ("b", "c"), ("c", "a"), ("a", "d"), ("d", "e")]
 Inserted 5 fact(s) into 'edge'.
+> triangle(A, B, C) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

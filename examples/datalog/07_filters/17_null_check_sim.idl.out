@@ -11,3 +11,42 @@ Switched to knowledge graph: test_null_sim_n07t17
 Switched to knowledge graph: test_null_sim_n07t17
 > +data[(1, 100), (2, 0), (3, 50), (4, 0)]
 Inserted 4 fact(s) into 'data'.
+> has_value(Id, V) <- data(Id, V), V != 0
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │   50 │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> no_value(Id) <- data(Id, 0)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+(session: 2 rule(s))
+> ?has_value(Id, V)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    3 │   50 │
+└──────┴──────┘
+2 rows
+> ?no_value(Id)
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_null_sim_n07t17
+Knowledge graph 'test_null_sim_n07t17' dropped.

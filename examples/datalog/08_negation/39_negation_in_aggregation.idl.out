@@ -13,3 +13,23 @@ Switched to knowledge graph: test_neg_agg_n08t39
 Inserted 5 fact(s) into 'items'.
 > +exclude[("B",), ("D",)]
 Inserted 2 fact(s) into 'exclude'.
+> count_included(count<Id>) <- items(Id, Name), !exclude(Name)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?count_included(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_neg_agg_n08t39
+Knowledge graph 'test_neg_agg_n08t39' dropped.

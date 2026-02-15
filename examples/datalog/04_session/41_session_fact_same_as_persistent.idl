@@ -1,0 +1,22 @@
+// Test: Ephemeral fact duplicates persistent fact
+// Description: Adding a session fact that already exists as persistent data
+
+.kg create test_sess_dup_pers_n04t41
+.kg use test_sess_dup_pers_n04t41
+
+// Persistent facts
++val[(10,), (20,)]
+
+// Ephemeral fact same as persistent
+val(10)
+val(30)
+
+// Should see 3 distinct values
+?val(X)
+
+// After clear, should see original 2
+.session clear
+?val(X)
+
+.kg use default
+.kg drop test_sess_dup_pers_n04t41

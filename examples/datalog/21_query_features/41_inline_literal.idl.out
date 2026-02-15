@@ -11,3 +11,27 @@ Switched to knowledge graph: test_inline_lit_n21t41
 Switched to knowledge graph: test_inline_lit_n21t41
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
+> with_const(X, "constant") <- base(X)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "constant" │
+│    2 │ "constant" │
+│    3 │ "constant" │
+└──────┴────────────┘
+3 rows
+(session: 1 rule(s))
+> ?with_const(X, C)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "constant" │
+│    2 │ "constant" │
+│    3 │ "constant" │
+└──────┴────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_inline_lit_n21t41
+Knowledge graph 'test_inline_lit_n21t41' dropped.

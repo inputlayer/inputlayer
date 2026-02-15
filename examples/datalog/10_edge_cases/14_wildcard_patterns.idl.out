@@ -11,3 +11,97 @@ Switched to knowledge graph: test_wildcards_n10t14
 Switched to knowledge graph: test_wildcards_n10t14
 > +data[(1, "a", 100), (2, "b", 200), (3, "c", 100)]
 Inserted 3 fact(s) into 'data'.
+> exists_with_value(Val) <- data(_, _, Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  200 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?exists_with_value(Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  200 │
+└──────┘
+2 rows
+> has_name(Name) <- data(_, Name, _)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+│ "b"  │
+│ "c"  │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> ?has_name(Name)
+┌──────┐
+│ col0 │
+├──────┤
+│ "a"  │
+│ "b"  │
+│ "c"  │
+└──────┘
+3 rows
+> has_any_data() <- data(_, _, _)
+┌┐
+││
+├┤
+││
+└┘
+1 rows
+(session: 3 rule(s))
+> ?has_any_data()
+┌┐
+││
+├┤
+││
+└┘
+1 rows
+> count_distinct_values(Val) <- data(_, _, Val), data(_, _, Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  200 │
+└──────┘
+2 rows
+(session: 4 rule(s))
+> ?count_distinct_values(Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+│  200 │
+└──────┘
+2 rows
+> +other[(100, "x"), (200, "y"), (300, "z")]
+Inserted 3 fact(s) into 'other'.
+> joined(Name, Label) <- data(_, Name, Val), other(Val, Label)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "x"  │
+│ "b"  │ "y"  │
+│ "c"  │ "x"  │
+└──────┴──────┘
+3 rows
+(session: 5 rule(s))
+> ?joined(Name, Label)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "x"  │
+│ "b"  │ "y"  │
+│ "c"  │ "x"  │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 5 session rule(s), 0 session fact(s))
+> .kg drop test_wildcards_n10t14
+Knowledge graph 'test_wildcards_n10t14' dropped.

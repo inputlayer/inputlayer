@@ -11,3 +11,31 @@ Switched to knowledge graph: test_mod_neg_n15t46
 Switched to knowledge graph: test_mod_neg_n15t46
 > +numbers[(-7,), (-5,), (0,), (5,), (7,)]
 Inserted 5 fact(s) into 'numbers'.
+> mod_result(X, Y) <- numbers(X), Y = X % 3
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -7 │   -1 │
+│   -5 │   -2 │
+│    0 │    0 │
+│    5 │    2 │
+│    7 │    1 │
+└──────┴──────┘
+5 rows
+(session: 1 rule(s))
+> ?mod_result(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -7 │   -1 │
+│   -5 │   -2 │
+│    0 │    0 │
+│    5 │    2 │
+│    7 │    1 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_mod_neg_n15t46
+Knowledge graph 'test_mod_neg_n15t46' dropped.

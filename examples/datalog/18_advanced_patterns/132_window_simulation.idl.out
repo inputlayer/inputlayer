@@ -32,3 +32,31 @@ Inserted 5 fact(s) into 'sales'.
 │    5 │    1 │
 └──────┴──────┘
 4 rows
+> running(Id, count<Other>) <- sales(Id, Val), sales(Other, OtherVal), OtherVal <= Val
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    3 │
+│    3 │    5 │
+│    4 │    2 │
+│    5 │    4 │
+└──────┴──────┘
+5 rows
+(session: 2 rule(s))
+> ?running(Id, R)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    1 │
+│    2 │    3 │
+│    3 │    5 │
+│    4 │    2 │
+│    5 │    4 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_window_n18t132
+Knowledge graph 'test_window_n18t132' dropped.

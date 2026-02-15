@@ -15,3 +15,25 @@ Inserted 4 fact(s) into 'set1'.
 Inserted 4 fact(s) into 'set2'.
 > +set3[(3,), (4,), (5,), (6,)]
 Inserted 4 fact(s) into 'set3'.
+> common(X) <- set1(X), set2(X), set3(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> ?common(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_int_three_n22t21
+Knowledge graph 'test_int_three_n22t21' dropped.

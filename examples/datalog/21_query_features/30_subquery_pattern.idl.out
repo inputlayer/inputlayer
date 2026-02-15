@@ -11,3 +11,23 @@ Switched to knowledge graph: test_subquery_n21t30
 Switched to knowledge graph: test_subquery_n21t30
 > +orders[(1, "Alice", 100), (2, "Bob", 200), (3, "Carol", 150)]
 Inserted 3 fact(s) into 'orders'.
+> max_order(max<Val>) <- orders(_, _, Val)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?max_order(M)
+┌──────┐
+│ col0 │
+├──────┤
+│  200 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_subquery_n21t30
+Knowledge graph 'test_subquery_n21t30' dropped.

@@ -20,3 +20,23 @@ Inserted 3 fact(s) into 'words'.
 │ "hello" │
 └─────────┘
 3 rows
+> lower(W) <- words(W), W = "hello"
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "hello" │
+└─────────┘
+1 rows
+(session: 1 rule(s))
+> ?lower(W)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "hello" │
+└─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_case_n10t133
+Knowledge graph 'test_case_n10t133' dropped.

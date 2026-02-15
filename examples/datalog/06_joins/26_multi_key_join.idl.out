@@ -13,3 +13,25 @@ Switched to knowledge graph: test_multi_key_n06t26
 Inserted 3 fact(s) into 'left'.
 > +right[(1, "a", "match1"), (2, "b", "match2"), (1, "b", "nomatch")]
 Inserted 3 fact(s) into 'right'.
+> joined(Id, Cat, Val, Label) <- left(Id, Cat, Val), right(Id, Cat, Label)
+┌──────┬──────┬──────┬──────────┐
+│ col0 │ col1 │ col2 │ col3     │
+├──────┼──────┼──────┼──────────┤
+│    1 │ "a"  │  100 │ "match1" │
+│    2 │ "b"  │  200 │ "match2" │
+└──────┴──────┴──────┴──────────┘
+2 rows
+(session: 1 rule(s))
+> ?joined(Id, Cat, Val, Label)
+┌──────┬──────┬──────┬──────────┐
+│ col0 │ col1 │ col2 │ col3     │
+├──────┼──────┼──────┼──────────┤
+│    1 │ "a"  │  100 │ "match1" │
+│    2 │ "b"  │  200 │ "match2" │
+└──────┴──────┴──────┴──────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multi_key_n06t26
+Knowledge graph 'test_multi_key_n06t26' dropped.

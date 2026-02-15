@@ -13,3 +13,60 @@ Switched to knowledge graph: test_cross_n06t07
 Inserted 2 fact(s) into 'colors'.
 > +shapes[("circle"), ("square")]
 Inserted 2 fact(s) into 'shapes'.
+> combinations(C, S) <- colors(C), shapes(S)
+┌────────┬──────────┐
+│ col0   │ col1     │
+├────────┼──────────┤
+│ "blue" │ "circle" │
+│ "blue" │ "square" │
+│ "red"  │ "circle" │
+│ "red"  │ "square" │
+└────────┴──────────┘
+4 rows
+(session: 1 rule(s))
+> ?combinations(C, S)
+┌────────┬──────────┐
+│ col0   │ col1     │
+├────────┼──────────┤
+│ "blue" │ "circle" │
+│ "blue" │ "square" │
+│ "red"  │ "circle" │
+│ "red"  │ "square" │
+└────────┴──────────┘
+4 rows
+> +sizes[("small"), ("large")]
+Inserted 2 fact(s) into 'sizes'.
+> all_combos(C, S, Z) <- colors(C), shapes(S), sizes(Z)
+┌────────┬──────────┬─────────┐
+│ col0   │ col1     │ col2    │
+├────────┼──────────┼─────────┤
+│ "blue" │ "circle" │ "large" │
+│ "blue" │ "circle" │ "small" │
+│ "blue" │ "square" │ "large" │
+│ "blue" │ "square" │ "small" │
+│ "red"  │ "circle" │ "large" │
+│ "red"  │ "circle" │ "small" │
+│ "red"  │ "square" │ "large" │
+│ "red"  │ "square" │ "small" │
+└────────┴──────────┴─────────┘
+8 rows
+(session: 2 rule(s))
+> ?all_combos(C, S, Z)
+┌────────┬──────────┬─────────┐
+│ col0   │ col1     │ col2    │
+├────────┼──────────┼─────────┤
+│ "blue" │ "circle" │ "large" │
+│ "blue" │ "circle" │ "small" │
+│ "blue" │ "square" │ "large" │
+│ "blue" │ "square" │ "small" │
+│ "red"  │ "circle" │ "large" │
+│ "red"  │ "circle" │ "small" │
+│ "red"  │ "square" │ "large" │
+│ "red"  │ "square" │ "small" │
+└────────┴──────────┴─────────┘
+8 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_cross_n06t07
+Knowledge graph 'test_cross_n06t07' dropped.

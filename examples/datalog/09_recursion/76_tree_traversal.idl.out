@@ -11,3 +11,22 @@ Switched to knowledge graph: test_tree_n09t76
 Switched to knowledge graph: test_tree_n09t76
 > +parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)]
 Inserted 5 fact(s) into 'parent'.
+> +descendant(P, C) <- parent(P, C)
+Rule 'descendant' registered.
+> +descendant(P, D) <- parent(P, C), descendant(C, D)
+Rule 'descendant' registered.
+> ?descendant(1, D)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    1 │    5 │
+│    1 │    6 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_tree_n09t76
+Knowledge graph 'test_tree_n09t76' dropped.

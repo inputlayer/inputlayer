@@ -13,3 +13,33 @@ Switched to knowledge graph: test_cross_n18t90
 Inserted 2 fact(s) into 'colors'.
 > +sizes[("S",), ("M",), ("L",)]
 Inserted 3 fact(s) into 'sizes'.
+> combinations(Color, Size) <- colors(Color), sizes(Size)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "blue" │ "L"  │
+│ "blue" │ "M"  │
+│ "blue" │ "S"  │
+│ "red"  │ "L"  │
+│ "red"  │ "M"  │
+│ "red"  │ "S"  │
+└────────┴──────┘
+6 rows
+(session: 1 rule(s))
+> ?combinations(Color, Size)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "blue" │ "L"  │
+│ "blue" │ "M"  │
+│ "blue" │ "S"  │
+│ "red"  │ "L"  │
+│ "red"  │ "M"  │
+│ "red"  │ "S"  │
+└────────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_cross_n18t90
+Knowledge graph 'test_cross_n18t90' dropped.

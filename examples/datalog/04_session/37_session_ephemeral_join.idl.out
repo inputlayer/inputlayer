@@ -1,0 +1,44 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_join_n04t37
+Knowledge graph 'test_sess_join_n04t37' created.
+Switched to knowledge graph: test_sess_join_n04t37
+> .kg use test_sess_join_n04t37
+Switched to knowledge graph: test_sess_join_n04t37
+> +enrolled[(1, "math"), (2, "math"), (3, "science")]
+Inserted 3 fact(s) into 'enrolled'.
+> grade(1, "math", 95)
+Session fact added for 'grade'. (Use +grade(...) to persist)
+> grade(2, "math", 80)
+Session fact added for 'grade'. (Use +grade(...) to persist)
+> grade(3, "science", 90)
+Session fact added for 'grade'. (Use +grade(...) to persist)
+> student_grade(Id, Course, Grade) <- enrolled(Id, Course), grade(Id, Course, Grade)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "math"    │   95 │
+│    2 │ "math"    │   80 │
+│    3 │ "science" │   90 │
+└──────┴───────────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?student_grade(Id, Course, Grade)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "math"    │   95 │
+│    2 │ "math"    │   80 │
+│    3 │ "science" │   90 │
+└──────┴───────────┴──────┘
+3 rows
+> .session clear
+Cleared 3 session fact(s), 1 session rule(s).
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_join_n04t37
+Knowledge graph 'test_sess_join_n04t37' dropped.

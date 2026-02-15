@@ -13,3 +13,25 @@ Switched to knowledge graph: test_cross_filter_n06t51
 Inserted 3 fact(s) into 'nums'.
 > +letters[("a",), ("b",)]
 Inserted 2 fact(s) into 'letters'.
+> cross_even(N, L) <- nums(N), letters(L), N % 2 = 0
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "a"  │
+│    2 │ "b"  │
+└──────┴──────┘
+2 rows
+(session: 1 rule(s))
+> ?cross_even(N, L)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │ "a"  │
+│    2 │ "b"  │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_cross_filter_n06t51
+Knowledge graph 'test_cross_filter_n06t51' dropped.

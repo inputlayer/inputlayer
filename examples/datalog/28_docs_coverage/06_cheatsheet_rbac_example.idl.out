@@ -13,3 +13,5 @@ Switched to knowledge graph: test_acl_n28t06
 Inserted 2 fact(s) into 'user_role'.
 > +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")]
 Inserted 3 fact(s) into 'role_permission'.
+> +has_permission(User, Perm) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

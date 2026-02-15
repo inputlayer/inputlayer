@@ -18,3 +18,16 @@ Inserted 1 fact(s) into 'singleton'.
 │   42 │ "answer" │    1 │
 └──────┴──────────┴──────┘
 1 rows
+> +single_sum(sum<A>) <- singleton(A, _, _)
+Rule 'single_sum' registered.
+> ?single_sum(S)
+┌──────┐
+│ col0 │
+├──────┤
+│   42 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_single_tuple_n10t137
+Knowledge graph 'test_single_tuple_n10t137' dropped.

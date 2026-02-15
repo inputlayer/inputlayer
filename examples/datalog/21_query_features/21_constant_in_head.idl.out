@@ -11,3 +11,27 @@ Switched to knowledge graph: test_const_head_n21t21
 Switched to knowledge graph: test_const_head_n21t21
 > +items[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'items'.
+> with_label(X, "item") <- items(X)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    1 │ "item" │
+│    2 │ "item" │
+│    3 │ "item" │
+└──────┴────────┘
+3 rows
+(session: 1 rule(s))
+> ?with_label(X, Label)
+┌──────┬────────┐
+│ col0 │ col1   │
+├──────┼────────┤
+│    1 │ "item" │
+│    2 │ "item" │
+│    3 │ "item" │
+└──────┴────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_const_head_n21t21
+Knowledge graph 'test_const_head_n21t21' dropped.

@@ -21,3 +21,23 @@ Inserted 4 fact(s) into 'edge'.
 │    3 │    4 │
 └──────┴──────┘
 4 rows
+> temp(count<X>) <- edge(X, _)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+(session: 1 rule(s))
+> ?temp(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_repl_wildcards_n28t19
+Knowledge graph 'test_repl_wildcards_n28t19' dropped.

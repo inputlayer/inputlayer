@@ -350,4 +350,153 @@ mod tests {
             assert_eq!(violations[0].tuple_index, 1);
         }
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_violation_display_with_column() {
+        let v = Violation::new(
+            0,
+            Tuple::new(vec![Value::Int64(1)]),
+            Some("age".to_string()),
+            ViolationType::TypeMismatch,
+            "expected int",
+        );
+        let display = v.to_string();
+        assert!(display.contains("age"));
+        assert!(display.contains("TYPE_MISMATCH"));
+        assert!(display.contains("expected int"));
+    }
+
+    #[test]
+    fn test_violation_display_without_column() {
+        let v = Violation::new(
+            2,
+            Tuple::new(vec![Value::Int64(1)]),
+            None,
+            ViolationType::ArityMismatch,
+            "expected 3 columns",
+        );
+        let display = v.to_string();
+        assert!(display.contains("Tuple #2"));
+        assert!(display.contains("ARITY_MISMATCH"));
+    }
+
+    #[test]
+    fn test_violation_type_display() {
+        assert_eq!(ViolationType::ArityMismatch.to_string(), "ARITY_MISMATCH");
+        assert_eq!(ViolationType::TypeMismatch.to_string(), "TYPE_MISMATCH");
+    }
+
+    #[test]
+    fn test_validation_error_display() {
+        let err = ValidationError::NoSchema("edge".to_string());
+        assert!(err.to_string().contains("edge"));
+
+        let err = ValidationError::BatchRejected {
+            relation: "user".to_string(),
+            total_tuples: 5,
+            violations: vec![],
+        };
+        assert!(err.to_string().contains("user"));
+        assert!(err.to_string().contains("5"));
+
+        let err = ValidationError::Internal("oops".to_string());
+        assert!(err.to_string().contains("oops"));
+    }
+
+    #[test]
+    fn test_validation_result_success() {
+        let result = ValidationResult::success(10);
+        assert_eq!(result.validated_count, 10);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validation_result_with_warning() {
+        let result = ValidationResult::success(1).with_warning("nullable column");
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0], "nullable column");
+    }
+
+    #[test]
+    fn test_validate_empty_batch() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+        let result = engine.validate_batch(&schema, &[]).unwrap();
+        assert_eq!(result.validated_count, 0);
+    }
+
+    #[test]
+    fn test_validate_too_many_columns() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+
+        let tuple = Tuple::new(vec![
+            Value::string("u1"),
+            Value::string("Alice"),
+            Value::Int64(30),
+            Value::string("alice@example.com"),
+            Value::string("extra_column"),
+        ]);
+
+        let result = engine.validate_batch(&schema, &[tuple]);
+        assert!(result.is_err());
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations[0].violation_type, ViolationType::ArityMismatch);
+        }
+    }
+
+    #[test]
+    fn test_validate_int_schema() {
+        let schema =
+            RelationSchema::new("numbers").with_column(ColumnSchema::new("val", SchemaType::Int));
+        let mut engine = ValidationEngine::new();
+
+        // Valid int
+        let result = engine.validate_batch(&schema, &[Tuple::new(vec![Value::Int64(42)])]);
+        assert!(result.is_ok());
+
+        // Invalid: string where int expected
+        let result = engine.validate_batch(&schema, &[Tuple::new(vec![Value::string("hello")])]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_existing_data() {
+        let schema = make_simple_schema();
+        let mut engine = ValidationEngine::new();
+        let data = vec![Tuple::new(vec![
+            Value::string("u1"),
+            Value::string("Alice"),
+            Value::Int64(30),
+            Value::string("a@b.com"),
+        ])];
+        let result = engine.validate_existing_data(&schema, &data);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_multiple_violations_in_batch() {
+        let schema = RelationSchema::new("test")
+            .with_column(ColumnSchema::new("a", SchemaType::Int))
+            .with_column(ColumnSchema::new("b", SchemaType::Int));
+        let mut engine = ValidationEngine::new();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::string("bad"), Value::Int64(1)]), // type error at col 0
+            Tuple::new(vec![Value::Int64(1)]),                       // arity error
+        ];
+
+        let result = engine.validate_batch(&schema, &tuples);
+        assert!(result.is_err());
+        if let Err(ValidationError::BatchRejected { violations, .. }) = result {
+            assert_eq!(violations.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_validation_engine_default() {
+        let _engine = ValidationEngine::default();
+    }
 }

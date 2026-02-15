@@ -11,3 +11,52 @@ Switched to knowledge graph: test_powerset_n22t34
 Switched to knowledge graph: test_powerset_n22t34
 > +elements[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'elements'.
+> pairs(A, B) <- elements(A), elements(B), A < B
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    2 │    3 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?pairs(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    2 │    3 │
+└──────┴──────┘
+3 rows
+> ordered_pairs(A, B) <- elements(A), elements(B), A != B
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    2 │    1 │
+│    2 │    3 │
+│    3 │    1 │
+│    3 │    2 │
+└──────┴──────┘
+6 rows
+(session: 2 rule(s))
+> ?ordered_pairs(A, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    2 │    1 │
+│    2 │    3 │
+│    3 │    1 │
+│    3 │    2 │
+└──────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_powerset_n22t34
+Knowledge graph 'test_powerset_n22t34' dropped.

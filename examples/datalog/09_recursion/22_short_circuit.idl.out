@@ -11,3 +11,32 @@ Switched to knowledge graph: test_short_n09t22
 Switched to knowledge graph: test_short_n09t22
 > +edge[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edge'.
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- path(X, Y), edge(Y, Z)
+Rule 'path' registered.
+> ?path(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    2 │    3 │
+│    2 │    4 │
+│    3 │    4 │
+└──────┴──────┘
+6 rows
+> +path_count(count<Y>) <- path(1, Y)
+Rule 'path_count' registered.
+> ?path_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_short_n09t22
+Knowledge graph 'test_short_n09t22' dropped.

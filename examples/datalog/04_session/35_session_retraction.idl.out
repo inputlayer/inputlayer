@@ -1,0 +1,52 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sess_retract_n04t35
+Knowledge graph 'test_sess_retract_n04t35' created.
+Switched to knowledge graph: test_sess_retract_n04t35
+> .kg use test_sess_retract_n04t35
+Switched to knowledge graph: test_sess_retract_n04t35
+> +color[("red",), ("blue",)]
+Inserted 2 fact(s) into 'color'.
+> color("green")
+Session fact added for 'color'. (Use +color(...) to persist)
+> color("yellow")
+Session fact added for 'color'. (Use +color(...) to persist)
+> all_color(C) <- color(C)
+┌──────────┐
+│ col0     │
+├──────────┤
+│ "blue"   │
+│ "green"  │
+│ "red"    │
+│ "yellow" │
+└──────────┘
+4 rows
+(session: 1 rule(s))
+> ?all_color(C)
+┌──────────┐
+│ col0     │
+├──────────┤
+│ "blue"   │
+│ "green"  │
+│ "red"    │
+│ "yellow" │
+└──────────┘
+4 rows
+> .session clear
+Cleared 2 session fact(s), 1 session rule(s).
+> ?color(C)
+┌────────┐
+│ col0   │
+├────────┤
+│ "blue" │
+│ "red"  │
+└────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sess_retract_n04t35
+Knowledge graph 'test_sess_retract_n04t35' dropped.

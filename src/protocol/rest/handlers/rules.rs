@@ -225,3 +225,152 @@ pub async fn delete_rule_clause(
         message,
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Config;
+
+    fn make_handler() -> Arc<Handler> {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        Arc::new(Handler::from_config(config).unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_list_rules_empty() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("rules_empty_kg")
+            .unwrap();
+        let result = list_rules(Extension(handler), Path("rules_empty_kg".to_string()))
+            .await
+            .unwrap();
+        let data = result.0.data.unwrap();
+        assert!(data.rules.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_rules_with_rule() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("rules_list_kg".to_string()),
+                "+base[(1,), (2,)]\n+doubled(X, Y) <- base(X), Y = X * 2".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = list_rules(Extension(handler), Path("rules_list_kg".to_string()))
+            .await
+            .unwrap();
+        let data = result.0.data.unwrap();
+        assert!(data.rules.iter().any(|r| r.name == "doubled"));
+    }
+
+    #[tokio::test]
+    async fn test_get_rule() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("rules_get_kg".to_string()),
+                "+base[(1,)]\n+my_rule(X, Y) <- base(X), Y = X + 1".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = get_rule(
+            Extension(handler),
+            Path(("rules_get_kg".to_string(), "my_rule".to_string())),
+        )
+        .await
+        .unwrap();
+        let rule = result.0.data.unwrap();
+        assert_eq!(rule.name, "my_rule");
+        assert!(rule.clause_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_rule_not_found() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("rules_nf_kg")
+            .unwrap();
+        let result = get_rule(
+            Extension(handler),
+            Path(("rules_nf_kg".to_string(), "nonexistent".to_string())),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_rule() {
+        let handler = make_handler();
+        handler
+            .query_program(
+                Some("rules_del_kg".to_string()),
+                "+base[(1,)]\n+to_delete(X) <- base(X)".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = delete_rule(
+            Extension(handler),
+            Path(("rules_del_kg".to_string(), "to_delete".to_string())),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_rule_not_found() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("rules_delnf_kg")
+            .unwrap();
+        let result = delete_rule(
+            Extension(handler),
+            Path(("rules_delnf_kg".to_string(), "ghost".to_string())),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_rule_clause_zero_index() {
+        let handler = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("rules_cl0_kg")
+            .unwrap();
+        let result = delete_rule_clause(
+            Extension(handler),
+            Path(("rules_cl0_kg".to_string(), "rule".to_string(), 0)),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rule_dto_serialize() {
+        let rule = RuleDto {
+            name: "path".to_string(),
+            clause_count: 2,
+            description: "path(X,Y) <- edge(X,Y)".to_string(),
+        };
+        let json = serde_json::to_string(&rule).unwrap();
+        assert!(json.contains("\"name\":\"path\""));
+        assert!(json.contains("\"clause_count\":2"));
+    }
+
+    #[test]
+    fn test_delete_clause_result_serialize() {
+        let result = DeleteClauseResult {
+            rule_deleted: true,
+            message: "Rule deleted".to_string(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"rule_deleted\":true"));
+    }
+}

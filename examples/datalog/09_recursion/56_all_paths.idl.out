@@ -13,3 +13,17 @@ Switched to knowledge graph: test_all_paths_n09t56
 Inserted 5 fact(s) into 'edge'.
 > +reachable("s", "s", 0)
 Inserted 1 fact(s) into 'reachable'.
+> +reachable(Start, End, D) <- reachable(Start, Mid, D1), edge(Mid, End), D = D1 + 1, D < 5
+Rule 'reachable' registered.
+> ?reachable("s", End, D)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│ "s"  │ "a"  │    1 │
+│ "s"  │ "b"  │    1 │
+└──────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_paths_n09t56
+Knowledge graph 'test_all_paths_n09t56' dropped.

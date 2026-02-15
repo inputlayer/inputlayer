@@ -11,3 +11,27 @@ Switched to knowledge graph: test_sum_multi_grp_n14t55
 Switched to knowledge graph: test_sum_multi_grp_n14t55
 > +sales[("2024", "Q1", 100), ("2024", "Q1", 150), ("2024", "Q2", 200), ("2025", "Q1", 300)]
 Inserted 4 fact(s) into 'sales'.
+> sum_by_year_qtr(Year, Qtr, sum<Amount>) <- sales(Year, Qtr, Amount)
+┌────────┬──────┬──────┐
+│ col0   │ col1 │ col2 │
+├────────┼──────┼──────┤
+│ "2024" │ "Q1" │  250 │
+│ "2024" │ "Q2" │  200 │
+│ "2025" │ "Q1" │  300 │
+└────────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?sum_by_year_qtr(Year, Qtr, Total)
+┌────────┬──────┬──────┐
+│ col0   │ col1 │ col2 │
+├────────┼──────┼──────┤
+│ "2024" │ "Q1" │  250 │
+│ "2024" │ "Q2" │  200 │
+│ "2025" │ "Q1" │  300 │
+└────────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_sum_multi_grp_n14t55
+Knowledge graph 'test_sum_multi_grp_n14t55' dropped.

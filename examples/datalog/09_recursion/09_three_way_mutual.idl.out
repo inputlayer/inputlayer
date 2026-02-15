@@ -17,3 +17,25 @@ Inserted 1 fact(s) into 'base_zero'.
 Inserted 1 fact(s) into 'base_one'.
 > +base_two[(2)]
 Inserted 1 fact(s) into 'base_two'.
+> +zero_mod(N) <- base_zero(N)
+Rule 'zero_mod' registered.
+> +zero_mod(N) <- succ(M, N), two_mod(M)
+Rule 'zero_mod' registered.
+> +one_mod(N) <- base_one(N)
+Rule 'one_mod' registered.
+> +one_mod(N) <- succ(M, N), zero_mod(M)
+Rule 'one_mod' registered.
+> +two_mod(N) <- base_two(N)
+Rule 'two_mod' registered.
+> +two_mod(N) <- succ(M, N), one_mod(M)
+Rule 'two_mod' registered.
+> ?zero_mod(X)
+No results.
+> ?one_mod(X)
+No results.
+> ?two_mod(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_three_way_mutual_n09t09
+Knowledge graph 'test_three_way_mutual_n09t09' dropped.

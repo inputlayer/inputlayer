@@ -13,3 +13,5 @@ Switched to knowledge graph: test_non_equi_n06t63
 Inserted 3 fact(s) into 'items'.
 > +thresholds[(1, 120, "low"), (2, 180, "medium")]
 Inserted 2 fact(s) into 'thresholds'.
+> +below_threshold(ItemId, Price, Label) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

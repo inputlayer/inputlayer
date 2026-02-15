@@ -13,3 +13,44 @@ Switched to knowledge graph: test_strat_three_n08t50
 Inserted 5 fact(s) into 'base'.
 > +exclude_l1[(1,), (2,)]
 Inserted 2 fact(s) into 'exclude_l1'.
+> level1(X) <- base(X), !exclude_l1(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+│    5 │
+└──────┘
+3 rows
+(session: 1 rule(s))
+> level2(X) <- base(X), !level1(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+(session: 2 rule(s))
+> ?level1(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+│    4 │
+│    5 │
+└──────┘
+3 rows
+> ?level2(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_strat_three_n08t50
+Knowledge graph 'test_strat_three_n08t50' dropped.

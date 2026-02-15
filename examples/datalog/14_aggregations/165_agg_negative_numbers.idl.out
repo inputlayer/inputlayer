@@ -11,3 +11,54 @@ Switched to knowledge graph: test_agg_neg_n14t165
 Switched to knowledge graph: test_agg_neg_n14t165
 > +temp[(-10), (-20), (-5), (-30), (-1)]
 Inserted 5 fact(s) into 'temp'.
+> +hottest(max<T>) <- temp(T)
+Rule 'hottest' registered.
+> +coldest(min<T>) <- temp(T)
+Rule 'coldest' registered.
+> +total(sum<T>) <- temp(T)
+Rule 'total' registered.
+> +top2_warm(top_k<2, T:desc>) <- temp(T)
+Rule 'top2_warm' registered.
+> +top2_cold(top_k<2, T:asc>) <- temp(T)
+Rule 'top2_cold' registered.
+> ?hottest(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   -1 │
+└──────┘
+1 rows
+> ?coldest(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  -30 │
+└──────┘
+1 rows
+> ?total(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  -66 │
+└──────┘
+1 rows
+> ?top2_warm(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   -5 │
+│   -1 │
+└──────┘
+2 rows
+> ?top2_cold(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  -30 │
+│  -20 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_neg_n14t165
+Knowledge graph 'test_agg_neg_n14t165' dropped.

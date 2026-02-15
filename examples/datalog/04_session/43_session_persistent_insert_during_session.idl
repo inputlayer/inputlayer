@@ -1,0 +1,23 @@
+// Test: Persistent insert during active session
+// Description: Persistent inserts should work alongside ephemeral state
+
+.kg create test_sess_pers_ins_n04t43
+.kg use test_sess_pers_ins_n04t43
+
+// Initial persistent data
++data[(1,)]
+
+// Session rule
+doubled(X, Y) <- data(X), Y = X * 2
+?doubled(X, Y)
+
+// Persistent insert while session is active
++data[(5,)]
+
+// Session rule should pick up new persistent data
+?doubled(X, Y)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_pers_ins_n04t43

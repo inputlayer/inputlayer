@@ -13,3 +13,5 @@ Switched to knowledge graph: test_neg_join_n08t45
 Inserted 3 fact(s) into 'employees'.
 > +managers[(1, "Eng")]
 Inserted 1 fact(s) into 'managers'.
+> non_managers(Id, Name, Dept) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

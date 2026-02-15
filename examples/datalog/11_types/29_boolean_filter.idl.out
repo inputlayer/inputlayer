@@ -11,3 +11,18 @@ Switched to knowledge graph: test_bool_filter_n11t29
 Switched to knowledge graph: test_bool_filter_n11t29
 > +features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)]
 Inserted 3 fact(s) into 'features'.
+> enabled(Id, Name) <- features(Id, Name, true)
+No results.
+(session: 1 rule(s))
+> disabled(Id, Name) <- features(Id, Name, false)
+No results.
+(session: 2 rule(s))
+> ?enabled(Id, N)
+No results.
+> ?disabled(Id, N)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_bool_filter_n11t29
+Knowledge graph 'test_bool_filter_n11t29' dropped.

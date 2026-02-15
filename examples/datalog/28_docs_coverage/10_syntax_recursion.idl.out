@@ -11,3 +11,33 @@ Switched to knowledge graph: test_syntax_recursion_n28t10
 Switched to knowledge graph: test_syntax_recursion_n28t10
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)]
 Inserted 4 fact(s) into 'edge'.
+> +reachable(X, Y) <- edge(X, Y)
+Rule 'reachable' registered.
+> +reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+Rule 'reachable' registered.
+> ?reachable(1, X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    1 │    3 │
+│    1 │    4 │
+│    1 │    5 │
+└──────┴──────┘
+4 rows
+> +start(1)
+Inserted 1 fact(s) into 'start'.
+> +odd(X) <- edge(Start, X), start(Start)
+Rule 'odd' registered.
+> +odd(X) <- even(Y), edge(Y, X)
+Rule 'odd' registered.
+> +even(X) <- odd(Y), edge(Y, X)
+Rule 'even' registered.
+> ?odd(X)
+No results.
+> ?even(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_recursion_n28t10
+Knowledge graph 'test_syntax_recursion_n28t10' dropped.

@@ -11,3 +11,29 @@ Switched to knowledge graph: test_overwrite_n17t19
 Switched to knowledge graph: test_overwrite_n17t19
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
+> +doubled(X, Y) <- base(X), Y = X * 2, X < 2
+Rule 'doubled' registered.
+> ?doubled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+> +doubled(X, Y) <- base(X), Y = X * 2, X >= 2
+Rule 'doubled' registered.
+> ?doubled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    4 │
+│    3 │    6 │
+└──────┴──────┘
+3 rows
+> .rule def doubled
+This command is available in embedded mode. HTTP support is planned for a future release.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_overwrite_n17t19
+Knowledge graph 'test_overwrite_n17t19' dropped.

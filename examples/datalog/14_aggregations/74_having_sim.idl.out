@@ -11,3 +11,18 @@ Switched to knowledge graph: test_having_n14t74
 Switched to knowledge graph: test_having_n14t74
 > +orders[(1, "Alice", 50), (2, "Bob", 100), (3, "Alice", 75), (4, "Carol", 30), (5, "Alice", 25)]
 Inserted 5 fact(s) into 'orders'.
+> +totals(Customer, sum<Amount>) <- orders(_, Customer, Amount)
+Rule 'totals' registered.
+> +big_customers(Customer, Total) <- totals(Customer, Total), Total > 100
+Rule 'big_customers' registered.
+> ?big_customers(C, T)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "Alice" │  150 │
+└─────────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_having_n14t74
+Knowledge graph 'test_having_n14t74' dropped.

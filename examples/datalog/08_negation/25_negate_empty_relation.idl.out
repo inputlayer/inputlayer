@@ -11,3 +11,44 @@ Switched to knowledge graph: test_neg_empty_n08t25
 Switched to knowledge graph: test_neg_empty_n08t25
 > +items[(1), (2), (3), (4), (5)]
 Inserted 5 fact(s) into 'items'.
+> +not_excluded(X) <- items(X), !excluded(X)
+Rule 'not_excluded' registered.
+> ?not_excluded(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+│    5 │
+└──────┘
+5 rows
+> +excluded[(2), (4)]
+Inserted 2 fact(s) into 'excluded'.
+> ?not_excluded(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+│    5 │
+└──────┘
+3 rows
+> -excluded(X) <- excluded(X)
+Conditional delete: 2 fact(s) deleted from 'excluded'.
+> ?not_excluded(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+│    5 │
+└──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_empty_n08t25
+Knowledge graph 'test_neg_empty_n08t25' dropped.

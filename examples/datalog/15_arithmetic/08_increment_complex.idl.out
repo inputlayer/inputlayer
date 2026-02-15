@@ -13,3 +13,90 @@ Switched to knowledge graph: test_inc_complex_n15t08
 Inserted 3 fact(s) into 'data1'.
 > +link1[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'link1'.
+> scaled(Y, A*2) <- data1(X, A), link1(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   10 │
+│  200 │   20 │
+│  300 │    0 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?scaled(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   10 │
+│  200 │   20 │
+│  300 │    0 │
+└──────┴──────┘
+3 rows
+> +minuend[(1, 100), (2, 50)]
+Inserted 2 fact(s) into 'minuend'.
+> +subtrahend[(1, 30), (2, 25)]
+Inserted 2 fact(s) into 'subtrahend'.
+> difference(X, A-B) <- minuend(X, A), subtrahend(X, B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   70 │
+│    2 │   25 │
+└──────┴──────┘
+2 rows
+(session: 2 rule(s))
+> ?difference(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   70 │
+│    2 │   25 │
+└──────┴──────┘
+2 rows
+> +base3[(1, 0), (2, 5)]
+Inserted 2 fact(s) into 'base3'.
+> +link3[(1, 10), (2, 20)]
+Inserted 2 fact(s) into 'link3'.
+> plus_ten(Y, D+10) <- base3(X, D), link3(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │   10 │
+│   20 │   15 │
+└──────┴──────┘
+2 rows
+(session: 3 rule(s))
+> ?plus_ten(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   10 │   10 │
+│   20 │   15 │
+└──────┴──────┘
+2 rows
+> +base4[(1, 20), (2, 10)]
+Inserted 2 fact(s) into 'base4'.
+> +link4[(1, 30), (2, 40)]
+Inserted 2 fact(s) into 'link4'.
+> minus_five(Y, D-5) <- base4(X, D), link4(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   30 │   15 │
+│   40 │    5 │
+└──────┴──────┘
+2 rows
+(session: 4 rule(s))
+> ?minus_five(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   30 │   15 │
+│   40 │    5 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_inc_complex_n15t08
+Knowledge graph 'test_inc_complex_n15t08' dropped.

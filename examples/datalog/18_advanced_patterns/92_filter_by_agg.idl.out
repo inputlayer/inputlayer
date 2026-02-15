@@ -11,3 +11,27 @@ Switched to knowledge graph: test_filter_agg_n18t92
 Switched to knowledge graph: test_filter_agg_n18t92
 > +orders[("A", 100), ("A", 200), ("B", 50), ("B", 60), ("B", 70), ("C", 500)]
 Inserted 6 fact(s) into 'orders'.
+> total_per_cust(Cust, sum<Amount>) <- orders(Cust, Amount)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │  300 │
+│ "B"  │  180 │
+│ "C"  │  500 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?total_per_cust(Cust, Total)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "A"  │  300 │
+│ "B"  │  180 │
+│ "C"  │  500 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_filter_agg_n18t92
+Knowledge graph 'test_filter_agg_n18t92' dropped.

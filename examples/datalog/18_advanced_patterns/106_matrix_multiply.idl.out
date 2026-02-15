@@ -13,3 +13,37 @@ Switched to knowledge graph: test_matrix_mult_n18t106
 Inserted 4 fact(s) into 'a'.
 > +b[(1, 1, 5), (1, 2, 6), (2, 1, 7), (2, 2, 8)]
 Inserted 4 fact(s) into 'b'.
+> elem_prod(I, J, K, P) <- a(I, K, AVal), b(K, J, BVal), P = AVal * BVal
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │    1 │    1 │    5 │
+│    1 │    1 │    2 │   14 │
+│    1 │    2 │    1 │    6 │
+│    1 │    2 │    2 │   16 │
+│    2 │    1 │    1 │   15 │
+│    2 │    1 │    2 │   28 │
+│    2 │    2 │    1 │   18 │
+│    2 │    2 │    2 │   32 │
+└──────┴──────┴──────┴──────┘
+8 rows
+(session: 1 rule(s))
+> ?elem_prod(I, J, K, P)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│    1 │    1 │    1 │    5 │
+│    1 │    1 │    2 │   14 │
+│    1 │    2 │    1 │    6 │
+│    1 │    2 │    2 │   16 │
+│    2 │    1 │    1 │   15 │
+│    2 │    1 │    2 │   28 │
+│    2 │    2 │    1 │   18 │
+│    2 │    2 │    2 │   32 │
+└──────┴──────┴──────┴──────┘
+8 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_matrix_mult_n18t106
+Knowledge graph 'test_matrix_mult_n18t106' dropped.

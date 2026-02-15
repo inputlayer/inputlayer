@@ -15,3 +15,23 @@ Inserted 2 fact(s) into 'set_a'.
 Inserted 2 fact(s) into 'set_b'.
 > +set_c[(3,), (4,)]
 Inserted 2 fact(s) into 'set_c'.
+> +union_all(X) <- set_a(X)
+Rule 'union_all' registered.
+> +union_all(X) <- set_b(X)
+Rule 'union_all' registered.
+> +union_all(X) <- set_c(X)
+Rule 'union_all' registered.
+> ?union_all(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+│    4 │
+└──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_union3_n22t28
+Knowledge graph 'test_union3_n22t28' dropped.

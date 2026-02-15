@@ -11,3 +11,43 @@ Switched to knowledge graph: test_median_n14t43
 Switched to knowledge graph: test_median_n14t43
 > +vals[(10,), (20,), (30,), (40,), (50,)]
 Inserted 5 fact(s) into 'vals'.
+> +val_count(count<V>) <- vals(V)
+Rule 'val_count' registered.
+> +val_min(min<V>) <- vals(V)
+Rule 'val_min' registered.
+> +val_max(max<V>) <- vals(V)
+Rule 'val_max' registered.
+> +val_avg(avg<V>) <- vals(V)
+Rule 'val_avg' registered.
+> ?val_count(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    5 │
+└──────┘
+1 rows
+> ?val_min(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   10 │
+└──────┘
+1 rows
+> ?val_max(M)
+┌──────┐
+│ col0 │
+├──────┤
+│   50 │
+└──────┘
+1 rows
+> ?val_avg(A)
+┌──────┐
+│ col0 │
+├──────┤
+│ 30.0 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_median_n14t43
+Knowledge graph 'test_median_n14t43' dropped.

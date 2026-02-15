@@ -29,3 +29,31 @@ Inserted 50 fact(s) into 'edge'.
 Inserted 50 fact(s) into 'edge'.
 > +edge[(450, 451), (451, 452), (452, 453), (453, 454), (454, 455), (455, 456), (456, 457), (457, 458), (458, 459), (459, 460), (460, 461), (461, 462), (462, 463), (463, 464), (464, 465), (465, 466), (466, 467), (467, 468), (468, 469), (469, 470), (470, 471), (471, 472), (472, 473), (473, 474), (474, 475), (475, 476), (476, 477), (477, 478), (478, 479), (479, 480), (480, 481), (481, 482), (482, 483), (483, 484), (484, 485), (485, 486), (486, 487), (487, 488), (488, 489), (489, 490), (490, 491), (491, 492), (492, 493), (493, 494), (494, 495), (495, 496), (496, 497), (497, 498), (498, 499), (499, 500)]
 Inserted 50 fact(s) into 'edge'.
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- edge(X, Y), path(Y, Z)
+Rule 'path' registered.
+> +reachable_500(X) <- path(1, X), X = 500
+Rule 'reachable_500' registered.
+> ?reachable_500(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  500 │
+└──────┘
+1 rows
+> +from_one(Y) <- path(1, Y)
+Rule 'from_one' registered.
+> +count_from_one(count<Y>) <- from_one(Y)
+Rule 'count_from_one' registered.
+> ?count_from_one(C)
+┌──────┐
+│ col0 │
+├──────┤
+│  499 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_deep_500_n09t07
+Knowledge graph 'test_deep_500_n09t07' dropped.

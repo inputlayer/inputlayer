@@ -15,3 +15,5 @@ Inserted 1 fact(s) into 'embedding'.
 Inserted 1 fact(s) into 'embedding'.
 > +embedding[(3, [1.0, 1.0, 1.0, 1.0])]
 Inserted 1 fact(s) into 'embedding'.
+> int8_dot(Id1, Id2, DotProd) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

@@ -11,3 +11,20 @@ Switched to knowledge graph: test_path_exists_n09t62
 Switched to knowledge graph: test_path_exists_n09t62
 > +edge[("a", "b"), ("b", "c"), ("c", "d"), ("x", "y")]
 Inserted 4 fact(s) into 'edge'.
+> +reaches(X, Y) <- edge(X, Y)
+Rule 'reaches' registered.
+> +reaches(X, Z) <- reaches(X, Y), edge(Y, Z)
+Rule 'reaches' registered.
+> ?reaches("a", "d")
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │ "d"  │
+└──────┴──────┘
+1 rows
+> ?reaches("a", "y")
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_path_exists_n09t62
+Knowledge graph 'test_path_exists_n09t62' dropped.

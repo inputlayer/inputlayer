@@ -11,3 +11,80 @@ Switched to knowledge graph: test_math_sign_n32t04
 Switched to knowledge graph: test_math_sign_n32t04
 > +nums[(-5), (-1), (0), (1), (5)]
 Inserted 5 fact(s) into 'nums'.
+> with_abs(X, A) <- nums(X), A = abs_int64(X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -5 │    5 │
+│   -1 │    1 │
+│    0 │    0 │
+│    1 │    1 │
+│    5 │    5 │
+└──────┴──────┘
+5 rows
+(session: 1 rule(s))
+> ?with_abs(X, A)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -5 │    5 │
+│   -1 │    1 │
+│    0 │    0 │
+│    1 │    1 │
+│    5 │    5 │
+└──────┴──────┘
+5 rows
+> positive(X) <- nums(X), X > 0
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    5 │
+└──────┘
+2 rows
+(session: 2 rule(s))
+> negative(X) <- nums(X), X < 0
+┌──────┐
+│ col0 │
+├──────┤
+│   -5 │
+│   -1 │
+└──────┘
+2 rows
+(session: 3 rule(s))
+> zero(X) <- nums(X), X = 0
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+(session: 4 rule(s))
+> ?positive(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    5 │
+└──────┘
+2 rows
+> ?negative(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   -5 │
+│   -1 │
+└──────┘
+2 rows
+> ?zero(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 4 session rule(s), 0 session fact(s))
+> .kg drop test_math_sign_n32t04
+Knowledge graph 'test_math_sign_n32t04' dropped.

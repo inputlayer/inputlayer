@@ -11,3 +11,27 @@ Switched to knowledge graph: test_underscore_n21t46
 Switched to knowledge graph: test_underscore_n21t46
 > +records[(1, "Alice", 100, "active"), (2, "Bob", 200, "inactive"), (3, "Carol", 150, "active")]
 Inserted 3 fact(s) into 'records'.
+> id_status(Id, Status) <- records(Id, _, _, Status)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "active"   │
+│    2 │ "inactive" │
+│    3 │ "active"   │
+└──────┴────────────┘
+3 rows
+(session: 1 rule(s))
+> ?id_status(Id, Status)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "active"   │
+│    2 │ "inactive" │
+│    3 │ "active"   │
+└──────┴────────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_underscore_n21t46
+Knowledge graph 'test_underscore_n21t46' dropped.

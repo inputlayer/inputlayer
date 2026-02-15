@@ -11,3 +11,27 @@ Switched to knowledge graph: test_most_common_n18t37
 Switched to knowledge graph: test_most_common_n18t37
 > +events[("click",), ("view",), ("click",), ("purchase",), ("click",), ("view",)]
 Inserted 3 fact(s) into 'events'.
+> +event_counts(Event, count<Event>) <- events(Event)
+Rule 'event_counts' registered.
+> ?event_counts(Event, Count)
+┌────────────┬──────┐
+│ col0       │ col1 │
+├────────────┼──────┤
+│ "click"    │    1 │
+│ "purchase" │    1 │
+│ "view"     │    1 │
+└────────────┴──────┘
+3 rows
+> +max_count(max<Count>) <- event_counts(_, Count)
+Rule 'max_count' registered.
+> ?max_count(M)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_most_common_n18t37
+Knowledge graph 'test_most_common_n18t37' dropped.

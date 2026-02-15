@@ -1,0 +1,23 @@
+// Test: Session group-by aggregation with ephemeral data
+// Description: Group-by aggregation on mixed persistent/ephemeral data
+
+.kg create test_sess_groupby_n04t46
+.kg use test_sess_groupby_n04t46
+
++sale[("alice", 100), ("bob", 200), ("alice", 150)]
+
+// Group-by sum with persistent only
+total_by_person(Name, sum<Amount>) <- sale(Name, Amount)
+?total_by_person(Name, Total)
+
+// Add ephemeral sale
+sale("bob", 300)
+
+// Group-by should include ephemeral
+total_by_person2(Name, sum<Amount>) <- sale(Name, Amount)
+?total_by_person2(Name, Total)
+
+.session clear
+
+.kg use default
+.kg drop test_sess_groupby_n04t46

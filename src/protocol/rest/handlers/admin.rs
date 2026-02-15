@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::{Extension, Json};
 
-use crate::protocol::rest::dto::{ApiResponse, HealthDto, StatsDto};
+use crate::protocol::rest::dto::{ApiResponse, HealthDto, SessionStatsDto, StatsDto};
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
 
@@ -73,6 +73,7 @@ pub async fn stats(
 
     drop(storage);
 
+    let session_stats = handler.session_stats();
     let stats = StatsDto {
         knowledge_graphs,
         relations: total_relations,
@@ -80,7 +81,86 @@ pub async fn stats(
         memory_usage_bytes: estimated_memory,
         query_count: handler.total_queries(),
         uptime_secs: handler.uptime_seconds(),
+        sessions: SessionStatsDto {
+            total: session_stats.total_sessions,
+            clean: session_stats.clean_sessions,
+            dirty: session_stats.dirty_sessions,
+            total_ephemeral_facts: session_stats.total_ephemeral_facts,
+            total_ephemeral_rules: session_stats.total_ephemeral_rules,
+        },
     };
 
     Ok(Json(ApiResponse::success(stats)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Config;
+
+    fn make_handler() -> Arc<Handler> {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        Arc::new(Handler::from_config(config).unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_health_returns_healthy() {
+        let handler = make_handler();
+        let result = health(Extension(handler)).await.unwrap();
+        let resp = result.0;
+        assert!(resp.success);
+        let data = resp.data.unwrap();
+        assert_eq!(data.status, "healthy");
+        assert!(!data.version.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_health_uptime_is_reasonable() {
+        let handler = make_handler();
+        let result = health(Extension(handler)).await.unwrap();
+        let data = result.0.data.unwrap();
+        assert!(data.uptime_secs < 5);
+    }
+
+    #[tokio::test]
+    async fn test_stats_empty_server() {
+        let handler = make_handler();
+        let result = stats(Extension(handler)).await.unwrap();
+        let resp = result.0;
+        assert!(resp.success);
+        let data = resp.data.unwrap();
+        assert_eq!(data.query_count, 0);
+        assert_eq!(data.sessions.total, 0);
+        assert_eq!(data.sessions.clean, 0);
+        assert_eq!(data.sessions.dirty, 0);
+    }
+
+    #[tokio::test]
+    async fn test_stats_after_insert() {
+        let handler = make_handler();
+        handler
+            .query_program(None, "+stuff[(1, 2)]".to_string())
+            .await
+            .unwrap();
+        let result = stats(Extension(handler)).await.unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.query_count, 1);
+        assert!(data.knowledge_graphs >= 1);
+        assert!(data.relations >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_stats_memory_estimation() {
+        let handler = make_handler();
+        // Insert some data
+        handler
+            .query_program(None, "+mem_test[(1, 2), (3, 4), (5, 6)]".to_string())
+            .await
+            .unwrap();
+        let result = stats(Extension(handler)).await.unwrap();
+        let data = result.0.data.unwrap();
+        // 3 tuples * 64 bytes each = 192
+        assert!(data.memory_usage_bytes > 0);
+    }
 }

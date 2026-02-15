@@ -11,3 +11,23 @@ Switched to knowledge graph: test_rule_remove_last_n17t13
 Switched to knowledge graph: test_rule_remove_last_n17t13
 > +edge[(1,2)]
 Inserted 1 fact(s) into 'edge'.
+> +simple(X, Y) <- edge(X, Y)
+Rule 'simple' registered.
+> .rule list
+Rules:
+  simple (1 clause(s))
+> ?simple(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+└──────┴──────┘
+1 rows
+> .rule remove simple 1
+Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining).
+> .rule list
+No rules defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_remove_last_n17t13
+Knowledge graph 'test_rule_remove_last_n17t13' dropped.

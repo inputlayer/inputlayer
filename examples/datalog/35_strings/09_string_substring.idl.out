@@ -11,3 +11,23 @@ Switched to knowledge graph: test_substr_n35t09
 Switched to knowledge graph: test_substr_n35t09
 > +words[("hello world",)]
 Inserted 1 fact(s) into 'words'.
+> substr_result(S, R) <- words(S), R = SUBSTR(S, 0, 5)
+┌───────────────┬─────────┐
+│ col0          │ col1    │
+├───────────────┼─────────┤
+│ "hello world" │ "hello" │
+└───────────────┴─────────┘
+1 rows
+(session: 1 rule(s))
+> ?substr_result(S, R)
+┌───────────────┬─────────┐
+│ col0          │ col1    │
+├───────────────┼─────────┤
+│ "hello world" │ "hello" │
+└───────────────┴─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_substr_n35t09
+Knowledge graph 'test_substr_n35t09' dropped.

@@ -11,3 +11,19 @@ Switched to knowledge graph: test_agg_multi_n14t06
 Switched to knowledge graph: test_agg_multi_n14t06
 > +order[(1, 10, 5), (1, 10, 3), (1, 20, 7), (2, 10, 2), (2, 20, 4), (2, 20, 6)]
 Inserted 6 fact(s) into 'order'.
+> +order_total(Region, Product, sum<Qty>) <- order(Region, Product, Qty)
+Rule 'order_total' registered.
+> ?order_total(X, Y, Z)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │   10 │    8 │
+│    1 │   20 │    7 │
+│    2 │   10 │    2 │
+│    2 │   20 │   10 │
+└──────┴──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_agg_multi_n14t06
+Knowledge graph 'test_agg_multi_n14t06' dropped.

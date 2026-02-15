@@ -13,3 +13,25 @@ Switched to knowledge graph: test_neg_agg_n08t32
 Inserted 4 fact(s) into 'scores'.
 > +excluded[(2,)]
 Inserted 1 fact(s) into 'excluded'.
+> +avg_allowed(avg<Score>) <- scores(Id, Score), !excluded(Id)
+Rule 'avg_allowed' registered.
+> ?avg_allowed(A)
+┌───────────────────┐
+│ col0              │
+├───────────────────┤
+│ 78.33333333333333 │
+└───────────────────┘
+1 rows
+> +count_allowed(count<Id>) <- scores(Id, _), !excluded(Id)
+Rule 'count_allowed' registered.
+> ?count_allowed(C)
+┌──────┐
+│ col0 │
+├──────┤
+│    3 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_agg_n08t32
+Knowledge graph 'test_neg_agg_n08t32' dropped.

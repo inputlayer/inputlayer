@@ -11,3 +11,23 @@ Switched to knowledge graph: test_bidir_n09t88
 Switched to knowledge graph: test_bidir_n09t88
 > +edge[(1, 2), (2, 3), (4, 3)]
 Inserted 3 fact(s) into 'edge'.
+> +undirected(X, Y) <- edge(X, Y)
+Rule 'undirected' registered.
+> +undirected(X, Y) <- edge(Y, X)
+Rule 'undirected' registered.
+> ?undirected(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    1 │
+│    2 │    3 │
+│    3 │    2 │
+│    3 │    4 │
+│    4 │    3 │
+└──────┴──────┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bidir_n09t88
+Knowledge graph 'test_bidir_n09t88' dropped.

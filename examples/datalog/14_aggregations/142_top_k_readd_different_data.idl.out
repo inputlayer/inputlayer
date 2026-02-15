@@ -11,3 +11,33 @@ Switched to knowledge graph: test_topk_readd_data_n14t142
 Switched to knowledge graph: test_topk_readd_data_n14t142
 > +score[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'score'.
+> +top(top_k<2, Player, Points:desc>) <- score(Player, Points)
+Rule 'top' registered.
+> ?top(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │  200 │
+│    3 │  300 │
+└──────┴──────┘
+2 rows
+> .rule drop top
+Rule 'top' dropped.
+> -score(3, 300)
+Deleted 1 facts from 'score'.
+> +score[(4, 400), (5, 500)]
+Inserted 2 fact(s) into 'score'.
+> +top(top_k<2, Player, Points:desc>) <- score(Player, Points)
+Rule 'top' registered.
+> ?top(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    4 │  400 │
+│    5 │  500 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_readd_data_n14t142
+Knowledge graph 'test_topk_readd_data_n14t142' dropped.

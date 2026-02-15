@@ -11,3 +11,44 @@ Switched to knowledge graph: test_negative_n15t24
 Switched to knowledge graph: test_negative_n15t24
 > +temps[(-10,), (0,), (10,), (-5,), (20,)]
 Inserted 5 fact(s) into 'temps'.
+> negative(T) <- temps(T), T < 0
+┌──────┐
+│ col0 │
+├──────┤
+│  -10 │
+│   -5 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> non_negative(T) <- temps(T), T >= 0
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+│   10 │
+│   20 │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> ?negative(T)
+┌──────┐
+│ col0 │
+├──────┤
+│  -10 │
+│   -5 │
+└──────┘
+2 rows
+> ?non_negative(T)
+┌──────┐
+│ col0 │
+├──────┤
+│    0 │
+│   10 │
+│   20 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_negative_n15t24
+Knowledge graph 'test_negative_n15t24' dropped.

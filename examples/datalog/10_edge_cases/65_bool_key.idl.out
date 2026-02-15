@@ -19,3 +19,13 @@ Inserted 2 fact(s) into 'flags'.
 │    1 │ "yes" │
 └──────┴───────┘
 2 rows
+> true_only(Val) <- flags(true, Val)
+No results.
+(session: 1 rule(s))
+> ?true_only(Val)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_bool_key_n10t65
+Knowledge graph 'test_bool_key_n10t65' dropped.

@@ -13,3 +13,18 @@ Switched to knowledge graph: test_neg_join_n08t02
 Inserted 5 fact(s) into 'employee'.
 > +excluded_dept[(200, 0)]
 Inserted 1 fact(s) into 'excluded_dept'.
+> +active_employee(EmpId, DeptId) <- employee(EmpId, DeptId), !excluded_dept(DeptId, _)
+Rule 'active_employee' registered.
+> ?active_employee(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │  100 │
+│    2 │  100 │
+│    5 │  300 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_join_n08t02
+Knowledge graph 'test_neg_join_n08t02' dropped.

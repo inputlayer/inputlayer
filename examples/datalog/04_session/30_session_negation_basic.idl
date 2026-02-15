@@ -1,0 +1,24 @@
+// Test: Session facts used in negation
+// Description: Ephemeral facts should participate in antijoin correctly
+
+.kg create test_sess_neg_n04t30
+.kg use test_sess_neg_n04t30
+
+// Persistent base data
++person[(1,), (2,), (3,), (4,)]
+
+// Add ephemeral blacklist facts
+blocked(2)
+blocked(4)
+
+// Session rule: people who are NOT blocked
+allowed(X) <- person(X), !blocked(X)
+
+?allowed(X)
+
+// Clear session - all people should be queryable again
+.session clear
+?person(X)
+
+.kg use default
+.kg drop test_sess_neg_n04t30

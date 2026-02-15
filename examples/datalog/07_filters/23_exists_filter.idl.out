@@ -13,3 +13,25 @@ Switched to knowledge graph: test_exists_filter_n07t23
 Inserted 3 fact(s) into 'customers'.
 > +orders[(101, 1), (102, 1), (103, 2)]
 Inserted 3 fact(s) into 'orders'.
+> has_order(CustId, Name) <- customers(CustId, Name), orders(_, CustId)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "Alice" │
+│    2 │ "Bob"   │
+└──────┴─────────┘
+2 rows
+(session: 1 rule(s))
+> ?has_order(Id, N)
+┌──────┬─────────┐
+│ col0 │ col1    │
+├──────┼─────────┤
+│    1 │ "Alice" │
+│    2 │ "Bob"   │
+└──────┴─────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_exists_filter_n07t23
+Knowledge graph 'test_exists_filter_n07t23' dropped.

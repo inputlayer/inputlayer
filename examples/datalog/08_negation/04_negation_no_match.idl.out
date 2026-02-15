@@ -13,3 +13,18 @@ Switched to knowledge graph: test_neg_nomatch_n08t04
 Inserted 3 fact(s) into 'edge'.
 > +blocked[(10,20), (30,40)]
 Inserted 2 fact(s) into 'blocked'.
+> +allowed(X, Y) <- edge(X, Y), !blocked(X, Y)
+Rule 'allowed' registered.
+> ?allowed(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    2 │    3 │
+│    3 │    4 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_nomatch_n08t04
+Knowledge graph 'test_neg_nomatch_n08t04' dropped.

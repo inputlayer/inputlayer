@@ -15,3 +15,44 @@ Inserted 5 fact(s) into 'all_items'.
 Inserted 3 fact(s) into 'set_a'.
 > +set_b[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set_b'.
+> not_in_a(X) <- all_items(X), !set_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+│    5 │
+└──────┘
+2 rows
+(session: 1 rule(s))
+> in_a(X) <- all_items(X), set_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+(session: 2 rule(s))
+> ?not_in_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+│    5 │
+└──────┘
+2 rows
+> ?in_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    3 │
+└──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_double_neg_n08t40
+Knowledge graph 'test_double_neg_n08t40' dropped.

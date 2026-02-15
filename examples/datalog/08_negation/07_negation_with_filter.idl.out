@@ -23,3 +23,26 @@ Rule 'filtered' registered.
 │    5 │   50 │
 └──────┴──────┘
 2 rows
+> +small_allowed(Id, Val) <- data(Id, Val), Val < 35, !excluded(Id, _)
+Rule 'small_allowed' registered.
+> ?small_allowed(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    3 │   30 │
+└──────┴──────┘
+2 rows
+> +specific(Id, Val) <- data(Id, Val), Val = 30, !excluded(Id, _)
+Rule 'specific' registered.
+> ?specific(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    3 │   30 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_filter_n08t07
+Knowledge graph 'test_neg_filter_n08t07' dropped.

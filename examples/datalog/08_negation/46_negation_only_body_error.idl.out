@@ -11,3 +11,5 @@ Switched to knowledge graph: test_neg_only_n08t46
 Switched to knowledge graph: test_neg_only_n08t46
 > +exclude[(1,), (2,)]
 Inserted 2 fact(s) into 'exclude'.
+> bad(X) <- !exclude(X)
+Script error: Unsafe rule 'bad': Head variable(s) X not bound by any positive body atom. All head variables must appear in at least one positive body predicate.

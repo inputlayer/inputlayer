@@ -22,3 +22,16 @@ No facts inserted (1 duplicate skipped).
 │    1 │ "a"  │
 └──────┴──────┘
 1 rows
+> +count_data(count<Id>) <- data(Id, _)
+Rule 'count_data' registered.
+> ?count_data(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_ins_n10t59
+Knowledge graph 'test_dup_ins_n10t59' dropped.

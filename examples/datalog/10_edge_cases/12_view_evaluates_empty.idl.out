@@ -15,3 +15,29 @@ Inserted 5 fact(s) into 'numbers'.
 Rule 'impossible' registered.
 > ?impossible(X)
 No results.
+> +uses_impossible(X) <- impossible(X)
+Rule 'uses_impossible' registered.
+> ?uses_impossible(X)
+No results.
+> +contradictory(X) <- numbers(X), X > 3, X < 2
+Rule 'contradictory' registered.
+> ?contradictory(X)
+No results.
+> +threshold(X) <- numbers(X), X > 10
+Rule 'threshold' registered.
+> ?threshold(X)
+No results.
+> +numbers[(15), (20)]
+Inserted 2 fact(s) into 'numbers'.
+> ?threshold(X)
+┌──────┐
+│ col0 │
+├──────┤
+│   15 │
+│   20 │
+└──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_view_empty_n10t12
+Knowledge graph 'test_view_empty_n10t12' dropped.

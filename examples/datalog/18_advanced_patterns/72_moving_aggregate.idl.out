@@ -11,15 +11,5 @@ Switched to knowledge graph: test_moving_n18t72
 Switched to knowledge graph: test_moving_n18t72
 > +timeseries[(1, 10), (2, 20), (3, 15), (4, 25), (5, 30)]
 Inserted 5 fact(s) into 'timeseries'.
-> moving_sum(T, V, sum<V2>) <- timeseries(T, V), timeseries(T2, V2), T2 >= T - 1,
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │   10 │  100 │
-│    2 │   20 │  100 │
-│    3 │   15 │   90 │
-│    4 │   25 │   70 │
-│    5 │   30 │   55 │
-└──────┴──────┴──────┘
-5 rows
-(session: 1 rule(s))
+> moving_sum(T, V, sum<V2>) <-
+Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

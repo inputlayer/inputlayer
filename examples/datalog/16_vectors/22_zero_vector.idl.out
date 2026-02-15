@@ -11,3 +11,53 @@ Switched to knowledge graph: test_zero_vec_n16t22
 Switched to knowledge graph: test_zero_vec_n16t22
 > +vec[(1, [0.0, 0.0, 0.0]), (2, [1.0, 0.0, 0.0]), (3, [0.0, 0.0, 0.0])]
 Inserted 3 fact(s) into 'vec'.
+> cos_sim(Id1, Id2, S) <- vec(Id1, V1), vec(Id2, V2), Id1 < Id2, S = cosine(V1, V2)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │  0.0 │
+│    1 │    3 │  0.0 │
+│    2 │    3 │  0.0 │
+└──────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?cos_sim(Id1, Id2, S)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │  0.0 │
+│    1 │    3 │  0.0 │
+│    2 │    3 │  0.0 │
+└──────┴──────┴──────┘
+3 rows
+> euc_dist(Id1, Id2, D) <- vec(Id1, V1), vec(Id2, V2), Id1 < Id2, D = euclidean(V1, V2)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │  1.0 │
+│    1 │    3 │  0.0 │
+│    2 │    3 │  1.0 │
+└──────┴──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?euc_dist(Id1, Id2, D)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    1 │    2 │  1.0 │
+│    1 │    3 │  0.0 │
+│    2 │    3 │  1.0 │
+└──────┴──────┴──────┘
+3 rows
+> ?vec(1, V), Norm = normalize(V)
+┌──────┬─────────────────┬─────────────────┐
+│ col0 │ col1            │ col2            │
+├──────┼─────────────────┼─────────────────┤
+│    1 │ [0.0, 0.0, 0.0] │ [0.0, 0.0, 0.0] │
+└──────┴─────────────────┴─────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_zero_vec_n16t22
+Knowledge graph 'test_zero_vec_n16t22' dropped.

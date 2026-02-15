@@ -142,8 +142,11 @@ mod tests {
     fn test_default_config() {
         let config = ExecutionConfig::default();
         assert!(config.timeout.is_some());
+        assert_eq!(config.timeout, Some(Duration::from_secs(60)));
         assert!(config.enable_query_cache);
         assert!(config.enable_result_cache);
+        assert_eq!(config.max_cache_entries, 1000);
+        assert_eq!(config.result_cache_ttl, Duration::from_secs(300));
     }
 
     #[test]
@@ -152,6 +155,7 @@ mod tests {
         assert!(config.timeout.is_none());
         assert!(!config.enable_query_cache);
         assert!(!config.enable_result_cache);
+        assert_eq!(config.max_cache_entries, 0);
     }
 
     #[test]
@@ -164,5 +168,48 @@ mod tests {
         assert_eq!(config.timeout, Some(Duration::from_secs(30)));
         assert_eq!(config.limits.max_result_size, Some(50_000));
         assert_eq!(config.limits.max_memory_bytes, Some(100 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_without_timeout() {
+        let config = ExecutionConfig::default().without_timeout();
+        assert!(config.timeout.is_none());
+    }
+
+    #[test]
+    fn test_with_query_cache() {
+        let config = ExecutionConfig::default().with_query_cache(false);
+        assert!(!config.enable_query_cache);
+    }
+
+    #[test]
+    fn test_with_result_cache() {
+        let config = ExecutionConfig::default().with_result_cache(false);
+        assert!(!config.enable_result_cache);
+    }
+
+    #[test]
+    fn test_builder_chaining() {
+        let config = ExecutionConfig::unlimited()
+            .with_timeout(Duration::from_secs(10))
+            .with_max_results(100)
+            .with_memory_limit(1024)
+            .with_query_cache(true)
+            .with_result_cache(true);
+
+        assert_eq!(config.timeout, Some(Duration::from_secs(10)));
+        assert_eq!(config.limits.max_result_size, Some(100));
+        assert_eq!(config.limits.max_memory_bytes, Some(1024));
+        assert!(config.enable_query_cache);
+        assert!(config.enable_result_cache);
+    }
+
+    #[test]
+    fn test_execution_error_display() {
+        let err = ExecutionError::QueryError("test error".to_string());
+        assert_eq!(format!("{err}"), "Query error: test error");
+
+        let err = ExecutionError::ParseError("bad syntax".to_string());
+        assert_eq!(format!("{err}"), "Parse error: bad syntax");
     }
 }

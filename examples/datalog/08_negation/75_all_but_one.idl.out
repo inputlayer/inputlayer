@@ -13,3 +13,19 @@ Switched to knowledge graph: test_all_but_n08t75
 Inserted 5 fact(s) into 'items'.
 > +excluded[(3,)]
 Inserted 1 fact(s) into 'excluded'.
+> +result(X) <- items(X), !excluded(X)
+Rule 'result' registered.
+> ?result(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    2 │
+│    4 │
+│    5 │
+└──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_all_but_n08t75
+Knowledge graph 'test_all_but_n08t75' dropped.

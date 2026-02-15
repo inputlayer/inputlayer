@@ -11,3 +11,68 @@ Switched to knowledge graph: test_ancestors_n18t18
 Switched to knowledge graph: test_ancestors_n18t18
 > +parent[("Alice", "Bob"), ("Alice", "Carol"), ("Bob", "Dave"), ("Bob", "Eve"), ("Carol", "Frank")]
 Inserted 5 fact(s) into 'parent'.
+> +ancestor(Child, Anc) <- parent(Anc, Child)
+Rule 'ancestor' registered.
+> +ancestor(Child, Anc) <- parent(Mid, Child), ancestor(Mid, Anc)
+Rule 'ancestor' registered.
+> ?ancestor(Child, Anc)
+┌─────────┬─────────┐
+│ col0    │ col1    │
+├─────────┼─────────┤
+│ "Bob"   │ "Alice" │
+│ "Carol" │ "Alice" │
+│ "Dave"  │ "Alice" │
+│ "Dave"  │ "Bob"   │
+│ "Eve"   │ "Alice" │
+│ "Eve"   │ "Bob"   │
+│ "Frank" │ "Alice" │
+│ "Frank" │ "Carol" │
+└─────────┴─────────┘
+8 rows
+> alice_descendants(D) <- ancestor(D, "Alice")
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Bob"   │
+│ "Carol" │
+│ "Dave"  │
+│ "Eve"   │
+│ "Frank" │
+└─────────┘
+5 rows
+(session: 1 rule(s))
+> ?alice_descendants(D)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Bob"   │
+│ "Carol" │
+│ "Dave"  │
+│ "Eve"   │
+│ "Frank" │
+└─────────┘
+5 rows
+> desc_count(Person, count<D>) <- ancestor(D, Person)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "Alice" │    5 │
+│ "Bob"   │    2 │
+│ "Carol" │    1 │
+└─────────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?desc_count(Person, Count)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "Alice" │    5 │
+│ "Bob"   │    2 │
+│ "Carol" │    1 │
+└─────────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_ancestors_n18t18
+Knowledge graph 'test_ancestors_n18t18' dropped.

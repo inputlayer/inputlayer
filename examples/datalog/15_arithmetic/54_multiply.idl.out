@@ -11,3 +11,27 @@ Switched to knowledge graph: test_multiply_n15t54
 Switched to knowledge graph: test_multiply_n15t54
 > +factors[(2, 3), (5, 4), (10, 10)]
 Inserted 3 fact(s) into 'factors'.
+> product(A, B, Result) <- factors(A, B), Result = A * B
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │    3 │    6 │
+│    5 │    4 │   20 │
+│   10 │   10 │  100 │
+└──────┴──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?product(A, B, R)
+┌──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │
+├──────┼──────┼──────┤
+│    2 │    3 │    6 │
+│    5 │    4 │   20 │
+│   10 │   10 │  100 │
+└──────┴──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_multiply_n15t54
+Knowledge graph 'test_multiply_n15t54' dropped.

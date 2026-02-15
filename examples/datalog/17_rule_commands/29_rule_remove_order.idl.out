@@ -11,3 +11,36 @@ Switched to knowledge graph: test_remove_order_n17t29
 Switched to knowledge graph: test_remove_order_n17t29
 > +nums[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'nums'.
+> +output(X, 10) <- nums(X), X = 1
+Rule 'output' registered.
+> +output(X, 20) <- nums(X), X = 2
+Rule 'output' registered.
+> +output(X, 30) <- nums(X), X = 3
+Rule 'output' registered.
+> ?output(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    2 │   20 │
+│    3 │   30 │
+└──────┴──────┘
+3 rows
+> .rule def output
+This command is available in embedded mode. HTTP support is planned for a future release.
+> .rule remove output 2
+Clause 2 removed from rule 'output'.
+> .rule def output
+This command is available in embedded mode. HTTP support is planned for a future release.
+> ?output(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   10 │
+│    3 │   30 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_remove_order_n17t29
+Knowledge graph 'test_remove_order_n17t29' dropped.
