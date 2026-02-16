@@ -135,23 +135,26 @@ impl HnswIndex {
         ef_override.unwrap_or(self.config.ef_search)
     }
 
-    /// Transform distance based on metric
+    /// Transform raw L2 distance from hnsw_rs into the user-facing metric.
+    ///
+    /// hnsw_rs `DistL2.eval()` returns actual L2 distance (not squared):
+    ///   dist = sqrt(sum((a_i - b_i)^2))
     fn transform_distance(&self, dist: f32) -> f64 {
         match self.config.metric {
             DistanceMetric::Euclidean => dist as f64,
             DistanceMetric::Cosine => {
-                // L2 on normalized vectors: d^2 = 2(1 - cos(theta))
-                // So cosine distance = 1 - cos(theta) = d^2 / 2
+                // Vectors are pre-normalized to unit length before insertion.
+                // For unit vectors: L2^2 = |a-b|^2 = 2(1 - cos(θ))
+                // Therefore: cosine_distance = 1 - cos(θ) = L2^2 / 2 = dist^2 / 2
                 (dist * dist / 2.0) as f64
             }
             DistanceMetric::DotProduct => {
-                // Dot product on unit vectors equals cosine
-                // Convert L2 to approximate dot product similarity
-                // Higher similarity = lower distance, so negate
+                // For unit vectors: dot(a,b) = cos(θ) = 1 - L2^2/2 = 1 - dist^2/2
+                // Negate so lower = more similar (consistent with distance semantics)
                 -(1.0 - dist * dist / 2.0) as f64
             }
             DistanceMetric::Manhattan => {
-                // Approximate L1 from L2 (rough approximation)
+                // L2 used as approximation for L1 (hnsw_rs only supports L2 internally)
                 dist as f64
             }
         }

@@ -194,12 +194,12 @@ mod tests {
     use super::*;
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[test]
@@ -230,7 +230,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_relations_empty() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("list_rel_kg")
@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_relations_with_data() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("list_rel_d_kg".to_string()),
@@ -261,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_relation() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("get_rel_d_kg".to_string()),
@@ -284,7 +284,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_relation_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("get_rel_nf_kg")
@@ -299,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_relation_data() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("rel_data_kg".to_string()),
@@ -325,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_relation_data_with_pagination() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("rel_page_kg".to_string()),
