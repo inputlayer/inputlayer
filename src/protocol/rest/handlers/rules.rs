@@ -231,17 +231,17 @@ mod tests {
     use super::*;
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[tokio::test]
     async fn test_list_rules_empty() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("rules_empty_kg")
@@ -255,7 +255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_rules_with_rule() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("rules_list_kg".to_string()),
@@ -272,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_rule() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("rules_get_kg".to_string()),
@@ -293,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_rule_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("rules_nf_kg")
@@ -308,7 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_rule() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("rules_del_kg".to_string()),
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_rule_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("rules_delnf_kg")
@@ -341,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_rule_clause_zero_index() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("rules_cl0_kg")

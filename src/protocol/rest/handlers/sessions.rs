@@ -410,17 +410,17 @@ mod tests {
     };
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[tokio::test]
     async fn test_create_session_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_h_kg")
@@ -440,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_close_session_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_close_kg")
@@ -452,14 +452,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_close_session_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let result = close_session(Extension(handler), Path(999999)).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_get_session_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_get_kg")
@@ -475,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_sessions_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_list_kg")
@@ -490,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_ephemeral_facts_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_eph_kg")
@@ -512,7 +512,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_retract_ephemeral_facts_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_ret_kg")
@@ -536,7 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_ephemeral_rule_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_rule_kg")
@@ -554,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_ephemeral_rule_invalid() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_badrule_kg")
@@ -569,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_query_handler() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("sess_query_kg".to_string()),
@@ -590,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_query_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let request = SessionQueryRequest {
             query: "?data(X)".to_string(),
         };
