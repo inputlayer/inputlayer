@@ -1819,4 +1819,499 @@ mod tests {
             "Error should mention arity mismatch: {err}"
         );
     }
+
+    #[test]
+    fn test_rule_catalog_empty() {
+        let catalog = RuleCatalog::empty();
+        assert!(catalog.is_empty());
+        assert_eq!(catalog.len(), 0);
+        assert!(catalog.list().is_empty());
+        assert!(catalog.all_rules().is_empty());
+        assert!(!catalog.exists("anything"));
+    }
+
+    #[test]
+    fn test_rule_catalog_rule_count() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        assert_eq!(catalog.rule_count("path"), None);
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+        assert_eq!(catalog.rule_count("path"), Some(1));
+    }
+
+    #[test]
+    fn test_rule_catalog_rule_arity() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        assert_eq!(catalog.rule_arity("path"), None);
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+        assert_eq!(catalog.rule_arity("path"), Some(2)); // (X, Y) = arity 2
+    }
+
+    #[test]
+    fn test_rule_catalog_reload_empty_dir() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+        assert!(!catalog.is_empty());
+
+        // Reload from empty dir (catalog file still exists)
+        catalog.reload().unwrap();
+        assert!(!catalog.is_empty()); // Should still have the rule from file
+    }
+
+    #[test]
+    fn test_remove_rule_clause_removes_single() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Register two clauses
+        let rule1 = make_test_rule("path", "edge");
+        catalog.register("path", &rule1).unwrap();
+
+        let head = Atom::new(
+            "path".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Z".to_string()),
+            ],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )),
+            BodyPredicate::Positive(Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("Y".to_string()),
+                    Term::Variable("Z".to_string()),
+                ],
+            )),
+        ];
+        let rule2 = Rule::new(head, body);
+        catalog.register("path", &rule2).unwrap();
+
+        assert_eq!(catalog.rule_count("path"), Some(2));
+
+        // Remove first clause
+        let deleted = catalog.remove_rule_clause("path", 0).unwrap();
+        assert!(!deleted); // Not fully deleted, 1 clause remains
+        assert_eq!(catalog.rule_count("path"), Some(1));
+    }
+
+    #[test]
+    fn test_remove_rule_clause_deletes_rule_when_last() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        // Remove only clause => entire rule deleted
+        let deleted = catalog.remove_rule_clause("path", 0).unwrap();
+        assert!(deleted);
+        assert!(!catalog.exists("path"));
+    }
+
+    #[test]
+    fn test_remove_rule_clause_out_of_bounds() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        let result = catalog.remove_rule_clause("path", 5);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("out of bounds"));
+    }
+
+    #[test]
+    fn test_remove_rule_clause_nonexistent() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let result = catalog.remove_rule_clause("ghost", 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_rule_standalone() {
+        // Valid rule
+        let rule = make_test_rule("path", "edge");
+        assert!(validate_rule(&rule, "path").is_ok());
+
+        // Self-negation
+        let head = Atom::new("a".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Negated(Atom::new(
+                "a".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+        ];
+        let bad_rule = Rule::new(head, body);
+        let err = validate_rule(&bad_rule, "a").unwrap_err();
+        assert!(err.contains("Unstratified"));
+    }
+
+    #[test]
+    fn test_validate_rule_unbound_head_var() {
+        let head = Atom::new(
+            "foo".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
+        );
+        // Only X is bound by positive atom, Y is unbound
+        let body = vec![BodyPredicate::Positive(Atom::new(
+            "bar".to_string(),
+            vec![Term::Variable("X".to_string())],
+        ))];
+        let rule = Rule::new(head, body);
+        let err = validate_rule(&rule, "foo").unwrap_err();
+        assert!(err.contains("Unsafe rule") || err.contains("not bound"));
+    }
+
+    #[test]
+    fn test_validate_rules_stratification_empty() {
+        assert!(validate_rules_stratification(&[]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rules_stratification_mutual_negation() {
+        // a(X) <- base(X), !b(X).
+        let rule_a = Rule::new(
+            Atom::new("a".to_string(), vec![Term::Variable("X".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "base".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "b".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+            ],
+        );
+        // b(X) <- base(X), !a(X).
+        let rule_b = Rule::new(
+            Atom::new("b".to_string(), vec![Term::Variable("X".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "base".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "a".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+            ],
+        );
+        let err = validate_rules_stratification(&[rule_a, rule_b]).unwrap_err();
+        assert!(err.contains("Unstratified"));
+    }
+
+    #[test]
+    fn test_validate_session_rule_compatibility_ok() {
+        let rule1 = make_test_rule("path", "edge");
+        let rule2 = make_test_rule("path", "link");
+        assert!(validate_session_rule_compatibility(&[rule1], &rule2).is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_rule_compatibility_arity_mismatch() {
+        let rule1 = make_test_rule("path", "edge"); // arity 2
+        let head = Atom::new(
+            "path".to_string(),
+            vec![Term::Variable("X".to_string())], // arity 1
+        );
+        let body = vec![BodyPredicate::Positive(Atom::new(
+            "source".to_string(),
+            vec![Term::Variable("X".to_string())],
+        ))];
+        let rule2 = Rule::new(head, body);
+        let err = validate_session_rule_compatibility(&[rule1], &rule2).unwrap_err();
+        assert!(err.contains("Arity mismatch"));
+    }
+
+    #[test]
+    fn test_topological_sort_preserves_dependency_order() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Register rules in wrong dependency order:
+        // reach depends on path, but register reach first
+        let reach_rule = Rule::new(
+            Atom::new(
+                "reach".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![BodyPredicate::Positive(Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ))],
+        );
+        catalog.register("reach", &reach_rule).unwrap();
+
+        let path_rule = make_test_rule("path", "edge");
+        catalog.register("path", &path_rule).unwrap();
+
+        let rules = catalog.all_rules();
+        assert_eq!(rules.len(), 2);
+
+        // path should come before reach (since reach depends on path)
+        let path_idx = rules
+            .iter()
+            .position(|r| r.head.relation == "path")
+            .unwrap();
+        let reach_idx = rules
+            .iter()
+            .position(|r| r.head.relation == "reach")
+            .unwrap();
+        assert!(
+            path_idx < reach_idx,
+            "path should come before reach in topological order"
+        );
+    }
+
+    #[test]
+    fn test_rule_register_result_variants() {
+        assert_eq!(RuleRegisterResult::Created, RuleRegisterResult::Created);
+        assert_eq!(
+            RuleRegisterResult::RuleAdded(2),
+            RuleRegisterResult::RuleAdded(2)
+        );
+        assert_ne!(
+            RuleRegisterResult::Created,
+            RuleRegisterResult::RuleAdded(1)
+        );
+    }
+
+    #[test]
+    fn test_rule_definition_add_rule_dedup() {
+        let rule = make_test_rule("path", "edge");
+        let serializable = SerializableRule::from_rule(&rule);
+        let mut def = RuleDefinition::new("path".to_string(), serializable.clone());
+
+        assert_eq!(def.rules.len(), 1);
+
+        // Adding same rule again should be deduped
+        def.add_rule(serializable.clone());
+        assert_eq!(def.rules.len(), 1); // Still 1, duplicate skipped
+    }
+
+    #[test]
+    fn test_rule_definition_describe() {
+        let rule = make_test_rule("path", "edge");
+        let serializable = SerializableRule::from_rule(&rule);
+        let def = RuleDefinition::new("path".to_string(), serializable);
+
+        let desc = def.describe();
+        assert!(desc.contains("Rule: path"));
+        assert!(desc.contains("Clauses:"));
+        assert!(desc.contains("1."));
+    }
+
+    #[test]
+    fn test_rule_definition_to_rules() {
+        let rule = make_test_rule("path", "edge");
+        let serializable = SerializableRule::from_rule(&rule);
+        let def = RuleDefinition::new("path".to_string(), serializable);
+
+        let rules = def.to_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].head.relation, "path");
+    }
+
+    #[test]
+    fn test_register_arity_mismatch_via_register() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let rule1 = make_test_rule("path", "edge"); // arity 2
+        catalog.register("path", &rule1).unwrap();
+
+        // Different arity via register()
+        let head = Atom::new("path".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![BodyPredicate::Positive(Atom::new(
+            "source".to_string(),
+            vec![Term::Variable("X".to_string())],
+        ))];
+        let rule2 = Rule::new(head, body);
+        let result = catalog.register("path", &rule2);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Arity mismatch"));
+    }
+
+    // Batch 18: aggregates_are_compatible and extract_head_aggregate
+
+    #[test]
+    fn test_aggregates_compatible_simple_same() {
+        assert!(aggregates_are_compatible(
+            &AggregateFunc::Count,
+            &AggregateFunc::Count,
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_compatible_simple_different() {
+        assert!(aggregates_are_compatible(
+            &AggregateFunc::Sum,
+            &AggregateFunc::Max,
+        ));
+    }
+
+    fn make_topk(k: usize, descending: bool) -> AggregateFunc {
+        AggregateFunc::TopK {
+            k,
+            order_var: "Score".to_string(),
+            output_vars: vec!["Score".to_string()],
+            descending,
+        }
+    }
+
+    fn make_within_radius(max_distance: f64) -> AggregateFunc {
+        AggregateFunc::WithinRadius {
+            max_distance,
+            distance_var: "Dist".to_string(),
+            output_vars: vec!["Dist".to_string()],
+        }
+    }
+
+    fn make_topk_threshold(k: usize, threshold: f64, descending: bool) -> AggregateFunc {
+        AggregateFunc::TopKThreshold {
+            k,
+            threshold,
+            order_var: "Score".to_string(),
+            output_vars: vec!["Score".to_string()],
+            descending,
+        }
+    }
+
+    #[test]
+    fn test_aggregates_compatible_topk_same() {
+        assert!(aggregates_are_compatible(
+            &make_topk(5, true),
+            &make_topk(5, true)
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_topk_different_k() {
+        assert!(!aggregates_are_compatible(
+            &make_topk(5, true),
+            &make_topk(10, true)
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_topk_different_order() {
+        assert!(!aggregates_are_compatible(
+            &make_topk(5, true),
+            &make_topk(5, false)
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_compatible_within_radius_same() {
+        assert!(aggregates_are_compatible(
+            &make_within_radius(1.5),
+            &make_within_radius(1.5),
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_within_radius_different() {
+        assert!(!aggregates_are_compatible(
+            &make_within_radius(1.5),
+            &make_within_radius(3.0),
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_topk_vs_within_radius() {
+        assert!(!aggregates_are_compatible(
+            &make_topk(5, true),
+            &make_within_radius(1.0)
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_ranking_vs_simple() {
+        assert!(!aggregates_are_compatible(
+            &make_topk(5, true),
+            &AggregateFunc::Count
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_compatible_topk_threshold_same() {
+        assert!(aggregates_are_compatible(
+            &make_topk_threshold(3, 0.5, true),
+            &make_topk_threshold(3, 0.5, true),
+        ));
+    }
+
+    #[test]
+    fn test_aggregates_incompatible_topk_threshold_different_k() {
+        assert!(!aggregates_are_compatible(
+            &make_topk_threshold(3, 0.5, true),
+            &make_topk_threshold(5, 0.5, true),
+        ));
+    }
+
+    #[test]
+    fn test_rule_definition_describe_with_description() {
+        let rule = make_test_rule("view", "base");
+        let serializable = SerializableRule::from_rule(&rule);
+        let mut def = RuleDefinition::new("view".to_string(), serializable);
+        def.description = Some("A test view".to_string());
+        let desc = def.describe();
+        assert!(desc.contains("A test view"));
+        assert!(desc.contains("view"));
+    }
+
+    #[test]
+    fn test_rule_catalog_exists() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        assert!(!catalog.exists("path"));
+
+        let rule = make_test_rule("path", "edge");
+        catalog.register("path", &rule).unwrap();
+
+        assert!(catalog.exists("path"));
+    }
+
+    #[test]
+    fn test_catalog_file_default() {
+        let cf = CatalogFile::default();
+        assert_eq!(cf.version, 1);
+        assert!(cf.rules.is_empty());
+    }
 }

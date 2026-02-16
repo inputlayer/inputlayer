@@ -449,4 +449,187 @@ mod tests {
         assert_eq!(loaded_schema, schema);
         assert_eq!(loaded_tuples.len(), 2);
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_parse_value_null_variants() {
+        assert_eq!(parse_value("null"), Value::Null);
+        assert_eq!(parse_value("NULL"), Value::Null);
+        assert_eq!(parse_value("na"), Value::Null);
+        assert_eq!(parse_value("NA"), Value::Null);
+        assert_eq!(parse_value("\\N"), Value::Null);
+    }
+
+    #[test]
+    fn test_parse_value_large_int() {
+        // i64 that doesn't fit in i32
+        let large = 3_000_000_000i64;
+        assert_eq!(parse_value(&large.to_string()), Value::Int64(large));
+    }
+
+    #[test]
+    fn test_parse_value_negative_float() {
+        if let Value::Float64(f) = parse_value("-3.14") {
+            assert!((f - (-3.14)).abs() < f64::EPSILON);
+        } else {
+            panic!("Expected Float64");
+        }
+    }
+
+    #[test]
+    fn test_csv_options_default() {
+        let opts = CsvOptions::default();
+        assert_eq!(opts.delimiter, ',');
+        assert!(opts.has_header);
+        assert_eq!(opts.quote_char, '"');
+        assert!(opts.trim_whitespace);
+    }
+
+    #[test]
+    fn test_value_to_csv_all_types() {
+        let opts = CsvOptions::default();
+        assert_eq!(value_to_csv(&Value::Int32(42), &opts), "42");
+        assert_eq!(value_to_csv(&Value::Int64(100), &opts), "100");
+        assert_eq!(value_to_csv(&Value::Float64(3.14), &opts), "3.14");
+        assert_eq!(value_to_csv(&Value::Bool(true), &opts), "true");
+        assert_eq!(value_to_csv(&Value::Bool(false), &opts), "false");
+        assert_eq!(value_to_csv(&Value::Null, &opts), "");
+        assert_eq!(
+            value_to_csv(&Value::String(Arc::from("hello")), &opts),
+            "hello"
+        );
+        assert_eq!(value_to_csv(&Value::Timestamp(12345), &opts), "12345");
+    }
+
+    #[test]
+    fn test_value_to_csv_special_floats() {
+        let opts = CsvOptions::default();
+        assert_eq!(value_to_csv(&Value::Float64(f64::NAN), &opts), "NaN");
+        assert_eq!(value_to_csv(&Value::Float64(f64::INFINITY), &opts), "Inf");
+        assert_eq!(
+            value_to_csv(&Value::Float64(f64::NEG_INFINITY), &opts),
+            "-Inf"
+        );
+    }
+
+    #[test]
+    fn test_value_to_csv_vector() {
+        let opts = CsvOptions::default();
+        let v = Value::Vector(Arc::new(vec![1.0, 2.0, 3.0]));
+        let result = value_to_csv(&v, &opts);
+        assert_eq!(result, "[1,2,3]");
+    }
+
+    #[test]
+    fn test_value_to_csv_vector_int8() {
+        let opts = CsvOptions::default();
+        let v = Value::VectorInt8(Arc::new(vec![1, -2, 3]));
+        let result = value_to_csv(&v, &opts);
+        assert_eq!(result, "[1,-2,3]i8");
+    }
+
+    #[test]
+    fn test_escape_csv_field_no_special() {
+        let opts = CsvOptions::default();
+        assert_eq!(escape_csv_field("hello", &opts), "hello");
+    }
+
+    #[test]
+    fn test_escape_csv_field_with_delimiter() {
+        let opts = CsvOptions::default();
+        assert_eq!(escape_csv_field("a,b", &opts), "\"a,b\"");
+    }
+
+    #[test]
+    fn test_escape_csv_field_with_quote() {
+        let opts = CsvOptions::default();
+        assert_eq!(escape_csv_field("say \"hi\"", &opts), "\"say \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn test_escape_csv_field_with_newline() {
+        let opts = CsvOptions::default();
+        let result = escape_csv_field("line1\nline2", &opts);
+        assert!(result.starts_with('"'));
+        assert!(result.ends_with('"'));
+    }
+
+    #[test]
+    fn test_csv_empty_file() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("empty.csv");
+        std::fs::write(&path, "").unwrap();
+        let (schema, tuples) = load_from_csv(&path).unwrap();
+        // Empty file: no lines at all, so no header parsed
+        assert!(tuples.is_empty());
+        assert!(schema.is_empty());
+    }
+
+    #[test]
+    fn test_csv_header_only() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("header_only.csv");
+        std::fs::write(&path, "id,name,score\n").unwrap();
+        let (schema, tuples) = load_from_csv(&path).unwrap();
+        assert_eq!(schema, vec!["id", "name", "score"]);
+        assert!(tuples.is_empty());
+    }
+
+    #[test]
+    fn test_csv_no_header() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("no_header.csv");
+        std::fs::write(&path, "1,2,3\n4,5,6\n").unwrap();
+        let opts = CsvOptions {
+            has_header: false,
+            ..Default::default()
+        };
+        let (schema, tuples) = load_from_csv_with_options(&path, opts).unwrap();
+        assert_eq!(schema, vec!["col0", "col1", "col2"]);
+        assert_eq!(tuples.len(), 2);
+    }
+
+    #[test]
+    fn test_csv_save_empty_tuples() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("empty_data.csv");
+        let schema = vec!["a".to_string(), "b".to_string()];
+        save_to_csv(&path, &schema, &[]).unwrap();
+        let (loaded_schema, loaded_tuples) = load_from_csv(&path).unwrap();
+        assert_eq!(loaded_schema, schema);
+        assert!(loaded_tuples.is_empty());
+    }
+
+    #[test]
+    fn test_csv_row_count_mismatch() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("mismatch.csv");
+        std::fs::write(&path, "a,b\n1,2,3\n").unwrap();
+        let result = load_from_csv(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_csv_nonexistent_file() {
+        let result = load_from_csv("/nonexistent/path/test.csv");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_csv_line_with_whitespace() {
+        let options = CsvOptions::default();
+        let fields = parse_csv_line(" a , b , c ", &options);
+        assert_eq!(fields, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_csv_line_no_trim() {
+        let options = CsvOptions {
+            trim_whitespace: false,
+            ..Default::default()
+        };
+        let fields = parse_csv_line(" a , b ", &options);
+        assert_eq!(fields, vec![" a ", " b "]);
+    }
 }

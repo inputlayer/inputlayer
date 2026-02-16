@@ -677,6 +677,105 @@ mod tests {
         );
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_schema_mismatch_error() {
+        let tuples = vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])];
+        // Schema has 3 columns, tuple has 2
+        let schema = TupleSchema::new(vec![
+            ("a".to_string(), DataType::Int32),
+            ("b".to_string(), DataType::Int32),
+            ("c".to_string(), DataType::Int32),
+        ]);
+
+        let result = tuples_to_record_batch(&tuples, &schema);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ArrowConvertError::SchemaMismatch(_)));
+        assert!(err.to_string().contains("arity"));
+    }
+
+    #[test]
+    fn test_bool_roundtrip() {
+        let tuples = vec![
+            Tuple::new(vec![Value::Bool(true), Value::string("yes")]),
+            Tuple::new(vec![Value::Bool(false), Value::string("no")]),
+        ];
+
+        let schema = TupleSchema::new(vec![
+            ("flag".to_string(), DataType::Bool),
+            ("label".to_string(), DataType::String),
+        ]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        let (result, _) = record_batch_to_tuples(&batch).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].get(0), Some(&Value::Bool(true)));
+        assert_eq!(result[1].get(0), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_timestamp_roundtrip() {
+        let tuples = vec![
+            Tuple::new(vec![Value::Timestamp(1000000)]),
+            Tuple::new(vec![Value::Timestamp(2000000)]),
+        ];
+
+        let schema = TupleSchema::new(vec![("ts".to_string(), DataType::Timestamp)]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        assert_eq!(batch.num_rows(), 2);
+    }
+
+    #[test]
+    fn test_infer_schema_empty_tuples() {
+        let tuples: Vec<Tuple> = vec![];
+        let schema = infer_schema_from_tuples(&tuples, &["a".to_string(), "b".to_string()]);
+        // Empty tuples should produce schema from names only
+        assert_eq!(schema.arity(), 2);
+    }
+
+    #[test]
+    fn test_infer_schema_fewer_names() {
+        let tuples = vec![Tuple::new(vec![
+            Value::Int32(1),
+            Value::string("x"),
+            Value::Float64(3.14),
+        ])];
+        // Only provide 1 name for 3 columns
+        let schema = infer_schema_from_tuples(&tuples, &["id".to_string()]);
+        assert_eq!(schema.arity(), 3);
+        // Extra columns get auto-generated names col1, col2
+    }
+
+    #[test]
+    fn test_int64_roundtrip() {
+        let tuples = vec![
+            Tuple::new(vec![Value::Int64(i64::MAX)]),
+            Tuple::new(vec![Value::Int64(i64::MIN)]),
+        ];
+
+        let schema = TupleSchema::new(vec![("big".to_string(), DataType::Int64)]);
+
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        let (result, _) = record_batch_to_tuples(&batch).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].get(0), Some(&Value::Int64(i64::MAX)));
+        assert_eq!(result[1].get(0), Some(&Value::Int64(i64::MIN)));
+    }
+
+    #[test]
+    fn test_arrow_convert_error_display() {
+        let e1 = ArrowConvertError::SchemaMismatch("bad schema".to_string());
+        assert!(e1.to_string().contains("bad schema"));
+
+        let e2 = ArrowConvertError::UnsupportedType("weird type".to_string());
+        assert!(e2.to_string().contains("weird type"));
+    }
+
     #[test]
     fn test_empty_batch_with_vector_int8() {
         let tuples: Vec<Tuple> = vec![];

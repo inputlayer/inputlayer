@@ -911,4 +911,172 @@ mod tests {
         assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
         assert!(tuples.iter().any(|t| t.to_pair() == Some((3, 4))));
     }
+
+    #[test]
+    fn test_persist_config_default() {
+        let config = PersistConfig::default();
+        assert_eq!(config.buffer_size, 10000);
+        assert!(config.immediate_sync);
+        assert_eq!(config.path, PathBuf::from("./data/persist"));
+        assert!(matches!(config.durability_mode, DurabilityMode::Immediate));
+    }
+
+    #[test]
+    fn test_sanitize_name() {
+        assert_eq!(sanitize_name("db:edge"), "db_edge");
+        assert_eq!(sanitize_name("db/test/edge"), "db_test_edge");
+        assert_eq!(sanitize_name("simple"), "simple");
+        assert_eq!(sanitize_name("a:b/c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn test_ensure_shard_idempotent() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:test").unwrap();
+        persist.ensure_shard("db:test").unwrap(); // Second call should be idempotent
+
+        let shards = persist.list_shards().unwrap();
+        assert_eq!(
+            shards.iter().filter(|s| *s == "db:test").count(),
+            1,
+            "Shard should only appear once"
+        );
+    }
+
+    #[test]
+    fn test_read_nonexistent_shard() {
+        let (_temp, persist) = create_test_persist();
+
+        let result = persist.read("nonexistent", 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_shard_info_basic() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:info_test").unwrap();
+        let info = persist.shard_info("db:info_test").unwrap();
+        assert_eq!(info.batch_count, 0);
+        assert_eq!(info.since, 0);
+    }
+
+    #[test]
+    fn test_shard_info_nonexistent() {
+        let (_temp, persist) = create_test_persist();
+        let result = persist.shard_info("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_flush_empty_buffer() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:empty").unwrap();
+        // Flushing empty buffer should be a no-op
+        persist.flush("db:empty").unwrap();
+
+        let info = persist.shard_info("db:empty").unwrap();
+        assert_eq!(info.batch_count, 0);
+    }
+
+    #[test]
+    fn test_append_empty_updates() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:empty_append").unwrap();
+        persist.append("db:empty_append", &[]).unwrap();
+
+        let read = persist.read("db:empty_append", 0).unwrap();
+        assert!(read.is_empty());
+    }
+
+    #[test]
+    fn test_sync() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:sync_test").unwrap();
+        persist
+            .append(
+                "db:sync_test",
+                &[Update::insert(Tuple::from_pair(1, 2), 10)],
+            )
+            .unwrap();
+
+        // Sync should not error
+        persist.sync().unwrap();
+    }
+
+    #[test]
+    fn test_infer_schema_from_updates_empty() {
+        let schema = infer_schema_from_updates(&[]);
+        // Should return default 2-column Int32 schema
+        assert_eq!(schema.arity(), 2);
+    }
+
+    #[test]
+    fn test_infer_schema_from_updates_with_data() {
+        let updates = vec![Update::insert(
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::string("hello"),
+                Value::Float64(3.14),
+            ]),
+            10,
+        )];
+        let schema = infer_schema_from_updates(&updates);
+        assert_eq!(schema.arity(), 3);
+    }
+
+    #[test]
+    fn test_read_with_since_filter() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:since_test").unwrap();
+        persist
+            .append(
+                "db:since_test",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                    Update::insert(Tuple::from_pair(5, 6), 30),
+                ],
+            )
+            .unwrap();
+
+        // Read only updates since time 15
+        let read = persist.read("db:since_test", 15).unwrap();
+        assert!(read.iter().all(|u| u.time >= 15));
+        assert_eq!(read.len(), 2); // Only time 20 and 30
+    }
+
+    #[test]
+    fn test_multiple_shards_independent() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:a").unwrap();
+        persist.ensure_shard("db:b").unwrap();
+
+        persist
+            .append("db:a", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist
+            .append("db:b", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+
+        let read_a = persist.read("db:a", 0).unwrap();
+        let read_b = persist.read("db:b", 0).unwrap();
+
+        assert_eq!(read_a.len(), 1);
+        assert_eq!(read_b.len(), 1);
+        assert_ne!(read_a[0].data, read_b[0].data);
+    }
+
+    #[test]
+    fn test_flush_nonexistent_shard() {
+        let (_temp, persist) = create_test_persist();
+        let result = persist.flush("nonexistent");
+        assert!(result.is_err());
+    }
 }

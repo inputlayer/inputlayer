@@ -1367,4 +1367,386 @@ mod tests {
         assert_eq!(canonical.var_mapping.get("v1"), Some(&"Bar".to_string()));
         assert_eq!(canonical.var_mapping.get("v2"), Some(&"Baz".to_string()));
     }
+
+    #[test]
+    fn test_set_min_depth() {
+        let mut sharer = SubplanSharer::new();
+        sharer.set_min_depth(3);
+
+        // Two identical Filter(Scan) subtrees (depth 2), now below new threshold
+        let ir1 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+        let ir2 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Depth 2 < min_depth 3, so no sharing
+        assert!(
+            shared_views.is_empty(),
+            "Depth 2 subtrees should not be shared with min_depth=3"
+        );
+    }
+
+    #[test]
+    fn test_sharing_skips_derived_relations() {
+        let sharer = SubplanSharer::new();
+
+        let mut derived = HashSet::new();
+        derived.insert("R".to_string());
+
+        // Two identical joins referencing derived relation R
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &derived);
+
+        // Should NOT share because R is a derived relation
+        assert!(
+            shared_views.is_empty(),
+            "Joins referencing derived relations should not be shared"
+        );
+    }
+
+    #[test]
+    fn test_subtree_depth_distinct() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Distinct {
+            input: Box::new(make_scan("R")),
+        };
+        assert_eq!(sharer.subtree_depth(&ir), 2);
+    }
+
+    #[test]
+    fn test_subtree_depth_aggregate() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Aggregate {
+            input: Box::new(make_scan("R")),
+            group_by: vec![0],
+            aggregations: vec![],
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(sharer.subtree_depth(&ir), 2);
+    }
+
+    #[test]
+    fn test_subtree_depth_union() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Union {
+            inputs: vec![make_scan("R"), make_scan("S"), make_scan("T")],
+        };
+        // Union(3 scans) = 1 + max(1,1,1) = 2
+        assert_eq!(sharer.subtree_depth(&ir), 2);
+    }
+
+    #[test]
+    fn test_subtree_depth_compute() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Compute {
+            input: Box::new(make_scan("R")),
+            expressions: vec![("out".to_string(), crate::ir::IRExpression::IntConstant(1))],
+        };
+        assert_eq!(sharer.subtree_depth(&ir), 2);
+    }
+
+    #[test]
+    fn test_subtree_depth_map() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Map {
+            input: Box::new(make_scan("R")),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(sharer.subtree_depth(&ir), 2);
+    }
+
+    #[test]
+    fn test_subtree_depth_antijoin() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Antijoin {
+            left: Box::new(make_scan("R")),
+            right: Box::new(make_join(make_scan("S"), make_scan("T"))),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        // Antijoin(Scan, Join(Scan, Scan)) = 1 + max(1, 2) = 3
+        assert_eq!(sharer.subtree_depth(&ir), 3);
+    }
+
+    #[test]
+    fn test_references_derived_relation() {
+        let derived: HashSet<String> = ["derived".to_string()].into_iter().collect();
+
+        // Direct reference
+        let scan = IRNode::Scan {
+            relation: "derived".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        assert!(SubplanSharer::references_derived_relation(&scan, &derived));
+
+        // Non-derived
+        let scan2 = IRNode::Scan {
+            relation: "base".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        assert!(!SubplanSharer::references_derived_relation(
+            &scan2, &derived
+        ));
+
+        // Nested through filter
+        let filtered = IRNode::Filter {
+            input: Box::new(scan2),
+            predicate: Predicate::True,
+        };
+        assert!(!SubplanSharer::references_derived_relation(
+            &filtered, &derived
+        ));
+    }
+
+    #[test]
+    fn test_sharing_with_distinct_wrapper() {
+        let sharer = SubplanSharer::new();
+
+        // Two identical Distinct(Scan) trees
+        let ir1 = IRNode::Distinct {
+            input: Box::new(make_scan("R")),
+        };
+        let ir2 = IRNode::Distinct {
+            input: Box::new(make_scan("R")),
+        };
+
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Distinct(Scan) has depth 2, should be shared
+        assert_eq!(shared_views.len(), 1);
+        for ir in &rewritten {
+            assert!(
+                matches!(ir, IRNode::Scan { relation, .. } if relation.starts_with("__shared_view_"))
+            );
+        }
+    }
+
+    #[test]
+    fn test_sharing_with_compute_wrapper() {
+        let sharer = SubplanSharer::new();
+
+        let ir1 = IRNode::Compute {
+            input: Box::new(make_scan("R")),
+            expressions: vec![("out".to_string(), crate::ir::IRExpression::IntConstant(42))],
+        };
+        let ir2 = IRNode::Compute {
+            input: Box::new(make_scan("R")),
+            expressions: vec![("out".to_string(), crate::ir::IRExpression::IntConstant(42))],
+        };
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        // Compute(Scan) has depth 2, should be shared
+        assert_eq!(shared_views.len(), 1);
+    }
+
+    #[test]
+    fn test_different_predicates_not_shared() {
+        let sharer = SubplanSharer::new();
+
+        let ir1 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+        let ir2 = IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: Predicate::ColumnGtConst(0, 10), // Different constant
+        };
+
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+
+        assert!(
+            shared_views.is_empty(),
+            "Different predicates should not be shared"
+        );
+    }
+
+    #[test]
+    fn test_default_subplan_sharer() {
+        let sharer = SubplanSharer::default();
+        // Default should work identically to new()
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+        assert_eq!(shared_views.len(), 1);
+    }
+
+    #[test]
+    fn test_hash_ir_same_structure() {
+        let sharer = SubplanSharer::new();
+        let ir1 = make_scan("R");
+        let ir2 = make_scan("R");
+        assert_eq!(sharer.hash_ir(&ir1), sharer.hash_ir(&ir2));
+    }
+
+    #[test]
+    fn test_hash_ir_different_relations() {
+        let sharer = SubplanSharer::new();
+        let ir1 = make_scan("R");
+        let ir2 = make_scan("S");
+        assert_ne!(sharer.hash_ir(&ir1), sharer.hash_ir(&ir2));
+    }
+
+    #[test]
+    fn test_canonicalize_normalizes_different_var_names_to_same_form() {
+        let sharer = SubplanSharer::new();
+        let ir1 = IRNode::Scan {
+            relation: "R".to_string(),
+            schema: vec!["alpha".to_string(), "beta".to_string()],
+        };
+        let ir2 = IRNode::Scan {
+            relation: "R".to_string(),
+            schema: vec!["gamma".to_string(), "delta".to_string()],
+        };
+        let c1 = sharer.canonicalize(&ir1);
+        let c2 = sharer.canonicalize(&ir2);
+        // Same structure, different var names -> same canonical hash
+        assert_eq!(c1.hash, c2.hash);
+    }
+
+    #[test]
+    fn test_subtree_depth_nested_join() {
+        let sharer = SubplanSharer::new();
+        let inner_join = make_join(make_scan("R"), make_scan("S"));
+        let outer_join = make_join(inner_join, make_scan("T"));
+        let depth = sharer.subtree_depth(&outer_join);
+        assert!(
+            depth >= 3,
+            "Nested join should have depth >= 3, got {depth}"
+        );
+    }
+
+    #[test]
+    fn test_subtree_depth_filter_chain() {
+        let sharer = SubplanSharer::new();
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Filter {
+                input: Box::new(make_scan("R")),
+                predicate: Predicate::True,
+            }),
+            predicate: Predicate::True,
+        };
+        let depth = sharer.subtree_depth(&ir);
+        assert_eq!(depth, 3);
+    }
+
+    #[test]
+    fn test_references_derived_relation_in_join() {
+        let mut derived = HashSet::new();
+        derived.insert("derived_rel".to_string());
+        let ir = make_join(
+            make_scan("R"),
+            IRNode::Scan {
+                relation: "derived_rel".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            },
+        );
+        assert!(SubplanSharer::references_derived_relation(&ir, &derived));
+    }
+
+    #[test]
+    fn test_references_derived_relation_in_union() {
+        let mut derived = HashSet::new();
+        derived.insert("d".to_string());
+        let ir = IRNode::Union {
+            inputs: vec![
+                make_scan("R"),
+                IRNode::Scan {
+                    relation: "d".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                },
+            ],
+        };
+        assert!(SubplanSharer::references_derived_relation(&ir, &derived));
+    }
+
+    #[test]
+    fn test_references_derived_relation_none_found() {
+        let derived = HashSet::new();
+        let ir = make_join(make_scan("R"), make_scan("S"));
+        assert!(!SubplanSharer::references_derived_relation(&ir, &derived));
+    }
+
+    #[test]
+    fn test_collect_subtrees_via_share() {
+        let sharer = SubplanSharer::new();
+        // Two identical joins - collect_subtrees is called internally by share_subplans
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+        assert_eq!(
+            shared_views.len(),
+            1,
+            "Should collect and share the common join subtree"
+        );
+    }
+
+    #[test]
+    fn test_find_internal_duplicates_with_repeats() {
+        let sharer = SubplanSharer::new();
+        // A union of two identical filter+scan subtrees
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Filter {
+                    input: Box::new(make_scan("R")),
+                    predicate: Predicate::ColumnEqConst(0, 1),
+                },
+                IRNode::Filter {
+                    input: Box::new(make_scan("R")),
+                    predicate: Predicate::ColumnEqConst(0, 1),
+                },
+            ],
+        };
+        let dupes = sharer.find_internal_duplicates(&ir);
+        assert!(!dupes.is_empty(), "Should find internal duplicates");
+    }
+
+    #[test]
+    fn test_find_internal_duplicates_no_repeats() {
+        let sharer = SubplanSharer::new();
+        let ir = make_join(make_scan("R"), make_scan("S"));
+        let dupes = sharer.find_internal_duplicates(&ir);
+        assert!(dupes.is_empty(), "Different scans should not be duplicates");
+    }
+
+    #[test]
+    fn test_sharing_with_union_children() {
+        let sharer = SubplanSharer::new();
+        // Two identical unions
+        let make_union = || IRNode::Union {
+            inputs: vec![
+                make_join(make_scan("R"), make_scan("S")),
+                make_join(make_scan("R"), make_scan("T")),
+            ],
+        };
+        let ir1 = make_union();
+        let ir2 = make_union();
+        let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+        assert!(!shared_views.is_empty(), "Should share common subtrees");
+        assert_eq!(rewritten.len(), 2);
+    }
+
+    #[test]
+    fn test_sharing_respects_min_depth() {
+        let mut sharer = SubplanSharer::new();
+        sharer.set_min_depth(5);
+        // Simple join has depth 2, below min_depth of 5
+        let ir1 = make_join(make_scan("R"), make_scan("S"));
+        let ir2 = make_join(make_scan("R"), make_scan("S"));
+        let (_, shared_views) = sharer.share_subplans(vec![ir1, ir2], &no_derived());
+        assert!(
+            shared_views.is_empty(),
+            "Min depth 5 should prevent sharing of shallow subtrees"
+        );
+    }
 }

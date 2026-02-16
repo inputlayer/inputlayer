@@ -1338,4 +1338,184 @@ mod tests {
 
         engine.shutdown().unwrap();
     }
+
+    // Batch 20: Index lifecycle, accessors, edge cases
+
+    #[test]
+    fn test_remove_index_registered() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+
+        let index = make_registered_index("test_idx", "data");
+        engine.register_index(index).unwrap();
+        assert!(engine.has_index("test_idx"));
+
+        engine.remove_index("test_idx").unwrap();
+        assert!(!engine.has_index("test_idx"));
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_remove_index_nonexistent() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        let result = engine.remove_index("no_such_index");
+        assert!(result.is_err());
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_current_time_after_advance() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        assert_eq!(engine.current_time(), 0);
+
+        engine.advance_time(5).unwrap();
+        engine.wait_until_caught_up(5).unwrap();
+        assert_eq!(engine.current_time(), 5);
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_max_write_time_after_insert() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        assert_eq!(engine.max_write_time(), 0);
+
+        engine
+            .insert("data", vec![Tuple::new(vec![Value::Int32(1)])], 3)
+            .unwrap();
+        assert_eq!(engine.max_write_time(), 3);
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_derived_relations_accessor() {
+        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
+        let dr = engine.derived_relations();
+        // Just verify the accessor returns an Arc and we can lock it
+        let _guard = dr.lock();
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_index_manager_accessor() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        let im = engine.index_manager();
+        // Just verify the accessor returns an Arc and we can lock it
+        let _guard = im.lock();
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_notify_indexes_base_update() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+
+        let index = make_registered_index("my_idx", "data");
+        engine.register_index(index).unwrap();
+
+        // A freshly registered (non-materialized) index won't appear as invalidated
+        // because it was never materialized/valid in the first place.
+        let invalidated = engine.notify_indexes_base_update("data").unwrap();
+        assert!(
+            invalidated.is_empty(),
+            "Non-materialized index should not appear as invalidated"
+        );
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_notify_indexes_unrelated_relation() {
+        let engine = IncrementalEngine::new(vec!["data".to_string(), "other".to_string()]).unwrap();
+
+        let index = make_registered_index("my_idx", "data");
+        engine.register_index(index).unwrap();
+
+        let invalidated = engine.notify_indexes_base_update("other").unwrap();
+        assert!(
+            invalidated.is_empty(),
+            "Index on 'data' should not be invalidated by 'other' update"
+        );
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_ensure_relation_new() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        engine.ensure_relation("new_rel").unwrap();
+        // Should be able to insert into the new relation
+        engine
+            .insert("new_rel", vec![Tuple::new(vec![Value::Int32(1)])], 1)
+            .unwrap();
+        engine.advance_time(2).unwrap();
+        engine.wait_until_caught_up(2).unwrap();
+        assert_eq!(engine.read_relation("new_rel").unwrap().len(), 1);
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_ensure_relation_existing() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        // Should not error for existing relation
+        engine.ensure_relation("data").unwrap();
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_is_derived_relation() {
+        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
+        assert!(!engine.is_derived_relation("base"));
+
+        let rule = make_compiled_rule("derived", vec!["base"]);
+        engine.register_rule(rule).unwrap();
+        assert!(engine.is_derived_relation("derived"));
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_get_derived_stats() {
+        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
+        let (total, mat, inval) = engine.get_derived_stats().unwrap();
+        assert_eq!(total, 0);
+        assert_eq!(mat, 0);
+        assert_eq!(inval, 0);
+
+        let rule = make_compiled_rule("derived", vec!["base"]);
+        engine.register_rule(rule).unwrap();
+        let (total2, _, _) = engine.get_derived_stats().unwrap();
+        assert_eq!(total2, 1);
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_remove_rule() {
+        let engine = IncrementalEngine::new(vec!["base".to_string()]).unwrap();
+
+        let rule = make_compiled_rule("view", vec!["base"]);
+        engine.register_rule(rule).unwrap();
+        assert!(engine.is_derived_relation("view"));
+
+        engine.remove_rule("view").unwrap();
+        assert!(!engine.is_derived_relation("view"));
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_read_relation_consistent() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        engine
+            .insert("data", vec![Tuple::new(vec![Value::Int32(42)])], 1)
+            .unwrap();
+        engine.advance_time(2).unwrap();
+        engine.wait_until_caught_up(2).unwrap();
+
+        let results = engine.read_relation_consistent("data").unwrap();
+        assert_eq!(results.len(), 1);
+
+        engine.shutdown().unwrap();
+    }
 }

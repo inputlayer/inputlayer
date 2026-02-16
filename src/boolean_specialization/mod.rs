@@ -1137,4 +1137,176 @@ mod tests {
             "Join annotation should mention 'join'"
         );
     }
+
+    // =========================================================================
+    // Additional Boolean Specialization Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_semiring_type_display() {
+        assert_eq!(format!("{:?}", SemiringType::Boolean), "Boolean");
+        assert_eq!(format!("{:?}", SemiringType::Counting), "Counting");
+        assert_eq!(format!("{:?}", SemiringType::Min), "Min");
+        assert_eq!(format!("{:?}", SemiringType::Max), "Max");
+    }
+
+    #[test]
+    fn test_semiring_meet_min_max() {
+        // Min has priority in match ordering: Min meets Max = Min
+        assert_eq!(
+            SemiringType::Min.meet(&SemiringType::Max),
+            SemiringType::Min
+        );
+        // Max meets Min = Min (Min branch matches first)
+        assert_eq!(
+            SemiringType::Max.meet(&SemiringType::Min),
+            SemiringType::Min
+        );
+    }
+
+    #[test]
+    fn test_specializer_set_specialization_toggle() {
+        let mut specializer = BooleanSpecializer::new();
+
+        // Disable
+        specializer.set_specialization(false);
+        let ir = make_scan("R");
+        let (_, ann1) = specializer.specialize(ir);
+        // Should still return an annotation
+
+        // Re-enable
+        specializer.set_specialization(true);
+        let ir = make_scan("R");
+        let (_, ann2) = specializer.specialize(ir);
+        assert_eq!(ann2.semiring, SemiringType::Boolean);
+
+        let _ = ann1; // Use ann1 to avoid warning
+    }
+
+    #[test]
+    fn test_map_preserves_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Map {
+            input: Box::new(make_scan("R")),
+            projection: vec![1, 0],
+            output_schema: vec!["y".to_string(), "x".to_string()],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_antijoin_preserves_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Antijoin {
+            left: Box::new(make_scan("R")),
+            right: Box::new(make_scan("S")),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        // Antijoin should preserve boolean
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_compute_preserves_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Compute {
+            input: Box::new(make_scan("R")),
+            expressions: vec![("z".to_string(), crate::ir::IRExpression::Column(0))],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_flatmap_preserves_semiring() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::FlatMap {
+            input: Box::new(make_scan("R")),
+            projection: vec![0],
+            filter_predicate: None,
+            output_schema: vec!["x".to_string()],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(annotation.semiring, SemiringType::Boolean);
+    }
+
+    #[test]
+    fn test_get_relation_semiring_unknown() {
+        let specializer = BooleanSpecializer::new();
+        // Unknown relation should default to Boolean
+        assert_eq!(
+            specializer.get_relation_semiring("unknown_relation"),
+            SemiringType::Boolean
+        );
+    }
+
+    #[test]
+    fn test_compute_stats_empty() {
+        let mut specializer = BooleanSpecializer::new();
+        let stats = specializer.compute_stats(&[]);
+        assert_eq!(stats.total_nodes, 0);
+    }
+
+    #[test]
+    fn test_compute_stats_multiple_ir_trees() {
+        let mut specializer = BooleanSpecializer::new();
+        let trees = vec![make_scan("R"), make_join(make_scan("S"), make_scan("T"))];
+        let stats = specializer.compute_stats(&trees);
+        assert!(stats.total_nodes >= 3);
+    }
+
+    #[test]
+    fn test_sum_aggregation_uses_counting() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Aggregate {
+            input: Box::new(make_scan("R")),
+            group_by: vec![0],
+            aggregations: vec![(crate::ir::AggregateFunction::Sum, 1)],
+            output_schema: vec!["x".to_string(), "sum_y".to_string()],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(
+            annotation.semiring,
+            SemiringType::Counting,
+            "Sum aggregation should use Counting semiring"
+        );
+    }
+
+    #[test]
+    fn test_avg_aggregation_uses_counting() {
+        let mut specializer = BooleanSpecializer::new();
+        let ir = IRNode::Aggregate {
+            input: Box::new(make_scan("R")),
+            group_by: vec![0],
+            aggregations: vec![(crate::ir::AggregateFunction::Avg, 1)],
+            output_schema: vec!["x".to_string(), "avg_y".to_string()],
+        };
+
+        let (_, annotation) = specializer.specialize(ir);
+        assert_eq!(
+            annotation.semiring,
+            SemiringType::Counting,
+            "Avg aggregation should use Counting semiring"
+        );
+    }
+
+    #[test]
+    fn test_is_more_general_min_max() {
+        // Neither Min nor Max is more general than the other
+        assert!(!SemiringType::Min.is_more_general_than(&SemiringType::Max));
+        assert!(!SemiringType::Max.is_more_general_than(&SemiringType::Min));
+        // Only Counting > Boolean is defined as "more general"
+        assert!(!SemiringType::Counting.is_more_general_than(&SemiringType::Min));
+        assert!(!SemiringType::Counting.is_more_general_than(&SemiringType::Max));
+        assert!(SemiringType::Counting.is_more_general_than(&SemiringType::Boolean));
+    }
 }

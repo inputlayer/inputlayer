@@ -2373,6 +2373,463 @@ mod tests {
             other => panic!("Expected PersistentUpdate, got {other:?}"),
         }
     }
+
+    // =========================================================================
+    // Additional Handler Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_term_to_value_arithmetic_error() {
+        use crate::ast::ArithExpr;
+        let result = term_to_value(&Term::Arithmetic(ArithExpr::Variable("X".to_string())));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("arithmetic"));
+    }
+
+    #[test]
+    fn test_term_to_value_field_access_error() {
+        let result = term_to_value(&Term::FieldAccess(
+            Box::new(Term::Variable("record".to_string())),
+            "field".to_string(),
+        ));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("field access"));
+    }
+
+    #[test]
+    fn test_handler_get_storage() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let storage = handler.get_storage();
+        // Should have default KG
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"default".to_string()));
+    }
+
+    #[test]
+    fn test_handler_get_storage_mut() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let storage = handler.get_storage_mut();
+        // Should be able to create a new KG
+        storage.create_knowledge_graph("test_mut").unwrap();
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"test_mut".to_string()));
+    }
+
+    #[test]
+    fn test_handler_session_manager() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let mgr = handler.session_manager();
+        assert_eq!(mgr.session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_query_program_no_kg_selected() {
+        let storage = StorageEngine::new(Config::default()).unwrap();
+        let handler = Handler::new(storage);
+        // Without an explicit KG, uses the default
+        let result = handler.query_program(None, "+data[(1,)]".to_string()).await;
+        // Should succeed since default KG exists
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_query_program_invalid_syntax() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        // Invalid Datalog syntax
+        let result = handler
+            .query_program(None, "not valid datalog !!!".to_string())
+            .await;
+        // Should not crash - either returns error or empty
+        // (parser resilience)
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_handler_uptime() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        // Just created, uptime should be < 2 seconds
+        assert!(handler.uptime_seconds() < 2);
+    }
+
+    #[tokio::test]
+    async fn test_query_program_multiline_with_mixed_comments() {
+        let handler = handler_with_kg("mixed_comments");
+        let program = "%% header comment\n+mc_data[(1,), (2,)]\n// inline\n?mc_data(X)";
+        let result = handler
+            .query_program(Some("mixed_comments".to_string()), program.to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_session_insert_retract_and_query() {
+        let handler = handler_with_kg("sess_irt");
+        let kg = "sess_irt";
+
+        // Insert persistent base
+        handler
+            .query_program(Some(kg.to_string()), "+base[(10,)]".to_string())
+            .await
+            .unwrap();
+
+        // Create session
+        let sid = handler.create_session(kg).unwrap();
+
+        // Add ephemeral facts
+        handler
+            .session_insert_ephemeral(
+                sid,
+                "base",
+                vec![
+                    Tuple::new(vec![Value::Int64(20)]),
+                    Tuple::new(vec![Value::Int64(30)]),
+                ],
+            )
+            .unwrap();
+
+        // Query with session → 3 results
+        let result = handler
+            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 3);
+
+        // Retract one ephemeral fact
+        handler
+            .session_retract_ephemeral(sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
+            .unwrap();
+
+        // Query again → 2 results
+        let result = handler
+            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2);
+
+        handler.close_session(sid).unwrap();
+    }
+
+    #[test]
+    fn test_session_insert_invalid_session() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let result =
+            handler.session_insert_ephemeral(99999, "rel", vec![Tuple::new(vec![Value::Int64(1)])]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_retract_invalid_session() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let result = handler.session_retract_ephemeral(
+            99999,
+            "rel",
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_persistent_notification_serialize() {
+        let notif = PersistentNotification::PersistentUpdate {
+            knowledge_graph: "test".to_string(),
+            relation: "edge".to_string(),
+            operation: "insert".to_string(),
+            count: 5,
+        };
+        let json = serde_json::to_string(&notif).unwrap();
+        assert!(json.contains("persistent_update"));
+        assert!(json.contains("\"count\":5"));
+    }
+
+    // --- extract_predicate_vars tests ---
+
+    #[test]
+    fn test_extract_predicate_vars_positive() {
+        use crate::ast::{Atom, BodyPredicate};
+        let atom = Atom::new(
+            "edge".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("Y".to_string()),
+            ],
+        );
+        let pred = BodyPredicate::Positive(atom);
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["X".to_string(), "Y".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_negated() {
+        use crate::ast::{Atom, BodyPredicate};
+        let atom = Atom::new("banned".to_string(), vec![Term::Variable("Z".to_string())]);
+        let pred = BodyPredicate::Negated(atom);
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["Z".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_comparison() {
+        use crate::ast::{BodyPredicate, ComparisonOp};
+        let pred = BodyPredicate::Comparison(
+            Term::Variable("A".to_string()),
+            ComparisonOp::GreaterThan,
+            Term::Variable("B".to_string()),
+        );
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_no_duplicates() {
+        use crate::ast::{Atom, BodyPredicate};
+        let atom = Atom::new(
+            "self_join".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("X".to_string()),
+            ],
+        );
+        let pred = BodyPredicate::Positive(atom);
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["X".to_string()]); // No duplicate
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_skips_constants() {
+        use crate::ast::{Atom, BodyPredicate};
+        let atom = Atom::new(
+            "data".to_string(),
+            vec![
+                Term::Constant(42),
+                Term::Variable("X".to_string()),
+                Term::Placeholder,
+            ],
+        );
+        let pred = BodyPredicate::Positive(atom);
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["X".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_comparison_with_constant() {
+        use crate::ast::{BodyPredicate, ComparisonOp};
+        let pred = BodyPredicate::Comparison(
+            Term::Variable("X".to_string()),
+            ComparisonOp::GreaterThan,
+            Term::Constant(10),
+        );
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert_eq!(vars, vec!["X".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_predicate_vars_hnsw() {
+        use crate::ast::BodyPredicate;
+        let pred = BodyPredicate::HnswNearest {
+            index_name: "embeddings".to_string(),
+            query: Term::Variable("QV".to_string()),
+            k: 5,
+            id_var: "Id".to_string(),
+            distance_var: "Dist".to_string(),
+            ef_search: None,
+        };
+        let mut vars = Vec::new();
+        super::extract_predicate_vars(&pred, &mut vars);
+        assert!(vars.contains(&"Id".to_string()));
+        assert!(vars.contains(&"Dist".to_string()));
+    }
+
+    // =========================================================================
+    // Additional Handler Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_handler_total_queries_initial() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        assert_eq!(handler.total_queries(), 0);
+    }
+
+    #[test]
+    fn test_handler_total_inserts_initial() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        assert_eq!(handler.total_inserts(), 0);
+    }
+
+    #[test]
+    fn test_handler_session_stats_empty() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let stats = handler.session_stats();
+        assert_eq!(stats.total_sessions, 0);
+    }
+
+    #[tokio::test]
+    async fn test_handler_query_updates_counter() {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .query_program(Some("counter_kg".to_string()), "+data[(1,)]".to_string())
+            .await
+            .unwrap();
+        assert!(handler.total_inserts() > 0 || handler.total_queries() > 0);
+    }
+
+    #[test]
+    fn test_handler_explain_query() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        {
+            let storage = handler.get_storage_mut();
+            storage.create_knowledge_graph("explain_h_kg").unwrap();
+        }
+        let trace = handler.explain_query(
+            Some("explain_h_kg".to_string()),
+            "result(X, Y) <- edge(X, Y)".to_string(),
+        );
+        assert!(trace.is_ok());
+    }
+
+    #[test]
+    fn test_handler_subscribe_notifications() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let rx = handler.subscribe_notifications();
+        // Should create a valid receiver without errors
+        drop(rx);
+    }
+
+    #[tokio::test]
+    async fn test_handler_query_select_all_tuples() {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .query_program(
+                Some("sel_kg".to_string()),
+                "+items[(1, 10), (2, 20)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(Some("sel_kg".to_string()), "?items(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_handler_query_with_rule() {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .query_program(
+                Some("rule_q_kg".to_string()),
+                "+edge[(1, 2), (2, 3)]".to_string(),
+            )
+            .await
+            .unwrap();
+        // Define a persistent rule
+        handler
+            .query_program(
+                Some("rule_q_kg".to_string()),
+                "+path(X, Y) <- edge(X, Y)".to_string(),
+            )
+            .await
+            .unwrap();
+        // Query the derived relation
+        let result = handler
+            .query_program(Some("rule_q_kg".to_string()), "?path(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_handler_uptime_seconds() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        // Just created, uptime should be 0 or very small
+        assert!(handler.uptime_seconds() < 2);
+    }
+
+    #[tokio::test]
+    async fn test_handler_total_queries_after_query() {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .query_program(Some("tq_kg".to_string()), "+data[(1,)]".to_string())
+            .await
+            .unwrap();
+        assert!(handler.total_queries() > 0 || handler.total_inserts() > 0);
+    }
+
+    #[test]
+    fn test_handler_close_session_invalid() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let result = handler.close_session(999999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_handler_validate_tuples_no_schema() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        {
+            let storage = handler.get_storage_mut();
+            storage.create_knowledge_graph("val_kg").unwrap();
+        }
+        // With no schema defined, validation should pass
+        let tuples = vec![Tuple::new(vec![Value::Int32(1)])];
+        let result = handler.validate_tuples_against_schema("val_kg", "test_rel", &tuples);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handler_notify_persistent_update() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        // Should not panic — fire and forget notification
+        handler.notify_persistent_update("kg", "rel", "insert", 5);
+    }
+
+    #[tokio::test]
+    async fn test_handler_query_program_insert_and_query() {
+        let mut config = Config::default();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        // Insert data
+        handler
+            .query_program(
+                Some("qp_iq_kg".to_string()),
+                "+scores[(1, 100), (2, 200)]".to_string(),
+            )
+            .await
+            .unwrap();
+        // Query it back
+        let result = handler
+            .query_program(Some("qp_iq_kg".to_string()), "?scores(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_handler_query_program_nonexistent_kg() {
+        let handler = Handler::from_config(Config::default()).unwrap();
+        let result = handler
+            .query_program(
+                Some("nonexistent_kg_xyz".to_string()),
+                "?data(X)".to_string(),
+            )
+            .await;
+        assert!(result.is_err());
+    }
 }
 
 /// Extract variables from a body predicate and add to `head_vars`

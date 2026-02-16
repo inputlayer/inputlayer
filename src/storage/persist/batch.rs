@@ -254,4 +254,94 @@ mod tests {
         shard.advance_since(50);
         assert_eq!(shard.since, 50);
     }
+
+    #[test]
+    fn test_batch_empty() {
+        let batch = Batch::new(vec![]);
+        assert!(batch.is_empty());
+        assert_eq!(batch.len(), 0);
+        assert_eq!(batch.lower, 0);
+        assert_eq!(batch.upper, 0);
+    }
+
+    #[test]
+    fn test_batch_single_update() {
+        let updates = vec![Update::insert_pair(10, 20, 5)];
+        let batch = Batch::new(updates);
+        assert!(!batch.is_empty());
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch.lower, 5);
+        assert_eq!(batch.upper, 6);
+    }
+
+    #[test]
+    fn test_shard_meta_multiple_batches() {
+        let mut shard = ShardMeta::new("db:rel".to_string());
+
+        shard.add_batch(BatchRef {
+            id: "b1".to_string(),
+            path: PathBuf::from("b1.parquet"),
+            lower: 0,
+            upper: 50,
+            len: 10,
+        });
+        shard.add_batch(BatchRef {
+            id: "b2".to_string(),
+            path: PathBuf::from("b2.parquet"),
+            lower: 50,
+            upper: 100,
+            len: 20,
+        });
+
+        assert_eq!(shard.batches.len(), 2);
+        assert_eq!(shard.total_updates, 30);
+        assert_eq!(shard.upper, 100);
+    }
+
+    #[test]
+    fn test_shard_advance_since_not_backwards() {
+        let mut shard = ShardMeta::new("db:rel".to_string());
+        shard.advance_since(50);
+        assert_eq!(shard.since, 50);
+        // Advancing to lower value should be no-op
+        shard.advance_since(30);
+        assert_eq!(shard.since, 50);
+    }
+
+    #[test]
+    fn test_shard_info_from_meta() {
+        let mut shard = ShardMeta::new("mydb:edges".to_string());
+        shard.add_batch(BatchRef {
+            id: "b1".to_string(),
+            path: PathBuf::from("b1.parquet"),
+            lower: 0,
+            upper: 10,
+            len: 5,
+        });
+        shard.advance_since(3);
+
+        let info = ShardInfo::from(&shard);
+        assert_eq!(info.name, "mydb:edges");
+        assert_eq!(info.since, 3);
+        assert_eq!(info.upper, 10);
+        assert_eq!(info.batch_count, 1);
+        assert_eq!(info.total_updates, 5);
+    }
+
+    #[test]
+    fn test_update_equality() {
+        let u1 = Update::insert_pair(1, 2, 100);
+        let u2 = Update::insert_pair(1, 2, 100);
+        let u3 = Update::delete_pair(1, 2, 100);
+        assert_eq!(u1, u2);
+        assert_ne!(u1, u3); // diff differs
+    }
+
+    #[test]
+    fn test_batch_bounds_same_timestamp() {
+        let updates = vec![Update::insert_pair(1, 2, 42), Update::insert_pair(3, 4, 42)];
+        let batch = Batch::new(updates);
+        assert_eq!(batch.lower, 42);
+        assert_eq!(batch.upper, 43);
+    }
 }

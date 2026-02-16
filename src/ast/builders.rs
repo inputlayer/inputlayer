@@ -286,4 +286,93 @@ mod tests {
         assert_eq!(rule.head.relation, "path");
         assert_eq!(rule.body.len(), 1);
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_atom_builder_term() {
+        let atom = AtomBuilder::new("data")
+            .term(Term::StringConstant("hello".to_string()))
+            .term(Term::FloatConstant(3.14))
+            .term(Term::BoolConstant(true))
+            .build();
+        assert_eq!(atom.args.len(), 3);
+        assert!(matches!(&atom.args[0], Term::StringConstant(s) if s == "hello"));
+        assert!(matches!(&atom.args[1], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001));
+        assert!(matches!(&atom.args[2], Term::BoolConstant(true)));
+    }
+
+    #[test]
+    fn test_atom_builder_empty() {
+        let atom = AtomBuilder::new("empty").build();
+        assert_eq!(atom.relation, "empty");
+        assert!(atom.args.is_empty());
+        assert_eq!(atom.arity(), 0);
+    }
+
+    #[test]
+    fn test_rule_builder_head_terms() {
+        let rule = RuleBuilder::new("calc")
+            .head_terms([Term::Variable("x".to_string()), Term::Constant(42)])
+            .body_atom("data", ["x"])
+            .build();
+        assert_eq!(rule.head.args.len(), 2);
+        assert!(matches!(&rule.head.args[1], Term::Constant(42)));
+    }
+
+    #[test]
+    fn test_rule_builder_body_predicate() {
+        use crate::ast::ComparisonOp;
+        let rule = RuleBuilder::new("filtered")
+            .head_vars(["x"])
+            .body_atom("data", ["x"])
+            .body_predicate(BodyPredicate::Comparison(
+                Term::Variable("x".to_string()),
+                ComparisonOp::GreaterThan,
+                Term::Constant(0),
+            ))
+            .build();
+        assert_eq!(rule.body.len(), 2);
+        assert!(rule.body[1].is_comparison());
+    }
+
+    #[test]
+    fn test_rule_builder_body_atom() {
+        let custom_atom = AtomBuilder::new("custom").var("a").int(10).build();
+        let rule = RuleBuilder::new("out")
+            .head_vars(["a"])
+            .body(custom_atom)
+            .build();
+        assert_eq!(rule.body.len(), 1);
+        if let BodyPredicate::Positive(atom) = &rule.body[0] {
+            assert_eq!(atom.relation, "custom");
+            assert_eq!(atom.args.len(), 2);
+        } else {
+            panic!("Expected Positive");
+        }
+    }
+
+    #[test]
+    fn test_atom_builder_clone() {
+        let builder = AtomBuilder::new("test").var("x");
+        let builder2 = builder.clone();
+        let a1 = builder.var("y").build();
+        let a2 = builder2.int(1).build();
+        assert_eq!(a1.args.len(), 2);
+        assert_eq!(a2.args.len(), 2);
+        assert!(matches!(&a1.args[1], Term::Variable(_)));
+        assert!(matches!(&a2.args[1], Term::Constant(1)));
+    }
+
+    #[test]
+    fn test_rule_builder_multiple_negations() {
+        let rule = RuleBuilder::new("safe")
+            .head_vars(["x"])
+            .body_atom("node", ["x"])
+            .negated_atom("bad", ["x"])
+            .negated_atom("removed", ["x"])
+            .build();
+        assert_eq!(rule.body.len(), 3);
+        assert_eq!(rule.negated_body_atoms().len(), 2);
+    }
 }

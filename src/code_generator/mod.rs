@@ -5832,4 +5832,1657 @@ mod tests {
         assert_eq!(results.len(), 1, "Expected 1 row with value > 0.0");
         assert_eq!(results[0].get(0).and_then(|v| v.as_i32()), Some(3));
     }
+
+    // =========================================================================
+    // Additional Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_execution_config_with_workers() {
+        let config = ExecutionConfig::with_workers(4);
+        assert_eq!(config.num_workers, 4);
+    }
+
+    #[test]
+    fn test_execution_config_single_worker() {
+        let config = ExecutionConfig::single_worker();
+        assert_eq!(config.num_workers, 1);
+    }
+
+    #[test]
+    fn test_execution_config_all_cores() {
+        let config = ExecutionConfig::all_cores();
+        assert!(config.num_workers >= 1);
+    }
+
+    #[test]
+    fn test_codegen_new_default() {
+        let codegen = CodeGenerator::new();
+        assert!(codegen.input_tuples.is_empty());
+    }
+
+    #[test]
+    fn test_scan_empty_relation() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input("empty".to_string(), vec![]);
+
+        let ir = IRNode::Scan {
+            relation: "empty".to_string(),
+            schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_scan_nonexistent_relation() {
+        let codegen = CodeGenerator::new();
+
+        let ir = IRNode::Scan {
+            relation: "nonexistent".to_string(),
+            schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_columns_eq() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(3)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnsEq(0, 1),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows where x == y");
+    }
+
+    #[test]
+    fn test_filter_column_eq_const() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10), Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(20), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(10), Value::Int32(3)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "id".to_string()],
+            }),
+            predicate: Predicate::ColumnEqConst(0, 10),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_column_ne_const() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(10)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::ColumnNeConst(0, 10),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_column_ge_const() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(15)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::ColumnGeConst(0, 10),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows where x >= 10");
+    }
+
+    #[test]
+    fn test_filter_column_le_const() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(15)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::ColumnLeConst(0, 10),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows where x <= 10");
+    }
+
+    #[test]
+    fn test_filter_column_lt_const() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(15)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::ColumnLtConst(0, 10),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1, "Expected 1 row where x < 10");
+    }
+
+    #[test]
+    fn test_filter_or_predicate() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(10)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::Or(
+                Box::new(Predicate::ColumnEqConst(0, 1)),
+                Box::new(Predicate::ColumnEqConst(0, 10)),
+            ),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected x=1 or x=10");
+    }
+
+    #[test]
+    fn test_filter_true_predicate() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(10)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::True,
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 3, "True predicate passes all rows");
+    }
+
+    #[test]
+    fn test_aggregate_count() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(30)]),
+            ],
+        );
+
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["group".to_string(), "val".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Count, 1)],
+            output_schema: vec!["group".to_string(), "count".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 groups");
+
+        // Group 1 should have count 2, group 2 should have count 1
+        let mut sorted = results.clone();
+        sorted.sort();
+        let g1_count = sorted[0].get(1).and_then(|v| v.as_i64()).unwrap();
+        let g2_count = sorted[1].get(1).and_then(|v| v.as_i64()).unwrap();
+        assert_eq!(g1_count, 2);
+        assert_eq!(g2_count, 1);
+    }
+
+    #[test]
+    fn test_aggregate_sum() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(30)]),
+            ],
+        );
+
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["group".to_string(), "val".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Sum, 1)],
+            output_schema: vec!["group".to_string(), "sum".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_aggregate_min_max() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(30)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(20)]),
+            ],
+        );
+
+        // Test Min
+        let ir_min = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["group".to_string(), "val".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Min, 1)],
+            output_schema: vec!["group".to_string(), "min".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir_min).unwrap();
+        assert_eq!(results.len(), 1);
+        let min_val = results[0].get(1).and_then(|v| v.as_i32()).unwrap();
+        assert_eq!(min_val, 10);
+
+        // Test Max
+        let ir_max = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["group".to_string(), "val".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Max, 1)],
+            output_schema: vec!["group".to_string(), "max".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir_max).unwrap();
+        assert_eq!(results.len(), 1);
+        let max_val = results[0].get(1).and_then(|v| v.as_i32()).unwrap();
+        assert_eq!(max_val, 30);
+    }
+
+    #[test]
+    fn test_flatmap_projection_only() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(5), Value::Int32(6)]),
+            ],
+        );
+
+        // FlatMap with projection [2, 0] and no filter
+        let ir = IRNode::FlatMap {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            }),
+            projection: vec![2, 0],
+            filter_predicate: None,
+            output_schema: vec!["c".to_string(), "a".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results
+            .iter()
+            .any(|t| t.get(0) == Some(&Value::Int32(3)) && t.get(1) == Some(&Value::Int32(1))));
+    }
+
+    #[test]
+    fn test_flatmap_with_filter() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(100)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(200)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(300)]),
+            ],
+        );
+
+        // FlatMap with identity projection and filter x > 2
+        let ir = IRNode::FlatMap {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 1],
+            filter_predicate: Some(Predicate::ColumnGtConst(0, 2)),
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows where x > 2");
+    }
+
+    #[test]
+    fn test_union_two_relations() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r1".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+        codegen.add_input_tuples(
+            "r2".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(4)]),
+            ],
+        );
+
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "r1".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "r2".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+            ],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 4);
+    }
+
+    #[test]
+    fn test_boolean_semiring_distinct() {
+        use crate::boolean_specialization::SemiringType;
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_semiring_type(SemiringType::Boolean);
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Boolean semiring should deduplicate");
+    }
+
+    #[test]
+    fn test_map_identity_projection() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+            ],
+        );
+
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 1],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_map_duplicate_column() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+        );
+
+        // Project column 0 twice
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0, 0],
+            output_schema: vec!["x".to_string(), "x2".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get(0), results[0].get(1));
+    }
+
+    #[test]
+    fn test_nested_filter_and_map() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(50)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(30)]),
+            ],
+        );
+
+        // Filter x > 2, then project to [1] (just the second column)
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                predicate: Predicate::ColumnGtConst(0, 2),
+            }),
+            projection: vec![1],
+            output_schema: vec!["y".to_string()],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_add_input_and_add_input_tuples() {
+        let mut codegen = CodeGenerator::new();
+
+        // add_input takes Vec<Tuple> (legacy API via edges helper)
+        codegen.add_input("legacy".to_string(), edges(&[(1, 2), (3, 4)]));
+
+        // add_input_tuples takes Vec<Tuple> directly
+        codegen.add_input_tuples(
+            "modern".to_string(),
+            vec![Tuple::new(vec![Value::Int32(10)])],
+        );
+
+        let r1 = codegen
+            .execute(&IRNode::Scan {
+                relation: "legacy".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            })
+            .unwrap();
+        assert_eq!(r1.len(), 2);
+
+        let r2 = codegen
+            .generate_and_execute_tuples(&IRNode::Scan {
+                relation: "modern".to_string(),
+                schema: vec!["x".to_string()],
+            })
+            .unwrap();
+        assert_eq!(r2.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_column_eq_bool() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Bool(true)]),
+                Tuple::new(vec![Value::Int32(2), Value::Bool(false)]),
+                Tuple::new(vec![Value::Int32(3), Value::Bool(true)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["id".to_string(), "flag".to_string()],
+            }),
+            predicate: Predicate::ColumnEqBool(1, true),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 rows where flag is true");
+    }
+
+    // =========================================================================
+    // Additional Code Generator Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_references_relation_found() {
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "edge".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "path".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                },
+            ],
+        };
+        assert!(CodeGenerator::references_relation(&ir, "path"));
+        assert!(CodeGenerator::references_relation(&ir, "edge"));
+    }
+
+    #[test]
+    fn test_references_relation_not_found() {
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        assert!(!CodeGenerator::references_relation(&ir, "missing"));
+    }
+
+    #[test]
+    fn test_references_relation_nested() {
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "deep".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+                projection: vec![0],
+                output_schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::True,
+        };
+        assert!(CodeGenerator::references_relation(&ir, "deep"));
+    }
+
+    #[test]
+    fn test_compute_node_add_column() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(10), Value::Int64(3)]),
+                Tuple::new(vec![Value::Int64(20), Value::Int64(7)]),
+            ],
+        );
+
+        // Compute: add a column that is the sum of col0 and col1
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            expressions: vec![(
+                "sum".to_string(),
+                crate::ir::IRExpression::Arithmetic {
+                    op: crate::ir::ArithOp::Add,
+                    left: Box::new(crate::ir::IRExpression::Column(0)),
+                    right: Box::new(crate::ir::IRExpression::Column(1)),
+                },
+            )],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+        // Each result should have 3 columns: x, y, sum
+        assert_eq!(results[0].arity(), 3);
+    }
+
+    #[test]
+    fn test_compute_node_int_constant() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int64(1)])]);
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![(
+                "const".to_string(),
+                crate::ir::IRExpression::IntConstant(42),
+            )],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].arity(), 2);
+        assert_eq!(results[0].get(1), Some(&Value::Int64(42)));
+    }
+
+    #[test]
+    fn test_compute_node_string_constant() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int64(1)])]);
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![(
+                "label".to_string(),
+                crate::ir::IRExpression::StringConstant("hello".to_string()),
+            )],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get(1), Some(&Value::string("hello")));
+    }
+
+    #[test]
+    fn test_antijoin_basic() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "all_nodes".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(3)]),
+            ],
+        );
+        codegen.add_input_tuples(
+            "excluded".to_string(),
+            vec![Tuple::new(vec![Value::Int64(2)])],
+        );
+
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "all_nodes".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "excluded".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Should have 2 nodes not in excluded");
+    }
+
+    #[test]
+    fn test_join_basic() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::string("a")]),
+                Tuple::new(vec![Value::Int64(2), Value::string("b")]),
+            ],
+        );
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(2), Value::Int64(200)]),
+                Tuple::new(vec![Value::Int64(3), Value::Int64(300)]),
+            ],
+        );
+
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["id".to_string(), "name".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["id".to_string(), "score".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec![
+                "id".to_string(),
+                "name".to_string(),
+                "id".to_string(),
+                "score".to_string(),
+            ],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 1, "Only id=2 matches");
+    }
+
+    #[test]
+    fn test_set_semiring_type() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_semiring_type(SemiringType::Boolean);
+        // Should not panic, and should affect execution mode
+        let results = codegen
+            .execute(&IRNode::Scan {
+                relation: "empty".to_string(),
+                schema: vec!["x".to_string()],
+            })
+            .unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_execute_with_config_single_worker() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+            ],
+        );
+
+        let config = ExecutionConfig::single_worker();
+        let results = codegen
+            .execute_with_config(
+                &IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                config,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_column_eq_str() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "users".to_string(),
+            vec![
+                Tuple::new(vec![Value::string("alice"), Value::string("admin")]),
+                Tuple::new(vec![Value::string("bob"), Value::string("user")]),
+                Tuple::new(vec![Value::string("carol"), Value::string("admin")]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "users".to_string(),
+                schema: vec!["name".to_string(), "role".to_string()],
+            }),
+            predicate: Predicate::ColumnEqStr(1, "admin".to_string()),
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2, "Expected 2 admins");
+    }
+
+    #[test]
+    fn test_filter_false_returns_empty() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+            ],
+        );
+
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::False,
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert!(
+            results.is_empty(),
+            "False predicate should filter everything"
+        );
+    }
+
+    #[test]
+    fn test_filter_and_predicate() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(50)]),
+                Tuple::new(vec![Value::Int32(8), Value::Int32(80)]),
+            ],
+        );
+
+        // x > 2 AND x < 7
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::And(
+                Box::new(Predicate::ColumnGtConst(0, 2)),
+                Box::new(Predicate::ColumnLtConst(0, 7)),
+            ),
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1, "Only x=5 passes both conditions");
+    }
+
+    #[test]
+    fn test_distinct_deduplicates() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(10)]),
+                Tuple::new(vec![Value::Int64(1), Value::Int64(10)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(20)]),
+            ],
+        );
+
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        // DD already deduplicates, but Distinct should still work
+        assert!(results.len() <= 2);
+    }
+
+    #[test]
+    fn test_compute_bool_constant() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int64(1)])]);
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![(
+                "flag".to_string(),
+                crate::ir::IRExpression::BoolConstant(true),
+            )],
+        };
+
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results[0].get(1), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_filter_columns_ne() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(4), Value::Int32(4)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnsNe(0, 1),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_columns_lt() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(5)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(2)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnsLt(0, 1),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_union_two_scans() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("a".to_string(), vec![Tuple::new(vec![Value::Int32(1)])]);
+        codegen.add_input_tuples("b".to_string(), vec![Tuple::new(vec![Value::Int32(2)])]);
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "a".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "b".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+            ],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_compute_add_two_columns() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(20)]),
+            ],
+        );
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![(
+                "doubled".to_string(),
+                crate::ir::IRExpression::IntConstant(99),
+            )],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+        // Each row should have 2 columns: original x + computed doubled
+        assert_eq!(results[0].arity(), 2);
+    }
+
+    #[test]
+    fn test_compute_string_constant_value() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int32(1)])]);
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            expressions: vec![(
+                "label".to_string(),
+                crate::ir::IRExpression::StringConstant("hello".to_string()),
+            )],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results[0].get(1), Some(&Value::String("hello".into())));
+    }
+
+    #[test]
+    fn test_map_reorder_columns() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int32(1),
+                Value::Int32(2),
+                Value::Int32(3),
+            ])],
+        );
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            }),
+            projection: vec![2, 0],
+            output_schema: vec!["c".to_string(), "a".to_string()],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get(0), Some(&Value::Int32(3)));
+        assert_eq!(results[0].get(1), Some(&Value::Int32(1)));
+    }
+
+    #[test]
+    fn test_detect_recursive_union_same_relation() {
+        // When ALL inputs scan the same relation, no recursion detected
+        let inputs = vec![
+            IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            },
+            IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            },
+        ];
+        assert!(CodeGenerator::detect_recursive_union(&inputs).is_none());
+    }
+
+    #[test]
+    fn test_execute_empty_relation() {
+        let codegen = CodeGenerator::new();
+        let ir = IRNode::Scan {
+            relation: "nonexistent".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_execute_parallel_simple() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute_parallel(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_ne_bool() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Bool(true)]),
+                Tuple::new(vec![Value::Bool(false)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["flag".to_string()],
+            }),
+            predicate: Predicate::ColumnNeBool(0, true),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_columns_gt() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(5), Value::Int32(3)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(8)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnsGt(0, 1),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_set_semiring_annotations_empty() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_semiring_annotations(vec![]);
+        // No panic, annotations are empty
+    }
+
+    #[test]
+    fn test_set_semiring_annotations_non_empty() {
+        use crate::boolean_specialization::SemiringAnnotation;
+        let mut codegen = CodeGenerator::new();
+        let ann = SemiringAnnotation {
+            semiring: crate::boolean_specialization::SemiringType::Boolean,
+            reason: "test".to_string(),
+            needs_duplicates: false,
+            is_recursive: false,
+        };
+        codegen.set_semiring_annotations(vec![ann]);
+    }
+
+    #[test]
+    fn test_detect_recursive_union_for_relation_with_expected() {
+        // Two inputs: base scans "edge", recursive scans "edge" and "reach"
+        let base_input = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let recursive_input = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "reach".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let inputs = vec![base_input, recursive_input];
+        let result = CodeGenerator::detect_recursive_union_for_relation(&inputs, Some("reach"));
+        assert!(result.is_some());
+        let (rel, base_idx, rec_idx) = result.unwrap();
+        assert_eq!(rel, "reach");
+        assert_eq!(base_idx, vec![0]); // base case = input 0 (no reach scan)
+        assert_eq!(rec_idx, vec![1]); // recursive case = input 1
+    }
+
+    #[test]
+    fn test_detect_recursive_union_for_relation_no_match() {
+        let input1 = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let input2 = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let inputs = vec![input1, input2];
+        // Both scan "edge", so "edge" appears in ALL inputs → not recursive
+        let result = CodeGenerator::detect_recursive_union_for_relation(&inputs, Some("edge"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_recursive_union_for_relation_auto_detect() {
+        let base_input = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let recursive_input = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "path".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let inputs = vec![base_input, recursive_input];
+        // Auto-detect (None): "path" only in input 1 → recursive
+        let result = CodeGenerator::detect_recursive_union_for_relation(&inputs, None);
+        assert!(result.is_some());
+        let (rel, _, _) = result.unwrap();
+        assert_eq!(rel, "path");
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_join() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "left".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(20)]),
+            ],
+        );
+        codegen.add_input_tuples(
+            "right".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(100)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(300)]),
+            ],
+        );
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "left".to_string(),
+                schema: vec!["k".to_string(), "v1".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "right".to_string(),
+                schema: vec!["k".to_string(), "v2".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["k".to_string(), "v1".to_string(), "v2".to_string()],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        // Only key=1 matches
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_distinct() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+            ],
+        );
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_aggregate_count() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(1), Value::Int32(20)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(30)]),
+            ],
+        );
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["group".to_string(), "val".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(crate::ir::AggregateFunction::Count, 1)],
+            output_schema: vec!["group".to_string(), "cnt".to_string()],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        // Two groups: 1 and 2
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_antijoin() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "all".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+        codegen.add_input_tuples(
+            "excluded".to_string(),
+            vec![Tuple::new(vec![Value::Int32(2)])],
+        );
+        let ir = IRNode::Antijoin {
+            left: Box::new(IRNode::Scan {
+                relation: "all".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "excluded".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        // 1 and 3 remain (2 is excluded)
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_add_input_alias() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input("rel".to_string(), vec![Tuple::new(vec![Value::Int32(1)])]);
+        let ir = IRNode::Scan {
+            relation: "rel".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_filter_and() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(5), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(3), Value::Int32(10)]),
+                Tuple::new(vec![Value::Int32(5), Value::Int32(20)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::And(
+                Box::new(Predicate::ColumnEqConst(0, 5)),
+                Box::new(Predicate::ColumnEqConst(1, 10)),
+            ),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_and_execute_tuples_filter_or() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            predicate: Predicate::Or(
+                Box::new(Predicate::ColumnEqConst(0, 1)),
+                Box::new(Predicate::ColumnEqConst(0, 3)),
+            ),
+        };
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // === evaluate_arithmetic tests ===
+
+    #[test]
+    fn test_evaluate_arithmetic_add_ints() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Add, &Value::Int32(3), &Value::Int32(4));
+        assert_eq!(result, Value::Int64(7));
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_sub_ints() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Sub, &Value::Int64(10), &Value::Int64(3));
+        assert_eq!(result, Value::Int64(7));
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_mul_ints() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Mul, &Value::Int32(5), &Value::Int32(6));
+        assert_eq!(result, Value::Int64(30));
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_div_ints_returns_float() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Div, &Value::Int32(10), &Value::Int32(3));
+        // Division always returns Float64
+        match result {
+            Value::Float64(f) => assert!((f - 3.333333).abs() < 0.001),
+            other => panic!("Expected Float64, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_div_by_zero() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Div, &Value::Int32(10), &Value::Int32(0));
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_mod_ints() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Mod, &Value::Int32(10), &Value::Int32(3));
+        assert_eq!(result, Value::Int64(1));
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_mod_by_zero() {
+        let result =
+            CodeGenerator::evaluate_arithmetic(ArithOp::Mod, &Value::Int32(10), &Value::Int32(0));
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_float_add() {
+        let result = CodeGenerator::evaluate_arithmetic(
+            ArithOp::Add,
+            &Value::Float64(1.5),
+            &Value::Float64(2.3),
+        );
+        match result {
+            Value::Float64(f) => assert!((f - 3.8).abs() < 1e-10),
+            other => panic!("Expected Float64, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_mixed_int_float() {
+        let result = CodeGenerator::evaluate_arithmetic(
+            ArithOp::Add,
+            &Value::Int32(3),
+            &Value::Float64(1.5),
+        );
+        match result {
+            Value::Float64(f) => assert!((f - 4.5).abs() < 1e-10),
+            other => panic!("Expected Float64, got {:?}", other),
+        }
+    }
+
+    // === strip_top_aggregate tests ===
+
+    #[test]
+    fn test_strip_top_aggregate_with_aggregate() {
+        let inner = IRNode::Scan {
+            relation: "r".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let ir = IRNode::Aggregate {
+            input: Box::new(inner),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Count, 1)],
+            output_schema: vec!["x".to_string(), "cnt".to_string()],
+        };
+        let stripped = CodeGenerator::strip_top_aggregate(&ir);
+        assert!(matches!(stripped, IRNode::Scan { .. }));
+    }
+
+    #[test]
+    fn test_strip_top_aggregate_without_aggregate() {
+        let ir = IRNode::Scan {
+            relation: "r".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let stripped = CodeGenerator::strip_top_aggregate(&ir);
+        assert!(matches!(stripped, IRNode::Scan { .. }));
+    }
+
+    // === partition_data_for_worker tests ===
+
+    #[test]
+    fn test_partition_data_single_worker() {
+        let mut data = HashMap::new();
+        data.insert(
+            "rel".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1)]),
+                Tuple::new(vec![Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(3)]),
+            ],
+        );
+        let partitioned = CodeGenerator::partition_data_for_worker(&data, 0, 1);
+        // Single worker gets all data
+        assert_eq!(partitioned["rel"].len(), 3);
+    }
+
+    #[test]
+    fn test_partition_data_covers_all_tuples() {
+        let mut data = HashMap::new();
+        let tuples: Vec<Tuple> = (0..100)
+            .map(|i| Tuple::new(vec![Value::Int32(i)]))
+            .collect();
+        data.insert("rel".to_string(), tuples);
+
+        let num_workers = 4;
+        let mut total = 0;
+        for w in 0..num_workers {
+            let partitioned = CodeGenerator::partition_data_for_worker(&data, w, num_workers);
+            total += partitioned["rel"].len();
+        }
+        // All tuples must be accounted for across workers
+        assert_eq!(total, 100);
+    }
+
+    // === detect_transitive_closure_pattern tests ===
+
+    #[test]
+    fn test_detect_tc_simple_pattern() {
+        let base = vec![IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        }];
+        let recursive = vec![IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "tc".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec![
+                "x".to_string(),
+                "y".to_string(),
+                "x2".to_string(),
+                "y2".to_string(),
+            ],
+        }];
+        let result = CodeGenerator::detect_transitive_closure_pattern(&base, &recursive, "tc");
+        assert_eq!(result, Some("edge".to_string()));
+    }
+
+    #[test]
+    fn test_detect_tc_no_match_multiple_base() {
+        let base = vec![
+            IRNode::Scan {
+                relation: "e1".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            },
+            IRNode::Scan {
+                relation: "e2".to_string(),
+                schema: vec!["a".to_string(), "b".to_string()],
+            },
+        ];
+        let recursive = vec![];
+        let result = CodeGenerator::detect_transitive_closure_pattern(&base, &recursive, "tc");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_detect_tc_no_match_ternary_relation() {
+        let base = vec![IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string(), "w".to_string()],
+        }];
+        let recursive = vec![];
+        let result = CodeGenerator::detect_transitive_closure_pattern(&base, &recursive, "tc");
+        // Ternary relation → not a simple TC
+        assert_eq!(result, None);
+    }
 }

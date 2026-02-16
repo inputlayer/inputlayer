@@ -1618,6 +1618,234 @@ mod tests {
         );
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_optimization_config_default() {
+        let config = OptimizationConfig::default();
+        assert!(config.enable_join_planning);
+        assert!(config.enable_sip_rewriting);
+        assert!(config.enable_subplan_sharing);
+        assert!(config.enable_boolean_specialization);
+    }
+
+    #[test]
+    fn test_with_config() {
+        let config = OptimizationConfig {
+            enable_join_planning: false,
+            enable_sip_rewriting: false,
+            enable_subplan_sharing: false,
+            enable_boolean_specialization: false,
+        };
+        let engine = DatalogEngine::with_config(config.clone());
+        assert!(!engine.config().enable_join_planning);
+        assert!(!engine.config().enable_sip_rewriting);
+    }
+
+    #[test]
+    fn test_set_config() {
+        let mut engine = DatalogEngine::new();
+        assert!(engine.config().enable_join_planning);
+
+        let config = OptimizationConfig {
+            enable_join_planning: false,
+            enable_sip_rewriting: true,
+            enable_subplan_sharing: true,
+            enable_boolean_specialization: true,
+        };
+        engine.set_config(config);
+        assert!(!engine.config().enable_join_planning);
+    }
+
+    #[test]
+    fn test_set_num_workers() {
+        let mut engine = DatalogEngine::new();
+        engine.set_num_workers(4);
+        // Workers must be at least 1
+        engine.set_num_workers(0);
+        // No panic, clamped to 1
+    }
+
+    #[test]
+    fn test_add_tuple_single() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuple("node", Tuple::new(vec![Value::Int64(42)]));
+        engine.add_tuple("node", Tuple::new(vec![Value::Int64(99)]));
+
+        let rel = engine.get_relation("node").unwrap();
+        assert_eq!(rel.len(), 2);
+        assert!(engine.catalog().has_relation("node"));
+    }
+
+    #[test]
+    fn test_get_relation_nonexistent() {
+        let engine = DatalogEngine::new();
+        assert!(engine.get_relation("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_input_tuples_accessors() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+
+        assert_eq!(engine.input_tuples().len(), 1);
+        assert!(engine.input_tuples().contains_key("edge"));
+
+        engine.input_tuples_mut().clear();
+        assert!(engine.input_tuples().is_empty());
+    }
+
+    #[test]
+    fn test_parse_detects_recursion() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+        // Non-recursive
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        assert!(!engine.is_recursive());
+        assert!(!engine.strata().is_empty());
+
+        // Recursive
+        let mut engine2 = DatalogEngine::new();
+        engine2.add_fact("edge", vec![(1, 2), (2, 3)]);
+        engine2
+            .parse("path(X, Y) <- edge(X, Y)\npath(X, Z) <- path(X, Y), edge(Y, Z)")
+            .unwrap();
+        assert!(engine2.is_recursive());
+    }
+
+    #[test]
+    fn test_parse_unsafe_rule_rejected() {
+        let mut engine = DatalogEngine::new();
+        let result = engine.parse("result(X, Y) <- edge(X, _)");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Unsafe rule"));
+    }
+
+    #[test]
+    fn test_execute_with_negation() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "node",
+            vec![
+                Tuple::new(vec![Value::Int64(1)]),
+                Tuple::new(vec![Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(3)]),
+            ],
+        );
+        engine.add_tuples("excluded", vec![Tuple::new(vec![Value::Int64(2)])]);
+
+        let results = engine
+            .execute_tuples("result(X) <- node(X), !excluded(X)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_execute_with_arithmetic() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "data",
+            vec![
+                Tuple::new(vec![Value::Int64(10), Value::Int64(3)]),
+                Tuple::new(vec![Value::Int64(20), Value::Int64(5)]),
+            ],
+        );
+
+        let results = engine
+            .execute_tuples("result(X, Y, S) <- data(X, Y), S = X + Y")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+        // Verify arithmetic
+        let sums: Vec<i64> = results
+            .iter()
+            .filter_map(|t| t.get(2).and_then(|v| v.as_i64()))
+            .collect();
+        assert!(sums.contains(&13));
+        assert!(sums.contains(&25));
+    }
+
+    #[test]
+    fn test_execute_all_rules() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+        let results = engine
+            .execute_all_rules("path(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_execute_with_trace() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+        let (results, trace) = engine
+            .execute_with_trace("path(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_explain() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+
+        let trace = engine.explain("path(X, Y) <- edge(X, Y)").unwrap();
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_default_engine() {
+        let engine = DatalogEngine::default();
+        assert!(engine.program().is_none());
+    }
+
+    #[test]
+    fn test_execute_multiple_rules() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "edge",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+
+        // Two rules: intermediate + query
+        let results = engine
+            .execute_tuples("path(X, Y) <- edge(X, Y)\nresult(X, Y) <- path(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_execute_string_data() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "person",
+            vec![
+                Tuple::new(vec![Value::string("alice"), Value::Int64(30)]),
+                Tuple::new(vec![Value::string("bob"), Value::Int64(25)]),
+            ],
+        );
+
+        let results = engine
+            .execute_tuples("result(N, A) <- person(N, A)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_get_optimization_config() {
+        let engine = DatalogEngine::new();
+        let config = engine.get_optimization_config();
+        assert!(config.enable_join_planning);
+    }
+
     #[test]
     fn test_sip_equijoin_multikey_column_order() {
         // Regression test: SIP rewrites the rule body, join planner may reorder
@@ -1679,5 +1907,438 @@ mod tests {
             "First column should be OrdId=1, got {:?}",
             first
         );
+    }
+
+    // =========================================================================
+    // Additional DatalogEngine Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_ir_without_parse_fails() {
+        let mut engine = DatalogEngine::new();
+        let result = engine.build_ir();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No program parsed"));
+    }
+
+    #[test]
+    fn test_execute_ir_tuples_direct() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "data",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(3), Value::Int64(4)]),
+            ],
+        );
+
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let results = engine.execute_ir_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_execute_ir_binary_direct() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (3, 4)]);
+
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let results = engine.execute_ir(&ir).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_scan_relations() {
+        let ir = IRNode::Join {
+            left: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            right: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "node".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+                predicate: Predicate::True,
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "x".to_string()],
+        };
+
+        let mut scans = Vec::new();
+        DatalogEngine::collect_scan_relations(&ir, &mut scans);
+        assert!(scans.contains(&"edge".to_string()));
+        assert!(scans.contains(&"node".to_string()));
+        assert_eq!(scans.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_scan_relations_union() {
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Scan {
+                    relation: "a".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "b".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+                IRNode::Scan {
+                    relation: "a".to_string(), // duplicate
+                    schema: vec!["x".to_string()],
+                },
+            ],
+        };
+
+        let mut scans = Vec::new();
+        DatalogEngine::collect_scan_relations(&ir, &mut scans);
+        // "a" should appear only once (dedup)
+        assert_eq!(scans.len(), 2);
+    }
+
+    #[test]
+    fn test_topological_sort_single_node() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        engine.build_ir().unwrap();
+
+        let rule_heads = engine.get_rule_heads();
+        let order = engine.topological_sort_ir_nodes(&rule_heads);
+        assert_eq!(order, vec![0]);
+    }
+
+    #[test]
+    fn test_topological_sort_dependency_chain() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "edge",
+            vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
+        );
+
+        // Two rules: intermediate depends on base, query depends on intermediate
+        engine
+            .parse("mid(X, Y) <- edge(X, Y)\nresult(X, Y) <- mid(X, Y)")
+            .unwrap();
+        engine.build_ir().unwrap();
+
+        let rule_heads = engine.get_rule_heads();
+        let order = engine.topological_sort_ir_nodes(&rule_heads);
+        // mid (idx 0) should execute before result (idx 1)
+        assert_eq!(order.len(), 2);
+        let mid_pos = order.iter().position(|&i| i == 0).unwrap();
+        let result_pos = order.iter().position(|&i| i == 1).unwrap();
+        assert!(mid_pos < result_pos);
+    }
+
+    #[test]
+    fn test_detect_recursion_info_nonrecursive() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        engine.build_ir().unwrap();
+
+        let rule_heads = engine.get_rule_heads();
+        let info = engine.detect_recursion_info(&rule_heads);
+        assert_eq!(info.len(), 1);
+        assert!(info[0].is_none());
+    }
+
+    #[test]
+    fn test_execute_tuples_parse_error() {
+        let mut engine = DatalogEngine::new();
+        let result = engine.execute_tuples("this is not valid datalog @@!!");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execute_all_with_trace() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+        let (results, trace) = engine
+            .execute_all_with_trace("path(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert!(!results.is_empty());
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_pipeline_all_optimizations_disabled() {
+        let config = OptimizationConfig {
+            enable_join_planning: false,
+            enable_sip_rewriting: false,
+            enable_subplan_sharing: false,
+            enable_boolean_specialization: false,
+        };
+        let mut engine = DatalogEngine::with_config(config);
+        engine.add_tuples(
+            "edge",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+
+        let results = engine.execute_tuples("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_add_tuples_empty() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples("empty_rel", vec![]);
+        // Schema should default to arity 2
+        assert!(engine.catalog().has_relation("empty_rel"));
+        assert_eq!(engine.get_relation("empty_rel").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_add_tuples_registers_schema() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "triple",
+            vec![Tuple::new(vec![
+                Value::Int64(1),
+                Value::Int64(2),
+                Value::Int64(3),
+            ])],
+        );
+        assert!(engine.catalog().has_relation("triple"));
+    }
+
+    #[test]
+    fn test_execute_simple_query_reversed_projection() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (3, 4)]);
+
+        let results = engine.execute_simple_query("edge", vec![1, 0]).unwrap();
+        // Reversed projection: (2,1) and (4,3)
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&(2, 1)));
+        assert!(results.contains(&(4, 3)));
+    }
+
+    #[test]
+    fn test_execute_simple_query_nonexistent_relation() {
+        let engine = DatalogEngine::new();
+        let results = engine.execute_simple_query("missing", vec![0, 1]).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_multiworker_execution() {
+        let mut engine = DatalogEngine::new();
+        engine.set_num_workers(2);
+        engine.add_tuples(
+            "data",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(10)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(20)]),
+                Tuple::new(vec![Value::Int64(3), Value::Int64(30)]),
+            ],
+        );
+
+        let results = engine.execute_tuples("result(X, Y) <- data(X, Y)").unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_program_accessor_after_parse() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+
+        let program = engine.program().unwrap();
+        assert_eq!(program.rules.len(), 1);
+        assert_eq!(program.rules[0].head.relation, "result");
+    }
+
+    #[test]
+    fn test_ir_nodes_accessor_after_build() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        engine.build_ir().unwrap();
+
+        let ir_nodes = engine.ir_nodes();
+        assert_eq!(ir_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_execute_with_comparison() {
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "score",
+            vec![
+                Tuple::new(vec![Value::string("alice"), Value::Int64(90)]),
+                Tuple::new(vec![Value::string("bob"), Value::Int64(70)]),
+                Tuple::new(vec![Value::string("carol"), Value::Int64(50)]),
+            ],
+        );
+
+        let results = engine
+            .execute_tuples("result(Name, S) <- score(Name, S), S > 60")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // Batch 19: Core pipeline and accessor coverage
+
+    #[test]
+    fn test_execute_binary_returns_pairs() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (3, 4)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_build_ir_success() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        assert!(engine.build_ir().is_ok());
+        assert!(!engine.ir_nodes().is_empty());
+    }
+
+    #[test]
+    fn test_optimize_ir_after_build() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
+        engine.build_ir().unwrap();
+        assert!(engine.optimize_ir().is_ok());
+    }
+
+    #[test]
+    fn test_optimize_ir_empty_noop() {
+        // optimize_ir on empty ir_nodes is a no-op (maps over empty vec)
+        let mut engine = DatalogEngine::new();
+        let result = engine.optimize_ir();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_all_rules_multiple() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (3, 4)]);
+        // Execute two rules separately (parser handles one rule per call)
+        let r1 = engine.execute_all_rules("r1(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(r1.len(), 1);
+        let r2 = engine.execute_all_rules("r2(Y, X) <- edge(X, Y)").unwrap();
+        assert_eq!(r2.len(), 1);
+    }
+
+    #[test]
+    fn test_execute_with_trace_has_ast() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        let (results, trace) = engine
+            .execute_with_trace("result(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_set_num_workers_value() {
+        let mut engine = DatalogEngine::new();
+        engine.set_num_workers(4);
+        // Verify it doesn't panic and engine still works
+        engine.add_fact("edge", vec![(1, 2)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_get_optimization_config_accessors() {
+        let engine = DatalogEngine::new();
+        let config = engine.get_optimization_config();
+        assert!(config.enable_join_planning);
+    }
+
+    #[test]
+    fn test_config_with_join_planning_disabled() {
+        let mut config = OptimizationConfig::default();
+        config.enable_join_planning = false;
+        let mut engine = DatalogEngine::with_config(config);
+        engine.add_fact("edge", vec![(1, 2)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_config_with_sip_disabled() {
+        let mut config = OptimizationConfig::default();
+        config.enable_sip_rewriting = false;
+        let mut engine = DatalogEngine::with_config(config);
+        engine.add_fact("edge", vec![(1, 2)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_config_with_subplan_sharing_disabled() {
+        let mut config = OptimizationConfig::default();
+        config.enable_subplan_sharing = false;
+        let mut engine = DatalogEngine::with_config(config);
+        engine.add_fact("edge", vec![(1, 2)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_config_with_boolean_specialization_disabled() {
+        let mut config = OptimizationConfig::default();
+        config.enable_boolean_specialization = false;
+        let mut engine = DatalogEngine::with_config(config);
+        engine.add_fact("edge", vec![(1, 2)]);
+        let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_get_relation_after_add() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("data", vec![(1, 2)]);
+        let rel = engine.get_relation("data");
+        assert!(rel.is_some());
+        assert_eq!(rel.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_input_tuples_mut_direct_modification() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("data", vec![(1, 2)]);
+        let tuples = engine.input_tuples_mut();
+        tuples
+            .get_mut("data")
+            .unwrap()
+            .push(Tuple::new(vec![Value::Int64(3), Value::Int64(4)]));
+        assert_eq!(engine.get_relation("data").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_execute_parse_error() {
+        let mut engine = DatalogEngine::new();
+        let result = engine.execute("@#$%^INVALID");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_explain_produces_trace() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2)]);
+        let trace = engine.explain("result(X, Y) <- edge(X, Y)").unwrap();
+        assert!(trace.ast.is_some());
     }
 }

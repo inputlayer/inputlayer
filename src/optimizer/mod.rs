@@ -1759,6 +1759,195 @@ mod tests {
         assert!(optimized.is_scan());
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_optimizer_with_max_iterations() {
+        let optimizer = Optimizer::with_max_iterations(3);
+        // Simple scan should pass through
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let result = optimizer.optimize(ir);
+        assert!(result.is_scan());
+    }
+
+    #[test]
+    fn test_optimizer_default() {
+        let optimizer = Optimizer::default();
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_scan_passes_through() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Scan {
+            relation: "test".to_string(),
+            schema: vec!["a".to_string(), "b".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        match optimized {
+            IRNode::Scan { relation, .. } => assert_eq!(relation, "test"),
+            _ => panic!("Expected Scan"),
+        }
+    }
+
+    #[test]
+    fn test_distinct_passes_through() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+        };
+        let optimized = optimizer.optimize(ir);
+        assert!(matches!(optimized, IRNode::Distinct { .. }));
+    }
+
+    #[test]
+    fn test_non_identity_map_preserved() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![1, 0], // swap (non-identity)
+            output_schema: vec!["y".to_string(), "x".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        // Non-identity map should be preserved (as FlatMap after fusion)
+        assert!(!optimized.is_scan());
+    }
+
+    #[test]
+    fn test_filter_on_non_join_preserved() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 10),
+        };
+        let optimized = optimizer.optimize(ir);
+        // After logic fusion, Filter(Scan) → FlatMap(Scan)
+        assert!(matches!(
+            optimized,
+            IRNode::FlatMap { .. } | IRNode::Filter { .. }
+        ));
+    }
+
+    #[test]
+    fn test_triple_nested_identity_maps() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Map {
+                    input: Box::new(IRNode::Scan {
+                        relation: "t".to_string(),
+                        schema: vec!["a".to_string(), "b".to_string()],
+                    }),
+                    projection: vec![0, 1],
+                    output_schema: vec!["a".to_string(), "b".to_string()],
+                }),
+                projection: vec![0, 1],
+                output_schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            projection: vec![0, 1],
+            output_schema: vec!["a".to_string(), "b".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_empty_union_elimination() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Union { inputs: vec![] };
+        let optimized = optimizer.optimize(ir);
+        match optimized {
+            IRNode::Union { inputs } => assert!(inputs.is_empty()),
+            _ => panic!("Expected empty Union"),
+        }
+    }
+
+    #[test]
+    fn test_union_with_false_filter_child() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Union {
+            inputs: vec![
+                IRNode::Filter {
+                    input: Box::new(IRNode::Scan {
+                        relation: "a".to_string(),
+                        schema: vec!["x".to_string()],
+                    }),
+                    predicate: Predicate::False,
+                },
+                IRNode::Scan {
+                    relation: "b".to_string(),
+                    schema: vec!["x".to_string()],
+                },
+            ],
+        };
+        let optimized = optimizer.optimize(ir);
+        // False-filtered branch should be eliminated
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_optimize_through_aggregate() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Aggregate {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                projection: vec![0, 1], // Identity
+                output_schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            group_by: vec![0],
+            aggregations: vec![(crate::ir::AggregateFunction::Count, 1)],
+            output_schema: vec!["x".to_string(), "count".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        // The result should still be an Aggregate (identity map eliminated)
+        assert!(matches!(optimized, IRNode::Aggregate { .. }));
+    }
+
+    #[test]
+    fn test_optimize_through_compute() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Filter {
+                input: Box::new(IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+                predicate: Predicate::True, // Should be eliminated
+            }),
+            expressions: vec![("y".to_string(), crate::ir::IRExpression::Column(0))],
+        };
+        let optimized = optimizer.optimize(ir);
+        match optimized {
+            IRNode::Compute { input, .. } => {
+                assert!(
+                    input.is_scan(),
+                    "True filter inside compute should be eliminated"
+                );
+            }
+            _ => panic!("Expected Compute"),
+        }
+    }
+
     #[test]
     fn test_full_optimization_pipeline() {
         let optimizer = Optimizer::new();
@@ -1793,5 +1982,418 @@ mod tests {
             }
             _ => panic!("Expected simplified Filter(Scan)"),
         }
+    }
+
+    // =========================================================================
+    // Additional Optimizer Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_optimizer_custom_max_iterations() {
+        let optimizer = Optimizer::with_max_iterations(5);
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_eliminate_empty_union() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Union { inputs: vec![] };
+        let optimized = optimizer.eliminate_empty_unions(ir);
+        match optimized {
+            IRNode::Union { inputs } => assert_eq!(inputs.len(), 0),
+            _ => panic!("Expected empty union"),
+        }
+    }
+
+    #[test]
+    fn test_eliminate_single_item_union() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Union {
+            inputs: vec![IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }],
+        };
+        let optimized = optimizer.eliminate_empty_unions(ir);
+        // Single-element union should unwrap to just the scan
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_ir_equals_identical() {
+        let a = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let b = a.clone();
+        assert!(Optimizer::ir_equals(&a, &b));
+    }
+
+    #[test]
+    fn test_ir_equals_different() {
+        let a = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let b = IRNode::Scan {
+            relation: "node".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        assert!(!Optimizer::ir_equals(&a, &b));
+    }
+
+    #[test]
+    fn test_pushdown_filter_with_non_join_input() {
+        let optimizer = Optimizer::new();
+
+        // Filter on a non-join input - should not change
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "edge".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        let optimized = optimizer.pushdown_filters(ir);
+        assert!(matches!(optimized, IRNode::Filter { .. }));
+    }
+
+    #[test]
+    fn test_fuse_map_filter_to_flatmap() {
+        let optimizer = Optimizer::new();
+
+        // Filter(Map(Scan, proj), pred) -> FlatMap(Scan, proj, pred)
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Scan {
+                    relation: "edge".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                projection: vec![1, 0],
+                output_schema: vec!["y".to_string(), "x".to_string()],
+            }),
+            predicate: Predicate::ColumnGtConst(0, 5),
+        };
+
+        let optimized = optimizer.fuse_to_flatmap(ir);
+        assert!(
+            matches!(optimized, IRNode::FlatMap { .. }),
+            "Filter(Map) should fuse to FlatMap"
+        );
+    }
+
+    #[test]
+    fn test_optimize_preserves_scan() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let optimized = optimizer.optimize(ir);
+        assert!(optimized.is_scan());
+    }
+
+    #[test]
+    fn test_optimize_triple_nested_identity_maps() {
+        let optimizer = Optimizer::new();
+
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Map {
+                input: Box::new(IRNode::Map {
+                    input: Box::new(IRNode::Scan {
+                        relation: "data".to_string(),
+                        schema: vec!["x".to_string()],
+                    }),
+                    projection: vec![0],
+                    output_schema: vec!["x".to_string()],
+                }),
+                projection: vec![0],
+                output_schema: vec!["x".to_string()],
+            }),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+
+        let optimized = optimizer.optimize(ir);
+        assert!(
+            optimized.is_scan(),
+            "Triple nested identity maps should reduce to scan"
+        );
+    }
+
+    #[test]
+    fn test_filter_with_false_on_complex_input() {
+        let optimizer = Optimizer::new();
+
+        // Filter with False predicate on a complex input
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "r".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "s".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+                left_keys: vec![0],
+                right_keys: vec![0],
+                output_schema: vec!["x".to_string(), "x".to_string()],
+            }),
+            predicate: Predicate::False,
+        };
+
+        let optimized = optimizer.optimize(ir);
+        // Should be empty union (False filter eliminates everything)
+        assert!(matches!(optimized, IRNode::Union { .. }));
+    }
+
+    #[test]
+    fn test_optimize_distinct_of_distinct() {
+        let optimizer = Optimizer::new();
+
+        // Optimizer doesn't currently eliminate nested distinct - verify it preserves structure
+        let ir = IRNode::Distinct {
+            input: Box::new(IRNode::Distinct {
+                input: Box::new(IRNode::Scan {
+                    relation: "data".to_string(),
+                    schema: vec!["x".to_string()],
+                }),
+            }),
+        };
+
+        let optimized = optimizer.optimize(ir);
+        // Nested distinct is preserved (no collapse rule exists)
+        assert!(matches!(optimized, IRNode::Distinct { .. }));
+    }
+
+    #[test]
+    fn test_fuse_to_join_flatmap() {
+        let optimizer = Optimizer::new();
+
+        // Map(Join(A, B), proj) -> JoinFlatMap(A, B, proj)
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Join {
+                left: Box::new(IRNode::Scan {
+                    relation: "r".to_string(),
+                    schema: vec!["x".to_string(), "y".to_string()],
+                }),
+                right: Box::new(IRNode::Scan {
+                    relation: "s".to_string(),
+                    schema: vec!["y".to_string(), "z".to_string()],
+                }),
+                left_keys: vec![1],
+                right_keys: vec![0],
+                output_schema: vec![
+                    "x".to_string(),
+                    "y".to_string(),
+                    "y".to_string(),
+                    "z".to_string(),
+                ],
+            }),
+            projection: vec![0, 3],
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        };
+
+        let optimized = optimizer.fuse_to_join_flatmap(ir);
+        assert!(
+            matches!(optimized, IRNode::JoinFlatMap { .. }),
+            "Map(Join) should fuse to JoinFlatMap"
+        );
+    }
+
+    #[test]
+    fn test_get_predicate_columns_single_col() {
+        let cols = Optimizer::get_predicate_columns(&Predicate::ColumnEqConst(2, 42));
+        assert_eq!(cols, vec![2]);
+    }
+
+    #[test]
+    fn test_get_predicate_columns_two_cols() {
+        let cols = Optimizer::get_predicate_columns(&Predicate::ColumnsEq(1, 3));
+        assert_eq!(cols, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_get_predicate_columns_and() {
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 1)),
+            Box::new(Predicate::ColumnGtConst(2, 10)),
+        );
+        let cols = Optimizer::get_predicate_columns(&pred);
+        assert_eq!(cols, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_get_predicate_columns_or() {
+        let pred = Predicate::Or(
+            Box::new(Predicate::ColumnEqStr(0, "a".to_string())),
+            Box::new(Predicate::ColumnEqStr(3, "b".to_string())),
+        );
+        let cols = Optimizer::get_predicate_columns(&pred);
+        assert_eq!(cols, vec![0, 3]);
+    }
+
+    #[test]
+    fn test_get_predicate_columns_true_false() {
+        assert!(Optimizer::get_predicate_columns(&Predicate::True).is_empty());
+        assert!(Optimizer::get_predicate_columns(&Predicate::False).is_empty());
+    }
+
+    #[test]
+    fn test_get_predicate_columns_float() {
+        let cols = Optimizer::get_predicate_columns(&Predicate::ColumnEqFloat(4, 3.14));
+        assert_eq!(cols, vec![4]);
+    }
+
+    #[test]
+    fn test_get_predicate_columns_bool() {
+        let cols = Optimizer::get_predicate_columns(&Predicate::ColumnEqBool(1, true));
+        assert_eq!(cols, vec![1]);
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_positive_offset() {
+        let pred = Predicate::ColumnEqConst(2, 42);
+        let adjusted = Optimizer::adjust_predicate_columns(&pred, 3);
+        assert!(matches!(adjusted, Predicate::ColumnEqConst(5, 42)));
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_negative_offset() {
+        let pred = Predicate::ColumnGtConst(5, 10);
+        let adjusted = Optimizer::adjust_predicate_columns(&pred, -2);
+        assert!(matches!(adjusted, Predicate::ColumnGtConst(3, 10)));
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_eq() {
+        let pred = Predicate::ColumnsEq(3, 5);
+        let adjusted = Optimizer::adjust_predicate_columns(&pred, -2);
+        assert!(matches!(adjusted, Predicate::ColumnsEq(1, 3)));
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_and_recursive() {
+        let pred = Predicate::And(
+            Box::new(Predicate::ColumnEqConst(0, 1)),
+            Box::new(Predicate::ColumnGtConst(2, 5)),
+        );
+        let adjusted = Optimizer::adjust_predicate_columns(&pred, 10);
+        match adjusted {
+            Predicate::And(left, right) => {
+                assert!(matches!(*left, Predicate::ColumnEqConst(10, 1)));
+                assert!(matches!(*right, Predicate::ColumnGtConst(12, 5)));
+            }
+            _ => panic!("Expected And"),
+        }
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_true_false_unchanged() {
+        assert!(matches!(
+            Optimizer::adjust_predicate_columns(&Predicate::True, 5),
+            Predicate::True
+        ));
+        assert!(matches!(
+            Optimizer::adjust_predicate_columns(&Predicate::False, -3),
+            Predicate::False
+        ));
+    }
+
+    #[test]
+    fn test_adjust_predicate_columns_str() {
+        let pred = Predicate::ColumnEqStr(1, "hello".to_string());
+        let adjusted = Optimizer::adjust_predicate_columns(&pred, 2);
+        match adjusted {
+            Predicate::ColumnEqStr(col, val) => {
+                assert_eq!(col, 3);
+                assert_eq!(val, "hello");
+            }
+            _ => panic!("Expected ColumnEqStr"),
+        }
+    }
+
+    #[test]
+    fn test_remap_projection_for_join_flatmap_no_keys() {
+        // No right keys excluded - should be identity
+        let proj = vec![0, 1, 2, 3];
+        let result = Optimizer::remap_projection_for_join_flatmap(&proj, 2, &[]);
+        assert_eq!(result, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_remap_projection_for_join_flatmap_one_key() {
+        // left_width=2, right_keys=[0] (first right col excluded from join output)
+        // Join output: [left0, left1, right1, right2] (right0 excluded)
+        // JoinFlatMap: [left0, left1, right0, right1, right2]
+        // proj idx 2 = right non-key pos 0 → actual right idx 1 (after key 0) → left_width + 1 = 3
+        let proj = vec![0, 2];
+        let result = Optimizer::remap_projection_for_join_flatmap(&proj, 2, &[0]);
+        assert_eq!(result, vec![0, 3]);
+    }
+
+    #[test]
+    fn test_remap_projection_left_only() {
+        // All projection indices are from left side - no change
+        let proj = vec![0, 1];
+        let result = Optimizer::remap_projection_for_join_flatmap(&proj, 3, &[0]);
+        assert_eq!(result, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_apply_all_rules_identity_map_eliminated() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Map {
+            input: Box::new(IRNode::Scan {
+                relation: "r".to_string(),
+                schema: vec!["a".to_string(), "b".to_string()],
+            }),
+            projection: vec![0, 1],
+            output_schema: vec!["a".to_string(), "b".to_string()],
+        };
+        let result = optimizer.apply_all_rules(ir);
+        assert!(matches!(result, IRNode::Scan { .. }));
+    }
+
+    #[test]
+    fn test_apply_all_rules_true_filter_eliminated() {
+        let optimizer = Optimizer::new();
+        let ir = IRNode::Filter {
+            input: Box::new(IRNode::Scan {
+                relation: "r".to_string(),
+                schema: vec!["a".to_string()],
+            }),
+            predicate: Predicate::True,
+        };
+        let result = optimizer.apply_all_rules(ir);
+        assert!(matches!(result, IRNode::Scan { .. }));
+    }
+
+    #[test]
+    fn test_predicate_equals_same() {
+        let p1 = Predicate::ColumnEqConst(0, 42);
+        let p2 = Predicate::ColumnEqConst(0, 42);
+        assert!(Optimizer::predicate_equals(&p1, &p2));
+    }
+
+    #[test]
+    fn test_predicate_equals_different() {
+        let p1 = Predicate::ColumnEqConst(0, 42);
+        let p2 = Predicate::ColumnEqConst(0, 99);
+        assert!(!Optimizer::predicate_equals(&p1, &p2));
+    }
+
+    #[test]
+    fn test_predicate_equals_different_types() {
+        let p1 = Predicate::ColumnEqConst(0, 42);
+        let p2 = Predicate::ColumnGtConst(0, 42);
+        assert!(!Optimizer::predicate_equals(&p1, &p2));
     }
 }

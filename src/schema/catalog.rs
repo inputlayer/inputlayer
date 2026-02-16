@@ -601,4 +601,262 @@ mod tests {
         catalog.clear();
         assert_eq!(catalog.len(), 0);
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_register_or_update() {
+        let mut catalog = SchemaCatalog::new();
+        let schema1 =
+            RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Int));
+        catalog.register_or_update(schema1).unwrap();
+        assert_eq!(catalog.get("User").unwrap().arity(), 1);
+
+        // Update with more columns
+        let schema2 = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+        catalog.register_or_update(schema2).unwrap();
+        assert_eq!(catalog.get("User").unwrap().arity(), 2);
+    }
+
+    #[test]
+    fn test_register_or_update_session() {
+        let mut catalog = SchemaCatalog::new();
+        let schema =
+            RelationSchema::new("Temp").with_column(ColumnSchema::new("x", SchemaType::Int));
+        catalog.register_or_update_session(schema).unwrap();
+        assert!(catalog.has_session_schema("Temp"));
+
+        // Overwrite
+        let schema2 =
+            RelationSchema::new("Temp").with_column(ColumnSchema::new("x", SchemaType::Float));
+        catalog.register_or_update_session(schema2).unwrap();
+        let s = catalog.get("Temp").unwrap();
+        assert_eq!(s.columns[0].data_type, SchemaType::Float);
+    }
+
+    #[test]
+    fn test_get_mut() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+
+        let schema = catalog.get_mut("A").unwrap();
+        schema
+            .columns
+            .push(ColumnSchema::new("y", SchemaType::String));
+        assert_eq!(catalog.get("A").unwrap().arity(), 2);
+    }
+
+    #[test]
+    fn test_get_mut_session_shadows() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("X").with_column(ColumnSchema::new("a", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("X").with_column(ColumnSchema::new("b", SchemaType::String)),
+            )
+            .unwrap();
+        // get_mut should return session schema
+        let schema = catalog.get_mut("X").unwrap();
+        assert_eq!(schema.columns[0].name, "b");
+    }
+
+    #[test]
+    fn test_remove_persistent() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+        let removed = catalog.remove_persistent("A");
+        assert!(removed.is_some());
+        assert!(!catalog.has_schema("A"));
+    }
+
+    #[test]
+    fn test_remove_session() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_session(
+                RelationSchema::new("B").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+        let removed = catalog.remove_session("B");
+        assert!(removed.is_some());
+        assert!(!catalog.has_schema("B"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent() {
+        let mut catalog = SchemaCatalog::new();
+        assert!(catalog.remove("Nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_persistent_and_session_relations() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("P1").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("S1").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+        assert_eq!(catalog.persistent_relations(), vec!["P1"]);
+        assert_eq!(catalog.session_relations(), vec!["S1"]);
+    }
+
+    #[test]
+    fn test_all_schemas_deduplication() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("User").with_column(ColumnSchema::new("id", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("User")
+                    .with_column(ColumnSchema::new("id", SchemaType::Int))
+                    .with_column(ColumnSchema::new("name", SchemaType::String)),
+            )
+            .unwrap();
+        // Session shadows persistent, so all_schemas should have just 1 "User"
+        let all: Vec<_> = catalog.all_schemas().collect();
+        let user_count = all.iter().filter(|s| s.name == "User").count();
+        assert_eq!(user_count, 1);
+        // And it should be the session version (2 columns)
+        let user = all.iter().find(|s| s.name == "User").unwrap();
+        assert_eq!(user.arity(), 2);
+    }
+
+    #[test]
+    fn test_merge() {
+        let mut catalog1 = SchemaCatalog::new();
+        catalog1
+            .register_persistent(
+                RelationSchema::new("A").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+
+        let mut catalog2 = SchemaCatalog::new();
+        catalog2
+            .register_persistent(
+                RelationSchema::new("B").with_column(ColumnSchema::new("y", SchemaType::String)),
+            )
+            .unwrap();
+
+        catalog1.merge(catalog2);
+        assert!(catalog1.has_schema("A"));
+        assert!(catalog1.has_schema("B"));
+        assert_eq!(catalog1.len(), 2);
+    }
+
+    #[test]
+    fn test_clear_persistent() {
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("P").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog
+            .register_session(
+                RelationSchema::new("S").with_column(ColumnSchema::new("y", SchemaType::Int)),
+            )
+            .unwrap();
+        catalog.clear_persistent();
+        assert_eq!(catalog.persistent_len(), 0);
+        assert_eq!(catalog.session_len(), 1);
+    }
+
+    #[test]
+    fn test_validate_empty_column_name() {
+        let mut catalog = SchemaCatalog::new();
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("", SchemaType::Int));
+        assert!(catalog.register_persistent(schema).is_err());
+    }
+
+    #[test]
+    fn test_save_and_load() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("catalog.json");
+
+        let mut catalog = SchemaCatalog::new();
+        catalog
+            .register_persistent(
+                RelationSchema::new("User")
+                    .with_column(ColumnSchema::new("id", SchemaType::Int))
+                    .with_column(ColumnSchema::new("name", SchemaType::String)),
+            )
+            .unwrap();
+        // Session schemas should NOT be saved
+        catalog
+            .register_session(
+                RelationSchema::new("Temp").with_column(ColumnSchema::new("x", SchemaType::Int)),
+            )
+            .unwrap();
+
+        catalog.save(&path).unwrap();
+        let loaded = SchemaCatalog::load(&path).unwrap();
+
+        assert!(loaded.has_persistent_schema("User"));
+        assert!(!loaded.has_schema("Temp")); // session not saved
+        assert_eq!(loaded.get("User").unwrap().arity(), 2);
+    }
+
+    #[test]
+    fn test_load_nonexistent_returns_empty() {
+        let path = std::path::Path::new("/nonexistent/path/catalog.json");
+        let catalog = SchemaCatalog::load(path).unwrap();
+        assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn test_register_shortcut() {
+        let mut catalog = SchemaCatalog::new();
+        let schema =
+            RelationSchema::new("Test").with_column(ColumnSchema::new("x", SchemaType::Int));
+        catalog.register(schema).unwrap();
+        assert!(catalog.has_persistent_schema("Test"));
+    }
+
+    #[test]
+    fn test_schema_error_display() {
+        assert!(SchemaError::AlreadyExists("User".to_string())
+            .to_string()
+            .contains("User"));
+        assert!(SchemaError::NotFound("Edge".to_string())
+            .to_string()
+            .contains("Edge"));
+        assert!(SchemaError::InvalidSchema("bad".to_string())
+            .to_string()
+            .contains("bad"));
+        assert!(SchemaError::DuplicateColumn("id".to_string())
+            .to_string()
+            .contains("id"));
+        assert!(SchemaError::DataViolation {
+            relation: "User".to_string(),
+            message: "type mismatch".to_string(),
+        }
+        .to_string()
+        .contains("User"));
+        assert!(SchemaError::IoError("disk full".to_string())
+            .to_string()
+            .contains("disk full"));
+    }
 }

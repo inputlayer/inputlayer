@@ -741,4 +741,258 @@ mod tests {
         assert_eq!(stats.rules_rewritten, 1);
         assert!(stats.rules_generated > 0);
     }
+
+    #[test]
+    fn test_sip_rewriter_default() {
+        let rewriter = SipRewriter::default();
+        let stats = rewriter.get_stats();
+        assert_eq!(stats.rules_rewritten, 0);
+        assert_eq!(stats.rules_generated, 0);
+    }
+
+    #[test]
+    fn test_sip_stats_default() {
+        let stats = SipStats::default();
+        assert_eq!(stats.rules_generated, 0);
+        assert_eq!(stats.rules_rewritten, 0);
+    }
+
+    #[test]
+    fn test_set_recursive_relations_skips_rule() {
+        let mut rewriter = SipRewriter::new();
+        let mut recursive = HashSet::new();
+        recursive.insert("R".to_string());
+        rewriter.set_recursive_relations(recursive);
+
+        // Rule referencing recursive relation R should NOT be SIP-rewritten
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should be unchanged (1 rule, no SIP rewriting)
+        assert_eq!(result.rules.len(), 1);
+        assert_eq!(result.rules[0].head.relation, "result");
+        assert_eq!(rewriter.get_stats().rules_rewritten, 0);
+    }
+
+    #[test]
+    fn test_recursive_head_relation_skips_sip() {
+        let mut rewriter = SipRewriter::new();
+        let mut recursive = HashSet::new();
+        recursive.insert("result".to_string());
+        rewriter.set_recursive_relations(recursive);
+
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        assert_eq!(result.rules.len(), 1);
+        assert_eq!(rewriter.get_stats().rules_rewritten, 0);
+    }
+
+    #[test]
+    fn test_sip_skips_derived_relations() {
+        let mut rewriter = SipRewriter::new();
+
+        // derived_rel is defined as a rule head, so R's body reference should cause skip
+        let rule1 = Rule::new(
+            atom("derived_rel", vec![var("X"), var("Y")]),
+            vec![pos(atom("base", vec![var("X"), var("Y")]))],
+        );
+        let rule2 = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("derived_rel", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program {
+            rules: vec![rule1, rule2],
+        };
+        let result = rewriter.rewrite_program(&program);
+
+        // rule2 references derived_rel (a rule head), so SIP should skip it
+        // rule1 has only 1 atom, so SIP also skips it
+        // Total rules should be unchanged
+        assert_eq!(result.rules.len(), 2);
+        assert_eq!(rewriter.get_stats().rules_rewritten, 0);
+    }
+
+    #[test]
+    fn test_core_atom_bitmap_equal_var_sets() {
+        // R(X, Y), S(X, Y) - same variable set, lower index wins
+        let atoms = vec![
+            pos(atom("R", vec![var("X"), var("Y")])),
+            pos(atom("S", vec![var("X"), var("Y")])),
+        ];
+        let bitmap = SipRewriter::compute_core_atom_bitmap(&atoms);
+
+        assert!(bitmap[0], "R (index 0) should be core");
+        assert!(
+            !bitmap[1],
+            "S (index 1) should be non-core (same vars, higher index)"
+        );
+    }
+
+    #[test]
+    fn test_core_atom_bitmap_all_disjoint() {
+        // All disjoint variable sets => all core
+        let atoms = vec![
+            pos(atom("R", vec![var("A"), var("B")])),
+            pos(atom("S", vec![var("C"), var("D")])),
+            pos(atom("T", vec![var("E"), var("F")])),
+        ];
+        let bitmap = SipRewriter::compute_core_atom_bitmap(&atoms);
+
+        assert!(bitmap[0]);
+        assert!(bitmap[1]);
+        assert!(bitmap[2]);
+    }
+
+    #[test]
+    fn test_wildcarded_predicate_negated() {
+        let pred = neg(atom("R", vec![var("X"), var("Y"), var("Z")]));
+        let x = "X".to_string();
+        let shared: HashSet<&String> = [&x].into_iter().collect();
+
+        let result = SipRewriter::wildcarded_predicate(&pred, &shared);
+
+        // Non-atom predicates returned as-is
+        match result {
+            BodyPredicate::Negated(_) => {
+                // Negated atoms are returned as-is (not wildcarded)
+            }
+            _ => panic!("Expected negated atom to be returned as-is"),
+        }
+    }
+
+    #[test]
+    fn test_wildcarded_predicate_comparison() {
+        let pred = cmp(var("X"), ComparisonOp::GreaterThan, Term::Constant(1));
+        let x = "X".to_string();
+        let shared: HashSet<&String> = [&x].into_iter().collect();
+
+        let result = SipRewriter::wildcarded_predicate(&pred, &shared);
+
+        // Non-atom predicates returned as-is
+        match result {
+            BodyPredicate::Comparison(_, _, _) => {}
+            _ => panic!("Expected comparison returned as-is"),
+        }
+    }
+
+    #[test]
+    fn test_empty_program() {
+        let mut rewriter = SipRewriter::new();
+        let program = Program { rules: vec![] };
+        let result = rewriter.rewrite_program(&program);
+        assert!(result.rules.is_empty());
+    }
+
+    #[test]
+    fn test_sip_resets_stats_each_call() {
+        let mut rewriter = SipRewriter::new();
+
+        // First call
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+            ],
+        );
+        let program = Program {
+            rules: vec![rule.clone()],
+        };
+        let _ = rewriter.rewrite_program(&program);
+        assert_eq!(rewriter.get_stats().rules_rewritten, 1);
+
+        // Second call should reset stats
+        let _ = rewriter.rewrite_program(&Program { rules: vec![] });
+        assert_eq!(rewriter.get_stats().rules_rewritten, 0);
+        assert_eq!(rewriter.get_stats().rules_generated, 0);
+    }
+
+    #[test]
+    fn test_sip_with_placeholder_in_atom() {
+        let mut rewriter = SipRewriter::new();
+        // R(X, _), S(X, Z) - placeholder in R
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), Term::Placeholder])),
+                pos(atom("S", vec![var("X"), var("Z")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should handle placeholders gracefully
+        let last = result.rules.last().unwrap();
+        assert_eq!(last.head.relation, "result");
+    }
+
+    #[test]
+    fn test_sip_four_way_join() {
+        let mut rewriter = SipRewriter::new();
+        // R(X, Y), S(Y, Z), T(Z, W), U(W, V)
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("V")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+                pos(atom("T", vec![var("Z"), var("W")])),
+                pos(atom("U", vec![var("W"), var("V")])),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should produce multiple SIP rules
+        assert!(
+            result.rules.len() >= 4,
+            "4-way join should produce multiple SIP rules, got {}",
+            result.rules.len()
+        );
+        assert_eq!(result.rules.last().unwrap().head.relation, "result");
+        assert_eq!(rewriter.get_stats().rules_rewritten, 1);
+    }
+
+    #[test]
+    fn test_sip_with_constant_in_body() {
+        let mut rewriter = SipRewriter::new();
+        // result(X, Z) <- R(X, Y), S(Y, Z), Y > 10.
+        let rule = Rule::new(
+            atom("result", vec![var("X"), var("Z")]),
+            vec![
+                pos(atom("R", vec![var("X"), var("Y")])),
+                pos(atom("S", vec![var("Y"), var("Z")])),
+                cmp(var("Y"), ComparisonOp::GreaterThan, Term::Constant(10)),
+            ],
+        );
+        let program = Program { rules: vec![rule] };
+        let result = rewriter.rewrite_program(&program);
+
+        // Should still produce SIP rules with comparison folded in
+        assert!(result.rules.len() >= 2);
+    }
+
+    #[test]
+    fn test_predicate_relation_name_for_comparison() {
+        let pred = cmp(var("X"), ComparisonOp::GreaterThan, Term::Constant(1));
+        let name = SipRewriter::predicate_relation_name(&pred);
+        assert_eq!(name, "_cmp");
+    }
 }
