@@ -288,17 +288,17 @@ mod tests {
     use crate::protocol::rest::dto::CreateViewRequest;
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[tokio::test]
     async fn test_list_views_empty() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("views_empty_kg")
@@ -312,7 +312,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_list_view() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("views_create_kg".to_string()),
@@ -344,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_view() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("views_get_kg".to_string()),
@@ -365,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_view_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("views_nf_kg")
@@ -380,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_view_data() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("views_data_kg".to_string()),
@@ -405,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_view() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("views_del_kg".to_string()),
@@ -423,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_view_not_found() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("views_delnf_kg")
@@ -438,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_view_invalid_definition() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("views_inv_kg")

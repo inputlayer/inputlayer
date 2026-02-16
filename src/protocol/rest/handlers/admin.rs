@@ -98,17 +98,17 @@ mod tests {
     use super::*;
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[tokio::test]
     async fn test_health_returns_healthy() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let result = health(Extension(handler)).await.unwrap();
         let resp = result.0;
         assert!(resp.success);
@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_uptime_is_reasonable() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let result = health(Extension(handler)).await.unwrap();
         let data = result.0.data.unwrap();
         assert!(data.uptime_secs < 5);
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stats_empty_server() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let result = stats(Extension(handler)).await.unwrap();
         let resp = result.0;
         assert!(resp.success);
@@ -140,7 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stats_after_insert() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(None, "+stuff[(1, 2)]".to_string())
             .await
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stats_memory_estimation() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         // Insert some data
         handler
             .query_program(None, "+mem_test[(1, 2), (3, 4), (5, 6)]".to_string())

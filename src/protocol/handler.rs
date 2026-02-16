@@ -1263,12 +1263,25 @@ mod tests {
     use super::*;
     use crate::ast::Term;
 
-    /// Create a Config with a unique temp directory (prevents parallel test conflicts)
-    fn make_test_config() -> Config {
-        let temp_dir = tempfile::tempdir().unwrap();
+    /// Create a Config with a unique temp directory. Returns TempDir so it stays alive
+    /// for the test's duration and auto-cleans on drop.
+    fn make_test_config() -> (Config, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
-        config.storage.data_dir = temp_dir.into_path();
-        config
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (config, tmp)
+    }
+
+    /// Convenience: create a Handler with isolated temp storage.
+    fn make_test_handler() -> (Handler, tempfile::TempDir) {
+        let (config, tmp) = make_test_config();
+        (Handler::from_config(config).unwrap(), tmp)
+    }
+
+    /// Convenience: create a StorageEngine with isolated temp storage.
+    fn make_test_storage() -> (StorageEngine, tempfile::TempDir) {
+        let (config, tmp) = make_test_config();
+        (StorageEngine::new(config).unwrap(), tmp)
     }
 
     // --- term_to_value tests ---
@@ -1342,7 +1355,7 @@ mod tests {
 
     #[test]
     fn test_handler_new() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         assert_eq!(handler.total_queries(), 0);
         assert_eq!(handler.total_inserts(), 0);
@@ -1351,13 +1364,13 @@ mod tests {
 
     #[test]
     fn test_handler_from_config() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         assert_eq!(handler.total_queries(), 0);
     }
 
     #[test]
     fn test_handler_with_session_config() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let config = SessionConfig {
             max_sessions: 10,
             ..SessionConfig::default()
@@ -1368,23 +1381,21 @@ mod tests {
 
     // --- Session management tests ---
 
-    /// Helper to create a fresh handler with a known KG.
-    /// Uses a unique temp directory for persist layer to avoid leftover data
-    /// from previous test runs.
-    fn handler_with_kg(kg_name: &str) -> Handler {
-        let mut config = make_test_config();
+    /// Helper to create a fresh handler with a known KG and isolated temp storage.
+    fn handler_with_kg(kg_name: &str) -> (Handler, tempfile::TempDir) {
+        let (mut config, tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
             .get_storage()
             .ensure_knowledge_graph(kg_name)
             .unwrap();
-        handler
+        (handler, tmp)
     }
 
     #[test]
     fn test_handler_create_and_close_session() {
-        let handler = handler_with_kg("sess_create_test");
+        let (handler, _tmp) = handler_with_kg("sess_create_test");
         let session_id = handler.create_session("sess_create_test").unwrap();
         assert!(session_id > 0);
         handler.close_session(session_id).unwrap();
@@ -1392,13 +1403,13 @@ mod tests {
 
     #[test]
     fn test_handler_close_nonexistent_session() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         assert!(handler.close_session(999).is_err());
     }
 
     #[test]
     fn test_handler_session_insert_ephemeral() {
-        let handler = handler_with_kg("sess_insert_test");
+        let (handler, _tmp) = handler_with_kg("sess_insert_test");
         let sid = handler.create_session("sess_insert_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])];
         handler
@@ -1408,7 +1419,7 @@ mod tests {
 
     #[test]
     fn test_handler_session_retract_ephemeral() {
-        let handler = handler_with_kg("sess_retract_test");
+        let (handler, _tmp) = handler_with_kg("sess_retract_test");
         let sid = handler.create_session("sess_retract_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         handler
@@ -1420,7 +1431,7 @@ mod tests {
 
     #[test]
     fn test_handler_session_stats() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let stats = handler.session_stats();
         assert_eq!(stats.total_sessions, 0);
     }
@@ -1429,7 +1440,7 @@ mod tests {
 
     #[test]
     fn test_subscribe_notifications() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         let mut rx = handler.subscribe_notifications();
 
@@ -1453,14 +1464,14 @@ mod tests {
 
     #[test]
     fn test_notify_no_subscribers() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         handler.notify_persistent_update("test_kg", "edge", "insert", 1);
     }
 
     #[test]
     fn test_multiple_subscribers() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         let mut rx1 = handler.subscribe_notifications();
         let mut rx2 = handler.subscribe_notifications();
@@ -1476,7 +1487,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_program_simple_insert() {
         // Use unique KG name to avoid leftover data from previous test runs
-        let handler = handler_with_kg("simple_insert_test");
+        let (handler, _tmp) = handler_with_kg("simple_insert_test");
         let result = handler
             .query_program(
                 Some("simple_insert_test".to_string()),
@@ -1494,7 +1505,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_insert_and_query() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         handler
             .query_program(None, "+data[(1,), (2,), (3,)]".to_string())
             .await
@@ -1508,7 +1519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_comment_stripping() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let program = "% this is a comment\n// this too\n+test_data[(1,)]".to_string();
         let result = handler.query_program(None, program).await.unwrap();
         assert!(result.rows[0].values[0]
@@ -1519,7 +1530,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_session_fact() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let program = "temp(42)\n?temp(X)".to_string();
         let result = handler.query_program(None, program).await.unwrap();
         assert_eq!(result.rows.len(), 1);
@@ -1527,7 +1538,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_session_rule() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         handler
             .query_program(None, "+base[(1,), (2,), (3,)]".to_string())
             .await
@@ -1539,7 +1550,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_persistent_rule() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         handler
             .query_program(None, "+nodes[(1,), (2,)]".to_string())
             .await
@@ -1557,7 +1568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_delete_facts() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         handler
             .query_program(None, "+del_test[(1, 2), (3, 4)]".to_string())
             .await
@@ -1579,7 +1590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_with_target_kg() {
-        let handler = handler_with_kg("handler_target_kg");
+        let (handler, _tmp) = handler_with_kg("handler_target_kg");
         let result = handler
             .query_program(
                 Some("handler_target_kg".to_string()),
@@ -1595,7 +1606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_no_results() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result = handler
             .query_program(None, "?empty_relation(X)".to_string())
             .await
@@ -1607,7 +1618,7 @@ mod tests {
 
     #[test]
     fn test_explain_query_simple() {
-        let handler = handler_with_kg("explain_test_kg");
+        let (handler, _tmp) = handler_with_kg("explain_test_kg");
         // explain_query takes a Datalog rule, not a ?query
         let result = handler.explain_query(
             Some("explain_test_kg".to_string()),
@@ -1621,7 +1632,7 @@ mod tests {
 
     #[test]
     fn test_explain_query_no_kg_error() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         let result = handler.explain_query(None, "?edge(X, Y)".to_string());
         // No current KG selected → error
@@ -1632,7 +1643,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_schema_declaration() {
-        let handler = handler_with_kg("schema_decl_test");
+        let (handler, _tmp) = handler_with_kg("schema_decl_test");
         // Persistent schema syntax: +name(col: type, ...)
         let result = handler
             .query_program(
@@ -1649,7 +1660,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_bulk_delete() {
-        let handler = handler_with_kg("bulk_del_test");
+        let (handler, _tmp) = handler_with_kg("bulk_del_test");
         handler
             .query_program(
                 Some("bulk_del_test".to_string()),
@@ -1681,7 +1692,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_register_persistent_rule() {
-        let handler = handler_with_kg("persist_rule_test");
+        let (handler, _tmp) = handler_with_kg("persist_rule_test");
         handler
             .query_program(
                 Some("persist_rule_test".to_string()),
@@ -1701,7 +1712,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_conditional_delete() {
-        let handler = handler_with_kg("cond_del_test");
+        let (handler, _tmp) = handler_with_kg("cond_del_test");
         handler
             .query_program(
                 Some("cond_del_test".to_string()),
@@ -1733,7 +1744,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_empty_program() {
-        let handler = handler_with_kg("empty_prog_test");
+        let (handler, _tmp) = handler_with_kg("empty_prog_test");
         // Empty program has no IR nodes to execute
         let result = handler
             .query_program(Some("empty_prog_test".to_string()), "".to_string())
@@ -1743,7 +1754,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_only_comments() {
-        let handler = handler_with_kg("comments_only_test");
+        let (handler, _tmp) = handler_with_kg("comments_only_test");
         // Program with only comments has no IR nodes to execute
         let result = handler
             .query_program(
@@ -1756,7 +1767,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_multiple_queries_last_wins() {
-        let handler = handler_with_kg("multi_q_test");
+        let (handler, _tmp) = handler_with_kg("multi_q_test");
         handler
             .query_program(
                 Some("multi_q_test".to_string()),
@@ -1780,7 +1791,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_with_session_clean() {
-        let handler = handler_with_kg("sess_clean_q");
+        let (handler, _tmp) = handler_with_kg("sess_clean_q");
         handler
             .query_program(
                 Some("sess_clean_q".to_string()),
@@ -1800,7 +1811,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_with_session_ephemeral_facts() {
-        let handler = handler_with_kg("sess_eph_q");
+        let (handler, _tmp) = handler_with_kg("sess_eph_q");
         handler
             .query_program(Some("sess_eph_q".to_string()), "+data[(1,)]".to_string())
             .await
@@ -1820,7 +1831,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_with_session_invalid_id() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result = handler
             .query_program_with_session(99999, "?data(X)".to_string())
             .await;
@@ -1831,7 +1842,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_add_rule_and_query() {
-        let handler = handler_with_kg("sess_rule_q");
+        let (handler, _tmp) = handler_with_kg("sess_rule_q");
         handler
             .query_program(
                 Some("sess_rule_q".to_string()),
@@ -1859,7 +1870,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_tuples_no_schema() {
-        let handler = handler_with_kg("val_no_schema");
+        let (handler, _tmp) = handler_with_kg("val_no_schema");
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         // No schema registered → validation passes
         assert!(handler
@@ -1869,7 +1880,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_tuples_with_schema() {
-        let handler = handler_with_kg("val_with_schema");
+        let (handler, _tmp) = handler_with_kg("val_with_schema");
         // Persistent schema syntax: +name(col: type, ...)
         handler
             .query_program(
@@ -1917,7 +1928,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_count_increments() {
-        let handler = handler_with_kg("counter_test");
+        let (handler, _tmp) = handler_with_kg("counter_test");
         assert_eq!(handler.total_queries(), 0);
         handler
             .query_program(Some("counter_test".to_string()), "+stuff[(1,)]".to_string())
@@ -1933,7 +1944,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_count_increments() {
-        let handler = handler_with_kg("insert_cnt_test");
+        let (handler, _tmp) = handler_with_kg("insert_cnt_test");
         assert_eq!(handler.total_inserts(), 0);
         handler
             .query_program(
@@ -1957,7 +1968,7 @@ mod tests {
     #[tokio::test]
     async fn test_two_clients_persistent_rule_different_ephemeral_facts() {
         // Core scenario: persistent rule + 2 sessions with different ephemeral facts
-        let handler = handler_with_kg("multi_client_1");
+        let (handler, _tmp) = handler_with_kg("multi_client_1");
         let kg = "multi_client_1";
 
         // 1. Insert persistent base facts
@@ -2060,7 +2071,7 @@ mod tests {
     async fn test_two_clients_only_ephemeral_base_facts() {
         // Persistent rule exists but no persistent base facts
         // Only ephemeral facts from sessions trigger the rule
-        let handler = handler_with_kg("multi_client_2");
+        let (handler, _tmp) = handler_with_kg("multi_client_2");
         let kg = "multi_client_2";
 
         // Register persistent rule (no persistent edge facts)
@@ -2124,7 +2135,7 @@ mod tests {
     #[tokio::test]
     async fn test_provenance_tags_persistent_vs_ephemeral() {
         // Verify per-tuple provenance is correctly assigned
-        let handler = handler_with_kg("prov_tags");
+        let (handler, _tmp) = handler_with_kg("prov_tags");
         let kg = "prov_tags";
 
         // Persistent fact
@@ -2167,7 +2178,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_ephemeral_rule_augments_persistent() {
         // Client adds an ephemeral rule that extends persistent facts
-        let handler = handler_with_kg("eph_rule_aug");
+        let (handler, _tmp) = handler_with_kg("eph_rule_aug");
         let kg = "eph_rule_aug";
 
         // Persistent base facts
@@ -2212,7 +2223,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_close_cleans_up_ephemeral() {
         // After session close, ephemeral facts no longer affect queries
-        let handler = handler_with_kg("close_cleanup");
+        let (handler, _tmp) = handler_with_kg("close_cleanup");
         let kg = "close_cleanup";
 
         handler
@@ -2249,7 +2260,7 @@ mod tests {
     #[tokio::test]
     async fn test_many_sessions_sequential_queries() {
         // Simulate 10 "AI agent" sessions querying sequentially
-        let handler = handler_with_kg("many_agents");
+        let (handler, _tmp) = handler_with_kg("many_agents");
         let kg = "many_agents";
 
         // Persistent base
@@ -2302,7 +2313,7 @@ mod tests {
     #[tokio::test]
     async fn test_ephemeral_retract_changes_session_results() {
         // Session adds ephemeral facts, queries, retracts some, queries again
-        let handler = handler_with_kg("retract_changes");
+        let (handler, _tmp) = handler_with_kg("retract_changes");
         let kg = "retract_changes";
 
         handler
@@ -2347,7 +2358,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_metadata_reports_ephemeral_sources() {
-        let handler = handler_with_kg("meta_sources");
+        let (handler, _tmp) = handler_with_kg("meta_sources");
         let kg = "meta_sources";
 
         handler
@@ -2381,7 +2392,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_sends_notification() {
-        let handler = handler_with_kg("notif_ins_test");
+        let (handler, _tmp) = handler_with_kg("notif_ins_test");
         let mut rx = handler.subscribe_notifications();
         handler
             .query_program(
@@ -2403,7 +2414,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_sends_notification() {
-        let handler = handler_with_kg("notif_del_test");
+        let (handler, _tmp) = handler_with_kg("notif_del_test");
         handler
             .query_program(
                 Some("notif_del_test".to_string()),
@@ -2468,7 +2479,7 @@ mod tests {
 
     #[test]
     fn test_handler_get_storage() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let storage = handler.get_storage();
         // Should have default KG
         assert!(storage
@@ -2478,7 +2489,7 @@ mod tests {
 
     #[test]
     fn test_handler_get_storage_mut() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let storage = handler.get_storage_mut();
         // Should be able to create a new KG
         storage.create_knowledge_graph("test_mut").unwrap();
@@ -2489,14 +2500,14 @@ mod tests {
 
     #[test]
     fn test_handler_session_manager() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let mgr = handler.session_manager();
         assert_eq!(mgr.session_count(), 0);
     }
 
     #[tokio::test]
     async fn test_query_program_no_kg_selected() {
-        let storage = StorageEngine::new(make_test_config()).unwrap();
+        let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         // Without an explicit KG, uses the default
         let result = handler.query_program(None, "+data[(1,)]".to_string()).await;
@@ -2506,7 +2517,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_invalid_syntax() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         // Invalid Datalog syntax
         let result = handler
             .query_program(None, "not valid datalog !!!".to_string())
@@ -2518,14 +2529,14 @@ mod tests {
 
     #[test]
     fn test_handler_uptime() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         // Just created, uptime should be < 2 seconds
         assert!(handler.uptime_seconds() < 2);
     }
 
     #[tokio::test]
     async fn test_query_program_multiline_with_mixed_comments() {
-        let handler = handler_with_kg("mixed_comments");
+        let (handler, _tmp) = handler_with_kg("mixed_comments");
         let program = "%% header comment\n+mc_data[(1,), (2,)]\n// inline\n?mc_data(X)";
         let result = handler
             .query_program(Some("mixed_comments".to_string()), program.to_string())
@@ -2536,7 +2547,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_insert_retract_and_query() {
-        let handler = handler_with_kg("sess_irt");
+        let (handler, _tmp) = handler_with_kg("sess_irt");
         let kg = "sess_irt";
 
         // Insert persistent base
@@ -2584,7 +2595,7 @@ mod tests {
 
     #[test]
     fn test_session_insert_invalid_session() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result =
             handler.session_insert_ephemeral(99999, "rel", vec![Tuple::new(vec![Value::Int64(1)])]);
         assert!(result.is_err());
@@ -2592,7 +2603,7 @@ mod tests {
 
     #[test]
     fn test_session_retract_invalid_session() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result = handler.session_retract_ephemeral(
             99999,
             "rel",
@@ -2726,26 +2737,26 @@ mod tests {
 
     #[test]
     fn test_handler_total_queries_initial() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         assert_eq!(handler.total_queries(), 0);
     }
 
     #[test]
     fn test_handler_total_inserts_initial() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         assert_eq!(handler.total_inserts(), 0);
     }
 
     #[test]
     fn test_handler_session_stats_empty() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let stats = handler.session_stats();
         assert_eq!(stats.total_sessions, 0);
     }
 
     #[tokio::test]
     async fn test_handler_query_updates_counter() {
-        let mut config = make_test_config();
+        let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2757,7 +2768,7 @@ mod tests {
 
     #[test]
     fn test_handler_explain_query() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         {
             let storage = handler.get_storage_mut();
             storage.create_knowledge_graph("explain_h_kg").unwrap();
@@ -2771,7 +2782,7 @@ mod tests {
 
     #[test]
     fn test_handler_subscribe_notifications() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let rx = handler.subscribe_notifications();
         // Should create a valid receiver without errors
         drop(rx);
@@ -2779,7 +2790,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_select_all_tuples() {
-        let mut config = make_test_config();
+        let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2798,7 +2809,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_with_rule() {
-        let mut config = make_test_config();
+        let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2826,14 +2837,14 @@ mod tests {
 
     #[test]
     fn test_handler_uptime_seconds() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         // Just created, uptime should be 0 or very small
         assert!(handler.uptime_seconds() < 2);
     }
 
     #[tokio::test]
     async fn test_handler_total_queries_after_query() {
-        let mut config = make_test_config();
+        let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2845,14 +2856,14 @@ mod tests {
 
     #[test]
     fn test_handler_close_session_invalid() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result = handler.close_session(999999);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_handler_validate_tuples_no_schema() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         {
             let storage = handler.get_storage_mut();
             storage.create_knowledge_graph("val_kg").unwrap();
@@ -2865,14 +2876,14 @@ mod tests {
 
     #[test]
     fn test_handler_notify_persistent_update() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         // Should not panic — fire and forget notification
         handler.notify_persistent_update("kg", "rel", "insert", 5);
     }
 
     #[tokio::test]
     async fn test_handler_query_program_insert_and_query() {
-        let mut config = make_test_config();
+        let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         // Insert data
@@ -2893,7 +2904,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_program_nonexistent_kg() {
-        let handler = Handler::from_config(make_test_config()).unwrap();
+        let (handler, _tmp) = make_test_handler();
         let result = handler
             .query_program(
                 Some("nonexistent_kg_xyz".to_string()),

@@ -127,17 +127,17 @@ mod tests {
     use crate::protocol::rest::dto::QueryRequest;
     use crate::Config;
 
-    fn make_handler() -> Arc<Handler> {
-        let temp_dir = tempfile::tempdir().unwrap();
+    fn make_handler() -> (Arc<Handler>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
-        config.storage.data_dir = temp_dir.into_path();
-        Arc::new(Handler::from_config(config).unwrap())
+        config.storage.data_dir = tmp.path().to_path_buf();
+        (Arc::new(Handler::from_config(config).unwrap()), tmp)
     }
 
     #[tokio::test]
     async fn test_execute_query_insert() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let request = QueryRequest {
             query: "+data[(1, 2), (3, 4)]".to_string(),
             knowledge_graph: "query_ins_kg".to_string(),
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_select() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .query_program(
                 Some("sel_test_kg".to_string()),
@@ -178,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_error_returns_success_with_error_status() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         let request = QueryRequest {
             query: "?nonexistent(X, Y, Z, invalid!!!".to_string(),
             knowledge_graph: "err_test_kg".to_string(),
@@ -194,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_explain_query_basic() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("explain_kg")
@@ -213,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_explain_query_shorthand() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("explain_sh_kg")
@@ -231,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_explain_query_error_in_plan() {
-        let handler = make_handler();
+        let (handler, _tmp) = make_handler();
         handler
             .get_storage()
             .ensure_knowledge_graph("explain_e_kg")
