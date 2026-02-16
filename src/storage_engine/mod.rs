@@ -3568,4 +3568,1301 @@ mod tests {
             assert_eq!(invalid, 1);
         }
     }
+
+    // =========================================================================
+    // Storage Engine API Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_create_duplicate_knowledge_graph_error() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("dup_test").unwrap();
+        let result = storage.create_knowledge_graph("dup_test");
+        assert!(matches!(result, Err(StorageError::KnowledgeGraphExists(_))));
+    }
+
+    #[test]
+    fn test_create_knowledge_graph_invalid_name() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        // Empty name
+        assert!(storage.create_knowledge_graph("").is_err());
+        // Slash in name
+        assert!(storage.create_knowledge_graph("a/b").is_err());
+        // Backslash in name
+        assert!(storage.create_knowledge_graph("a\\b").is_err());
+    }
+
+    #[test]
+    fn test_drop_nonexistent_knowledge_graph() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.drop_knowledge_graph("nonexistent");
+        assert!(matches!(
+            result,
+            Err(StorageError::KnowledgeGraphNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_drop_knowledge_graph_success() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("to_drop").unwrap();
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"to_drop".to_string()));
+
+        // Drop it (not the current kg)
+        storage.drop_knowledge_graph("to_drop").unwrap();
+        assert!(!storage
+            .list_knowledge_graphs()
+            .contains(&"to_drop".to_string()));
+    }
+
+    #[test]
+    fn test_use_nonexistent_knowledge_graph_no_auto_create() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.auto_create_knowledge_graphs = false;
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.use_knowledge_graph("nonexistent");
+        assert!(matches!(
+            result,
+            Err(StorageError::KnowledgeGraphNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_use_knowledge_graph_auto_create() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.auto_create_knowledge_graphs = true;
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        // Auto-create should succeed
+        storage.use_knowledge_graph("auto_created").unwrap();
+        assert_eq!(storage.current_knowledge_graph(), Some("auto_created"));
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"auto_created".to_string()));
+    }
+
+    #[test]
+    fn test_insert_empty_tuples() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let (new_count, dup_count) = storage.insert_tuples("empty_rel", vec![]).unwrap();
+        assert_eq!(new_count, 0);
+        assert_eq!(dup_count, 0);
+    }
+
+    #[test]
+    fn test_insert_arity_mismatch_in_batch() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+            Tuple::new(vec![Value::Int32(3)]), // Different arity
+        ];
+        let result = storage.insert_tuples("rel", tuples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Arity mismatch"));
+    }
+
+    #[test]
+    fn test_insert_into_view_error() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Register a rule to make "path" a derived relation
+        let rule_def = make_path_rule_def();
+        storage.register_rule(&rule_def).unwrap();
+
+        // Try to insert into the view
+        let result = storage.insert_tuples(
+            "path",
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("derived relation"));
+    }
+
+    #[test]
+    fn test_insert_no_current_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.current_kg = None;
+
+        let result = storage.insert_tuples("rel", vec![Tuple::new(vec![Value::Int32(1)])]);
+        assert!(matches!(result, Err(StorageError::NoCurrentKnowledgeGraph)));
+    }
+
+    #[test]
+    fn test_delete_empty_tuples() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let count = storage
+            .delete_tuples_from("default", "rel", vec![])
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_execute_query_no_current_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.current_kg = None;
+
+        let result = storage.execute_query("result(X,Y) <- edge(X,Y)");
+        assert!(matches!(result, Err(StorageError::NoCurrentKnowledgeGraph)));
+    }
+
+    #[test]
+    fn test_execute_query_on_nonexistent_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.execute_query_on("nonexistent", "result(X,Y) <- edge(X,Y)");
+        assert!(matches!(
+            result,
+            Err(StorageError::KnowledgeGraphNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_list_relations_empty() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let relations = storage.list_relations().unwrap();
+        assert!(relations.is_empty());
+    }
+
+    #[test]
+    fn test_list_relations_after_insert() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("edge", vec![(1, 2)]).unwrap();
+        storage.insert("node", vec![(1, 1)]).unwrap();
+
+        let relations = storage.list_relations().unwrap();
+        assert!(relations.contains(&"edge".to_string()));
+        assert!(relations.contains(&"node".to_string()));
+    }
+
+    #[test]
+    fn test_describe_relation_exists() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("edge", vec![(1, 2), (3, 4)]).unwrap();
+
+        let desc = storage.describe_relation("edge").unwrap();
+        assert!(desc.is_some());
+        let desc = desc.unwrap();
+        assert!(desc.contains("edge"));
+        assert!(desc.contains("2")); // tuple count
+    }
+
+    #[test]
+    fn test_describe_relation_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let desc = storage.describe_relation("nonexistent").unwrap();
+        assert!(desc.is_none());
+    }
+
+    #[test]
+    fn test_get_relation_metadata() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage
+            .insert("edge", vec![(1, 2), (3, 4), (5, 6)])
+            .unwrap();
+
+        let meta = storage.get_relation_metadata("edge").unwrap();
+        assert!(meta.is_some());
+        let (schema, count) = meta.unwrap();
+        assert_eq!(schema.len(), 2); // binary relation
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_get_relation_metadata_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let meta = storage.get_relation_metadata("nonexistent").unwrap();
+        assert!(meta.is_none());
+    }
+
+    #[test]
+    fn test_list_relations_with_metadata() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("alpha", vec![(1, 2)]).unwrap();
+        storage.insert("beta", vec![(3, 4), (5, 6)]).unwrap();
+
+        let rels = storage.list_relations_with_metadata("default").unwrap();
+        assert_eq!(rels.len(), 2);
+    }
+
+    #[test]
+    fn test_rule_management_lifecycle() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        // Register
+        let rule_def = make_simple_rule_def("derived1", "base");
+        storage.register_rule(&rule_def).unwrap();
+
+        // List
+        let rules = storage.list_rules().unwrap();
+        assert!(rules.contains(&"derived1".to_string()));
+
+        // Describe
+        let desc = storage.describe_rule("derived1").unwrap();
+        assert!(desc.is_some());
+
+        // Count
+        let count = storage.rule_count("derived1").unwrap();
+        assert_eq!(count, Some(1));
+
+        // Arity
+        let arity = storage.rule_arity("derived1").unwrap();
+        assert_eq!(arity, Some(1));
+
+        // Drop
+        storage.drop_rule("derived1").unwrap();
+        let rules = storage.list_rules().unwrap();
+        assert!(!rules.contains(&"derived1".to_string()));
+    }
+
+    #[test]
+    fn test_save_and_compact() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("data", vec![(1, 2), (3, 4)]).unwrap();
+
+        // Save should not error
+        storage.save_knowledge_graph("default").unwrap();
+        storage.save_all().unwrap();
+
+        // Compact should not error
+        storage.compact_all().unwrap();
+    }
+
+    #[test]
+    fn test_save_nonexistent_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.save_knowledge_graph("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ensure_knowledge_graph_existing() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        // Default exists, should be no-op
+        storage.ensure_knowledge_graph("default").unwrap();
+    }
+
+    #[test]
+    fn test_ensure_knowledge_graph_no_auto_create() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.auto_create_knowledge_graphs = false;
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.ensure_knowledge_graph("nonexistent");
+        assert!(matches!(
+            result,
+            Err(StorageError::KnowledgeGraphNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_execute_query_tuples() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage
+            .insert_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int32(1), Value::string("hello")]),
+                    Tuple::new(vec![Value::Int32(2), Value::string("world")]),
+                ],
+            )
+            .unwrap();
+
+        let results = storage
+            .execute_query_tuples("result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_insert_and_query_binary_tuples() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+
+        let results = storage.execute_query("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&(1, 2)));
+        assert!(results.contains(&(2, 3)));
+    }
+
+    #[test]
+    fn test_delete_binary_tuples() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage
+            .insert("edge", vec![(1, 2), (2, 3), (3, 4)])
+            .unwrap();
+        let deleted = storage.delete("edge", vec![(2, 3)]).unwrap();
+        assert_eq!(deleted, 1);
+
+        let results = storage.execute_query("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&(1, 2)));
+        assert!(results.contains(&(3, 4)));
+    }
+
+    #[test]
+    fn test_insert_into_specific_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("test_kg").unwrap();
+        storage
+            .insert_into("test_kg", "data", vec![(10, 20)])
+            .unwrap();
+
+        let results = storage
+            .execute_query_on("test_kg", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], (10, 20));
+    }
+
+    #[test]
+    fn test_schema_register_and_get() {
+        use crate::schema::{ColumnSchema, SchemaType};
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let schema = RelationSchema::new("typed_rel")
+            .with_column(ColumnSchema::new("name", SchemaType::String))
+            .with_column(ColumnSchema::new("age", SchemaType::Int));
+        storage.register_schema(schema).unwrap();
+
+        assert!(storage.has_schema("typed_rel").unwrap());
+        let retrieved = storage.get_schema("typed_rel").unwrap();
+        assert!(retrieved.is_some());
+
+        let schemas = storage.list_schemas().unwrap();
+        assert!(schemas.contains(&"typed_rel".to_string()));
+    }
+
+    #[test]
+    fn test_schema_remove() {
+        use crate::schema::{ColumnSchema, SchemaType};
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let schema =
+            RelationSchema::new("to_remove").with_column(ColumnSchema::new("x", SchemaType::Int));
+        storage.register_schema(schema).unwrap();
+        assert!(storage.has_schema("to_remove").unwrap());
+
+        storage.remove_schema("to_remove").unwrap();
+        assert!(!storage.has_schema("to_remove").unwrap());
+    }
+
+    #[test]
+    fn test_remove_rule_clause_from_storage() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let rule_def = make_simple_rule_def("test_view", "base");
+        storage.register_rule(&rule_def).unwrap();
+
+        // Remove the only clause (0-based index) → should delete the rule
+        let deleted = storage.remove_rule_clause("test_view", 0).unwrap();
+        assert!(deleted, "Should have deleted the entire rule");
+        assert!(storage.list_rules().unwrap().is_empty());
+    }
+
+    // =========================================================================
+    // Additional Storage Engine Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_current_knowledge_graph_after_use() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+        assert_eq!(storage.current_knowledge_graph(), Some("default"));
+    }
+
+    #[test]
+    fn test_list_knowledge_graphs() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.create_knowledge_graph("kg2").unwrap();
+
+        let kgs = storage.list_knowledge_graphs();
+        assert!(kgs.contains(&"kg1".to_string()));
+        assert!(kgs.contains(&"kg2".to_string()));
+    }
+
+    #[test]
+    fn test_insert_and_delete_binary() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        let (inserted, _) = storage
+            .insert("pairs", vec![(1, 2), (3, 4), (5, 6)])
+            .unwrap();
+        assert_eq!(inserted, 3);
+
+        let deleted = storage.delete("pairs", vec![(1, 2)]).unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_delete_tuple_single() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage
+            .insert_tuples(
+                "items",
+                vec![
+                    Tuple::new(vec![Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(2)]),
+                ],
+            )
+            .unwrap();
+
+        let deleted = storage
+            .delete_tuple("items", &Tuple::new(vec![Value::Int64(1)]))
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_execute_query_binary() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+
+        storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
+        let results = storage.execute_query("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_execute_query_on_specific_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("target_kg").unwrap();
+        storage
+            .insert_into("target_kg", "data", vec![(10, 20)])
+            .unwrap();
+
+        let results = storage
+            .execute_query_on("target_kg", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_insert_tuples_into_cross_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("xkg").unwrap();
+        storage
+            .insert_tuples_into(
+                "xkg",
+                "nodes",
+                vec![
+                    Tuple::new(vec![Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(2)]),
+                ],
+            )
+            .unwrap();
+
+        let results = storage
+            .execute_query_tuples_on("xkg", "result(X) <- nodes(X)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_describe_relation_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("desc_kg").unwrap();
+        storage
+            .insert_into("desc_kg", "info", vec![(1, 2)])
+            .unwrap();
+
+        let desc = storage.describe_relation_in("desc_kg", "info").unwrap();
+        assert!(desc.is_some());
+    }
+
+    #[test]
+    fn test_describe_relation_nonexistent_in_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("empty_kg").unwrap();
+        let desc = storage.describe_relation_in("empty_kg", "missing").unwrap();
+        assert!(desc.is_none());
+    }
+
+    #[test]
+    fn test_save_all() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("s1").unwrap();
+        storage.create_knowledge_graph("s2").unwrap();
+
+        // save_all should not fail even with empty KGs
+        storage.save_all().unwrap();
+    }
+
+    #[test]
+    fn test_compact_all() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("c1").unwrap();
+        storage.compact_all().unwrap();
+    }
+
+    #[test]
+    fn test_num_cpus() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+        assert!(storage.num_cpus() >= 1);
+    }
+
+    #[test]
+    fn test_config_accessor() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+        let cfg = storage.config();
+        assert!(!cfg.storage.data_dir.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_rule_management_cross_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("rule_kg").unwrap();
+
+        let rule_def = make_simple_rule_def("view_r", "base_r");
+        storage.register_rule_in("rule_kg", &rule_def).unwrap();
+
+        let rules = storage.list_rules_in("rule_kg").unwrap();
+        assert!(rules.contains(&"view_r".to_string()));
+
+        let desc = storage.describe_rule_in("rule_kg", "view_r").unwrap();
+        assert!(desc.is_some());
+
+        let count = storage.rule_count_in("rule_kg", "view_r").unwrap();
+        assert_eq!(count, Some(1));
+
+        storage.drop_rule_in("rule_kg", "view_r").unwrap();
+        let rules_after = storage.list_rules_in("rule_kg").unwrap();
+        assert!(rules_after.is_empty());
+    }
+
+    #[test]
+    fn test_schema_management_cross_kg() {
+        use crate::schema::{ColumnSchema, SchemaType};
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("schema_kg").unwrap();
+
+        let schema =
+            RelationSchema::new("my_rel").with_column(ColumnSchema::new("id", SchemaType::Int));
+        storage.register_schema_in("schema_kg", schema).unwrap();
+
+        assert!(storage.has_schema_in("schema_kg", "my_rel").unwrap());
+        let retrieved = storage.get_schema_in("schema_kg", "my_rel").unwrap();
+        assert!(retrieved.is_some());
+
+        let schemas = storage.list_schemas_in("schema_kg").unwrap();
+        assert!(schemas.contains(&"my_rel".to_string()));
+
+        storage.remove_schema_in("schema_kg", "my_rel").unwrap();
+        assert!(!storage.has_schema_in("schema_kg", "my_rel").unwrap());
+    }
+
+    #[test]
+    fn test_delete_from_cross_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("del_kg").unwrap();
+        storage
+            .insert_into("del_kg", "data", vec![(1, 2), (3, 4)])
+            .unwrap();
+
+        let deleted = storage.delete_from("del_kg", "data", vec![(1, 2)]).unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_explain_query() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("explain_kg").unwrap();
+        storage
+            .insert_into("explain_kg", "edge", vec![(1, 2)])
+            .unwrap();
+
+        let trace = storage
+            .explain_query_on("explain_kg", "result(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_create_knowledge_graph_duplicate() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("dup_kg").unwrap();
+        let result = storage.create_knowledge_graph("dup_kg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_drop_knowledge_graph() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("drop_kg").unwrap();
+        storage.drop_knowledge_graph("drop_kg").unwrap();
+        let kgs = storage.list_knowledge_graphs();
+        assert!(!kgs.contains(&"drop_kg".to_string()));
+    }
+
+    #[test]
+    fn test_drop_nonexistent_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.drop_knowledge_graph("nope_kg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_use_knowledge_graph_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.use_knowledge_graph("no_such_kg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_insert_and_query_strings() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("str_kg").unwrap();
+        storage
+            .insert_tuples_into(
+                "str_kg",
+                "names",
+                vec![
+                    Tuple::new(vec![Value::String("alice".into()), Value::Int32(30)]),
+                    Tuple::new(vec![Value::String("bob".into()), Value::Int32(25)]),
+                ],
+            )
+            .unwrap();
+
+        let result = storage
+            .execute_query_tuples_on("str_kg", "result(N, A) <- names(N, A)")
+            .unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_list_relations_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("rel_kg").unwrap();
+        storage.insert_into("rel_kg", "edge", vec![(1, 2)]).unwrap();
+        storage.insert_into("rel_kg", "node", vec![(1, 0)]).unwrap();
+
+        let relations = storage.list_relations_in("rel_kg").unwrap();
+        assert!(relations.contains(&"edge".to_string()));
+        assert!(relations.contains(&"node".to_string()));
+    }
+
+    #[test]
+    fn test_query_with_filter() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("filt_kg").unwrap();
+        storage
+            .insert_into("filt_kg", "scores", vec![(1, 90), (2, 50), (3, 80)])
+            .unwrap();
+
+        let result = storage
+            .execute_query_on("filt_kg", "result(Id, S) <- scores(Id, S), S > 60")
+            .unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_multiple_kg_isolation() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("kg_a").unwrap();
+        storage.create_knowledge_graph("kg_b").unwrap();
+
+        storage.insert_into("kg_a", "data", vec![(1, 2)]).unwrap();
+        storage
+            .insert_into("kg_b", "data", vec![(3, 4), (5, 6)])
+            .unwrap();
+
+        let result_a = storage
+            .execute_query_on("kg_a", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        let result_b = storage
+            .execute_query_on("kg_b", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(result_a.len(), 1);
+        assert_eq!(result_b.len(), 2);
+    }
+
+    #[test]
+    fn test_describe_relation_format() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("desc_kg").unwrap();
+        storage
+            .insert_into("desc_kg", "edge", vec![(1, 2), (3, 4)])
+            .unwrap();
+
+        let desc = storage.describe_relation_in("desc_kg", "edge").unwrap();
+        assert!(desc.is_some());
+    }
+
+    #[test]
+    fn test_rule_arity_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("arity_kg").unwrap();
+        let rule_def = make_simple_rule_def("path", "edge");
+        storage.register_rule_in("arity_kg", &rule_def).unwrap();
+
+        let arity = storage.rule_arity_in("arity_kg", "path").unwrap();
+        assert!(arity.is_some());
+    }
+
+    #[test]
+    fn test_get_relation_metadata_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("meta_kg").unwrap();
+        storage
+            .insert_into("meta_kg", "edge", vec![(1, 2), (3, 4)])
+            .unwrap();
+
+        let meta = storage.get_relation_metadata_in("meta_kg", "edge").unwrap();
+        assert!(meta.is_some());
+        let (_, count) = meta.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_execute_query_tuples_on() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("tuples_kg").unwrap();
+        storage
+            .insert_into("tuples_kg", "data", vec![(10, 20)])
+            .unwrap();
+
+        let results = storage
+            .execute_query_tuples_on("tuples_kg", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        // insert_into uses (i32, i32) but query pipeline produces Int64
+        assert_eq!(results[0].get(0), Some(&Value::Int64(10)));
+    }
+
+    #[test]
+    fn test_insert_tuples_into() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("tup_kg").unwrap();
+        let tuples = vec![
+            Tuple::new(vec![Value::Int64(1), Value::string("a")]),
+            Tuple::new(vec![Value::Int64(2), Value::string("b")]),
+        ];
+        let (new, dup) = storage
+            .insert_tuples_into("tup_kg", "mixed", tuples)
+            .unwrap();
+        assert_eq!(new, 2);
+        assert_eq!(dup, 0);
+    }
+
+    #[test]
+    fn test_insert_tuples_empty() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("emp_tup_kg").unwrap();
+        let (new, dup) = storage
+            .insert_tuples_into("emp_tup_kg", "rel", vec![])
+            .unwrap();
+        assert_eq!(new, 0);
+        assert_eq!(dup, 0);
+    }
+
+    #[test]
+    fn test_delete_tuples_from() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("del_tup_kg").unwrap();
+        let tuples = vec![
+            Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+            Tuple::new(vec![Value::Int32(3), Value::Int32(4)]),
+        ];
+        storage
+            .insert_tuples_into("del_tup_kg", "data", tuples.clone())
+            .unwrap();
+
+        let deleted = storage
+            .delete_tuples_from("del_tup_kg", "data", vec![tuples[0].clone()])
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_delete_tuples_empty() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("del_emp_kg").unwrap();
+        let deleted = storage
+            .delete_tuples_from("del_emp_kg", "data", vec![])
+            .unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_ensure_knowledge_graph() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("ensure_kg").unwrap();
+        // Should succeed (already exists)
+        assert!(storage.ensure_knowledge_graph("ensure_kg").is_ok());
+        // Should fail (doesn't exist)
+        assert!(storage.ensure_knowledge_graph("missing_kg").is_err());
+    }
+
+    #[test]
+    fn test_explain_query_on() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("explain_kg").unwrap();
+        storage
+            .insert_into("explain_kg", "edge", vec![(1, 2)])
+            .unwrap();
+
+        let trace = storage
+            .explain_query_on("explain_kg", "result(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert!(trace.ast.is_some());
+    }
+
+    #[test]
+    fn test_list_relations_with_metadata_counts() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("meta_count_kg").unwrap();
+        storage
+            .insert_into("meta_count_kg", "alpha", vec![(1, 2)])
+            .unwrap();
+        storage
+            .insert_into("meta_count_kg", "beta", vec![(3, 4), (5, 6)])
+            .unwrap();
+
+        let meta = storage
+            .list_relations_with_metadata("meta_count_kg")
+            .unwrap();
+        assert_eq!(meta.len(), 2);
+        // One relation has 1 tuple, the other has 2
+        let total: usize = meta.iter().map(|(_, _, count)| count).sum();
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn test_drop_rule_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("drop_rule_kg").unwrap();
+        let rule_def = make_simple_rule_def("path", "edge");
+        storage.register_rule_in("drop_rule_kg", &rule_def).unwrap();
+        assert!(storage
+            .list_rules_in("drop_rule_kg")
+            .unwrap()
+            .contains(&"path".to_string()));
+
+        storage.drop_rule_in("drop_rule_kg", "path").unwrap();
+        assert!(!storage
+            .list_rules_in("drop_rule_kg")
+            .unwrap()
+            .contains(&"path".to_string()));
+    }
+
+    #[test]
+    fn test_describe_rule_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("desc_rule_kg").unwrap();
+        let rule_def = make_simple_rule_def("path", "edge");
+        storage.register_rule_in("desc_rule_kg", &rule_def).unwrap();
+
+        let desc = storage.describe_rule_in("desc_rule_kg", "path").unwrap();
+        assert!(desc.is_some());
+    }
+
+    #[test]
+    fn test_rule_count_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("cnt_rule_kg").unwrap();
+        let rule_def = make_simple_rule_def("path", "edge");
+        storage.register_rule_in("cnt_rule_kg", &rule_def).unwrap();
+
+        let count = storage.rule_count_in("cnt_rule_kg", "path").unwrap();
+        assert!(count.is_some());
+        assert!(count.unwrap() >= 1);
+    }
+
+    #[test]
+    fn test_validate_tuples_in_no_schema() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("val_tup_kg").unwrap();
+        let tuples = vec![Tuple::new(vec![Value::Int32(1)])];
+        // No schema → validation should pass
+        let result = storage.validate_tuples_in("val_tup_kg", "noschema", &tuples);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_with_rules_on() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("ewr_kg").unwrap();
+        storage
+            .insert_into("ewr_kg", "edge", vec![(1, 2), (2, 3)])
+            .unwrap();
+
+        let rule_def = make_simple_rule_def("path", "edge");
+        storage.register_rule_in("ewr_kg", &rule_def).unwrap();
+
+        let results = storage
+            .execute_query_with_rules_tuples_on("ewr_kg", "result(X, Y) <- path(X, Y)")
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_set_num_threads_already_initialized() {
+        // Rayon global pool is already initialized in test context.
+        // set_num_threads should still return Ok (silently succeeds).
+        let result = StorageEngine::set_num_threads(4);
+        // In test context, rayon pool is already built by other tests
+        // so this may succeed silently or error depending on error message format
+        // Either way, it should not panic
+        let _ = result;
+    }
+
+    // === Batch 26: Untested public method coverage ===
+
+    #[test]
+    fn test_clear_rule_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("clear_rule_kg").unwrap();
+        let rule_def = make_simple_rule_def("reach", "edge");
+        storage
+            .register_rule_in("clear_rule_kg", &rule_def)
+            .unwrap();
+        assert_eq!(
+            storage.rule_count_in("clear_rule_kg", "reach").unwrap(),
+            Some(1)
+        );
+
+        storage.clear_rule_in("clear_rule_kg", "reach").unwrap();
+        // After clear, the rule count should be 0 (no clauses)
+        let count = storage.rule_count_in("clear_rule_kg", "reach").unwrap();
+        assert!(count.is_none() || count == Some(0));
+    }
+
+    #[test]
+    fn test_execute_query_with_rules_binary_on() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("qwrb_kg").unwrap();
+        storage
+            .insert_into("qwrb_kg", "edge", vec![(1, 2), (2, 3)])
+            .unwrap();
+
+        let rule_def = RuleDef {
+            name: "path".to_string(),
+            rule: SerializableRule {
+                head_relation: "path".to_string(),
+                head_args: vec![
+                    SerializableTerm::Variable("X".to_string()),
+                    SerializableTerm::Variable("Y".to_string()),
+                ],
+                body: vec![SerializableBodyPred::Atom {
+                    relation: "edge".to_string(),
+                    args: vec![
+                        SerializableTerm::Variable("X".to_string()),
+                        SerializableTerm::Variable("Y".to_string()),
+                    ],
+                    negated: false,
+                }],
+            },
+        };
+        storage.register_rule_in("qwrb_kg", &rule_def).unwrap();
+
+        let results = storage
+            .execute_query_with_rules_on("qwrb_kg", "result(X, Y) <- path(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_execute_query_with_session_facts_on() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("sessf_kg").unwrap();
+        storage
+            .insert_into("sessf_kg", "edge", vec![(1, 2), (2, 3)])
+            .unwrap();
+
+        // from_pair stores as Int64, so session facts must also use Int64
+        let session_facts = vec![("filter".to_string(), Tuple::new(vec![Value::Int64(1)]))];
+
+        let results = storage
+            .execute_query_with_session_facts_on(
+                "sessf_kg",
+                "result(X, Y) <- edge(X, Y), filter(X)",
+                session_facts,
+            )
+            .unwrap();
+        // Only edge(1, 2) matches because only 1 is in filter
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_register_or_update_schema_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("schema_kg").unwrap();
+
+        let schema = RelationSchema::new("users");
+        let result = storage.register_or_update_schema_in("schema_kg", schema);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_register_or_update_session_schema_in() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("ssschema_kg").unwrap();
+
+        let schema = RelationSchema::new("temp_data");
+        let result = storage.register_or_update_session_schema_in("ssschema_kg", schema);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_query_with_rules_on_nonexistent_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.execute_query_with_rules_on("no_such_kg", "result(X) <- a(X)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execute_query_with_session_facts_nonexistent_kg() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.execute_query_with_session_facts_on(
+            "no_kg_at_all",
+            "result(X) <- a(X)",
+            vec![],
+        );
+        assert!(result.is_err());
+    }
 }

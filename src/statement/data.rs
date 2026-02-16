@@ -353,4 +353,158 @@ mod tests {
         assert_eq!(op.deletes[0].relation, "edge");
         assert_eq!(op.inserts[0].relation, "edge");
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_parse_bulk_delete() {
+        let op = parse_delete("edge[(1,2), (3,4)]").unwrap();
+        assert_eq!(op.relation, "edge");
+        if let DeletePattern::BulkTuples(tuples) = op.pattern {
+            assert_eq!(tuples.len(), 2);
+        } else {
+            panic!("Expected BulkTuples");
+        }
+    }
+
+    #[test]
+    fn test_parse_fact_simple() {
+        let rule = parse_fact("edge(1, 2)").unwrap();
+        assert_eq!(rule.head.relation, "edge");
+        assert_eq!(rule.head.args.len(), 2);
+        assert!(rule.body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_fact_no_parens() {
+        let result = parse_fact("edge");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_insert_no_parens_or_brackets() {
+        let result = parse_insert("edge");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid insert syntax"));
+    }
+
+    #[test]
+    fn test_parse_delete_head_atom_error() {
+        let result = parse_delete("edge_no_args");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_bulk_tuples_empty_brackets() {
+        let op = parse_insert("edge[]").unwrap();
+        assert_eq!(op.relation, "edge");
+        assert!(op.tuples.is_empty());
+    }
+
+    #[test]
+    fn test_parse_bulk_single_value_tuples() {
+        let op = parse_insert("node[1, 2, 3]").unwrap();
+        assert_eq!(op.relation, "node");
+        assert_eq!(op.tuples.len(), 3);
+        // Each is a single-value tuple
+        assert_eq!(op.tuples[0].len(), 1);
+        assert_eq!(op.tuples[1].len(), 1);
+    }
+
+    #[test]
+    fn test_try_parse_update_no_arrow() {
+        let result = try_parse_update("-edge(1, 2), +edge(1, 3)").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_parse_update_only_deletes() {
+        let result = try_parse_update("-edge(1, 2) <- edge(1, 2)").unwrap();
+        // No inserts → not an update
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_parse_update_only_inserts() {
+        let result = try_parse_update("+edge(1, 3) <- edge(1, _)").unwrap();
+        // No deletes → not an update
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_parse_update_mixed_item_not_prefix() {
+        let result = try_parse_update("edge(1, 2), +edge(1, 3) <- edge(1, 2)").unwrap();
+        // First item has no prefix → not an update
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_conditional_delete_body_content() {
+        let op = parse_delete("edge(X, Y) <- banned(X), edge(X, Y)").unwrap();
+        assert_eq!(op.relation, "edge");
+        if let DeletePattern::Conditional { head_args, body } = op.pattern {
+            assert_eq!(head_args.len(), 2);
+            assert_eq!(body.len(), 2);
+        } else {
+            panic!("Expected Conditional");
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_with_floats() {
+        let op = parse_insert("data(3.14, 2.71)").unwrap();
+        assert_eq!(op.relation, "data");
+        assert_eq!(op.tuples.len(), 1);
+        assert!(matches!(&op.tuples[0][0], Term::FloatConstant(f) if (*f - 3.14).abs() < 0.001));
+    }
+
+    #[test]
+    fn test_parse_update_multiple_deletes_inserts() {
+        let update = try_parse_update("-a(X), -b(Y), +c(X), +d(Y) <- a(X), b(Y)").unwrap();
+        assert!(update.is_some());
+        let op = update.unwrap();
+        assert_eq!(op.deletes.len(), 2);
+        assert_eq!(op.inserts.len(), 2);
+        assert_eq!(op.deletes[0].relation, "a");
+        assert_eq!(op.deletes[1].relation, "b");
+        assert_eq!(op.inserts[0].relation, "c");
+        assert_eq!(op.inserts[1].relation, "d");
+    }
+
+    #[test]
+    fn test_parse_delete_single_tuple_args() {
+        let op = parse_delete("node(42)").unwrap();
+        assert_eq!(op.relation, "node");
+        if let DeletePattern::SingleTuple(args) = op.pattern {
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Term::Constant(42)));
+        } else {
+            panic!("Expected SingleTuple");
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_with_variables() {
+        // Variables are uppercase
+        let op = parse_insert("edge(X, Y)").unwrap();
+        assert_eq!(op.tuples[0].len(), 2);
+        assert!(matches!(&op.tuples[0][0], Term::Variable(v) if v == "X"));
+    }
+
+    #[test]
+    fn test_parse_fact_with_string_args() {
+        let rule = parse_fact("person(\"alice\", 30)").unwrap();
+        assert_eq!(rule.head.relation, "person");
+        assert!(matches!(&rule.head.args[0], Term::StringConstant(s) if s == "alice"));
+        assert!(matches!(&rule.head.args[1], Term::Constant(30)));
+    }
+
+    #[test]
+    fn test_parse_bulk_insert_nested_parens() {
+        let op = parse_insert("edge[(1, 2), (3, 4)]").unwrap();
+        assert_eq!(op.relation, "edge");
+        assert_eq!(op.tuples.len(), 2);
+        assert_eq!(op.tuples[0].len(), 2);
+        assert_eq!(op.tuples[1].len(), 2);
+    }
 }

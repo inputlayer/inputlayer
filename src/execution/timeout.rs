@@ -221,4 +221,82 @@ mod tests {
         assert!(!timeout.is_cancelled());
         assert!(timeout.check().is_ok());
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_infinite_timeout() {
+        let timeout = QueryTimeout::infinite();
+        assert!(timeout.check().is_ok());
+        assert_eq!(timeout.remaining(), None);
+    }
+
+    #[test]
+    fn test_default_timeout() {
+        let timeout = QueryTimeout::default();
+        assert!(timeout.check().is_ok());
+        // Default is 60 seconds
+        let remaining = timeout.remaining().unwrap();
+        assert!(remaining <= Duration::from_secs(60));
+        assert!(remaining > Duration::from_secs(59));
+    }
+
+    #[test]
+    fn test_elapsed_increases() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let e1 = timeout.elapsed();
+        thread::sleep(Duration::from_millis(10));
+        let e2 = timeout.elapsed();
+        assert!(e2 > e1);
+    }
+
+    #[test]
+    fn test_cancel_handle_clone() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let handle1 = timeout.cancel_handle();
+        let handle2 = handle1.clone();
+        assert!(!handle2.is_cancelled());
+        handle1.cancel();
+        assert!(handle2.is_cancelled());
+        assert!(timeout.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancel_handle_from_another_thread() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let handle = timeout.cancel_handle();
+        let t = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            handle.cancel();
+        });
+        t.join().unwrap();
+        assert!(timeout.is_cancelled());
+        assert!(timeout.check().is_err());
+    }
+
+    #[test]
+    fn test_timeout_error_display() {
+        let err = TimeoutError {
+            timeout: Duration::from_secs(5),
+            elapsed: Duration::from_secs(6),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("5"));
+        assert!(msg.contains("6"));
+    }
+
+    #[test]
+    fn test_remaining_after_timeout() {
+        let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(timeout.remaining(), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn test_clone_shares_cancel_state() {
+        let timeout = QueryTimeout::new(Some(Duration::from_secs(10)));
+        let cloned = timeout.clone();
+        timeout.cancel();
+        assert!(cloned.is_cancelled());
+    }
 }

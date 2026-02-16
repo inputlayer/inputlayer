@@ -1159,6 +1159,143 @@ mod tests {
         assert!(graph.has_negative_deps("a"));
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_dependency_graph_default() {
+        let graph = DependencyGraph::default();
+        assert!(graph.relations.is_empty());
+        assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn test_dependency_graph_to_simple_graph() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("a", "c", DependencyType::Negative);
+
+        let simple = graph.to_simple_graph();
+        assert!(simple.contains_key("a"));
+        let a_deps = &simple["a"];
+        assert!(a_deps.contains("b"));
+        assert!(a_deps.contains("c")); // Both positive and negative edges in simple graph
+    }
+
+    #[test]
+    fn test_dependency_graph_no_negative_deps() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        assert!(!graph.has_negative_deps("a"));
+        assert!(graph.negative_deps("a").is_empty());
+    }
+
+    #[test]
+    fn test_positive_deps_nonexistent() {
+        let graph = DependencyGraph::new();
+        assert!(graph.positive_deps("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn test_negative_deps_nonexistent() {
+        let graph = DependencyGraph::new();
+        assert!(graph.negative_deps("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn test_has_negative_edge_in_scc_positive_only() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("b", "a", DependencyType::Positive);
+
+        let scc = vec!["a".to_string(), "b".to_string()];
+        assert!(graph.has_negative_edge_in_scc(&scc).is_none());
+    }
+
+    #[test]
+    fn test_has_negative_edge_in_scc_with_negative() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Negative);
+        graph.add_edge("b", "a", DependencyType::Positive);
+
+        let scc = vec!["a".to_string(), "b".to_string()];
+        let result = graph.has_negative_edge_in_scc(&scc);
+        assert!(result.is_some());
+        let (from, to) = result.unwrap();
+        assert_eq!(from, "a");
+        assert_eq!(to, "b");
+    }
+
+    #[test]
+    fn test_is_recursive_rule_non_recursive() {
+        let rule = Rule::new_simple(
+            Atom::new("result".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        );
+        assert!(!is_recursive_rule(&rule));
+    }
+
+    #[test]
+    fn test_has_recursion_empty_program() {
+        let program = Program::new();
+        assert!(!has_recursion(&program));
+    }
+
+    #[test]
+    fn test_stratify_empty_program() {
+        let program = Program::new();
+        let strata = stratify(&program);
+        assert!(strata.is_empty());
+    }
+
+    #[test]
+    fn test_find_sccs_empty_graph() {
+        let graph: HashMap<String, HashSet<String>> = HashMap::new();
+        let sccs = find_sccs(&graph);
+        assert!(sccs.is_empty());
+    }
+
+    #[test]
+    fn test_find_sccs_mutual_recursion() {
+        // a -> b -> a (mutual recursion)
+        let mut graph = HashMap::new();
+        graph.insert("a".to_string(), ["b".to_string()].iter().cloned().collect());
+        graph.insert("b".to_string(), ["a".to_string()].iter().cloned().collect());
+
+        let sccs = find_sccs(&graph);
+        // a and b should be in the same SCC
+        let ab_scc = sccs.iter().find(|scc| scc.contains(&"a".to_string()));
+        assert!(ab_scc.is_some());
+        assert!(ab_scc.unwrap().contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn test_build_extended_dependency_graph_with_comparison() {
+        // Tests that comparison predicates don't add edges
+        let mut program = Program::new();
+        program.add_rule(Rule::new(
+            Atom::new("result".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("x".to_string()),
+                    crate::ast::ComparisonOp::GreaterThan,
+                    Term::Constant(0),
+                ),
+            ],
+        ));
+
+        let graph = build_extended_dependency_graph(&program);
+        let pos_deps = graph.positive_deps("result");
+        assert!(pos_deps.contains(&"data"));
+        assert_eq!(pos_deps.len(), 1); // Only data, not comparison
+    }
+
     #[test]
     fn test_stratify_multiple_negations() {
         // d(x) <- a(x), !b(x), !c(x).
@@ -1222,5 +1359,278 @@ mod tests {
 
         assert!(d_stratum > b_stratum, "d must be after b");
         assert!(d_stratum > c_stratum, "d must be after c");
+    }
+
+    // =========================================================================
+    // Additional Recursion Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_stratification_result_strata_not_stratifiable() {
+        let result = StratificationResult::NotStratifiable {
+            relation: "bad".to_string(),
+            reason: "negation through recursion".to_string(),
+        };
+        assert!(result.strata().is_none());
+        assert!(!result.is_success());
+    }
+
+    #[test]
+    fn test_stratification_result_try_into_success() {
+        let result = StratificationResult::Success(vec![vec![0], vec![1]]);
+        let strata = result.try_into_strata().unwrap();
+        assert_eq!(strata.len(), 2);
+    }
+
+    #[test]
+    fn test_stratification_result_try_into_error() {
+        let result = StratificationResult::NotStratifiable {
+            relation: "r".to_string(),
+            reason: "cycle".to_string(),
+        };
+        let err = result.try_into_strata().unwrap_err();
+        assert_eq!(err.0, "r");
+        assert_eq!(err.1, "cycle");
+    }
+
+    #[test]
+    #[should_panic(expected = "Not stratifiable")]
+    fn test_stratification_result_unwrap_panics() {
+        let result = StratificationResult::NotStratifiable {
+            relation: "x".to_string(),
+            reason: "fail".to_string(),
+        };
+        result.unwrap();
+    }
+
+    #[test]
+    fn test_dependency_graph_add_edge() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("a", "c", DependencyType::Negative);
+
+        assert!(graph.relations.contains("a"));
+        assert!(graph.relations.contains("b"));
+        assert!(graph.relations.contains("c"));
+    }
+
+    #[test]
+    fn test_dependency_graph_positive_deps() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("a", "c", DependencyType::Negative);
+
+        let pos = graph.positive_deps("a");
+        assert_eq!(pos, vec!["b"]);
+    }
+
+    #[test]
+    fn test_dependency_graph_negative_deps() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("a", "c", DependencyType::Negative);
+
+        let neg = graph.negative_deps("a");
+        assert_eq!(neg, vec!["c"]);
+    }
+
+    #[test]
+    fn test_dependency_graph_has_negative_deps() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        assert!(!graph.has_negative_deps("a"));
+
+        graph.add_edge("a", "c", DependencyType::Negative);
+        assert!(graph.has_negative_deps("a"));
+    }
+
+    #[test]
+    fn test_dependency_graph_to_simple_graph_includes_all() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("a", "c", DependencyType::Negative);
+        // d has no outgoing edges but is a target
+        graph.relations.insert("d".to_string());
+
+        let simple = graph.to_simple_graph();
+        assert!(simple.contains_key("a"));
+        assert!(simple.contains_key("d"));
+        assert!(simple["a"].contains("b"));
+        assert!(simple["a"].contains("c"));
+    }
+
+    #[test]
+    fn test_has_negative_edge_in_scc_none() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("b", "a", DependencyType::Positive);
+
+        let scc = vec!["a".to_string(), "b".to_string()];
+        assert!(graph.has_negative_edge_in_scc(&scc).is_none());
+    }
+
+    #[test]
+    fn test_has_negative_edge_in_scc_found() {
+        let mut graph = DependencyGraph::new();
+        graph.add_edge("a", "b", DependencyType::Positive);
+        graph.add_edge("b", "a", DependencyType::Negative);
+
+        let scc = vec!["a".to_string(), "b".to_string()];
+        let result = graph.has_negative_edge_in_scc(&scc);
+        assert!(result.is_some());
+        let (from, to) = result.unwrap();
+        assert_eq!(from, "b");
+        assert_eq!(to, "a");
+    }
+
+    #[test]
+    fn test_find_sccs_singleton() {
+        let mut graph = HashMap::new();
+        graph.insert("a".to_string(), HashSet::new());
+
+        let sccs = find_sccs(&graph);
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0], vec!["a"]);
+    }
+
+    #[test]
+    fn test_find_sccs_chain_no_cycle() {
+        let mut graph = HashMap::new();
+        graph.insert("a".to_string(), HashSet::from(["b".to_string()]));
+        graph.insert("b".to_string(), HashSet::from(["c".to_string()]));
+        graph.insert("c".to_string(), HashSet::new());
+
+        let sccs = find_sccs(&graph);
+        // Each node is its own SCC (no cycles)
+        assert_eq!(sccs.len(), 3);
+        for scc in &sccs {
+            assert_eq!(scc.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_find_sccs_triangle_cycle() {
+        let mut graph = HashMap::new();
+        graph.insert("a".to_string(), HashSet::from(["b".to_string()]));
+        graph.insert("b".to_string(), HashSet::from(["c".to_string()]));
+        graph.insert("c".to_string(), HashSet::from(["a".to_string()]));
+
+        let sccs = find_sccs(&graph);
+        // One SCC with all three nodes
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0].len(), 3);
+    }
+
+    #[test]
+    fn test_stratify_single_rule() {
+        let mut program = Program::new();
+        program.add_rule(Rule::new_simple(
+            Atom::new("result".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "base".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        let strata = stratify(&program);
+        assert_eq!(strata.len(), 1);
+        assert!(strata[0].contains(&0));
+    }
+
+    #[test]
+    fn test_is_recursive_rule_with_indirect() {
+        // path(X, Y) <- edge(X, Y) — NOT recursive (head not in body)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            )],
+        );
+        assert!(!is_recursive_rule(&rule));
+    }
+
+    #[test]
+    fn test_build_dependency_graph_simple() {
+        let mut program = Program::new();
+        // a(x) <- b(x)
+        program.add_rule(Rule::new_simple(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "b".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+
+        let graph = build_dependency_graph(&program);
+        assert!(graph.contains_key("a"));
+        assert!(graph["a"].contains("b"));
+    }
+
+    #[test]
+    fn test_dependency_type_equality() {
+        assert_eq!(DependencyType::Positive, DependencyType::Positive);
+        assert_ne!(DependencyType::Positive, DependencyType::Negative);
+    }
+
+    #[test]
+    fn test_stratify_with_negation_empty() {
+        let program = Program::new();
+        let result = stratify_with_negation(&program);
+        assert!(result.is_success());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_has_recursion_single_nonrecursive() {
+        let mut program = Program::new();
+        program.add_rule(Rule::new_simple(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "b".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        assert!(!has_recursion(&program));
+    }
+
+    #[test]
+    fn test_has_recursion_mutual_not_detected() {
+        // has_recursion only checks DIRECT self-recursion (head in own body)
+        // Mutual recursion (a→b, b→a) is NOT detected by has_recursion
+        let mut program = Program::new();
+        // a(x) <- b(x)
+        program.add_rule(Rule::new_simple(
+            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "b".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        // b(x) <- a(x)
+        program.add_rule(Rule::new_simple(
+            Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "a".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        // Mutual recursion is NOT detected by has_recursion()
+        assert!(!has_recursion(&program));
+
+        // But SCC detection does find the cycle
+        let graph = build_dependency_graph(&program);
+        let sccs = find_sccs(&graph);
+        let has_cycle = sccs.iter().any(|scc| scc.len() > 1);
+        assert!(has_cycle, "SCC detection should find mutual recursion");
     }
 }

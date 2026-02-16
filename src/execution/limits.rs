@@ -360,4 +360,147 @@ mod tests {
         assert!(limits.max_result_size.unwrap() < 1_000_000);
         assert!(limits.max_row_width.unwrap() <= 20);
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_intermediate_size_check() {
+        let limits = ResourceLimits::default().with_max_intermediate_size(500);
+        assert!(limits.check_intermediate_size(499, "join").is_ok());
+        assert!(limits.check_intermediate_size(500, "join").is_ok());
+        let err = limits.check_intermediate_size(501, "join");
+        assert!(err.is_err());
+        if let Err(ResourceError::IntermediateResultExceeded { stage, .. }) = err {
+            assert_eq!(stage, "join");
+        } else {
+            panic!("Expected IntermediateResultExceeded");
+        }
+    }
+
+    #[test]
+    fn test_unlimited_checks_all_pass() {
+        let limits = ResourceLimits::unlimited();
+        assert!(limits.check_result_size(usize::MAX).is_ok());
+        assert!(limits.check_intermediate_size(usize::MAX, "any").is_ok());
+        assert!(limits.check_row_width(usize::MAX).is_ok());
+    }
+
+    #[test]
+    fn test_resource_limits_with_builders() {
+        let limits = ResourceLimits::unlimited()
+            .with_max_memory(1024)
+            .with_max_result_size(100)
+            .with_max_intermediate_size(200);
+        assert_eq!(limits.max_memory_bytes, Some(1024));
+        assert_eq!(limits.max_result_size, Some(100));
+        assert_eq!(limits.max_intermediate_size, Some(200));
+    }
+
+    #[test]
+    fn test_memory_tracker_reset() {
+        let tracker = MemoryTracker::new(Some(1000));
+        tracker.allocate(500).unwrap();
+        assert_eq!(tracker.current_usage(), 500);
+        assert_eq!(tracker.peak_usage(), 500);
+        tracker.reset();
+        assert_eq!(tracker.current_usage(), 0);
+        assert_eq!(tracker.peak_usage(), 0);
+    }
+
+    #[test]
+    fn test_memory_tracker_check() {
+        let tracker = MemoryTracker::new(Some(100));
+        assert!(tracker.check().is_ok());
+        tracker.allocate(100).unwrap();
+        assert!(tracker.check().is_ok());
+    }
+
+    #[test]
+    fn test_memory_tracker_default() {
+        let tracker = MemoryTracker::default();
+        assert_eq!(tracker.limit, Some(1024 * 1024 * 1024));
+        assert_eq!(tracker.current_usage(), 0);
+    }
+
+    #[test]
+    fn test_memory_tracker_clone_shares_state() {
+        let tracker1 = MemoryTracker::new(Some(1000));
+        let tracker2 = tracker1.clone();
+        tracker1.allocate(300).unwrap();
+        // Cloned tracker shares Arc state
+        assert_eq!(tracker2.current_usage(), 300);
+    }
+
+    #[test]
+    fn test_resource_error_display() {
+        let err = ResourceError::MemoryLimitExceeded {
+            limit: 100,
+            used: 200,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("100"));
+        assert!(msg.contains("200"));
+
+        let err = ResourceError::ResultSizeLimitExceeded {
+            limit: 50,
+            actual: 100,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("50"));
+        assert!(msg.contains("100"));
+
+        let err = ResourceError::IntermediateResultExceeded {
+            limit: 500,
+            actual: 1000,
+            stage: "join".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("join"));
+
+        let err = ResourceError::RowWidthExceeded {
+            limit: 20,
+            actual: 30,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("20"));
+        assert!(msg.contains("30"));
+    }
+
+    #[test]
+    fn test_default_limits_have_recursion_depth() {
+        let limits = ResourceLimits::default();
+        assert_eq!(limits.max_recursion_depth, Some(1000));
+    }
+
+    #[test]
+    fn test_strict_limits_all_fields() {
+        let limits = ResourceLimits::strict();
+        assert_eq!(limits.max_memory_bytes, Some(100 * 1024 * 1024));
+        assert_eq!(limits.max_result_size, Some(100_000));
+        assert_eq!(limits.max_intermediate_size, Some(1_000_000));
+        assert_eq!(limits.max_row_width, Some(20));
+        assert_eq!(limits.max_recursion_depth, Some(100));
+    }
+
+    #[test]
+    fn test_memory_tracker_remaining_decreases() {
+        let tracker = MemoryTracker::new(Some(1000));
+        assert_eq!(tracker.remaining(), Some(1000));
+        tracker.allocate(300).unwrap();
+        assert_eq!(tracker.remaining(), Some(700));
+        tracker.allocate(700).unwrap();
+        assert_eq!(tracker.remaining(), Some(0));
+    }
+
+    #[test]
+    fn test_memory_tracker_peak_tracks_highest() {
+        let tracker = MemoryTracker::new(Some(10000));
+        tracker.allocate(500).unwrap();
+        tracker.allocate(300).unwrap(); // 800 total
+        assert_eq!(tracker.peak_usage(), 800);
+        tracker.release(600); // 200 current
+        assert_eq!(tracker.peak_usage(), 800); // peak unchanged
+        tracker.allocate(100).unwrap(); // 300 current
+        assert_eq!(tracker.peak_usage(), 800); // still 800
+    }
 }

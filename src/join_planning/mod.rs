@@ -1241,4 +1241,459 @@ mod tests {
         assert!(stats.is_connected);
         assert_eq!(stats.num_atoms, 3);
     }
+
+    #[test]
+    fn test_join_graph_new_empty() {
+        let graph = JoinGraph::new();
+        assert!(graph.nodes.is_empty());
+        assert!(graph.edges.is_empty());
+        assert!(graph.is_connected()); // Empty graph is connected by convention
+    }
+
+    #[test]
+    fn test_join_graph_default() {
+        let graph = JoinGraph::default();
+        assert!(graph.nodes.is_empty());
+        assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn test_join_graph_mst_empty() {
+        let graph = JoinGraph::new();
+        let mst = graph.compute_mst();
+        assert!(mst.is_empty());
+    }
+
+    #[test]
+    fn test_join_graph_edge_ordering() {
+        let edge1 = JoinGraphEdge {
+            from: 0,
+            to: 1,
+            weight: 2,
+        };
+        let edge2 = JoinGraphEdge {
+            from: 0,
+            to: 2,
+            weight: 3,
+        };
+        let edge3 = JoinGraphEdge {
+            from: 1,
+            to: 2,
+            weight: 2,
+        };
+
+        // Higher weight = higher priority (for max spanning tree)
+        assert!(edge2 > edge1);
+        assert_eq!(edge1, edge3); // Equal weight
+        assert!(edge1.partial_cmp(&edge2).is_some());
+    }
+
+    #[test]
+    fn test_join_planner_default() {
+        let planner = JoinPlanner::default();
+        // Default should have reordering enabled
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+        // Should not panic
+        let _ = planner.plan_joins(ir);
+    }
+
+    #[test]
+    fn test_join_planner_with_antijoin_skips() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let scan3 = make_scan("T", &["z", "w"]);
+
+        // Build Join(Scan(R), Scan(S)) then Antijoin with T
+        let join = make_join(scan1, scan2, "y");
+        let ir = IRNode::Antijoin {
+            left: Box::new(join),
+            right: Box::new(scan3),
+            left_keys: vec![2],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+
+        let result = planner.plan_joins(ir.clone());
+
+        // Should return unchanged because antijoin is present
+        assert!(matches!(result, IRNode::Antijoin { .. }));
+    }
+
+    #[test]
+    fn test_join_planner_no_joins_unchanged() {
+        let planner = JoinPlanner::new();
+        let ir = IRNode::Filter {
+            input: Box::new(make_scan("R", &["x", "y"])),
+            predicate: crate::ir::Predicate::ColumnGtConst(0, 5),
+        };
+        let result = planner.plan_joins(ir);
+        // No joins, so should be unchanged
+        assert!(matches!(result, IRNode::Filter { .. }));
+    }
+
+    #[test]
+    fn test_join_planner_single_node_graph_unchanged() {
+        let planner = JoinPlanner::new();
+        // Only one scan, no joins
+        let ir = make_scan("R", &["x", "y"]);
+        let result = planner.plan_joins(ir);
+        assert!(matches!(result, IRNode::Scan { .. }));
+    }
+
+    #[test]
+    fn test_four_way_join() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["a", "b"]);
+        let scan2 = make_scan("S", &["b", "c"]);
+        let scan3 = make_scan("T", &["c", "d"]);
+        let scan4 = make_scan("U", &["d", "e"]);
+
+        let join1 = make_join(scan1, scan2, "b");
+        let join2 = make_join(join1, scan3, "c");
+        let ir = make_join(join2, scan4, "d");
+
+        let stats = planner.analyze(&ir);
+        assert_eq!(stats.num_atoms, 4);
+        assert_eq!(stats.num_joins, 3);
+        assert!(stats.is_connected);
+
+        // Plan should produce a valid result
+        let result = planner.plan_joins(ir);
+        let output = result.output_schema();
+        assert!(output.contains(&"a".to_string()));
+        assert!(output.contains(&"e".to_string()));
+    }
+
+    #[test]
+    fn test_join_planning_with_map_wrapper() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let join = make_join(scan1, scan2, "y");
+
+        // Wrap in Map to project to (x, z)
+        let ir = IRNode::Map {
+            input: Box::new(join),
+            projection: vec![0, 2],
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        };
+
+        let result = planner.plan_joins(ir);
+        let output = result.output_schema();
+        assert_eq!(output, vec!["x".to_string(), "z".to_string()]);
+    }
+
+    #[test]
+    fn test_join_planning_with_distinct_wrapper() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let join = make_join(scan1, scan2, "y");
+
+        let ir = IRNode::Distinct {
+            input: Box::new(join),
+        };
+
+        let result = planner.plan_joins(ir);
+        assert!(matches!(result, IRNode::Distinct { .. }));
+    }
+
+    #[test]
+    fn test_join_planning_with_filter_wrapper() {
+        let planner = JoinPlanner::new();
+
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let join = make_join(scan1, scan2, "y");
+
+        let ir = IRNode::Filter {
+            input: Box::new(join),
+            predicate: crate::ir::Predicate::ColumnGtConst(0, 5),
+        };
+
+        let result = planner.plan_joins(ir);
+        // Should preserve filter
+        assert!(matches!(result, IRNode::Filter { .. }));
+    }
+
+    #[test]
+    fn test_rooted_jst_from_mst() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let scan3 = make_scan("T", &["z", "w"]);
+
+        let join1 = make_join(scan1, scan2, "y");
+        let ir = make_join(join1, scan3, "z");
+
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+
+        // Try different roots
+        let jst0 = RootedJST::from_mst(&graph, &mst, 0);
+        let jst1 = RootedJST::from_mst(&graph, &mst, 1);
+        let jst2 = RootedJST::from_mst(&graph, &mst, 2);
+
+        // All should have 3 nodes in join order
+        assert_eq!(jst0.join_order.len(), 3);
+        assert_eq!(jst1.join_order.len(), 3);
+        assert_eq!(jst2.join_order.len(), 3);
+
+        // Root should be last in post-order
+        assert_eq!(*jst0.join_order.last().unwrap(), 0);
+        assert_eq!(*jst1.join_order.last().unwrap(), 1);
+        assert_eq!(*jst2.join_order.last().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_rooted_jst_depth() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+        let jst = RootedJST::from_mst(&graph, &mst, 0);
+
+        // Two-node tree has depth 1
+        assert_eq!(jst.depth, 1);
+    }
+
+    #[test]
+    fn test_join_planning_stats_default() {
+        let stats = JoinPlanningStats::default();
+        assert_eq!(stats.num_joins, 0);
+        assert_eq!(stats.num_atoms, 0);
+        assert!(!stats.is_connected);
+        assert_eq!(stats.chosen_cost, 0);
+        assert_eq!(stats.best_cost, 0);
+    }
+
+    #[test]
+    fn test_analyze_single_scan() {
+        let planner = JoinPlanner::new();
+        let ir = make_scan("R", &["x", "y"]);
+        let stats = planner.analyze(&ir);
+        assert_eq!(stats.num_joins, 0);
+        assert_eq!(stats.num_atoms, 1);
+    }
+
+    #[test]
+    fn test_extract_scans_through_filter_chain() {
+        // Filter wrapping a Scan should be treated as a single leaf node
+        let scan = make_scan("R", &["x", "y"]);
+        let filtered = IRNode::Filter {
+            input: Box::new(scan),
+            predicate: crate::ir::Predicate::ColumnEqStr(0, "hello".to_string()),
+        };
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(filtered, scan2, "y");
+
+        let graph = JoinGraph::from_ir(&ir);
+        // Should have 2 nodes: the Filter(Scan(R)) as one leaf, Scan(S) as another
+        assert_eq!(graph.nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_join_graph_multiple_shared_vars() {
+        // R(x, y, z) joins S(x, y, w) on both x and y
+        let scan1 = make_scan("R", &["x", "y", "z"]);
+        let scan2 = make_scan("S", &["x", "y", "w"]);
+
+        let ir = IRNode::Join {
+            left: Box::new(scan1),
+            right: Box::new(scan2),
+            left_keys: vec![0, 1],
+            right_keys: vec![0, 1],
+            output_schema: vec![
+                "x".to_string(),
+                "y".to_string(),
+                "z".to_string(),
+                "w".to_string(),
+            ],
+        };
+
+        let graph = JoinGraph::from_ir(&ir);
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].weight, 2); // Two shared variables: x, y
+    }
+
+    #[test]
+    fn test_count_joins_nested() {
+        let scan1 = make_scan("R", &["a", "b"]);
+        let scan2 = make_scan("S", &["b", "c"]);
+        let scan3 = make_scan("T", &["c", "d"]);
+
+        let join1 = make_join(scan1, scan2, "b");
+        let ir = make_join(join1, scan3, "c");
+
+        let planner = JoinPlanner::new();
+        let stats = planner.analyze(&ir);
+        assert_eq!(stats.num_joins, 2);
+    }
+
+    #[test]
+    fn test_has_joins_scan_only() {
+        let ir = make_scan("R", &["x"]);
+        assert!(!JoinPlanner::has_joins(&ir));
+    }
+
+    #[test]
+    fn test_has_joins_simple_join() {
+        let ir = make_join(
+            make_scan("R", &["x", "y"]),
+            make_scan("S", &["y", "z"]),
+            "y",
+        );
+        assert!(JoinPlanner::has_joins(&ir));
+    }
+
+    #[test]
+    fn test_has_joins_nested_in_filter() {
+        let ir = IRNode::Filter {
+            input: Box::new(make_join(
+                make_scan("R", &["x", "y"]),
+                make_scan("S", &["y", "z"]),
+                "y",
+            )),
+            predicate: crate::ir::Predicate::True,
+        };
+        assert!(JoinPlanner::has_joins(&ir));
+    }
+
+    #[test]
+    fn test_has_joins_in_distinct() {
+        let ir = IRNode::Distinct {
+            input: Box::new(make_join(
+                make_scan("R", &["a", "b"]),
+                make_scan("S", &["b", "c"]),
+                "b",
+            )),
+        };
+        assert!(JoinPlanner::has_joins(&ir));
+    }
+
+    #[test]
+    fn test_has_antijoin_none() {
+        let ir = make_join(
+            make_scan("R", &["x", "y"]),
+            make_scan("S", &["y", "z"]),
+            "y",
+        );
+        assert!(!JoinPlanner::has_antijoin(&ir));
+    }
+
+    #[test]
+    fn test_has_antijoin_present() {
+        let ir = IRNode::Antijoin {
+            left: Box::new(make_scan("R", &["x", "y"])),
+            right: Box::new(make_scan("S", &["y", "z"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        assert!(JoinPlanner::has_antijoin(&ir));
+    }
+
+    #[test]
+    fn test_has_antijoin_nested_in_map() {
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(make_scan("R", &["x", "y"])),
+            right: Box::new(make_scan("S", &["y"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let ir = IRNode::Map {
+            input: Box::new(antijoin),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert!(JoinPlanner::has_antijoin(&ir));
+    }
+
+    #[test]
+    fn test_graph_connected_single_node() {
+        let scan = make_scan("R", &["x"]);
+        let graph = JoinGraph::from_ir(&scan);
+        assert!(graph.is_connected());
+    }
+
+    #[test]
+    fn test_graph_connected_chain() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let scan3 = make_scan("T", &["z", "w"]);
+        let join1 = make_join(scan1, scan2, "y");
+        let ir = make_join(join1, scan3, "z");
+        let graph = JoinGraph::from_ir(&ir);
+        assert!(graph.is_connected());
+    }
+
+    #[test]
+    fn test_mst_single_edge() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+        assert_eq!(mst.len(), 1);
+    }
+
+    #[test]
+    fn test_plan_joins_preserves_single_scan() {
+        let planner = JoinPlanner::new();
+        let ir = make_scan("R", &["x", "y"]);
+        let result = planner.plan_joins(ir);
+        match result {
+            IRNode::Scan { relation, .. } => assert_eq!(relation, "R"),
+            _ => panic!("Expected Scan"),
+        }
+    }
+
+    #[test]
+    fn test_plan_joins_with_antijoin_skips_reordering() {
+        let planner = JoinPlanner::new();
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(make_scan("R", &["x", "y"])),
+            right: Box::new(make_scan("S", &["y"])),
+            left_keys: vec![1],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        // plan_joins should skip reordering when antijoin is present
+        let result = planner.plan_joins(antijoin);
+        assert!(matches!(result, IRNode::Antijoin { .. }));
+    }
+
+    #[test]
+    fn test_analyze_one_join() {
+        let planner = JoinPlanner::new();
+        let ir = make_join(
+            make_scan("R", &["x", "y"]),
+            make_scan("S", &["y", "z"]),
+            "y",
+        );
+        let stats = planner.analyze(&ir);
+        assert_eq!(stats.num_joins, 1);
+    }
+
+    #[test]
+    fn test_rooted_jst_from_mst_single_edge() {
+        let scan1 = make_scan("R", &["x", "y"]);
+        let scan2 = make_scan("S", &["y", "z"]);
+        let ir = make_join(scan1, scan2, "y");
+        let graph = JoinGraph::from_ir(&ir);
+        let mst = graph.compute_mst();
+        let jst = RootedJST::from_mst(&graph, &mst, 0);
+        assert_eq!(jst.root, 0);
+        // Root has one child (node 1), join_order should contain both nodes
+        assert_eq!(jst.join_order.len(), 2);
+    }
 }
