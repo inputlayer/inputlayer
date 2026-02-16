@@ -358,11 +358,11 @@ mod tests {
 
     #[test]
     fn test_cache_entry_expiration() {
-        let entry: CacheEntry<i32> = CacheEntry::new(42, Some(Duration::from_millis(10)));
+        let entry: CacheEntry<i32> = CacheEntry::new(42, Some(Duration::from_millis(50)));
 
         assert!(!entry.is_expired());
 
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(150));
 
         assert!(entry.is_expired());
     }
@@ -471,9 +471,9 @@ mod tests {
     #[test]
     fn test_cache_entry_age_and_idle() {
         let entry: CacheEntry<i32> = CacheEntry::new(42, None);
-        std::thread::sleep(Duration::from_millis(5));
-        assert!(entry.age() >= Duration::from_millis(5));
-        assert!(entry.idle_time() >= Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(entry.age() >= Duration::from_millis(50));
+        assert!(entry.idle_time() >= Duration::from_millis(50));
     }
 
     #[test]
@@ -549,22 +549,22 @@ mod tests {
 
     #[test]
     fn test_result_cache_expiration() {
-        let cache = QueryCache::new(100, 100, Duration::from_millis(10));
+        let cache = QueryCache::new(100, 100, Duration::from_millis(50));
         cache.put_results("query", 1, vec![(1, 2)]);
 
         assert!(cache.get_results("query", 1).is_some());
 
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(150));
 
         assert!(cache.get_results("query", 1).is_none());
     }
 
     #[test]
     fn test_compiled_cache_no_expiration() {
-        let cache = QueryCache::new(100, 100, Duration::from_millis(10));
+        let cache = QueryCache::new(100, 100, Duration::from_millis(50));
         cache.put_compiled("query", vec![]);
 
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(150));
 
         // Compiled cache entries have no TTL
         assert!(cache.get_compiled("query").is_some());
@@ -572,11 +572,11 @@ mod tests {
 
     #[test]
     fn test_result_cache_eviction_prefers_expired() {
-        let cache = QueryCache::new(100, 2, Duration::from_millis(10));
+        let cache = QueryCache::new(100, 2, Duration::from_millis(50));
         cache.put_results("a", 1, vec![(1, 2)]);
         cache.put_results("b", 1, vec![(3, 4)]);
 
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(150));
 
         // Adding a new entry should evict expired ones
         cache.put_results("c", 1, vec![(5, 6)]);

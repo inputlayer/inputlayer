@@ -190,16 +190,16 @@ mod tests {
 
     #[test]
     fn test_timeout_exceeded() {
-        let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
+        let timeout = QueryTimeout::new(Some(Duration::from_millis(50)));
 
-        // Sleep to exceed timeout
-        thread::sleep(Duration::from_millis(50));
+        // Sleep well past timeout (5x margin for CI scheduling jitter)
+        thread::sleep(Duration::from_millis(250));
 
         let result = timeout.check();
         assert!(result.is_err());
 
         if let Err(e) = result {
-            assert!(e.elapsed >= Duration::from_millis(10));
+            assert!(e.elapsed >= Duration::from_millis(50));
         }
     }
 
@@ -287,8 +287,8 @@ mod tests {
 
     #[test]
     fn test_remaining_after_timeout() {
-        let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
-        thread::sleep(Duration::from_millis(50));
+        let timeout = QueryTimeout::new(Some(Duration::from_millis(50)));
+        thread::sleep(Duration::from_millis(250));
         assert_eq!(timeout.remaining(), Some(Duration::ZERO));
     }
 

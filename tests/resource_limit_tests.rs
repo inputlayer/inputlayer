@@ -47,17 +47,17 @@ fn test_query_timeout_check_before_timeout() {
 
 #[test]
 fn test_query_timeout_exceeded() {
-    let timeout = QueryTimeout::new(Some(Duration::from_millis(10)));
+    let timeout = QueryTimeout::new(Some(Duration::from_millis(50)));
 
-    // Sleep to exceed timeout
-    thread::sleep(Duration::from_millis(50));
+    // Sleep well past timeout (5x margin for CI scheduling jitter)
+    thread::sleep(Duration::from_millis(250));
 
     let result = timeout.check();
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert!(e.elapsed >= Duration::from_millis(10));
-        assert_eq!(e.timeout, Duration::from_millis(10));
+        assert!(e.elapsed >= Duration::from_millis(50));
+        assert_eq!(e.timeout, Duration::from_millis(50));
     }
 }
 
@@ -94,16 +94,17 @@ fn test_cancel_handle_cross_thread() {
 
 #[test]
 fn test_query_timeout_remaining_time() {
-    let timeout = QueryTimeout::new(Some(Duration::from_millis(100)));
+    let timeout = QueryTimeout::new(Some(Duration::from_secs(2)));
 
     let remaining1 = timeout.remaining().unwrap();
-    assert!(remaining1 > Duration::from_millis(90));
+    // Generous headroom: 500ms for scheduling jitter on overloaded CI
+    assert!(remaining1 > Duration::from_millis(1500));
 
-    thread::sleep(Duration::from_millis(30));
+    thread::sleep(Duration::from_millis(100));
 
     let remaining2 = timeout.remaining().unwrap();
     assert!(remaining2 < remaining1);
-    assert!(remaining2 < Duration::from_millis(80));
+    assert!(remaining2 < Duration::from_millis(1950));
 }
 
 #[test]
