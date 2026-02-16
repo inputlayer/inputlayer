@@ -614,6 +614,99 @@ mod tests {
         assert!(prefix.contains("derived2"));
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_snapshot_with_workers() {
+        let snapshot = KnowledgeGraphSnapshot::new_with_workers(HashMap::new(), Vec::new(), 4);
+        assert_eq!(snapshot.num_workers, 4);
+        assert!(snapshot.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_version_increases() {
+        let s1 = KnowledgeGraphSnapshot::empty();
+        let s2 = KnowledgeGraphSnapshot::empty();
+        assert!(s2.version > s1.version);
+    }
+
+    #[test]
+    fn test_snapshot_execute_tuples() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "data".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::string("alice")]),
+                Tuple::new(vec![Value::Int64(2), Value::string("bob")]),
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let results = snapshot
+            .execute_tuples("result(N, Name) <- data(N, Name)")
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_snapshot_execute_with_session_facts() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int32(1), Value::Int32(2)]),
+                Tuple::new(vec![Value::Int32(2), Value::Int32(3)]),
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+
+        // Execute with session-scoped filter
+        let results = snapshot
+            .execute_with_session_facts(
+                "result(X, Y) <- edge(X, Y), allowed(X)",
+                vec![("allowed".to_string(), Tuple::new(vec![Value::Int32(1)]))],
+            )
+            .unwrap();
+
+        // Only edge(1,2) matches because only 1 is in allowed
+        assert_eq!(results.len(), 1);
+
+        // Original snapshot is unaffected (no "allowed" in base data)
+        assert!(!snapshot.input_tuples.contains_key("allowed"));
+    }
+
+    #[test]
+    fn test_snapshot_execute_with_rules_no_rules() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        // No rules → execute_with_rules behaves like execute
+        let results = snapshot
+            .execute_with_rules("result(X, Y) <- edge(X, Y)")
+            .unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_snapshot_debug_output() {
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![Tuple::new(vec![Value::Int32(1), Value::Int32(2)])],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let debug = format!("{:?}", snapshot);
+        assert!(debug.contains("KnowledgeGraphSnapshot"));
+        assert!(debug.contains("relations: 1"));
+        assert!(debug.contains("tuples: 1"));
+    }
+
     #[test]
     fn test_empty_rules_empty_prefix() {
         let snapshot = KnowledgeGraphSnapshot::empty();

@@ -410,6 +410,107 @@ mod tests {
         assert!(!catalog.has_relation("node"));
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_catalog_default() {
+        let catalog = Catalog::default();
+        assert!(catalog.all_relations().is_empty());
+    }
+
+    #[test]
+    fn test_get_schema_nonexistent() {
+        let catalog = Catalog::new();
+        assert!(catalog.get_schema("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_typed_schema_nonexistent() {
+        let catalog = Catalog::new();
+        assert!(catalog.get_typed_schema("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_find_variable_position_nonexistent_relation() {
+        let catalog = Catalog::new();
+        assert!(catalog.find_variable_position("nonexistent", "x").is_none());
+    }
+
+    #[test]
+    fn test_validate_tuple_no_schema() {
+        let catalog = Catalog::new();
+        // No schema registered → validation succeeds (allow any)
+        let tuple = Tuple::new(vec![Value::Int32(1)]);
+        assert!(catalog.validate_tuple("unregistered", &tuple).is_ok());
+    }
+
+    #[test]
+    fn test_validate_tuples_no_schema() {
+        let catalog = Catalog::new();
+        let tuples = vec![Tuple::new(vec![Value::Int32(1)])];
+        assert!(catalog.validate_tuples("unregistered", &tuples).is_ok());
+    }
+
+    #[test]
+    fn test_infer_types_empty_tuples() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+        // Empty tuples → no inference
+        catalog.infer_types_from_tuples("data", &[]);
+        // Schema should still be the old one
+        assert_eq!(catalog.get_column_type("data", "x"), Some(&DataType::Int32));
+    }
+
+    #[test]
+    fn test_infer_types_no_existing_schema() {
+        let mut catalog = Catalog::new();
+        // Infer from tuples without pre-registration
+        let tuples = vec![Tuple::new(vec![
+            Value::string("hello"),
+            Value::Float64(1.0),
+        ])];
+        catalog.infer_types_from_tuples("new_rel", &tuples);
+        assert!(catalog.has_relation("new_rel"));
+        assert_eq!(
+            catalog.get_column_type("new_rel", "col0"),
+            Some(&DataType::String)
+        );
+        assert_eq!(
+            catalog.get_column_type("new_rel", "col1"),
+            Some(&DataType::Float64)
+        );
+    }
+
+    #[test]
+    fn test_infer_join_keys_no_shared() {
+        let catalog = Catalog::new();
+        let left = vec!["a".to_string(), "b".to_string()];
+        let right = vec!["c".to_string(), "d".to_string()];
+        let shared: Vec<String> = vec![];
+        let (lk, rk) = catalog.infer_join_keys(&left, &right, &shared);
+        assert!(lk.is_empty());
+        assert!(rk.is_empty());
+    }
+
+    #[test]
+    fn test_unregister_nonexistent() {
+        let mut catalog = Catalog::new();
+        // Should not panic
+        catalog.unregister_relation("nonexistent");
+    }
+
+    #[test]
+    fn test_all_relations() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("a".to_string(), vec!["x".to_string()]);
+        catalog.register_relation("b".to_string(), vec!["y".to_string()]);
+
+        let rels = catalog.all_relations();
+        assert_eq!(rels.len(), 2);
+        assert!(rels.contains(&"a".to_string()));
+        assert!(rels.contains(&"b".to_string()));
+    }
+
     #[test]
     fn test_default_types_are_int32() {
         let mut catalog = Catalog::new();

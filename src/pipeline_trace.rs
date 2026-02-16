@@ -744,6 +744,129 @@ mod tests {
     }
 
     #[test]
+    fn test_format_ir_tree_flatmap() {
+        let ir = IRNode::FlatMap {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            }),
+            projection: vec![0],
+            filter_predicate: Some(crate::ir::Predicate::ColumnGtConst(0, 5)),
+            output_schema: vec!["x".to_string()],
+        };
+        let output = PipelineTrace::format_ir_tree(&ir, 0);
+        assert!(output.contains("FlatMap"));
+    }
+
+    #[test]
+    fn test_format_ir_tree_join_flatmap() {
+        let ir = IRNode::JoinFlatMap {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            projection: vec![0, 1],
+            filter_predicate: None,
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let output = PipelineTrace::format_ir_tree(&ir, 0);
+        assert!(output.contains("JoinFlatMap"));
+    }
+
+    #[test]
+    fn test_format_ir_tree_hnsw_scan() {
+        let ir = IRNode::HnswScan {
+            index_name: "my_index".to_string(),
+            query: crate::ir::IRExpression::VectorLiteral(vec![1.0, 2.0, 3.0]),
+            k: 5,
+            ef_search: Some(50),
+            output_schema: vec!["id".to_string(), "distance".to_string()],
+        };
+        let output = PipelineTrace::format_ir_tree(&ir, 0);
+        assert!(output.contains("HnswScan"));
+        assert!(output.contains("my_index"));
+        assert!(output.contains("k=5"));
+    }
+
+    #[test]
+    fn test_count_ir_nodes_flatmap() {
+        let ir = IRNode::FlatMap {
+            input: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            projection: vec![0],
+            filter_predicate: None,
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 2);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_join_flatmap() {
+        let ir = IRNode::JoinFlatMap {
+            left: Box::new(IRNode::Scan {
+                relation: "a".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            right: Box::new(IRNode::Scan {
+                relation: "b".to_string(),
+                schema: vec!["x".to_string()],
+            }),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            projection: vec![0],
+            filter_predicate: None,
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 3);
+    }
+
+    #[test]
+    fn test_count_ir_nodes_hnsw_scan() {
+        let ir = IRNode::HnswScan {
+            index_name: "idx".to_string(),
+            query: crate::ir::IRExpression::VectorLiteral(vec![1.0]),
+            k: 1,
+            ef_search: None,
+            output_schema: vec!["id".to_string()],
+        };
+        assert_eq!(PipelineTrace::count_ir_nodes(&ir), 1);
+    }
+
+    #[test]
+    fn test_format_trace_with_ast() {
+        use crate::ast::{Atom, BodyPredicate, Program, Rule, Term};
+        let mut trace = PipelineTrace::new();
+        let mut program = Program::new();
+        program.add_rule(Rule::new(
+            Atom::new("result".to_string(), vec![Term::Variable("X".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "source".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "excluded".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+            ],
+        ));
+        trace.record_ast(program);
+        let output = trace.format_trace();
+        assert!(output.contains("PARSING"));
+        assert!(output.contains("Rules parsed: 1"));
+        assert!(output.contains("result"));
+        assert!(output.contains("!excluded"));
+    }
+
+    #[test]
     fn test_format_ir_tree_compute() {
         let ir = IRNode::Compute {
             input: Box::new(IRNode::Scan {

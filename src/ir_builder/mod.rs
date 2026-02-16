@@ -2042,4 +2042,1291 @@ mod tests {
             ir
         );
     }
+
+    #[test]
+    fn test_empty_body_rule_error() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // Rule with no positive body atoms
+        let rule = Rule::new(
+            Atom::new("result".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![], // empty body
+        );
+
+        let result = builder.build_ir(&rule);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no positive body atoms"));
+    }
+
+    #[test]
+    fn test_repeated_variable_in_atom() {
+        // edge(X, X) should add ColumnsEq filter
+        let mut catalog = Catalog::new();
+        catalog.register_relation("edge".to_string(), vec!["a".to_string(), "b".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        let rule = Rule::new_simple(
+            Atom::new(
+                "self_loop".to_string(),
+                vec![Term::Variable("X".to_string())],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("X".to_string()),
+                ],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        // Should contain a ColumnsEq filter for the repeated variable
+        fn contains_columns_eq(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    matches!(predicate, Predicate::ColumnsEq(0, 1)) || contains_columns_eq(input)
+                }
+                IRNode::Map { input, .. } => contains_columns_eq(input),
+                _ => false,
+            }
+        }
+        assert!(
+            contains_columns_eq(&ir),
+            "Expected ColumnsEq filter for repeated variable"
+        );
+    }
+
+    #[test]
+    fn test_bool_constant_in_body_atom() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation(
+            "flag".to_string(),
+            vec!["id".to_string(), "active".to_string()],
+        );
+        let builder = IRBuilder::new(catalog);
+
+        // active_item(Id) <- flag(Id, true)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "active_item".to_string(),
+                vec![Term::Variable("Id".to_string())],
+            ),
+            vec![Atom::new(
+                "flag".to_string(),
+                vec![Term::Variable("Id".to_string()), Term::BoolConstant(true)],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(ir.is_ok());
+
+        fn contains_bool_filter(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    matches!(predicate, Predicate::ColumnEqBool(1, true))
+                        || contains_bool_filter(input)
+                }
+                IRNode::Map { input, .. } => contains_bool_filter(input),
+                _ => false,
+            }
+        }
+        assert!(contains_bool_filter(&ir.unwrap()));
+    }
+
+    #[test]
+    fn test_integer_constant_in_body_atom() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation(
+            "data".to_string(),
+            vec!["id".to_string(), "val".to_string()],
+        );
+        let builder = IRBuilder::new(catalog);
+
+        // zero_val(Id) <- data(Id, 0)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "zero_val".to_string(),
+                vec![Term::Variable("Id".to_string())],
+            ),
+            vec![Atom::new(
+                "data".to_string(),
+                vec![Term::Variable("Id".to_string()), Term::Constant(0)],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(ir.is_ok());
+
+        fn contains_const_filter(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    matches!(predicate, Predicate::ColumnEqConst(1, 0))
+                        || contains_const_filter(input)
+                }
+                IRNode::Map { input, .. } => contains_const_filter(input),
+                _ => false,
+            }
+        }
+        assert!(contains_const_filter(&ir.unwrap()));
+    }
+
+    #[test]
+    fn test_build_negation_antijoin() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("person".to_string(), vec!["x".to_string()]);
+        catalog.register_relation("banned".to_string(), vec!["x".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        // allowed(X) <- person(X), !banned(X).
+        let rule = Rule::new(
+            Atom::new("allowed".to_string(), vec![Term::Variable("X".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "person".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "banned".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        fn contains_antijoin(node: &IRNode) -> bool {
+            match node {
+                IRNode::Antijoin { .. } => true,
+                IRNode::Map { input, .. } | IRNode::Filter { input, .. } => {
+                    contains_antijoin(input)
+                }
+                _ => false,
+            }
+        }
+        assert!(
+            contains_antijoin(&ir),
+            "Expected antijoin for negated predicate, got: {:?}",
+            ir
+        );
+    }
+
+    #[test]
+    fn test_comparison_filter_gt() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string(), "y".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        // big(X, Y) <- data(X, Y), X > 10.
+        let rule = Rule::new(
+            Atom::new(
+                "big".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("X".to_string()),
+                    ComparisonOp::GreaterThan,
+                    Term::Constant(10),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        fn contains_gt_filter(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    matches!(predicate, Predicate::ColumnGtConst(0, 10))
+                        || contains_gt_filter(input)
+                }
+                IRNode::Map { input, .. } => contains_gt_filter(input),
+                _ => false,
+            }
+        }
+        assert!(
+            contains_gt_filter(&ir),
+            "Expected ColumnGtConst filter for X > 10"
+        );
+    }
+
+    #[test]
+    fn test_comparison_filter_column_eq() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string(), "y".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        // same(X, Y) <- data(X, Y), X = Y.
+        let rule = Rule::new(
+            Atom::new(
+                "same".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("X".to_string()),
+                    ComparisonOp::Equal,
+                    Term::Variable("Y".to_string()),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        fn contains_columns_eq(node: &IRNode) -> bool {
+            match node {
+                IRNode::Filter { predicate, input } => {
+                    matches!(predicate, Predicate::ColumnsEq(0, 1)) || contains_columns_eq(input)
+                }
+                IRNode::Map { input, .. } => contains_columns_eq(input),
+                _ => false,
+            }
+        }
+        assert!(
+            contains_columns_eq(&ir),
+            "Expected ColumnsEq filter for X = Y"
+        );
+    }
+
+    #[test]
+    fn test_placeholder_in_body() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // has_edge(X) <- edge(X, _)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "has_edge".to_string(),
+                vec![Term::Variable("X".to_string())],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![Term::Variable("X".to_string()), Term::Placeholder],
+            )],
+        );
+
+        let ir = builder.build_ir(&rule);
+        assert!(ir.is_ok(), "Placeholder in body should be handled");
+    }
+
+    #[test]
+    fn test_func_to_str() {
+        use crate::ast::AggregateFunc;
+        assert_eq!(func_to_str(&AggregateFunc::Count), "count");
+        assert_eq!(func_to_str(&AggregateFunc::CountDistinct), "count_distinct");
+        assert_eq!(func_to_str(&AggregateFunc::Sum), "sum");
+        assert_eq!(func_to_str(&AggregateFunc::Min), "min");
+        assert_eq!(func_to_str(&AggregateFunc::Max), "max");
+        assert_eq!(func_to_str(&AggregateFunc::Avg), "avg");
+        assert_eq!(
+            func_to_str(&AggregateFunc::TopK {
+                k: 5,
+                order_var: "X".to_string(),
+                output_vars: vec![],
+                descending: true,
+            }),
+            "top_k"
+        );
+        assert_eq!(
+            func_to_str(&AggregateFunc::WithinRadius {
+                max_distance: 1.0,
+                distance_var: "D".to_string(),
+                output_vars: vec![],
+            }),
+            "within_radius"
+        );
+    }
+
+    #[test]
+    fn test_three_way_join_rule() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("r".to_string(), vec!["a".to_string(), "b".to_string()]);
+        catalog.register_relation("s".to_string(), vec!["b".to_string(), "c".to_string()]);
+        catalog.register_relation("t".to_string(), vec!["c".to_string(), "d".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        // result(A, D) <- r(A, B), s(B, C), t(C, D).
+        let rule = Rule::new_simple(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("A".to_string()),
+                    Term::Variable("D".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "r".to_string(),
+                    vec![
+                        Term::Variable("A".to_string()),
+                        Term::Variable("B".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "s".to_string(),
+                    vec![
+                        Term::Variable("B".to_string()),
+                        Term::Variable("C".to_string()),
+                    ],
+                ),
+                Atom::new(
+                    "t".to_string(),
+                    vec![
+                        Term::Variable("C".to_string()),
+                        Term::Variable("D".to_string()),
+                    ],
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        let output = ir.output_schema();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0], "A");
+        assert_eq!(output[1], "D");
+    }
+
+    #[test]
+    fn test_computed_column_arithmetic() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        // result(X, Y) <- data(X), Y = X * 2.
+        let rule = Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("Y".to_string()),
+                    ComparisonOp::Equal,
+                    Term::Arithmetic(crate::ast::ArithExpr::Binary {
+                        op: crate::ast::ArithOp::Mul,
+                        left: Box::new(crate::ast::ArithExpr::Variable("X".to_string())),
+                        right: Box::new(crate::ast::ArithExpr::Constant(2)),
+                    }),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+
+        fn contains_compute(node: &IRNode) -> bool {
+            match node {
+                IRNode::Compute { .. } => true,
+                IRNode::Map { input, .. } | IRNode::Filter { input, .. } => contains_compute(input),
+                _ => false,
+            }
+        }
+        assert!(
+            contains_compute(&ir),
+            "Expected Compute node for arithmetic assignment"
+        );
+    }
+
+    #[test]
+    fn test_infer_antijoin_keys_skips_generated_names() {
+        let catalog = Catalog::new();
+        let builder = IRBuilder::new(catalog);
+
+        let left = vec!["x".to_string(), "y".to_string()];
+        let right = vec![
+            "x".to_string(),
+            "_const_a0_c1".to_string(), // Generated name - should be skipped
+        ];
+
+        let (left_keys, right_keys) = builder.infer_antijoin_keys(&left, &right).unwrap();
+
+        assert_eq!(left_keys, vec![0]); // Only x matched
+        assert_eq!(right_keys, vec![0]);
+    }
+
+    #[test]
+    fn test_build_scan_with_placeholder() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let atom = Atom::new(
+            "edge".to_string(),
+            vec![Term::Variable("x".to_string()), Term::Placeholder],
+        );
+
+        let ir = builder.build_scan(&atom, 0).unwrap();
+        match ir {
+            IRNode::Scan { schema, .. } => {
+                assert_eq!(schema[0], "x");
+                assert!(schema[1].starts_with("_ph_"));
+            }
+            _ => panic!("Expected Scan"),
+        }
+    }
+
+    // =========================================================================
+    // Additional IR Builder Coverage Tests
+    // =========================================================================
+
+    #[test]
+    fn test_try_eval_const_arith_constant() {
+        use crate::ast::ArithExpr;
+        let result = IRBuilder::try_eval_const_arith(&ArithExpr::Constant(42));
+        assert_eq!(result, Some(42));
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_variable() {
+        use crate::ast::ArithExpr;
+        let result = IRBuilder::try_eval_const_arith(&ArithExpr::Variable("X".to_string()));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_binary_add() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Constant(10)),
+            right: Box::new(ArithExpr::Constant(20)),
+        };
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(30));
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_binary_sub() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Sub,
+            left: Box::new(ArithExpr::Constant(50)),
+            right: Box::new(ArithExpr::Constant(8)),
+        };
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(42));
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_div_by_zero() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Div,
+            left: Box::new(ArithExpr::Constant(10)),
+            right: Box::new(ArithExpr::Constant(0)),
+        };
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_mod_by_zero() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Mod,
+            left: Box::new(ArithExpr::Constant(10)),
+            right: Box::new(ArithExpr::Constant(0)),
+        };
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_mixed_returns_none() {
+        use crate::ast::{ArithExpr, ArithOp};
+        // 10 + X -> None (can't evaluate variable)
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Constant(10)),
+            right: Box::new(ArithExpr::Variable("X".to_string())),
+        };
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+    }
+
+    #[test]
+    fn test_convert_arith_op_all() {
+        use crate::ast::ArithOp as AstOp;
+        use crate::ir::ArithOp as IrOp;
+
+        assert!(matches!(
+            IRBuilder::convert_arith_op(&AstOp::Add),
+            IrOp::Add
+        ));
+        assert!(matches!(
+            IRBuilder::convert_arith_op(&AstOp::Sub),
+            IrOp::Sub
+        ));
+        assert!(matches!(
+            IRBuilder::convert_arith_op(&AstOp::Mul),
+            IrOp::Mul
+        ));
+        assert!(matches!(
+            IRBuilder::convert_arith_op(&AstOp::Div),
+            IrOp::Div
+        ));
+        assert!(matches!(
+            IRBuilder::convert_arith_op(&AstOp::Mod),
+            IrOp::Mod
+        ));
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_int_constant() {
+        let schema = vec!["x".to_string()];
+        let result = IRBuilder::term_to_ir_expr(&Term::Constant(42), &schema).unwrap();
+        assert!(matches!(result, IRExpression::IntConstant(42)));
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_string_constant() {
+        let schema = vec!["x".to_string()];
+        let result =
+            IRBuilder::term_to_ir_expr(&Term::StringConstant("hello".to_string()), &schema)
+                .unwrap();
+        match result {
+            IRExpression::StringConstant(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected StringConstant"),
+        }
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_bool_constant() {
+        let schema = vec!["x".to_string()];
+        let result = IRBuilder::term_to_ir_expr(&Term::BoolConstant(true), &schema).unwrap();
+        assert!(matches!(result, IRExpression::BoolConstant(true)));
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_vector_literal() {
+        let schema = vec!["x".to_string()];
+        let result =
+            IRBuilder::term_to_ir_expr(&Term::VectorLiteral(vec![1.0, 2.0, 3.0]), &schema).unwrap();
+        match result {
+            IRExpression::VectorLiteral(v) => {
+                assert_eq!(v.len(), 3);
+                assert!((v[0] - 1.0f32).abs() < f32::EPSILON);
+            }
+            _ => panic!("Expected VectorLiteral"),
+        }
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_variable_not_in_schema() {
+        let schema = vec!["x".to_string()];
+        let result = IRBuilder::term_to_ir_expr(&Term::Variable("z".to_string()), &schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found in schema"));
+    }
+
+    #[test]
+    fn test_term_to_ir_expr_unsupported_term() {
+        let schema = vec!["x".to_string()];
+        let result = IRBuilder::term_to_ir_expr(&Term::Placeholder, &schema);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported term type"));
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_not_equal() {
+        use crate::ast::ComparisonOp;
+        // Non-equality is never an assignment
+        let schema = vec!["X".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("X".to_string()),
+            &ComparisonOp::LessThan,
+            &Term::Constant(5),
+            &schema,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_both_vars_in_schema() {
+        use crate::ast::ComparisonOp;
+        // Both variables already bound → this is a filter, not assignment
+        let schema = vec!["X".to_string(), "Y".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("X".to_string()),
+            &ComparisonOp::Equal,
+            &Term::Variable("Y".to_string()),
+            &schema,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_one_var_new() {
+        use crate::ast::ComparisonOp;
+        // One variable not in schema → this IS an assignment
+        let schema = vec!["X".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("X".to_string()),
+            &ComparisonOp::Equal,
+            &Term::Variable("Y".to_string()),
+            &schema,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_const_var_in_schema() {
+        use crate::ast::ComparisonOp;
+        // Variable already in schema + constant → filter, not assignment
+        let schema = vec!["X".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("X".to_string()),
+            &ComparisonOp::Equal,
+            &Term::Constant(5),
+            &schema,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_const_var_new() {
+        use crate::ast::ComparisonOp;
+        // Variable NOT in schema + constant → assignment
+        let schema = vec!["X".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("Y".to_string()),
+            &ComparisonOp::Equal,
+            &Term::Constant(5),
+            &schema,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_is_computed_column_assignment_function_call() {
+        use crate::ast::{BuiltinFunc, ComparisonOp};
+        // Function call → always an assignment
+        let schema = vec!["X".to_string()];
+        let result = IRBuilder::is_computed_column_assignment_in_schema(
+            &Term::Variable("D".to_string()),
+            &ComparisonOp::Equal,
+            &Term::FunctionCall(
+                BuiltinFunc::Euclidean,
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("X".to_string()),
+                ],
+            ),
+            &schema,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_build_variable_alias() {
+        // Y = X where Y is new, X is bound
+        let mut catalog = make_catalog();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("Y".to_string()),
+                    crate::ast::ComparisonOp::Equal,
+                    Term::Variable("X".to_string()),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // Should have a Compute node for the alias
+        assert!(format!("{ir:?}").contains("Compute"));
+    }
+
+    #[test]
+    fn test_build_constant_assignment() {
+        // Y = 100 where Y is new
+        let mut catalog = make_catalog();
+        catalog.register_relation("data".to_string(), vec!["x".to_string()]);
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "data".to_string(),
+                    vec![Term::Variable("X".to_string())],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("Y".to_string()),
+                    crate::ast::ComparisonOp::Equal,
+                    Term::Constant(100),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        assert!(format!("{ir:?}").contains("Compute"));
+    }
+
+    #[test]
+    fn test_comparison_filter_ne() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("X".to_string()),
+                    crate::ast::ComparisonOp::NotEqual,
+                    Term::Constant(0),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        assert!(format!("{ir:?}").contains("ColumnNeConst"));
+    }
+
+    #[test]
+    fn test_comparison_filter_string_eq() {
+        let mut catalog = Catalog::new();
+        catalog.register_relation(
+            "users".to_string(),
+            vec!["name".to_string(), "role".to_string()],
+        );
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![Term::Variable("Name".to_string())],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "users".to_string(),
+                    vec![
+                        Term::Variable("Name".to_string()),
+                        Term::Variable("Role".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Variable("Role".to_string()),
+                    crate::ast::ComparisonOp::Equal,
+                    Term::StringConstant("admin".to_string()),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        assert!(format!("{ir:?}").contains("ColumnEqStr"));
+    }
+
+    #[test]
+    fn test_comparison_constant_vs_constant() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Constant(1),
+                    crate::ast::ComparisonOp::Equal,
+                    Term::Constant(1),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // Compile-time evaluation: 1 == 1 → True → Filter with True
+        assert!(format!("{ir:?}").contains("True"));
+    }
+
+    #[test]
+    fn test_comparison_swapped_const_lt_var() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // 5 < X should become X > 5
+        let rule = crate::ast::Rule::new(
+            Atom::new(
+                "result".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("X".to_string()),
+                        Term::Variable("Y".to_string()),
+                    ],
+                )),
+                BodyPredicate::Comparison(
+                    Term::Constant(5),
+                    crate::ast::ComparisonOp::LessThan,
+                    Term::Variable("X".to_string()),
+                ),
+            ],
+        );
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // 5 < X becomes ColumnGtConst(col, 5)
+        assert!(format!("{ir:?}").contains("ColumnGtConst"));
+    }
+
+    #[test]
+    fn test_arith_expr_to_ir_expression_binary() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let schema = vec!["x".to_string(), "y".to_string()];
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Variable("x".to_string())),
+            right: Box::new(ArithExpr::Constant(1)),
+        };
+        let result = IRBuilder::arith_expr_to_ir_expression(&expr, &schema).unwrap();
+        assert!(matches!(result, IRExpression::Arithmetic { .. }));
+    }
+
+    #[test]
+    fn test_arith_expr_to_ir_expression_float_constant() {
+        use crate::ast::ArithExpr;
+        let schema = vec!["x".to_string()];
+        let bits = 3.14_f64.to_bits();
+        let expr = ArithExpr::FloatConstant(bits);
+        let result = IRBuilder::arith_expr_to_ir_expression(&expr, &schema).unwrap();
+        match result {
+            IRExpression::FloatConstant(val) => assert!((val - 3.14).abs() < 0.01),
+            _ => panic!("Expected FloatConstant"),
+        }
+    }
+
+    // Batch 17: ast_func_to_ir_func and comparison_to_predicate coverage
+
+    #[test]
+    fn test_ast_func_to_ir_func_distance() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Euclidean),
+            Ok(BuiltinFunction::Euclidean)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Cosine),
+            Ok(BuiltinFunction::Cosine)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::DotProduct),
+            Ok(BuiltinFunction::DotProduct)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Manhattan),
+            Ok(BuiltinFunction::Manhattan)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_math() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Abs),
+            Ok(BuiltinFunction::Abs)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Sqrt),
+            Ok(BuiltinFunction::Sqrt)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Pow),
+            Ok(BuiltinFunction::Pow)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Log),
+            Ok(BuiltinFunction::Log)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Floor),
+            Ok(BuiltinFunction::Floor)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Ceil),
+            Ok(BuiltinFunction::Ceil)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_string() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Len),
+            Ok(BuiltinFunction::Len)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Upper),
+            Ok(BuiltinFunction::Upper)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Lower),
+            Ok(BuiltinFunction::Lower)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Trim),
+            Ok(BuiltinFunction::Trim)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Concat),
+            Ok(BuiltinFunction::Concat)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_temporal() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::TimeNow),
+            Ok(BuiltinFunction::TimeNow)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::TimeDiff),
+            Ok(BuiltinFunction::TimeDiff)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::TimeAdd),
+            Ok(BuiltinFunction::TimeAdd)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_lsh() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::LshBucket),
+            Ok(BuiltinFunction::LshBucket)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::LshProbes),
+            Ok(BuiltinFunction::LshProbes)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::LshMultiProbe),
+            Ok(BuiltinFunction::LshMultiProbe)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_vector() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::VecNormalize),
+            Ok(BuiltinFunction::VecNormalize)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::VecDim),
+            Ok(BuiltinFunction::VecDim)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::VecAdd),
+            Ok(BuiltinFunction::VecAdd)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::VecScale),
+            Ok(BuiltinFunction::VecScale)
+        ));
+    }
+
+    #[test]
+    fn test_ast_func_to_ir_func_quantization() {
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::QuantizeLinear),
+            Ok(BuiltinFunction::QuantizeLinear)
+        ));
+        assert!(matches!(
+            IRBuilder::ast_func_to_ir_func(&BuiltinFunc::Dequantize),
+            Ok(BuiltinFunction::Dequantize)
+        ));
+    }
+
+    #[test]
+    fn test_comparison_var_lt_const() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string(), "y".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::LessThan,
+                &Term::Constant(10),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnLtConst(0, 10)));
+    }
+
+    #[test]
+    fn test_comparison_var_le_const() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::LessOrEqual,
+                &Term::Constant(5),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnLeConst(0, 5)));
+    }
+
+    #[test]
+    fn test_comparison_var_ge_const() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::GreaterOrEqual,
+                &Term::Constant(3),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnGeConst(0, 3)));
+    }
+
+    #[test]
+    fn test_comparison_const_lt_var_swapped() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        // 5 < X becomes X > 5
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Constant(5),
+                &ComparisonOp::LessThan,
+                &Term::Variable("x".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnGtConst(0, 5)));
+    }
+
+    #[test]
+    fn test_comparison_const_ge_var_swapped() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        // 5 >= X becomes X <= 5
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Constant(5),
+                &ComparisonOp::GreaterOrEqual,
+                &Term::Variable("x".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnLeConst(0, 5)));
+    }
+
+    #[test]
+    fn test_comparison_var_eq_float() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        let float_val = 3.14_f64;
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::Equal,
+                &Term::FloatConstant(float_val),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnEqFloat(0, _)));
+    }
+
+    #[test]
+    fn test_comparison_float_lt_var_swapped() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        // 2.0 < X becomes X > 2.0
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::FloatConstant(2.0),
+                &ComparisonOp::LessThan,
+                &Term::Variable("x".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnGtFloat(0, _)));
+    }
+
+    #[test]
+    fn test_comparison_var_lt_string() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["name".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("name".to_string()),
+                &ComparisonOp::LessThan,
+                &Term::StringConstant("z".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnLtStr(0, _)));
+    }
+
+    #[test]
+    fn test_comparison_string_gt_var_swapped() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["name".to_string()];
+        // "z" > name becomes name < "z"
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::StringConstant("z".to_string()),
+                &ComparisonOp::GreaterThan,
+                &Term::Variable("name".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnLtStr(0, _)));
+    }
+
+    #[test]
+    fn test_comparison_var_eq_bool() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["flag".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("flag".to_string()),
+                &ComparisonOp::Equal,
+                &Term::BoolConstant(true),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnEqBool(0, true)));
+    }
+
+    #[test]
+    fn test_comparison_var_ne_bool() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["flag".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("flag".to_string()),
+                &ComparisonOp::NotEqual,
+                &Term::BoolConstant(false),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnNeBool(0, false)));
+    }
+
+    #[test]
+    fn test_comparison_var_var_lt() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string(), "y".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::LessThan,
+                &Term::Variable("y".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnsLt(0, 1)));
+    }
+
+    #[test]
+    fn test_comparison_var_var_ge() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string(), "y".to_string()];
+        let pred = builder
+            .comparison_to_predicate(
+                &Term::Variable("x".to_string()),
+                &ComparisonOp::GreaterOrEqual,
+                &Term::Variable("y".to_string()),
+                &schema,
+            )
+            .unwrap();
+        assert!(matches!(pred, Predicate::ColumnsGe(0, 1)));
+    }
+
+    #[test]
+    fn test_comparison_variable_not_in_schema_error() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+        let schema = vec!["x".to_string()];
+        let result = builder.comparison_to_predicate(
+            &Term::Variable("z".to_string()),
+            &ComparisonOp::Equal,
+            &Term::Constant(1),
+            &schema,
+        );
+        assert!(result.is_err());
+    }
 }

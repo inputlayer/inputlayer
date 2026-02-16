@@ -911,6 +911,112 @@ mod tests {
         assert_eq!(results[0].0, 1);
     }
 
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_distance_metric_display() {
+        assert_eq!(DistanceMetric::Cosine.to_string(), "cosine");
+        assert_eq!(DistanceMetric::Euclidean.to_string(), "l2");
+        assert_eq!(DistanceMetric::DotProduct.to_string(), "dot");
+        assert_eq!(DistanceMetric::Manhattan.to_string(), "l1");
+    }
+
+    #[test]
+    fn test_distance_metric_default() {
+        assert_eq!(DistanceMetric::default(), DistanceMetric::Cosine);
+    }
+
+    #[test]
+    fn test_distance_metric_all_aliases() {
+        // Test all parsing aliases
+        assert_eq!(
+            "cos".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Cosine
+        );
+        assert_eq!(
+            "euclid".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Euclidean
+        );
+        assert_eq!(
+            "dotproduct".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::DotProduct
+        );
+        assert_eq!(
+            "dot_product".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::DotProduct
+        );
+        assert_eq!(
+            "inner".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::DotProduct
+        );
+        assert_eq!(
+            "taxicab".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Manhattan
+        );
+    }
+
+    #[test]
+    fn test_distance_metric_case_insensitive() {
+        assert_eq!(
+            "COSINE".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Cosine
+        );
+        assert_eq!(
+            "L2".parse::<DistanceMetric>().unwrap(),
+            DistanceMetric::Euclidean
+        );
+    }
+
+    #[test]
+    fn test_hnsw_config_default() {
+        let config = HnswConfig::default();
+        assert_eq!(config.m, 16);
+        assert_eq!(config.ef_construction, 200);
+        assert_eq!(config.ef_search, 50);
+        assert_eq!(config.metric, DistanceMetric::Cosine);
+    }
+
+    #[test]
+    fn test_index_type_name() {
+        let idx_type = IndexType::Hnsw(HnswConfig::default());
+        assert_eq!(idx_type.type_name(), "hnsw");
+    }
+
+    #[test]
+    fn test_index_manager_new_is_empty() {
+        let manager = IndexManager::new();
+        assert!(manager.get_all_valid_indexes().is_empty());
+        assert!(manager.get_invalid_indexes().is_empty());
+    }
+
+    #[test]
+    fn test_notify_base_update_no_indexes() {
+        let mut manager = IndexManager::new();
+        let invalidated = manager.notify_base_update("nonexistent");
+        assert!(invalidated.is_empty());
+    }
+
+    #[test]
+    fn test_mock_index_is_empty() {
+        let index = MockIndex::new(DistanceMetric::Cosine);
+        assert!(index.is_empty());
+        assert_eq!(index.index_type(), "mock");
+        assert_eq!(index.dimension(), 0);
+    }
+
+    #[test]
+    fn test_mock_index_dimension() {
+        let mut index = MockIndex::new(DistanceMetric::Cosine);
+        index.insert(0, &[1.0, 2.0, 3.0]).unwrap();
+        assert_eq!(index.dimension(), 3);
+    }
+
+    #[test]
+    fn test_stats_nonexistent() {
+        let manager = IndexManager::new();
+        assert!(manager.get_stats("nonexistent").is_none());
+    }
+
     #[test]
     fn test_mock_index_rebuild() {
         let mut index = MockIndex::new(DistanceMetric::Euclidean);

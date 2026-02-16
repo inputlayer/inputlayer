@@ -1624,4 +1624,687 @@ mod tests {
         assert_eq!(idbs, vec!["reach"]);
         assert_eq!(edbs, vec!["edge", "source"]);
     }
+
+    // === Additional Coverage ===
+
+    // --- BuiltinFunc ---
+
+    #[test]
+    fn test_builtin_func_parse_all_categories() {
+        // Distance
+        assert_eq!(
+            BuiltinFunc::parse("euclidean"),
+            Some(BuiltinFunc::Euclidean)
+        );
+        assert_eq!(BuiltinFunc::parse("cosine"), Some(BuiltinFunc::Cosine));
+        assert_eq!(BuiltinFunc::parse("dot"), Some(BuiltinFunc::DotProduct));
+        assert_eq!(
+            BuiltinFunc::parse("manhattan"),
+            Some(BuiltinFunc::Manhattan)
+        );
+        // Vector ops
+        assert_eq!(
+            BuiltinFunc::parse("normalize"),
+            Some(BuiltinFunc::VecNormalize)
+        );
+        assert_eq!(BuiltinFunc::parse("vec_dim"), Some(BuiltinFunc::VecDim));
+        assert_eq!(BuiltinFunc::parse("vec_add"), Some(BuiltinFunc::VecAdd));
+        assert_eq!(BuiltinFunc::parse("vec_scale"), Some(BuiltinFunc::VecScale));
+        // Temporal
+        assert_eq!(BuiltinFunc::parse("time_now"), Some(BuiltinFunc::TimeNow));
+        assert_eq!(BuiltinFunc::parse("time_diff"), Some(BuiltinFunc::TimeDiff));
+        assert_eq!(
+            BuiltinFunc::parse("time_decay"),
+            Some(BuiltinFunc::TimeDecay)
+        );
+        // Math
+        assert_eq!(BuiltinFunc::parse("sqrt"), Some(BuiltinFunc::Sqrt));
+        assert_eq!(BuiltinFunc::parse("abs"), Some(BuiltinFunc::Abs));
+        assert_eq!(BuiltinFunc::parse("floor"), Some(BuiltinFunc::Floor));
+        assert_eq!(BuiltinFunc::parse("ceil"), Some(BuiltinFunc::Ceil));
+        // String
+        assert_eq!(BuiltinFunc::parse("len"), Some(BuiltinFunc::Len));
+        assert_eq!(BuiltinFunc::parse("upper"), Some(BuiltinFunc::Upper));
+        assert_eq!(BuiltinFunc::parse("concat"), Some(BuiltinFunc::Concat));
+        // Unknown
+        assert_eq!(BuiltinFunc::parse("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_builtin_func_arity() {
+        assert_eq!(BuiltinFunc::Euclidean.arity(), 2);
+        assert_eq!(BuiltinFunc::VecNormalize.arity(), 1);
+        assert_eq!(BuiltinFunc::TimeNow.arity(), 0);
+        assert_eq!(BuiltinFunc::LshBucket.arity(), 3);
+        assert_eq!(BuiltinFunc::IntervalsOverlap.arity(), 4);
+        assert_eq!(BuiltinFunc::Pow.arity(), 2);
+        assert_eq!(BuiltinFunc::Len.arity(), 1);
+        assert_eq!(BuiltinFunc::Substr.arity(), 3);
+    }
+
+    #[test]
+    fn test_builtin_func_as_str_roundtrip() {
+        let funcs = [
+            BuiltinFunc::Euclidean,
+            BuiltinFunc::Cosine,
+            BuiltinFunc::DotProduct,
+            BuiltinFunc::Sqrt,
+            BuiltinFunc::Abs,
+            BuiltinFunc::Len,
+            BuiltinFunc::TimeNow,
+            BuiltinFunc::Floor,
+        ];
+        for func in &funcs {
+            let name = func.as_str();
+            assert_eq!(BuiltinFunc::parse(name).as_ref(), Some(func));
+        }
+    }
+
+    // --- ArithOp ---
+
+    #[test]
+    fn test_arith_op_parse() {
+        assert_eq!(ArithOp::parse("+"), Some(ArithOp::Add));
+        assert_eq!(ArithOp::parse("-"), Some(ArithOp::Sub));
+        assert_eq!(ArithOp::parse("*"), Some(ArithOp::Mul));
+        assert_eq!(ArithOp::parse("/"), Some(ArithOp::Div));
+        assert_eq!(ArithOp::parse("%"), Some(ArithOp::Mod));
+        assert_eq!(ArithOp::parse("^"), None);
+    }
+
+    #[test]
+    fn test_arith_op_as_str() {
+        assert_eq!(ArithOp::Add.as_str(), "+");
+        assert_eq!(ArithOp::Sub.as_str(), "-");
+        assert_eq!(ArithOp::Mul.as_str(), "*");
+        assert_eq!(ArithOp::Div.as_str(), "/");
+        assert_eq!(ArithOp::Mod.as_str(), "%");
+    }
+
+    // --- ArithExpr ---
+
+    #[test]
+    fn test_arith_expr_from_float() {
+        let expr = ArithExpr::from_float(3.14);
+        assert!((expr.as_f64().unwrap() - 3.14).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_arith_expr_as_f64_constant() {
+        let expr = ArithExpr::Constant(42);
+        assert_eq!(expr.as_f64(), Some(42.0));
+    }
+
+    #[test]
+    fn test_arith_expr_as_f64_variable() {
+        let expr = ArithExpr::Variable("x".to_string());
+        assert_eq!(expr.as_f64(), None);
+    }
+
+    #[test]
+    fn test_arith_expr_variables() {
+        let expr = ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Variable("x".to_string())),
+            right: Box::new(ArithExpr::Variable("y".to_string())),
+        };
+        let vars = expr.variables();
+        assert!(vars.contains("x"));
+        assert!(vars.contains("y"));
+        assert_eq!(vars.len(), 2);
+    }
+
+    #[test]
+    fn test_arith_expr_is_simple() {
+        assert!(ArithExpr::Variable("x".to_string()).is_simple());
+        assert!(ArithExpr::Constant(1).is_simple());
+        assert!(ArithExpr::from_float(1.0).is_simple());
+        assert!(!ArithExpr::Binary {
+            op: ArithOp::Add,
+            left: Box::new(ArithExpr::Constant(1)),
+            right: Box::new(ArithExpr::Constant(2)),
+        }
+        .is_simple());
+    }
+
+    #[test]
+    fn test_arith_expr_try_eval_constant() {
+        // Simple constant
+        assert_eq!(ArithExpr::Constant(10).try_eval_constant(), Some(10));
+        // Variable → None
+        assert_eq!(
+            ArithExpr::Variable("x".to_string()).try_eval_constant(),
+            None
+        );
+        // Float → None
+        assert_eq!(ArithExpr::from_float(1.0).try_eval_constant(), None);
+        // Binary: 3 + 4 = 7
+        assert_eq!(
+            ArithExpr::Binary {
+                op: ArithOp::Add,
+                left: Box::new(ArithExpr::Constant(3)),
+                right: Box::new(ArithExpr::Constant(4)),
+            }
+            .try_eval_constant(),
+            Some(7)
+        );
+        // Division by zero → None
+        assert_eq!(
+            ArithExpr::Binary {
+                op: ArithOp::Div,
+                left: Box::new(ArithExpr::Constant(10)),
+                right: Box::new(ArithExpr::Constant(0)),
+            }
+            .try_eval_constant(),
+            None
+        );
+        // Modulo by zero → None
+        assert_eq!(
+            ArithExpr::Binary {
+                op: ArithOp::Mod,
+                left: Box::new(ArithExpr::Constant(10)),
+                right: Box::new(ArithExpr::Constant(0)),
+            }
+            .try_eval_constant(),
+            None
+        );
+    }
+
+    // --- Term ---
+
+    #[test]
+    fn test_term_type_checks() {
+        assert!(Term::Variable("x".to_string()).is_variable());
+        assert!(Term::Constant(42).is_constant());
+        assert!(Term::Aggregate(AggregateFunc::Count, "x".to_string()).is_aggregate());
+        assert!(Term::Arithmetic(ArithExpr::Constant(1)).is_arithmetic());
+        assert!(
+            Term::FunctionCall(BuiltinFunc::Len, vec![Term::Variable("s".to_string())])
+                .is_function_call()
+        );
+        assert!(Term::VectorLiteral(vec![1.0, 2.0]).is_vector_literal());
+        assert!(Term::FloatConstant(3.14).is_float_constant());
+    }
+
+    #[test]
+    fn test_term_as_variable() {
+        assert_eq!(Term::Variable("x".to_string()).as_variable(), Some("x"));
+        assert_eq!(Term::Constant(1).as_variable(), None);
+    }
+
+    #[test]
+    fn test_term_as_aggregate() {
+        let t = Term::Aggregate(AggregateFunc::Sum, "x".to_string());
+        let (func, var) = t.as_aggregate().unwrap();
+        assert!(matches!(func, AggregateFunc::Sum));
+        assert_eq!(var, "x");
+        assert!(Term::Constant(1).as_aggregate().is_none());
+    }
+
+    #[test]
+    fn test_term_as_arithmetic() {
+        let t = Term::Arithmetic(ArithExpr::Constant(42));
+        assert!(t.as_arithmetic().is_some());
+        assert!(Term::Constant(1).as_arithmetic().is_none());
+    }
+
+    #[test]
+    fn test_term_as_function_call() {
+        let t = Term::FunctionCall(BuiltinFunc::Len, vec![Term::Variable("s".to_string())]);
+        let (func, args) = t.as_function_call().unwrap();
+        assert!(matches!(func, BuiltinFunc::Len));
+        assert_eq!(args.len(), 1);
+        assert!(Term::Constant(1).as_function_call().is_none());
+    }
+
+    #[test]
+    fn test_term_as_vector_literal() {
+        let t = Term::VectorLiteral(vec![1.0, 2.0, 3.0]);
+        assert_eq!(t.as_vector_literal().unwrap().len(), 3);
+        assert!(Term::Constant(1).as_vector_literal().is_none());
+    }
+
+    #[test]
+    fn test_term_as_float() {
+        assert_eq!(Term::FloatConstant(3.14).as_float(), Some(3.14));
+        assert_eq!(Term::Constant(5).as_float(), Some(5.0));
+        assert_eq!(Term::Variable("x".to_string()).as_float(), None);
+    }
+
+    #[test]
+    fn test_term_variables() {
+        // Variable
+        let vars = Term::Variable("x".to_string()).variables();
+        assert!(vars.contains("x"));
+        // Constant → empty
+        assert!(Term::Constant(1).variables().is_empty());
+        // FunctionCall → collects arg variables
+        let t = Term::FunctionCall(
+            BuiltinFunc::VecAdd,
+            vec![
+                Term::Variable("a".to_string()),
+                Term::Variable("b".to_string()),
+            ],
+        );
+        let vars = t.variables();
+        assert!(vars.contains("a"));
+        assert!(vars.contains("b"));
+    }
+
+    // --- AggregateFunc ---
+
+    #[test]
+    fn test_aggregate_func_is_simple() {
+        assert!(AggregateFunc::Count.is_simple());
+        assert!(AggregateFunc::CountDistinct.is_simple());
+        assert!(AggregateFunc::Sum.is_simple());
+        assert!(AggregateFunc::Min.is_simple());
+        assert!(AggregateFunc::Max.is_simple());
+        assert!(AggregateFunc::Avg.is_simple());
+    }
+
+    #[test]
+    fn test_aggregate_func_is_ranking() {
+        let top_k = AggregateFunc::TopK {
+            k: 3,
+            order_var: "Score".to_string(),
+            output_vars: vec!["Name".to_string(), "Score".to_string()],
+            descending: true,
+        };
+        assert!(top_k.is_ranking());
+        assert!(!top_k.is_simple());
+        assert!(!AggregateFunc::Count.is_ranking());
+    }
+
+    #[test]
+    fn test_parse_top_k() {
+        let result = AggregateFunc::parse_top_k("3, Name, Score:desc").unwrap();
+        if let AggregateFunc::TopK {
+            k,
+            order_var,
+            output_vars,
+            descending,
+        } = result
+        {
+            assert_eq!(k, 3);
+            assert_eq!(order_var, "Score");
+            assert_eq!(output_vars, vec!["Name", "Score"]);
+            assert!(descending);
+        } else {
+            panic!("Expected TopK");
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_single_var() {
+        let result = AggregateFunc::parse_top_k("5, Score").unwrap();
+        if let AggregateFunc::TopK {
+            k,
+            order_var,
+            descending,
+            ..
+        } = result
+        {
+            assert_eq!(k, 5);
+            assert_eq!(order_var, "Score");
+            assert!(descending); // default desc for top_k
+        } else {
+            panic!("Expected TopK");
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_asc() {
+        let result = AggregateFunc::parse_top_k("2, Score:asc").unwrap();
+        if let AggregateFunc::TopK { descending, .. } = result {
+            assert!(!descending);
+        } else {
+            panic!("Expected TopK");
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_too_few_params() {
+        assert!(AggregateFunc::parse_top_k("3").is_none());
+    }
+
+    #[test]
+    fn test_parse_within_radius() {
+        let result = AggregateFunc::parse_within_radius("10.0, Name, Distance:asc").unwrap();
+        if let AggregateFunc::WithinRadius {
+            max_distance,
+            distance_var,
+            output_vars,
+        } = result
+        {
+            assert!((max_distance - 10.0).abs() < f64::EPSILON);
+            assert_eq!(distance_var, "Distance");
+            assert_eq!(output_vars.len(), 2);
+        } else {
+            panic!("Expected WithinRadius");
+        }
+    }
+
+    #[test]
+    fn test_parse_top_k_threshold() {
+        let result = AggregateFunc::parse_top_k_threshold("5, 0.5, Name, Score:desc").unwrap();
+        if let AggregateFunc::TopKThreshold {
+            k,
+            threshold,
+            order_var,
+            ..
+        } = result
+        {
+            assert_eq!(k, 5);
+            assert!((threshold - 0.5).abs() < f64::EPSILON);
+            assert_eq!(order_var, "Score");
+        } else {
+            panic!("Expected TopKThreshold");
+        }
+    }
+
+    #[test]
+    fn test_parse_count_distinct() {
+        assert_eq!(
+            AggregateFunc::parse("count_distinct"),
+            Some(AggregateFunc::CountDistinct)
+        );
+        assert_eq!(
+            AggregateFunc::parse("countdistinct"),
+            Some(AggregateFunc::CountDistinct)
+        );
+    }
+
+    // --- Atom ---
+
+    #[test]
+    fn test_atom_has_aggregates() {
+        let atom = Atom::new(
+            "stats".to_string(),
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Aggregate(AggregateFunc::Count, "x".to_string()),
+            ],
+        );
+        assert!(atom.has_aggregates());
+        assert_eq!(atom.aggregates().len(), 1);
+    }
+
+    #[test]
+    fn test_atom_has_arithmetic() {
+        let atom = Atom::new(
+            "calc".to_string(),
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Arithmetic(ArithExpr::Binary {
+                    op: ArithOp::Add,
+                    left: Box::new(ArithExpr::Variable("x".to_string())),
+                    right: Box::new(ArithExpr::Constant(1)),
+                }),
+            ],
+        );
+        assert!(atom.has_arithmetic());
+        assert_eq!(atom.arithmetic_terms().len(), 1);
+    }
+
+    #[test]
+    fn test_atom_has_function_calls() {
+        let atom = Atom::new(
+            "dist".to_string(),
+            vec![Term::FunctionCall(
+                BuiltinFunc::Euclidean,
+                vec![
+                    Term::Variable("v1".to_string()),
+                    Term::Variable("v2".to_string()),
+                ],
+            )],
+        );
+        assert!(atom.has_function_calls());
+        assert_eq!(atom.function_calls().len(), 1);
+    }
+
+    #[test]
+    fn test_atom_effective_arity_simple() {
+        let atom = Atom::new(
+            "edge".to_string(),
+            vec![
+                Term::Variable("x".to_string()),
+                Term::Variable("y".to_string()),
+            ],
+        );
+        assert_eq!(atom.arity(), 2);
+        assert_eq!(atom.effective_arity(), 2);
+    }
+
+    #[test]
+    fn test_atom_effective_arity_ranking() {
+        let atom = Atom::new(
+            "ranked".to_string(),
+            vec![
+                Term::Variable("group".to_string()),
+                Term::Aggregate(
+                    AggregateFunc::TopK {
+                        k: 3,
+                        order_var: "Score".to_string(),
+                        output_vars: vec!["Name".to_string(), "Score".to_string()],
+                        descending: true,
+                    },
+                    "Score".to_string(),
+                ),
+            ],
+        );
+        assert_eq!(atom.arity(), 2);
+        assert_eq!(atom.effective_arity(), 3); // 1 + 2 output vars
+    }
+
+    // --- BodyPredicate ---
+
+    #[test]
+    fn test_body_predicate_type_checks() {
+        let pos = BodyPredicate::Positive(Atom::new("a".to_string(), vec![]));
+        assert!(pos.is_positive());
+        assert!(!pos.is_negated());
+        assert!(!pos.is_comparison());
+        assert!(!pos.is_hnsw_nearest());
+        assert!(pos.atom().is_some());
+
+        let neg = BodyPredicate::Negated(Atom::new("b".to_string(), vec![]));
+        assert!(neg.is_negated());
+        assert!(neg.atom().is_some());
+
+        let cmp = BodyPredicate::Comparison(
+            Term::Variable("x".to_string()),
+            ComparisonOp::LessThan,
+            Term::Constant(10),
+        );
+        assert!(cmp.is_comparison());
+        assert!(cmp.atom().is_none());
+    }
+
+    #[test]
+    fn test_body_predicate_hnsw_nearest() {
+        let hnsw = BodyPredicate::HnswNearest {
+            index_name: "idx".to_string(),
+            query: Term::Variable("q".to_string()),
+            k: 10,
+            id_var: "Id".to_string(),
+            distance_var: "Dist".to_string(),
+            ef_search: Some(64),
+        };
+        assert!(hnsw.is_hnsw_nearest());
+        let vars = hnsw.variables();
+        assert!(vars.contains("q"));
+        assert!(vars.contains("Id"));
+        assert!(vars.contains("Dist"));
+    }
+
+    #[test]
+    fn test_body_predicate_comparison_variables() {
+        let cmp = BodyPredicate::Comparison(
+            Term::Variable("x".to_string()),
+            ComparisonOp::Equal,
+            Term::Variable("y".to_string()),
+        );
+        let vars = cmp.variables();
+        assert!(vars.contains("x"));
+        assert!(vars.contains("y"));
+    }
+
+    // --- Rule ---
+
+    #[test]
+    fn test_rule_not_recursive() {
+        let rule = Rule::new_simple(
+            Atom::new(
+                "path".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            ),
+            vec![Atom::new(
+                "edge".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        );
+        assert!(!rule.is_recursive());
+    }
+
+    #[test]
+    fn test_rule_unsafe() {
+        // Head has variable not in body
+        let rule = Rule::new_simple(
+            Atom::new("out".to_string(), vec![Term::Variable("z".to_string())]),
+            vec![Atom::new(
+                "in".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        );
+        assert!(!rule.is_safe());
+    }
+
+    #[test]
+    fn test_rule_positive_and_negated_body_atoms() {
+        let rule = Rule::new(
+            Atom::new("safe".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![
+                BodyPredicate::Positive(Atom::new(
+                    "node".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+                BodyPredicate::Negated(Atom::new(
+                    "bad".to_string(),
+                    vec![Term::Variable("x".to_string())],
+                )),
+            ],
+        );
+        assert_eq!(rule.positive_body_atoms().len(), 1);
+        assert_eq!(rule.negated_body_atoms().len(), 1);
+        assert!(rule.is_safe());
+    }
+
+    #[test]
+    fn test_rule_variables() {
+        let rule = Rule::new_simple(
+            Atom::new("out".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "in".to_string(),
+                vec![
+                    Term::Variable("x".to_string()),
+                    Term::Variable("y".to_string()),
+                ],
+            )],
+        );
+        let vars = rule.variables();
+        assert!(vars.contains("x"));
+        assert!(vars.contains("y"));
+    }
+
+    #[test]
+    fn test_rule_hnsw_nearest_predicates() {
+        let rule = Rule::new(
+            Atom::new("near".to_string(), vec![Term::Variable("id".to_string())]),
+            vec![BodyPredicate::HnswNearest {
+                index_name: "idx".to_string(),
+                query: Term::Variable("q".to_string()),
+                k: 5,
+                id_var: "id".to_string(),
+                distance_var: "d".to_string(),
+                ef_search: None,
+            }],
+        );
+        assert_eq!(rule.hnsw_nearest_predicates().len(), 1);
+    }
+
+    // --- Program ---
+
+    #[test]
+    fn test_program_empty() {
+        let program = Program::new();
+        assert!(program.rules.is_empty());
+        assert!(program.idbs().is_empty());
+        assert!(program.edbs().is_empty());
+        assert!(program.all_relations().is_empty());
+        assert!(program.is_safe());
+    }
+
+    #[test]
+    fn test_program_all_relations() {
+        let mut program = Program::new();
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        let all = program.all_relations();
+        assert!(all.contains(&"reach".to_string()));
+        assert!(all.contains(&"source".to_string()));
+    }
+
+    #[test]
+    fn test_program_recursive_and_non_recursive_rules() {
+        let mut program = Program::new();
+        // Non-recursive
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+            vec![Atom::new(
+                "source".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        // Recursive
+        program.add_rule(Rule::new_simple(
+            Atom::new("reach".to_string(), vec![Term::Variable("y".to_string())]),
+            vec![
+                Atom::new("reach".to_string(), vec![Term::Variable("x".to_string())]),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![
+                        Term::Variable("x".to_string()),
+                        Term::Variable("y".to_string()),
+                    ],
+                ),
+            ],
+        ));
+        assert_eq!(program.recursive_rules().len(), 1);
+        assert_eq!(program.non_recursive_rules().len(), 1);
+    }
+
+    #[test]
+    fn test_program_is_safe_with_unsafe_rule() {
+        let mut program = Program::new();
+        program.add_rule(Rule::new_simple(
+            Atom::new("out".to_string(), vec![Term::Variable("z".to_string())]),
+            vec![Atom::new(
+                "in".to_string(),
+                vec![Term::Variable("x".to_string())],
+            )],
+        ));
+        assert!(!program.is_safe());
+    }
 }

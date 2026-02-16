@@ -212,4 +212,58 @@ mod tests {
         }
         result
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_highlight_insert_statement() {
+        let h = DatalogHelper::new();
+        let result = h.highlight("+edge(1, 2)", 0);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped, "+edge(1, 2)");
+    }
+
+    #[test]
+    fn test_highlight_meta_command() {
+        let h = DatalogHelper::new();
+        let result = h.highlight(".rel", 0);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped, ".rel");
+    }
+
+    #[test]
+    fn test_highlight_delete_statement() {
+        let h = DatalogHelper::new();
+        let result = h.highlight("-edge(1, 2)", 0);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped, "-edge(1, 2)");
+    }
+
+    #[test]
+    fn test_highlight_string_literal() {
+        let h = DatalogHelper::new();
+        let result = h.highlight("+name(\"alice\")", 0);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped, "+name(\"alice\")");
+    }
+
+    #[test]
+    fn test_highlight_numbers() {
+        let h = DatalogHelper::new();
+        let result = h.highlight("+data(42, 3.14)", 0);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped, "+data(42, 3.14)");
+    }
+
+    #[test]
+    fn test_highlight_prompt_no_bracket() {
+        let h = DatalogHelper::new();
+        let result = h.highlight_prompt("plain", false);
+        assert_eq!(result.as_ref(), "plain");
+    }
+
+    #[test]
+    fn test_datalog_helper_default() {
+        let _h = DatalogHelper::default();
+    }
 }

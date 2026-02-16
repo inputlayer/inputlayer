@@ -302,4 +302,185 @@ mod tests {
         assert_eq!(tuple_schema.field_name(0), Some("id"));
         assert_eq!(tuple_schema.field_name(1), Some("name"));
     }
+
+    // === Additional Coverage ===
+
+    #[test]
+    fn test_schema_type_to_data_type() {
+        use crate::value::DataType;
+        assert!(matches!(SchemaType::Int.to_data_type(), DataType::Int64));
+        assert!(matches!(
+            SchemaType::Float.to_data_type(),
+            DataType::Float64
+        ));
+        assert!(matches!(
+            SchemaType::Symbol.to_data_type(),
+            DataType::String
+        ));
+        assert!(matches!(
+            SchemaType::String.to_data_type(),
+            DataType::String
+        ));
+        assert!(matches!(SchemaType::Bool.to_data_type(), DataType::Bool));
+        assert!(matches!(
+            SchemaType::Timestamp.to_data_type(),
+            DataType::Timestamp
+        ));
+        assert!(matches!(SchemaType::Any.to_data_type(), DataType::Null));
+        assert!(matches!(
+            SchemaType::Named("Foo".to_string()).to_data_type(),
+            DataType::String
+        ));
+    }
+
+    #[test]
+    fn test_schema_type_matches_bool() {
+        assert!(SchemaType::Bool.matches(&Value::Bool(true)));
+        assert!(!SchemaType::Bool.matches(&Value::Int32(1)));
+    }
+
+    #[test]
+    fn test_schema_type_matches_timestamp() {
+        assert!(SchemaType::Timestamp.matches(&Value::Timestamp(12345)));
+        assert!(SchemaType::Timestamp.matches(&Value::Int64(12345))); // int as timestamp
+        assert!(!SchemaType::Timestamp.matches(&Value::string("now")));
+    }
+
+    #[test]
+    fn test_schema_type_matches_named_accepts_all() {
+        let named = SchemaType::Named("Email".to_string());
+        assert!(named.matches(&Value::string("test@example.com")));
+        assert!(named.matches(&Value::Int64(42)));
+    }
+
+    #[test]
+    fn test_schema_type_from_str_aliases() {
+        assert_eq!(SchemaType::from_str("integer"), Some(SchemaType::Int));
+        assert_eq!(SchemaType::from_str("i32"), Some(SchemaType::Int));
+        assert_eq!(SchemaType::from_str("i64"), Some(SchemaType::Int));
+        assert_eq!(SchemaType::from_str("double"), Some(SchemaType::Float));
+        assert_eq!(SchemaType::from_str("f64"), Some(SchemaType::Float));
+        assert_eq!(SchemaType::from_str("number"), Some(SchemaType::Float));
+        assert_eq!(SchemaType::from_str("str"), Some(SchemaType::String));
+        assert_eq!(SchemaType::from_str("text"), Some(SchemaType::String));
+        assert_eq!(SchemaType::from_str("boolean"), Some(SchemaType::Bool));
+        assert_eq!(
+            SchemaType::from_str("timestamp"),
+            Some(SchemaType::Timestamp)
+        );
+        assert_eq!(
+            SchemaType::from_str("datetime"),
+            Some(SchemaType::Timestamp)
+        );
+        assert_eq!(SchemaType::from_str("vector"), Some(SchemaType::Vector));
+        assert_eq!(SchemaType::from_str("embedding"), Some(SchemaType::Vector));
+        assert_eq!(SchemaType::from_str("vec"), Some(SchemaType::Vector));
+        assert_eq!(SchemaType::from_str("any"), Some(SchemaType::Any));
+    }
+
+    #[test]
+    fn test_schema_type_from_str_invalid_lowercase() {
+        assert_eq!(SchemaType::from_str("foo"), None);
+        assert_eq!(SchemaType::from_str("123"), None);
+    }
+
+    #[test]
+    fn test_schema_type_is_base_type() {
+        assert!(SchemaType::Int.is_base_type());
+        assert!(SchemaType::Float.is_base_type());
+        assert!(SchemaType::Any.is_base_type());
+        assert!(!SchemaType::Named("Email".to_string()).is_base_type());
+    }
+
+    #[test]
+    fn test_schema_type_display() {
+        assert_eq!(format!("{}", SchemaType::Int), "int");
+        assert_eq!(format!("{}", SchemaType::Float), "float");
+        assert_eq!(format!("{}", SchemaType::Symbol), "symbol");
+        assert_eq!(format!("{}", SchemaType::String), "string");
+        assert_eq!(format!("{}", SchemaType::Bool), "bool");
+        assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
+        assert_eq!(format!("{}", SchemaType::Vector), "vector");
+        assert_eq!(format!("{}", SchemaType::Any), "any");
+        assert_eq!(
+            format!("{}", SchemaType::Named("Email".to_string())),
+            "Email"
+        );
+    }
+
+    #[test]
+    fn test_column_schema_display() {
+        let col = ColumnSchema::new("age", SchemaType::Int);
+        assert_eq!(format!("{}", col), "age: int");
+    }
+
+    #[test]
+    fn test_relation_schema_column_by_index() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+        assert_eq!(schema.column(0).unwrap().name, "id");
+        assert_eq!(schema.column(1).unwrap().name, "name");
+        assert!(schema.column(2).is_none());
+    }
+
+    #[test]
+    fn test_relation_schema_column_by_name() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+        assert_eq!(
+            schema.column_by_name("id").unwrap().data_type,
+            SchemaType::Int
+        );
+        assert!(schema.column_by_name("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_relation_schema_column_index() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+        assert_eq!(schema.column_index("id"), Some(0));
+        assert_eq!(schema.column_index("name"), Some(1));
+        assert_eq!(schema.column_index("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_relation_schema_empty() {
+        let schema = RelationSchema::new("Empty");
+        assert_eq!(schema.arity(), 0);
+        assert!(schema.column_names().is_empty());
+    }
+
+    #[test]
+    fn test_schema_type_serde_roundtrip() {
+        let types = vec![
+            SchemaType::Int,
+            SchemaType::Float,
+            SchemaType::String,
+            SchemaType::Bool,
+            SchemaType::Symbol,
+            SchemaType::Timestamp,
+            SchemaType::Vector,
+            SchemaType::Any,
+            SchemaType::Named("Email".to_string()),
+        ];
+        for t in types {
+            let json = serde_json::to_string(&t).unwrap();
+            let back: SchemaType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, t);
+        }
+    }
+
+    #[test]
+    fn test_relation_schema_serde_roundtrip() {
+        let schema = RelationSchema::new("User")
+            .with_column(ColumnSchema::new("id", SchemaType::Int))
+            .with_column(ColumnSchema::new("name", SchemaType::String));
+        let json = serde_json::to_string(&schema).unwrap();
+        let back: RelationSchema = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "User");
+        assert_eq!(back.arity(), 2);
+    }
 }
