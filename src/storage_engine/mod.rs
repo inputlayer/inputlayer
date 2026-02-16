@@ -141,27 +141,37 @@ impl StorageEngine {
 
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
-        if self.knowledge_graphs.contains_key(name) {
-            return Err(StorageError::KnowledgeGraphExists(name.to_string()));
-        }
-
         // Validate knowledge graph name
-        if name.is_empty() || name.contains('/') || name.contains('\\') {
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+            || name.contains("..")
+            || name == "."
+        {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
 
-        // Create knowledge graph directory structure
-        let db_dir = self.config.storage.data_dir.join(name);
-        fs::create_dir_all(&db_dir)?;
-        fs::create_dir_all(db_dir.join("relations"))?;
+        // Atomic check-and-insert to prevent TOCTOU race
+        use dashmap::mapref::entry::Entry;
+        let entry = self.knowledge_graphs.entry(name.to_string());
+        match entry {
+            Entry::Occupied(_) => {
+                return Err(StorageError::KnowledgeGraphExists(name.to_string()));
+            }
+            Entry::Vacant(vacant) => {
+                // Create knowledge graph directory structure
+                let db_dir = self.config.storage.data_dir.join(name);
+                fs::create_dir_all(&db_dir)?;
+                fs::create_dir_all(db_dir.join("relations"))?;
 
-        // Create knowledge graph instance (uses persist layer for durability)
-        let num_workers = self.config.storage.performance.num_threads;
-        let kg = KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
+                // Create knowledge graph instance (uses persist layer for durability)
+                let num_workers = self.config.storage.performance.num_threads;
+                let kg = KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
 
-        // Store in memory
-        self.knowledge_graphs
-            .insert(name.to_string(), Arc::new(RwLock::new(kg)));
+                vacant.insert(Arc::new(RwLock::new(kg)));
+            }
+        }
 
         // Update system metadata
         self.save_knowledge_graphs_metadata()?;
@@ -191,6 +201,16 @@ impl StorageEngine {
         // Remove from memory
         self.knowledge_graphs.remove(name);
 
+        // Delete persist shards for this KG (prevents resurrection on restart)
+        let prefix = format!("{name}:");
+        if let Ok(shard_names) = self.persist.list_shards() {
+            for shard_name in shard_names {
+                if shard_name.starts_with(&prefix) {
+                    let _ = self.persist.delete_shard(&shard_name);
+                }
+            }
+        }
+
         // Delete from disk
         let db_dir = self.config.storage.data_dir.join(name);
         if db_dir.exists() {
@@ -213,11 +233,8 @@ impl StorageEngine {
             }
         }
 
-        // Update access timestamp (reusing created_at as last-accessed tracker)
-        if let Some(db) = self.knowledge_graphs.get(name) {
-            let mut db = db.write();
-            db.metadata.created_at = Utc::now().to_rfc3339();
-        }
+        // Note: Access tracking is handled at save time via KnowledgeGraphInfo::last_accessed.
+        // We do NOT overwrite created_at here to preserve the original creation timestamp.
 
         self.current_kg = Some(name.to_string());
         Ok(())
@@ -560,11 +577,19 @@ impl StorageEngine {
             db_guard.snapshot()
         };
 
+        // Prepend persistent rules (same as execute_with_rules) so the explain
+        // plan matches actual execution behavior.
+        let combined = if snapshot.rule_prefix().is_empty() {
+            program.to_string()
+        } else {
+            format!("{}{}", snapshot.rule_prefix(), program)
+        };
+
         let mut engine = crate::DatalogEngine::new();
         engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
 
         engine
-            .explain(program)
+            .explain(&combined)
             .map_err(|e| StorageError::Other(format!("Query explain failed: {e}")))
     }
 
@@ -1793,8 +1818,10 @@ impl KnowledgeGraph {
             }
         }
 
-        // Publish new snapshot for lock-free reads
-        self.publish_snapshot();
+        // Publish new snapshot for lock-free reads (only if data actually changed)
+        if new_count > 0 {
+            self.publish_snapshot();
+        }
 
         Ok((new_count, dup_count))
     }
@@ -1828,22 +1855,24 @@ impl KnowledgeGraph {
 
         // Update production format (input_tuples)
         if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
-            // Find which tuples will actually be deleted
-            for t in tuples_to_remove {
+            // Deduplicate the remove set for consistent DD shadow writes
+            let remove_set: std::collections::HashSet<&Tuple> = tuples_to_remove.iter().collect();
+            // Find which unique tuples will actually be deleted
+            for t in &remove_set {
                 if existing.contains(t) {
-                    deleted_tuples_for_dd.push(t.clone());
+                    deleted_tuples_for_dd.push((*t).clone());
                 }
             }
             let count_before = existing.len();
-            // Remove tuples
-            existing.retain(|tuple| !tuples_to_remove.contains(tuple));
+            // Remove tuples — O(n) scan with O(1) per-element lookup
+            existing.retain(|tuple| !remove_set.contains(tuple));
             final_count = existing.len();
             deleted_count = count_before - final_count;
             found = true;
         }
 
-        // Update metadata if we found and modified data
-        if found {
+        // Update metadata and DD only if data actually changed
+        if found && deleted_count > 0 {
             self.metadata
                 .add_relation(relation.to_string(), schema, final_count);
 
@@ -3596,6 +3625,14 @@ mod tests {
         assert!(storage.create_knowledge_graph("a/b").is_err());
         // Backslash in name
         assert!(storage.create_knowledge_graph("a\\b").is_err());
+        // Path traversal with ..
+        assert!(storage.create_knowledge_graph("..").is_err());
+        assert!(storage.create_knowledge_graph("foo/..").is_err());
+        assert!(storage.create_knowledge_graph("a..b").is_err());
+        // Current directory
+        assert!(storage.create_knowledge_graph(".").is_err());
+        // Null byte
+        assert!(storage.create_knowledge_graph("a\0b").is_err());
     }
 
     #[test]
@@ -3627,6 +3664,50 @@ mod tests {
         assert!(!storage
             .list_knowledge_graphs()
             .contains(&"to_drop".to_string()));
+    }
+
+    #[test]
+    fn test_drop_knowledge_graph_cleans_persist_shards() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let mut storage = StorageEngine::new(config.clone()).unwrap();
+
+        // Create a KG and insert some data to create persist shards
+        storage.create_knowledge_graph("shard_test").unwrap();
+        storage
+            .insert_tuples_into(
+                "shard_test",
+                "rel1",
+                vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
+            )
+            .unwrap();
+
+        // Verify shard exists
+        let shards = storage.persist.list_shards().unwrap();
+        assert!(
+            shards.iter().any(|s| s.starts_with("shard_test:")),
+            "Expected persist shard for shard_test, got: {shards:?}"
+        );
+
+        // Drop the KG
+        storage.drop_knowledge_graph("shard_test").unwrap();
+
+        // Verify persist shards are cleaned up
+        let shards_after = storage.persist.list_shards().unwrap();
+        assert!(
+            !shards_after.iter().any(|s| s.starts_with("shard_test:")),
+            "Persist shards should be cleaned up after drop, got: {shards_after:?}"
+        );
+
+        // Verify KG doesn't resurrect on restart
+        drop(storage);
+        let storage2 = StorageEngine::new(config).unwrap();
+        assert!(
+            !storage2
+                .list_knowledge_graphs()
+                .contains(&"shard_test".to_string()),
+            "Dropped KG should not resurrect on restart"
+        );
     }
 
     #[test]

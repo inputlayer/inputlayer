@@ -385,33 +385,6 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X > 2, X < 4) no longer supported - Constraint type removed
-fn test_multiple_queries_on_same_knowledge_graph() {
-    let (storage, _temp) = create_test_storage();
-
-    storage.create_knowledge_graph("test").unwrap();
-    storage
-        .insert_into("test", "edge", vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)])
-        .unwrap();
-
-    // Execute multiple queries in parallel
-    let queries = vec![
-        "q1(X,Y) <- edge(X,Y)",
-        "q2(X,Y) <- edge(X,Y), X > 2",
-        "q3(X,Y) <- edge(X,Y), X < 4",
-    ];
-
-    let results = storage
-        .execute_parallel_queries_on_knowledge_graph("test", queries)
-        .unwrap();
-
-    assert_eq!(results.len(), 3);
-    assert_eq!(results[0].len(), 5); // All edges
-    assert_eq!(results[1].len(), 3); // x > 2
-    assert_eq!(results[2].len(), 3); // x < 4
-}
-
-#[test]
 fn test_worker_pool_configuration() {
     let (storage, _temp) = create_test_storage();
 

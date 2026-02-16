@@ -12,7 +12,6 @@
 //! ├── Sessions (HashMap<SessionId, Session>)
 //! │   └── Session
 //! │       ├── Ephemeral facts: HashMap<relation, Vec<Tuple>>
-//! │       ├── Ephemeral retractions: HashMap<relation, Vec<Tuple>>
 //! │       ├── Ephemeral rules: Vec<Rule>
 //! │       ├── Knowledge graph binding
 //! │       └── Created/accessed timestamps
@@ -83,6 +82,16 @@ pub enum Provenance {
     Mixed,
 }
 
+impl std::fmt::Display for Provenance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Provenance::Persistent => write!(f, "persistent"),
+            Provenance::Ephemeral => write!(f, "ephemeral"),
+            Provenance::Mixed => write!(f, "mixed"),
+        }
+    }
+}
+
 /// Metadata about ephemeral participation in a query result
 #[derive(Debug, Clone, Default)]
 pub struct QueryMetadata {
@@ -103,9 +112,6 @@ pub struct Session {
     pub knowledge_graph: String,
     /// Ephemeral facts (relation → tuples to add)
     ephemeral_facts: HashMap<String, Vec<Tuple>>,
-    /// Ephemeral retractions (relation → tuples to subtract)
-    /// These only retract ephemeral facts, never persistent ones
-    ephemeral_retractions: HashMap<String, Vec<Tuple>>,
     /// Ephemeral rules (session-scoped, not persisted)
     ephemeral_rules: Vec<Rule>,
     /// Rule text for each ephemeral rule (for prepending to queries)
@@ -123,7 +129,6 @@ impl Session {
             id,
             knowledge_graph,
             ephemeral_facts: HashMap::new(),
-            ephemeral_retractions: HashMap::new(),
             ephemeral_rules: Vec::new(),
             ephemeral_rule_texts: Vec::new(),
             created_at: now,
@@ -138,19 +143,12 @@ impl Session {
 
     /// Check if session has any ephemeral state
     pub fn is_clean(&self) -> bool {
-        self.ephemeral_facts.is_empty()
-            && self.ephemeral_retractions.is_empty()
-            && self.ephemeral_rules.is_empty()
+        self.ephemeral_facts.is_empty() && self.ephemeral_rules.is_empty()
     }
 
     /// Get the number of ephemeral facts across all relations
     pub fn ephemeral_fact_count(&self) -> usize {
         self.ephemeral_facts.values().map(Vec::len).sum()
-    }
-
-    /// Get the number of ephemeral retractions across all relations
-    pub fn ephemeral_retraction_count(&self) -> usize {
-        self.ephemeral_retractions.values().map(Vec::len).sum()
     }
 
     /// Get the number of ephemeral rules
@@ -162,26 +160,22 @@ impl Session {
     ///
     /// These facts are only visible within this session.
     /// Duplicates with existing ephemeral facts are deduplicated.
-    pub fn insert_ephemeral(&mut self, relation: &str, tuples: Vec<Tuple>) {
+    /// Returns the number of facts actually inserted (after dedup).
+    pub fn insert_ephemeral(&mut self, relation: &str, tuples: Vec<Tuple>) -> usize {
         self.touch();
         let existing = self
             .ephemeral_facts
             .entry(relation.to_string())
             .or_default();
 
+        let mut inserted = 0;
         for tuple in tuples {
-            // Check against existing ephemeral facts
             if !existing.contains(&tuple) {
-                // Also remove from retractions if re-inserting
-                if let Some(retractions) = self.ephemeral_retractions.get_mut(relation) {
-                    retractions.retain(|t| t != &tuple);
-                    if retractions.is_empty() {
-                        self.ephemeral_retractions.remove(relation);
-                    }
-                }
                 existing.push(tuple);
+                inserted += 1;
             }
         }
+        inserted
     }
 
     /// Retract ephemeral fact(s) from a relation
@@ -234,12 +228,19 @@ impl Session {
             .collect()
     }
 
-    /// Get all ephemeral facts as session_facts pairs for snapshot execution
+    /// Get all ephemeral facts as session_facts pairs for snapshot execution.
+    ///
+    /// Results are sorted by relation name for deterministic ordering,
+    /// since HashMap iteration order is non-deterministic.
     pub fn session_facts(&self) -> Vec<(String, Tuple)> {
         let mut facts = Vec::new();
-        for (relation, tuples) in &self.ephemeral_facts {
-            for tuple in tuples {
-                facts.push((relation.clone(), tuple.clone()));
+        let mut relations: Vec<&String> = self.ephemeral_facts.keys().collect();
+        relations.sort();
+        for relation in relations {
+            if let Some(tuples) = self.ephemeral_facts.get(relation) {
+                for tuple in tuples {
+                    facts.push((relation.clone(), tuple.clone()));
+                }
             }
         }
         facts
@@ -260,15 +261,9 @@ impl Session {
         &self.ephemeral_facts
     }
 
-    /// Get all ephemeral retractions
-    pub fn ephemeral_retractions(&self) -> &HashMap<String, Vec<Tuple>> {
-        &self.ephemeral_retractions
-    }
-
     /// Clear all ephemeral state (e.g., on KG switch)
     pub fn clear(&mut self) {
         self.ephemeral_facts.clear();
-        self.ephemeral_retractions.clear();
         self.ephemeral_rules.clear();
         self.ephemeral_rule_texts.clear();
     }
@@ -294,21 +289,17 @@ impl Session {
             ..Default::default()
         };
 
-        // List relations with ephemeral data
-        for relation in self.ephemeral_facts.keys() {
-            metadata.ephemeral_sources.push(relation.clone());
-        }
+        // List relations with ephemeral data (sorted for deterministic output)
+        let mut sources: Vec<String> = self.ephemeral_facts.keys().cloned().collect();
+        sources.sort();
+        metadata.ephemeral_sources = sources;
 
         // Add warnings
         if !self.ephemeral_facts.is_empty() {
             metadata.warnings.push(format!(
                 "Query results may include ephemeral data from {} relation(s): {}",
                 self.ephemeral_facts.len(),
-                self.ephemeral_facts
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                metadata.ephemeral_sources.join(", ")
             ));
         }
 
@@ -430,26 +421,37 @@ impl SessionManager {
         Ok(f(session))
     }
 
-    /// Insert ephemeral facts into a session
+    /// Update last-accessed timestamp for a session to prevent idle reaping.
+    ///
+    /// Call this for operations that represent genuine session activity
+    /// but only require read access (e.g., query execution).
+    pub fn touch_session(&self, id: SessionId) -> Result<(), String> {
+        self.with_session_mut(id, Session::touch)
+    }
+
+    /// Insert ephemeral facts into a session.
+    /// Returns the number of facts actually inserted (after dedup).
     pub fn insert_ephemeral(
         &self,
         session_id: SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
-    ) -> Result<(), String> {
-        let count = tuples.len();
-        self.with_session_mut(session_id, |session| {
-            session.insert_ephemeral(relation, tuples);
+    ) -> Result<usize, String> {
+        if relation.trim().is_empty() {
+            return Err("Relation name cannot be empty".to_string());
+        }
+        let inserted = self.with_session_mut(session_id, |session| {
+            session.insert_ephemeral(relation, tuples)
         })?;
 
         self.audit.record(AuditEvent::EphemeralInsert {
             session_id,
             relation: relation.to_string(),
-            count,
+            count: inserted,
             timestamp: Instant::now(),
         });
 
-        Ok(())
+        Ok(inserted)
     }
 
     /// Retract ephemeral facts from a session
@@ -459,6 +461,9 @@ impl SessionManager {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
+        if relation.trim().is_empty() {
+            return Err("Relation name cannot be empty".to_string());
+        }
         let retracted = self.with_session_mut(session_id, |session| {
             session.retract_ephemeral(relation, tuples)
         })?;
@@ -531,11 +536,13 @@ impl SessionManager {
     /// Switch a session to a different knowledge graph
     ///
     /// Clears all ephemeral state per the design decision.
+    /// Reads old KG and writes new KG atomically under a single write lock.
     pub fn switch_kg(&self, session_id: SessionId, new_kg: &str) -> Result<(), String> {
-        let from_kg = self.session_kg(session_id)?;
-        self.with_session_mut(session_id, |session| {
+        let from_kg = self.with_session_mut(session_id, |session| {
+            let from = session.knowledge_graph.clone();
             session.clear();
             session.knowledge_graph = new_kg.to_string();
+            from
         })?;
 
         self.audit.record(AuditEvent::KgSwitched {
@@ -595,9 +602,11 @@ impl SessionManager {
         }
     }
 
-    /// List all session IDs
+    /// List all session IDs (sorted for deterministic output)
     pub fn list_sessions(&self) -> Vec<SessionId> {
-        self.sessions.read().keys().copied().collect()
+        let mut ids: Vec<SessionId> = self.sessions.read().keys().copied().collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// Get a reference to the audit log
@@ -706,9 +715,14 @@ pub enum AuditEvent {
 ///
 /// Thread-safe event buffer with configurable capacity.
 /// When the buffer is full, oldest events are discarded.
+/// Uses a `drain_offset` to track how many events have been drained,
+/// allowing `events_since` to work correctly across drains.
 pub struct AuditLog {
     events: RwLock<Vec<AuditEvent>>,
     max_events: usize,
+    /// Tracks the total number of events drained over the log's lifetime.
+    /// This offset is added to the current Vec index to get the "logical" index.
+    drain_offset: AtomicU64,
 }
 
 impl AuditLog {
@@ -717,16 +731,24 @@ impl AuditLog {
         Self {
             events: RwLock::new(Vec::with_capacity(max_events.min(10_000))),
             max_events,
+            drain_offset: AtomicU64::new(0),
         }
     }
 
     /// Record an audit event
     pub fn record(&self, event: AuditEvent) {
+        // max_events == 0 means unlimited logging
+        if self.max_events == 0 {
+            self.events.write().push(event);
+            return;
+        }
         let mut events = self.events.write();
         if events.len() >= self.max_events {
-            // Remove oldest half when full
-            let drain_count = self.max_events / 2;
+            // Remove oldest half when full (at least 1 to guarantee progress)
+            let drain_count = (self.max_events / 2).max(1);
             events.drain(..drain_count);
+            self.drain_offset
+                .fetch_add(drain_count as u64, Ordering::SeqCst);
         }
         events.push(event);
     }
@@ -736,19 +758,34 @@ impl AuditLog {
         self.events.read().clone()
     }
 
-    /// Get events since a given index
-    pub fn events_since(&self, start: usize) -> Vec<AuditEvent> {
+    /// Get events since a given logical index.
+    ///
+    /// The logical index accounts for drained events, so it remains valid
+    /// even after the buffer wraps. Use `logical_len()` to get the current
+    /// logical index for later calls to `events_since()`.
+    pub fn events_since(&self, logical_start: usize) -> Vec<AuditEvent> {
         let events = self.events.read();
-        if start >= events.len() {
+        let offset = self.drain_offset.load(Ordering::SeqCst) as usize;
+        // Convert logical index to physical index
+        let physical_start = logical_start.saturating_sub(offset);
+        if physical_start >= events.len() {
             Vec::new()
         } else {
-            events[start..].to_vec()
+            events[physical_start..].to_vec()
         }
     }
 
-    /// Get the number of recorded events
+    /// Get the number of currently buffered events
     pub fn len(&self) -> usize {
         self.events.read().len()
+    }
+
+    /// Get the logical length (total events ever recorded minus those cleared).
+    /// Use this value for subsequent `events_since()` calls.
+    pub fn logical_len(&self) -> usize {
+        let events = self.events.read();
+        let offset = self.drain_offset.load(Ordering::SeqCst) as usize;
+        events.len() + offset
     }
 
     /// Check if the audit log is empty
@@ -756,9 +793,14 @@ impl AuditLog {
         self.events.read().is_empty()
     }
 
-    /// Clear all events
+    /// Clear all events and reset logical offset.
+    /// Both operations are performed while holding the write lock for atomicity.
     pub fn clear(&self) {
-        self.events.write().clear();
+        let mut events = self.events.write();
+        events.clear();
+        self.drain_offset.store(0, Ordering::SeqCst);
+        // Write lock is held until here, ensuring no concurrent record()
+        // sees a stale drain_offset with an empty events Vec.
     }
 }
 
@@ -1430,6 +1472,87 @@ mod tests {
         assert!(matches!(since[0], AuditEvent::EphemeralInsert { .. }));
     }
 
+    #[test]
+    fn test_audit_events_since_after_drain() {
+        let log = AuditLog::new(4);
+
+        // Record 4 events (fills buffer)
+        for i in 0..4 {
+            log.record(AuditEvent::SessionCreated {
+                session_id: i,
+                knowledge_graph: "test".to_string(),
+                timestamp: Instant::now(),
+            });
+        }
+
+        // Save the logical position after 4 events
+        let checkpoint = log.logical_len();
+        assert_eq!(checkpoint, 4);
+
+        // Record 2 more events (triggers drain of oldest 2)
+        for i in 4..6 {
+            log.record(AuditEvent::SessionCreated {
+                session_id: i,
+                knowledge_graph: "test".to_string(),
+                timestamp: Instant::now(),
+            });
+        }
+
+        // events_since(checkpoint) should return only the 2 new events
+        let since = log.events_since(checkpoint);
+        assert_eq!(since.len(), 2);
+        match &since[0] {
+            AuditEvent::SessionCreated { session_id, .. } => assert_eq!(*session_id, 4),
+            other => panic!("Expected SessionCreated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_audit_logical_len() {
+        let log = AuditLog::new(4);
+        for i in 0..6 {
+            log.record(AuditEvent::SessionCreated {
+                session_id: i,
+                knowledge_graph: "test".to_string(),
+                timestamp: Instant::now(),
+            });
+        }
+        // 6 total events recorded, logical_len should reflect 6
+        // even though physical buffer is smaller
+        assert_eq!(log.logical_len(), 6);
+    }
+
+    #[test]
+    fn test_audit_clear_resets_drain_offset() {
+        let log = AuditLog::new(4);
+        // Fill past capacity to trigger drain
+        for i in 0..6 {
+            log.record(AuditEvent::SessionCreated {
+                session_id: i,
+                knowledge_graph: "test".to_string(),
+                timestamp: Instant::now(),
+            });
+        }
+        assert_eq!(log.logical_len(), 6);
+
+        // Clear should reset everything
+        log.clear();
+        assert_eq!(log.logical_len(), 0);
+        assert!(log.is_empty());
+
+        // After clear, new events should start from 0
+        log.record(AuditEvent::SessionCreated {
+            session_id: 99,
+            knowledge_graph: "test".to_string(),
+            timestamp: Instant::now(),
+        });
+        assert_eq!(log.logical_len(), 1);
+
+        // events_since(0) should return the new event
+        let events = log.events_since(0);
+        assert_eq!(events.len(), 1);
+    }
+
     // === Ephemeral fact count ===
 
     #[test]
@@ -1448,7 +1571,6 @@ mod tests {
 
         mgr.with_session(id, |s| {
             assert_eq!(s.ephemeral_fact_count(), 3);
-            assert_eq!(s.ephemeral_retraction_count(), 0);
             assert_eq!(s.ephemeral_rule_count(), 0);
         })
         .unwrap();
@@ -1480,6 +1602,67 @@ mod tests {
     }
 
     // === Provenance ===
+
+    // === Relation name validation ===
+
+    #[test]
+    fn test_insert_ephemeral_empty_relation_name() {
+        let mgr = SessionManager::default();
+        let id = mgr.create_session("default").unwrap();
+        let result = mgr.insert_ephemeral(id, "", vec![make_tuple(vec![1])]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_insert_ephemeral_whitespace_relation_name() {
+        let mgr = SessionManager::default();
+        let id = mgr.create_session("default").unwrap();
+        let result = mgr.insert_ephemeral(id, "  ", vec![make_tuple(vec![1])]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retract_ephemeral_empty_relation_name() {
+        let mgr = SessionManager::default();
+        let id = mgr.create_session("default").unwrap();
+        let result = mgr.retract_ephemeral(id, "", vec![make_tuple(vec![1])]);
+        assert!(result.is_err());
+    }
+
+    // === Deterministic ordering ===
+
+    #[test]
+    fn test_session_facts_deterministic_order() {
+        let mgr = SessionManager::default();
+        let id = mgr.create_session("default").unwrap();
+
+        // Insert in non-alphabetical order
+        mgr.insert_ephemeral(id, "zebra", vec![make_tuple(vec![1])])
+            .unwrap();
+        mgr.insert_ephemeral(id, "alpha", vec![make_tuple(vec![2])])
+            .unwrap();
+        mgr.insert_ephemeral(id, "middle", vec![make_tuple(vec![3])])
+            .unwrap();
+
+        let facts = mgr.get_session_facts(id).unwrap();
+        let relations: Vec<&str> = facts.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(relations, vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn test_metadata_ephemeral_sources_sorted() {
+        let mgr = SessionManager::default();
+        let id = mgr.create_session("default").unwrap();
+
+        mgr.insert_ephemeral(id, "zebra", vec![make_tuple(vec![1])])
+            .unwrap();
+        mgr.insert_ephemeral(id, "alpha", vec![make_tuple(vec![2])])
+            .unwrap();
+
+        let meta = mgr.get_query_metadata(id).unwrap();
+        assert_eq!(meta.ephemeral_sources, vec!["alpha", "zebra"]);
+    }
 
     #[test]
     fn test_provenance_serialization() {

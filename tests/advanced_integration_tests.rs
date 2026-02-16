@@ -40,23 +40,6 @@ fn test_self_join_with_filter() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X >= 2, etc.) no longer supported - Constraint type removed
-fn test_complex_filter_combination() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
-
-    // x in range [2, 4], y in range [20, 40]
-    let query = "result(X, Y) <- data(X, Y), X >= 2, X <= 4, Y >= 20, Y <= 40";
-    let results = engine.execute(query).unwrap();
-
-    let result_set = to_set(results);
-    assert_eq!(result_set.len(), 3);
-    assert!(result_set.contains(&(2, 20)));
-    assert!(result_set.contains(&(3, 30)));
-    assert!(result_set.contains(&(4, 40)));
-}
-
-#[test]
 fn test_column_swap_projection() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
@@ -88,23 +71,6 @@ fn test_join_with_column_equality() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (A < C) no longer supported - Constraint type removed
-fn test_cartesian_product_filtered() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("r", vec![(1, 2), (2, 3)]);
-    engine.add_fact("s", vec![(10, 20), (30, 40)]);
-
-    // Cartesian product filtered by constraint
-    let query = "result(A, C) <- r(A, B), s(C, D), A < C";
-    let results = engine.execute(query).unwrap();
-
-    // Should have results where a < c
-    for (a, c) in &results {
-        assert!(a < c);
-    }
-}
-
-#[test]
 fn test_variable_reuse_in_body() {
     let mut engine = DatalogEngine::new();
     // Add edges including bidirectional ones to form cycles
@@ -130,57 +96,6 @@ fn test_variable_reuse_in_body() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X > 10) no longer supported - Constraint type removed
-fn test_empty_result_set() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
-
-    // Filter that excludes everything
-    let query = "result(X, Y) <- edge(X, Y), X > 10";
-    let results = engine.execute(query).unwrap();
-
-    assert_eq!(results.len(), 0, "Expected empty result set");
-}
-
-#[test]
-#[ignore] // Constraint syntax (X = Y) no longer supported - Constraint type removed
-fn test_single_variable_constraint() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("data", vec![(1, 1), (2, 2), (3, 4), (5, 5)]);
-
-    // Only pairs where X == Y
-    let query = "result(X, Y) <- data(X, Y), X = Y";
-    let results = engine.execute(query).unwrap();
-
-    for (x, y) in &results {
-        assert_eq!(x, y, "Expected x == y");
-    }
-
-    let result_set = to_set(results);
-    assert!(result_set.contains(&(1, 1)));
-    assert!(result_set.contains(&(2, 2)));
-    assert!(result_set.contains(&(5, 5)));
-    assert!(!result_set.contains(&(3, 4)));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
-fn test_multiple_inequality_constraints() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("data", vec![(1, 1), (2, 3), (4, 5), (6, 6)]);
-
-    // X != Y
-    let query = "result(X, Y) <- data(X, Y), X != Y";
-    let results = engine.execute(query).unwrap();
-
-    for (x, y) in &results {
-        assert_ne!(x, y, "Expected x != y");
-    }
-
-    assert_eq!(results.len(), 2); // (2,3) and (4,5)
-}
-
-#[test]
 fn test_join_with_multiple_constraints() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("r", vec![(1, 2), (2, 3), (3, 4)]);
@@ -197,24 +112,6 @@ fn test_join_with_multiple_constraints() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X > 50) no longer supported - Constraint type removed
-fn test_large_dataset_performance() {
-    let mut engine = DatalogEngine::new();
-
-    // Create larger dataset
-    let mut data = Vec::new();
-    for i in 1..=100 {
-        data.push((i, i + 1));
-    }
-    engine.add_fact("edge", data);
-
-    let query = "result(X, Y) <- edge(X, Y), X > 50";
-    let results = engine.execute(query).unwrap();
-
-    assert_eq!(results.len(), 50); // 51 to 100
-}
-
-#[test]
 fn test_nested_join_complex() {
     let mut engine = DatalogEngine::new();
     engine.add_fact("a", vec![(1, 2), (2, 3)]);
@@ -226,55 +123,6 @@ fn test_nested_join_complex() {
     let results = engine.execute(query).unwrap();
 
     assert!(!results.is_empty());
-}
-
-#[test]
-#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
-fn test_pipeline_with_trace() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
-
-    let query = "result(X, Y) <- edge(X, Y), X > 1";
-    let (results, trace) = engine.execute_with_trace(query).unwrap();
-
-    // Verify trace captured all stages
-    assert!(trace.ast.is_some());
-    assert!(!trace.ir_before.is_empty());
-    assert!(!trace.ir_after.is_empty());
-    assert!(!trace.results.is_empty());
-
-    // Verify results
-    assert_eq!(results.len(), 1);
-    assert!(results.contains(&(2, 3)));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X = 3, etc.) no longer supported - Constraint type removed
-fn test_all_comparison_operators_comprehensive() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
-
-    // Test each operator
-    let tests = vec![
-        ("result(X, Y) <- data(X, Y), X = 3", 1),  // Equal
-        ("result(X, Y) <- data(X, Y), X != 3", 4), // Not equal
-        ("result(X, Y) <- data(X, Y), X < 3", 2),  // Less than
-        ("result(X, Y) <- data(X, Y), X > 3", 2),  // Greater than
-        ("result(X, Y) <- data(X, Y), X <= 3", 3), // Less or equal
-        ("result(X, Y) <- data(X, Y), X >= 3", 3), // Greater or equal
-    ];
-
-    for (query, expected_count) in tests {
-        let results = engine.execute(query).unwrap();
-        assert_eq!(
-            results.len(),
-            expected_count,
-            "Query '{}' expected {} results, got {}",
-            query,
-            expected_count,
-            results.len()
-        );
-    }
 }
 
 #[test]
@@ -369,43 +217,6 @@ fn test_asymmetric_joins() {
     assert!(result_set.contains(&(1, 22)));
     // parent(2,4), age(4,5) -> (2,5)
     assert!(result_set.contains(&(2, 5)));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X > 1, etc.) no longer supported - Constraint type removed
-fn test_filters_pushed_through_pipeline() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
-
-    // Multiple filters that should all be applied
-    let query = "result(X, Y) <- data(X, Y), X > 1, X < 5, Y >= 20, Y <= 40";
-    let results = engine.execute(query).unwrap();
-
-    // Should get (2,20), (3,30), (4,40)
-    assert_eq!(results.len(), 3);
-
-    for (x, y) in &results {
-        assert!(*x > 1 && *x < 5, "x should be in (1, 5)");
-        assert!(*y >= 20 && *y <= 40, "y should be in [20, 40]");
-    }
-}
-
-#[test]
-#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
-fn test_column_to_column_comparison() {
-    let mut engine = DatalogEngine::new();
-    engine.add_fact("pairs", vec![(1, 1), (1, 2), (2, 1), (2, 2), (3, 4)]);
-
-    // X != Y (column-to-column comparison)
-    let query = "result(X, Y) <- pairs(X, Y), X != Y";
-    let results = engine.execute(query).unwrap();
-
-    let result_set = to_set(results);
-    assert!(!result_set.contains(&(1, 1)));
-    assert!(result_set.contains(&(1, 2)));
-    assert!(result_set.contains(&(2, 1)));
-    assert!(!result_set.contains(&(2, 2)));
-    assert!(result_set.contains(&(3, 4)));
 }
 
 #[test]

@@ -24,7 +24,19 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
         Term::Constant(n) => Ok(Value::Int64(*n)),
         Term::FloatConstant(f) => Ok(Value::Float64(*f)),
         Term::StringConstant(s) => Ok(Value::string(s)),
-        Term::VectorLiteral(v) => Ok(Value::vector(v.iter().map(|x| *x as f32).collect())),
+        Term::VectorLiteral(v) => {
+            let f32_vals: Vec<f32> = v
+                .iter()
+                .map(|x| {
+                    let val = *x as f32;
+                    if !val.is_finite() {
+                        return Err(format!("Vector element {x} overflows f32 range"));
+                    }
+                    Ok(val)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::vector(f32_vals))
+        }
         Term::Variable(v) => Err(format!("Cannot insert variable '{v}' - use constants only")),
         Term::Placeholder => Err("Cannot insert placeholder '_' - use constants only".to_string()),
         Term::Arithmetic(_) => {
@@ -142,6 +154,12 @@ impl Handler {
 
     /// Create a new session bound to a knowledge graph.
     pub fn create_session(&self, knowledge_graph: &str) -> Result<SessionId, String> {
+        // Validate KG exists (or auto-create if configured)
+        let storage = self.storage.read();
+        storage
+            .ensure_knowledge_graph(knowledge_graph)
+            .map_err(|e| format!("Knowledge graph '{knowledge_graph}' not found: {e}"))?;
+        drop(storage);
         self.sessions.create_session(knowledge_graph)
     }
 
@@ -224,14 +242,7 @@ impl Handler {
         };
 
         // Strip comment lines
-        let program_text: String = program
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.starts_with('%') && !trimmed.starts_with("//")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let program_text = strip_comments(&program);
 
         // Process statements
         let mut messages = Vec::new();
@@ -327,6 +338,7 @@ impl Handler {
 
                                 if let Some(err) = conversion_error {
                                     messages.push(err);
+                                    current_stmt.clear();
                                     continue;
                                 }
 
@@ -342,23 +354,25 @@ impl Handler {
                                     continue;
                                 }
 
-                                let count = tuples.len();
-                                self.insert_count.fetch_add(count as u64, Ordering::Relaxed);
-                                storage
+                                let (inserted, _duplicates) = storage
                                     .insert_tuples_into(&kg_name, &op.relation, tuples)
                                     .map_err(|e| e.to_string())?;
+                                self.insert_count
+                                    .fetch_add(inserted as u64, Ordering::Relaxed);
                                 // Notify WebSocket subscribers of persistent data change
-                                let _ =
-                                    self.notify_tx
-                                        .send(PersistentNotification::PersistentUpdate {
+                                if inserted > 0 {
+                                    let _ = self.notify_tx.send(
+                                        PersistentNotification::PersistentUpdate {
                                             knowledge_graph: kg_name.clone(),
                                             relation: op.relation.clone(),
                                             operation: "insert".to_string(),
-                                            count,
-                                        });
+                                            count: inserted,
+                                        },
+                                    );
+                                }
                                 messages.push(format!(
                                     "Inserted {} fact(s) into '{}'.",
-                                    count, op.relation
+                                    inserted, op.relation
                                 ));
                             }
                             statement::Statement::Fact(rule) => {
@@ -367,6 +381,7 @@ impl Handler {
                                 if rule.head.args.is_empty() {
                                     messages
                                         .push("Fact must have at least one argument".to_string());
+                                    current_stmt.clear();
                                     continue;
                                 }
 
@@ -384,6 +399,7 @@ impl Handler {
                                 }
                                 if let Some(err) = conversion_error {
                                     messages.push(err);
+                                    current_stmt.clear();
                                     continue;
                                 }
 
@@ -399,27 +415,24 @@ impl Handler {
                                 use statement::DeletePattern;
                                 match op.pattern {
                                     DeletePattern::SingleTuple(terms) => {
-                                        if terms.len() >= 2 {
-                                            let a = if let Term::Constant(n) = &terms[0] {
-                                                *n as i32
-                                            } else {
-                                                messages.push(
-                                                    "Delete arguments must be constants"
-                                                        .to_string(),
-                                                );
-                                                continue;
+                                        if !terms.is_empty() {
+                                            let values: Result<Vec<Value>, String> =
+                                                terms.iter().map(term_to_value).collect();
+                                            let values = match values {
+                                                Ok(v) => v,
+                                                Err(e) => {
+                                                    messages.push(format!("Delete error: {e}"));
+                                                    current_stmt.clear();
+                                                    continue;
+                                                }
                                             };
-                                            let b = if let Term::Constant(n) = &terms[1] {
-                                                *n as i32
-                                            } else {
-                                                messages.push(
-                                                    "Delete arguments must be constants"
-                                                        .to_string(),
-                                                );
-                                                continue;
-                                            };
+                                            let tuple = Tuple::new(values);
                                             let deleted_count = storage
-                                                .delete_from(&kg_name, &op.relation, vec![(a, b)])
+                                                .delete_tuples_from(
+                                                    &kg_name,
+                                                    &op.relation,
+                                                    vec![tuple],
+                                                )
                                                 .map_err(|e| e.to_string())?;
                                             if deleted_count > 0 {
                                                 let _ = self.notify_tx.send(
@@ -441,24 +454,11 @@ impl Handler {
                                         let mut total_deleted = 0;
                                         for tuple_terms in tuples {
                                             // Convert terms to values
-                                            let values: Vec<crate::value::Value> = tuple_terms
-                                                .iter()
-                                                .filter_map(|t| match t {
-                                                    Term::Constant(n) => {
-                                                        Some(crate::value::Value::Int64(*n))
-                                                    }
-                                                    Term::StringConstant(s) => {
-                                                        Some(crate::value::Value::String(
-                                                            s.clone().into(),
-                                                        ))
-                                                    }
-                                                    Term::FloatConstant(f) => {
-                                                        Some(crate::value::Value::Float64(*f))
-                                                    }
-                                                    _ => None,
-                                                })
-                                                .collect();
-                                            if values.len() == tuple_terms.len() {
+                                            let converted: Result<
+                                                Vec<crate::value::Value>,
+                                                String,
+                                            > = tuple_terms.iter().map(term_to_value).collect();
+                                            if let Ok(values) = converted {
                                                 let tuple = crate::value::Tuple::new(values);
                                                 let count = storage
                                                     .delete_tuples_from(
@@ -567,6 +567,10 @@ impl Handler {
                                                     Term::FloatConstant(f) => {
                                                         tuple_values
                                                             .push(crate::value::Value::Float64(*f));
+                                                    }
+                                                    Term::BoolConstant(b) => {
+                                                        tuple_values
+                                                            .push(crate::value::Value::Bool(*b));
                                                     }
                                                     _ => {
                                                         valid = false;
@@ -681,71 +685,71 @@ impl Handler {
                                 );
 
                                 let results = storage
-                                    .execute_query_with_rules_on(&kg_name, &query_rule)
+                                    .execute_query_with_rules_tuples_on(&kg_name, &query_rule)
                                     .map_err(|e| e.to_string())?;
 
                                 let mut deleted = 0;
                                 let mut inserted = 0;
 
-                                for (a, b) in results {
-                                    let bindings: std::collections::HashMap<String, i32> =
-                                        if all_vars.len() >= 2 {
-                                            let mut m = std::collections::HashMap::new();
-                                            m.insert(all_vars[0].clone(), a);
-                                            m.insert(all_vars[1].clone(), b);
-                                            m
-                                        } else if all_vars.len() == 1 {
-                                            let mut m = std::collections::HashMap::new();
-                                            m.insert(all_vars[0].clone(), a);
-                                            m
-                                        } else {
-                                            std::collections::HashMap::new()
-                                        };
-
-                                    for target in &op.deletes {
-                                        let tuple: Vec<i32> = target
-                                            .args
+                                for result_tuple in results {
+                                    // Build bindings from query result: var_name → Value
+                                    let bindings: std::collections::HashMap<String, Value> =
+                                        all_vars
                                             .iter()
-                                            .filter_map(|arg| match arg {
-                                                Term::Variable(v) => bindings.get(v).copied(),
-                                                Term::Constant(c) => Some(*c as i32),
-                                                _ => None,
+                                            .enumerate()
+                                            .filter_map(|(idx, var)| {
+                                                result_tuple
+                                                    .get(idx)
+                                                    .map(|v| (var.clone(), v.clone()))
                                             })
                                             .collect();
-                                        if tuple.len() >= 2 {
-                                            storage
-                                                .delete_from(
+
+                                    for target in &op.deletes {
+                                        let tuple_vals: Option<Vec<Value>> = target
+                                            .args
+                                            .iter()
+                                            .map(|arg| match arg {
+                                                Term::Variable(v) => bindings.get(v).cloned(),
+                                                other => term_to_value(other).ok(),
+                                            })
+                                            .collect();
+                                        if let Some(vals) = tuple_vals {
+                                            let count = storage
+                                                .delete_tuples_from(
                                                     &kg_name,
                                                     &target.relation,
-                                                    vec![(tuple[0], tuple[1])],
+                                                    vec![Tuple::new(vals)],
                                                 )
                                                 .map_err(|e| e.to_string())?;
-                                            deleted += 1;
+                                            deleted += count;
                                         }
                                     }
 
                                     for target in &op.inserts {
-                                        let tuple: Vec<i32> = target
+                                        let tuple_vals: Option<Vec<Value>> = target
                                             .args
                                             .iter()
-                                            .filter_map(|arg| match arg {
-                                                Term::Variable(v) => bindings.get(v).copied(),
-                                                Term::Constant(c) => Some(*c as i32),
-                                                _ => None,
+                                            .map(|arg| match arg {
+                                                Term::Variable(v) => bindings.get(v).cloned(),
+                                                other => term_to_value(other).ok(),
                                             })
                                             .collect();
-                                        if tuple.len() >= 2 {
-                                            storage
-                                                .insert_into(
+                                        if let Some(vals) = tuple_vals {
+                                            let (new_count, _) = storage
+                                                .insert_tuples_into(
                                                     &kg_name,
                                                     &target.relation,
-                                                    vec![(tuple[0], tuple[1])],
+                                                    vec![Tuple::new(vals)],
                                                 )
                                                 .map_err(|e| e.to_string())?;
-                                            inserted += 1;
+                                            inserted += new_count;
                                         }
                                     }
                                 }
+
+                                // Track insert count for metrics
+                                self.insert_count
+                                    .fetch_add(inserted as u64, Ordering::Relaxed);
 
                                 if deleted > 0 || inserted > 0 {
                                     let _ = self.notify_tx.send(
@@ -753,7 +757,7 @@ impl Handler {
                                             knowledge_graph: kg_name.clone(),
                                             relation: "multiple".to_string(),
                                             operation: "update".to_string(),
-                                            count: (deleted + inserted) as usize,
+                                            count: deleted + inserted,
                                         },
                                     );
                                 }
@@ -799,77 +803,8 @@ impl Handler {
 
         let program_text = query_to_execute.unwrap_or(program_text);
 
-        // Transform query
-        let query_program = if program_text.trim().starts_with('?')
-            && program_text
-                .trim()
-                .chars()
-                .nth(1)
-                .is_some_and(char::is_alphabetic)
-        {
-            let query_text = &program_text.trim()[1..];
-            let goal = statement::parse_query(query_text)
-                .map_err(|e| format!("Failed to parse query: {e}"))?;
-
-            let mut head_vars = Vec::new();
-            let mut extra_constraints = Vec::new();
-
-            let transformed_args: Vec<String> = goal
-                .goal
-                .args
-                .iter()
-                .enumerate()
-                .map(|(i, term)| match term {
-                    Term::Variable(v) => {
-                        head_vars.push(v.clone());
-                        v.clone()
-                    }
-                    Term::Constant(val) => {
-                        let t = format!("_c{i}");
-                        head_vars.push(t.clone());
-                        extra_constraints.push(format!("{t} = {val}"));
-                        t
-                    }
-                    Term::StringConstant(s) => {
-                        let t = format!("_c{i}");
-                        head_vars.push(t.clone());
-                        extra_constraints.push(format!("{t} = \"{s}\""));
-                        t
-                    }
-                    Term::Placeholder => {
-                        let t = format!("_p{i}");
-                        head_vars.push(t.clone());
-                        t
-                    }
-                    _ => {
-                        let t = format!("_t{i}");
-                        head_vars.push(t.clone());
-                        t
-                    }
-                })
-                .collect();
-
-            let body_atom = format!("{}({})", goal.goal.relation, transformed_args.join(", "));
-            let mut body_parts = vec![body_atom];
-
-            // Add additional body predicates (for complex queries like ?- foo(X), bar(Y).)
-            // ALSO extract variables from additional body atoms for Cartesian product queries
-            for pred in &goal.body {
-                body_parts.push(format_body_pred(pred));
-                // Extract variables from this predicate to add to head
-                extract_predicate_vars(pred, &mut head_vars);
-            }
-
-            body_parts.extend(extra_constraints);
-
-            format!(
-                "__query__({}) <- {}",
-                head_vars.join(", "),
-                body_parts.join(", ")
-            )
-        } else {
-            program_text
-        };
+        // Transform ?shorthand query syntax into __query__(...) <- ... rule
+        let query_program = transform_query_shorthand(&program_text)?;
 
         // Prepend session rules to the query program
         let query_program = if session_rules.is_empty() {
@@ -956,16 +891,7 @@ impl Handler {
                 })
                 .collect()
         } else {
-            vec![
-                ColumnDef {
-                    name: "col0".to_string(),
-                    data_type: WireDataType::Int32,
-                },
-                ColumnDef {
-                    name: "col1".to_string(),
-                    data_type: WireDataType::Int32,
-                },
-            ]
+            vec![]
         };
 
         Ok(QueryResult {
@@ -1026,6 +952,9 @@ impl Handler {
         session_id: SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
+        // Touch session to prevent idle reaping during query execution
+        self.sessions.touch_session(session_id)?;
+
         // Check if session is clean → fast path
         let is_clean = self.sessions.is_session_clean(session_id)?;
         let kg = self.sessions.session_kg(session_id)?;
@@ -1042,12 +971,17 @@ impl Handler {
             .sessions
             .with_session(session_id, |session| session.rule_texts().to_vec())?;
 
-        // Build combined program: ephemeral rules + original program
+        // Apply same preprocessing as the fast path: strip comments + transform ?shorthand
+        let preprocessed = strip_comments(&program);
+        let preprocessed = transform_query_shorthand(&preprocessed)?;
+
+        // Build combined program: ephemeral rules + preprocessed query
+        // Keep `preprocessed` for the persistent-only baseline (provenance diff)
         let combined_program = if rule_texts.is_empty() {
-            program
+            preprocessed.clone()
         } else {
             let rules_prefix = rule_texts.join("\n");
-            format!("{rules_prefix}\n{program}")
+            format!("{rules_prefix}\n{preprocessed}")
         };
 
         self.inc_query_count();
@@ -1063,15 +997,19 @@ impl Handler {
             .execute_query_with_session_facts_on(&kg, &combined_program, session_facts)
             .map_err(|e| e.to_string())?;
 
-        // Per-tuple provenance: run the same query on persistent-only data to diff
-        // This identifies which result tuples are newly contributed by ephemeral data.
+        // Per-tuple provenance: run the original query (without ephemeral rules)
+        // against persistent-only data to identify ephemeral contributions.
         use crate::session::Provenance;
         use std::collections::HashSet;
-        let baseline: HashSet<Tuple> = storage
-            .execute_query_with_rules_tuples_on(&kg, &combined_program)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        let baseline: HashSet<Tuple> = match storage
+            .execute_query_with_rules_tuples_on(&kg, &preprocessed)
+        {
+            Ok(tuples) => tuples.into_iter().collect(),
+            Err(e) => {
+                eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
+                HashSet::new()
+            }
+        };
 
         // Convert results to wire format with per-tuple provenance
         let rows: Vec<WireTuple> = results
@@ -1127,16 +1065,7 @@ impl Handler {
                 })
                 .collect()
         } else {
-            vec![
-                ColumnDef {
-                    name: "col0".to_string(),
-                    data_type: WireDataType::Int32,
-                },
-                ColumnDef {
-                    name: "col1".to_string(),
-                    data_type: WireDataType::Int32,
-                },
-            ]
+            vec![]
         };
 
         // Build provenance metadata from session state
@@ -1164,12 +1093,13 @@ impl Handler {
     }
 
     /// Insert ephemeral facts into a session.
+    /// Returns the number of facts actually inserted (after dedup).
     pub fn session_insert_ephemeral(
         &self,
         session_id: SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
-    ) -> Result<(), String> {
+    ) -> Result<usize, String> {
         self.sessions.insert_ephemeral(session_id, relation, tuples)
     }
 
@@ -1202,6 +1132,117 @@ impl Handler {
 }
 
 // Helper Functions
+
+/// Transform `?shorthand` query syntax into a `__query__(...) <- ...` rule.
+///
+/// This enables the shorthand `?relation(X, Y)` syntax that the REPL and
+/// REST API use, converting it to a proper Datalog rule before execution.
+/// Returns the original text unchanged if it's not a `?shorthand` query.
+pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<String, String> {
+    let trimmed = program_text.trim();
+    if let Some(after_q) = trimmed.strip_prefix('?') {
+        if !after_q.starts_with(char::is_alphabetic) {
+            return Ok(program_text.to_string());
+        }
+        let query_text = after_q;
+        let goal = statement::parse_query(query_text)
+            .map_err(|e| format!("Failed to parse query: {e}"))?;
+
+        let mut head_vars = Vec::new();
+        let mut extra_constraints = Vec::new();
+
+        let transformed_args: Vec<String> = goal
+            .goal
+            .args
+            .iter()
+            .enumerate()
+            .map(|(i, term)| match term {
+                Term::Variable(v) => {
+                    head_vars.push(v.clone());
+                    v.clone()
+                }
+                Term::Constant(val) => {
+                    let t = format!("_c{i}");
+                    head_vars.push(t.clone());
+                    extra_constraints.push(format!("{t} = {val}"));
+                    t
+                }
+                Term::FloatConstant(val) => {
+                    let t = format!("_c{i}");
+                    head_vars.push(t.clone());
+                    extra_constraints.push(format!("{t} = {val}"));
+                    t
+                }
+                Term::BoolConstant(val) => {
+                    let t = format!("_c{i}");
+                    head_vars.push(t.clone());
+                    extra_constraints.push(format!("{t} = {val}"));
+                    t
+                }
+                Term::StringConstant(s) => {
+                    let t = format!("_c{i}");
+                    head_vars.push(t.clone());
+                    // Escape internal double quotes
+                    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                    extra_constraints.push(format!("{t} = \"{escaped}\""));
+                    t
+                }
+                Term::VectorLiteral(_) => {
+                    // Vector literals can't be used in comparison constraints
+                    // (parser doesn't support [1,2,3] in comparison context).
+                    // Use a fresh variable — returns all rows for this position.
+                    let t = format!("_v{i}");
+                    head_vars.push(t.clone());
+                    t
+                }
+                Term::Placeholder => {
+                    let t = format!("_p{i}");
+                    head_vars.push(t.clone());
+                    t
+                }
+                _ => {
+                    // For complex terms (Arithmetic, FunctionCall, etc.),
+                    // use a fresh variable. The parser may not support these
+                    // in comparison constraints, so don't add constraints.
+                    let t = format!("_t{i}");
+                    head_vars.push(t.clone());
+                    t
+                }
+            })
+            .collect();
+
+        let body_atom = format!("{}({})", goal.goal.relation, transformed_args.join(", "));
+        let mut body_parts = vec![body_atom];
+
+        for pred in &goal.body {
+            body_parts.push(format_body_pred(pred));
+            extract_predicate_vars(pred, &mut head_vars);
+        }
+
+        body_parts.extend(extra_constraints);
+
+        Ok(format!(
+            "__query__({}) <- {}",
+            head_vars.join(", "),
+            body_parts.join(", ")
+        ))
+    } else {
+        Ok(program_text.to_string())
+    }
+}
+
+/// Strip comment lines from program text
+fn strip_comments(program: &str) -> String {
+    program
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with('%') && !trimmed.starts_with("//")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Format a rule as Datalog text (uses Rule's Display impl)
 fn format_rule_text(rule: &crate::ast::Rule) -> String {
     rule.to_string()
@@ -1221,6 +1262,14 @@ fn format_term(term: &Term) -> String {
 mod tests {
     use super::*;
     use crate::ast::Term;
+
+    /// Create a Config with a unique temp directory (prevents parallel test conflicts)
+    fn make_test_config() -> Config {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.storage.data_dir = temp_dir.into_path();
+        config
+    }
 
     // --- term_to_value tests ---
 
@@ -1293,7 +1342,7 @@ mod tests {
 
     #[test]
     fn test_handler_new() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         assert_eq!(handler.total_queries(), 0);
         assert_eq!(handler.total_inserts(), 0);
@@ -1302,13 +1351,13 @@ mod tests {
 
     #[test]
     fn test_handler_from_config() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         assert_eq!(handler.total_queries(), 0);
     }
 
     #[test]
     fn test_handler_with_session_config() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let config = SessionConfig {
             max_sessions: 10,
             ..SessionConfig::default()
@@ -1319,9 +1368,11 @@ mod tests {
 
     // --- Session management tests ---
 
-    /// Helper to create a fresh handler with a known KG
+    /// Helper to create a fresh handler with a known KG.
+    /// Uses a unique temp directory for persist layer to avoid leftover data
+    /// from previous test runs.
     fn handler_with_kg(kg_name: &str) -> Handler {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -1341,7 +1392,7 @@ mod tests {
 
     #[test]
     fn test_handler_close_nonexistent_session() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         assert!(handler.close_session(999).is_err());
     }
 
@@ -1369,7 +1420,7 @@ mod tests {
 
     #[test]
     fn test_handler_session_stats() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let stats = handler.session_stats();
         assert_eq!(stats.total_sessions, 0);
     }
@@ -1378,7 +1429,7 @@ mod tests {
 
     #[test]
     fn test_subscribe_notifications() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         let mut rx = handler.subscribe_notifications();
 
@@ -1402,14 +1453,14 @@ mod tests {
 
     #[test]
     fn test_notify_no_subscribers() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         handler.notify_persistent_update("test_kg", "edge", "insert", 1);
     }
 
     #[test]
     fn test_multiple_subscribers() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         let mut rx1 = handler.subscribe_notifications();
         let mut rx2 = handler.subscribe_notifications();
@@ -1424,21 +1475,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_simple_insert() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        // Use unique KG name to avoid leftover data from previous test runs
+        let handler = handler_with_kg("simple_insert_test");
         let result = handler
-            .query_program(None, "+edge[(1,2), (3,4)]".to_string())
+            .query_program(
+                Some("simple_insert_test".to_string()),
+                "+edge[(1,2), (3,4)]".to_string(),
+            )
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 1);
-        assert!(result.rows[0].values[0]
-            .as_str()
-            .unwrap()
-            .contains("Inserted 2"));
+        let actual = result.rows[0].values[0].as_str().unwrap();
+        assert!(
+            actual.contains("Inserted 2"),
+            "Expected 'Inserted 2', got: {actual}"
+        );
     }
 
     #[tokio::test]
     async fn test_query_program_insert_and_query() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         handler
             .query_program(None, "+data[(1,), (2,), (3,)]".to_string())
             .await
@@ -1452,7 +1508,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_comment_stripping() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let program = "% this is a comment\n// this too\n+test_data[(1,)]".to_string();
         let result = handler.query_program(None, program).await.unwrap();
         assert!(result.rows[0].values[0]
@@ -1463,7 +1519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_session_fact() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let program = "temp(42)\n?temp(X)".to_string();
         let result = handler.query_program(None, program).await.unwrap();
         assert_eq!(result.rows.len(), 1);
@@ -1471,7 +1527,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_session_rule() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         handler
             .query_program(None, "+base[(1,), (2,), (3,)]".to_string())
             .await
@@ -1483,7 +1539,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_persistent_rule() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         handler
             .query_program(None, "+nodes[(1,), (2,)]".to_string())
             .await
@@ -1501,7 +1557,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_delete_facts() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         handler
             .query_program(None, "+del_test[(1, 2), (3, 4)]".to_string())
             .await
@@ -1539,7 +1595,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_no_results() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result = handler
             .query_program(None, "?empty_relation(X)".to_string())
             .await
@@ -1565,7 +1621,7 @@ mod tests {
 
     #[test]
     fn test_explain_query_no_kg_error() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         let result = handler.explain_query(None, "?edge(X, Y)".to_string());
         // No current KG selected → error
@@ -1764,7 +1820,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_with_session_invalid_id() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result = handler
             .query_program_with_session(99999, "?data(X)".to_string())
             .await;
@@ -2397,8 +2453,22 @@ mod tests {
     }
 
     #[test]
+    fn test_term_to_value_vector_f32_overflow() {
+        // f64 value that overflows f32
+        let result = term_to_value(&Term::VectorLiteral(vec![1e40]));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("overflows f32"));
+    }
+
+    #[test]
+    fn test_term_to_value_vector_normal() {
+        let result = term_to_value(&Term::VectorLiteral(vec![1.0, 2.5, 3.0]));
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_handler_get_storage() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let storage = handler.get_storage();
         // Should have default KG
         assert!(storage
@@ -2408,7 +2478,7 @@ mod tests {
 
     #[test]
     fn test_handler_get_storage_mut() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let storage = handler.get_storage_mut();
         // Should be able to create a new KG
         storage.create_knowledge_graph("test_mut").unwrap();
@@ -2419,14 +2489,14 @@ mod tests {
 
     #[test]
     fn test_handler_session_manager() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let mgr = handler.session_manager();
         assert_eq!(mgr.session_count(), 0);
     }
 
     #[tokio::test]
     async fn test_query_program_no_kg_selected() {
-        let storage = StorageEngine::new(Config::default()).unwrap();
+        let storage = StorageEngine::new(make_test_config()).unwrap();
         let handler = Handler::new(storage);
         // Without an explicit KG, uses the default
         let result = handler.query_program(None, "+data[(1,)]".to_string()).await;
@@ -2436,7 +2506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_program_invalid_syntax() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         // Invalid Datalog syntax
         let result = handler
             .query_program(None, "not valid datalog !!!".to_string())
@@ -2448,7 +2518,7 @@ mod tests {
 
     #[test]
     fn test_handler_uptime() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         // Just created, uptime should be < 2 seconds
         assert!(handler.uptime_seconds() < 2);
     }
@@ -2514,7 +2584,7 @@ mod tests {
 
     #[test]
     fn test_session_insert_invalid_session() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result =
             handler.session_insert_ephemeral(99999, "rel", vec![Tuple::new(vec![Value::Int64(1)])]);
         assert!(result.is_err());
@@ -2522,7 +2592,7 @@ mod tests {
 
     #[test]
     fn test_session_retract_invalid_session() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result = handler.session_retract_ephemeral(
             99999,
             "rel",
@@ -2563,13 +2633,15 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_predicate_vars_negated() {
+    fn test_extract_predicate_vars_negated_skipped() {
+        // Negated atoms should NOT contribute variables to the query head.
+        // A variable only appearing in a negated body atom is "unsafe" in Datalog.
         use crate::ast::{Atom, BodyPredicate};
         let atom = Atom::new("banned".to_string(), vec![Term::Variable("Z".to_string())]);
         let pred = BodyPredicate::Negated(atom);
         let mut vars = Vec::new();
         super::extract_predicate_vars(&pred, &mut vars);
-        assert_eq!(vars, vec!["Z".to_string()]);
+        assert!(vars.is_empty(), "Negated atoms should not add vars to head");
     }
 
     #[test]
@@ -2654,26 +2726,26 @@ mod tests {
 
     #[test]
     fn test_handler_total_queries_initial() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         assert_eq!(handler.total_queries(), 0);
     }
 
     #[test]
     fn test_handler_total_inserts_initial() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         assert_eq!(handler.total_inserts(), 0);
     }
 
     #[test]
     fn test_handler_session_stats_empty() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let stats = handler.session_stats();
         assert_eq!(stats.total_sessions, 0);
     }
 
     #[tokio::test]
     async fn test_handler_query_updates_counter() {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2685,7 +2757,7 @@ mod tests {
 
     #[test]
     fn test_handler_explain_query() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         {
             let storage = handler.get_storage_mut();
             storage.create_knowledge_graph("explain_h_kg").unwrap();
@@ -2699,7 +2771,7 @@ mod tests {
 
     #[test]
     fn test_handler_subscribe_notifications() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let rx = handler.subscribe_notifications();
         // Should create a valid receiver without errors
         drop(rx);
@@ -2707,7 +2779,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_select_all_tuples() {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2726,7 +2798,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_with_rule() {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2754,14 +2826,14 @@ mod tests {
 
     #[test]
     fn test_handler_uptime_seconds() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         // Just created, uptime should be 0 or very small
         assert!(handler.uptime_seconds() < 2);
     }
 
     #[tokio::test]
     async fn test_handler_total_queries_after_query() {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         handler
@@ -2773,14 +2845,14 @@ mod tests {
 
     #[test]
     fn test_handler_close_session_invalid() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result = handler.close_session(999999);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_handler_validate_tuples_no_schema() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         {
             let storage = handler.get_storage_mut();
             storage.create_knowledge_graph("val_kg").unwrap();
@@ -2793,14 +2865,14 @@ mod tests {
 
     #[test]
     fn test_handler_notify_persistent_update() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         // Should not panic — fire and forget notification
         handler.notify_persistent_update("kg", "rel", "insert", 5);
     }
 
     #[tokio::test]
     async fn test_handler_query_program_insert_and_query() {
-        let mut config = Config::default();
+        let mut config = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         let handler = Handler::from_config(config).unwrap();
         // Insert data
@@ -2821,7 +2893,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_query_program_nonexistent_kg() {
-        let handler = Handler::from_config(Config::default()).unwrap();
+        let handler = Handler::from_config(make_test_config()).unwrap();
         let result = handler
             .query_program(
                 Some("nonexistent_kg_xyz".to_string()),
@@ -2832,34 +2904,74 @@ mod tests {
     }
 }
 
+/// Recursively extract variable names from a term.
+fn extract_term_vars(term: &Term, vars: &mut Vec<String>) {
+    match term {
+        Term::Variable(v) => {
+            if !vars.contains(v) {
+                vars.push(v.clone());
+            }
+        }
+        Term::Arithmetic(expr) => {
+            extract_arith_vars(expr, vars);
+        }
+        Term::FunctionCall(_, args) => {
+            for arg in args {
+                extract_term_vars(arg, vars);
+            }
+        }
+        Term::FieldAccess(base, _) => {
+            extract_term_vars(base, vars);
+        }
+        Term::RecordPattern(fields) => {
+            for (_, field_term) in fields {
+                extract_term_vars(field_term, vars);
+            }
+        }
+        // Constants, placeholders, aggregates, vectors — no variables to extract
+        _ => {}
+    }
+}
+
+/// Recursively extract variable names from an arithmetic expression.
+fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
+    match expr {
+        crate::ast::ArithExpr::Variable(v) => {
+            if !vars.contains(v) {
+                vars.push(v.clone());
+            }
+        }
+        crate::ast::ArithExpr::Binary { left, right, .. } => {
+            extract_arith_vars(left, vars);
+            extract_arith_vars(right, vars);
+        }
+        // Constants — no variables
+        crate::ast::ArithExpr::Constant(_) | crate::ast::ArithExpr::FloatConstant(_) => {}
+    }
+}
+
 /// Extract variables from a body predicate and add to `head_vars`
 /// Used for Cartesian product queries like ?- foo(X), bar(Y).
 fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<String>) {
     match pred {
-        crate::ast::BodyPredicate::Positive(atom) | crate::ast::BodyPredicate::Negated(atom) => {
+        crate::ast::BodyPredicate::Positive(atom) => {
             for term in &atom.args {
-                if let Term::Variable(v) = term {
-                    if !head_vars.contains(v) {
-                        head_vars.push(v.clone());
-                    }
-                }
+                extract_term_vars(term, head_vars);
             }
         }
+        crate::ast::BodyPredicate::Negated(_) => {
+            // Do NOT extract variables from negated atoms into the query head.
+            // A variable that appears only in a negated body atom is "unsafe"
+            // in Datalog — it cannot be safely projected into the head.
+        }
         crate::ast::BodyPredicate::Comparison(left, _, right) => {
-            if let Term::Variable(v) = left {
-                if !head_vars.contains(v) {
-                    head_vars.push(v.clone());
-                }
-            }
-            if let Term::Variable(v) = right {
-                if !head_vars.contains(v) {
-                    head_vars.push(v.clone());
-                }
-            }
+            extract_term_vars(left, head_vars);
+            extract_term_vars(right, head_vars);
         }
         crate::ast::BodyPredicate::HnswNearest {
             id_var,
             distance_var,
+            query,
             ..
         } => {
             if !head_vars.contains(id_var) {
@@ -2868,6 +2980,7 @@ fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<
             if !head_vars.contains(distance_var) {
                 head_vars.push(distance_var.clone());
             }
+            extract_term_vars(query, head_vars);
         }
     }
 }

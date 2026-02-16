@@ -30,12 +30,12 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows
 (session: 2 rule(s))
 > flags(F) <- mixed(_, _, _, F)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-│    1 │
-└──────┘
+┌───────┐
+│ col0  │
+├───────┤
+│ false │
+│ true  │
+└───────┘
 2 rows
 (session: 3 rule(s))
 > ?names(N)
@@ -55,12 +55,12 @@ Inserted 2 fact(s) into 'mixed'.
 └────────┘
 2 rows
 > ?flags(F)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-│    1 │
-└──────┘
+┌───────┐
+│ col0  │
+├───────┤
+│ false │
+│ true  │
+└───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

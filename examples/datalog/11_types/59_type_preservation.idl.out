@@ -15,7 +15,7 @@ Inserted 1 fact(s) into 'mixed'.
 ┌──────┬────────┬──────┬──────┐
 │ col0 │ col1   │ col2 │ col3 │
 ├──────┼────────┼──────┼──────┤
-│    1 │ "text" │ 3.14 │    1 │
+│    1 │ "text" │ 3.14 │ true │
 └──────┴────────┴──────┴──────┘
 1 rows
 (session: 1 rule(s))
@@ -23,7 +23,7 @@ Inserted 1 fact(s) into 'mixed'.
 ┌──────┬────────┬──────┬──────┐
 │ col0 │ col1   │ col2 │ col3 │
 ├──────┼────────┼──────┼──────┤
-│    1 │ "text" │ 3.14 │    1 │
+│    1 │ "text" │ 3.14 │ true │
 └──────┴────────┴──────┴──────┘
 1 rows
 > int_only(X) <- mixed(X, _, _, _)
@@ -54,7 +54,7 @@ Inserted 1 fact(s) into 'mixed'.
 ┌──────┐
 │ col0 │
 ├──────┤
-│    1 │
+│ true │
 └──────┘
 1 rows
 (session: 5 rule(s))
@@ -83,7 +83,7 @@ Inserted 1 fact(s) into 'mixed'.
 ┌──────┐
 │ col0 │
 ├──────┤
-│    1 │
+│ true │
 └──────┘
 1 rows
 > .kg use default

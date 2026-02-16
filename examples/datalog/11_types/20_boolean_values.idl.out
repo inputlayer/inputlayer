@@ -12,19 +12,31 @@ Switched to knowledge graph: test_bool_n11t20
 > +flags[("feature_a", true), ("feature_b", false), ("feature_c", true)]
 Inserted 3 fact(s) into 'flags'.
 > ?flags(Name, Value)
-┌─────────────┬──────┐
-│ col0        │ col1 │
-├─────────────┼──────┤
-│ "feature_a" │    1 │
-│ "feature_b" │    0 │
-│ "feature_c" │    1 │
-└─────────────┴──────┘
+┌─────────────┬───────┐
+│ col0        │ col1  │
+├─────────────┼───────┤
+│ "feature_a" │ true  │
+│ "feature_b" │ false │
+│ "feature_c" │ true  │
+└─────────────┴───────┘
 3 rows
 > enabled(Name) <- flags(Name, true)
-No results.
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ "feature_a" │
+│ "feature_c" │
+└─────────────┘
+2 rows
 (session: 1 rule(s))
 > ?enabled(Name)
-No results.
+┌─────────────┐
+│ col0        │
+├─────────────┤
+│ "feature_a" │
+│ "feature_c" │
+└─────────────┘
+2 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

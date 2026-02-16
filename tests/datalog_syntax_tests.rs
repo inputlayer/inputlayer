@@ -448,31 +448,6 @@ fn test_serializable_rule_json() {
 }
 
 // Complex Query Tests
-#[test]
-#[ignore] // Constraint syntax (Age >= 18) no longer supported - Constraint type removed
-fn test_view_with_constraints() {
-    let (mut storage, _temp) = create_test_storage();
-
-    storage.create_knowledge_graph("test").unwrap();
-    storage.use_knowledge_graph("test").unwrap();
-
-    // Insert data
-    storage
-        .insert("person", vec![(1, 25), (2, 17), (3, 30), (4, 16)])
-        .unwrap();
-
-    // Register view with constraint
-    let view_def = parse_rule_definition("adult(Id, Age) <- person(Id, Age), Age >= 18").unwrap();
-    storage.register_rule(&view_def).unwrap();
-
-    // Query the view
-    let results = storage
-        .execute_query_with_rules("result(Id, Age) <- adult(Id, Age)")
-        .unwrap();
-
-    // Should only get people 18 or older (id 1 age 25, id 3 age 30)
-    assert_eq!(results.len(), 2);
-}
 
 #[test]
 fn test_multiple_views() {

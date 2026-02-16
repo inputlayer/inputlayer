@@ -11,30 +11,7 @@ use utoipa::ToSchema;
 use crate::protocol::rest::dto::ApiResponse;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
-use crate::value::{Tuple, Value};
-
-/// Convert a JSON value to a storage Value
-fn json_to_value(json: &serde_json::Value) -> Option<Value> {
-    match json {
-        serde_json::Value::Null => None,
-        serde_json::Value::Bool(b) => Some(Value::Int64(i64::from(*b))),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Value::Int64(i))
-            } else {
-                n.as_f64().map(Value::Float64)
-            }
-        }
-        serde_json::Value::String(s) => Some(Value::string(s)),
-        serde_json::Value::Array(arr) => {
-            // Check if it's a vector of numbers (for vector values)
-            let floats: Option<Vec<f32>> =
-                arr.iter().map(|v| v.as_f64().map(|f| f as f32)).collect();
-            floats.map(Value::vector)
-        }
-        serde_json::Value::Object(_) => None, // Objects not supported
-    }
-}
+use crate::value::Tuple;
 
 /// Insert data request
 #[derive(Debug, Deserialize, ToSchema)]
@@ -48,6 +25,13 @@ pub struct InsertDataRequest {
 pub struct InsertDataResponse {
     pub rows_inserted: usize,
     pub duplicates: usize,
+    /// Rows that were skipped due to conversion errors or being empty
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Delete data request
@@ -61,6 +45,9 @@ pub struct DeleteDataRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DeleteDataResponse {
     pub rows_deleted: usize,
+    /// Rows that were skipped due to conversion errors or being empty
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped: usize,
 }
 
 /// Insert data into a relation
@@ -102,13 +89,13 @@ pub async fn insert_data(
             continue;
         }
 
-        // Convert all values in the row
-        let values: Option<Vec<Value>> = row.iter().map(json_to_value).collect();
-
-        match values {
-            Some(vals) => tuples.push(Tuple::new(vals)),
-            None => {
-                // Skip rows with unsupported values (null, objects)
+        match row
+            .iter()
+            .map(super::json_to_value)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(vals) => tuples.push(Tuple::new(vals)),
+            Err(_) => {
                 skipped += 1;
             }
         }
@@ -131,7 +118,8 @@ pub async fn insert_data(
 
     let response = InsertDataResponse {
         rows_inserted: inserted,
-        duplicates: duplicates + skipped,
+        duplicates,
+        skipped,
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -168,20 +156,27 @@ pub async fn delete_data(
 
     // Convert JSON rows to Tuples with proper type handling
     let mut tuples: Vec<Tuple> = Vec::new();
+    let mut skipped = 0;
     for row in &request.rows {
         if row.is_empty() {
+            skipped += 1;
             continue;
         }
-        // Convert all values in the row
-        let values: Option<Vec<Value>> = row.iter().map(json_to_value).collect();
-        if let Some(vals) = values {
-            tuples.push(Tuple::new(vals));
+        match row
+            .iter()
+            .map(super::json_to_value)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(vals) => tuples.push(Tuple::new(vals)),
+            Err(_) => {
+                skipped += 1;
+            }
         }
     }
 
     let deleted_count = storage
         .delete_tuples_from(&kg, &name, tuples)
-        .map_err(|e| RestError::internal(format!("Delete failed: {e}")))?;
+        .map_err(|e| RestError::bad_request(format!("Delete failed: {e}")))?;
 
     // Notify WebSocket subscribers of persistent data change
     if deleted_count > 0 {
@@ -190,6 +185,7 @@ pub async fn delete_data(
 
     let response = DeleteDataResponse {
         rows_deleted: deleted_count,
+        skipped,
     };
 
     Ok(Json(ApiResponse::success(response)))
@@ -198,78 +194,6 @@ pub async fn delete_data(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_json_to_value_integer() {
-        let val = json_to_value(&serde_json::json!(42));
-        assert_eq!(val, Some(Value::Int64(42)));
-    }
-
-    #[test]
-    fn test_json_to_value_negative() {
-        let val = json_to_value(&serde_json::json!(-100));
-        assert_eq!(val, Some(Value::Int64(-100)));
-    }
-
-    #[test]
-    fn test_json_to_value_float() {
-        let val = json_to_value(&serde_json::json!(3.14));
-        assert_eq!(val, Some(Value::Float64(3.14)));
-    }
-
-    #[test]
-    fn test_json_to_value_string() {
-        let val = json_to_value(&serde_json::json!("hello"));
-        assert_eq!(val, Some(Value::string("hello")));
-    }
-
-    #[test]
-    fn test_json_to_value_bool_true() {
-        let val = json_to_value(&serde_json::json!(true));
-        assert_eq!(val, Some(Value::Int64(1)));
-    }
-
-    #[test]
-    fn test_json_to_value_bool_false() {
-        let val = json_to_value(&serde_json::json!(false));
-        assert_eq!(val, Some(Value::Int64(0)));
-    }
-
-    #[test]
-    fn test_json_to_value_null() {
-        let val = json_to_value(&serde_json::json!(null));
-        assert_eq!(val, None);
-    }
-
-    #[test]
-    fn test_json_to_value_object() {
-        let val = json_to_value(&serde_json::json!({"key": "val"}));
-        assert_eq!(val, None);
-    }
-
-    #[test]
-    fn test_json_to_value_array_floats() {
-        let val = json_to_value(&serde_json::json!([1.0, 2.0, 3.0]));
-        assert_eq!(val, Some(Value::vector(vec![1.0, 2.0, 3.0])));
-    }
-
-    #[test]
-    fn test_json_to_value_array_mixed() {
-        let val = json_to_value(&serde_json::json!([1.0, "bad"]));
-        assert_eq!(val, None);
-    }
-
-    #[test]
-    fn test_json_to_value_empty_array() {
-        let val = json_to_value(&serde_json::json!([]));
-        assert_eq!(val, Some(Value::vector(vec![])));
-    }
-
-    #[test]
-    fn test_json_to_value_large_int() {
-        let val = json_to_value(&serde_json::json!(i64::MAX));
-        assert_eq!(val, Some(Value::Int64(i64::MAX)));
-    }
 
     #[test]
     fn test_insert_data_request_deserialize() {
@@ -290,16 +214,48 @@ mod tests {
         let resp = InsertDataResponse {
             rows_inserted: 5,
             duplicates: 2,
+            skipped: 0,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"rows_inserted\":5"));
         assert!(json.contains("\"duplicates\":2"));
+        // skipped=0 should be omitted via skip_serializing_if
+        assert!(!json.contains("\"skipped\""));
+    }
+
+    #[test]
+    fn test_insert_data_response_serialize_with_skipped() {
+        let resp = InsertDataResponse {
+            rows_inserted: 3,
+            duplicates: 1,
+            skipped: 2,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"rows_inserted\":3"));
+        assert!(json.contains("\"duplicates\":1"));
+        assert!(json.contains("\"skipped\":2"));
     }
 
     #[test]
     fn test_delete_data_response_serialize() {
-        let resp = DeleteDataResponse { rows_deleted: 3 };
+        let resp = DeleteDataResponse {
+            rows_deleted: 3,
+            skipped: 0,
+        };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"rows_deleted\":3"));
+        // skipped=0 should be omitted
+        assert!(!json.contains("\"skipped\""));
+    }
+
+    #[test]
+    fn test_delete_data_response_serialize_with_skipped() {
+        let resp = DeleteDataResponse {
+            rows_deleted: 2,
+            skipped: 1,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"rows_deleted\":2"));
+        assert!(json.contains("\"skipped\":1"));
     }
 }

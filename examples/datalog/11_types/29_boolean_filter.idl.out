@@ -12,15 +12,37 @@ Switched to knowledge graph: test_bool_filter_n11t29
 > +features[(1, "feature_a", true), (2, "feature_b", false), (3, "feature_c", true)]
 Inserted 3 fact(s) into 'features'.
 > enabled(Id, Name) <- features(Id, Name, true)
-No results.
+┌──────┬─────────────┐
+│ col0 │ col1        │
+├──────┼─────────────┤
+│    1 │ "feature_a" │
+│    3 │ "feature_c" │
+└──────┴─────────────┘
+2 rows
 (session: 1 rule(s))
 > disabled(Id, Name) <- features(Id, Name, false)
-No results.
+┌──────┬─────────────┐
+│ col0 │ col1        │
+├──────┼─────────────┤
+│    2 │ "feature_b" │
+└──────┴─────────────┘
+1 rows
 (session: 2 rule(s))
 > ?enabled(Id, N)
-No results.
+┌──────┬─────────────┐
+│ col0 │ col1        │
+├──────┼─────────────┤
+│    1 │ "feature_a" │
+│    3 │ "feature_c" │
+└──────┴─────────────┘
+2 rows
 > ?disabled(Id, N)
-No results.
+┌──────┬─────────────┐
+│ col0 │ col1        │
+├──────┼─────────────┤
+│    2 │ "feature_b" │
+└──────┴─────────────┘
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 2 session rule(s), 0 session fact(s))

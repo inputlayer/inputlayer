@@ -1,10 +1,6 @@
 //! Config loading, TOML parsing, and env var override tests.
-//!
-//! Some tests are `#[ignore]` (they chdir and conflict in parallel).
-//! Run them with: `cargo test --test config_tests -- --ignored --test-threads=1`
 
 use inputlayer::Config;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -87,7 +83,6 @@ fn test_config_default_logging_format() {
 
 // TOML File Parsing Tests
 #[test]
-#[ignore = "Requires --test-threads=1 due to directory change"]
 fn test_load_config_from_toml() {
     let temp = TempDir::new().unwrap();
     let config_path = temp.path().join("config.toml");
@@ -120,20 +115,12 @@ format = "json"
 
     fs::write(&config_path, config_content).unwrap();
 
-    // Change to temp directory to load config
-    let original_dir = env::current_dir().unwrap();
-    env::set_current_dir(temp.path()).unwrap();
-
-    let config = Config::load().unwrap();
-
-    // Restore original directory
-    env::set_current_dir(original_dir).unwrap();
+    let config = Config::from_file(config_path.to_str().unwrap()).unwrap();
 
     // Verify loaded values
     assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/test_data"));
     assert_eq!(config.storage.default_knowledge_graph, "test_db");
     assert!(config.storage.auto_create_knowledge_graphs);
-    // Check format and compression via Debug string
     assert!(format!("{:?}", config.storage.persistence.format).contains("Csv"));
     assert!(format!("{:?}", config.storage.persistence.compression).contains("Gzip"));
     assert_eq!(config.storage.persistence.auto_save_interval, 60);
@@ -150,28 +137,27 @@ format = "json"
 #[test]
 fn test_load_missing_config_file() {
     let temp = TempDir::new().unwrap();
-    let original_dir = env::current_dir().unwrap();
-    env::set_current_dir(temp.path()).unwrap();
+    let nonexistent = temp.path().join("nonexistent.toml");
 
-    // Config::load() returns an error when no config file exists
-    // (it doesn't have built-in defaults, so at least one config source is required)
-    let result = Config::load();
-
-    env::set_current_dir(original_dir).unwrap();
-
-    // Config::load() requires at least one config source - returns error if missing
-    // Use Config::default() if you need defaults without a config file
+    // from_file with a nonexistent path should fail (required fields missing)
+    let result = Config::from_file(nonexistent.to_str().unwrap());
     assert!(
         result.is_err(),
-        "Config::load() should return error when no config file exists"
+        "Config::from_file() should return error when config file doesn't exist"
     );
 }
 
 // Configuration Merging Tests
 #[test]
-#[ignore = "Requires --test-threads=1 due to directory change"]
 fn test_config_local_overrides_base() {
+    use figment::{
+        providers::{Format, Toml},
+        Figment,
+    };
+
     let temp = TempDir::new().unwrap();
+    let base_path = temp.path().join("config.toml");
+    let local_path = temp.path().join("config.local.toml");
 
     // Create base config.toml with complete config
     let base_config = r#"
@@ -200,9 +186,9 @@ enable_boolean_specialization = false
 level = "info"
 format = "text"
 "#;
-    fs::write(temp.path().join("config.toml"), base_config).unwrap();
+    fs::write(&base_path, base_config).unwrap();
 
-    // Create config.local.toml with partial override (just data_dir)
+    // Create config.local.toml with override (data_dir changed)
     let local_config = r#"
 [storage]
 data_dir = "./local_data"
@@ -227,14 +213,14 @@ enable_subplan_sharing = true
 level = "info"
 format = "text"
 "#;
-    fs::write(temp.path().join("config.local.toml"), local_config).unwrap();
+    fs::write(&local_path, local_config).unwrap();
 
-    let original_dir = env::current_dir().unwrap();
-    env::set_current_dir(temp.path()).unwrap();
-
-    let config = Config::load().unwrap();
-
-    env::set_current_dir(original_dir).unwrap();
+    // Merge using Figment directly (same logic as Config::load but with explicit paths)
+    let config: Config = Figment::new()
+        .merge(Toml::file(&base_path))
+        .merge(Toml::file(&local_path))
+        .extract()
+        .unwrap();
 
     // data_dir should be from config.local.toml
     assert_eq!(config.storage.data_dir, PathBuf::from("./local_data"));
