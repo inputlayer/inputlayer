@@ -115,49 +115,6 @@ fn test_same_query_on_multiple_knowledge_graphs() {
     assert_eq!(results_map.get("db3").map(|v| v.len()), Some(3)); // db3 has 3 edges
 }
 
-#[test]
-#[ignore] // Constraint syntax (X > 5, etc.) no longer supported - Constraint type removed
-fn test_multiple_queries_on_same_knowledge_graph() {
-    let (storage, _temp) = create_test_storage();
-
-    storage.create_knowledge_graph("test").unwrap();
-    storage
-        .insert_into(
-            "test",
-            "edge",
-            vec![
-                (1, 2),
-                (2, 3),
-                (3, 4),
-                (4, 5),
-                (5, 6),
-                (6, 7),
-                (7, 8),
-                (8, 9),
-                (9, 10),
-            ],
-        )
-        .unwrap();
-
-    // Execute multiple queries on the same knowledge_graph in parallel
-    let queries = vec![
-        "q1(X,Y) <- edge(X,Y)",               // All edges
-        "q2(X,Y) <- edge(X,Y), X > 5",        // x > 5
-        "q3(X,Y) <- edge(X,Y), X < 5",        // x < 5
-        "q4(X,Y) <- edge(X,Y), X > 3, X < 7", // 3 < x < 7
-    ];
-
-    let results = storage
-        .execute_parallel_queries_on_knowledge_graph("test", queries)
-        .unwrap();
-
-    assert_eq!(results.len(), 4);
-    assert_eq!(results[0].len(), 9); // All edges
-    assert_eq!(results[1].len(), 4); // x > 5: 6,7,8,9
-    assert_eq!(results[2].len(), 4); // x < 5: 1,2,3,4
-    assert_eq!(results[3].len(), 3); // 3 < x < 7: 4,5,6
-}
-
 // KnowledgeGraph Isolation Tests (Concurrent Access)
 #[test]
 fn test_parallel_queries_maintain_knowledge_graph_isolation() {
@@ -325,36 +282,6 @@ fn test_parallel_execution_with_many_knowledge_graphs() {
             .unwrap();
         assert_eq!(result[0], (db_num, db_num * 100));
     }
-}
-
-#[test]
-#[ignore] // Constraint syntax (X > 5, etc.) no longer supported - Constraint type removed
-fn test_parallel_execution_with_complex_queries() {
-    let (storage, _temp) = create_test_storage();
-
-    storage.create_knowledge_graph("test").unwrap();
-
-    // Insert more data for complex queries
-    let edges: Vec<(i32, i32)> = (0..20).map(|i| (i, i + 1)).collect();
-    storage.insert_into("test", "edge", edges).unwrap();
-
-    // Execute multiple complex queries in parallel
-    let queries = vec![
-        "q1(X,Y) <- edge(X,Y), X > 5",
-        "q2(X,Y) <- edge(X,Y), X < 15",
-        "q3(X,Y) <- edge(X,Y), X > 5, X < 15",
-        "q4(X,Y) <- edge(X,Y), Y > 10",
-    ];
-
-    let results = storage
-        .execute_parallel_queries_on_knowledge_graph("test", queries)
-        .unwrap();
-
-    assert_eq!(results.len(), 4);
-    assert!(results[0].len() > 0); // Should have results
-    assert!(results[1].len() > 0);
-    assert!(results[2].len() > 0);
-    assert!(results[3].len() > 0);
 }
 
 // Thread Safety Tests

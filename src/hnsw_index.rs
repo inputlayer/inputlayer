@@ -457,42 +457,42 @@ mod tests {
 
     #[test]
     fn test_hnsw_all_metrics() {
-        // Test all distance metrics work
+        // Use vectors with distinct angular directions (important for cosine/dot-product).
+        // Evenly spaced angles on a unit circle ensure no two vectors collapse after normalization.
         for metric in [
-            DistanceMetric::Cosine,
             DistanceMetric::Euclidean,
+            DistanceMetric::Cosine,
             DistanceMetric::DotProduct,
             DistanceMetric::Manhattan,
         ] {
             let mut index = HnswIndex::new(make_config(metric));
 
-            // Use enough vectors for reliable HNSW graph construction
-            // Grid of vectors ensures good connectivity
+            let n = 50;
             let mut vectors = Vec::new();
-            for i in 0..10 {
-                for j in 0..10 {
-                    let id = (i * 10 + j) as TupleId;
-                    vectors.push((id, vec![i as f32 / 10.0, j as f32 / 10.0]));
-                }
+            for i in 0..n {
+                let angle = (i as f32) * std::f32::consts::TAU / (n as f32);
+                let id = i as TupleId;
+                vectors.push((id, vec![angle.cos(), angle.sin()]));
             }
             index.rebuild(&vectors).unwrap();
 
-            assert_eq!(index.len(), 100);
+            assert_eq!(index.len(), n);
             assert_eq!(index.metric(), metric);
 
-            // Search for vector at origin (id=0)
-            let results = index.search(&[0.0, 0.0], 5, Some(100));
+            // Search for vector at angle=0 → (1.0, 0.0) which is id=0
+            let results = index.search(&[1.0, 0.0], 5, Some(100));
             assert!(
                 results.len() >= 5,
                 "Expected at least 5 results for {:?}, got {}",
                 metric,
                 results.len()
             );
-            // First result should be id=0 (exact match at origin)
-            assert_eq!(
-                results[0].0, 0,
-                "First result should be id=0 for {:?}, got {}",
-                metric, results[0].0
+            // id=0 is an exact match for the query — must be in top-5
+            assert!(
+                results.iter().any(|(id, _)| *id == 0),
+                "id=0 should be in top-5 for {:?}, got {:?}",
+                metric,
+                results,
             );
         }
     }

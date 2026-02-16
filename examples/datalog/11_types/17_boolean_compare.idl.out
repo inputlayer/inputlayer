@@ -12,15 +12,39 @@ Switched to knowledge graph: test_bool_cmp_n11t17
 > +flags[(1, true), (2, false), (3, true), (4, false)]
 Inserted 4 fact(s) into 'flags'.
 > active(Id) <- flags(Id, Val), Val = true
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
 (session: 1 rule(s))
 > ?active(Id)
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
 > inactive(Id) <- flags(Id, Val), Val = false
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
 (session: 2 rule(s))
 > ?inactive(Id)
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    2 │
+│    4 │
+└──────┘
+2 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 2 session rule(s), 0 session fact(s))

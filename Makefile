@@ -6,23 +6,25 @@ all: ci
 # Developer Workflow
 
 # Fast feedback loop - unit + integration tests only (~30s)
-test-fast: unit-test
+test-fast: check unit-test
 	@echo "Fast tests complete."
 
 # Pre-commit gate - unit + integration + snapshot E2E (~60-90s)
-test: unit-test e2e-test
+test: check unit-test e2e-test
 	@echo "All tests complete."
 
 # Full verification (CI, pre-merge)
-# Optimized flow:
-#   1. Build release binaries (verifies compilation + pre-builds for snapshot runner)
-#   2. Unit tests (dev build, fast - deps already cached from step 1)
-#   3. Snapshot tests in parallel (release binaries already built, skips rebuild)
-test-all:
+# Runs everything: lint, build, unit+integration tests, snapshot E2E tests
+# All tests run in parallel. Zero ignored tests allowed. Cleanup verified.
+test-all: check
 	@FAILURES=0; \
 	STRIP_ANSI='s/\x1b\[[0-9;]*m//g'; \
 	NCPU=$$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4); \
 	echo "Running all tests ($$NCPU CPUs)..."; \
+	echo ""; \
+	echo "=== Cleanup (pre-test) ==="; \
+	rm -rf ./data 2>/dev/null || true; \
+	echo "Cleaned ./data directory"; \
 	echo ""; \
 	echo "=== Build (release) ==="; \
 	if cargo build --all-features --release 2>&1; then \
@@ -32,22 +34,44 @@ test-all:
 		FAILURES=$$((FAILURES + 1)); \
 	fi; \
 	echo ""; \
-	echo "=== Unit Tests ==="; \
+	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
 	UNIT_OUTPUT=$$(cargo test --all-features 2>&1); \
 	UNIT_EXIT=$$?; \
 	echo "$$UNIT_OUTPUT" | tail -5; \
 	UNIT_PASSED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$4} END {print sum+0}'); \
 	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
+	UNIT_IGNORED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$8} END {print sum+0}'); \
 	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	if [ "$$UNIT_IGNORED" -gt 0 ] 2>/dev/null; then \
+		echo "ERROR: $$UNIT_IGNORED ignored test(s) detected. No tests may be ignored."; \
+		FAILURES=$$((FAILURES + 1)); \
+	fi; \
 	echo ""; \
 	echo "=== Snapshot Tests (E2E, $$NCPU parallel) ==="; \
-	SNAP_OUTPUT=$$(./scripts/run_snapshot_tests.sh -j $$NCPU 2>&1); \
+	SNAP_OUTPUT=$$(./scripts/run_snapshot_tests.sh --skip-build -j $$NCPU 2>&1); \
 	SNAP_EXIT=$$?; \
 	echo "$$SNAP_OUTPUT" | tail -10; \
 	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \
 	SNAP_FAILED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Failed:" | awk '{print $$2}'); \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
+	echo "=== Cleanup Verification ==="; \
+	STALE_DATA=""; \
+	if [ -d "./data" ]; then \
+		STALE_KGS=$$(ls -d ./data/*/ 2>/dev/null | grep -v persist | grep -v metadata | grep -v '/default/' | wc -l | tr -d ' '); \
+		if [ "$$STALE_KGS" -gt 0 ]; then \
+			STALE_DATA="$$STALE_KGS stale KG directories in ./data"; \
+		fi; \
+	fi; \
+	if [ -n "$$STALE_DATA" ]; then \
+		echo "WARNING: $$STALE_DATA"; \
+	else \
+		echo "Clean: no stale test data"; \
+	fi; \
+	rm -rf ./data 2>/dev/null || true; \
+	echo ""; \
+	TOTAL=$$(($$UNIT_PASSED + $${SNAP_PASSED:-0})); \
+	TOTAL_FAILED=$$(($$UNIT_FAILED + $${SNAP_FAILED:-0})); \
 	echo "==========================================="; \
 	echo "              TEST SUMMARY"; \
 	echo "==========================================="; \
@@ -55,8 +79,9 @@ test-all:
 	printf "  | %-14s | %-48s |\n" "Category" "Status"; \
 	printf "  |----------------|--------------------------------------------------|\n"; \
 	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
-	printf "  | %-14s | %-48s |\n" "Unit Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed"; \
+	printf "  | %-14s | %-48s |\n" "Cargo Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed, $$UNIT_IGNORED ignored"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "TOTAL" "$$TOTAL passed, $$TOTAL_FAILED failed"; \
 	echo ""; \
 	echo "==========================================="; \
 	if [ $$FAILURES -ne 0 ]; then \
@@ -65,16 +90,17 @@ test-all:
 	fi; \
 	echo "ALL CHECKS PASSED"
 
-# CI-friendly full verification (memory-constrained runners: 16GB RAM)
+# CI-friendly full verification (disk/memory-constrained free-tier runners)
 # Same checks as test-all but with:
 #   - Thin LTO instead of full LTO (halves linker peak memory)
 #   - More codegen units (reduces per-unit memory)
 #   - Capped test parallelism (DD workers are memory-hungry)
 #   - Capped snapshot parallelism
+#   - Debug artifacts cleaned between unit and snapshot tests (saves ~11GB disk)
 ci-test-all:
 	@FAILURES=0; \
 	STRIP_ANSI='s/\x1b\[[0-9;]*m//g'; \
-	CI_JOBS=2; \
+	CI_JOBS=$$(nproc 2>/dev/null || echo 4); \
 	echo "Running all tests (CI mode, $${CI_JOBS} parallel)..."; \
 	echo ""; \
 	echo "=== Build (release, thin LTO) ==="; \
@@ -94,9 +120,12 @@ ci-test-all:
 	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
 	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
+	echo "Cleaning debug artifacts to free disk space..."; \
+	rm -rf target/debug 2>/dev/null || true; \
+	echo ""; \
 	echo "=== Snapshot Tests (E2E, $$CI_JOBS parallel) ==="; \
 	SNAP_OUTPUT=$$(CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
-	   ./scripts/run_snapshot_tests.sh -j $$CI_JOBS 2>&1); \
+	   ./scripts/run_snapshot_tests.sh --skip-build -j $$CI_JOBS 2>&1); \
 	SNAP_EXIT=$$?; \
 	echo "$$SNAP_OUTPUT" | tail -10; \
 	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \

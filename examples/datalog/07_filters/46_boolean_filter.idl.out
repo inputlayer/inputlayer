@@ -12,10 +12,22 @@ Switched to knowledge graph: test_bool_filter_n07t46
 > +items[(1, true), (2, false), (3, true), (4, false)]
 Inserted 4 fact(s) into 'items'.
 > enabled(Id) <- items(Id, true)
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
 (session: 1 rule(s))
 > ?enabled(Id)
-No results.
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    3 │
+└──────┘
+2 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

@@ -322,7 +322,7 @@ impl HashIndex {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// let key = make_tuple(vec![42]);
     /// for tuple in index.probe(&key) {
     ///     println!("Found: {:?}", tuple);

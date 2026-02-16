@@ -141,7 +141,7 @@ impl KnowledgeGraphSnapshot {
     /// The snapshot is immutable so this is thread-safe without locks.
     pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
         let mut engine = DatalogEngine::new();
-        // Clone from Arc - efficient because underlying data is shared
+        engine.set_num_workers(self.num_workers);
         engine.input_tuples.clone_from(&self.input_tuples);
         engine.execute(program)
     }
@@ -191,7 +191,7 @@ impl KnowledgeGraphSnapshot {
     /// * `session_facts` - Vec of (relation_name, tuple) pairs to add temporarily
     ///
     /// # Example
-    /// ```ignore
+    /// ```text
     /// let snapshot = kg.snapshot();
     /// let result = snapshot.execute_with_session_facts(
     ///     "result(X) <- edge(X, Y), session_filter(Y)",
@@ -208,8 +208,7 @@ impl KnowledgeGraphSnapshot {
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
 
-        // Clone the snapshot's input_tuples (this is a shallow clone of the HashMap,
-        // but each Vec<Tuple> is cloned - this is necessary for isolation)
+        // Deep clone the snapshot's input_tuples for session isolation
         let mut isolated_tuples = (*self.input_tuples).clone();
 
         // Add session facts to the isolated copy (NOT the shared store!)

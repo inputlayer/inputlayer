@@ -104,6 +104,9 @@ pub trait PersistBackend: Send + Sync {
 
     /// Flush buffered updates for a shard to a batch file
     fn flush(&self, shard: &str) -> StorageResult<()>;
+
+    /// Delete a shard and all its data (metadata, batch files, in-memory state)
+    fn delete_shard(&self, shard: &str) -> StorageResult<()>;
 }
 
 /// In-memory state for a shard
@@ -440,6 +443,53 @@ impl PersistBackend for FilePersist {
             wal.clear()?;
         }
 
+        Ok(())
+    }
+
+    fn delete_shard(&self, shard: &str) -> StorageResult<()> {
+        let mut shards = self.shards.write();
+        if let Some(state) = shards.remove(shard) {
+            // Flush remaining shards' buffers to batch files so we can safely
+            // clear the shared WAL without losing their data.
+            for (_name, other_state) in shards.iter_mut() {
+                if !other_state.buffer.is_empty() {
+                    let (batch_id, path) = self.write_batch(&other_state.buffer)?;
+                    let batch = Batch::new(other_state.buffer.clone());
+                    other_state.meta.add_batch(BatchRef {
+                        id: batch_id,
+                        path,
+                        lower: batch.lower,
+                        upper: batch.upper,
+                        len: batch.len(),
+                    });
+                    other_state.buffer.clear();
+                    self.save_shard_meta(&other_state.meta)?;
+                }
+            }
+
+            // Clear shared WAL (all surviving data is now in batch files)
+            {
+                let mut wal = self.wal.lock();
+                let _ = wal.clear();
+            }
+
+            // Delete the target shard's batch files
+            for batch_ref in &state.meta.batches {
+                if batch_ref.path.exists() {
+                    fs::remove_file(&batch_ref.path)?;
+                }
+            }
+
+            // Delete shard metadata file
+            let meta_path = self
+                .config
+                .path
+                .join("shards")
+                .join(format!("{}.json", sanitize_name(shard)));
+            if meta_path.exists() {
+                fs::remove_file(meta_path)?;
+            }
+        }
         Ok(())
     }
 }
@@ -1078,5 +1128,81 @@ mod tests {
         let (_temp, persist) = create_test_persist();
         let result = persist.flush("nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_shard_removes_all_data() {
+        let (_temp, persist) = create_test_persist();
+
+        // Create shard and add data
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append(
+                "db:edge",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                ],
+            )
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // Verify shard exists
+        let shards = persist.list_shards().unwrap();
+        assert!(shards.contains(&"db:edge".to_string()));
+
+        // Delete the shard
+        persist.delete_shard("db:edge").unwrap();
+
+        // Shard should no longer be listed
+        let shards = persist.list_shards().unwrap();
+        assert!(!shards.contains(&"db:edge".to_string()));
+    }
+
+    #[test]
+    fn test_delete_shard_nonexistent_is_ok() {
+        let (_temp, persist) = create_test_persist();
+        // Deleting a non-existent shard should succeed silently
+        persist.delete_shard("nonexistent").unwrap();
+    }
+
+    #[test]
+    fn test_delete_shard_not_resurrected_on_restart() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        // First instance: create shard, flush, then delete
+        {
+            let config = PersistConfig {
+                path: path.clone(),
+                buffer_size: 100,
+                immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+
+            persist.ensure_shard("db:edge").unwrap();
+            persist
+                .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+                .unwrap();
+            persist.flush("db:edge").unwrap();
+            persist.delete_shard("db:edge").unwrap();
+        }
+
+        // Second instance: deleted shard should not reappear
+        {
+            let config = PersistConfig {
+                path,
+                buffer_size: 100,
+                immediate_sync: true,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+            let shards = persist.list_shards().unwrap();
+            assert!(
+                !shards.contains(&"db:edge".to_string()),
+                "Deleted shard should not be resurrected on restart"
+            );
+        }
     }
 }

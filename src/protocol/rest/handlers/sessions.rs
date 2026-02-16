@@ -110,7 +110,6 @@ pub async fn list_sessions(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<SessionListDto>>, RestError> {
     let mgr = handler.session_manager();
-    let stats = mgr.stats();
     let ids = mgr.list_sessions();
 
     let sessions: Vec<SessionDto> = ids
@@ -127,11 +126,16 @@ pub async fn list_sessions(
         })
         .collect();
 
+    // Compute stats from the collected sessions for consistency
+    let total = sessions.len();
+    let clean = sessions.iter().filter(|s| s.is_clean).count();
+    let dirty = total - clean;
+
     Ok(Json(ApiResponse::success(SessionListDto {
         sessions,
-        total: stats.total_sessions,
-        clean: stats.clean_sessions,
-        dirty: stats.dirty_sessions,
+        total,
+        clean,
+        dirty,
     })))
 }
 
@@ -167,16 +171,13 @@ pub async fn session_query(
 
     match result {
         Ok(response) => {
-            // Extract per-row provenance before consuming rows
             let row_provenance: Vec<String> = response
                 .rows
                 .iter()
-                .filter_map(|row| {
-                    row.provenance.as_ref().map(|p| match p {
-                        crate::session::Provenance::Persistent => "persistent".to_string(),
-                        crate::session::Provenance::Ephemeral => "ephemeral".to_string(),
-                        crate::session::Provenance::Mixed => "mixed".to_string(),
-                    })
+                .map(|row| {
+                    row.provenance
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string)
                 })
                 .collect();
 
@@ -243,13 +244,18 @@ pub async fn insert_ephemeral_facts(
 ) -> Result<Json<ApiResponse<String>>, RestError> {
     let tuples = json_tuples_to_tuples(&request.tuples).map_err(RestError::bad_request)?;
 
-    let count = tuples.len();
-    handler
+    let inserted = handler
         .session_insert_ephemeral(id, &request.relation, tuples)
-        .map_err(RestError::not_found)?;
+        .map_err(|e| {
+            if e.contains("not found") {
+                RestError::not_found(e)
+            } else {
+                RestError::bad_request(e)
+            }
+        })?;
 
     Ok(Json(ApiResponse::success(format!(
-        "Inserted {count} ephemeral fact(s) into '{}'",
+        "Inserted {inserted} ephemeral fact(s) into '{}'",
         request.relation
     ))))
 }
@@ -277,7 +283,13 @@ pub async fn retract_ephemeral_facts(
 
     let retracted = handler
         .session_retract_ephemeral(id, &request.relation, tuples)
-        .map_err(RestError::not_found)?;
+        .map_err(|e| {
+            if e.contains("not found") {
+                RestError::not_found(e)
+            } else {
+                RestError::bad_request(e)
+            }
+        })?;
 
     Ok(Json(ApiResponse::success(format!(
         "Retracted {retracted} ephemeral fact(s) from '{}'",
@@ -309,16 +321,27 @@ pub async fn add_ephemeral_rule(
     let program = crate::parser::parse_program(&request.rule)
         .map_err(|e| RestError::bad_request(format!("Invalid rule syntax: {e}")))?;
 
-    let rule = program
-        .rules
-        .into_iter()
-        .next()
-        .ok_or_else(|| RestError::bad_request("No rule found in input"))?;
+    if program.rules.is_empty() {
+        return Err(RestError::bad_request("No rule found in input"));
+    }
+    if program.rules.len() > 1 {
+        return Err(RestError::bad_request(format!(
+            "Expected exactly one rule, got {}. Add rules one at a time.",
+            program.rules.len()
+        )));
+    }
 
+    let rule = program.rules.into_iter().next().unwrap();
     let head_relation = rule.head.relation.clone();
     handler
         .session_add_rule(id, rule, request.rule.clone())
-        .map_err(RestError::not_found)?;
+        .map_err(|e| {
+            if e.contains("not found") {
+                RestError::not_found(e)
+            } else {
+                RestError::bad_request(e)
+            }
+        })?;
 
     Ok(Json(ApiResponse::success(format!(
         "Ephemeral rule added for '{head_relation}'"
@@ -330,88 +353,15 @@ pub fn json_tuples_to_tuples(json_tuples: &[Vec<serde_json::Value>]) -> Result<V
     json_tuples
         .iter()
         .map(|row| {
-            let values: Result<Vec<Value>, String> = row.iter().map(json_value_to_value).collect();
+            let values: Result<Vec<Value>, String> = row.iter().map(super::json_to_value).collect();
             values.map(Tuple::new)
         })
         .collect()
 }
 
-/// Convert a JSON value to an InputLayer Value
-fn json_value_to_value(v: &serde_json::Value) -> Result<Value, String> {
-    match v {
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(Value::Int64(i))
-            } else if let Some(f) = n.as_f64() {
-                Ok(Value::Float64(f))
-            } else {
-                Err(format!("Unsupported number: {n}"))
-            }
-        }
-        serde_json::Value::String(s) => Ok(Value::string(s)),
-        serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
-        serde_json::Value::Null => Ok(Value::Null),
-        serde_json::Value::Array(arr) => {
-            // Array of numbers → Vector
-            let floats: Result<Vec<f32>, String> = arr
-                .iter()
-                .map(|v| {
-                    v.as_f64()
-                        .map(|f| f as f32)
-                        .ok_or_else(|| format!("Vector element must be a number: {v}"))
-                })
-                .collect();
-            Ok(Value::vector(floats?))
-        }
-        serde_json::Value::Object(_) => Err("Object values not supported".to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_json_value_to_value_integers() {
-        let v = json_value_to_value(&serde_json::json!(42)).unwrap();
-        assert_eq!(v, Value::Int64(42));
-    }
-
-    #[test]
-    fn test_json_value_to_value_floats() {
-        let v = json_value_to_value(&serde_json::json!(3.14)).unwrap();
-        assert_eq!(v, Value::Float64(3.14));
-    }
-
-    #[test]
-    fn test_json_value_to_value_string() {
-        let v = json_value_to_value(&serde_json::json!("hello")).unwrap();
-        assert_eq!(v, Value::string("hello"));
-    }
-
-    #[test]
-    fn test_json_value_to_value_bool() {
-        let v = json_value_to_value(&serde_json::json!(true)).unwrap();
-        assert_eq!(v, Value::Bool(true));
-    }
-
-    #[test]
-    fn test_json_value_to_value_null() {
-        let v = json_value_to_value(&serde_json::json!(null)).unwrap();
-        assert_eq!(v, Value::Null);
-    }
-
-    #[test]
-    fn test_json_value_to_value_vector() {
-        let v = json_value_to_value(&serde_json::json!([1.0, 2.0, 3.0])).unwrap();
-        assert_eq!(v, Value::vector(vec![1.0, 2.0, 3.0]));
-    }
-
-    #[test]
-    fn test_json_value_to_value_object_error() {
-        let result = json_value_to_value(&serde_json::json!({"key": "val"}));
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_json_tuples_to_tuples() {
@@ -441,36 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn test_json_value_to_value_negative_int() {
-        let v = json_value_to_value(&serde_json::json!(-100)).unwrap();
-        assert_eq!(v, Value::Int64(-100));
-    }
-
-    #[test]
-    fn test_json_value_to_value_bool_false() {
-        let v = json_value_to_value(&serde_json::json!(false)).unwrap();
-        assert_eq!(v, Value::Bool(false));
-    }
-
-    #[test]
-    fn test_json_value_to_value_empty_string() {
-        let v = json_value_to_value(&serde_json::json!("")).unwrap();
-        assert_eq!(v, Value::string(""));
-    }
-
-    #[test]
-    fn test_json_value_to_value_empty_array() {
-        let v = json_value_to_value(&serde_json::json!([])).unwrap();
-        assert_eq!(v, Value::vector(vec![]));
-    }
-
-    #[test]
-    fn test_json_value_to_value_array_with_non_number() {
-        let result = json_value_to_value(&serde_json::json!([1.0, "bad"]));
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_json_tuples_empty() {
         let tuples = json_tuples_to_tuples(&[]).unwrap();
         assert!(tuples.is_empty());
@@ -491,8 +411,10 @@ mod tests {
     use crate::Config;
 
     fn make_handler() -> Arc<Handler> {
+        let temp_dir = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
+        config.storage.data_dir = temp_dir.into_path();
         Arc::new(Handler::from_config(config).unwrap())
     }
 

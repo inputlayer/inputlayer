@@ -41,24 +41,6 @@ fn test_simple_scan_query() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (Y > 3) no longer supported - Constraint type removed
-fn test_filter_query() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("edge", vec![(1, 2), (2, 5), (3, 10), (4, 1)]);
-
-    // Query: result(X, Y) <- edge(X, Y), Y > 3
-    let program = "result(X, Y) <- edge(X, Y), Y > 3";
-
-    let results = engine.execute(program).unwrap();
-
-    // Should only return edges where y > 3
-    assert_eq!(results.len(), 2);
-    assert!(results.contains(&(2, 5)));
-    assert!(results.contains(&(3, 10)));
-}
-
-#[test]
 fn test_projection_query() {
     let mut engine = DatalogEngine::new();
 
@@ -95,24 +77,6 @@ fn test_join_query() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X > 1, Y < 20) no longer supported - Constraint type removed
-fn test_multiple_filters() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("edge", vec![(1, 5), (2, 10), (3, 15), (4, 20)]);
-
-    // Query: result(X, Y) <- edge(X, Y), X > 1, Y < 20
-    let program = "result(X, Y) <- edge(X, Y), X > 1, Y < 20";
-
-    let results = engine.execute(program).unwrap();
-
-    // Should filter: x > 1 AND y < 20
-    assert_eq!(results.len(), 2);
-    assert!(results.contains(&(2, 10)));
-    assert!(results.contains(&(3, 15)));
-}
-
-#[test]
 fn test_self_join() {
     let mut engine = DatalogEngine::new();
 
@@ -127,43 +91,6 @@ fn test_self_join() {
     // Should find self-loops: (1,1) and (2,2)
     assert!(results.contains(&(1, 1)));
     assert!(results.contains(&(2, 2)));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X != Y) no longer supported - Constraint type removed
-fn test_inequality_constraint() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("edge", vec![(1, 1), (1, 2), (2, 2), (2, 3)]);
-
-    // Query: result(X, Y) <- edge(X, Y), X != Y
-    let program = "result(X, Y) <- edge(X, Y), X != Y";
-
-    let results = engine.execute(program).unwrap();
-
-    // Should exclude self-loops
-    assert_eq!(results.len(), 2);
-    assert!(results.contains(&(1, 2)));
-    assert!(results.contains(&(2, 3)));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X < 3) no longer supported - Constraint type removed
-fn test_complex_join_with_filter() {
-    let mut engine = DatalogEngine::new();
-
-    // Graph: 1->2, 2->3, 3->4, 4->5
-    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
-
-    // Query: result(X, Z) <- edge(X, Y), edge(Y, Z), X < 3
-    let program = "result(X, Z) <- edge(X, Y), edge(Y, Z), X < 3";
-
-    let results = engine.execute(program).unwrap();
-
-    // 2-hop paths where x < 3: 1->2->3, 2->3->4
-    assert_eq!(results.len(), 2);
-    assert!(results.contains(&(1, 3)));
-    assert!(results.contains(&(2, 4)));
 }
 
 #[test]
@@ -248,23 +175,6 @@ fn test_empty_relation() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X = 2) no longer supported - Constraint type removed
-fn test_constant_in_body() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
-
-    // Query with constant equality: result(X, Y) <- edge(X, Y), X = 2
-    let program = "result(X, Y) <- edge(X, Y), X = 2";
-
-    let results = engine.execute(program).unwrap();
-
-    // Should only return edges where x = 2
-    assert_eq!(results.len(), 1);
-    assert!(results.contains(&(2, 3)));
-}
-
-#[test]
 fn test_catalog_schema_inference() {
     let mut engine = DatalogEngine::new();
 
@@ -335,69 +245,6 @@ fn test_triangles_query() {
 }
 
 #[test]
-#[ignore] // Constraint syntax (X != Z) no longer supported - Constraint type removed
-fn test_three_rule_same_component() {
-    let mut engine = DatalogEngine::new();
-
-    // Simple graph: 1->2->3->4
-    engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
-
-    // Three rules for same_component (like session rules would create)
-    let program = r#"
-same_component(X, Y) <- edge(X, Y)
-same_component(X, Y) <- edge(Y, X)
-same_component(X, Z) <- same_component(X, Y), same_component(Y, Z), X != Z
-__result__(X, Y) <- same_component(X, Y)
-"#;
-
-    let results = engine.execute(program).unwrap();
-
-    println!("Results: {:?}", results);
-
-    // Base cases: direct edges and reverse edges
-    assert!(results.contains(&(1, 2)), "Should contain (1, 2)");
-    assert!(results.contains(&(2, 1)), "Should contain (2, 1) - reverse");
-    assert!(results.contains(&(2, 3)), "Should contain (2, 3)");
-    assert!(results.contains(&(3, 2)), "Should contain (3, 2) - reverse");
-
-    // Transitive: 1 connected to 3 via 2
-    assert!(
-        results.contains(&(1, 3)),
-        "Should contain (1, 3) - transitive"
-    );
-    assert!(
-        results.contains(&(3, 1)),
-        "Should contain (3, 1) - transitive reverse"
-    );
-
-    // Should have many more due to transitivity
-    assert!(
-        results.len() >= 6,
-        "Should have at least 6 results, got {}",
-        results.len()
-    );
-}
-
-#[test]
-#[ignore] // Constraint syntax (X >= 2, Y <= 30, X != 3) no longer supported - Constraint type removed
-fn test_parse_multiple_constraints() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40)]);
-
-    // Multiple constraint types
-    let program = "
-        result(X, Y) <- data(X, Y), X >= 2, Y <= 30, X != 3
-    ";
-
-    let results = engine.execute(program).unwrap();
-
-    // Only (2, 20) satisfies: x >= 2 AND y <= 30 AND x != 3
-    assert_eq!(results.len(), 1);
-    assert!(results.contains(&(2, 20)));
-}
-
-#[test]
 fn test_parse_simple_rule() {
     let mut engine = DatalogEngine::new();
 
@@ -438,71 +285,6 @@ fn test_shared_types_compatibility() {
     assert_eq!(rule.head.relation, "test");
     assert_eq!(ir.output_schema(), vec!["x"]);
     assert!(!matches!(pred, Predicate::True));
-}
-
-#[test]
-#[ignore] // Constraint syntax (X > 2, etc.) no longer supported - Constraint type removed
-fn test_all_comparison_operators() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40)]);
-
-    // Test each operator
-    let tests = vec![
-        ("result(X, Y) <- data(X, Y), X > 2", vec![(3, 30), (4, 40)]),
-        ("result(X, Y) <- data(X, Y), X < 3", vec![(1, 10), (2, 20)]),
-        ("result(X, Y) <- data(X, Y), X >= 3", vec![(3, 30), (4, 40)]),
-        ("result(X, Y) <- data(X, Y), X <= 2", vec![(1, 10), (2, 20)]),
-        ("result(X, Y) <- data(X, Y), X = 2", vec![(2, 20)]),
-        (
-            "result(X, Y) <- data(X, Y), X != 2",
-            vec![(1, 10), (3, 30), (4, 40)],
-        ),
-    ];
-
-    for (program, expected) in tests {
-        let results = engine.execute(program).unwrap();
-        assert_eq!(
-            results.len(),
-            expected.len(),
-            "Failed for program: {}",
-            program
-        );
-        for tuple in expected {
-            assert!(
-                results.contains(&tuple),
-                "Missing tuple {:?} for program: {}",
-                tuple,
-                program
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore] // Constraint syntax (X > 1) no longer supported - Constraint type removed
-fn test_pipeline_stages() {
-    let mut engine = DatalogEngine::new();
-
-    engine.add_fact("edge", vec![(1, 2), (2, 3)]);
-
-    let program = "result(X, Y) <- edge(X, Y), X > 1";
-
-    // Stage 1: Parse
-    let parsed = engine.parse(program).unwrap();
-    assert_eq!(parsed.rules.len(), 1);
-
-    // Stage 2: Build IR
-    engine.build_ir().unwrap();
-    assert_eq!(engine.ir_nodes().len(), 1);
-
-    // Stage 3: Optimize
-    engine.optimize_ir().unwrap();
-
-    // Stage 4: Execute
-    let results = engine.execute_ir(&engine.ir_nodes()[0].clone()).unwrap();
-    assert_eq!(results.len(), 1);
-    assert!(results.contains(&(2, 3)));
 }
 
 #[test]
