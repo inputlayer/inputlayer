@@ -232,8 +232,10 @@ mod tests {
     use crate::Config;
 
     fn make_handler() -> Arc<Handler> {
+        let temp_dir = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
+        config.storage.data_dir = temp_dir.into_path();
         Arc::new(Handler::from_config(config).unwrap())
     }
 

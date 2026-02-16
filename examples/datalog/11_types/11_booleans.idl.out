@@ -12,13 +12,13 @@ Switched to knowledge graph: test_bool_n11t11
 > +user[(1, "alice", true), (2, "bob", false), (3, "charlie", true)]
 Inserted 3 fact(s) into 'user'.
 > ?user(Id, Name, Active)
-┌──────┬───────────┬──────┐
-│ col0 │ col1      │ col2 │
-├──────┼───────────┼──────┤
-│    1 │ "alice"   │    1 │
-│    2 │ "bob"     │    0 │
-│    3 │ "charlie" │    1 │
-└──────┴───────────┴──────┘
+┌──────┬───────────┬───────┐
+│ col0 │ col1      │ col2  │
+├──────┼───────────┼───────┤
+│    1 │ "alice"   │ true  │
+│    2 │ "bob"     │ false │
+│    3 │ "charlie" │ true  │
+└──────┴───────────┴───────┘
 3 rows
 > +active_user(Id, Name) <- user(Id, Name, true)
 Rule 'active_user' registered.

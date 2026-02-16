@@ -807,7 +807,13 @@ impl JoinPlanner {
                     // original schema, find its position in the new schema.
                     let projection: Vec<usize> = old_schema
                         .iter()
-                        .map(|col| new_schema.iter().position(|c| c == col).unwrap_or(0))
+                        .map(|col| {
+                            new_schema.iter().position(|c| c == col).unwrap_or_else(|| {
+                                panic!(
+                                    "Column '{col}' from old schema not found in new schema: {new_schema:?}"
+                                )
+                            })
+                        })
                         .collect();
                     IRNode::Map {
                         input: Box::new(new_joins),
@@ -1045,11 +1051,15 @@ mod tests {
         let left_key = left_schema
             .iter()
             .position(|v| v == shared_var)
-            .unwrap_or(0);
+            .unwrap_or_else(|| {
+                panic!("Join key '{shared_var}' not found in left schema: {left_schema:?}")
+            });
         let right_key = right_schema
             .iter()
             .position(|v| v == shared_var)
-            .unwrap_or(0);
+            .unwrap_or_else(|| {
+                panic!("Join key '{shared_var}' not found in right schema: {right_schema:?}")
+            });
 
         let mut output_schema = left_schema.clone();
         for var in &right_schema {

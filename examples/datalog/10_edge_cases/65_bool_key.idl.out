@@ -12,18 +12,28 @@ Switched to knowledge graph: test_bool_key_n10t65
 > +flags[(true, "yes"), (false, "no")]
 Inserted 2 fact(s) into 'flags'.
 > ?flags(Key, Val)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    0 │ "no"  │
-│    1 │ "yes" │
-└──────┴───────┘
+┌───────┬───────┐
+│ col0  │ col1  │
+├───────┼───────┤
+│ false │ "no"  │
+│ true  │ "yes" │
+└───────┴───────┘
 2 rows
 > true_only(Val) <- flags(true, Val)
-No results.
+┌───────┐
+│ col0  │
+├───────┤
+│ "yes" │
+└───────┘
+1 rows
 (session: 1 rule(s))
 > ?true_only(Val)
-No results.
+┌───────┐
+│ col0  │
+├───────┤
+│ "yes" │
+└───────┘
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

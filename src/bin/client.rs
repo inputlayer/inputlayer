@@ -167,10 +167,13 @@ struct InsertDataRequest {
     rows: Vec<Vec<serde_json::Value>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct InsertDataResponse {
     rows_inserted: usize,
     duplicates: usize,
+    #[serde(default)]
+    skipped: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -178,9 +181,12 @@ struct DeleteDataRequest {
     rows: Vec<Vec<serde_json::Value>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct DeleteDataResponse {
     rows_deleted: usize,
+    #[serde(default)]
+    skipped: usize,
 }
 
 #[allow(dead_code)]

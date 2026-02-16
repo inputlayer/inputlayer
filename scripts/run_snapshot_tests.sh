@@ -41,6 +41,7 @@ DIRTY=0
 
 # Mode flags
 UPDATE_MODE=0
+SKIP_BUILD=0
 
 # Temporary directory for test outputs
 TEMP_DIR=$(mktemp -d)
@@ -278,6 +279,10 @@ while [[ $# -gt 0 ]]; do
             UPDATE_MODE=1
             shift
             ;;
+        --skip-build)
+            SKIP_BUILD=1
+            shift
+            ;;
         -j|--jobs)
             PARALLEL_JOBS="$2"
             shift 2
@@ -290,6 +295,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -f, --filter     Only run tests matching pattern (e.g., 'negation')"
             echo "  -u, --update     Update .out files with actual output (forces sequential)"
             echo "  -j, --jobs N     Parallel jobs (default: $PARALLEL_JOBS, 0 or 1 = sequential)"
+            echo "  --skip-build     Skip cargo build (assumes binaries already built)"
             echo "  -h, --help       Show this help message"
             echo ""
             echo "Environment variables:"
@@ -319,14 +325,18 @@ if [[ "$UPDATE_MODE" == "1" ]] || [[ "$VERBOSE" == "1" ]]; then
 fi
 
 # Build the project first (release mode for speed, suppresses warnings)
-echo "Building project..."
 cd "$PROJECT_DIR"
-if ! cargo build --bin inputlayer-client --bin inputlayer-server --release --quiet 2>/dev/null; then
-    echo -e "${RED}Build failed!${NC}"
-    echo "Attempting verbose build to show errors:"
-    cargo build --bin inputlayer-client --bin inputlayer-server --release 2>&1 | grep -v "^warning" || true
-    echo -e "${RED}Aborting tests due to build failure.${NC}"
-    exit 1
+if [[ "$SKIP_BUILD" == "1" ]]; then
+    echo "Skipping build (--skip-build)..."
+else
+    echo "Building project..."
+    if ! cargo build --bin inputlayer-client --bin inputlayer-server --release --quiet 2>/dev/null; then
+        echo -e "${RED}Build failed!${NC}"
+        echo "Attempting verbose build to show errors:"
+        cargo build --bin inputlayer-client --bin inputlayer-server --release 2>&1 | grep -v "^warning" || true
+        echo -e "${RED}Aborting tests due to build failure.${NC}"
+        exit 1
+    fi
 fi
 
 # Detect the cargo target directory (handles workspace layouts)

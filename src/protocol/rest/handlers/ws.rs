@@ -123,13 +123,21 @@ pub async fn session_websocket(
 /// Uses `tokio::select!` to concurrently process client messages and push notifications.
 async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_id: u64) {
     let (mut sender, mut receiver) = socket.split();
-    let mut notify_rx = handler.subscribe_notifications();
 
-    // Get the session's knowledge graph for filtering notifications
-    let session_kg = handler
-        .session_manager()
-        .with_session(session_id, |s| s.knowledge_graph.clone())
-        .unwrap_or_default();
+    // Re-validate session exists after upgrade (it may have closed during the
+    // HTTP→WebSocket upgrade handshake)
+    if !handler.session_manager().has_session(session_id) {
+        let err_msg = WsResponse::Error {
+            message: format!("Session {session_id} closed during upgrade"),
+        };
+        if let Ok(json) = serde_json::to_string(&err_msg) {
+            let _ = sender.send(Message::Text(json)).await;
+        }
+        let _ = sender.close().await;
+        return;
+    }
+
+    let mut notify_rx = handler.subscribe_notifications();
 
     loop {
         tokio::select! {
@@ -144,7 +152,9 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                                 let err = WsResponse::Error {
                                     message: format!("Serialization error: {e}"),
                                 };
-                                serde_json::to_string(&err).unwrap_or_default()
+                                serde_json::to_string(&err).unwrap_or_else(|_| {
+                                    r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
+                                })
                             }
                         };
                         if sender.send(Message::Text(json)).await.is_err() {
@@ -152,6 +162,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break, // Protocol error, close connection
                     _ => {} // Ignore binary, ping/pong handled by axum
                 }
             }
@@ -159,6 +170,23 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
             notification = notify_rx.recv() => {
                 match notification {
                     Ok(PersistentNotification::PersistentUpdate { knowledge_graph, relation, operation, count }) => {
+                        // Get current session KG (may have changed via switch_kg)
+                        let session_kg = match handler
+                            .session_manager()
+                            .with_session(session_id, |s| s.knowledge_graph.clone())
+                        {
+                            Ok(kg) => kg,
+                            Err(_) => {
+                                // Session was closed — notify client before disconnecting
+                                let err_msg = WsResponse::Error {
+                                    message: "Session closed".to_string(),
+                                };
+                                if let Ok(json) = serde_json::to_string(&err_msg) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                break;
+                            }
+                        };
                         // Only forward notifications for this session's knowledge graph
                         if knowledge_graph == session_kg {
                             let ws_msg = WsResponse::Notification {
@@ -175,8 +203,16 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                             }
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        // Missed some notifications — continue
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        // Missed some notifications — warn the client
+                        let warn = WsResponse::Error {
+                            message: format!("Missed {count} notification(s) due to backpressure"),
+                        };
+                        if let Ok(json) = serde_json::to_string(&warn) {
+                            if sender.send(Message::Text(json)).await.is_err() {
+                                break;
+                            }
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;
@@ -218,12 +254,10 @@ async fn handle_ws_query(handler: &Arc<Handler>, session_id: u64, query: String)
             let row_provenance: Vec<String> = response
                 .rows
                 .iter()
-                .filter_map(|row| {
-                    row.provenance.as_ref().map(|p| match p {
-                        crate::session::Provenance::Persistent => "persistent".to_string(),
-                        crate::session::Provenance::Ephemeral => "ephemeral".to_string(),
-                        crate::session::Provenance::Mixed => "mixed".to_string(),
-                    })
+                .map(|row| {
+                    row.provenance
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string)
                 })
                 .collect();
 
@@ -265,10 +299,9 @@ fn handle_ws_insert_facts(
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
-    let count = parsed.len();
     match handler.session_insert_ephemeral(session_id, relation, parsed) {
-        Ok(()) => WsResponse::Ack {
-            message: format!("Inserted {count} fact(s) into '{relation}'"),
+        Ok(inserted) => WsResponse::Ack {
+            message: format!("Inserted {inserted} fact(s) into '{relation}'"),
         },
         Err(e) => WsResponse::Error { message: e },
     }
@@ -302,14 +335,20 @@ fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: u64, rule_text: &str) 
         }
     };
 
-    let rule = match program.rules.into_iter().next() {
-        Some(r) => r,
-        None => {
-            return WsResponse::Error {
-                message: "No rule found in input".to_string(),
-            };
-        }
-    };
+    if program.rules.is_empty() {
+        return WsResponse::Error {
+            message: "No rule found in input".to_string(),
+        };
+    }
+    if program.rules.len() > 1 {
+        return WsResponse::Error {
+            message: format!(
+                "Expected exactly one rule, got {}. Add rules one at a time.",
+                program.rules.len()
+            ),
+        };
+    }
+    let rule = program.rules.into_iter().next().unwrap();
 
     let head = rule.head.relation.clone();
     match handler.session_add_rule(session_id, rule, rule_text.to_string()) {

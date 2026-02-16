@@ -95,20 +95,10 @@ pub async fn explain_query(
     Extension(handler): Extension<Arc<Handler>>,
     Json(request): Json<ExplainRequest>,
 ) -> Result<Json<ApiResponse<ExplainResponse>>, RestError> {
-    // Transform ?query syntax into a rule (same as execute endpoint)
-    let query = if request.query.trim().starts_with('?')
-        && request
-            .query
-            .trim()
-            .chars()
-            .nth(1)
-            .is_some_and(char::is_alphabetic)
-    {
-        let q = request.query.trim()[1..].trim();
-        format!("__explain__(X, Y) <- {q}")
-    } else {
-        request.query.clone()
-    };
+    // Transform ?query syntax into a rule using the same logic as execute endpoint.
+    // This correctly handles any arity, not just 2-variable queries.
+    let query = crate::protocol::handler::transform_query_shorthand(&request.query)
+        .unwrap_or_else(|_| request.query.clone());
 
     match handler.explain_query(Some(request.knowledge_graph.clone()), query) {
         Ok((plan, optimizations)) => {
@@ -138,8 +128,10 @@ mod tests {
     use crate::Config;
 
     fn make_handler() -> Arc<Handler> {
+        let temp_dir = tempfile::tempdir().unwrap();
         let mut config = Config::default();
         config.storage.auto_create_knowledge_graphs = true;
+        config.storage.data_dir = temp_dir.into_path();
         Arc::new(Handler::from_config(config).unwrap())
     }
 
