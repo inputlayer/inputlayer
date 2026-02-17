@@ -181,6 +181,20 @@ pub struct DropByPrefixResult {
 }
 
 /// Delete all rules matching a prefix
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/rules",
+    tag = "rules",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("prefix" = String, Query, description = "Prefix to match rule names against")
+    ),
+    responses(
+        (status = 200, description = "Rules deleted", body = ApiResponse<DropByPrefixResult>),
+        (status = 404, description = "Knowledge graph not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
 pub async fn delete_rules_by_prefix(
     Extension(handler): Extension<Arc<Handler>>,
     Path(kg): Path<String>,
