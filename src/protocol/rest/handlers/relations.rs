@@ -214,6 +214,21 @@ pub struct ClearedRelation {
 }
 
 /// Clear all facts from relations matching a prefix
+#[utoipa::path(
+    delete,
+    path = "/knowledge-graphs/{kg}/relations",
+    tag = "relations",
+    params(
+        ("kg" = String, Path, description = "Knowledge graph name"),
+        ("prefix" = String, Query, description = "Prefix to match relation names against")
+    ),
+    responses(
+        (status = 200, description = "Relations cleared", body = ApiResponse<ClearByPrefixResult>),
+        (status = 400, description = "Invalid request (empty prefix)"),
+        (status = 404, description = "Knowledge graph not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
 pub async fn clear_relations_by_prefix(
     Extension(handler): Extension<Arc<Handler>>,
     Path(kg): Path<String>,
