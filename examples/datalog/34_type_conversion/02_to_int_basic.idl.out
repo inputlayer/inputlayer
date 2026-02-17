@@ -1,0 +1,41 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_to_int_basic_n34t02
+Knowledge graph 'test_to_int_basic_n34t02' created.
+Switched to knowledge graph: test_to_int_basic_n34t02
+> .kg use test_to_int_basic_n34t02
+Switched to knowledge graph: test_to_int_basic_n34t02
+> +floats[(3.7,), (3.2,), (-2.9,), (-2.1,), (5.0,)]
+Inserted 5 fact(s) into 'floats'.
+> int_val(X, Y) <- floats(X), Y = to_int(X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ -2.9 │   -2 │
+│ -2.1 │   -2 │
+│  3.2 │    3 │
+│  3.7 │    3 │
+│  5.0 │    5 │
+└──────┴──────┘
+5 rows
+(session: 1 rule(s))
+> ?int_val(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ -2.9 │   -2 │
+│ -2.1 │   -2 │
+│  3.2 │    3 │
+│  3.7 │    3 │
+│  5.0 │    5 │
+└──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_to_int_basic_n34t02
+Knowledge graph 'test_to_int_basic_n34t02' dropped.

@@ -8,6 +8,7 @@ use crate::rule_catalog::validate_rule;
 use crate::schema::{ColumnSchema, RelationSchema};
 use crate::session::{SessionConfig, SessionId, SessionManager};
 use crate::statement;
+use crate::statement::parser::SortDirection;
 use crate::storage_engine::StorageEngine;
 use crate::value::{Tuple, Value};
 use crate::Config;
@@ -17,6 +18,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
+
+/// Result of transforming a `?shorthand` query, including sort and pagination annotations.
+pub(crate) struct QueryTransform {
+    /// The transformed query program text.
+    pub query: String,
+    /// Column-index-based sort specification, extracted from `:asc`/`:desc` annotations.
+    pub order_by: Vec<(usize, SortDirection)>,
+    /// Maximum number of rows to return.
+    pub limit: Option<usize>,
+    /// Number of rows to skip before applying limit.
+    pub offset: Option<usize>,
+}
 
 /// Term -> Value (constants only, rejects variables/placeholders).
 fn term_to_value(term: &Term) -> Result<Value, String> {
@@ -212,6 +225,27 @@ impl Handler {
 
     fn inc_query_count(&self) {
         self.query_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Clear all facts from relations matching a prefix in a knowledge graph.
+    /// Returns list of (relation_name, count_deleted) for each affected relation.
+    pub fn clear_relations_by_prefix_in(
+        &self,
+        kg: &str,
+        prefix: &str,
+    ) -> Result<Vec<(String, usize)>, String> {
+        let storage = self.storage.read();
+        storage
+            .clear_relations_by_prefix_in(kg, prefix)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Drop all rules matching a prefix in a knowledge graph.
+    pub fn drop_rules_by_prefix_in(&self, kg: &str, prefix: &str) -> Result<Vec<String>, String> {
+        let storage = self.storage.read();
+        storage
+            .drop_rules_by_prefix_in(kg, prefix)
+            .map_err(|e| e.to_string())
     }
 
     /// Execute a Datalog program and return results.
@@ -790,12 +824,15 @@ impl Handler {
                     provenance: None,
                 })
                 .collect();
+            let total_count = rows.len();
             return Ok(QueryResult {
                 rows,
                 schema: vec![ColumnDef {
                     name: "message".to_string(),
                     data_type: WireDataType::String,
                 }],
+                total_count,
+                truncated: false,
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 metadata: None,
             });
@@ -804,7 +841,11 @@ impl Handler {
         let program_text = query_to_execute.unwrap_or(program_text);
 
         // Transform ?shorthand query syntax into __query__(...) <- ... rule
-        let query_program = transform_query_shorthand(&program_text)?;
+        let transform = transform_query_shorthand(&program_text)?;
+        let query_program = transform.query;
+        let order_by = transform.order_by;
+        let query_limit = transform.limit;
+        let query_offset = transform.offset;
 
         // Prepend session rules to the query program
         let query_program = if session_rules.is_empty() {
@@ -894,9 +935,19 @@ impl Handler {
             vec![]
         };
 
+        // Apply sorting if :asc/:desc annotations were present
+        let rows = sort_rows(rows, &order_by);
+
+        // Apply pagination (offset then limit)
+        let total_count = rows.len();
+        let rows = apply_pagination(rows, query_limit, query_offset);
+        let truncated = rows.len() < total_count;
+
         Ok(QueryResult {
             rows,
             schema,
+            total_count,
+            truncated,
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
         })
@@ -973,7 +1024,11 @@ impl Handler {
 
         // Apply same preprocessing as the fast path: strip comments + transform ?shorthand
         let preprocessed = strip_comments(&program);
-        let preprocessed = transform_query_shorthand(&preprocessed)?;
+        let transform = transform_query_shorthand(&preprocessed)?;
+        let preprocessed = transform.query;
+        let order_by = transform.order_by;
+        let query_limit = transform.limit;
+        let query_offset = transform.offset;
 
         // Build combined program: ephemeral rules + preprocessed query
         // Keep `preprocessed` for the persistent-only baseline (provenance diff)
@@ -1084,9 +1139,19 @@ impl Handler {
             );
         }
 
+        // Apply sorting if :asc/:desc annotations were present
+        let rows = sort_rows(rows, &order_by);
+
+        // Apply pagination (offset then limit)
+        let total_count = rows.len();
+        let rows = apply_pagination(rows, query_limit, query_offset);
+        let truncated = rows.len() < total_count;
+
         Ok(QueryResult {
             rows,
             schema,
+            total_count,
+            truncated,
             execution_time_ms,
             metadata: result_metadata,
         })
@@ -1138,11 +1203,19 @@ impl Handler {
 /// This enables the shorthand `?relation(X, Y)` syntax that the REPL and
 /// REST API use, converting it to a proper Datalog rule before execution.
 /// Returns the original text unchanged if it's not a `?shorthand` query.
-pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<String, String> {
+///
+/// Also extracts `:asc`/`:desc` sort annotations from query head variables,
+/// e.g. `?rel(X, Score:desc)` → sort by column 1 descending.
+pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTransform, String> {
     let trimmed = program_text.trim();
     if let Some(after_q) = trimmed.strip_prefix('?') {
         if !after_q.starts_with(char::is_alphabetic) {
-            return Ok(program_text.to_string());
+            return Ok(QueryTransform {
+                query: program_text.to_string(),
+                order_by: vec![],
+                limit: None,
+                offset: None,
+            });
         }
         let query_text = after_q;
         let goal = statement::parse_query(query_text)
@@ -1221,13 +1294,35 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<String, St
 
         body_parts.extend(extra_constraints);
 
-        Ok(format!(
-            "__query__({}) <- {}",
-            head_vars.join(", "),
-            body_parts.join(", ")
-        ))
+        // Map sort annotations (variable names) to column indices in head_vars
+        let order_by: Vec<(usize, SortDirection)> = goal
+            .order_by
+            .iter()
+            .filter_map(|(var_name, dir)| {
+                head_vars
+                    .iter()
+                    .position(|v| v == var_name)
+                    .map(|idx| (idx, *dir))
+            })
+            .collect();
+
+        Ok(QueryTransform {
+            query: format!(
+                "__query__({}) <- {}",
+                head_vars.join(", "),
+                body_parts.join(", ")
+            ),
+            order_by,
+            limit: goal.limit,
+            offset: goal.offset,
+        })
     } else {
-        Ok(program_text.to_string())
+        Ok(QueryTransform {
+            query: program_text.to_string(),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+        })
     }
 }
 
@@ -2913,6 +3008,144 @@ mod tests {
             .await;
         assert!(result.is_err());
     }
+
+    // --- compare_wire_values / sort tests ---
+
+    #[test]
+    fn test_compare_wire_values_same_type() {
+        use std::cmp::Ordering;
+        let a = WireValue::Int64(1);
+        let b = WireValue::Int64(2);
+        assert_eq!(compare_wire_values(Some(&a), Some(&b)), Ordering::Less);
+    }
+
+    #[test]
+    fn test_compare_wire_values_null_ordering() {
+        use std::cmp::Ordering;
+        let v = WireValue::Int64(1);
+        let n = WireValue::Null;
+        assert_eq!(compare_wire_values(Some(&n), Some(&v)), Ordering::Less);
+        assert_eq!(compare_wire_values(Some(&v), Some(&n)), Ordering::Greater);
+        assert_eq!(compare_wire_values(None, Some(&v)), Ordering::Less);
+    }
+
+    #[test]
+    fn test_compare_wire_values_cross_type_stable() {
+        use std::cmp::Ordering;
+        let int_val = WireValue::Int64(100);
+        let str_val = WireValue::String("hello".to_string());
+        // Int (rank 3) < String (rank 5) → Less
+        assert_eq!(
+            compare_wire_values(Some(&int_val), Some(&str_val)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_wire_values(Some(&str_val), Some(&int_val)),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn test_compare_wire_values_cross_numeric() {
+        use std::cmp::Ordering;
+        let i = WireValue::Int64(2);
+        let f = WireValue::Float64(1.5);
+        assert_eq!(compare_wire_values(Some(&i), Some(&f)), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_sort_rows_empty_order() {
+        let rows = vec![
+            WireTuple::new(vec![WireValue::Int64(2)]),
+            WireTuple::new(vec![WireValue::Int64(1)]),
+        ];
+        let sorted = sort_rows(rows.clone(), &[]);
+        assert_eq!(sorted.len(), 2);
+        // No sorting applied — same order
+        assert_eq!(sorted[0].values[0], WireValue::Int64(2));
+    }
+
+    #[test]
+    fn test_sort_rows_single_col_asc() {
+        let rows = vec![
+            WireTuple::new(vec![WireValue::Int64(3)]),
+            WireTuple::new(vec![WireValue::Int64(1)]),
+            WireTuple::new(vec![WireValue::Int64(2)]),
+        ];
+        let sorted = sort_rows(rows, &[(0, SortDirection::Asc)]);
+        assert_eq!(sorted[0].values[0], WireValue::Int64(1));
+        assert_eq!(sorted[1].values[0], WireValue::Int64(2));
+        assert_eq!(sorted[2].values[0], WireValue::Int64(3));
+    }
+
+    #[test]
+    fn test_sort_rows_single_col_desc() {
+        let rows = vec![
+            WireTuple::new(vec![WireValue::Int64(1)]),
+            WireTuple::new(vec![WireValue::Int64(3)]),
+            WireTuple::new(vec![WireValue::Int64(2)]),
+        ];
+        let sorted = sort_rows(rows, &[(0, SortDirection::Desc)]);
+        assert_eq!(sorted[0].values[0], WireValue::Int64(3));
+        assert_eq!(sorted[1].values[0], WireValue::Int64(2));
+        assert_eq!(sorted[2].values[0], WireValue::Int64(1));
+    }
+
+    // --- apply_pagination tests ---
+
+    fn make_int_rows(n: usize) -> Vec<WireTuple> {
+        (1..=n)
+            .map(|i| WireTuple::new(vec![WireValue::Int64(i as i64)]))
+            .collect()
+    }
+
+    #[test]
+    fn test_apply_pagination_no_limit() {
+        let rows = make_int_rows(5);
+        let result = apply_pagination(rows.clone(), None, None);
+        assert_eq!(result.len(), 5);
+        assert_eq!(result, rows);
+    }
+
+    #[test]
+    fn test_apply_pagination_with_limit() {
+        let rows = make_int_rows(5);
+        let result = apply_pagination(rows, Some(2), None);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].values[0], WireValue::Int64(1));
+        assert_eq!(result[1].values[0], WireValue::Int64(2));
+    }
+
+    #[test]
+    fn test_apply_pagination_with_offset() {
+        let rows = make_int_rows(5);
+        let result = apply_pagination(rows, None, Some(2));
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].values[0], WireValue::Int64(3));
+        assert_eq!(result[1].values[0], WireValue::Int64(4));
+        assert_eq!(result[2].values[0], WireValue::Int64(5));
+    }
+
+    #[test]
+    fn test_apply_pagination_limit_exceeds() {
+        let rows = make_int_rows(3);
+        let result = apply_pagination(rows, Some(10), None);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_apply_pagination_offset_exceeds() {
+        let rows = make_int_rows(3);
+        let result = apply_pagination(rows, None, Some(10));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_apply_pagination_limit_zero() {
+        let rows = make_int_rows(5);
+        let result = apply_pagination(rows, Some(0), None);
+        assert!(result.is_empty());
+    }
 }
 
 /// Recursively extract variable names from a term.
@@ -2963,6 +3196,93 @@ fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
 
 /// Extract variables from a body predicate and add to `head_vars`
 /// Used for Cartesian product queries like ?- foo(X), bar(Y).
+/// Apply offset and limit pagination to result rows.
+fn apply_pagination(
+    rows: Vec<WireTuple>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Vec<WireTuple> {
+    let start = offset.unwrap_or(0);
+    if start >= rows.len() {
+        return vec![];
+    }
+    let remaining = &rows[start..];
+    match limit {
+        Some(n) => remaining.iter().take(n).cloned().collect(),
+        None => remaining.to_vec(),
+    }
+}
+
+/// Sort result rows by the given column indices and directions.
+/// Returns the rows unchanged if `order_by` is empty.
+fn sort_rows(mut rows: Vec<WireTuple>, order_by: &[(usize, SortDirection)]) -> Vec<WireTuple> {
+    if order_by.is_empty() {
+        return rows;
+    }
+    rows.sort_by(|a, b| {
+        for &(col_idx, dir) in order_by {
+            let va = a.values.get(col_idx);
+            let vb = b.values.get(col_idx);
+            let cmp = compare_wire_values(va, vb);
+            let cmp = match dir {
+                SortDirection::Asc => cmp,
+                SortDirection::Desc => cmp.reverse(),
+            };
+            if cmp != std::cmp::Ordering::Equal {
+                return cmp;
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    rows
+}
+
+/// Compare two optional WireValues for sorting purposes.
+fn compare_wire_values(a: Option<&WireValue>, b: Option<&WireValue>) -> std::cmp::Ordering {
+    match (a, b) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (Some(va), Some(vb)) => match (va, vb) {
+            (WireValue::Int64(a), WireValue::Int64(b)) => a.cmp(b),
+            (WireValue::Int32(a), WireValue::Int32(b)) => a.cmp(b),
+            (WireValue::Float64(a), WireValue::Float64(b)) => {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            (WireValue::String(a), WireValue::String(b)) => a.cmp(b),
+            (WireValue::Bool(a), WireValue::Bool(b)) => a.cmp(b),
+            (WireValue::Timestamp(a), WireValue::Timestamp(b)) => a.cmp(b),
+            (WireValue::Null, WireValue::Null) => std::cmp::Ordering::Equal,
+            (WireValue::Null, _) => std::cmp::Ordering::Less,
+            (_, WireValue::Null) => std::cmp::Ordering::Greater,
+            // Cross-type numeric comparison
+            (WireValue::Int64(a), WireValue::Float64(b)) => (*a as f64)
+                .partial_cmp(b)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (WireValue::Float64(a), WireValue::Int64(b)) => a
+                .partial_cmp(&(*b as f64))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            // Cross-type: use type discriminant for stable ordering
+            _ => wire_value_type_rank(va).cmp(&wire_value_type_rank(vb)),
+        },
+    }
+}
+
+/// Assign a rank to each WireValue variant for stable cross-type ordering.
+fn wire_value_type_rank(v: &WireValue) -> u8 {
+    match v {
+        WireValue::Null => 0,
+        WireValue::Bool(_) => 1,
+        WireValue::Int32(_) => 2,
+        WireValue::Int64(_) => 3,
+        WireValue::Float64(_) => 4,
+        WireValue::String(_) => 5,
+        WireValue::Timestamp(_) => 6,
+        WireValue::Vector(_) | WireValue::VectorInt8(_) => 7,
+        WireValue::Bytes(_) => 8,
+    }
+}
+
 fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<String>) {
     match pred {
         crate::ast::BodyPredicate::Positive(atom) => {

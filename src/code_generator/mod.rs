@@ -2783,6 +2783,24 @@ impl CodeGenerator {
                 Value::Null
             }
 
+            // Type conversion functions
+            BuiltinFunction::ToFloat => match arg_values.first() {
+                Some(Value::Int64(i)) => Value::Float64(*i as f64),
+                Some(Value::Float64(f)) => Value::Float64(*f),
+                _ => Value::Null,
+            },
+            BuiltinFunction::ToInt => match arg_values.first() {
+                Some(Value::Float64(f)) => {
+                    if f.is_finite() {
+                        Value::Int64(*f as i64)
+                    } else {
+                        Value::Null
+                    }
+                }
+                Some(Value::Int64(i)) => Value::Int64(*i),
+                _ => Value::Null,
+            },
+
             // String functions
             BuiltinFunction::Len => {
                 if let Some(s) = arg_values.first().and_then(super::value::Value::as_str) {

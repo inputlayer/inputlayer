@@ -1,0 +1,9 @@
+.kg create test_clear_prefix_all_n33t32
+.kg use test_clear_prefix_all_n33t32
++test_a[(1,), (2,)]
++test_b[(3,)]
+.clear prefix test_
+?test_a(X)
+?test_b(X)
+.kg use default
+.kg drop test_clear_prefix_all_n33t32

@@ -1,0 +1,11 @@
+// Test: Query ordering combined with body conditions
+
+.kg create test_order_filter_n21t33
+.kg use test_order_filter_n21t33
+
++scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
+
+?scores(Name, Score:desc), Score > 80
+
+.kg use default
+.kg drop test_order_filter_n21t33

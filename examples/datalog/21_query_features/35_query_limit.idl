@@ -1,0 +1,11 @@
+// Test: Query with limit
+
+.kg create test_limit_n21t35
+.kg use test_limit_n21t35
+
++data[("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+
+?data(X, Y:asc), limit(3)
+
+.kg use default
+.kg drop test_limit_n21t35

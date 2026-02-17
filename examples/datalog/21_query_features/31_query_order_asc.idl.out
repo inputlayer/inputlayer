@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_order_asc_n21t31
+Knowledge graph 'test_order_asc_n21t31' created.
+Switched to knowledge graph: test_order_asc_n21t31
+> .kg use test_order_asc_n21t31
+Switched to knowledge graph: test_order_asc_n21t31
+> +scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
+Inserted 5 fact(s) into 'scores'.
+> ?scores(Name, Score:asc)
+┌─────────┬──────┐
+│ col0    │ col1 │
+├─────────┼──────┤
+│ "carol" │   78 │
+│ "alice" │   85 │
+│ "eve"   │   88 │
+│ "bob"   │   92 │
+│ "dave"  │   95 │
+└─────────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_order_asc_n21t31
+Knowledge graph 'test_order_asc_n21t31' dropped.

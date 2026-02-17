@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_limit_order_n21t37
+Knowledge graph 'test_limit_order_n21t37' created.
+Switched to knowledge graph: test_limit_order_n21t37
+> .kg use test_limit_order_n21t37
+Switched to knowledge graph: test_limit_order_n21t37
+> +scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
+Inserted 5 fact(s) into 'scores'.
+> ?scores(Name, Score:desc), limit(3)
+┌────────┬──────┐
+│ col0   │ col1 │
+├────────┼──────┤
+│ "dave" │   95 │
+│ "bob"  │   92 │
+│ "eve"  │   88 │
+└────────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_limit_order_n21t37
+Knowledge graph 'test_limit_order_n21t37' dropped.

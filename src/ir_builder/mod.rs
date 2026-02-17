@@ -532,6 +532,9 @@ impl IRBuilder {
             BuiltinFunc::Floor => Ok(BuiltinFunction::Floor),
             BuiltinFunc::Ceil => Ok(BuiltinFunction::Ceil),
             BuiltinFunc::Sign => Ok(BuiltinFunction::Sign),
+            // Type conversion functions
+            BuiltinFunc::ToFloat => Ok(BuiltinFunction::ToFloat),
+            BuiltinFunc::ToInt => Ok(BuiltinFunction::ToInt),
             // String functions
             BuiltinFunc::Len => Ok(BuiltinFunction::Len),
             BuiltinFunc::Upper => Ok(BuiltinFunction::Upper),

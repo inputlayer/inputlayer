@@ -1,0 +1,11 @@
+// Test: Multi-column ordering (Grade:asc, Score:desc)
+
+.kg create test_order_multi_n21t32
+.kg use test_order_multi_n21t32
+
++students[("alice", "A", 95), ("bob", "B", 88), ("carol", "A", 90), ("dave", "B", 92), ("eve", "A", 85)]
+
+?students(Name, Grade:asc, Score:desc)
+
+.kg use default
+.kg drop test_order_multi_n21t32

@@ -709,6 +709,38 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Failed to drop rule: {e}")))
     }
 
+    /// Drop all rules matching a prefix from a specific knowledge graph.
+    /// Returns the list of dropped rule names.
+    pub fn drop_rules_by_prefix_in(&self, kg: &str, prefix: &str) -> StorageResult<Vec<String>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.drop_rules_by_prefix(prefix)
+            .map_err(|e| StorageError::Other(format!("Failed to drop rules by prefix: {e}")))
+    }
+
+    /// Clear all facts from relations matching a prefix in a knowledge graph.
+    ///
+    /// Returns list of (relation_name, count_deleted) for each affected relation.
+    pub fn clear_relations_by_prefix_in(
+        &self,
+        kg: &str,
+        prefix: &str,
+    ) -> StorageResult<Vec<(String, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+
+        let mut db = db.write();
+        db.clear_relations_by_prefix(prefix, time, &self.persist, kg)
+    }
+
     /// List all rules in the current knowledge graph
     pub fn list_rules(&self) -> StorageResult<Vec<String>> {
         let db_name = self
@@ -2079,6 +2111,104 @@ impl KnowledgeGraph {
 
         self.publish_snapshot();
         Ok(())
+    }
+
+    /// Drop all rules matching a prefix.
+    /// Returns the list of dropped rule names.
+    pub fn drop_rules_by_prefix(&mut self, prefix: &str) -> Result<Vec<String>, String> {
+        let dropped = self.rule_catalog.drop_by_prefix(prefix)?;
+
+        // Remove each from IncrementalEngine
+        if let Some(ref dd) = self.incremental {
+            for name in &dropped {
+                if let Err(e) = dd.remove_rule(name) {
+                    eprintln!(
+                        "Warning: failed to remove rule '{name}' from IncrementalEngine: {e}"
+                    );
+                }
+            }
+        }
+
+        if !dropped.is_empty() {
+            self.publish_snapshot();
+        }
+        Ok(dropped)
+    }
+
+    /// Clear all facts from relations whose name starts with the given prefix.
+    ///
+    /// Returns a list of (relation_name, deleted_count) for each affected relation.
+    /// Does NOT remove the relations themselves or their schemas — only clears data.
+    pub fn clear_relations_by_prefix(
+        &mut self,
+        prefix: &str,
+        time: u64,
+        persist: &FilePersist,
+        kg_name: &str,
+    ) -> StorageResult<Vec<(String, usize)>> {
+        // Find all relations matching the prefix (sorted for deterministic output)
+        let mut matching: Vec<String> = self
+            .engine
+            .input_tuples
+            .keys()
+            .filter(|name| name.starts_with(prefix))
+            .cloned()
+            .collect();
+        matching.sort();
+
+        if matching.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut results = Vec::new();
+
+        for relation in &matching {
+            if let Some(tuples) = self.engine.input_tuples.get_mut(relation) {
+                let count = tuples.len();
+                if count == 0 {
+                    continue;
+                }
+
+                // Feed deletes to IncrementalEngine
+                if let Some(ref dd) = self.incremental {
+                    let _ = dd.delete(relation, tuples.clone(), time);
+                    let _ = dd.notify_base_update(relation);
+                    let _ = dd.notify_indexes_base_update(relation);
+                }
+
+                // Write deletes to persist
+                let shard = format!("{kg_name}:{relation}");
+                let updates: Vec<Update> = tuples
+                    .iter()
+                    .map(|t| Update::delete(t.clone(), time))
+                    .collect();
+                let _ = persist.ensure_shard(&shard);
+                let _ = persist.append(&shard, &updates);
+
+                tuples.clear();
+
+                // Update metadata
+                let schema = self
+                    .metadata
+                    .relations
+                    .get(relation)
+                    .map(|m| m.schema.clone())
+                    .unwrap_or_default();
+                self.metadata.add_relation(relation.clone(), schema, 0);
+
+                results.push((relation.clone(), count));
+            }
+        }
+
+        if !results.is_empty() {
+            // Auto-rematerialize invalidated rules
+            if self.incremental.is_some() {
+                self.auto_rematerialize_invalid_rules();
+            }
+            self.publish_snapshot();
+        }
+
+        Ok(results)
     }
 
     /// List all views
@@ -4944,6 +5074,92 @@ mod tests {
             "result(X) <- a(X)",
             vec![],
         );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_clear_relations_by_prefix_basic() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+        storage.create_knowledge_graph("clear_pfx").unwrap();
+
+        // Insert data into relations with and without prefix
+        storage
+            .insert_tuples_into(
+                "clear_pfx",
+                "env_a",
+                vec![Tuple::new(vec![Value::Int32(1)])],
+            )
+            .unwrap();
+        storage
+            .insert_tuples_into(
+                "clear_pfx",
+                "env_b",
+                vec![Tuple::new(vec![Value::Int32(2)])],
+            )
+            .unwrap();
+        storage
+            .insert_tuples_into("clear_pfx", "keep", vec![Tuple::new(vec![Value::Int32(3)])])
+            .unwrap();
+
+        let results = storage
+            .clear_relations_by_prefix_in("clear_pfx", "env_")
+            .unwrap();
+
+        // Should have cleared 2 relations
+        assert_eq!(results.len(), 2);
+        let total: usize = results.iter().map(|(_, c)| c).sum();
+        assert_eq!(total, 2);
+
+        // "keep" should still have its data
+        let keep = storage
+            .execute_query_tuples_on("clear_pfx", "result(X) <- keep(X)")
+            .unwrap();
+        assert_eq!(keep.len(), 1);
+
+        // env_a should be empty
+        let env_a = storage
+            .execute_query_tuples_on("clear_pfx", "result(X) <- env_a(X)")
+            .unwrap();
+        assert!(env_a.is_empty());
+    }
+
+    #[test]
+    fn test_clear_relations_by_prefix_no_match() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+        storage.create_knowledge_graph("clear_none").unwrap();
+
+        storage
+            .insert_tuples_into(
+                "clear_none",
+                "alpha",
+                vec![Tuple::new(vec![Value::Int32(1)])],
+            )
+            .unwrap();
+
+        let results = storage
+            .clear_relations_by_prefix_in("clear_none", "zzz_")
+            .unwrap();
+
+        assert!(results.is_empty());
+
+        // Original data untouched
+        let data = storage
+            .execute_query_tuples_on("clear_none", "result(X) <- alpha(X)")
+            .unwrap();
+        assert_eq!(data.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_relations_by_prefix_kg_not_found() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config).unwrap();
+
+        let result = storage.clear_relations_by_prefix_in("no_such_kg", "env_");
         assert!(result.is_err());
     }
 }

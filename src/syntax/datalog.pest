@@ -164,6 +164,8 @@ builtin_fn = @{
     | "floor"
     | "ceil"
     | "sign"
+    | "to_float"
+    | "to_int"
     | "min_val"
     | "max_val"
     | "len"

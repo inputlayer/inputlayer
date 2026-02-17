@@ -1,0 +1,23 @@
+// Test: .rule drop prefix drops matching rules, keeps others
+
+.kg create test_rule_drop_prefix_n17t30
+.kg use test_rule_drop_prefix_n17t30
+
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Define rules with a common prefix
++mem_relevant(X, Y) <- edge(X, Y), X > 1
++mem_importance(X) <- edge(X, _Y)
+
+// Define a non-matching rule
++other_rule(X) <- edge(X, _Y)
+
+.rule list
+
+// Drop rules with prefix "mem_"
+.rule drop prefix mem_
+
+.rule list
+
+.kg use default
+.kg drop test_rule_drop_prefix_n17t30

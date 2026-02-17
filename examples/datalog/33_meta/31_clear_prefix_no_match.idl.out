@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_clear_prefix_none_n33t31
+Knowledge graph 'test_clear_prefix_none_n33t31' created.
+Switched to knowledge graph: test_clear_prefix_none_n33t31
+> .kg use test_clear_prefix_none_n33t31
+Switched to knowledge graph: test_clear_prefix_none_n33t31
+> +alpha[(1,)]
+Inserted 1 fact(s) into 'alpha'.
+> .clear prefix zzz_
+No relations matching prefix 'zzz_'.
+> ?alpha(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_clear_prefix_none_n33t31
+Knowledge graph 'test_clear_prefix_none_n33t31' dropped.

@@ -1,0 +1,26 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_order_none_n21t34
+Knowledge graph 'test_order_none_n21t34' created.
+Switched to knowledge graph: test_order_none_n21t34
+> .kg use test_order_none_n21t34
+Switched to knowledge graph: test_order_none_n21t34
+> +data[("a", 3), ("b", 1), ("c", 2)]
+Inserted 3 fact(s) into 'data'.
+> ?data(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│ "a"  │    3 │
+│ "b"  │    1 │
+│ "c"  │    2 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_order_none_n21t34
+Knowledge graph 'test_order_none_n21t34' dropped.

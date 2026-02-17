@@ -21,6 +21,7 @@ pub enum MetaCommand {
     RuleQuery(String),   // .rule <name> - query the rule and show results
     RuleShowDef(String), // .rule def <name> - show rule definition
     RuleDrop(String),
+    RuleDropPrefix(String), // .rule drop prefix <p> - drop all rules matching prefix
     RuleEdit {
         // .rule edit <name> <index> <rule> - edit specific rule
         name: String,
@@ -46,6 +47,9 @@ pub enum MetaCommand {
     IndexDrop(String),               // .index drop <name> - drop an index
     IndexStats(String),              // .index stats <name> - show index statistics
     IndexRebuild(String),            // .index rebuild <name> - force rebuild index
+
+    // Clear commands
+    ClearPrefix(String), // .clear prefix <p> - clear all facts from relations with prefix
 
     // System commands
     Compact,
@@ -108,6 +112,7 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "rule" => parse_rule_command(&parts, input),
         "session" | "rules" => parse_session_command(&parts),
         "index" | "idx" => parse_index_command(&parts, input),
+        "clear" => parse_clear_command(&parts),
         "compact" => Ok(MetaCommand::Compact),
         "status" => Ok(MetaCommand::Status),
         "help" | "?" => Ok(MetaCommand::Help),
@@ -164,7 +169,13 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         Ok(MetaCommand::RuleList)
     } else if parts[1].to_lowercase() == "drop" {
         if parts.len() < 3 {
-            Err("Usage: .rule drop <name>".to_string())
+            Err("Usage: .rule drop <name> | .rule drop prefix <prefix>".to_string())
+        } else if parts[2].to_lowercase() == "prefix" {
+            if parts.len() < 4 {
+                Err("Usage: .rule drop prefix <prefix>".to_string())
+            } else {
+                Ok(MetaCommand::RuleDropPrefix(parts[3].to_string()))
+            }
         } else {
             Ok(MetaCommand::RuleDrop(parts[2].to_string()))
         }
@@ -278,6 +289,25 @@ fn parse_load_command(parts: &[&str]) -> Result<MetaCommand, String> {
             LoadMode::Default
         };
         Ok(MetaCommand::Load { path, mode })
+    }
+}
+
+fn parse_clear_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    if parts.len() < 3 {
+        return Err("Usage: .clear prefix <prefix>".to_string());
+    }
+    match parts[1].to_lowercase().as_str() {
+        "prefix" => {
+            let prefix = parts[2].to_string();
+            if prefix.is_empty() {
+                return Err("Prefix cannot be empty".to_string());
+            }
+            Ok(MetaCommand::ClearPrefix(prefix))
+        }
+        _ => Err(format!(
+            "Unknown clear subcommand: '{}'. Use: .clear prefix <prefix>",
+            parts[1]
+        )),
     }
 }
 
@@ -739,6 +769,38 @@ mod tests {
         let result = parse_meta_command(".index foo");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown index subcommand"));
+    }
+
+    // Clear prefix tests
+    #[test]
+    fn test_parse_clear_prefix() {
+        let cmd = parse_meta_command(".clear prefix env_").unwrap();
+        if let MetaCommand::ClearPrefix(prefix) = cmd {
+            assert_eq!(prefix, "env_");
+        } else {
+            panic!("Expected ClearPrefix");
+        }
+    }
+
+    #[test]
+    fn test_parse_clear_prefix_missing_prefix() {
+        let result = parse_meta_command(".clear prefix");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
+    }
+
+    #[test]
+    fn test_parse_clear_missing_subcommand() {
+        let result = parse_meta_command(".clear");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
+    }
+
+    #[test]
+    fn test_parse_clear_unknown_subcommand() {
+        let result = parse_meta_command(".clear foo bar");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown clear subcommand"));
     }
 
     #[test]

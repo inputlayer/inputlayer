@@ -1,0 +1,11 @@
+// Test: Query with limit and offset
+
+.kg create test_limit_offset_n21t36
+.kg use test_limit_offset_n21t36
+
++data[("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+
+?data(X, Y:asc), limit(3, 2)
+
+.kg use default
+.kg drop test_limit_offset_n21t36
