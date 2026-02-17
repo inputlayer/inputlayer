@@ -1,0 +1,11 @@
+// Test: Query with :asc ordering on single column
+
+.kg create test_order_asc_n21t31
+.kg use test_order_asc_n21t31
+
++scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
+
+?scores(Name, Score:asc)
+
+.kg use default
+.kg drop test_order_asc_n21t31

@@ -19,10 +19,12 @@ Meta Commands:
   .rule                List rules
   .rule <name>         Query rule
   .rule drop <name>    Drop all clauses of a rule
+  .rule drop prefix <p> Drop all rules matching prefix
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
+  .clear prefix <p>    Clear all facts from relations with prefix
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -53,10 +55,12 @@ Meta Commands:
   .rule                List rules
   .rule <name>         Query rule
   .rule drop <name>    Drop all clauses of a rule
+  .rule drop prefix <p> Drop all rules matching prefix
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
+  .clear prefix <p>    Clear all facts from relations with prefix
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -87,10 +91,12 @@ Meta Commands:
   .rule                List rules
   .rule <name>         Query rule
   .rule drop <name>    Drop all clauses of a rule
+  .rule drop prefix <p> Drop all rules matching prefix
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
+  .clear prefix <p>    Clear all facts from relations with prefix
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -121,10 +127,12 @@ Meta Commands:
   .rule                List rules
   .rule <name>         Query rule
   .rule drop <name>    Drop all clauses of a rule
+  .rule drop prefix <p> Drop all rules matching prefix
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
+  .clear prefix <p>    Clear all facts from relations with prefix
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -155,10 +163,12 @@ Meta Commands:
   .rule                List rules
   .rule <name>         Query rule
   .rule drop <name>    Drop all clauses of a rule
+  .rule drop prefix <p> Drop all rules matching prefix
   .rule remove <name> <n>  Remove clause n from rule (1-based)
   .session             List session rules
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
+  .clear prefix <p>    Clear all facts from relations with prefix
   .status              Server status
   .help                Show this help
   .quit                Exit

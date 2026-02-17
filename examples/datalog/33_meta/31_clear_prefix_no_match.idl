@@ -1,0 +1,7 @@
+.kg create test_clear_prefix_none_n33t31
+.kg use test_clear_prefix_none_n33t31
++alpha[(1,)]
+.clear prefix zzz_
+?alpha(X)
+.kg use default
+.kg drop test_clear_prefix_none_n33t31

@@ -941,6 +941,53 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
             println!("Rule '{name}' dropped.");
         }
 
+        MetaCommand::RuleDropPrefix(prefix) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state
+                .http
+                .api_url(&format!("/knowledge-graphs/{db}/rules?prefix={prefix}"));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if resp.status().is_success() {
+                let body: serde_json::Value = resp.json().await.map_err(|e| format!("{e}"))?;
+                let count = body
+                    .get("data")
+                    .and_then(|d| d.get("count"))
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                let dropped = body
+                    .get("data")
+                    .and_then(|d| d.get("dropped"))
+                    .and_then(|d| d.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if count == 0 {
+                    println!("No rules matching prefix '{prefix}'.");
+                } else {
+                    println!(
+                        "Dropped {} rule(s) with prefix '{prefix}': {}",
+                        count,
+                        dropped.join(", ")
+                    );
+                }
+            } else {
+                return Err(format!("Failed to drop rules with prefix '{prefix}'"));
+            }
+        }
+
         MetaCommand::SessionList => {
             let has_facts = !state.session_facts.is_empty();
             let has_rules = !state.session_rules.is_empty();
@@ -987,6 +1034,58 @@ async fn handle_meta_command(state: &mut ReplState, cmd: MetaCommand) -> Result<
                 return Err(format!("No session rules found for relation '{name}'."));
             }
             println!("Dropped {removed} session rule(s) for '{name}'.");
+        }
+
+        MetaCommand::ClearPrefix(prefix) => {
+            let db = state
+                .current_kg
+                .as_ref()
+                .ok_or("No knowledge graph selected")?;
+            let url = state
+                .http
+                .api_url(&format!("/knowledge-graphs/{db}/relations?prefix={prefix}"));
+            let resp = state
+                .http
+                .client
+                .delete(&url)
+                .send()
+                .await
+                .map_err(|e| format!("{e}"))?;
+
+            if resp.status().is_success() {
+                let body: serde_json::Value = resp.json().await.map_err(|e| format!("{e}"))?;
+                let total_deleted = body
+                    .get("data")
+                    .and_then(|d| d.get("total_deleted"))
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                let cleared = body
+                    .get("data")
+                    .and_then(|d| d.get("cleared"))
+                    .and_then(|d| d.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| {
+                                let name = v.get("name")?.as_str()?;
+                                let deleted = v.get("deleted")?.as_u64()?;
+                                Some(format!("{name} ({deleted})"))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if total_deleted == 0 {
+                    println!("No relations matching prefix '{prefix}'.");
+                } else {
+                    println!(
+                        "Cleared {} fact(s) from {} relation(s) with prefix '{prefix}': {}",
+                        total_deleted,
+                        cleared.len(),
+                        cleared.join(", ")
+                    );
+                }
+            } else {
+                return Err(format!("Failed to clear relations with prefix '{prefix}'"));
+            }
         }
 
         MetaCommand::Status => {
@@ -1352,14 +1451,43 @@ async fn handle_query(
         program.push('\n');
     }
 
-    // Add the query
-    let query_args: Vec<String> = goal.goal.args.iter().map(format_term).collect();
+    // Add the query, preserving :asc/:desc annotations
+    let query_args: Vec<String> = goal
+        .goal
+        .args
+        .iter()
+        .map(|term| {
+            let base = format_term(term);
+            // Re-inject sort annotation if this variable has one
+            if let inputlayer::ast::Term::Variable(v) = term {
+                for (var_name, dir) in &goal.order_by {
+                    if var_name == v {
+                        let suffix = match dir {
+                            inputlayer::statement::SortDirection::Asc => ":asc",
+                            inputlayer::statement::SortDirection::Desc => ":desc",
+                        };
+                        return format!("{base}{suffix}");
+                    }
+                }
+            }
+            base
+        })
+        .collect();
     let mut body_parts: Vec<String> =
         vec![format!("{}({})", goal.goal.relation, query_args.join(", "))];
 
     // Add additional body predicates (for complex queries like ?- foo(X), bar(Y).)
     for pred in &goal.body {
         body_parts.push(format_body_pred(pred));
+    }
+
+    // Re-inject limit/offset as a pseudo-predicate
+    if let Some(n) = goal.limit {
+        if let Some(o) = goal.offset {
+            body_parts.push(format!("limit({n}, {o})"));
+        } else {
+            body_parts.push(format!("limit({n})"));
+        }
     }
 
     program.push_str(&format!("?{}", body_parts.join(", ")));
@@ -1401,6 +1529,9 @@ async fn handle_session_rule(
             args,
         },
         body: vec![],
+        order_by: vec![],
+        limit: None,
+        offset: None,
     };
 
     handle_query(state, goal).await?;
@@ -1884,10 +2015,12 @@ fn print_help() {
     println!("  .rule                List rules");
     println!("  .rule <name>         Query rule");
     println!("  .rule drop <name>    Drop all clauses of a rule");
+    println!("  .rule drop prefix <p> Drop all rules matching prefix");
     println!("  .rule remove <name> <n>  Remove clause n from rule (1-based)");
     println!("  .session             List session rules");
     println!("  .session clear       Clear all session rules");
     println!("  .session drop <n|name>  Drop session rule by index or relation name");
+    println!("  .clear prefix <p>    Clear all facts from relations with prefix");
     println!("  .status              Server status");
     println!("  .help                Show this help");
     println!("  .quit                Exit");

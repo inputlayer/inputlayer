@@ -1,0 +1,50 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_mixed_conv_n34t06
+Knowledge graph 'test_mixed_conv_n34t06' created.
+Switched to knowledge graph: test_mixed_conv_n34t06
+> .kg use test_mixed_conv_n34t06
+Switched to knowledge graph: test_mixed_conv_n34t06
+> +data[(10, 3.5)]
+Inserted 1 fact(s) into 'data'.
+> converted(A, B, FA, IB) <- data(A, B), FA = to_float(A), IB = to_int(B)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │  3.5 │ 10.0 │    3 │
+└──────┴──────┴──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> ?converted(A, B, FA, IB)
+┌──────┬──────┬──────┬──────┐
+│ col0 │ col1 │ col2 │ col3 │
+├──────┼──────┼──────┼──────┤
+│   10 │  3.5 │ 10.0 │    3 │
+└──────┴──────┴──────┴──────┘
+1 rows
+> +ints[(42,)]
+Inserted 1 fact(s) into 'ints'.
+> int_identity(X, Y) <- ints(X), Y = to_int(X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   42 │   42 │
+└──────┴──────┘
+1 rows
+(session: 2 rule(s))
+> ?int_identity(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   42 │   42 │
+└──────┴──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_mixed_conv_n34t06
+Knowledge graph 'test_mixed_conv_n34t06' dropped.

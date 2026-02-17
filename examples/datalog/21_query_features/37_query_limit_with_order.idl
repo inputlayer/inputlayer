@@ -1,0 +1,12 @@
+// Test: Query with limit combined with descending sort
+
+.kg create test_limit_order_n21t37
+.kg use test_limit_order_n21t37
+
++scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
+
+// Top 3 scores
+?scores(Name, Score:desc), limit(3)
+
+.kg use default
+.kg drop test_limit_order_n21t37

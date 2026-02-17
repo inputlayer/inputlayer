@@ -1,0 +1,13 @@
+// Test: to_int() truncation toward zero
+
+.kg create test_to_int_float_n34t04
+.kg use test_to_int_float_n34t04
+
++vals[(3.7,), (-3.7,), (0.9,), (-0.9,), (100.99,)]
+
+truncated(X, Y) <- vals(X), Y = to_int(X)
+
+?truncated(X, Y)
+
+.kg use default
+.kg drop test_to_int_float_n34t04

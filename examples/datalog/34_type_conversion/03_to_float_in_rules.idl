@@ -1,0 +1,16 @@
+// Test: to_float() in rule context - converting int for use in expressions
+
+.kg create test_to_float_rules_n34t03
+.kg use test_to_float_rules_n34t03
+
++stats[("a", 10, 50), ("b", 25, 100), ("c", 3, 10)]
+
+// Use to_float to convert integers for ratio display
+float_count(Name, FC) <- stats(Name, Count, _Total), FC = to_float(Count)
+float_total(Name, FT) <- stats(Name, _Count, Total), FT = to_float(Total)
+
+?float_count(Name, FC)
+?float_total(Name, FT)
+
+.kg use default
+.kg drop test_to_float_rules_n34t03

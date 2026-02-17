@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_to_float_noop_n34t05
+Knowledge graph 'test_to_float_noop_n34t05' created.
+Switched to knowledge graph: test_to_float_noop_n34t05
+> .kg use test_to_float_noop_n34t05
+Switched to knowledge graph: test_to_float_noop_n34t05
+> +floats[(3.14,), (2.71,), (0.0,)]
+Inserted 3 fact(s) into 'floats'.
+> identity(X, Y) <- floats(X), Y = to_float(X)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  0.0 │  0.0 │
+│ 2.71 │ 2.71 │
+│ 3.14 │ 3.14 │
+└──────┴──────┘
+3 rows
+(session: 1 rule(s))
+> ?identity(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  0.0 │  0.0 │
+│ 2.71 │ 2.71 │
+│ 3.14 │ 3.14 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_to_float_noop_n34t05
+Knowledge graph 'test_to_float_noop_n34t05' dropped.

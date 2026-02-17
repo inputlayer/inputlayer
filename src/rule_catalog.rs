@@ -525,6 +525,29 @@ impl RuleCatalog {
         Ok(())
     }
 
+    /// Drop all rules whose name starts with the given prefix.
+    /// Returns the list of dropped rule names.
+    pub fn drop_by_prefix(&mut self, prefix: &str) -> Result<Vec<String>, String> {
+        if prefix.is_empty() {
+            return Err("Prefix must not be empty".to_string());
+        }
+        let mut to_drop: Vec<String> = self
+            .rules
+            .keys()
+            .filter(|k| k.starts_with(prefix))
+            .cloned()
+            .collect();
+        to_drop.sort();
+        for name in &to_drop {
+            self.rules.remove(name);
+        }
+        if !to_drop.is_empty() {
+            self.dirty = true;
+            self.save()?;
+        }
+        Ok(to_drop)
+    }
+
     /// Clear all clauses from a rule (for editing/redefining)
     /// The rule remains registered but with no clauses, ready for new registration
     pub fn clear_rules(&mut self, name: &str) -> Result<(), String> {
@@ -2313,5 +2336,84 @@ mod tests {
         let cf = CatalogFile::default();
         assert_eq!(cf.version, 1);
         assert!(cf.rules.is_empty());
+    }
+
+    #[test]
+    fn test_drop_by_prefix_basic() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        catalog
+            .register("mem_a", &make_test_rule("mem_a", "edge"))
+            .unwrap();
+        catalog
+            .register("mem_b", &make_test_rule("mem_b", "edge"))
+            .unwrap();
+        catalog
+            .register("other", &make_test_rule("other", "edge"))
+            .unwrap();
+
+        let dropped = catalog.drop_by_prefix("mem_").unwrap();
+        assert_eq!(dropped, vec!["mem_a", "mem_b"]);
+
+        // "other" should remain
+        assert!(catalog.exists("other"));
+        assert!(!catalog.exists("mem_a"));
+        assert!(!catalog.exists("mem_b"));
+        assert_eq!(catalog.len(), 1);
+    }
+
+    #[test]
+    fn test_drop_by_prefix_no_match() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        catalog
+            .register("alpha", &make_test_rule("alpha", "edge"))
+            .unwrap();
+        catalog
+            .register("beta", &make_test_rule("beta", "edge"))
+            .unwrap();
+
+        let dropped = catalog.drop_by_prefix("zzz_").unwrap();
+        assert!(dropped.is_empty());
+
+        // Nothing removed
+        assert_eq!(catalog.len(), 2);
+        assert!(catalog.exists("alpha"));
+        assert!(catalog.exists("beta"));
+    }
+
+    #[test]
+    fn test_drop_by_prefix_all_match() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        catalog
+            .register("test_one", &make_test_rule("test_one", "edge"))
+            .unwrap();
+        catalog
+            .register("test_two", &make_test_rule("test_two", "edge"))
+            .unwrap();
+        catalog
+            .register("test_three", &make_test_rule("test_three", "edge"))
+            .unwrap();
+
+        let dropped = catalog.drop_by_prefix("test_").unwrap();
+        assert_eq!(dropped.len(), 3);
+        assert!(dropped.contains(&"test_one".to_string()));
+        assert!(dropped.contains(&"test_two".to_string()));
+        assert!(dropped.contains(&"test_three".to_string()));
+        assert!(catalog.is_empty());
+    }
+
+    #[test]
+    fn test_drop_by_prefix_empty_rejected() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        let result = catalog.drop_by_prefix("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not be empty"));
     }
 }

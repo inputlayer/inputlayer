@@ -1,0 +1,13 @@
+// Test: to_float() basic conversion - int to float
+
+.kg create test_to_float_basic_n34t01
+.kg use test_to_float_basic_n34t01
+
++scores[(100,), (200,), (33,)]
+
+float_score(X, Y) <- scores(X), Y = to_float(X)
+
+?float_score(X, Y)
+
+.kg use default
+.kg drop test_to_float_basic_n34t01

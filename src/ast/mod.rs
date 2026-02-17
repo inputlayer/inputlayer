@@ -165,6 +165,12 @@ pub enum BuiltinFunc {
     /// Sign: `sign(x)` -> Int64 (-1, 0, or 1)
     Sign,
 
+    // Type conversion functions
+    /// Convert to float: `to_float(x)` -> Float64
+    ToFloat,
+    /// Convert to int: `to_int(x)` -> Int64
+    ToInt,
+
     // String functions
     /// String length: `len(s)` -> Int64
     Len,
@@ -243,6 +249,9 @@ impl BuiltinFunc {
             "floor" => Some(BuiltinFunc::Floor),
             "ceil" => Some(BuiltinFunc::Ceil),
             "sign" => Some(BuiltinFunc::Sign),
+            // Type conversion functions
+            "to_float" => Some(BuiltinFunc::ToFloat),
+            "to_int" => Some(BuiltinFunc::ToInt),
             // String functions
             "len" => Some(BuiltinFunc::Len),
             "upper" => Some(BuiltinFunc::Upper),
@@ -307,7 +316,9 @@ impl BuiltinFunc {
             | BuiltinFunc::Tan
             | BuiltinFunc::Floor
             | BuiltinFunc::Ceil
-            | BuiltinFunc::Sign => 1,
+            | BuiltinFunc::Sign
+            | BuiltinFunc::ToFloat
+            | BuiltinFunc::ToInt => 1,
             BuiltinFunc::Pow => 2,
             // String functions
             BuiltinFunc::Len | BuiltinFunc::Upper | BuiltinFunc::Lower | BuiltinFunc::Trim => 1,
@@ -370,6 +381,9 @@ impl BuiltinFunc {
             BuiltinFunc::Floor => "floor",
             BuiltinFunc::Ceil => "ceil",
             BuiltinFunc::Sign => "sign",
+            // Type conversion functions
+            BuiltinFunc::ToFloat => "to_float",
+            BuiltinFunc::ToInt => "to_int",
             // String functions
             BuiltinFunc::Len => "len",
             BuiltinFunc::Upper => "upper",

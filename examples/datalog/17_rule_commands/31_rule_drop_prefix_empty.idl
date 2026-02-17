@@ -1,0 +1,15 @@
+// Test: .rule drop prefix with no matching rules
+
+.kg create test_rule_drop_prefix_empty_n17t31
+.kg use test_rule_drop_prefix_empty_n17t31
+
++edge[(1, 2)]
++my_rule(X, Y) <- edge(X, Y)
+
+// Try to drop non-matching prefix
+.rule drop prefix zzz_
+
+.rule list
+
+.kg use default
+.kg drop test_rule_drop_prefix_empty_n17t31

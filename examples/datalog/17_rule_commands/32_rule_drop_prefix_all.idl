@@ -1,0 +1,18 @@
+// Test: .rule drop prefix matches all rules
+
+.kg create test_rule_drop_prefix_all_n17t32
+.kg use test_rule_drop_prefix_all_n17t32
+
++edge[(1, 2)]
++test_a(X) <- edge(X, _Y)
++test_b(X, Y) <- edge(X, Y)
+
+.rule list
+
+// Drop all rules starting with "test_"
+.rule drop prefix test_
+
+.rule list
+
+.kg use default
+.kg drop test_rule_drop_prefix_all_n17t32
