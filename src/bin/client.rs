@@ -625,61 +625,110 @@ fn is_complete_statement(line: &str) -> bool {
 }
 
 async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error>> {
-    let mut rl = Editor::new()?;
-    rl.set_helper(Some(inputlayer::syntax::highlight::DatalogHelper::new()));
-
     let history_path = get_history_path();
-    if history_path.exists() {
-        let _ = rl.load_history(&history_path);
-    }
+    let initial_prompt = state.prompt();
 
+    // Channel for readline results (thread → async)
+    let (line_tx, mut line_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Result<String, ReadlineError>>();
+    // Channel for prompt updates (async → thread)
+    let (prompt_tx, prompt_rx) = std::sync::mpsc::channel::<String>();
+
+    // Spawn a dedicated thread for blocking readline so the async loop
+    // can simultaneously watch for server disconnect signals.
+    let history_clone = history_path.clone();
+    std::thread::spawn(move || {
+        let mut rl = match Editor::new() {
+            Ok(rl) => rl,
+            Err(_) => return,
+        };
+        rl.set_helper(Some(inputlayer::syntax::highlight::DatalogHelper::new()));
+        if history_clone.exists() {
+            let _ = rl.load_history(&history_clone);
+        }
+
+        let mut current_prompt = initial_prompt;
+        loop {
+            match rl.readline(&current_prompt) {
+                Ok(line) => {
+                    let _ = rl.add_history_entry(&line);
+                    if line_tx.send(Ok(line)).is_err() {
+                        break; // async side dropped
+                    }
+                    // Wait for the async loop to finish processing and send new prompt
+                    match prompt_rx.recv() {
+                        Ok(p) => current_prompt = p,
+                        Err(_) => break,
+                    }
+                }
+                Err(ReadlineError::Interrupted) => {
+                    if line_tx.send(Err(ReadlineError::Interrupted)).is_err() {
+                        break;
+                    }
+                    match prompt_rx.recv() {
+                        Ok(p) => current_prompt = p,
+                        Err(_) => break,
+                    }
+                }
+                Err(e) => {
+                    let _ = line_tx.send(Err(e));
+                    break;
+                }
+            }
+        }
+        let _ = rl.save_history(&history_clone);
+    });
+
+    // Async loop: race readline against server disconnect
     loop {
-        // Check if server is still connected
-        if !state.is_server_alive() {
-            eprintln!();
-            eprintln!("Server connection lost. Exiting...");
-            let _ = rl.save_history(&history_path);
-            std::process::exit(1);
-        }
-
-        let prompt = state.prompt();
-        match rl.readline(&prompt) {
-            Ok(line) => {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
+        tokio::select! {
+            _ = state.disconnect_rx.changed() => {
+                if !state.is_server_alive() {
+                    eprintln!();
+                    eprintln!("Server connection lost. Exiting...");
+                    std::process::exit(1);
                 }
-
-                let _ = rl.add_history_entry(line);
-
-                match parse_statement(line) {
-                    Ok(stmt) => {
-                        if let Err(e) = handle_statement(state, stmt).await {
-                            println!("Error: {e}");
+            }
+            result = line_rx.recv() => {
+                match result {
+                    Some(Ok(line)) => {
+                        let line = line.trim().to_string();
+                        if line.is_empty() {
+                            let _ = prompt_tx.send(state.prompt());
+                            continue;
                         }
+
+                        match parse_statement(&line) {
+                            Ok(stmt) => {
+                                if let Err(e) = handle_statement(state, stmt).await {
+                                    println!("Error: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                println!("Parse error: {e}");
+                                println!("Type .help for syntax reference.");
+                            }
+                        }
+                        let _ = prompt_tx.send(state.prompt());
                     }
-                    Err(e) => {
-                        println!("Parse error: {e}");
-                        println!("Type .help for syntax reference.");
+                    Some(Err(ReadlineError::Interrupted)) => {
+                        println!("^C");
+                        let _ = prompt_tx.send(state.prompt());
                     }
+                    Some(Err(ReadlineError::Eof)) => {
+                        println!("Goodbye!");
+                        break;
+                    }
+                    Some(Err(err)) => {
+                        println!("Error: {err:?}");
+                        break;
+                    }
+                    None => break, // readline thread exited
                 }
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("^C");
-                continue;
-            }
-            Err(ReadlineError::Eof) => {
-                println!("Goodbye!");
-                break;
-            }
-            Err(err) => {
-                println!("Error: {err:?}");
-                break;
             }
         }
     }
 
-    let _ = rl.save_history(&history_path);
     Ok(())
 }
 

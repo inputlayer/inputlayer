@@ -96,7 +96,7 @@ impl HnswIndex {
             &*Arc::as_ptr(&storage).cast::<Vec<Vec<f32>>>()
         };
 
-        let max_elements = storage_ref.len().max(1000);
+        let max_elements = storage_ref.len();
         // Scale max_layer to dataset size: log_M(N), clamped to [4, 16]
         let max_layer = if storage_ref.len() <= 1 {
             4
@@ -106,13 +106,21 @@ impl HnswIndex {
             let layers = (n.ln() / m.ln()).ceil() as usize;
             layers.clamp(4, 16)
         };
-        let hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
+        let mut hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
             self.config.m,
             max_elements,
             max_layer,
             self.config.ef_construction,
             DistL2,
         );
+        // Keep pruned connections to prevent graph disconnection.
+        // Without this, Navarro's heuristic can over-prune small-to-medium
+        // datasets, causing search to return fewer than k results.
+        hnsw.set_keeping_pruned(true);
+        hnsw.set_extend_candidates(true);
+        // Flatten the graph: reduce level scale to keep more nodes at lower
+        // layers, improving connectivity for small-to-medium datasets.
+        hnsw.modify_level_scale(0.2);
 
         // Insert all vectors with their indices
         for (idx, vec) in storage_ref.iter().enumerate() {
