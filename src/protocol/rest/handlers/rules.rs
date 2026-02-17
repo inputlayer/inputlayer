@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
-use axum::{extract::Path, Extension, Json};
-use serde::Serialize;
+use axum::extract::{Path, Query};
+use axum::{Extension, Json};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::protocol::rest::dto::ApiResponse;
@@ -162,6 +163,44 @@ pub async fn delete_rule(
         data: None,
         error: None,
     }))
+}
+
+/// Query parameters for prefix-based rule deletion
+#[derive(Debug, Deserialize)]
+pub struct PrefixQuery {
+    pub prefix: String,
+}
+
+/// Result of prefix-based rule deletion
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DropByPrefixResult {
+    /// Names of dropped rules
+    pub dropped: Vec<String>,
+    /// Number of rules dropped
+    pub count: usize,
+}
+
+/// Delete all rules matching a prefix
+pub async fn delete_rules_by_prefix(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path(kg): Path<String>,
+    Query(params): Query<PrefixQuery>,
+) -> Result<Json<ApiResponse<DropByPrefixResult>>, RestError> {
+    let storage = handler.get_storage();
+
+    storage
+        .ensure_knowledge_graph(&kg)
+        .map_err(|e| RestError::not_found(format!("Knowledge graph '{kg}' not found: {e}")))?;
+
+    let dropped = storage
+        .drop_rules_by_prefix_in(&kg, &params.prefix)
+        .map_err(|e| RestError::internal(format!("Failed to drop rules by prefix: {e}")))?;
+
+    let count = dropped.len();
+    Ok(Json(ApiResponse::success(DropByPrefixResult {
+        dropped,
+        count,
+    })))
 }
 
 /// Delete result

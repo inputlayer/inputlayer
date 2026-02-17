@@ -187,6 +187,12 @@ pub enum BuiltinFunction {
     /// Sign: `sign(x)` -> Int64 (-1, 0, or 1)
     Sign,
 
+    // Type conversion functions
+    /// Convert to float: `to_float(x)` -> Float64
+    ToFloat,
+    /// Convert to int: `to_int(x)` -> Int64
+    ToInt,
+
     // String functions
     /// String length: `len(s)` -> Int64
     Len,

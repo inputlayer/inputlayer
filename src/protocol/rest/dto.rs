@@ -52,6 +52,9 @@ pub struct KnowledgeGraphDto {
     pub description: Option<String>,
     pub relations_count: usize,
     pub views_count: usize,
+    /// Ontology deployment statuses (present when ontologies were requested)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ontologies: Option<Vec<OntologyStatusDto>>,
 }
 
 /// List of knowledge graphs
@@ -71,6 +74,39 @@ pub struct CreateKnowledgeGraphRequest {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Optional ontologies to deploy into the new knowledge graph.
+    #[serde(default)]
+    pub ontologies: Option<Vec<OntologyDefinition>>,
+}
+
+/// An ontology to deploy into a knowledge graph.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct OntologyDefinition {
+    /// Unique prefix for this ontology (e.g. "mem_", "env_")
+    pub prefix: String,
+    /// Semantic version string
+    pub version: String,
+    /// Schema declarations (Datalog statements)
+    #[serde(default)]
+    pub schemas: Vec<String>,
+    /// Rule definitions (Datalog statements)
+    #[serde(default)]
+    pub rules: Vec<String>,
+    /// Index definitions (Datalog statements)
+    #[serde(default)]
+    pub indexes: Vec<String>,
+}
+
+/// Status of a single ontology deployment.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct OntologyStatusDto {
+    /// The ontology prefix
+    pub prefix: String,
+    /// Deployment status
+    pub status: String,
+    /// Error message if deployment failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // Query DTOs
@@ -84,6 +120,10 @@ pub struct QueryRequest {
     /// Optional timeout in milliseconds
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
+    /// When true, parse all statements first and return errors without executing any.
+    /// When false (default), execute statements as they are parsed.
+    #[serde(default)]
+    pub validate_first: bool,
 }
 
 fn default_timeout() -> u64 {
@@ -98,9 +138,25 @@ pub struct QueryResponse {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
+    pub total_count: usize,
+    pub truncated: bool,
     pub execution_time_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Validation errors when `validate_first` is used and parsing fails.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_errors: Option<Vec<ValidationError>>,
+}
+
+/// A parse/validation error for a specific statement in a batch.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ValidationError {
+    /// 0-based index of the failing statement
+    pub statement_index: usize,
+    /// 1-based line number in the original program text
+    pub line: usize,
+    /// Error message
+    pub error: String,
 }
 
 /// Query execution status
@@ -379,8 +435,11 @@ mod tests {
             columns: vec!["col0".to_string()],
             rows: vec![vec![serde_json::json!(1)]],
             row_count: 1,
+            total_count: 1,
+            truncated: false,
             execution_time_ms: 5,
             error: None,
+            validation_errors: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"status\":\"success\""));
@@ -396,8 +455,11 @@ mod tests {
             columns: vec![],
             rows: vec![],
             row_count: 0,
+            total_count: 0,
+            truncated: false,
             execution_time_ms: 1,
             error: Some("parse error".to_string()),
+            validation_errors: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"status\":\"error\""));
@@ -503,6 +565,7 @@ mod tests {
             description: Some("A test KG".to_string()),
             relations_count: 5,
             views_count: 2,
+            ontologies: None,
         };
         let json = serde_json::to_string(&kg).unwrap();
         assert!(json.contains("\"name\":\"test\""));
@@ -518,6 +581,7 @@ mod tests {
             description: None,
             relations_count: 0,
             views_count: 0,
+            ontologies: None,
         };
         let json = serde_json::to_string(&kg).unwrap();
         assert!(json.contains("\"name\":\"minimal\""));
@@ -686,5 +750,87 @@ mod tests {
         assert!(json.contains("\"name\":\"reachable\""));
         assert!(json.contains("\"arity\":2"));
         assert!(json.contains("\"dependencies\""));
+    }
+
+    #[test]
+    fn test_ontology_definition_deserialize() {
+        let json = r#"{
+            "prefix": "mem_",
+            "version": "1.0.0",
+            "schemas": ["+mem_data(id: Int)"],
+            "rules": ["+mem_rule(X) <- mem_data(X)"],
+            "indexes": []
+        }"#;
+        let onto: OntologyDefinition = serde_json::from_str(json).unwrap();
+        assert_eq!(onto.prefix, "mem_");
+        assert_eq!(onto.version, "1.0.0");
+        assert_eq!(onto.schemas.len(), 1);
+        assert_eq!(onto.rules.len(), 1);
+        assert!(onto.indexes.is_empty());
+    }
+
+    #[test]
+    fn test_ontology_definition_defaults() {
+        let json = r#"{"prefix": "test_", "version": "0.1.0"}"#;
+        let onto: OntologyDefinition = serde_json::from_str(json).unwrap();
+        assert!(onto.schemas.is_empty());
+        assert!(onto.rules.is_empty());
+        assert!(onto.indexes.is_empty());
+    }
+
+    #[test]
+    fn test_ontology_status_dto_serialize() {
+        let status = OntologyStatusDto {
+            prefix: "mem_".to_string(),
+            status: "installed".to_string(),
+            error: None,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"prefix\":\"mem_\""));
+        assert!(json.contains("\"status\":\"installed\""));
+        assert!(!json.contains("error"));
+    }
+
+    #[test]
+    fn test_ontology_status_dto_with_error() {
+        let status = OntologyStatusDto {
+            prefix: "bad_".to_string(),
+            status: "error".to_string(),
+            error: Some("Parse error at line 1".to_string()),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"status\":\"error\""));
+        assert!(json.contains("\"error\":\"Parse error at line 1\""));
+    }
+
+    #[test]
+    fn test_kg_dto_with_ontologies_serialize() {
+        let kg = KnowledgeGraphDto {
+            name: "test".to_string(),
+            description: None,
+            relations_count: 0,
+            views_count: 0,
+            ontologies: Some(vec![OntologyStatusDto {
+                prefix: "mem_".to_string(),
+                status: "installed".to_string(),
+                error: None,
+            }]),
+        };
+        let json = serde_json::to_string(&kg).unwrap();
+        assert!(json.contains("\"ontologies\""));
+        assert!(json.contains("\"installed\""));
+    }
+
+    #[test]
+    fn test_kg_dto_without_ontologies_serialize() {
+        let kg = KnowledgeGraphDto {
+            name: "test".to_string(),
+            description: None,
+            relations_count: 0,
+            views_count: 0,
+            ontologies: None,
+        };
+        let json = serde_json::to_string(&kg).unwrap();
+        assert!(!json.contains("ontologies"));
     }
 }

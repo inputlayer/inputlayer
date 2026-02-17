@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_drop_prefix_n17t30
+Knowledge graph 'test_rule_drop_prefix_n17t30' created.
+Switched to knowledge graph: test_rule_drop_prefix_n17t30
+> .kg use test_rule_drop_prefix_n17t30
+Switched to knowledge graph: test_rule_drop_prefix_n17t30
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.
+> +mem_relevant(X, Y) <- edge(X, Y), X > 1
+Rule 'mem_relevant' registered.
+> +mem_importance(X) <- edge(X, _Y)
+Rule 'mem_importance' registered.
+> +other_rule(X) <- edge(X, _Y)
+Rule 'other_rule' registered.
+> .rule list
+Rules:
+  mem_importance (1 clause(s))
+  mem_relevant (1 clause(s))
+  other_rule (1 clause(s))
+> .rule drop prefix mem_
+Dropped 2 rule(s) with prefix 'mem_': mem_importance, mem_relevant
+> .rule list
+Rules:
+  other_rule (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_drop_prefix_n17t30
+Knowledge graph 'test_rule_drop_prefix_n17t30' dropped.

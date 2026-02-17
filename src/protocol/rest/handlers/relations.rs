@@ -8,6 +8,8 @@ use axum::{
     extract::{Path, Query},
     Extension, Json,
 };
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use super::wire_value_to_json;
 use crate::protocol::rest::dto::{
@@ -189,6 +191,54 @@ pub async fn get_relation_data(
     Ok(Json(ApiResponse::success(data)))
 }
 
+/// Query parameters for prefix-based relation clearing
+#[derive(Debug, Deserialize)]
+pub struct ClearPrefixQuery {
+    pub prefix: String,
+}
+
+/// Result of prefix-based relation clearing
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClearByPrefixResult {
+    /// Relations that were cleared, with the number of facts deleted from each
+    pub cleared: Vec<ClearedRelation>,
+    /// Total number of facts deleted
+    pub total_deleted: usize,
+}
+
+/// A single relation that was cleared
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ClearedRelation {
+    pub name: String,
+    pub deleted: usize,
+}
+
+/// Clear all facts from relations matching a prefix
+pub async fn clear_relations_by_prefix(
+    Extension(handler): Extension<Arc<Handler>>,
+    Path(kg): Path<String>,
+    Query(params): Query<ClearPrefixQuery>,
+) -> Result<Json<ApiResponse<ClearByPrefixResult>>, RestError> {
+    if params.prefix.is_empty() {
+        return Err(RestError::bad_request("Prefix cannot be empty".to_string()));
+    }
+
+    let results = handler
+        .clear_relations_by_prefix_in(&kg, &params.prefix)
+        .map_err(|e| RestError::internal(format!("Failed to clear relations by prefix: {e}")))?;
+
+    let total_deleted: usize = results.iter().map(|(_, c)| c).sum();
+    let cleared: Vec<ClearedRelation> = results
+        .into_iter()
+        .map(|(name, deleted)| ClearedRelation { name, deleted })
+        .collect();
+
+    Ok(Json(ApiResponse::success(ClearByPrefixResult {
+        cleared,
+        total_deleted,
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +398,110 @@ mod tests {
         assert_eq!(data.row_count, 2);
         assert_eq!(data.offset, Some(1));
         assert_eq!(data.limit, Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_clear_relations_by_prefix() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .query_program(
+                Some("clear_pfx_kg".to_string()),
+                "+env_a[(1,), (2,)]\n+env_b[(3,)]\n+other[(4,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = clear_relations_by_prefix(
+            Extension(handler),
+            Path("clear_pfx_kg".to_string()),
+            Query(ClearPrefixQuery {
+                prefix: "env_".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.total_deleted, 3);
+        assert_eq!(data.cleared.len(), 2);
+        assert!(data
+            .cleared
+            .iter()
+            .any(|c| c.name == "env_a" && c.deleted == 2));
+        assert!(data
+            .cleared
+            .iter()
+            .any(|c| c.name == "env_b" && c.deleted == 1));
+    }
+
+    #[tokio::test]
+    async fn test_clear_relations_by_prefix_no_match() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .query_program(
+                Some("clear_nomatch_kg".to_string()),
+                "+alpha[(1,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = clear_relations_by_prefix(
+            Extension(handler),
+            Path("clear_nomatch_kg".to_string()),
+            Query(ClearPrefixQuery {
+                prefix: "zzz_".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let data = result.0.data.unwrap();
+        assert_eq!(data.total_deleted, 0);
+        assert!(data.cleared.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_clear_relations_preserves_other() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .query_program(
+                Some("clear_preserve_kg".to_string()),
+                "+env_data[(1,), (2,)]\n+keep_data[(10,)]".to_string(),
+            )
+            .await
+            .unwrap();
+        // Clear env_ prefix
+        let _ = clear_relations_by_prefix(
+            Extension(handler.clone()),
+            Path("clear_preserve_kg".to_string()),
+            Query(ClearPrefixQuery {
+                prefix: "env_".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        // Verify other relation still has data
+        let result = get_relation(
+            Extension(handler),
+            Path(("clear_preserve_kg".to_string(), "keep_data".to_string())),
+        )
+        .await
+        .unwrap();
+        let rel = result.0.data.unwrap();
+        assert_eq!(rel.tuple_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_clear_relations_empty_prefix_rejected() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("clear_empty_pfx_kg")
+            .unwrap();
+        let result = clear_relations_by_prefix(
+            Extension(handler),
+            Path("clear_empty_pfx_kg".to_string()),
+            Query(ClearPrefixQuery {
+                prefix: String::new(),
+            }),
+        )
+        .await;
+        assert!(result.is_err());
     }
 }

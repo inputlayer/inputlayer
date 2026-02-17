@@ -1,0 +1,28 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_order_multi_n21t32
+Knowledge graph 'test_order_multi_n21t32' created.
+Switched to knowledge graph: test_order_multi_n21t32
+> .kg use test_order_multi_n21t32
+Switched to knowledge graph: test_order_multi_n21t32
+> +students[("alice", "A", 95), ("bob", "B", 88), ("carol", "A", 90), ("dave", "B", 92), ("eve", "A", 85)]
+Inserted 5 fact(s) into 'students'.
+> ?students(Name, Grade:asc, Score:desc)
+┌─────────┬──────┬──────┐
+│ col0    │ col1 │ col2 │
+├─────────┼──────┼──────┤
+│ "alice" │ "A"  │   95 │
+│ "carol" │ "A"  │   90 │
+│ "eve"   │ "A"  │   85 │
+│ "dave"  │ "B"  │   92 │
+│ "bob"   │ "B"  │   88 │
+└─────────┴──────┴──────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_order_multi_n21t32
+Knowledge graph 'test_order_multi_n21t32' dropped.

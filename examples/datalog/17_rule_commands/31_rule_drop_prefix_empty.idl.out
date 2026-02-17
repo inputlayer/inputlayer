@@ -1,0 +1,24 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_rule_drop_prefix_empty_n17t31
+Knowledge graph 'test_rule_drop_prefix_empty_n17t31' created.
+Switched to knowledge graph: test_rule_drop_prefix_empty_n17t31
+> .kg use test_rule_drop_prefix_empty_n17t31
+Switched to knowledge graph: test_rule_drop_prefix_empty_n17t31
+> +edge[(1, 2)]
+Inserted 1 fact(s) into 'edge'.
+> +my_rule(X, Y) <- edge(X, Y)
+Rule 'my_rule' registered.
+> .rule drop prefix zzz_
+No rules matching prefix 'zzz_'.
+> .rule list
+Rules:
+  my_rule (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_drop_prefix_empty_n17t31
+Knowledge graph 'test_rule_drop_prefix_empty_n17t31' dropped.

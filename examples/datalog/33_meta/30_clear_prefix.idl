@@ -1,0 +1,9 @@
+.kg create test_clear_prefix_n33t30
+.kg use test_clear_prefix_n33t30
++env_a[(1, 2), (3, 4)]
++env_b[(10,)]
++keep_data[(100,)]
+.clear prefix env_
+?keep_data(X)
+.kg use default
+.kg drop test_clear_prefix_n33t30

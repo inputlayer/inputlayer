@@ -288,6 +288,12 @@ pub struct QueryResult {
     pub rows: Vec<WireTuple>,
     /// Schema of the result
     pub schema: Vec<ColumnDef>,
+    /// Total number of rows before limit/offset (equals rows.len() when no pagination)
+    #[serde(default)]
+    pub total_count: usize,
+    /// Whether pagination truncated the result set
+    #[serde(default)]
+    pub truncated: bool,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
     /// Provenance metadata (present when ephemeral data participates)
@@ -331,15 +337,20 @@ impl QueryResult {
         Self {
             rows: Vec::new(),
             schema: Vec::new(),
+            total_count: 0,
+            truncated: false,
             execution_time_ms: 0,
             metadata: None,
         }
     }
 
     pub fn new(rows: Vec<WireTuple>, schema: Vec<ColumnDef>, execution_time_ms: u64) -> Self {
+        let total_count = rows.len();
         Self {
             rows,
             schema,
+            total_count,
+            truncated: false,
             execution_time_ms,
             metadata: None,
         }
@@ -352,9 +363,12 @@ impl QueryResult {
         execution_time_ms: u64,
         metadata: Option<ResultMetadata>,
     ) -> Self {
+        let total_count = rows.len();
         Self {
             rows,
             schema,
+            total_count,
+            truncated: false,
             execution_time_ms,
             metadata,
         }
@@ -629,6 +643,8 @@ mod tests {
         let result = QueryResult {
             rows: vec![],
             schema: vec![ColumnDef::int32("x")],
+            total_count: 0,
+            truncated: false,
             execution_time_ms: 0,
             metadata: None,
         };

@@ -1,0 +1,19 @@
+// Test: both to_float() and to_int() in one rule
+
+.kg create test_mixed_conv_n34t06
+.kg use test_mixed_conv_n34t06
+
++data[(10, 3.5)]
+
+converted(A, B, FA, IB) <- data(A, B), FA = to_float(A), IB = to_int(B)
+
+?converted(A, B, FA, IB)
+
+// to_int on int is identity
++ints[(42,)]
+int_identity(X, Y) <- ints(X), Y = to_int(X)
+
+?int_identity(X, Y)
+
+.kg use default
+.kg drop test_mixed_conv_n34t06

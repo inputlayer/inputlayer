@@ -1,0 +1,11 @@
+// Test: Limit exceeds total rows - no truncation
+
+.kg create test_limit_exceeds_n21t38
+.kg use test_limit_exceeds_n21t38
+
++data[("a", 1), ("b", 2), ("c", 3)]
+
+?data(X, Y), limit(10)
+
+.kg use default
+.kg drop test_limit_exceeds_n21t38

@@ -1,0 +1,11 @@
+// Test: Query without ordering annotations preserves default behavior
+
+.kg create test_order_none_n21t34
+.kg use test_order_none_n21t34
+
++data[("a", 3), ("b", 1), ("c", 2)]
+
+?data(X, Y)
+
+.kg use default
+.kg drop test_order_none_n21t34

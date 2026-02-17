@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_clear_prefix_n33t30
+Knowledge graph 'test_clear_prefix_n33t30' created.
+Switched to knowledge graph: test_clear_prefix_n33t30
+> .kg use test_clear_prefix_n33t30
+Switched to knowledge graph: test_clear_prefix_n33t30
+> +env_a[(1, 2), (3, 4)]
+Inserted 2 fact(s) into 'env_a'.
+> +env_b[(10,)]
+Inserted 1 fact(s) into 'env_b'.
+> +keep_data[(100,)]
+Inserted 1 fact(s) into 'keep_data'.
+> .clear prefix env_
+Cleared 3 fact(s) from 2 relation(s) with prefix 'env_': env_a (2), env_b (1)
+> ?keep_data(X)
+┌──────┐
+│ col0 │
+├──────┤
+│  100 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_clear_prefix_n33t30
+Knowledge graph 'test_clear_prefix_n33t30' dropped.

@@ -53,7 +53,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         // Relations routes
         .route(
             "/knowledge-graphs/:kg/relations",
-            get(relations::list_relations),
+            get(relations::list_relations).delete(relations::clear_relations_by_prefix),
         )
         .route(
             "/knowledge-graphs/:kg/relations/:name",
@@ -66,7 +66,10 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
                 .delete(data::delete_data),
         )
         // Rules routes
-        .route("/knowledge-graphs/:kg/rules", get(rules::list_rules))
+        .route(
+            "/knowledge-graphs/:kg/rules",
+            get(rules::list_rules).delete(rules::delete_rules_by_prefix),
+        )
         .route(
             "/knowledge-graphs/:kg/rules/:name",
             get(rules::get_rule).delete(rules::delete_rule),

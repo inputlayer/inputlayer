@@ -1,0 +1,13 @@
+// Test: to_int() basic conversion - float to int truncation
+
+.kg create test_to_int_basic_n34t02
+.kg use test_to_int_basic_n34t02
+
++floats[(3.7,), (3.2,), (-2.9,), (-2.1,), (5.0,)]
+
+int_val(X, Y) <- floats(X), Y = to_int(X)
+
+?int_val(X, Y)
+
+.kg use default
+.kg drop test_to_int_basic_n34t02

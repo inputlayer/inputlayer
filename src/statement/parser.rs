@@ -3,6 +3,13 @@
 use crate::ast::{AggregateFunc, Atom, BodyPredicate, Rule, Term};
 use crate::parser::{parse_rule, parse_term};
 
+/// Sort direction for query result ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
 /// Query goal: ?- atom.
 #[derive(Debug, Clone)]
 pub struct QueryGoal {
@@ -10,6 +17,12 @@ pub struct QueryGoal {
     pub goal: Atom,
     /// Additional body predicates (for complex queries)
     pub body: Vec<BodyPredicate>,
+    /// Ordering annotations: (variable_name, direction)
+    pub order_by: Vec<(String, SortDirection)>,
+    /// Maximum number of rows to return
+    pub limit: Option<usize>,
+    /// Number of rows to skip before returning
+    pub offset: Option<usize>,
 }
 
 // String Utilities
@@ -392,11 +405,19 @@ pub fn term_to_string(term: &Term) -> String {
 
 // Query Parsing
 /// Parse a query: ?- goal.
+///
+/// Supports `:asc`/`:desc` annotations on variables in the goal atom, e.g.
+/// `?relation(X, Score:desc)`. Annotations are stripped before parsing and
+/// recorded as `order_by` on the returned `QueryGoal`.
 pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     let input = input.trim();
 
+    // Extract :asc/:desc annotations from the goal atom arguments
+    // before passing to the parser (which doesn't understand them).
+    let (cleaned_input, order_by) = strip_sort_annotations(input);
+
     // Try to parse as a simple rule body
-    let dummy_rule_str = format!("__query__(X) <- {input}");
+    let dummy_rule_str = format!("__query__(X) <- {cleaned_input}");
     let rule = parse_rule(&dummy_rule_str)?;
 
     if rule.body.is_empty() {
@@ -413,10 +434,131 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
         })
         .ok_or_else(|| "Query must have at least one positive goal".to_string())?;
 
-    // Remaining body predicates (excluding the first goal)
-    let body: Vec<BodyPredicate> = rule.body.into_iter().skip(1).collect();
+    // Remaining body predicates (excluding the first goal).
+    // Extract limit(...) as a special pseudo-predicate.
+    let mut body = Vec::new();
+    let mut limit = None;
+    let mut offset = None;
 
-    Ok(QueryGoal { goal, body })
+    for pred in rule.body.into_iter().skip(1) {
+        if let BodyPredicate::Positive(ref atom) = pred {
+            if atom.relation == "limit" {
+                // limit(N) or limit(N, Offset)
+                match atom.args.as_slice() {
+                    [Term::Constant(n)] => {
+                        if *n < 0 {
+                            return Err("limit must be non-negative".to_string());
+                        }
+                        limit = Some(*n as usize);
+                    }
+                    [Term::Constant(n), Term::Constant(o)] => {
+                        if *n < 0 {
+                            return Err("limit must be non-negative".to_string());
+                        }
+                        if *o < 0 {
+                            return Err("offset must be non-negative".to_string());
+                        }
+                        limit = Some(*n as usize);
+                        offset = Some(*o as usize);
+                    }
+                    _ => {
+                        return Err(
+                            "limit() expects 1 or 2 integer arguments: limit(N) or limit(N, Offset)"
+                                .to_string(),
+                        );
+                    }
+                }
+                continue;
+            }
+        }
+        body.push(pred);
+    }
+
+    Ok(QueryGoal {
+        goal,
+        body,
+        order_by,
+        limit,
+        offset,
+    })
+}
+
+/// Strip `:asc`/`:desc` annotations from the first atom's arguments.
+///
+/// Given `rel(X, Score:desc, Name:asc), cond(X)`, returns
+/// `("rel(X, Score, Name), cond(X)", [(Score, Desc), (Name, Asc)])`.
+fn strip_sort_annotations(input: &str) -> (String, Vec<(String, SortDirection)>) {
+    // Find the first '(' to locate the goal atom's arguments
+    let Some(open_paren) = input.find('(') else {
+        return (input.to_string(), vec![]);
+    };
+
+    // Find the matching ')' for this opening paren (respecting nesting)
+    let mut depth = 0;
+    let mut close_paren = None;
+    for (i, ch) in input[open_paren..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close_paren = Some(open_paren + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let Some(close_paren) = close_paren else {
+        return (input.to_string(), vec![]);
+    };
+
+    let prefix = &input[..=open_paren]; // "rel("
+    let args_str = &input[open_paren + 1..close_paren]; // "X, Score:desc, Name:asc"
+    let suffix = &input[close_paren..]; // "), cond(X)"
+
+    let mut order_by = Vec::new();
+    let mut cleaned_args = Vec::new();
+
+    for arg in split_top_level(args_str, ',') {
+        let arg = arg.trim();
+        if let Some(base) = arg.strip_suffix(":desc") {
+            let var = base.trim().to_string();
+            order_by.push((var.clone(), SortDirection::Desc));
+            cleaned_args.push(var);
+        } else if let Some(base) = arg.strip_suffix(":asc") {
+            let var = base.trim().to_string();
+            order_by.push((var.clone(), SortDirection::Asc));
+            cleaned_args.push(var);
+        } else {
+            cleaned_args.push(arg.to_string());
+        }
+    }
+
+    let result = format!("{prefix}{}{suffix}", cleaned_args.join(", "));
+    (result, order_by)
+}
+
+/// Split a string by a delimiter at the top level (respecting parentheses).
+fn split_top_level(s: &str, delim: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            c if c == delim && depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
 }
 
 /// Parse a transient rule: head <- body.
@@ -863,5 +1005,54 @@ mod tests {
     fn test_parse_aggregate_lowercase_var() {
         // Lowercase first char = not a valid variable, so not a valid aggregate
         assert!(parse_aggregate("count<x>").is_none());
+    }
+
+    // === parse_query limit/offset ===
+
+    #[test]
+    fn test_parse_query_with_limit() {
+        let result = parse_query("data(X), limit(3)").unwrap();
+        assert_eq!(result.goal.relation, "data");
+        assert_eq!(result.limit, Some(3));
+        assert_eq!(result.offset, None);
+        // limit pseudo-predicate should NOT appear in body
+        assert!(result.body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_query_with_limit_and_offset() {
+        let result = parse_query("data(X), limit(5, 2)").unwrap();
+        assert_eq!(result.goal.relation, "data");
+        assert_eq!(result.limit, Some(5));
+        assert_eq!(result.offset, Some(2));
+        assert!(result.body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_query_limit_zero() {
+        let result = parse_query("data(X), limit(0)").unwrap();
+        assert_eq!(result.limit, Some(0));
+        assert_eq!(result.offset, None);
+    }
+
+    #[test]
+    fn test_parse_query_negative_limit_rejected() {
+        let result = parse_query("data(X), limit(-1)");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("non-negative"));
+    }
+
+    #[test]
+    fn test_parse_query_negative_offset_rejected() {
+        let result = parse_query("data(X), limit(5, -1)");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("non-negative"));
+    }
+
+    #[test]
+    fn test_parse_query_no_limit() {
+        let result = parse_query("data(X)").unwrap();
+        assert_eq!(result.limit, None);
+        assert_eq!(result.offset, None);
     }
 }

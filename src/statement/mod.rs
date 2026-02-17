@@ -14,7 +14,7 @@ pub mod types;
 // Re-exports
 pub use data::{DeleteOp, DeletePattern, DeleteTarget, InsertOp, InsertTarget, UpdateOp};
 pub use meta::{IndexCreateOptions, LoadMode, MetaCommand};
-pub use parser::{parse_query, parse_transient_rule, QueryGoal};
+pub use parser::{parse_query, parse_transient_rule, QueryGoal, SortDirection};
 pub use schema::{ColumnDef, SchemaDecl};
 pub use serialize::{
     RuleDef, SerializableArithExpr, SerializableArithOp, SerializableBodyPred, SerializableRule,
