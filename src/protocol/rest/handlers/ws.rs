@@ -93,16 +93,90 @@ enum WsResponse {
     },
 }
 
-/// WebSocket upgrade endpoint for session-scoped connections
+/// Upgrade to a session-scoped WebSocket connection for real-time bidirectional communication.
+///
+/// ## WebSocket Protocol
+///
+/// All messages are JSON objects with a `type` field. The connection is scoped to a single
+/// session and inherits its knowledge graph binding and ephemeral data.
+///
+/// ### Client → Server Messages
+///
+/// **Query** — Execute a Datalog query in the session context:
+/// ```json
+/// {"type": "query", "query": "?edge(X, Y)"}
+/// ```
+///
+/// **Insert Ephemeral Facts** — Add session-scoped facts:
+/// ```json
+/// {"type": "insert_facts", "relation": "edge", "tuples": [[1, 2], [3, 4]]}
+/// ```
+///
+/// **Retract Ephemeral Facts** — Remove session-scoped facts:
+/// ```json
+/// {"type": "retract_facts", "relation": "edge", "tuples": [[1, 2]]}
+/// ```
+///
+/// **Add Ephemeral Rule** — Add a session-scoped rule (exactly one rule per message):
+/// ```json
+/// {"type": "add_rule", "rule": "path(X, Y) <- edge(X, Y)"}
+/// ```
+///
+/// **Ping** — Keep-alive:
+/// ```json
+/// {"type": "ping"}
+/// ```
+///
+/// ### Server → Client Messages
+///
+/// **Result** — Query results with per-row provenance tracking:
+/// ```json
+/// {"type": "result", "columns": ["x", "y"], "rows": [[1, 2]], "row_count": 1,
+///  "execution_time_ms": 5, "row_provenance": ["persistent"],
+///  "metadata": {"has_ephemeral": false, "ephemeral_sources": [], "warnings": []}}
+/// ```
+///
+/// **Ack** — Acknowledgement for insert/retract/add_rule operations:
+/// ```json
+/// {"type": "ack", "message": "Inserted 2 fact(s) into 'edge'"}
+/// ```
+///
+/// **Error** — Error response:
+/// ```json
+/// {"type": "error", "message": "Invalid query syntax"}
+/// ```
+///
+/// **Pong** — Response to ping:
+/// ```json
+/// {"type": "pong"}
+/// ```
+///
+/// **Notification** — Push notification when persistent data changes in the session's KG:
+/// ```json
+/// {"type": "notification", "event": "persistent_update", "knowledge_graph": "default",
+///  "relation": "edge", "operation": "insert", "count": 5}
+/// ```
+///
+/// ### Backpressure
+///
+/// If the client falls behind on reading notifications, missed notifications are reported
+/// via an error message: `{"type": "error", "message": "Missed N notification(s) due to backpressure"}`.
+///
+/// ### Connection Lifecycle
+///
+/// The WebSocket connection closes when:
+/// - The client sends a close frame
+/// - The underlying session is closed (server sends an error message before closing)
+/// - The notification broadcast channel is shut down
 #[utoipa::path(
     get,
     path = "/sessions/{id}/ws",
-    tag = "sessions",
+    tag = "websocket",
     params(
         ("id" = u64, Path, description = "Session ID")
     ),
     responses(
-        (status = 101, description = "WebSocket connection established"),
+        (status = 101, description = "WebSocket connection established — see endpoint description for the full message protocol"),
         (status = 404, description = "Session not found"),
     )
 )]
