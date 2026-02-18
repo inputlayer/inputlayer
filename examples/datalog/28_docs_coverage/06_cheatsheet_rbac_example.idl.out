@@ -14,4 +14,16 @@ Inserted 2 fact(s) into 'user_role'.
 > +role_permission[("admin", "read"), ("admin", "write"), ("viewer", "read")]
 Inserted 3 fact(s) into 'role_permission'.
 > +has_permission(User, Perm) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> user_role(User, Role),
+Parse error: Expected parentheses: (User, Role),
+> role_permission(Role, Perm)
+Cannot insert variable 'Role' - use constants only
+> ?has_permission("alice", Perm)
+No results.
+> ?has_permission("bob", Perm)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_acl_n28t06
+Knowledge graph 'test_acl_n28t06' dropped.

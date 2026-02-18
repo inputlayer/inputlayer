@@ -10,4 +10,36 @@ Switched to knowledge graph: test_rbac_n20t01
 > .kg use test_rbac_n20t01
 Switched to knowledge graph: test_rbac_n20t01
 > +role_inherits[(1, 2), (2, 3), (3, 4)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +user_role[(100, 1), (101, 2), (102, 3), (103, 4)]
+Inserted 4 fact(s) into 'user_role'.
+> +role_permission[(1, 1000), (1, 1001), (2, 1002), (2, 1003), (3, 1004), (3, 1005), (4, 1006)].
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +has_role(User, Role) <- user_role(User, Role)
+Rule 'has_role' registered.
+> +has_role(User, ParentRole) <- has_role(User, ChildRole), role_inherits(ChildRole, ParentRole)
+Rule 'has_role' registered.
+> +has_permission(User, Perm) <- has_role(User, Role), role_permission(Role, Perm)
+Rule 'has_permission' registered.
+> ?has_role(User, Role)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │    1 │
+│  101 │    2 │
+│  102 │    3 │
+│  103 │    4 │
+└──────┴──────┘
+4 rows
+> +admin_perms(Perm) <- has_permission(100, Perm)
+Rule 'admin_perms' registered.
+> ?admin_perms(P)
+No results.
+> +employee_perms(Perm) <- has_permission(102, Perm)
+Rule 'employee_perms' registered.
+> ?employee_perms(P)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rbac_n20t01
+Knowledge graph 'test_rbac_n20t01' dropped.

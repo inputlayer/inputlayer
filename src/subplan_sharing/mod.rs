@@ -34,14 +34,10 @@ pub struct SharingStats {
 /// Canonical form of an IR subtree with normalized variable names
 #[derive(Debug, Clone)]
 struct CanonicalSubtree {
-    /// Canonical IR form with normalized variable names (v0, v1, v2, ...)
-    /// Used for structural comparison. The hash is computed from this form.
-    #[allow(dead_code)]
-    ir: IRNode,
     /// Hash of the canonical form (ignores variable names, captures structure only)
     hash: u64,
     /// Column name -> canonical name (debug only; code gen uses column indices).
-    #[allow(dead_code)]
+    #[cfg(test)]
     var_mapping: HashMap<String, String>,
 }
 
@@ -347,16 +343,16 @@ impl SubplanSharer {
         let canonical_ir = self.canonicalize_recursive(ir, &mut var_counter, &mut var_mapping);
         let hash = self.hash_ir(&canonical_ir);
 
-        // Invert mapping for reconstruction
-        let inverted_mapping: HashMap<String, String> = var_mapping
-            .iter()
-            .map(|(orig, canon)| (canon.clone(), orig.clone()))
-            .collect();
-
         CanonicalSubtree {
-            ir: canonical_ir,
             hash,
-            var_mapping: inverted_mapping,
+            #[cfg(test)]
+            var_mapping: {
+                // Invert mapping for reconstruction (test-only)
+                var_mapping
+                    .iter()
+                    .map(|(orig, canon)| (canon.clone(), orig.clone()))
+                    .collect()
+            },
         }
     }
 

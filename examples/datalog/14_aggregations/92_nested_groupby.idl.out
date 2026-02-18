@@ -12,4 +12,16 @@ Switched to knowledge graph: test_nested_group_n14t92
 > +sales[("North", "Widget", 100), ("North", "Widget", 150), ("North", "Gadget", 200), ("South", "Widget", 300), ("South", "Gadget", 250)]
 Inserted 5 fact(s) into 'sales'.
 > +region_product_sum(Region, Product, sum<Amount>) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> sales(Region, Product, Amount)
+Cannot insert variable 'Region' - use constants only
+> ?region_product_sum(Region, Product, Sum)
+No results.
+> +region_max(Region, max<Total>) <- region_product_sum(Region, _, Total)
+Rule 'region_max' registered.
+> ?region_max(Region, MaxProduct)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_nested_group_n14t92
+Knowledge graph 'test_nested_group_n14t92' dropped.

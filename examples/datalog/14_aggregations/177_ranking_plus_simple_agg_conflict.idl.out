@@ -22,4 +22,8 @@ Rule 'result' registered.
 └──────┴──────┘
 2 rows
 > +result(sum<V>) <- data(_, V)
-Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'sum' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.
+Failed to register rule: Conflicting aggregation: cannot add clause with 'sum' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rank_simple_n14t177
+Knowledge graph 'test_rank_simple_n14t177' dropped.

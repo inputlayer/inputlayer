@@ -16,4 +16,20 @@ Inserted 1 fact(s) into 'embedding'.
 > +embedding[(3, [1.0, 1.0, 1.0, 1.0])]
 Inserted 1 fact(s) into 'embedding'.
 > int8_dot(Id1, Id2, DotProd) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> embedding(Id1, V1), embedding(Id2, V2),
+Parse error: Expected parentheses: (Id1, V1), embedding(Id2, V2),
+> Id1 < Id2,
+Parse error: Unrecognized statement: Id1 < Id2,
+> Q1 = quantize_linear(V1),
+Parse error: Expected parentheses: (V1),
+> Q2 = quantize_linear(V2),
+Parse error: Expected parentheses: (V2),
+> DotProd = dot_int8(Q1, Q2)
+Cannot insert variable 'Q1' - use constants only
+> ?int8_dot(Id1, Id2, DotProd)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dot_int8_n30t07
+Knowledge graph 'test_dot_int8_n30t07' dropped.

@@ -268,6 +268,27 @@ impl Session {
         self.ephemeral_rule_texts.clear();
     }
 
+    /// Remove an ephemeral rule by index
+    pub fn remove_ephemeral_rule(&mut self, index: usize) {
+        if index < self.ephemeral_rules.len() {
+            self.ephemeral_rules.remove(index);
+            self.ephemeral_rule_texts.remove(index);
+        }
+    }
+
+    /// Remove all ephemeral rules for a given relation name
+    pub fn remove_ephemeral_rules_by_name(&mut self, name: &str) {
+        let mut i = 0;
+        while i < self.ephemeral_rules.len() {
+            if self.ephemeral_rules[i].head.relation == name {
+                self.ephemeral_rules.remove(i);
+                self.ephemeral_rule_texts.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     /// Build query metadata describing ephemeral participation.
     ///
     /// Optionally accepts persistent rule head names to detect overshadowing.

@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_index_ops_n33t15
+Knowledge graph 'test_index_ops_n33t15' created.
+Switched to knowledge graph: test_index_ops_n33t15
+> .kg use test_index_ops_n33t15
+Switched to knowledge graph: test_index_ops_n33t15
+> .index list
+No indexes.
+> +embeddings[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [0.0, 0.0, 1.0])]
+Inserted 3 fact(s) into 'embeddings'.
+> .index create emb_idx on embeddings(col2) type hnsw metric cosine
+Index error: No schema found for relation 'embeddings'. Register a schema first.
+> .index list
+No indexes.
+> .index stats emb_idx
+Index error: Index 'emb_idx' not found (no incremental engine)
+> .index drop emb_idx
+Index error: Index 'emb_idx' not found (no incremental engine)
+> .index list
+No indexes.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_index_ops_n33t15
+Knowledge graph 'test_index_ops_n33t15' dropped.

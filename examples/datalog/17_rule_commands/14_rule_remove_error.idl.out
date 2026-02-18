@@ -17,4 +17,8 @@ Rule 'simple' registered.
 Rules:
   simple (1 clause(s))
 > .rule remove simple 5
-Script error: Failed to remove rule clause: Clause index 5 out of bounds. Rule 'simple' has 1 clause(s).
+Error: Failed to remove rule clause: Clause index 5 out of bounds. Rule 'simple' has 1 clause(s).
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_remove_err_n17t14
+Knowledge graph 'test_rule_remove_err_n17t14' dropped.

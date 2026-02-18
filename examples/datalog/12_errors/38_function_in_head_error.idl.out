@@ -12,4 +12,8 @@ Switched to knowledge graph: test_func_head_n12t38
 > +data[(1, 2), (3, 4)]
 Inserted 2 fact(s) into 'data'.
 > abs_result(abs_int64(X), Y) <- data(X, Y)
-Script error: Query execution failed: Function calls in rule head not yet fully supported. Use Compute node directly.
+Query execution failed: Function calls in rule head not yet fully supported. Use Compute node directly.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_func_head_n12t38
+Knowledge graph 'test_func_head_n12t38' dropped.

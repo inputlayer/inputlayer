@@ -12,4 +12,16 @@ Switched to knowledge graph: test_self_join_n18t80
 > +friends[("Alice", "Bob"), ("Bob", "Carol"), ("Carol", "Dave"), ("Alice", "Carol")]
 Inserted 4 fact(s) into 'friends'.
 > friends_of_friends(A, C) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> friends(A, B),
+Parse error: Expected parentheses: (A, B),
+> friends(B, C),
+Parse error: Expected parentheses: (B, C),
+> A != C
+Parse error: Unrecognized statement: A != C
+> ?friends_of_friends(A, C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_join_n18t80
+Knowledge graph 'test_self_join_n18t80' dropped.

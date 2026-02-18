@@ -10,4 +10,36 @@ Switched to knowledge graph: test_deps_n20t07
 > .kg use test_deps_n20t07
 Switched to knowledge graph: test_deps_n20t07
 > +depends[(1, 2), (1, 3), (2, 4), (2, 5), (3, 5), (3, 6), (4, 7), (5, 7), (5, 8), (6, 8)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +all_deps(Pkg, Dep) <- depends(Pkg, Dep)
+Rule 'all_deps' registered.
+> +all_deps(Pkg, TransDep) <- depends(Pkg, Dep), all_deps(Dep, TransDep)
+Rule 'all_deps' registered.
+> +deps_of_1(D) <- all_deps(1, D)
+Rule 'deps_of_1' registered.
+> ?deps_of_1(D)
+No results.
+> +dep_count(Pkg, count<D>) <- all_deps(Pkg, D)
+Rule 'dep_count' registered.
+> ?dep_count(P, C)
+No results.
+> +has_deps(P) <- depends(P, _)
+Rule 'has_deps' registered.
+> +leaf_pkg(P) <- depends(_, P), !has_deps(P)
+Rule 'leaf_pkg' registered.
+> ?leaf_pkg(P)
+No results.
+> +reverse_dep(7, Pkg) <- all_deps(Pkg, 7)
+Rule 'reverse_dep' registered.
+> ?reverse_dep(7, P)
+No results.
+> +used_by(Dep, Pkg) <- all_deps(Pkg, Dep)
+Rule 'used_by' registered.
+> +use_count(Dep, count<P>) <- used_by(Dep, P)
+Rule 'use_count' registered.
+> ?use_count(D, C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_deps_n20t07
+Knowledge graph 'test_deps_n20t07' dropped.

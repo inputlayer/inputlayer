@@ -16,4 +16,11 @@ No results.
 Session rules (1):
   1. test_rule(X) <- items(X)
 > .session drop 99
-Script error: Rule index 99 out of bounds.
+Rule index 99 out of bounds.
+> .session drop 0
+Parse error: Index must be 1 or greater (1-based indexing)
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_sess_invalid_n33t08
+Knowledge graph 'test_sess_invalid_n33t08' dropped.

@@ -29,9 +29,9 @@ Inserted 1 fact(s) into 'data'.
 > .kg create test_kg_b_n01t08
 Knowledge graph 'test_kg_b_n01t08' created.
 Switched to knowledge graph: test_kg_b_n01t08
+(Cleared 1 session rule(s), 0 session fact(s))
 > .kg use test_kg_b_n01t08
 Switched to knowledge graph: test_kg_b_n01t08
-(Cleared 1 session rule(s), 0 session fact(s))
 > ?temp(X, Y)
 No results.
 > .kg use default

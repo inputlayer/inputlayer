@@ -1,0 +1,31 @@
+// Test: .clear prefix and .rule drop prefix commands
+// Verifies prefix operations work through the WS protocol
+.kg create test_prefix_ops_n33t17
+.kg use test_prefix_ops_n33t17
+
+// Insert data with shared prefix
++app_users[(1, "alice"), (2, "bob")]
++app_roles[("admin",), ("user",)]
++other_data[(100,)]
+
+// Add rules with shared prefix
++app_active(X, Name) <- app_users(X, Name)
++app_admin(Name) <- app_roles(Name), Name = "admin"
+
+// Verify data exists
+?app_users(X, Y)
+
+// Clear facts with prefix
+.clear prefix app_
+
+// Verify only other_data remains queryable as base facts
+?other_data(X)
+
+// Drop rules with prefix
+.rule drop prefix app_
+
+// Verify rules are gone
+.rule list
+
+.kg use default
+.kg drop test_prefix_ops_n33t17

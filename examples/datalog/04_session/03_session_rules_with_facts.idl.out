@@ -28,7 +28,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 1 rows
 > .session
 Session facts (1):
-  1. human("socrates")
+  human(("socrates"))
 Session rules (1):
   1. mortal(X) <- human(X)
 > human("plato")

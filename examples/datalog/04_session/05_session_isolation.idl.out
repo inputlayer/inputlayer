@@ -31,9 +31,9 @@ Inserted 2 fact(s) into 'data1'.
 > .kg create test_sess_iso2_n04t05
 Knowledge graph 'test_sess_iso2_n04t05' created.
 Switched to knowledge graph: test_sess_iso2_n04t05
+(Cleared 1 session rule(s), 0 session fact(s))
 > .kg use test_sess_iso2_n04t05
 Switched to knowledge graph: test_sess_iso2_n04t05
-(Cleared 1 session rule(s), 0 session fact(s))
 > +data2[(3), (4)]
 Inserted 2 fact(s) into 'data2'.
 > ?sess_rule1(X)

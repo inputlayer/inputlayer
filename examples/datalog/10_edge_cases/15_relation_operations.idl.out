@@ -21,7 +21,7 @@ Inserted 3 fact(s) into 'data'.
 └──────┴──────┘
 3 rows
 > -data[(2, 200)]
-Deleted 1 facts from 'data'.
+Deleted 1 fact(s) from 'data'.
 > ?data(X, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │
@@ -43,7 +43,7 @@ Inserted 2 fact(s) into 'data'.
 └──────┴──────┘
 4 rows
 > -data[(1, 100), (4, 400)]
-Deleted 2 facts from 'data'.
+Deleted 2 fact(s) from 'data'.
 > ?data(X, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │
@@ -53,7 +53,7 @@ Deleted 2 facts from 'data'.
 └──────┴──────┘
 2 rows
 > +data[(2, 200)]
-No facts inserted (1 duplicate skipped).
+Inserted 0 fact(s) into 'data'.
 > ?data(X, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │
@@ -63,7 +63,7 @@ No facts inserted (1 duplicate skipped).
 └──────┴──────┘
 2 rows
 > -data[(2, 200), (3, 300)]
-Deleted 2 facts from 'data'.
+Deleted 2 fact(s) from 'data'.
 > ?data(X, Y)
 No results.
 > .kg use default

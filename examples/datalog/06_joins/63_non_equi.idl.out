@@ -14,4 +14,16 @@ Inserted 3 fact(s) into 'items'.
 > +thresholds[(1, 120, "low"), (2, 180, "medium")]
 Inserted 2 fact(s) into 'thresholds'.
 > +below_threshold(ItemId, Price, Label) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> items(ItemId, Price),
+Parse error: Expected parentheses: (ItemId, Price),
+> thresholds(_, Thresh, Label),
+Parse error: Expected parentheses: (_, Thresh, Label),
+> Price < Thresh
+Parse error: Unrecognized statement: Price < Thresh
+> ?below_threshold(I, P, L)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_non_equi_n06t63
+Knowledge graph 'test_non_equi_n06t63' dropped.

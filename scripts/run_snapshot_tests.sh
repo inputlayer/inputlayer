@@ -93,8 +93,11 @@ start_server() {
     # Clean up data folder for fresh start
     rm -rf "$PROJECT_DIR/data"
 
-    # Start fresh server (direct binary, no cargo run overhead)
-    "$SERVER_BIN" >/dev/null 2>&1 &
+    # Server log file for debugging
+    SERVER_LOG="${TEMP_DIR}/server.log"
+
+    # Start fresh server with logging to temp file
+    "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
 
     # Wait for server to be ready (up to 15 seconds)
@@ -572,6 +575,14 @@ else
     if [[ $FAILED -gt 0 ]]; then
         echo -e "${RED}Some tests failed!${NC}"
         echo "Run with -v for detailed diff output"
+        if [[ -f "$SERVER_LOG" ]]; then
+            echo ""
+            echo "=== Server Log (last 50 lines) ==="
+            tail -50 "$SERVER_LOG"
+            echo "=== End Server Log ==="
+            SERVER_LOG_LINES=$(wc -l < "$SERVER_LOG" | tr -d ' ')
+            echo "(Total server log: $SERVER_LOG_LINES lines)"
+        fi
         exit 1
     else
         echo -e "${GREEN}All tests passed!${NC}"

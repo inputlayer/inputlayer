@@ -10,4 +10,8 @@ Switched to knowledge graph: test_empty_body_n12t30
 > .kg use test_empty_body_n12t30
 Switched to knowledge graph: test_empty_body_n12t30
 > +foo(X) <- .
-Script error: Parse error: Invalid atom: .
+Parse error: Invalid atom: .
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_empty_body_n12t30
+Knowledge graph 'test_empty_body_n12t30' dropped.

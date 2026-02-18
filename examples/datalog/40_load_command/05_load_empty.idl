@@ -5,7 +5,7 @@
 
 // Create an empty helper file (just comments)
 // For now, load from existing file that works
-.load examples/datalog/40_load_command/_helper_data.dl
+.load examples/datalog/40_load_command/_helper_data.idl
 
 ?loaded_data(X, Y)
 

@@ -52,7 +52,18 @@ impl PersistWal {
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&self.current_file)?;
+                .open(&self.current_file)
+                .map_err(|e| {
+                    eprintln!(
+                        "[wal] ERROR ensure_writer: path={}, parent_exists={}, error={}",
+                        self.current_file.display(),
+                        self.current_file
+                            .parent()
+                            .is_some_and(std::path::Path::exists),
+                        e
+                    );
+                    e
+                })?;
             self.writer = Some(BufWriter::new(file));
         }
         Ok(self.writer.as_mut().unwrap())

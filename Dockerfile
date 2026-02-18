@@ -40,6 +40,6 @@ USER inputlayer
 WORKDIR /var/lib/inputlayer
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:8080/api/v1/health || exit 1
+    CMD curl -sf http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["inputlayer-server"]

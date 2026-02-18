@@ -14,4 +14,16 @@ Inserted 3 fact(s) into 'products'.
 > +budgets[(1, "Alice", 80), (2, "Bob", 120)]
 Inserted 2 fact(s) into 'budgets'.
 > affordable(BuyerName, ProductName, Price, Budget) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> budgets(_, BuyerName, Budget),
+Parse error: Expected parentheses: (_, BuyerName, Budget),
+> products(_, ProductName, Price),
+Parse error: Expected parentheses: (_, ProductName, Price),
+> Price <= Budget
+Parse error: Unrecognized statement: Price <= Budget
+> ?affordable(BuyerName, ProductName, Price, Budget)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_theta_n06t20
+Knowledge graph 'test_theta_n06t20' dropped.

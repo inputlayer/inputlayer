@@ -12,7 +12,7 @@ Switched to knowledge graph: test_dup_n10t03
 > +edge[(1,2)]
 Inserted 1 fact(s) into 'edge'.
 > +edge[(1,2)]
-No facts inserted (1 duplicate skipped).
+Inserted 0 fact(s) into 'edge'.
 > +edge[(1,2), (2,3), (2,3)]
 Inserted 1 fact(s) into 'edge'.
 > ?edge(X, Y)

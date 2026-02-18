@@ -12,4 +12,18 @@ Switched to knowledge graph: test_chain_filt_n07t08
 > +data[(1, 10, "active"), (2, 20, "inactive"), (3, 30, "active"), (4, 5, "active"), (5, 25, "inactive")]
 Inserted 5 fact(s) into 'data'.
 > filtered(Id, Val, Status) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> data(Id, Val, Status),
+Parse error: Expected parentheses: (Id, Val, Status),
+> Status = "active",
+Parse error: Unrecognized statement: Status = "active",
+> Val > 5,
+Parse error: Unrecognized statement: Val > 5,
+> Id != 4
+Parse error: Unrecognized statement: Id != 4
+> ?filtered(Id, Val, Status)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_chain_filt_n07t08
+Knowledge graph 'test_chain_filt_n07t08' dropped.

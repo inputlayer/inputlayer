@@ -12,9 +12,9 @@ Switched to knowledge graph: test_compact_n33t03
 > +data[(1, "a"), (2, "b"), (3, "c")]
 Inserted 3 fact(s) into 'data'.
 > -data[(2, "b")]
-Deleted 1 facts from 'data'.
+Deleted 1 fact(s) from 'data'.
 > .compact
-Compaction command not available over HTTP.
+Compaction complete.
 > ?data(Id, Val)
 ┌──────┬──────┐
 │ col0 │ col1 │

@@ -12,4 +12,8 @@ Switched to knowledge graph: test_inv_agg_n12t42
 > +data[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'data'.
 > bad(X, <INVALID:Y>) <- data(Y)
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_inv_agg_n12t42
+Knowledge graph 'test_inv_agg_n12t42' dropped.

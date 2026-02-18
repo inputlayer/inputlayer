@@ -35,24 +35,33 @@ test-all: check
 	fi; \
 	echo ""; \
 	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
-	UNIT_OUTPUT=$$(cargo test --all-features 2>&1); \
+	UNIT_TMPFILE=$$(mktemp); \
+	cargo test --all-features > "$$UNIT_TMPFILE" 2>&1; \
 	UNIT_EXIT=$$?; \
-	echo "$$UNIT_OUTPUT" | tail -5; \
-	UNIT_PASSED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$4} END {print sum+0}'); \
-	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
-	UNIT_IGNORED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$8} END {print sum+0}'); \
+	tail -5 "$$UNIT_TMPFILE"; \
+	UNIT_PASSED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$4} END {print sum+0}'); \
+	UNIT_FAILED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$6} END {print sum+0}'); \
+	UNIT_IGNORED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$8} END {print sum+0}'); \
+	rm -f "$$UNIT_TMPFILE"; \
 	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	if [ "$$UNIT_IGNORED" -gt 0 ] 2>/dev/null; then \
 		echo "ERROR: $$UNIT_IGNORED ignored test(s) detected. No tests may be ignored."; \
 		FAILURES=$$((FAILURES + 1)); \
 	fi; \
 	echo ""; \
-	echo "=== Snapshot Tests (E2E, $$NCPU parallel) ==="; \
-	SNAP_OUTPUT=$$(./scripts/run_snapshot_tests.sh --skip-build -j $$NCPU 2>&1); \
+	echo "Settling before snapshot tests..."; \
+	lsof -ti :8080 | xargs kill 2>/dev/null || true; \
+	rm -rf ./data 2>/dev/null || true; \
+	sleep 3; \
+	echo ""; \
+	echo "=== Snapshot Tests (E2E) ==="; \
+	SNAP_TMPFILE=$$(mktemp); \
+	./scripts/run_snapshot_tests.sh --skip-build > "$$SNAP_TMPFILE" 2>&1; \
 	SNAP_EXIT=$$?; \
-	echo "$$SNAP_OUTPUT" | tail -10; \
-	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \
-	SNAP_FAILED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Failed:" | awk '{print $$2}'); \
+	tail -10 "$$SNAP_TMPFILE"; \
+	SNAP_PASSED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Passed:" | awk '{print $$2}'); \
+	SNAP_FAILED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Failed:" | awk '{print $$2}'); \
+	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
 	echo "=== Cleanup Verification ==="; \

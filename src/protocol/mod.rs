@@ -8,14 +8,13 @@
 //! +-------------------------------------------------------------+
 //! |                   InputLayer Protocol                       |
 //! +-------------------------------------------------------------+
-//! |  HTTP API (REST):                                           |
-//! |    - /api/v1/knowledge-graphs: knowledge graph management  |
-//! |    - /api/v1/query: execute Datalog queries                |
-//! |    - /api/v1/knowledge-graphs/:kg/relations: data ops      |
-//! |    - /api/v1/health: health checks                          |
+//! |  HTTP Endpoints:                                            |
+//! |    - /health: health check                                  |
+//! |    - /metrics: server statistics                             |
+//! |    - /api/v1/ws: WebSocket (all data operations)            |
 //! +-------------------------------------------------------------+
-//! |  Wire Format: JSON serialization (HTTP) / bincode (internal)|
-//! |  Transport: HTTP                                             |
+//! |  Wire Format: JSON (WebSocket) / bincode (internal)         |
+//! |  Transport: WebSocket                                        |
 //! +-------------------------------------------------------------+
 //! ```
 //!

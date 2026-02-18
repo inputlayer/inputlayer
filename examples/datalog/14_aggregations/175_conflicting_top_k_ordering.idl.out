@@ -36,4 +36,8 @@ Rule 'top2_by_subject' registered.
 └───────────┴─────────┴──────┘
 4 rows
 > +top2_by_subject(Subj, top_k<2, Name, Score:asc>) <- scores(Subj, Name, Score)
-Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'top_k<2, Name, Score:asc>' to rule 'top2_by_subject' which already has a clause with 'top_k<2, Name, Score:desc>'. Drop the rule first with '.rule drop top2_by_subject' and re-create it.
+Failed to register rule: Conflicting aggregation: cannot add clause with 'top_k<2, Name, Score:asc>' to rule 'top2_by_subject' which already has a clause with 'top_k<2, Name, Score:desc>'. Drop the rule first with '.rule drop top2_by_subject' and re-create it.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_conflict_topk_n14t175
+Knowledge graph 'test_conflict_topk_n14t175' dropped.

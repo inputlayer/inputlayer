@@ -1907,244 +1907,283 @@ impl CodeGenerator {
         // reduce returns Collection<G, (K, V)> so we need to extract just the result tuple
         let aggs_clone = aggregations.clone();
 
-        keyed.reduce(move |key, input, output| {
-            // input: slice of (&Tuple, R) pairs
-            // We need to compute aggregations over all tuples with this key
+        keyed
+            .reduce(move |key, input, output| {
+                // input: slice of (&Tuple, R) pairs
+                // We need to compute aggregations over all tuples with this key
 
-            // Collect all tuples (accounting for multiplicities)
-            let mut tuples: Vec<&Tuple> = Vec::new();
-            for (tuple, count) in input {
-                for _ in 0..count.to_count() {
-                    tuples.push(*tuple);
-                }
-            }
-
-            if tuples.is_empty() {
-                return;
-            }
-
-            // Check for ranking aggregates (TopK, TopKThreshold, WithinRadius)
-            // These return multiple rows per group instead of a single aggregate value
-            let has_ranking_agg = aggs_clone.iter().any(|(func, _)| func.is_ranking());
-
-            if has_ranking_agg {
-                // Handle ranking aggregates - output multiple rows per group
-                // Output: group_by key cols + output_cols from selected tuples
-                for (func, _col_idx) in &aggs_clone {
-                    match func {
-                        AggregateFunction::TopK { k, order_col, output_cols, descending } => {
-                            use std::cmp::Reverse;
-                            use std::collections::BinaryHeap;
-
-                            let null_val = Value::Null;
-
-                            // Helper to build output tuple: key + output_cols values
-                            let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
-                                let mut vals: Vec<Value> = key.values().to_vec();
-                                for &col in output_cols {
-                                    vals.push(t.get(col).cloned().unwrap_or(Value::Null));
-                                }
-                                Tuple::new(vals)
-                            };
-
-                            if *descending {
-                                let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
-                                for t in &tuples {
-                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
-                                    if heap.len() < *k {
-                                        heap.push(Reverse((score, *t)));
-                                    } else if let Some(Reverse((ref min_score, _))) = heap.peek() {
-                                        if score > *min_score {
-                                            heap.pop();
-                                            heap.push(Reverse((score, *t)));
-                                        }
-                                    }
-                                }
-                                let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
-                                result.sort_by(|a, b| b.0.cmp(&a.0));
-                                for (_, tuple) in result {
-                                    output.push((build_result(key, tuple), R::one()));
-                                }
-                            } else {
-                                let mut heap: BinaryHeap<(Value, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
-                                for t in &tuples {
-                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
-                                    if heap.len() < *k {
-                                        heap.push((score, *t));
-                                    } else if let Some((ref max_score, _)) = heap.peek() {
-                                        if score < *max_score {
-                                            heap.pop();
-                                            heap.push((score, *t));
-                                        }
-                                    }
-                                }
-                                let mut result: Vec<_> = heap.into_iter().collect();
-                                result.sort_by(|a, b| a.0.cmp(&b.0));
-                                for (_, tuple) in result {
-                                    output.push((build_result(key, tuple), R::one()));
-                                }
-                            }
-                        }
-                        AggregateFunction::TopKThreshold { k, order_col, output_cols, threshold, descending } => {
-                            use std::cmp::Reverse;
-                            use std::collections::BinaryHeap;
-
-                            let null_val = Value::Null;
-
-                            let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
-                                let mut vals: Vec<Value> = key.values().to_vec();
-                                for &col in output_cols {
-                                    vals.push(t.get(col).cloned().unwrap_or(Value::Null));
-                                }
-                                Tuple::new(vals)
-                            };
-
-                            if *descending {
-                                let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> = BinaryHeap::with_capacity(*k + 1);
-                                for t in &tuples {
-                                    let score_f64 = t.get(*order_col).map_or(f64::NEG_INFINITY, super::value::Value::to_f64);
-                                    if score_f64 < *threshold {
-                                        continue;
-                                    }
-                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
-                                    if heap.len() < *k {
-                                        heap.push(Reverse((score, *t)));
-                                    } else if let Some(Reverse((ref min_score, _))) = heap.peek() {
-                                        if score > *min_score {
-                                            heap.pop();
-                                            heap.push(Reverse((score, *t)));
-                                        }
-                                    }
-                                }
-                                let mut result: Vec<_> = heap.into_iter().map(|Reverse((score, t))| (score, t)).collect();
-                                result.sort_by(|a, b| b.0.cmp(&a.0));
-                                for (_, tuple) in result {
-                                    output.push((build_result(key, tuple), R::one()));
-                                }
-                            } else {
-                                let mut heap: BinaryHeap<(Value, &Tuple)> = BinaryHeap::with_capacity(*k + 1);
-                                for t in &tuples {
-                                    let score_f64 = t.get(*order_col).map_or(f64::INFINITY, super::value::Value::to_f64);
-                                    if score_f64 > *threshold {
-                                        continue;
-                                    }
-                                    let score = t.get(*order_col).cloned().unwrap_or_else(|| null_val.clone());
-                                    if heap.len() < *k {
-                                        heap.push((score, *t));
-                                    } else if let Some((ref max_score, _)) = heap.peek() {
-                                        if score < *max_score {
-                                            heap.pop();
-                                            heap.push((score, *t));
-                                        }
-                                    }
-                                }
-                                let mut result: Vec<_> = heap.into_iter().collect();
-                                result.sort_by(|a, b| a.0.cmp(&b.0));
-                                for (_, tuple) in result {
-                                    output.push((build_result(key, tuple), R::one()));
-                                }
-                            }
-                        }
-                        AggregateFunction::WithinRadius { distance_col, output_cols, max_distance } => {
-                            for tuple in &tuples {
-                                let dist = tuple.get(*distance_col)
-                                    .map_or(f64::INFINITY, super::value::Value::to_f64);
-                                if dist <= *max_distance {
-                                    let mut vals: Vec<Value> = key.values().to_vec();
-                                    for &col in output_cols {
-                                        vals.push(tuple.get(col).cloned().unwrap_or(Value::Null));
-                                    }
-                                    output.push((Tuple::new(vals), R::one()));
-                                }
-                            }
-                        }
-                        _ => {} // Standard aggregates handled below
+                // Collect all tuples (accounting for multiplicities)
+                let mut tuples: Vec<&Tuple> = Vec::new();
+                for (tuple, count) in input {
+                    for _ in 0..count.to_count() {
+                        tuples.push(*tuple);
                     }
                 }
-            } else {
-                // Standard aggregation - output one row per group
-                let mut agg_values: Vec<Value> = Vec::new();
 
-                for (func, col_idx) in &aggs_clone {
-                    let agg_result = match func {
-                        AggregateFunction::Count => {
-                            Value::Int64(tuples.len() as i64)
-                        }
-                        AggregateFunction::CountDistinct => {
-                            // Count unique values in the column
-                            let unique_values: std::collections::HashSet<_> = tuples
-                                .iter()
-                                .filter_map(|t| t.get(*col_idx).cloned())
-                                .collect();
-                            Value::Int64(unique_values.len() as i64)
-                        }
-                        AggregateFunction::Sum => {
-                            // Use saturating arithmetic to handle overflow safely
-                            // This processes ALL tuples and saturates at boundaries
-                            let mut sum: i64 = 0;
-                            let mut overflow = false;
-                            for t in &tuples {
-                                let val = t.get(*col_idx).map_or(0, super::value::Value::to_i64);
-                                let old_sum = sum;
-                                sum = sum.saturating_add(val);
-                                // Detect if saturation occurred
-                                if !overflow && sum != old_sum.wrapping_add(val) {
-                                    overflow = true;
-                                }
-                            }
-                            if overflow {
-                                // Log warning but continue with saturated value
-                                // This matches SQL behavior for overflow
-                                eprintln!("Warning: Integer overflow in SUM aggregation, result saturated");
-                            }
-                            Value::Int64(sum)
-                        }
-                        AggregateFunction::Min => {
-                            let min = tuples
-                                .iter()
-                                .filter_map(|t| t.get(*col_idx))
-                                .min()
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            min
-                        }
-                        AggregateFunction::Max => {
-                            let max = tuples
-                                .iter()
-                                .filter_map(|t| t.get(*col_idx))
-                                .max()
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            max
-                        }
-                        AggregateFunction::Avg => {
-                            let count = tuples.len() as f64;
-                            if count == 0.0 {
-                                Value::Null // Guard against division by zero
-                            } else {
-                                let sum: f64 = tuples
-                                    .iter()
-                                    .map(|t| t.get(*col_idx).map_or(0.0, super::value::Value::to_f64))
-                                    .sum();
-                                Value::Float64(sum / count)
-                            }
-                        }
-                        // Ranking aggregates handled above
-                        _ => continue,
-                    };
-                    agg_values.push(agg_result);
+                if tuples.is_empty() {
+                    return;
                 }
 
-                // Build output tuple: group key columns + aggregate values
-                let mut result_values: Vec<Value> = key.values().to_vec();
-                result_values.extend(agg_values);
-                let result = Tuple::new(result_values);
+                // Check for ranking aggregates (TopK, TopKThreshold, WithinRadius)
+                // These return multiple rows per group instead of a single aggregate value
+                let has_ranking_agg = aggs_clone.iter().any(|(func, _)| func.is_ranking());
 
-                output.push((result, R::one()));
-            }
-        })
-        // Extract just the result tuple from (key, result) pairs
-        .map(|(_key, result)| result)
+                if has_ranking_agg {
+                    // Handle ranking aggregates - output multiple rows per group
+                    // Output: group_by key cols + output_cols from selected tuples
+                    for (func, _col_idx) in &aggs_clone {
+                        match func {
+                            AggregateFunction::TopK {
+                                k,
+                                order_col,
+                                output_cols,
+                                descending,
+                            } => {
+                                use std::cmp::Reverse;
+                                use std::collections::BinaryHeap;
+
+                                let null_val = Value::Null;
+
+                                // Helper to build output tuple: key + output_cols values
+                                let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
+                                    let mut vals: Vec<Value> = key.values().to_vec();
+                                    for &col in output_cols {
+                                        vals.push(t.get(col).cloned().unwrap_or(Value::Null));
+                                    }
+                                    Tuple::new(vals)
+                                };
+
+                                if *descending {
+                                    let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> =
+                                        BinaryHeap::with_capacity(*k + 1);
+                                    for t in &tuples {
+                                        let score = t
+                                            .get(*order_col)
+                                            .cloned()
+                                            .unwrap_or_else(|| null_val.clone());
+                                        if heap.len() < *k {
+                                            heap.push(Reverse((score, *t)));
+                                        } else if let Some(Reverse((ref min_score, _))) =
+                                            heap.peek()
+                                        {
+                                            if score > *min_score {
+                                                heap.pop();
+                                                heap.push(Reverse((score, *t)));
+                                            }
+                                        }
+                                    }
+                                    let mut result: Vec<_> = heap
+                                        .into_iter()
+                                        .map(|Reverse((score, t))| (score, t))
+                                        .collect();
+                                    result.sort_by(|a, b| b.0.cmp(&a.0));
+                                    for (_, tuple) in result {
+                                        output.push((build_result(key, tuple), R::one()));
+                                    }
+                                } else {
+                                    let mut heap: BinaryHeap<(Value, &Tuple)> =
+                                        BinaryHeap::with_capacity(*k + 1);
+                                    for t in &tuples {
+                                        let score = t
+                                            .get(*order_col)
+                                            .cloned()
+                                            .unwrap_or_else(|| null_val.clone());
+                                        if heap.len() < *k {
+                                            heap.push((score, *t));
+                                        } else if let Some((ref max_score, _)) = heap.peek() {
+                                            if score < *max_score {
+                                                heap.pop();
+                                                heap.push((score, *t));
+                                            }
+                                        }
+                                    }
+                                    let mut result: Vec<_> = heap.into_iter().collect();
+                                    result.sort_by(|a, b| a.0.cmp(&b.0));
+                                    for (_, tuple) in result {
+                                        output.push((build_result(key, tuple), R::one()));
+                                    }
+                                }
+                            }
+                            AggregateFunction::TopKThreshold {
+                                k,
+                                order_col,
+                                output_cols,
+                                threshold,
+                                descending,
+                            } => {
+                                use std::cmp::Reverse;
+                                use std::collections::BinaryHeap;
+
+                                let null_val = Value::Null;
+
+                                let build_result = |key: &Tuple, t: &Tuple| -> Tuple {
+                                    let mut vals: Vec<Value> = key.values().to_vec();
+                                    for &col in output_cols {
+                                        vals.push(t.get(col).cloned().unwrap_or(Value::Null));
+                                    }
+                                    Tuple::new(vals)
+                                };
+
+                                if *descending {
+                                    let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> =
+                                        BinaryHeap::with_capacity(*k + 1);
+                                    for t in &tuples {
+                                        let score_f64 = t
+                                            .get(*order_col)
+                                            .map_or(f64::NEG_INFINITY, super::value::Value::to_f64);
+                                        if score_f64 < *threshold {
+                                            continue;
+                                        }
+                                        let score = t
+                                            .get(*order_col)
+                                            .cloned()
+                                            .unwrap_or_else(|| null_val.clone());
+                                        if heap.len() < *k {
+                                            heap.push(Reverse((score, *t)));
+                                        } else if let Some(Reverse((ref min_score, _))) =
+                                            heap.peek()
+                                        {
+                                            if score > *min_score {
+                                                heap.pop();
+                                                heap.push(Reverse((score, *t)));
+                                            }
+                                        }
+                                    }
+                                    let mut result: Vec<_> = heap
+                                        .into_iter()
+                                        .map(|Reverse((score, t))| (score, t))
+                                        .collect();
+                                    result.sort_by(|a, b| b.0.cmp(&a.0));
+                                    for (_, tuple) in result {
+                                        output.push((build_result(key, tuple), R::one()));
+                                    }
+                                } else {
+                                    let mut heap: BinaryHeap<(Value, &Tuple)> =
+                                        BinaryHeap::with_capacity(*k + 1);
+                                    for t in &tuples {
+                                        let score_f64 = t
+                                            .get(*order_col)
+                                            .map_or(f64::INFINITY, super::value::Value::to_f64);
+                                        if score_f64 > *threshold {
+                                            continue;
+                                        }
+                                        let score = t
+                                            .get(*order_col)
+                                            .cloned()
+                                            .unwrap_or_else(|| null_val.clone());
+                                        if heap.len() < *k {
+                                            heap.push((score, *t));
+                                        } else if let Some((ref max_score, _)) = heap.peek() {
+                                            if score < *max_score {
+                                                heap.pop();
+                                                heap.push((score, *t));
+                                            }
+                                        }
+                                    }
+                                    let mut result: Vec<_> = heap.into_iter().collect();
+                                    result.sort_by(|a, b| a.0.cmp(&b.0));
+                                    for (_, tuple) in result {
+                                        output.push((build_result(key, tuple), R::one()));
+                                    }
+                                }
+                            }
+                            AggregateFunction::WithinRadius {
+                                distance_col,
+                                output_cols,
+                                max_distance,
+                            } => {
+                                for tuple in &tuples {
+                                    let dist = tuple
+                                        .get(*distance_col)
+                                        .map_or(f64::INFINITY, super::value::Value::to_f64);
+                                    if dist <= *max_distance {
+                                        let mut vals: Vec<Value> = key.values().to_vec();
+                                        for &col in output_cols {
+                                            vals.push(
+                                                tuple.get(col).cloned().unwrap_or(Value::Null),
+                                            );
+                                        }
+                                        output.push((Tuple::new(vals), R::one()));
+                                    }
+                                }
+                            }
+                            _ => {} // Standard aggregates handled below
+                        }
+                    }
+                } else {
+                    // Standard aggregation - output one row per group
+                    let mut agg_values: Vec<Value> = Vec::new();
+
+                    for (func, col_idx) in &aggs_clone {
+                        let agg_result = match func {
+                            AggregateFunction::Count => Value::Int64(tuples.len() as i64),
+                            AggregateFunction::CountDistinct => {
+                                // Count unique values in the column
+                                let unique_values: std::collections::HashSet<_> = tuples
+                                    .iter()
+                                    .filter_map(|t| t.get(*col_idx).cloned())
+                                    .collect();
+                                Value::Int64(unique_values.len() as i64)
+                            }
+                            AggregateFunction::Sum => {
+                                // Use saturating arithmetic to handle overflow safely.
+                                // Saturation at i64::MAX/MIN matches SQL behavior.
+                                let mut sum: i64 = 0;
+                                for t in &tuples {
+                                    let val =
+                                        t.get(*col_idx).map_or(0, super::value::Value::to_i64);
+                                    sum = sum.saturating_add(val);
+                                }
+                                Value::Int64(sum)
+                            }
+                            AggregateFunction::Min => {
+                                let min = tuples
+                                    .iter()
+                                    .filter_map(|t| t.get(*col_idx))
+                                    .min()
+                                    .cloned()
+                                    .unwrap_or(Value::Null);
+                                min
+                            }
+                            AggregateFunction::Max => {
+                                let max = tuples
+                                    .iter()
+                                    .filter_map(|t| t.get(*col_idx))
+                                    .max()
+                                    .cloned()
+                                    .unwrap_or(Value::Null);
+                                max
+                            }
+                            AggregateFunction::Avg => {
+                                let count = tuples.len() as f64;
+                                if count == 0.0 {
+                                    Value::Null // Guard against division by zero
+                                } else {
+                                    let sum: f64 = tuples
+                                        .iter()
+                                        .map(|t| {
+                                            t.get(*col_idx).map_or(0.0, super::value::Value::to_f64)
+                                        })
+                                        .sum();
+                                    Value::Float64(sum / count)
+                                }
+                            }
+                            // Ranking aggregates handled above
+                            _ => continue,
+                        };
+                        agg_values.push(agg_result);
+                    }
+
+                    // Build output tuple: group key columns + aggregate values
+                    let mut result_values: Vec<Value> = key.values().to_vec();
+                    result_values.extend(agg_values);
+                    let result = Tuple::new(result_values);
+
+                    output.push((result, R::one()));
+                }
+            })
+            // Extract just the result tuple from (key, result) pairs
+            .map(|(_key, result)| result)
     }
 
     /// Generate compute node (production: vector functions and expressions)

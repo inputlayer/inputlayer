@@ -12,4 +12,14 @@ Switched to knowledge graph: test_minmax_fn_n32t15
 > +pairs[(10, 20), (30, 15), (5, 5), (100, 50)]
 Inserted 4 fact(s) into 'pairs'.
 > min_of_pair(A, B, M) <- pairs(A, B), M = MIN(A, B)
-Script error: Parse error: Invalid term: 'MIN(A, B)'
+Parse error: Invalid term: 'MIN(A, B)'
+> max_of_pair(A, B, M) <- pairs(A, B), M = MAX(A, B)
+Parse error: Invalid term: 'MAX(A, B)'
+> ?min_of_pair(A, B, M)
+No results.
+> ?max_of_pair(A, B, M)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_minmax_fn_n32t15
+Knowledge graph 'test_minmax_fn_n32t15' dropped.

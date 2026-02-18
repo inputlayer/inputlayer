@@ -14,4 +14,14 @@ Inserted 4 fact(s) into 'status_codes'.
 > +orders[(101, 1), (102, 2), (103, 3), (104, 1)]
 Inserted 4 fact(s) into 'orders'.
 > +order_status(OrderId, StatusName) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(OrderId, StatusCode),
+Parse error: Expected parentheses: (OrderId, StatusCode),
+> status_codes(StatusCode, StatusName)
+Cannot insert variable 'StatusCode' - use constants only
+> ?order_status(O, S)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_lookup_n18t114
+Knowledge graph 'test_lookup_n18t114' dropped.

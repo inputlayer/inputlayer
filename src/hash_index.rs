@@ -413,9 +413,6 @@ impl Default for HashIndexConfig {
 struct IndexUsageStats {
     /// Number of times this join key was used in queries
     lookup_count: usize,
-    /// Number of probe operations
-    #[allow(dead_code)]
-    probe_count: usize,
     /// Last access timestamp (for LRU)
     last_used: u64,
 }

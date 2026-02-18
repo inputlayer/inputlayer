@@ -10,4 +10,35 @@ Switched to knowledge graph: test_comments_n10t13
 > .kg use test_comments_n10t13
 Switched to knowledge graph: test_comments_n10t13
 > +edge(1, 2).
-Script error: Parse error: Expected parentheses: (1, 2).
+Parse error: Expected parentheses: (1, 2).
+> +edge(2, 3)
+Inserted 1 fact(s) into 'edge'.
+> +edge(3, 4)
+Inserted 1 fact(s) into 'edge'.
+> +edge(4, 5)
+Inserted 1 fact(s) into 'edge'.
+> ?edge(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    2 │    3 │
+│    3 │    4 │
+│    4 │    5 │
+└──────┴──────┘
+3 rows
+> +path(X, Y) <- edge(X, Y).
+Parse error: Invalid term: 'Y).'
+> +path(X, Z) <- path(X, Y), edge(Y, Z).
+Parse error: Invalid term: 'Z).'
+> ?path(1, X)
+No results.
+> +data(100, 200).
+Parse error: Expected parentheses: (100, 200).
+> +data(101, 201).
+Parse error: Expected parentheses: (101, 201).
+> ?data(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_comments_n10t13
+Knowledge graph 'test_comments_n10t13' dropped.

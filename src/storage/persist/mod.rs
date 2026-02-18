@@ -62,8 +62,6 @@ pub struct PersistConfig {
     pub path: PathBuf,
     /// Buffer size before flushing to batch file
     pub buffer_size: usize,
-    /// Whether to sync WAL immediately on each write (DEPRECATED)
-    pub immediate_sync: bool,
     /// Durability mode for writes
     pub durability_mode: DurabilityMode,
 }
@@ -73,7 +71,6 @@ impl Default for PersistConfig {
         PersistConfig {
             path: PathBuf::from("./data/persist"),
             buffer_size: 10000,
-            immediate_sync: true,
             durability_mode: DurabilityMode::Immediate,
         }
     }
@@ -218,7 +215,15 @@ impl FilePersist {
             .join(format!("{}.json", sanitize_name(&meta.name)));
         let content = serde_json::to_string_pretty(meta)
             .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
-        fs::write(&path, content)?;
+        if let Err(e) = fs::write(&path, &content) {
+            eprintln!(
+                "[persist] ERROR save_shard_meta: path={}, parent_exists={}, error={}",
+                path.display(),
+                path.parent().is_some_and(std::path::Path::exists),
+                e
+            );
+            return Err(e.into());
+        }
         Ok(())
     }
 
@@ -695,7 +700,7 @@ mod tests {
         let config = PersistConfig {
             path: temp.path().to_path_buf(),
             buffer_size: 5,
-            immediate_sync: true,
+
             durability_mode: DurabilityMode::Immediate,
         };
         let persist = FilePersist::new(config).unwrap();
@@ -840,7 +845,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -863,7 +868,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -966,7 +971,6 @@ mod tests {
     fn test_persist_config_default() {
         let config = PersistConfig::default();
         assert_eq!(config.buffer_size, 10000);
-        assert!(config.immediate_sync);
         assert_eq!(config.path, PathBuf::from("./data/persist"));
         assert!(matches!(config.durability_mode, DurabilityMode::Immediate));
     }
@@ -1176,7 +1180,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -1194,7 +1198,7 @@ mod tests {
             let config = PersistConfig {
                 path,
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();

@@ -97,10 +97,6 @@ pub struct PersistLayerConfig {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
 
-    /// Whether to sync WAL immediately on each write (DEPRECATED: use `durability_mode` instead)
-    #[serde(default = "default_true")]
-    pub immediate_sync: bool,
-
     /// Durability mode for writes (immediate, batched, or async)
     #[serde(default)]
     pub durability_mode: DurabilityMode,
@@ -119,7 +115,6 @@ impl Default for PersistLayerConfig {
         PersistLayerConfig {
             enabled: true,
             buffer_size: 10000,
-            immediate_sync: true,
             durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
         }
@@ -521,7 +516,6 @@ mod tests {
         let persist = PersistLayerConfig::default();
         assert!(persist.enabled);
         assert_eq!(persist.buffer_size, 10000);
-        assert!(persist.immediate_sync);
         assert_eq!(persist.durability_mode, DurabilityMode::Immediate);
         assert_eq!(persist.compaction_window, 0);
     }

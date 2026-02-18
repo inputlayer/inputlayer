@@ -45,4 +45,19 @@ Inserted 1 fact(s) into 'vectors'.
 > +query[(100, [0.95, 0.05, 0.0, 0.0])]
 Inserted 1 fact(s) into 'query'.
 > lsh_candidate(QueryId, CandidateId, QueryBucket) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> query(QueryId, QV),
+Parse error: Expected parentheses: (QueryId, QV),
+> QueryBucket = lsh_bucket(QV, 0, 3),
+Parse error: Expected parentheses: (QV, 0, 3),
+> lsh_index(CandidateId, _, CandidateB),
+Parse error: Expected parentheses: (CandidateId, _, CandidateB),
+> QueryBucket = CandidateB
+Parse error: Unrecognized statement: QueryBucket = CandidateB
+> ?lsh_candidate(QueryId, CandidateId, Bucket)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_similarity_n31t04
+Knowledge graph 'test_lsh_similarity_n31t04' dropped.

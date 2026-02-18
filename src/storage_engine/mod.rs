@@ -111,7 +111,6 @@ impl StorageEngine {
         let persist_config = PersistConfig {
             path: config.storage.data_dir.join("persist"),
             buffer_size: config.storage.persist.buffer_size,
-            immediate_sync: config.storage.persist.immediate_sync,
             durability_mode: config.storage.persist.durability_mode,
         };
         let persist = Arc::new(FilePersist::new(persist_config)?);
@@ -998,6 +997,35 @@ impl StorageEngine {
         db.remove_schema(relation).map_err(StorageError::Other)
     }
 
+    /// Execute a closure with read access to a specific KnowledgeGraph.
+    ///
+    /// This helper provides a convenient way to access KG internals
+    /// (like the IncrementalEngine) from Handler methods.
+    pub fn with_kg_read<T, F>(&self, kg: &str, f: F) -> StorageResult<T>
+    where
+        F: FnOnce(&KnowledgeGraph) -> Result<T, String>,
+    {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = db.read();
+        f(&db).map_err(StorageError::Other)
+    }
+
+    /// Execute a closure with write access to a specific KnowledgeGraph.
+    pub fn with_kg_mut<T, F>(&self, kg: &str, f: F) -> StorageResult<T>
+    where
+        F: FnOnce(&mut KnowledgeGraph) -> Result<T, String>,
+    {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let mut db = db.write();
+        f(&mut db).map_err(StorageError::Other)
+    }
+
     /// List all schemas in the current knowledge graph
     pub fn list_schemas(&self) -> StorageResult<Vec<String>> {
         let kg_name = self
@@ -1434,7 +1462,14 @@ impl StorageEngine {
     /// Save system-wide knowledge graphs metadata
     fn save_knowledge_graphs_metadata(&self) -> StorageResult<()> {
         let metadata_dir = self.config.storage.data_dir.join("metadata");
-        fs::create_dir_all(&metadata_dir)?;
+        if let Err(e) = fs::create_dir_all(&metadata_dir) {
+            eprintln!(
+                "[storage] ERROR create metadata dir: path={}, error={}",
+                metadata_dir.display(),
+                e
+            );
+            return Err(e.into());
+        }
 
         let knowledge_graphs: Vec<_> = self
             .knowledge_graphs

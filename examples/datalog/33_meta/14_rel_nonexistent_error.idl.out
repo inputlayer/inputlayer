@@ -10,4 +10,8 @@ Switched to knowledge graph: test_rel_noexist_n33t14
 > .kg use test_rel_noexist_n33t14
 Switched to knowledge graph: test_rel_noexist_n33t14
 > .rel nonexistent_relation
-Script error: Relation 'nonexistent_relation' not found
+Relation 'nonexistent_relation' not found.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_noexist_n33t14
+Knowledge graph 'test_rel_noexist_n33t14' dropped.
