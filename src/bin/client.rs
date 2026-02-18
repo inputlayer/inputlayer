@@ -507,7 +507,7 @@ fn http_to_ws_url(http_url: &str) -> String {
     } else {
         base.replacen("http://", "ws://", 1)
     };
-    format!("{ws_base}/api/v1/ws")
+    format!("{ws_base}/ws")
 }
 
 // ── Script execution ────────────────────────────────────────────
@@ -1382,15 +1382,15 @@ mod tests {
     fn test_http_to_ws_url() {
         assert_eq!(
             http_to_ws_url("http://127.0.0.1:8080"),
-            "ws://127.0.0.1:8080/api/v1/ws"
+            "ws://127.0.0.1:8080/ws"
         );
         assert_eq!(
             http_to_ws_url("https://example.com:443"),
-            "wss://example.com:443/api/v1/ws"
+            "wss://example.com:443/ws"
         );
         assert_eq!(
             http_to_ws_url("http://10.0.0.5:8080/"),
-            "ws://10.0.0.5:8080/api/v1/ws"
+            "ws://10.0.0.5:8080/ws"
         );
     }
 

@@ -1,6 +1,6 @@
 //! Handler for `InputLayer`
 //!
-//! Core business logic for Datalog queries and data operations, used by the REST API.
+//! Core business logic for Datalog queries and data operations, used by the HTTP/WebSocket API.
 //! Uses `parking_lot::RwLock` (no poisoning) and `AtomicU64` (lock-free counters).
 
 use crate::ast::Term;
@@ -119,7 +119,7 @@ pub struct Handler {
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(256);
+        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
         Self {
             storage: Arc::new(RwLock::new(storage)),
             start_time: Instant::now(),
@@ -139,7 +139,7 @@ impl Handler {
 
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(256);
+        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
         Self {
             storage: Arc::new(RwLock::new(storage)),
             start_time: Instant::now(),
@@ -203,12 +203,12 @@ impl Handler {
         self.start_time.elapsed().as_secs()
     }
 
-    /// Get access to the storage engine (for REST API handlers).
+    /// Get access to the storage engine (for HTTP handlers).
     pub fn get_storage(&self) -> parking_lot::RwLockReadGuard<'_, StorageEngine> {
         self.storage.read()
     }
 
-    /// Get mutable access to the storage engine (for REST API handlers).
+    /// Get mutable access to the storage engine (for HTTP handlers).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
     }
@@ -1056,21 +1056,32 @@ impl Handler {
                                         if name == kg {
                                             messages.push("Cannot drop current knowledge graph. Switch to another first.".to_string());
                                         } else {
-                                            // Need write lock — release read lock temporarily
+                                            // Release read lock for Phase 1 (needs write lock)
                                             drop(storage);
-                                            {
+
+                                            // Phase 1: Fast in-memory removal (under write lock, ~microseconds)
+                                            let drop_result = {
                                                 let mut storage_w = self.storage.write();
-                                                match storage_w.drop_knowledge_graph(&name) {
-                                                    Ok(()) => messages.push(format!(
+                                                storage_w.prepare_drop_knowledge_graph(&name)
+                                            }; // write lock released immediately
+
+                                            match drop_result {
+                                                Ok(cleanup) => {
+                                                    messages.push(format!(
                                                         "Knowledge graph '{name}' dropped."
-                                                    )),
-                                                    Err(e) => {
-                                                        messages.push(format!("Drop failed: {e}"));
-                                                    }
+                                                    ));
+                                                    // Phase 2: Slow file cleanup (NO storage lock held)
+                                                    let storage_ref = self.storage.read();
+                                                    storage_ref
+                                                        .finish_drop_knowledge_graph(cleanup);
+                                                    drop(storage_ref);
+                                                }
+                                                Err(e) => {
+                                                    messages.push(format!("Drop failed: {e}"));
                                                 }
                                             }
-                                            // Re-acquire read lock — this is safe because KgDrop
-                                            // is typically the only statement in the program
+
+                                            // Re-acquire read lock
                                             storage = self.storage.read();
                                         }
                                     }
@@ -1784,6 +1795,11 @@ impl Handler {
     ) -> Result<QueryResult, String> {
         let trimmed = program.trim();
 
+        // Any session-bound activity should keep the session alive.
+        if let Some(sid) = session_id {
+            self.sessions.touch_session(sid)?;
+        }
+
         // Fast path: intercept session meta commands that need SessionManager
         if trimmed.starts_with('.') {
             if let Ok(statement::Statement::Meta(ref meta)) = statement::parse_statement(trimmed) {
@@ -2036,7 +2052,7 @@ impl Handler {
 /// Transform `?shorthand` query syntax into a `__query__(...) <- ...` rule.
 ///
 /// This enables the shorthand `?relation(X, Y)` syntax that the REPL and
-/// REST API use, converting it to a proper Datalog rule before execution.
+/// WebSocket API use, converting it to a proper Datalog rule before execution.
 /// Returns the original text unchanged if it's not a `?shorthand` query.
 ///
 /// Also extracts `:asc`/`:desc` sort annotations from query head variables,
@@ -2192,10 +2208,10 @@ fn format_term(term: &Term) -> String {
 /// Used by execute_program() to convert soft errors (Ok with message) to hard errors (Err)
 /// for the WebSocket protocol where each statement is a separate request.
 ///
-/// Only matches errors that the old REST API returned as HTTP 4xx/5xx (hard errors).
+/// Only matches errors that previously mapped to HTTP 4xx/5xx responses.
 /// Other errors (delete, insert validation) stay as messages (soft errors).
 fn is_error_message(msg: &str) -> bool {
-    // KG management errors (were HTTP 400/404 in REST API)
+    // KG management errors (historically mapped to HTTP 400/404 responses)
     msg.starts_with("Cannot drop current knowledge graph")
         || msg.starts_with("Create failed:")
         || msg.starts_with("Drop failed:")
@@ -2206,6 +2222,7 @@ fn is_error_message(msg: &str) -> bool {
 mod tests {
     use super::*;
     use crate::ast::Term;
+    use std::time::Duration;
 
     /// Create a Config with a unique temp directory. Returns TempDir so it stays alive
     /// for the test's duration and auto-cleans on drop.
@@ -4035,6 +4052,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
+    }
+
+    #[tokio::test]
+    async fn test_execute_program_touches_session_on_non_query() {
+        let (mut config, tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        let storage = StorageEngine::new(config).unwrap();
+        let session_config = SessionConfig {
+            idle_timeout_secs: 1,
+            ..SessionConfig::default()
+        };
+        let handler = Handler::with_session_config(storage, session_config);
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("sess_touch")
+            .unwrap();
+
+        let sid = handler.create_session("sess_touch").unwrap();
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        handler
+            .execute_program(Some(sid), None, "+edge[(1,2)]".to_string())
+            .await
+            .unwrap();
+
+        let reaped = handler.session_manager().reap_expired();
+        assert_eq!(reaped, 0, "Session should remain alive after execute");
+        assert!(handler.session_manager().has_session(sid));
+
+        drop(tmp);
     }
 
     // --- Parse-all-first validation tests ---

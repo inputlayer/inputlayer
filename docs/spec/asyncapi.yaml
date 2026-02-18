@@ -6,14 +6,17 @@ info:
   description: |
     WebSocket API for InputLayer Knowledge Graph Engine.
 
-    The WebSocket endpoint at `/api/v1/ws` is the primary API for all operations:
+    The WebSocket endpoint at `/ws` is the primary API for all operations:
     knowledge graph management, query execution, data manipulation, rule management,
     and session-based ephemeral data. Sessions are auto-managed (created on connect,
     closed on disconnect).
 
+    Interactive documentation is served at `/api/ws-docs`, and this spec is available
+    as YAML at `/api/asyncapi.yaml`.
+
     ## Connection
 
-    Connect to `ws://<host>:<port>/api/v1/ws?kg=<name>` where `kg` is the initial
+    Connect to `ws://<host>:<port>/ws?kg=<name>` where `kg` is the initial
     knowledge graph to bind to (defaults to "default").
 
     On successful connection, the server sends a `connected` message with the
@@ -42,12 +45,12 @@ servers:
   development:
     host: localhost:8080
     protocol: ws
-    pathname: /api/v1/ws
+    pathname: /ws
     description: Local development server
 
 channels:
   ws:
-    address: /api/v1/ws
+    address: /ws
     description: |
       Global WebSocket endpoint with auto-session lifecycle.
       Query parameter `kg` sets the initial knowledge graph (default: "default").
@@ -316,7 +319,9 @@ components:
           type: array
           items:
             type: string
-          description: Per-row provenance (persistent, ephemeral, or unknown)
+          description: |
+            Per-row provenance. Values include "persistent", "ephemeral", "mixed",
+            or "unknown" when provenance cannot be determined.
         metadata:
           $ref: '#/components/schemas/SessionQueryMetadata'
         switched_kg:

@@ -58,6 +58,17 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Cleanup token returned by Phase 1 of KG drop.
+/// Carries the data needed for Phase 2 (slow file I/O cleanup).
+pub struct KgDropCleanup {
+    /// Name of the knowledge graph being dropped
+    pub name: String,
+    /// Path to the KG's data directory
+    data_dir: PathBuf,
+    /// Reference to the persist backend for shard cleanup
+    persist: Arc<FilePersist>,
+}
+
 /// Storage Engine - manages multiple knowledge graphs
 ///
 /// Uses `DashMap` for concurrent access to knowledge graphs without global locks.
@@ -70,6 +81,8 @@ pub struct StorageEngine {
     persist: Arc<FilePersist>,
     /// Logical timestamp for DD updates (monotonically increasing)
     logical_time: AtomicU64,
+    /// KG names pending async cleanup — prevents same-name recreation and blocks persist writes
+    dropping_kgs: parking_lot::RwLock<HashSet<String>>,
 }
 
 /// Single knowledge graph instance
@@ -121,6 +134,7 @@ impl StorageEngine {
             current_kg: None,
             persist,
             logical_time: AtomicU64::new(1),
+            dropping_kgs: parking_lot::RwLock::new(HashSet::new()),
         };
 
         // Load existing knowledge graphs from persist layer
@@ -151,6 +165,13 @@ impl StorageEngine {
             return Err(StorageError::InvalidRelationName(name.to_string()));
         }
 
+        // Block creation if a same-name KG is being dropped (prevents RC-2)
+        if self.dropping_kgs.read().contains(name) {
+            return Err(StorageError::Other(format!(
+                "Knowledge graph '{name}' is being dropped, cannot create"
+            )));
+        }
+
         // Atomic check-and-insert to prevent TOCTOU race
         use dashmap::mapref::entry::Entry;
         let entry = self.knowledge_graphs.entry(name.to_string());
@@ -178,8 +199,10 @@ impl StorageEngine {
         Ok(())
     }
 
-    /// Drop a knowledge graph (delete all data)
-    pub fn drop_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+    /// Phase 1 of KG drop: Fast in-memory removal (~microseconds).
+    /// Returns a `KgDropCleanup` token for Phase 2.
+    /// Requires `&mut self` (write lock) but releases quickly.
+    pub fn prepare_drop_knowledge_graph(&mut self, name: &str) -> StorageResult<KgDropCleanup> {
         // Cannot drop default knowledge graph
         if name == self.config.storage.default_knowledge_graph {
             return Err(StorageError::CannotDropDefault);
@@ -197,28 +220,43 @@ impl StorageEngine {
             return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
         }
 
-        // Remove from memory
+        // Add to tombstone BEFORE removing from DashMap (ordering matters for RC-2)
+        self.dropping_kgs.write().insert(name.to_string());
+
+        // Remove from in-memory DashMap (instant)
         self.knowledge_graphs.remove(name);
 
-        // Delete persist shards for this KG (prevents resurrection on restart)
-        let prefix = format!("{name}:");
-        if let Ok(shard_names) = self.persist.list_shards() {
-            for shard_name in shard_names {
-                if shard_name.starts_with(&prefix) {
-                    let _ = self.persist.delete_shard(&shard_name);
-                }
-            }
-        }
-
-        // Delete from disk
-        let db_dir = self.config.storage.data_dir.join(name);
-        if db_dir.exists() {
-            fs::remove_dir_all(db_dir)?;
-        }
-
-        // Update system metadata
+        // Save metadata JSON (small file write, fast)
         self.save_knowledge_graphs_metadata()?;
 
+        Ok(KgDropCleanup {
+            name: name.to_string(),
+            data_dir: self.config.storage.data_dir.join(name),
+            persist: Arc::clone(&self.persist),
+        })
+    }
+
+    /// Phase 2 of KG drop: Slow file I/O cleanup (NO storage write lock needed).
+    /// Deletes persist shards and data directory, then removes tombstone.
+    pub fn finish_drop_knowledge_graph(&self, cleanup: KgDropCleanup) {
+        let prefix = format!("{}:", cleanup.name);
+        if let Ok(shards) = cleanup.persist.list_shards() {
+            for shard in shards.iter().filter(|s| s.starts_with(&prefix)) {
+                let _ = cleanup.persist.delete_shard(shard);
+            }
+        }
+        if cleanup.data_dir.exists() {
+            let _ = fs::remove_dir_all(&cleanup.data_dir);
+        }
+        // Remove tombstone — name is now safe to reuse
+        self.dropping_kgs.write().remove(&cleanup.name);
+    }
+
+    /// Drop a knowledge graph (delete all data).
+    /// Convenience method that combines prepare + finish phases.
+    pub fn drop_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        let cleanup = self.prepare_drop_knowledge_graph(name)?;
+        self.finish_drop_knowledge_graph(cleanup);
         Ok(())
     }
 
@@ -371,6 +409,11 @@ impl StorageEngine {
             }
         }
 
+        // Block writes to KGs being dropped (prevents RC-1)
+        if self.dropping_kgs.read().contains(kg) {
+            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
+        }
+
         // Generate shard name and logical time
         let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
@@ -462,6 +505,11 @@ impl StorageEngine {
     ) -> StorageResult<usize> {
         if tuples.is_empty() {
             return Ok(0);
+        }
+
+        // Block writes to KGs being dropped (prevents RC-1)
+        if self.dropping_kgs.read().contains(kg) {
+            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
 
         // Generate shard name and logical time
@@ -1361,6 +1409,21 @@ impl StorageEngine {
         // Update logical time to be after all loaded data
         let max_time = self.find_max_logical_time()?;
         self.logical_time.store(max_time + 1, Ordering::SeqCst);
+
+        // Clean up orphaned shards from incomplete drops (RC-6)
+        let loaded_kgs: HashSet<String> = self
+            .knowledge_graphs
+            .iter()
+            .map(|e| e.key().clone())
+            .collect();
+        let all_shards = self.persist.list_shards()?;
+        for shard in &all_shards {
+            if let Some(kg_name) = shard.split(':').next() {
+                if !loaded_kgs.contains(kg_name) {
+                    let _ = self.persist.delete_shard(shard);
+                }
+            }
+        }
 
         Ok(())
     }

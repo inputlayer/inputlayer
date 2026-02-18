@@ -417,5 +417,5 @@ This enables:
 ## Next Steps
 
 - [Configuration Guide](configuration.md) - Full configuration reference
-- [REST API Guide](rest-api.md) - Programmatic access
+- [WebSocket API (AsyncAPI)](../spec/asyncapi.yaml) - Programmatic access
 - [Temporal Functions](temporal.md) - Time-based queries on persisted data

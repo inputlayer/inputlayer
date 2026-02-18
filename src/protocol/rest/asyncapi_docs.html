@@ -51,7 +51,7 @@
 <div class="container">
 
 <h1>InputLayer WebSocket API</h1>
-<p class="subtitle">Version 1.0.0 &middot; <a href="/api/asyncapi.yaml">AsyncAPI Spec (YAML)</a> &middot; <a href="/api/docs">REST API Docs</a></p>
+<p class="subtitle">Version 1.0.0 &middot; <a href="/api/asyncapi.yaml">AsyncAPI Spec (YAML)</a></p>
 
 <div class="toc">
   <strong>Contents</strong>
@@ -69,7 +69,7 @@
 
 <dl class="info-grid">
   <dt>Endpoint</dt>
-  <dd><code>ws://&lt;host&gt;:&lt;port&gt;/api/v1/ws</code></dd>
+  <dd><code>ws://&lt;host&gt;:&lt;port&gt;/ws</code></dd>
   <dt>Protocol</dt>
   <dd>WebSocket (RFC 6455)</dd>
   <dt>Message Format</dt>
@@ -80,7 +80,7 @@
 
 <h2 id="lifecycle">Connection Lifecycle</h2>
 <ol class="steps">
-  <li>Client connects to <code>/api/v1/ws?kg=&lt;name&gt;</code></li>
+  <li>Client connects to <code>/ws?kg=&lt;name&gt;</code></li>
   <li>Server auto-creates a session and sends a <code>connected</code> message</li>
   <li>Client sends <code>execute</code> messages, server responds with <code>result</code> or <code>error</code></li>
   <li>Server may push <code>notification</code> messages when persistent data changes in the session's KG</li>

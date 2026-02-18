@@ -462,6 +462,7 @@ impl SessionManager {
             return Err("Relation name cannot be empty".to_string());
         }
         let inserted = self.with_session_mut(session_id, |session| {
+            session.touch();
             session.insert_ephemeral(relation, tuples)
         })?;
 
@@ -486,6 +487,7 @@ impl SessionManager {
             return Err("Relation name cannot be empty".to_string());
         }
         let retracted = self.with_session_mut(session_id, |session| {
+            session.touch();
             session.retract_ephemeral(relation, tuples)
         })?;
 
@@ -510,6 +512,7 @@ impl SessionManager {
     ) -> Result<(), String> {
         let head_relation = rule.head.relation.clone();
         self.with_session_mut(session_id, |session| {
+            session.touch();
             session.add_ephemeral_rule(rule, rule_text);
         })?;
 

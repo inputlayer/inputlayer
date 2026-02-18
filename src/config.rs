@@ -215,10 +215,10 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
-/// HTTP server configuration for REST API and GUI
+/// HTTP server configuration for WebSocket API and GUI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpConfig {
-    /// Enable HTTP server (REST API + optional GUI)
+    /// Enable HTTP server (WebSocket API + optional GUI)
     #[serde(default)]
     pub enabled: bool,
 

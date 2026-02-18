@@ -1,4 +1,4 @@
-//! REST API Data Transfer Objects
+//! HTTP API Data Transfer Objects
 //!
 //! Defines request/response types for admin endpoints and WebSocket metadata.
 

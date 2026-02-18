@@ -42,11 +42,6 @@ async fn asyncapi_docs() -> Html<&'static str> {
 
 /// Creates the Axum router
 pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
-    // API v1 routes: WebSocket endpoints
-    let api_routes = Router::new()
-        .route("/ws", get(ws::global_websocket))
-        .route("/sessions/:id/ws", get(ws::session_websocket));
-
     // Build CORS layer
     let cors = if config.cors_origins.is_empty() {
         // Development mode: allow all origins
@@ -64,11 +59,12 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
             .allow_headers(Any)
     };
 
-    // Main router with top-level health/metrics and nested API routes
+    // Main router with top-level health/metrics and WebSocket routes
     let mut app = Router::new()
         .route("/health", get(admin::health))
         .route("/metrics", get(admin::stats))
-        .nest("/api/v1", api_routes)
+        .route("/ws", get(ws::global_websocket))
+        .route("/sessions/:id/ws", get(ws::session_websocket))
         .route("/api/asyncapi.yaml", get(asyncapi_yaml))
         .route("/api/ws-docs", get(asyncapi_docs))
         .layer(Extension(handler))
