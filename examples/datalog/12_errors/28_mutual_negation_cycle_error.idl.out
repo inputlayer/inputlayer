@@ -14,4 +14,8 @@ Inserted 3 fact(s) into 'base'.
 > +a(X) <- base(X), !b(X)
 Rule 'a' registered.
 > +b(X) <- base(X), !a(X)
-Script error: Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b]
+Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b]
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_cycle_n12t28
+Knowledge graph 'test_neg_cycle_n12t28' dropped.

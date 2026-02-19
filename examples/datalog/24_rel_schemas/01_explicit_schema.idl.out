@@ -10,4 +10,39 @@ Switched to knowledge graph: test_rel_schema_n24t01
 > .kg use test_rel_schema_n24t01
 Switched to knowledge graph: test_rel_schema_n24t01
 > +employee(emp_id: int, name: string, dept_id: int)
-Script error: Query execution failed: Invalid term: 'emp_id: int'
+Schema for 'employee' registered with 3 columns (persistent)
+> +department(dept_id: int, dept_name: string)
+Schema for 'department' registered with 2 columns (persistent)
+> +employee[(1, "Alice", 10), (2, "Bob", 10), (3, "Charlie", 20)]
+Inserted 3 fact(s) into 'employee'.
+> +department[(10, "Engineering"), (20, "Sales")]
+Inserted 2 fact(s) into 'department'.
+> ?employee(Id, Name, Dept)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "Alice"   │   10 │
+│    2 │ "Bob"     │   10 │
+│    3 │ "Charlie" │   20 │
+└──────┴───────────┴──────┘
+3 rows
+> ?department(Id, Name)
+┌──────┬───────────────┐
+│ col0 │ col1          │
+├──────┼───────────────┤
+│   10 │ "Engineering" │
+│   20 │ "Sales"       │
+└──────┴───────────────┘
+2 rows
+> +emp_dept(EmpName, DeptName) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> employee(_, EmpName, DeptId),
+Parse error: Expected parentheses: (_, EmpName, DeptId),
+> department(DeptId, DeptName)
+Cannot insert variable 'DeptId' - use constants only
+> ?emp_dept(E, D)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rel_schema_n24t01
+Knowledge graph 'test_rel_schema_n24t01' dropped.

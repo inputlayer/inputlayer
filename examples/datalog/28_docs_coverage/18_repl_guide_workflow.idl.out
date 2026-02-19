@@ -10,4 +10,38 @@ Switched to knowledge graph: test_repl_workflow_n28t18
 > .kg use test_repl_workflow_n28t18
 Switched to knowledge graph: test_repl_workflow_n28t18
 > +user(id: int, name: string)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'user' registered with 2 columns (persistent)
+> +order(id: int, user_id: int, amount: float)
+Schema for 'order' registered with 3 columns (persistent)
+> +user[(1, "alice"), (2, "bob"), (3, "carol")]
+Inserted 3 fact(s) into 'user'.
+> +order[(101, 1, 1500.0), (102, 1, 800.0), (103, 2, 200.0), (104, 1, 2000.0)]
+Inserted 4 fact(s) into 'order'.
+> +high_value_customer(UserId) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> order(_, UserId, Amount),
+Parse error: Expected parentheses: (_, UserId, Amount),
+> Amount > 1000
+Parse error: Unrecognized statement: Amount > 1000
+> ?high_value_customer(UserId)
+No results.
+> +customer_spend(UserId, sum<Amount>) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> order(_, UserId, Amount)
+Cannot insert placeholder '_' - use constants only
+> ?customer_spend(UserId, Total)
+No results.
+> +vip(UserId, Total) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> high_value_customer(UserId),
+Parse error: Expected parentheses: (UserId),
+> customer_spend(UserId, Total),
+Parse error: Expected parentheses: (UserId, Total),
+> Total > 3000
+Parse error: Unrecognized statement: Total > 3000
+> ?vip(User, Spend)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_repl_workflow_n28t18
+Knowledge graph 'test_repl_workflow_n28t18' dropped.

@@ -22,7 +22,7 @@ Inserted 4 fact(s) into 'items'.
 └──────┴──────┴──────┘
 4 rows
 > -items(Id, "a", Val)
-Deleted 0 facts from 'items'.
+Delete error: Cannot insert variable 'Id' - use constants only
 > ?items(Id, Cat, Val)
 ┌──────┬──────┬──────┐
 │ col0 │ col1 │ col2 │

@@ -14,4 +14,14 @@ Inserted 3 fact(s) into 'orders'.
 > +customers[("Alice", "VIP"), ("Bob", "Regular"), ("Carol", "New")]
 Inserted 3 fact(s) into 'customers'.
 > enriched(OrdId, Name, Amount, Status) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(OrdId, Name, Amount),
+Parse error: Expected parentheses: (OrdId, Name, Amount),
+> customers(Name, Status)
+Cannot insert variable 'Name' - use constants only
+> ?enriched(OrdId, Name, Amount, Status)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_partial_n06t27
+Knowledge graph 'test_partial_n06t27' dropped.

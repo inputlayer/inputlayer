@@ -18,7 +18,6 @@ Rule 'same_component' registered.
 > +same_component(X, Z) <- same_component(X, Y), same_component(Y, Z), X != Z
 Rule 'same_component' registered.
 > .rule same_component
-Rule: same_component
 ┌──────┬──────┐
 │ col0 │ col1 │
 ├──────┼──────┤

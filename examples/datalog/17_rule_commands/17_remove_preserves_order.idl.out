@@ -27,11 +27,20 @@ Rule 'multi' registered.
 └──────┴──────────┘
 3 rows
 > .rule def multi
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: multi
+Clauses:
+  1. multi(X, "small") <- src(X), X < 5
+  2. multi(X, "medium") <- src(X), X >= 5, X < 50
+  3. multi(X, "large") <- src(X), X >= 50
+
 > .rule remove multi 2
 Clause 2 removed from rule 'multi'.
 > .rule def multi
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: multi
+Clauses:
+  1. multi(X, "small") <- src(X), X < 5
+  2. multi(X, "large") <- src(X), X >= 50
+
 > ?multi(X, Size)
 ┌──────┬─────────┐
 │ col0 │ col1    │

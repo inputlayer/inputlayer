@@ -16,4 +16,32 @@ Inserted 3 fact(s) into 'orders'.
 > +vip[(1)]
 Inserted 1 fact(s) into 'vip'.
 > non_vip_with_orders(Name, Amount) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> customers(Id, Name),
+Parse error: Expected parentheses: (Id, Name),
+> orders(Id, Amount),
+Parse error: Expected parentheses: (Id, Amount),
+> !vip(Id)
+Cannot insert variable 'Id' - use constants only
+> ?non_vip_with_orders(Name, Amount)
+No results.
+> no_orders(Name) <- customers(Id, Name), !orders(Id, _)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Carol" │
+└─────────┘
+1 rows
+(session: 1 rule(s))
+> ?no_orders(Name)
+┌─────────┐
+│ col0    │
+├─────────┤
+│ "Carol" │
+└─────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_join_neg_n06t10
+Knowledge graph 'test_join_neg_n06t10' dropped.

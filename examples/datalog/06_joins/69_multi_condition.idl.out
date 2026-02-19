@@ -14,4 +14,14 @@ Inserted 3 fact(s) into 'orders'.
 > +customers[(100, "Alice", "VIP"), (101, "Bob", "Regular")]
 Inserted 2 fact(s) into 'customers'.
 > +vip_orders(OrderId, CustName, Month) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(OrderId, CustId, Month),
+Parse error: Expected parentheses: (OrderId, CustId, Month),
+> customers(CustId, CustName, "VIP")
+Cannot insert variable 'CustId' - use constants only
+> ?vip_orders(O, C, M)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_cond_n06t69
+Knowledge graph 'test_multi_cond_n06t69' dropped.

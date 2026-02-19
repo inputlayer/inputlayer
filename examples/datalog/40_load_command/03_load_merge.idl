@@ -12,7 +12,7 @@
 ?loaded_relation(X, Y)
 
 // Load with merge mode - should add to existing data
-.load examples/datalog/40_load_command/_helper_data.dl --merge
+.load examples/datalog/40_load_command/_helper_data.idl --merge
 
 // Verify all data is present (both original and loaded)
 ?loaded_relation(X, Y)

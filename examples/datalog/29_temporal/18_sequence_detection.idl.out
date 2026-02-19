@@ -12,4 +12,18 @@ Switched to knowledge graph: test_seq_n29t18
 > +events[(1, "login", 100), (2, "click", 110), (3, "purchase", 120), (4, "logout", 200)]
 Inserted 4 fact(s) into 'events'.
 > post_login(Id, Action, Time) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> events(_, "login", LoginTime),
+Parse error: Expected parentheses: (_, "login", LoginTime),
+> events(Id, Action, Time),
+Parse error: Expected parentheses: (Id, Action, Time),
+> Time > LoginTime,
+Parse error: Unrecognized statement: Time > LoginTime,
+> Action != "login"
+Parse error: Unrecognized statement: Action != "login"
+> ?post_login(Id, Action, Time)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_seq_n29t18
+Knowledge graph 'test_seq_n29t18' dropped.

@@ -12,9 +12,9 @@ Switched to knowledge graph: test_dup_ins_n10t59
 > +data[(1, "a")]
 Inserted 1 fact(s) into 'data'.
 > +data[(1, "a")]
-No facts inserted (1 duplicate skipped).
+Inserted 0 fact(s) into 'data'.
 > +data[(1, "a")]
-No facts inserted (1 duplicate skipped).
+Inserted 0 fact(s) into 'data'.
 > ?data(Id, Val)
 ┌──────┬──────┐
 │ col0 │ col1 │

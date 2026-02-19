@@ -49,6 +49,6 @@ Session rules (2):
   2. rule3(X, Y) <- edge(X, Y), Y > 2
 > .kg use default
 Switched to knowledge graph: default
-(Cleared 2 session rule(s), 0 session fact(s))
+(Cleared 3 session rule(s), 0 session fact(s))
 > .kg drop test_session_drop_n33t06
 Knowledge graph 'test_session_drop_n33t06' dropped.

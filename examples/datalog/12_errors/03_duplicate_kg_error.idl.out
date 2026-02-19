@@ -10,4 +10,8 @@ Switched to knowledge graph: test_dup_err_n12t03
 > .kg use test_dup_err_n12t03
 Switched to knowledge graph: test_dup_err_n12t03
 > .kg create test_dup_err_n12t03
-Script error: Knowledge graph already exists: test_dup_err_n12t03
+Create failed: Knowledge graph already exists: test_dup_err_n12t03
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dup_err_n12t03
+Knowledge graph 'test_dup_err_n12t03' dropped.

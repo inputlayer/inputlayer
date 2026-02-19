@@ -12,4 +12,10 @@ Switched to knowledge graph: test_count_dist_n14t81
 > +visits[(1, "page1"), (2, "page2"), (3, "page1"), (4, "page3"), (5, "page1")]
 Inserted 5 fact(s) into 'visits'.
 > +distinct_pages(<COUNT_DISTINCT:Page>) <- visits(_, Page)
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> ?distinct_pages(C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_count_dist_n14t81
+Knowledge graph 'test_count_dist_n14t81' dropped.

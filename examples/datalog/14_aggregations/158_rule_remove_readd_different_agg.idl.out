@@ -21,7 +21,7 @@ Rule 'best' registered.
 └──────┘
 1 rows
 > .rule remove best 1
-Clause 1 removed from rule 'best'. Rule completely deleted (no clauses remaining).
+Rule 'best' deleted (last clause removed).
 > ?best(X)
 No results.
 > +best(min<Score>) <- score(_, Score)

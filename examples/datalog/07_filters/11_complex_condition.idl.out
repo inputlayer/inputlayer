@@ -12,4 +12,26 @@ Switched to knowledge graph: test_complex_filt_n07t11
 > +data[(1, 100, "active"), (2, 50, "inactive"), (3, 200, "active"), (4, 75, "active"), (5, 150, "inactive")]
 Inserted 5 fact(s) into 'data'.
 > complex(Id, Val, Status) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> data(Id, Val, Status),
+Parse error: Expected parentheses: (Id, Val, Status),
+> Status = "active",
+Parse error: Unrecognized statement: Status = "active",
+> Val > 60,
+Parse error: Unrecognized statement: Val > 60,
+> Id < 5
+Parse error: Unrecognized statement: Id < 5
+> ?complex(Id, Val, Status)
+No results.
+> alt(Id, Val, Status) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> data(Id, Val, Status),
+Parse error: Expected parentheses: (Id, Val, Status),
+> Val >= 100
+Parse error: Unrecognized statement: Val >= 100
+> ?alt(Id, Val, Status)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_complex_filt_n07t11
+Knowledge graph 'test_complex_filt_n07t11' dropped.

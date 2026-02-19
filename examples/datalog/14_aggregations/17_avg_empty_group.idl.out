@@ -10,4 +10,18 @@ Switched to knowledge graph: test_avg_empty_n14t17
 > .kg use test_avg_empty_n14t17
 Switched to knowledge graph: test_avg_empty_n14t17
 > +values(id: int, amount: int)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'values' registered with 2 columns (persistent)
+> +avg_result(avg<Amount>) <- values(_, Amount)
+Rule 'avg_result' registered.
+> ?avg_result(Avg)
+No results.
+> +data[(1, 100), (2, 200)]
+Inserted 2 fact(s) into 'data'.
+> +filtered_avg(avg<V>) <- data(Id, V), Id > 100
+Rule 'filtered_avg' registered.
+> ?filtered_avg(Avg)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_avg_empty_n14t17
+Knowledge graph 'test_avg_empty_n14t17' dropped.

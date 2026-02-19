@@ -1,0 +1,13 @@
+// Test: .explain command
+// Shows query plan without executing
+.kg create test_explain_n33t16
+.kg use test_explain_n33t16
+
++edge[(1, 2), (2, 3), (3, 4)]
++node[(1,), (2,), (3,), (4,)]
+
+// Explain a simple query
+.explain ?edge(X, Y)
+
+.kg use default
+.kg drop test_explain_n33t16

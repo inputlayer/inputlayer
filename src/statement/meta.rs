@@ -54,6 +54,7 @@ pub enum MetaCommand {
     // System commands
     Compact,
     Status,
+    Explain(String), // .explain <query> - show query plan without executing
     Help,
     Quit,
 
@@ -115,6 +116,23 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "clear" => parse_clear_command(&parts),
         "compact" => Ok(MetaCommand::Compact),
         "status" => Ok(MetaCommand::Status),
+        "explain" => {
+            if parts.len() < 2 {
+                Err("Usage: .explain <query>".to_string())
+            } else {
+                // Everything after ".explain " is the query
+                let query = input
+                    .strip_prefix("explain")
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if query.is_empty() {
+                    Err("Usage: .explain <query>".to_string())
+                } else {
+                    Ok(MetaCommand::Explain(query))
+                }
+            }
+        }
         "help" | "?" => Ok(MetaCommand::Help),
         "quit" | "exit" | "q" => Ok(MetaCommand::Quit),
         "load" => parse_load_command(&parts),
@@ -801,6 +819,23 @@ mod tests {
         let result = parse_meta_command(".clear foo bar");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown clear subcommand"));
+    }
+
+    #[test]
+    fn test_parse_explain() {
+        let cmd = parse_meta_command(".explain ?edge(X, Y)").unwrap();
+        if let MetaCommand::Explain(query) = cmd {
+            assert_eq!(query, "?edge(X, Y)");
+        } else {
+            panic!("Expected Explain");
+        }
+    }
+
+    #[test]
+    fn test_parse_explain_missing_query() {
+        let result = parse_meta_command(".explain");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
     }
 
     #[test]

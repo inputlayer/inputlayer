@@ -5,4 +5,4 @@ Server status: healthy
 Current knowledge graph: default
 
 > .kg use nonexistent_database_xyz_n12t06
-Script error: Knowledge graph 'nonexistent_database_xyz_n12t06' not found
+Knowledge graph 'nonexistent_database_xyz_n12t06' not found: Knowledge graph not found: nonexistent_database_xyz_n12t06

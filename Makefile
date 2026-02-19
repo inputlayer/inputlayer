@@ -1,5 +1,7 @@
 .PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run
 
+SHELL := /bin/bash
+
 # Default target
 all: ci
 
@@ -35,24 +37,39 @@ test-all: check
 	fi; \
 	echo ""; \
 	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
-	UNIT_OUTPUT=$$(cargo test --all-features 2>&1); \
-	UNIT_EXIT=$$?; \
-	echo "$$UNIT_OUTPUT" | tail -5; \
-	UNIT_PASSED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$4} END {print sum+0}'); \
-	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
-	UNIT_IGNORED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$8} END {print sum+0}'); \
+	UNIT_TMPFILE=$$(mktemp); \
+	set -o pipefail; \
+	RUST_TEST_THREADS=$$NCPU cargo test --all-features -- --test-threads=$$NCPU --format=pretty \
+		2>&1 | tee "$$UNIT_TMPFILE"; \
+	UNIT_EXIT=$${PIPESTATUS[0]}; \
+	tail -5 "$$UNIT_TMPFILE"; \
+	UNIT_PASSED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$4} END {print sum+0}'); \
+	UNIT_FAILED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$6} END {print sum+0}'); \
+	UNIT_IGNORED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$8} END {print sum+0}'); \
+	rm -f "$$UNIT_TMPFILE"; \
 	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	if [ "$$UNIT_IGNORED" -gt 0 ] 2>/dev/null; then \
 		echo "ERROR: $$UNIT_IGNORED ignored test(s) detected. No tests may be ignored."; \
 		FAILURES=$$((FAILURES + 1)); \
 	fi; \
 	echo ""; \
-	echo "=== Snapshot Tests (E2E, $$NCPU parallel) ==="; \
-	SNAP_OUTPUT=$$(./scripts/run_snapshot_tests.sh --skip-build -j $$NCPU 2>&1); \
-	SNAP_EXIT=$$?; \
-	echo "$$SNAP_OUTPUT" | tail -10; \
-	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \
-	SNAP_FAILED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Failed:" | awk '{print $$2}'); \
+	echo "Settling before snapshot tests..."; \
+	lsof -ti :8080 | xargs kill -9 2>/dev/null || true; \
+	rm -rf ./data 2>/dev/null || true; \
+	echo "Cleaning debug artifacts to free memory..."; \
+	rm -rf target/debug 2>/dev/null || true; \
+	sync 2>/dev/null || true; \
+	sleep 8; \
+	echo ""; \
+	echo "=== Snapshot Tests (E2E) ==="; \
+	SNAP_TMPFILE=$$(mktemp); \
+	set -o pipefail; \
+	./scripts/run_snapshot_tests.sh --skip-build 2>&1 | tee "$$SNAP_TMPFILE"; \
+	SNAP_EXIT=$${PIPESTATUS[0]}; \
+	tail -10 "$$SNAP_TMPFILE"; \
+	SNAP_PASSED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Passed:" | awk '{print $$2}'); \
+	SNAP_FAILED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Failed:" | awk '{print $$2}'); \
+	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
 	echo "=== Cleanup Verification ==="; \
@@ -113,23 +130,30 @@ ci-test-all:
 	fi; \
 	echo ""; \
 	echo "=== Unit Tests ==="; \
-	UNIT_OUTPUT=$$(RUST_TEST_THREADS=$$CI_JOBS cargo test --all-features 2>&1); \
-	UNIT_EXIT=$$?; \
-	echo "$$UNIT_OUTPUT" | tail -5; \
-	UNIT_PASSED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$4} END {print sum+0}'); \
-	UNIT_FAILED=$$(echo "$$UNIT_OUTPUT" | grep -E "^test result:" | awk '{sum += $$6} END {print sum+0}'); \
+	UNIT_TMPFILE=$$(mktemp); \
+	set -o pipefail; \
+	RUST_TEST_THREADS=$$CI_JOBS cargo test --all-features -- --test-threads=$$CI_JOBS --format=pretty \
+		2>&1 | tee "$$UNIT_TMPFILE"; \
+	UNIT_EXIT=$${PIPESTATUS[0]}; \
+	tail -5 "$$UNIT_TMPFILE"; \
+	UNIT_PASSED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$4} END {print sum+0}'); \
+	UNIT_FAILED=$$(grep -E "^test result:" "$$UNIT_TMPFILE" | awk '{sum += $$6} END {print sum+0}'); \
+	rm -f "$$UNIT_TMPFILE"; \
 	if [ $$UNIT_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
 	echo "Cleaning debug artifacts to free disk space..."; \
 	rm -rf target/debug 2>/dev/null || true; \
 	echo ""; \
 	echo "=== Snapshot Tests (E2E, $$CI_JOBS parallel) ==="; \
-	SNAP_OUTPUT=$$(CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
-	   ./scripts/run_snapshot_tests.sh --skip-build -j $$CI_JOBS 2>&1); \
-	SNAP_EXIT=$$?; \
-	echo "$$SNAP_OUTPUT" | tail -10; \
-	SNAP_PASSED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Passed:" | awk '{print $$2}'); \
-	SNAP_FAILED=$$(echo "$$SNAP_OUTPUT" | sed "$$STRIP_ANSI" | grep -E "^Failed:" | awk '{print $$2}'); \
+	SNAP_TMPFILE=$$(mktemp); \
+	set -o pipefail; \
+	CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
+	   ./scripts/run_snapshot_tests.sh --skip-build -j $$CI_JOBS 2>&1 | tee "$$SNAP_TMPFILE"; \
+	SNAP_EXIT=$${PIPESTATUS[0]}; \
+	tail -10 "$$SNAP_TMPFILE"; \
+	SNAP_PASSED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Passed:" | awk '{print $$2}'); \
+	SNAP_FAILED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Failed:" | awk '{print $$2}'); \
+	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
 	echo "==========================================="; \

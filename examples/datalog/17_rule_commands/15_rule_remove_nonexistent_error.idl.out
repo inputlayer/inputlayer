@@ -12,4 +12,8 @@ Switched to knowledge graph: test_rule_remove_nex_n17t15
 > .rule list
 No rules defined.
 > .rule remove nonexistent 1
-Script error: Failed to remove rule clause: Rule 'nonexistent' does not exist
+Error: Failed to remove rule clause: Rule 'nonexistent' does not exist
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rule_remove_nex_n17t15
+Knowledge graph 'test_rule_remove_nex_n17t15' dropped.

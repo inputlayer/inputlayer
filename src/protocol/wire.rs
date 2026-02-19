@@ -299,6 +299,10 @@ pub struct QueryResult {
     /// Provenance metadata (present when ephemeral data participates)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ResultMetadata>,
+    /// Signal that the knowledge graph was switched (for WS session binding update)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub switched_kg: Option<String>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -341,6 +345,7 @@ impl QueryResult {
             truncated: false,
             execution_time_ms: 0,
             metadata: None,
+            switched_kg: None,
         }
     }
 
@@ -353,6 +358,7 @@ impl QueryResult {
             truncated: false,
             execution_time_ms,
             metadata: None,
+            switched_kg: None,
         }
     }
 
@@ -371,6 +377,7 @@ impl QueryResult {
             truncated: false,
             execution_time_ms,
             metadata,
+            switched_kg: None,
         }
     }
 }
@@ -647,6 +654,7 @@ mod tests {
             truncated: false,
             execution_time_ms: 0,
             metadata: None,
+            switched_kg: None,
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);

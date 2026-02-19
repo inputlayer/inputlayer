@@ -14,4 +14,10 @@ Inserted 4 fact(s) into 'scores'.
 > +distinct_scores(min<Score>) <- scores(_, Score)
 Rule 'distinct_scores' registered.
 > +dense_rank(Name, Score, <COUNT_DISTINCT:Higher>) <- scores(Name, Score), scores(_, Higher), Higher > Score
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> ?dense_rank(Name, Score, Rank)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dense_rank_n18t54
+Knowledge graph 'test_dense_rank_n18t54' dropped.

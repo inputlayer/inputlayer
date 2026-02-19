@@ -12,4 +12,10 @@ Switched to knowledge graph: test_unknown_agg_n14t89
 > +data[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'data'.
 > bad_agg(G, <MEDIAN:V>) <- data(G, V)
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> ?bad_agg(G, R)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unknown_agg_n14t89
+Knowledge graph 'test_unknown_agg_n14t89' dropped.

@@ -22,4 +22,18 @@ Inserted 1 fact(s) into 'embedding'.
 └──────┴────────────────────────┴──────────────────────┴────────────────────────────┘
 2 rows
 > scaled_output(Id, Q, D1, D2) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> embedding(Id, V),
+Parse error: Expected parentheses: (Id, V),
+> Q = quantize_linear(V),
+Parse error: Expected parentheses: (V),
+> D1 = dequantize_scaled(Q, 0.5),
+Parse error: Expected parentheses: (Q, 0.5),
+> D2 = dequantize_scaled(Q, 2.0)
+Cannot insert variable 'Q' - use constants only
+> ?scaled_output(Id, Q, D1, D2)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dequantize_scaled_n30t04
+Knowledge graph 'test_dequantize_scaled_n30t04' dropped.

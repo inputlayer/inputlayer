@@ -22,4 +22,8 @@ Rule 'result' registered.
 └──────┴──────┘
 2 rows
 > +result(within_radius<2.0, Id, V:asc>) <- data(Id, V)
-Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'within_radius<2, Id, V:asc>' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.
+Failed to register rule: Conflicting aggregation: cannot add clause with 'within_radius<2, Id, V:asc>' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rank_conflict_n14t178
+Knowledge graph 'test_rank_conflict_n14t178' dropped.

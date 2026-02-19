@@ -40,8 +40,8 @@ Session fact added for 'node'. (Use +node(...) to persist)
 Session fact added for 'node'. (Use +node(...) to persist)
 > .session
 Session facts (2):
-  1. node(1)
-  2. node(2)
+  node((1))
+  node((2))
 Session rules (2):
   1. path(X, Y) <- edge(X, Y)
   2. path(X, Z) <- edge(X, Y), path(Y, Z)

@@ -18,7 +18,11 @@ Rule 'rule_a' registered.
 > +rule_b(X) <- base(X), X > 1
 Rule 'rule_b' registered.
 > .rule def rule_a
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: rule_a
+Clauses:
+  1. rule_a(X, Y) <- base(X), Y = X+1
+  2. rule_a(X, Y) <- base(X), Y = X*2
+
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_rule_list_n17t25

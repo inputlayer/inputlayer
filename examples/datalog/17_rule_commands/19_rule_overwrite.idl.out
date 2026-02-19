@@ -32,7 +32,11 @@ Rule 'doubled' registered.
 └──────┴──────┘
 3 rows
 > .rule def doubled
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: doubled
+Clauses:
+  1. doubled(X, Y) <- base(X), Y = X*2, X < 2
+  2. doubled(X, Y) <- base(X), Y = X*2, X >= 2
+
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_overwrite_n17t19

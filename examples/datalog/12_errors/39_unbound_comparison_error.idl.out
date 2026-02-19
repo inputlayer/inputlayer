@@ -12,4 +12,10 @@ Switched to knowledge graph: test_unbound_cmp_n12t39
 > +data[(1, 10), (2, 20)]
 Inserted 2 fact(s) into 'data'.
 > bad(X) <- data(X, _), Y > 5
-Script error: Query execution failed: Variable 'Y' not found in schema ["X", "_ph_data_1"]
+Query execution failed: Variable 'Y' not found in schema ["X", "_ph_data_1"]
+> ?bad(X)
+Query execution failed: Variable 'Y' not found in schema ["X", "_ph_data_1"]
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unbound_cmp_n12t39
+Knowledge graph 'test_unbound_cmp_n12t39' dropped.

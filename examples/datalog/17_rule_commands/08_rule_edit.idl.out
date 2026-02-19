@@ -16,11 +16,19 @@ Rule 'reachable' registered.
 > +reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 Rule 'reachable' registered.
 > .rule def reachable
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
 > .rule edit reachable 2 +reachable(X, Z) <- edge(X, Y), reachable(Y, Z).
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule editing is not supported in server mode.
 > .rule def reachable
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
 > ?reachable(X, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │

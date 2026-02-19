@@ -10,7 +10,7 @@ Switched to knowledge graph: test_compact_empty_n33t12
 > .kg use test_compact_empty_n33t12
 Switched to knowledge graph: test_compact_empty_n33t12
 > .compact
-Compaction command not available over HTTP.
+Compaction complete.
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_compact_empty_n33t12

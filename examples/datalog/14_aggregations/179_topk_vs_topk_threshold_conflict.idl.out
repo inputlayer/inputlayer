@@ -22,4 +22,8 @@ Rule 'best' registered.
 └──────┴──────┘
 2 rows
 > +best(top_k_threshold<2, 100, Player, Points:desc>) <- score(Player, Points)
-Script error: Failed to register rule: Conflicting aggregation: cannot add clause with 'top_k_threshold<2, 100, Player, Points:desc>' to rule 'best' which already has a clause with 'top_k<2, Player, Points:desc>'. Drop the rule first with '.rule drop best' and re-create it.
+Failed to register rule: Conflicting aggregation: cannot add clause with 'top_k_threshold<2, 100, Player, Points:desc>' to rule 'best' which already has a clause with 'top_k<2, Player, Points:desc>'. Drop the rule first with '.rule drop best' and re-create it.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_topk_thresh_n14t179
+Knowledge graph 'test_topk_thresh_n14t179' dropped.

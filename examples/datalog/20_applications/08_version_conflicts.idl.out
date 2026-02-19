@@ -10,4 +10,24 @@ Switched to knowledge graph: test_conflicts_n20t08
 > .kg use test_conflicts_n20t08
 Switched to knowledge graph: test_conflicts_n20t08
 > +requires[(1, 100, 1, 3), (1, 101, 2, 5), (2, 100, 2, 4), (2, 101, 1, 2), (3, 100, 4, 6), (3, 102, 1, 10)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +root_pkg[(1), (2)]
+Inserted 2 fact(s) into 'root_pkg'.
+> +root_requires(Dep, MinV, MaxV) <- root_pkg(Pkg), requires(Pkg, Dep, MinV, MaxV)
+Rule 'root_requires' registered.
+> ?root_requires(D, Min, Max)
+No results.
+> +version_conflict(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 < Min2
+Rule 'version_conflict' registered.
+> +version_conflict(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max2 < Min1
+Rule 'version_conflict' registered.
+> ?version_conflict(Dep, P1, P2)
+No results.
+> +compatible(Dep, Pkg1, Pkg2) <- requires(Pkg1, Dep, Min1, Max1), requires(Pkg2, Dep, Min2, Max2), Pkg1 < Pkg2, Max1 >= Min2, Max2 >= Min1
+Rule 'compatible' registered.
+> ?compatible(Dep, P1, P2)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_conflicts_n20t08
+Knowledge graph 'test_conflicts_n20t08' dropped.

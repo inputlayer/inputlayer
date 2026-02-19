@@ -16,4 +16,16 @@ Inserted 2 fact(s) into 'products'.
 > +customers[(1000, "Alice"), (1001, "Bob")]
 Inserted 2 fact(s) into 'customers'.
 > full_report(SaleId, ProdName, CustName, Date) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> sales(SaleId, ProdId, CustId, Date),
+Parse error: Expected parentheses: (SaleId, ProdId, CustId, Date),
+> products(ProdId, ProdName),
+Parse error: Expected parentheses: (ProdId, ProdName),
+> customers(CustId, CustName)
+Cannot insert variable 'CustId' - use constants only
+> ?full_report(SaleId, ProdName, CustName, Date)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_star_n06t15
+Knowledge graph 'test_star_n06t15' dropped.

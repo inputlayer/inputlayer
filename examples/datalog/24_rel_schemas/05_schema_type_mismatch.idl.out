@@ -10,4 +10,27 @@ Switched to knowledge graph: test_type_mismatch_n24t05
 > .kg use test_type_mismatch_n24t05
 Switched to knowledge graph: test_type_mismatch_n24t05
 > +users(id: int, name: string, age: int)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'users' registered with 3 columns (persistent)
+> +users[(1, "Alice", 30), (2, "Bob", 25)]
+Inserted 2 fact(s) into 'users'.
+> ?users(Id, Name, Active)
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "Alice" │   30 │
+│    2 │ "Bob"   │   25 │
+└──────┴─────────┴──────┘
+2 rows
+> .rel users
+Relation: users
+┌──────┬─────────┬──────┐
+│ col0 │ col1    │ col2 │
+├──────┼─────────┼──────┤
+│    1 │ "Alice" │   30 │
+│    2 │ "Bob"   │   25 │
+└──────┴─────────┴──────┘
+2 of 2 total rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_type_mismatch_n24t05
+Knowledge graph 'test_type_mismatch_n24t05' dropped.

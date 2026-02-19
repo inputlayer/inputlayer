@@ -21,4 +21,8 @@ Rule 'total' registered.
 └──────┘
 1 rows
 > +total(G, sum<V>) <- data(G, V)
-Script error: Failed to register rule: Arity mismatch: rule 'total' has 1 argument(s) but new clause has 2. Drop the rule first with '.rule drop total' and re-create it.
+Failed to register rule: Arity mismatch: rule 'total' has 1 argument(s) but new clause has 2. Drop the rule first with '.rule drop total' and re-create it.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arity_mismatch_n14t176
+Knowledge graph 'test_arity_mismatch_n14t176' dropped.

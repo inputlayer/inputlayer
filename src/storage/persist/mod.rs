@@ -62,8 +62,6 @@ pub struct PersistConfig {
     pub path: PathBuf,
     /// Buffer size before flushing to batch file
     pub buffer_size: usize,
-    /// Whether to sync WAL immediately on each write (DEPRECATED)
-    pub immediate_sync: bool,
     /// Durability mode for writes
     pub durability_mode: DurabilityMode,
 }
@@ -73,7 +71,6 @@ impl Default for PersistConfig {
         PersistConfig {
             path: PathBuf::from("./data/persist"),
             buffer_size: 10000,
-            immediate_sync: true,
             durability_mode: DurabilityMode::Immediate,
         }
     }
@@ -218,7 +215,15 @@ impl FilePersist {
             .join(format!("{}.json", sanitize_name(&meta.name)));
         let content = serde_json::to_string_pretty(meta)
             .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
-        fs::write(&path, content)?;
+        if let Err(e) = fs::write(&path, &content) {
+            eprintln!(
+                "[persist] ERROR save_shard_meta: path={}, parent_exists={}, error={}",
+                path.display(),
+                path.parent().is_some_and(std::path::Path::exists),
+                e
+            );
+            return Err(e.into());
+        }
         Ok(())
     }
 
@@ -437,59 +442,48 @@ impl PersistBackend for FilePersist {
         // Save metadata
         self.save_shard_meta(&state.meta)?;
 
-        // Clear WAL (data is now durable in batch file)
+        // Remove only THIS shard's WAL entries (preserves other shards)
         {
             let mut wal = self.wal.lock();
-            wal.clear()?;
+            wal.remove_shard_entries(shard)?;
         }
 
         Ok(())
     }
 
     fn delete_shard(&self, shard: &str) -> StorageResult<()> {
-        let mut shards = self.shards.write();
-        if let Some(state) = shards.remove(shard) {
-            // Flush remaining shards' buffers to batch files so we can safely
-            // clear the shared WAL without losing their data.
-            for (_name, other_state) in shards.iter_mut() {
-                if !other_state.buffer.is_empty() {
-                    let (batch_id, path) = self.write_batch(&other_state.buffer)?;
-                    let batch = Batch::new(other_state.buffer.clone());
-                    other_state.meta.add_batch(BatchRef {
-                        id: batch_id,
-                        path,
-                        lower: batch.lower,
-                        upper: batch.upper,
-                        len: batch.len(),
-                    });
-                    other_state.buffer.clear();
-                    self.save_shard_meta(&other_state.meta)?;
-                }
-            }
+        // Step 1: Remove from in-memory shard map (fast, under write lock)
+        let removed_state = {
+            let mut shards = self.shards.write();
+            shards.remove(shard)
+        }; // write lock released — other shards unblocked
 
-            // Clear shared WAL (all surviving data is now in batch files)
-            {
-                let mut wal = self.wal.lock();
-                let _ = wal.clear();
-            }
+        // Step 2: Delete shard metadata file FIRST (crash-safe ordering)
+        let meta_path = self
+            .config
+            .path
+            .join("shards")
+            .join(format!("{}.json", sanitize_name(shard)));
+        if meta_path.exists() {
+            let _ = fs::remove_file(&meta_path);
+        }
 
-            // Delete the target shard's batch files
+        // Step 3: Selective WAL filter — remove only this shard's entries
+        // Other shards' WAL data is PRESERVED (no need to flush them)
+        {
+            let mut wal = self.wal.lock();
+            wal.remove_shard_entries(shard)?;
+        }
+
+        // Step 4: Delete batch files (no lock needed)
+        if let Some(state) = removed_state {
             for batch_ref in &state.meta.batches {
                 if batch_ref.path.exists() {
-                    fs::remove_file(&batch_ref.path)?;
+                    let _ = fs::remove_file(&batch_ref.path);
                 }
             }
-
-            // Delete shard metadata file
-            let meta_path = self
-                .config
-                .path
-                .join("shards")
-                .join(format!("{}.json", sanitize_name(shard)));
-            if meta_path.exists() {
-                fs::remove_file(meta_path)?;
-            }
         }
+
         Ok(())
     }
 }
@@ -695,7 +689,7 @@ mod tests {
         let config = PersistConfig {
             path: temp.path().to_path_buf(),
             buffer_size: 5,
-            immediate_sync: true,
+
             durability_mode: DurabilityMode::Immediate,
         };
         let persist = FilePersist::new(config).unwrap();
@@ -840,7 +834,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -863,7 +857,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -966,7 +960,6 @@ mod tests {
     fn test_persist_config_default() {
         let config = PersistConfig::default();
         assert_eq!(config.buffer_size, 10000);
-        assert!(config.immediate_sync);
         assert_eq!(config.path, PathBuf::from("./data/persist"));
         assert!(matches!(config.durability_mode, DurabilityMode::Immediate));
     }
@@ -1176,7 +1169,7 @@ mod tests {
             let config = PersistConfig {
                 path: path.clone(),
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
@@ -1194,7 +1187,7 @@ mod tests {
             let config = PersistConfig {
                 path,
                 buffer_size: 100,
-                immediate_sync: true,
+
                 durability_mode: DurabilityMode::Immediate,
             };
             let persist = FilePersist::new(config).unwrap();
