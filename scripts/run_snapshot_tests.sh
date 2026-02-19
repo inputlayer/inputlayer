@@ -7,7 +7,7 @@
 # - Global pre-run cleanup: drop stale KGs before tests start
 # - No per-test pre/post-clean connections (tests are self-contained)
 # - No fail-fast: run ALL tests, collect ALL failures
-# - Server health monitoring with auto-restart
+# - Per-test timeout via perl alarm (no extra processes)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -19,6 +19,9 @@ CLIENT_SERVER_URL="${SERVER_URL}"
 # Parallelism: use all CPUs
 NCPU=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 PARALLEL_JOBS=${INPUTLAYER_TEST_PARALLEL:-$NCPU}
+
+# Per-test timeout in seconds (prevents hanging tests from blocking the harness)
+TEST_TIMEOUT=60
 
 # Colors (only when stdout is a terminal)
 if [ -t 1 ]; then
@@ -118,10 +121,10 @@ extract_kgs() {
 # List non-default knowledge graphs via client
 ws_list_kgs() {
     local script_file="${TEMP_DIR}/_kg_list.idl"
+    local output_file="${TEMP_DIR}/_kg_list.out"
     printf '%s\n' ".kg list" > "$script_file"
-    local output
-    output=$("$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$script_file" 2>/dev/null || true)
-    echo "$output" \
+    perl -e 'alarm shift; exec @ARGV' 15 "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$script_file" >"$output_file" 2>/dev/null || true
+    cat "$output_file" 2>/dev/null \
         | awk '/^  / { sub(/^  /, "", $0); sub(/ \*$/, "", $0); print }' \
         | grep -v "^default$" \
         || true
@@ -139,7 +142,7 @@ ws_drop_kgs() {
             printf '%s\n' ".kg drop $kg"
         done
     } > "$script_file"
-    "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$script_file" >/dev/null 2>&1 || true
+    perl -e 'alarm shift; exec @ARGV' 30 "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$script_file" >/dev/null 2>&1 || true
     rm -f "$script_file"
 }
 
@@ -151,6 +154,12 @@ check_server() {
 stop_server() {
     if [[ -n "$SERVER_PID" ]]; then
         kill $SERVER_PID 2>/dev/null || true
+        # Wait up to 3s for graceful shutdown, then SIGKILL
+        for i in 1 2 3 4 5 6; do
+            if ! kill -0 $SERVER_PID 2>/dev/null; then break; fi
+            sleep 0.5
+        done
+        kill -9 $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
         SERVER_PID=""
     fi
@@ -158,6 +167,11 @@ stop_server() {
 
 start_server() {
     local clean_data="${1:-true}"
+    # Wait for port to be free FIRST (up to 15s)
+    for i in $(seq 1 30); do
+        if ! lsof -ti :"${SERVER_PORT}" >/dev/null 2>&1; then break; fi
+        sleep 0.5
+    done
     if [[ "$clean_data" == "true" ]]; then
         rm -rf "$PROJECT_DIR/data"
     fi
@@ -181,28 +195,33 @@ restart_server_keep_data() {
     echo -e "${CYAN}Restarting server (keeping data)...${NC}"
     stop_server
     if ! start_server false; then
-        echo -e "${RED}Server restart failed! Aborting.${NC}"
-        exit 1
+        echo -e "${RED}Server restart failed!${NC}"
+        return 1
     fi
+    return 0
 }
 
 restart_server() {
-    echo -e "${CYAN}Restarting server...${NC}"
+    echo -e "${CYAN}Restarting server (clean data)...${NC}"
     stop_server
     if ! start_server; then
-        echo -e "${RED}Server restart failed! Aborting.${NC}"
-        exit 1
+        echo -e "${RED}Server restart failed!${NC}"
+        return 1
     fi
+    return 0
 }
 
 # Cleanup on exit
 cleanup() {
+    # Kill any lingering client processes
+    pkill -f "inputlayer-client.*${SERVER_PORT}" 2>/dev/null || true
     rm -rf "$TEMP_DIR"
     stop_server
 }
 trap cleanup EXIT
 
 # Parallel worker: processes one test file, writes result to temp dir
+# Runs synchronously — no background processes. Timeout via perl alarm.
 run_test_parallel() {
     local test_file="$1"
     local expected_file="${test_file}.out"
@@ -220,10 +239,23 @@ run_test_parallel() {
         return 0
     fi
 
-    # Run the test (1 connection, no pre/post-clean)
+    # Run the test with perl alarm timeout (synchronous, no extra processes)
+    # Retry once on empty output (transient connection failure — no state was modified)
+    local attempt
+    for attempt in 1 2; do
+        perl -e 'alarm shift; exec @ARGV' "$TEST_TIMEOUT" \
+            "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$test_file" \
+            >"$output_file" 2>"$stderr_file" || true
+        # If output is non-empty, done; otherwise retry after brief delay
+        if [[ -s "$output_file" ]]; then
+            break
+        fi
+        if [[ $attempt -eq 1 ]]; then
+            sleep 2
+        fi
+    done
     local actual_output
-    actual_output=$("$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$test_file" 2>"$stderr_file") || true
-    printf '%s\n' "$actual_output" > "$output_file"
+    actual_output=$(cat "$output_file")
 
     # Normalize both outputs
     local allowed_kgs="default"
@@ -241,6 +273,11 @@ run_test_parallel() {
     else
         echo "FAIL [$category] $test_name" > "$result_file"
         diff <(echo "$normalized_expected") <(echo "$normalized_actual") > "$diff_file" 2>/dev/null || true
+        # Append stderr for debugging
+        if [[ -s "$stderr_file" ]]; then
+            echo "--- stderr ---" >> "$diff_file"
+            head -5 "$stderr_file" >> "$diff_file"
+        fi
     fi
 }
 
@@ -259,8 +296,14 @@ run_test_sequential() {
     fi
 
     local stderr_file="$TEMP_DIR/${category}_${test_name}.stderr"
+    local stdout_file="$TEMP_DIR/${category}_${test_name}.stdout"
+
+    # Run the test with perl alarm timeout (synchronous, no extra processes)
+    perl -e 'alarm shift; exec @ARGV' "$TEST_TIMEOUT" \
+        "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$test_file" \
+        >"$stdout_file" 2>"$stderr_file" || true
     local actual_output
-    actual_output=$("$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$test_file" 2>"$stderr_file") || true
+    actual_output=$(cat "$stdout_file")
 
     # Update mode
     if [[ "$UPDATE_MODE" == "1" ]]; then
@@ -366,11 +409,16 @@ fi
 SERVER_PID=""
 if check_server; then
     echo "Stopping existing server..."
-    pkill -f "inputlayer-server.*${SERVER_PORT}" 2>/dev/null || true
+    pkill -f "inputlayer-server" 2>/dev/null || true
     for i in $(seq 1 10); do
         if ! check_server; then break; fi
         sleep 0.5
     done
+    # Force kill if still alive
+    if check_server; then
+        pkill -9 -f "inputlayer-server" 2>/dev/null || true
+        sleep 1
+    fi
 fi
 
 # Start fresh server
@@ -386,6 +434,14 @@ if [[ -n "$stale_kgs" ]]; then
     echo "  Dropping: $stale_kgs"
     ws_drop_kgs "$stale_kgs"
 fi
+
+# Warmup: send a few queries to ensure the server's WS pipeline is fully ready
+warmup_script="${TEMP_DIR}/_warmup.idl"
+printf '%s\n' ".kg list" ".status" > "$warmup_script"
+for i in 1 2 3; do
+    perl -e 'alarm shift; exec @ARGV' 10 "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$warmup_script" >/dev/null 2>&1 || true
+done
+rm -f "$warmup_script"
 
 echo ""
 echo "========================================"
@@ -461,13 +517,13 @@ else
         mv "${PARALLEL_FILE}.shuffled" "$PARALLEL_FILE"
     fi
 
-    echo "Running $PARALLEL_COUNT tests in parallel, $SEQUENTIAL_COUNT sequentially..."
+    echo "Running $PARALLEL_COUNT tests in parallel ($PARALLEL_JOBS workers), $SEQUENTIAL_COUNT sequentially..."
     echo ""
 
     # Run parallel batch
     if [[ -f "$PARALLEL_FILE" ]] && [[ "$PARALLEL_COUNT" -gt 0 ]]; then
         export -f run_test_parallel normalize_output extract_kgs
-        export CLIENT_BIN TEMP_DIR SERVER_URL CLIENT_SERVER_URL
+        export CLIENT_BIN TEMP_DIR SERVER_URL CLIENT_SERVER_URL TEST_TIMEOUT
 
         cat "$PARALLEL_FILE" | xargs -P"$PARALLEL_JOBS" -I{} bash -c 'run_test_parallel "{}"'
     fi
@@ -495,37 +551,54 @@ else
         done
     fi
 
-    # Ensure server is alive before cleanup queries
+    # Kill any lingering client processes before cleanup phase
+    pkill -f "inputlayer-client.*${SERVER_PORT}" 2>/dev/null || true
+    sleep 1
+
+    # Check server health; try restart if dead
+    SERVER_ALIVE=true
     if ! check_server; then
-        echo -e "${YELLOW}Server died during parallel tests, restarting...${NC}"
-        restart_server_keep_data
+        echo -e "${YELLOW}Server died during parallel tests, attempting restart...${NC}"
+        if ! restart_server_keep_data; then
+            echo -e "${RED}Could not restart server — skipping leak check and sequential tests${NC}"
+            SERVER_ALIVE=false
+        fi
     fi
 
-    # Check for leaked KGs after parallel run
-    leaked_kgs=$(ws_list_kgs)
-    if [[ -n "$leaked_kgs" ]]; then
-        echo ""
-        echo -e "${YELLOW}WARNING: Leaked knowledge graphs after parallel run${NC}"
-        echo "  Leaked: $leaked_kgs"
-        ((DIRTY++))
-        ws_drop_kgs "$leaked_kgs"
+    # Check for leaked KGs after parallel run (only if server is alive)
+    if [[ "$SERVER_ALIVE" == true ]]; then
+        leaked_kgs=$(ws_list_kgs)
+        if [[ -n "$leaked_kgs" ]]; then
+            echo ""
+            echo -e "${YELLOW}WARNING: Leaked knowledge graphs after parallel run${NC}"
+            echo "  Leaked: $leaked_kgs"
+            ((DIRTY++))
+            ws_drop_kgs "$leaked_kgs"
+        fi
     fi
 
     # Run sequential batch (global-state tests)
     if [[ -f "$SEQUENTIAL_FILE" ]] && [[ "$SEQUENTIAL_COUNT" -gt 0 ]]; then
-        echo ""
-        echo "Running $SEQUENTIAL_COUNT sequential tests (global state)..."
+        if [[ "$SERVER_ALIVE" == true ]]; then
+            echo ""
+            echo "Running $SEQUENTIAL_COUNT sequential tests (global state)..."
 
-        # Pre-clean before sequential batch
-        seq_stale=$(ws_list_kgs)
-        if [[ -n "$seq_stale" ]]; then
-            ws_drop_kgs "$seq_stale"
+            # Restart server with clean data for sequential tests (they test global state)
+            if ! restart_server; then
+                echo -e "${RED}Could not restart server for sequential tests${NC}"
+                FAILED=$((FAILED + SEQUENTIAL_COUNT))
+            else
+                LAST_TEST=""
+                for test_file in $(cat "$SEQUENTIAL_FILE"); do
+                    run_test_sequential "$test_file"
+                done
+            fi
+        else
+            # Server is dead and couldn't restart — count sequential tests as failures
+            echo ""
+            echo -e "${RED}Skipping $SEQUENTIAL_COUNT sequential tests (server unavailable)${NC}"
+            FAILED=$((FAILED + SEQUENTIAL_COUNT))
         fi
-
-        LAST_TEST=""
-        for test_file in $(cat "$SEQUENTIAL_FILE"); do
-            run_test_sequential "$test_file"
-        done
     fi
 fi
 

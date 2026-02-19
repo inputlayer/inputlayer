@@ -14,6 +14,7 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
 
 # Build the real binary
 COPY src/ src/
+COPY docs/ docs/
 RUN cargo build --all-features --release --bin inputlayer-server && \
     strip target/release/inputlayer-server
 
@@ -27,6 +28,7 @@ RUN apt-get update && \
 RUN useradd -r -s /bin/false -m -d /var/lib/inputlayer inputlayer
 
 COPY --from=builder /build/target/release/inputlayer-server /usr/local/bin/
+COPY gui/dist/ /var/lib/inputlayer/gui/dist/
 
 ENV INPUTLAYER_HTTP__HOST=0.0.0.0
 ENV INPUTLAYER_HTTP__PORT=8080

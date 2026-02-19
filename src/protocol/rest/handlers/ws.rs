@@ -709,9 +709,20 @@ async fn handle_global_execute(
     program: String,
 ) -> GlobalWsResponse {
     let start = std::time::Instant::now();
-    let result = handler
-        .execute_program(Some(session_id), None, program.clone())
-        .await;
+    // Run on the spawn_blocking thread pool to avoid starving tokio worker threads.
+    // The handler uses parking_lot::RwLock (synchronous) which blocks the calling thread;
+    // under high concurrency this can exhaust all tokio workers and deadlock the runtime.
+    let handler_clone = Arc::clone(handler);
+    let program_clone = program.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(handler_clone.execute_program(
+            Some(session_id),
+            None,
+            program_clone,
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("Task panicked: {e}")));
     let elapsed = start.elapsed();
     if elapsed.as_secs() >= 5 {
         eprintln!(

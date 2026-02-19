@@ -54,9 +54,12 @@ test-all: check
 	fi; \
 	echo ""; \
 	echo "Settling before snapshot tests..."; \
-	lsof -ti :8080 | xargs kill 2>/dev/null || true; \
+	lsof -ti :8080 | xargs kill -9 2>/dev/null || true; \
 	rm -rf ./data 2>/dev/null || true; \
-	sleep 3; \
+	echo "Cleaning debug artifacts to free memory..."; \
+	rm -rf target/debug 2>/dev/null || true; \
+	sync 2>/dev/null || true; \
+	sleep 8; \
 	echo ""; \
 	echo "=== Snapshot Tests (E2E) ==="; \
 	SNAP_TMPFILE=$$(mktemp); \
