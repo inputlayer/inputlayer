@@ -279,23 +279,17 @@ impl Default for JoinGraph {
 /// A rooted Join Spanning Tree with computed join order
 #[derive(Debug, Clone)]
 pub struct RootedJST {
-    #[allow(dead_code)]
-    pub root: usize,
     /// Join order (post-order traversal of the tree)
     pub join_order: Vec<usize>,
     /// Tree-width cost: max "planning variables" at any join step
     pub cost: usize,
     /// Tree depth (for bushy tiebreaking: prefer lower depth)
     pub depth: usize,
-    #[allow(dead_code)]
-    parent: HashMap<usize, usize>,
-    #[allow(dead_code)]
-    children: HashMap<usize, Vec<usize>>,
 }
 
 impl RootedJST {
     /// Build a rooted JST from MST edges with specified root
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn from_mst(graph: &JoinGraph, mst_edges: &[(usize, usize)], root: usize) -> Self {
         Self::from_mst_with_head_vars(graph, mst_edges, root, None)
     }
@@ -307,7 +301,6 @@ impl RootedJST {
         root: usize,
         head_vars: Option<&HashSet<String>>,
     ) -> Self {
-        let mut parent = HashMap::new();
         let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
 
         // Build undirected adjacency from MST edges
@@ -317,17 +310,15 @@ impl RootedJST {
             adj.entry(v).or_default().push(u);
         }
 
-        // BFS from root to determine parent/child relationships
+        // BFS from root to determine child relationships
         let mut visited = HashSet::new();
         let mut queue = vec![root];
-        parent.insert(root, root);
         visited.insert(root);
 
         while let Some(node) = queue.pop() {
             if let Some(neighbors) = adj.get(&node) {
                 for &neighbor in neighbors {
                     if visited.insert(neighbor) {
-                        parent.insert(neighbor, node);
                         children.entry(node).or_default().push(neighbor);
                         queue.push(neighbor);
                     }
@@ -358,12 +349,9 @@ impl RootedJST {
         let cost = Self::compute_tree_width(&join_order, graph, head_vars);
 
         RootedJST {
-            root,
             join_order,
             cost,
             depth,
-            parent,
-            children,
         }
     }
 
@@ -1702,7 +1690,8 @@ mod tests {
         let graph = JoinGraph::from_ir(&ir);
         let mst = graph.compute_mst();
         let jst = RootedJST::from_mst(&graph, &mst, 0);
-        assert_eq!(jst.root, 0);
+        // Root is last in post-order
+        assert_eq!(*jst.join_order.last().unwrap(), 0);
         // Root has one child (node 1), join_order should contain both nodes
         assert_eq!(jst.join_order.len(), 2);
     }

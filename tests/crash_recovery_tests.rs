@@ -16,7 +16,7 @@ fn _create_test_persist(temp: &TempDir) -> FilePersist {
     let config = PersistConfig {
         path: temp.path().to_path_buf(),
         buffer_size: 10,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     };
     FilePersist::new(config).expect("Failed to create persist layer")
@@ -26,7 +26,7 @@ fn create_test_persist_with_config(path: PathBuf, buffer_size: usize) -> FilePer
     let config = PersistConfig {
         path,
         buffer_size,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     };
     FilePersist::new(config).expect("Failed to create persist layer")
@@ -164,7 +164,7 @@ fn test_recovery_with_corrupted_wal_json() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     });
 
@@ -207,7 +207,7 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 100,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     });
 
@@ -266,7 +266,7 @@ fn test_recovery_with_corrupted_shard_metadata() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     });
 
@@ -294,7 +294,7 @@ fn test_recovery_with_missing_required_metadata_fields() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-        immediate_sync: true,
+
         durability_mode: DurabilityMode::Immediate,
     });
 

@@ -1,0 +1,28 @@
+// Test: .index list / .index create / .index stats / .index drop
+// Verifies index meta-commands work through the WS protocol
+.kg create test_index_ops_n33t15
+.kg use test_index_ops_n33t15
+
+// List indexes (should be empty)
+.index list
+
+// Insert data with vector column
++embeddings[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0]), (3, [0.0, 0.0, 1.0])]
+
+// Create an HNSW index on the vector column (errors: no schema)
+.index create emb_idx on embeddings(col2) type hnsw metric cosine
+
+// List indexes (should show emb_idx)
+.index list
+
+// Show stats for the index
+.index stats emb_idx
+
+// Drop the index
+.index drop emb_idx
+
+// List should be empty again
+.index list
+
+.kg use default
+.kg drop test_index_ops_n33t15

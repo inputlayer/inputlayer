@@ -19,7 +19,11 @@ Rule 'reachable' registered.
 Rules:
   reachable (2 clause(s))
 > .rule def reachable
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
 > ?reachable(1, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │
@@ -32,7 +36,11 @@ This command is available in embedded mode. HTTP support is planned for a future
 > -reachable(X, Y) <- edge(X, Y)
 Conditional delete: 0 fact(s) deleted from 'reachable'.
 > .rule def reachable
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+
 > ?reachable(1, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │

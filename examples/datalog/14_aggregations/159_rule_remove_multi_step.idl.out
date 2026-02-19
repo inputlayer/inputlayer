@@ -39,7 +39,7 @@ Clause 2 removed from rule 'reach'.
 └──────┴──────┘
 3 rows
 > .rule remove reach 1
-Clause 1 removed from rule 'reach'. Rule completely deleted (no clauses remaining).
+Rule 'reach' deleted (last clause removed).
 > ?reach(X, Y)
 No results.
 > .kg use default

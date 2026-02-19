@@ -14,4 +14,26 @@ Inserted 4 fact(s) into 'contains'.
 > +requires(Asm, Part) <- contains(Asm, Part, _)
 Rule 'requires' registered.
 > +requires(Asm, Part) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> contains(Asm, Sub, _),
+Parse error: Expected parentheses: (Asm, Sub, _),
+> requires(Sub, Part)
+Cannot insert variable 'Sub' - use constants only
+> ?requires(100, Part)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│  100 │   10 │
+│  100 │   20 │
+└──────┴──────┘
+2 rows
+> +total_qty(Asm, Part, sum<Qty>) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> contains(Asm, Part, Qty)
+Cannot insert variable 'Asm' - use constants only
+> ?total_qty(Asm, Part, Total)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_bom_n28t13
+Knowledge graph 'test_syntax_bom_n28t13' dropped.

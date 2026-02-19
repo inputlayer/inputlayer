@@ -14,4 +14,18 @@ Inserted 3 fact(s) into 'employees'.
 > +salary_grades[(1, 0, 40000), (2, 40001, 55000), (3, 55001, 100000)]
 Inserted 3 fact(s) into 'salary_grades'.
 > +emp_grade(Name, Salary, Grade) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> employees(_, Name, Salary),
+Parse error: Expected parentheses: (_, Name, Salary),
+> salary_grades(Grade, MinSal, MaxSal),
+Parse error: Expected parentheses: (Grade, MinSal, MaxSal),
+> Salary >= MinSal,
+Parse error: Unrecognized statement: Salary >= MinSal,
+> Salary <= MaxSal
+Parse error: Unrecognized statement: Salary <= MaxSal
+> ?emp_grade(N, S, G)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ineq_join_n06t58
+Knowledge graph 'test_ineq_join_n06t58' dropped.

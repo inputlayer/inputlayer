@@ -12,4 +12,16 @@ Switched to knowledge graph: test_lag_n29t12
 > +timeseries[(1, 10), (2, 15), (3, 12), (4, 20)]
 Inserted 4 fact(s) into 'timeseries'.
 > consecutive(T1, V1, T2, V2) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> timeseries(T1, V1),
+Parse error: Expected parentheses: (T1, V1),
+> timeseries(T2, V2),
+Parse error: Expected parentheses: (T2, V2),
+> T2 = T1 + 1
+Parse error: Unrecognized statement: T2 = T1 + 1
+> ?consecutive(T1, V1, T2, V2)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_lag_n29t12
+Knowledge graph 'test_lag_n29t12' dropped.

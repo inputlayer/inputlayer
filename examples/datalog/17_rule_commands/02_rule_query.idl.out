@@ -16,7 +16,6 @@ Rule 'reach' registered.
 > +reach(X, Z) <- reach(X, Y), edge(Y, Z)
 Rule 'reach' registered.
 > .rule reach
-Rule: reach
 ┌──────┬──────┐
 │ col0 │ col1 │
 ├──────┼──────┤

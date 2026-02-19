@@ -1,6 +1,6 @@
-//! REST API Error Types
+//! HTTP API Error Types
 //!
-//! Provides error types and conversions for the REST API.
+//! Provides error types and conversions for the HTTP handlers.
 
 use axum::{
     http::StatusCode,
@@ -37,7 +37,7 @@ impl ApiError {
     }
 }
 
-/// REST API error that can be returned from handlers
+/// HTTP API error that can be returned from handlers
 #[derive(Debug)]
 pub struct RestError {
     pub status: StatusCode,

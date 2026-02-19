@@ -12,4 +12,38 @@ Switched to knowledge graph: test_clamp_n32t06
 > +values[(-5,), (0,), (5,), (10,), (15,), (20,)]
 Inserted 6 fact(s) into 'values'.
 > clamped(V, C) <- values(V), MinV = 0, MaxV = 10,
-Script error: Unsafe rule 'clamped': Head variable(s) C not bound by any positive body atom. All head variables must appear in at least one positive body predicate.
+Unsafe rule 'clamped': Head variable(s) C not bound by any positive body atom. All head variables must appear in at least one positive body predicate.
+> C = V, V >= MinV, V <= MaxV
+Parse error: Unrecognized statement: C = V, V >= MinV, V <= MaxV
+> clamped(V, C) <- values(V), C = 0, V < 0
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -5 │    0 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> clamped(V, C) <- values(V), C = 10, V > 10
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -5 │    0 │
+│   15 │   10 │
+│   20 │   10 │
+└──────┴──────┘
+3 rows
+(session: 2 rule(s))
+> ?clamped(V, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│   -5 │    0 │
+│   15 │   10 │
+│   20 │   10 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_clamp_n32t06
+Knowledge graph 'test_clamp_n32t06' dropped.

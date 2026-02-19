@@ -10,4 +10,32 @@ Switched to knowledge graph: test_syntax_social_n28t11
 > .kg use test_syntax_social_n28t11
 Switched to knowledge graph: test_syntax_social_n28t11
 > +person(id: int, name: string, age: int)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'person' registered with 3 columns (persistent)
+> +follows(follower: int, followed: int)
+Schema for 'follows' registered with 2 columns (persistent)
+> +person[(1, "alice", 30), (2, "bob", 25), (3, "carol", 35)]
+Inserted 3 fact(s) into 'person'.
+> +follows[(1, 2), (2, 3), (1, 3), (2, 1)]
+Inserted 4 fact(s) into 'follows'.
+> +mutual_follow(A, B) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> follows(A, B),
+Parse error: Expected parentheses: (A, B),
+> follows(B, A),
+Parse error: Expected parentheses: (B, A),
+> A < B
+Parse error: Unrecognized statement: A < B
+> ?mutual_follow(A, B)
+No results.
+> +influencer(Id, count<Follower>) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> follows(Follower, Id)
+Cannot insert variable 'Follower' - use constants only
+> ?influencer(Id, Count)
+No results.
+> ?influencer(Id, Count), Count > 1
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_social_n28t11
+Knowledge graph 'test_syntax_social_n28t11' dropped.

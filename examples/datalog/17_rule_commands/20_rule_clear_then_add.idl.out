@@ -23,24 +23,21 @@ Rule 'compute' registered.
 └──────┴──────┘
 3 rows
 > .rule clear compute
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule 'compute' cleared.
 > .rule
 Rules:
-  compute (1 clause(s))
+  compute (0 clause(s))
 > +compute(X, Y) <- base(X), Y = X * 100
 Rule 'compute' registered.
 > ?compute(X, Y)
 ┌──────┬──────┐
 │ col0 │ col1 │
 ├──────┼──────┤
-│    1 │   11 │
 │    1 │  100 │
-│    2 │   12 │
 │    2 │  200 │
-│    3 │   13 │
 │    3 │  300 │
 └──────┴──────┘
-6 rows
+3 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_clear_add_n17t20

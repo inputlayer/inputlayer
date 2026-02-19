@@ -84,12 +84,12 @@ level = "info"
 format = "text"
 
 # =============================================================================
-# HTTP Server Configuration (REST API + GUI)
+# HTTP Server Configuration (WebSocket API + GUI)
 # =============================================================================
 #
 # The HTTP server provides:
-# - REST API at /api/v1/*
-# - Swagger UI at /api/docs
+# - WebSocket API at /ws
+# - AsyncAPI docs at /api/ws-docs (and YAML at /api/asyncapi.yaml)
 # - Optional GUI dashboard at /
 
 [http]

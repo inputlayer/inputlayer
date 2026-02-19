@@ -14,4 +14,8 @@ Inserted 3 fact(s) into 'base'.
 > +derived(X) <- base(X), X > 1
 Rule 'derived' registered.
 > +derived[(99)]
-Script error: Insert failed: Cannot insert into 'derived': it is a derived relation (view). Use a base relation or drop the rule first with '.rule drop derived'.
+Cannot insert into 'derived': it is a derived relation (view). Use a base relation or drop the rule first with '.rule drop derived'.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_insert_view_n12t21
+Knowledge graph 'test_insert_view_n12t21' dropped.

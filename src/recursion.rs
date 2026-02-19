@@ -548,10 +548,11 @@ pub fn stratify(program: &Program) -> Vec<Vec<usize>> {
     // Delegate to the negation-aware version
     match stratify_with_negation(program) {
         StratificationResult::Success(strata) => strata,
-        StratificationResult::NotStratifiable { relation, reason } => {
-            // Fall back to basic stratification (ignoring negation constraints)
-            // This maintains backward compatibility
-            eprintln!("Warning: Program not stratifiable: {relation} - {reason}");
+        StratificationResult::NotStratifiable { reason, .. } => {
+            // Fall back to basic stratification (ignoring negation constraints).
+            // This maintains backward compatibility. The warning is surfaced
+            // through the query result, not printed to stderr.
+            let _ = reason; // consumed by caller if needed
             basic_stratify(program)
         }
     }

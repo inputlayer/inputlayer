@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InputLayer WebSocket API</title>
+  <style>
+    :root { --bg: #fff; --fg: #1a1a2e; --muted: #64748b; --border: #e2e8f0; --accent: #3b82f6; --accent-bg: #eff6ff; --code-bg: #f8fafc; --green: #16a34a; --green-bg: #f0fdf4; --orange: #ea580c; --orange-bg: #fff7ed; --tag-bg: #f1f5f9; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--fg); background: var(--bg); line-height: 1.6; }
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.35rem; margin-top: 2.5rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 2px solid var(--border); }
+    h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--muted); margin-bottom: 1.5rem; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-send { background: var(--green-bg); color: var(--green); }
+    .badge-recv { background: var(--orange-bg); color: var(--orange); }
+    .badge-ws { background: var(--accent-bg); color: var(--accent); }
+    .info-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; margin: 1rem 0; }
+    .info-grid dt { font-weight: 600; color: var(--muted); font-size: 0.875rem; }
+    .info-grid dd { font-size: 0.875rem; }
+    pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.8125rem; line-height: 1.5; margin: 0.75rem 0; }
+    code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.8125rem; }
+    p code { background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 3px; border: 1px solid var(--border); }
+    p { margin-bottom: 0.75rem; }
+    table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .msg-card { border: 1px solid var(--border); border-radius: 8px; margin: 1rem 0; overflow: hidden; }
+    .msg-card-header { padding: 0.75rem 1rem; background: var(--tag-bg); display: flex; align-items: center; gap: 0.75rem; }
+    .msg-card-header h4 { font-size: 0.95rem; margin: 0; }
+    .msg-card-body { padding: 1rem; }
+    .msg-card-body p { margin-bottom: 0.5rem; font-size: 0.875rem; }
+    .field-table td:first-child { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8125rem; white-space: nowrap; }
+    .field-table td:nth-child(2) { color: var(--muted); font-family: monospace; font-size: 0.8125rem; }
+    ul { margin: 0.5rem 0 0.75rem 1.25rem; }
+    li { margin-bottom: 0.25rem; font-size: 0.875rem; }
+    a { color: var(--accent); }
+    .toc { background: var(--tag-bg); border-radius: 8px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
+    .toc ul { list-style: none; margin: 0.5rem 0 0 0; padding: 0; columns: 2; }
+    .toc li { margin: 0.15rem 0; }
+    .toc a { text-decoration: none; font-size: 0.875rem; }
+    .toc a:hover { text-decoration: underline; }
+    .steps { counter-reset: step; list-style: none; margin-left: 0; padding-left: 0; }
+    .steps li { counter-increment: step; padding-left: 2rem; position: relative; margin-bottom: 0.5rem; }
+    .steps li::before { content: counter(step); position: absolute; left: 0; width: 1.5rem; height: 1.5rem; background: var(--accent); color: #fff; border-radius: 50%; text-align: center; font-size: 0.75rem; line-height: 1.5rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+<h1>InputLayer WebSocket API</h1>
+<p class="subtitle">Version 1.0.0 &middot; <a href="/api/asyncapi.yaml">AsyncAPI Spec (YAML)</a></p>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#connection">Connection</a></li>
+    <li><a href="#lifecycle">Lifecycle</a></li>
+    <li><a href="#client-messages">Client &rarr; Server</a></li>
+    <li><a href="#server-messages">Server &rarr; Client</a></li>
+    <li><a href="#commands">Supported Commands</a></li>
+    <li><a href="#examples">Examples</a></li>
+  </ul>
+</div>
+
+<h2 id="connection">Connection</h2>
+
+<dl class="info-grid">
+  <dt>Endpoint</dt>
+  <dd><code>ws://&lt;host&gt;:&lt;port&gt;/ws</code></dd>
+  <dt>Protocol</dt>
+  <dd>WebSocket (RFC 6455)</dd>
+  <dt>Message Format</dt>
+  <dd>JSON text frames</dd>
+  <dt>Query Parameters</dt>
+  <dd><code>kg</code> &mdash; Knowledge graph to bind to (default: <code>"default"</code>)</dd>
+</dl>
+
+<h2 id="lifecycle">Connection Lifecycle</h2>
+<ol class="steps">
+  <li>Client connects to <code>/ws?kg=&lt;name&gt;</code></li>
+  <li>Server auto-creates a session and sends a <code>connected</code> message</li>
+  <li>Client sends <code>execute</code> messages, server responds with <code>result</code> or <code>error</code></li>
+  <li>Server may push <code>notification</code> messages when persistent data changes in the session's KG</li>
+  <li>Client disconnects &rarr; server auto-closes the session</li>
+</ol>
+
+<h2 id="client-messages">Client &rarr; Server Messages</h2>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-send">SEND</span>
+    <h4>execute</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Execute any Datalog statement or meta command as raw text.</p>
+    <table class="field-table">
+      <tr><td>type</td><td>string</td><td>Always <code>"execute"</code></td></tr>
+      <tr><td>program</td><td>string</td><td>The Datalog statement or meta command</td></tr>
+    </table>
+    <pre><code>{"type": "execute", "program": "?edge(X, Y)"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-send">SEND</span>
+    <h4>ping</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Keep-alive ping. Server responds with <code>pong</code>.</p>
+    <pre><code>{"type": "ping"}</code></pre>
+  </div>
+</div>
+
+<h2 id="server-messages">Server &rarr; Client Messages</h2>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>connected</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Sent immediately after connection, confirming session creation.</p>
+    <table class="field-table">
+      <tr><td>type</td><td>string</td><td>Always <code>"connected"</code></td></tr>
+      <tr><td>session_id</td><td>integer</td><td>Auto-created session ID</td></tr>
+      <tr><td>knowledge_graph</td><td>string</td><td>Initial knowledge graph binding</td></tr>
+    </table>
+    <pre><code>{"type": "connected", "session_id": 42, "knowledge_graph": "default"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>result</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Command or query execution result.</p>
+    <table class="field-table">
+      <tr><td>type</td><td>string</td><td>Always <code>"result"</code></td></tr>
+      <tr><td>columns</td><td>string[]</td><td>Column names from result schema</td></tr>
+      <tr><td>rows</td><td>any[][]</td><td>Result rows</td></tr>
+      <tr><td>row_count</td><td>integer</td><td>Number of rows returned</td></tr>
+      <tr><td>total_count</td><td>integer</td><td>Total rows (before truncation)</td></tr>
+      <tr><td>truncated</td><td>boolean</td><td>Whether results were truncated</td></tr>
+      <tr><td>execution_time_ms</td><td>integer</td><td>Execution time in milliseconds</td></tr>
+      <tr><td>row_provenance</td><td>string[]</td><td>Per-row source: <code>"persistent"</code>, <code>"ephemeral"</code>, or <code>"unknown"</code></td></tr>
+      <tr><td>metadata</td><td>object?</td><td>Session query metadata (if applicable)</td></tr>
+      <tr><td>switched_kg</td><td>string?</td><td>Present when KG was switched (e.g. after <code>.kg use</code>)</td></tr>
+    </table>
+    <pre><code>{"type": "result", "columns": ["col0", "col1"], "rows": [[1, 2], [3, 4]],
+ "row_count": 2, "total_count": 2, "truncated": false, "execution_time_ms": 5}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>error</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Error response.</p>
+    <table class="field-table">
+      <tr><td>type</td><td>string</td><td>Always <code>"error"</code></td></tr>
+      <tr><td>message</td><td>string</td><td>Human-readable error message</td></tr>
+    </table>
+    <pre><code>{"type": "error", "message": "Knowledge graph 'missing' not found"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>pong</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Response to a <code>ping</code> message.</p>
+    <pre><code>{"type": "pong"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>notification</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Push notification when persistent data changes in the session's knowledge graph.</p>
+    <table class="field-table">
+      <tr><td>type</td><td>string</td><td>Always <code>"notification"</code></td></tr>
+      <tr><td>event</td><td>string</td><td>Event type (<code>"persistent_update"</code>)</td></tr>
+      <tr><td>knowledge_graph</td><td>string</td><td>KG where the change occurred</td></tr>
+      <tr><td>relation</td><td>string</td><td>Relation that was modified</td></tr>
+      <tr><td>operation</td><td>string</td><td><code>"insert"</code> or <code>"delete"</code></td></tr>
+      <tr><td>count</td><td>integer</td><td>Number of tuples affected</td></tr>
+    </table>
+    <pre><code>{"type": "notification", "event": "persistent_update",
+ "knowledge_graph": "default", "relation": "edge",
+ "operation": "insert", "count": 5}</code></pre>
+  </div>
+</div>
+
+<h2 id="commands">Supported Commands</h2>
+
+<h3>Data Operations</h3>
+<table>
+  <tr><th>Syntax</th><th>Description</th></tr>
+  <tr><td><code>+relation[(v1, v2), ...]</code></td><td>Insert persistent facts</td></tr>
+  <tr><td><code>relation(v1, v2)</code></td><td>Insert session-scoped (ephemeral) fact</td></tr>
+  <tr><td><code>-relation(X, Y) &lt;- condition</code></td><td>Delete facts matching condition</td></tr>
+  <tr><td><code>?relation(X, Y)</code></td><td>Query a relation</td></tr>
+</table>
+
+<h3>Rules</h3>
+<table>
+  <tr><th>Syntax</th><th>Description</th></tr>
+  <tr><td><code>+head(X, Y) &lt;- body(X, Y)</code></td><td>Add persistent rule</td></tr>
+  <tr><td><code>head(X, Y) &lt;- body(X, Y)</code></td><td>Add session-scoped (ephemeral) rule</td></tr>
+</table>
+
+<h3>Knowledge Graph Commands</h3>
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>.kg list</code></td><td>List all knowledge graphs</td></tr>
+  <tr><td><code>.kg create &lt;name&gt;</code></td><td>Create a new knowledge graph</td></tr>
+  <tr><td><code>.kg use &lt;name&gt;</code></td><td>Switch to a knowledge graph</td></tr>
+  <tr><td><code>.kg drop &lt;name&gt;</code></td><td>Delete a knowledge graph</td></tr>
+  <tr><td><code>.kg show</code></td><td>Show current knowledge graph</td></tr>
+</table>
+
+<h3>Relation &amp; Rule Commands</h3>
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>.rel</code></td><td>List all relations</td></tr>
+  <tr><td><code>.rel &lt;name&gt;</code></td><td>Describe a relation (show sample data)</td></tr>
+  <tr><td><code>.rule list</code></td><td>List all rules</td></tr>
+  <tr><td><code>.rule show &lt;name&gt;</code></td><td>Show rule definition</td></tr>
+  <tr><td><code>.rule drop &lt;name&gt;</code></td><td>Delete all clauses of a rule</td></tr>
+  <tr><td><code>.rule remove &lt;name&gt; &lt;index&gt;</code></td><td>Remove specific clause (1-based)</td></tr>
+  <tr><td><code>.rule clear &lt;name&gt;</code></td><td>Clear all clauses of a rule</td></tr>
+  <tr><td><code>.clear &lt;prefix&gt;</code></td><td>Clear relations by prefix</td></tr>
+</table>
+
+<h3>Session Commands</h3>
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>.session list</code></td><td>List ephemeral facts and rules</td></tr>
+  <tr><td><code>.session clear</code></td><td>Clear all session state</td></tr>
+  <tr><td><code>.session drop &lt;index&gt;</code></td><td>Remove specific session rule</td></tr>
+</table>
+
+<h3>Index Commands</h3>
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>.index list</code></td><td>List all indexes</td></tr>
+  <tr><td><code>.index create &lt;name&gt; on &lt;rel&gt;(&lt;col&gt;) [options]</code></td><td>Create HNSW index</td></tr>
+  <tr><td><code>.index drop &lt;name&gt;</code></td><td>Drop an index</td></tr>
+  <tr><td><code>.index stats &lt;name&gt;</code></td><td>Show index statistics</td></tr>
+  <tr><td><code>.index rebuild &lt;name&gt;</code></td><td>Rebuild an index</td></tr>
+</table>
+
+<h3>System Commands</h3>
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>.status</code></td><td>Server status and statistics</td></tr>
+  <tr><td><code>.compact</code></td><td>Trigger storage compaction</td></tr>
+</table>
+
+<h2 id="examples">Examples</h2>
+
+<h3>Insert and Query Data</h3>
+<pre><code>// Insert persistent facts
+&rarr; {"type": "execute", "program": "+edge[(1, 2), (2, 3), (3, 4)]"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["Inserted 3 fact(s) into 'edge'."]], ...}
+
+// Query
+&rarr; {"type": "execute", "program": "?edge(X, Y)"}
+&larr; {"type": "result", "columns": ["X", "Y"], "rows": [[1, 2], [2, 3], [3, 4]], "row_count": 3, ...}</code></pre>
+
+<h3>Add a Rule and Query Derived Data</h3>
+<pre><code>// Add persistent rule
+&rarr; {"type": "execute", "program": "+path(X, Y) <- edge(X, Y)"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["Rule added for 'path'."]], ...}
+
+&rarr; {"type": "execute", "program": "+path(X, Z) <- path(X, Y), edge(Y, Z)"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["Rule added for 'path'."]], ...}
+
+// Query derived view
+&rarr; {"type": "execute", "program": "?path(X, Y)"}
+&larr; {"type": "result", "columns": ["X", "Y"], "rows": [[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]], ...}</code></pre>
+
+<h3>Session-Scoped Data</h3>
+<pre><code>// Add ephemeral fact (no + prefix)
+&rarr; {"type": "execute", "program": "temp_data(100)"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["Session fact added for 'temp_data'. ..."]], ...}
+
+// Add ephemeral rule (no + prefix)
+&rarr; {"type": "execute", "program": "doubled(X, Y) <- temp_data(X), Y = X * 2"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["Session rule added for 'doubled'."]], ...}
+
+// Query combines persistent + ephemeral data
+&rarr; {"type": "execute", "program": "?doubled(X, Y)"}
+&larr; {"type": "result", ..., "row_provenance": ["ephemeral"], ...}</code></pre>
+
+<h3>Knowledge Graph Management</h3>
+<pre><code>// Switch KG
+&rarr; {"type": "execute", "program": ".kg create analytics"}
+&larr; {"type": "result", ..., "switched_kg": "analytics"}
+
+// List KGs
+&rarr; {"type": "execute", "program": ".kg list"}
+&larr; {"type": "result", "columns": ["message"], "rows": [["  default"], ["* analytics"]], ...}</code></pre>
+
+</div>
+</body>
+</html>

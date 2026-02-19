@@ -1,0 +1,471 @@
+asyncapi: 3.0.0
+
+info:
+  title: InputLayer WebSocket API
+  version: 1.0.0
+  description: |
+    WebSocket API for InputLayer Knowledge Graph Engine.
+
+    The WebSocket endpoint at `/ws` is the primary API for all operations:
+    knowledge graph management, query execution, data manipulation, rule management,
+    and session-based ephemeral data. Sessions are auto-managed (created on connect,
+    closed on disconnect).
+
+    Interactive documentation is served at `/api/ws-docs`, and this spec is available
+    as YAML at `/api/asyncapi.yaml`.
+
+    ## Connection
+
+    Connect to `ws://<host>:<port>/ws?kg=<name>` where `kg` is the initial
+    knowledge graph to bind to (defaults to "default").
+
+    On successful connection, the server sends a `connected` message with the
+    auto-created session ID.
+
+    ## Message Flow
+
+    1. Client connects → Server sends `connected`
+    2. Client sends `execute` messages → Server responds with `result` or `error`
+    3. Server may send `notification` messages when persistent data changes
+    4. Client disconnects → Server auto-closes session
+
+    ## Raw Text Protocol
+
+    The `execute` message accepts any valid Datalog statement or meta command as raw text.
+    The server parses and executes it, returning structured results.
+
+  license:
+    name: AGPL-3.0-or-later
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+  contact:
+    name: InputLayer Team
+    url: https://inputlayer.ai
+
+servers:
+  development:
+    host: localhost:8080
+    protocol: ws
+    pathname: /ws
+    description: Local development server
+
+channels:
+  ws:
+    address: /ws
+    description: |
+      Global WebSocket endpoint with auto-session lifecycle.
+      Query parameter `kg` sets the initial knowledge graph (default: "default").
+    parameters:
+      kg:
+        description: Knowledge graph to bind to on connect
+        default: default
+    messages:
+      # Client → Server
+      execute:
+        $ref: '#/components/messages/Execute'
+      ping:
+        $ref: '#/components/messages/Ping'
+      # Server → Client
+      connected:
+        $ref: '#/components/messages/Connected'
+      result:
+        $ref: '#/components/messages/Result'
+      error:
+        $ref: '#/components/messages/Error'
+      pong:
+        $ref: '#/components/messages/Pong'
+      notification:
+        $ref: '#/components/messages/Notification'
+
+operations:
+  execute:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Execute a Datalog statement or meta command
+    description: |
+      Send any valid Datalog statement or meta command as raw text.
+
+      **Supported statement types:**
+      - `+relation[(v1, v2), ...]` — Insert persistent facts
+      - `relation(v1, v2)` — Insert session-scoped (ephemeral) fact
+      - `-relation(X, Y) <- condition` — Delete facts matching condition
+      - `?relation(X, Y)` — Query a relation
+      - `+rule(X, Y) <- body(X, Y)` — Add persistent rule
+      - `rule(X, Y) <- body(X, Y)` — Add session-scoped rule
+
+      **Meta commands:**
+      - `.kg list` / `.kg create <name>` / `.kg use <name>` / `.kg drop <name>` — KG management
+      - `.rel` / `.rel <name>` — List relations / describe relation
+      - `.rule list` / `.rule show <name>` / `.rule drop <name>` — Rule management
+      - `.rule remove <name> <index>` — Remove specific rule clause
+      - `.session list` / `.session clear` — Session management
+      - `.index list` / `.index create ...` / `.index drop <name>` — Index management
+      - `.clear prefix <prefix>` — Clear relations by prefix
+      - `.explain <query>` — Show query plan without executing
+      - `.help` — Show available commands
+      - `.status` — Server status
+      - `.compact` — Trigger compaction
+    messages:
+      - $ref: '#/channels/ws/messages/execute'
+
+  ping:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Keep-alive ping
+    messages:
+      - $ref: '#/channels/ws/messages/ping'
+
+  onConnected:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Connection confirmation with session ID
+    description: Sent immediately after WebSocket upgrade. Contains the auto-created session ID and initial knowledge graph.
+    messages:
+      - $ref: '#/channels/ws/messages/connected'
+
+  onResult:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Command/query result
+    messages:
+      - $ref: '#/channels/ws/messages/result'
+
+  onError:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Error response
+    messages:
+      - $ref: '#/channels/ws/messages/error'
+
+  onPong:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Pong response to keep-alive
+    messages:
+      - $ref: '#/channels/ws/messages/pong'
+
+  onNotification:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Push notification for persistent data changes
+    description: |
+      Sent when persistent data changes in the session's currently bound knowledge graph.
+      Notifications are filtered to only include changes for the session's active KG.
+    messages:
+      - $ref: '#/channels/ws/messages/notification'
+
+components:
+  messages:
+    Execute:
+      name: execute
+      title: Execute Command
+      summary: Execute any Datalog statement or meta command
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ExecuteRequest'
+
+    Ping:
+      name: ping
+      title: Ping
+      summary: Keep-alive ping
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PingRequest'
+
+    Connected:
+      name: connected
+      title: Connected
+      summary: Connection established with auto-created session
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ConnectedResponse'
+
+    Result:
+      name: result
+      title: Result
+      summary: Command/query execution result
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ResultResponse'
+
+    Error:
+      name: error
+      title: Error
+      summary: Error response
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ErrorResponse'
+
+    Pong:
+      name: pong
+      title: Pong
+      summary: Pong response to keep-alive
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PongResponse'
+
+    Notification:
+      name: notification
+      title: Notification
+      summary: Push notification for persistent data changes
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NotificationResponse'
+
+  schemas:
+    ExecuteRequest:
+      type: object
+      required:
+        - type
+        - program
+      properties:
+        type:
+          type: string
+          const: execute
+          description: Message type discriminator
+        program:
+          type: string
+          description: |
+            Any valid Datalog statement or meta command as raw text.
+            Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
+      examples:
+        - type: execute
+          program: "+edge[(1, 2), (3, 4)]"
+        - type: execute
+          program: "?edge(X, Y)"
+        - type: execute
+          program: ".kg list"
+        - type: execute
+          program: "+path(X, Y) <- edge(X, Y)"
+
+    PingRequest:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ping
+      examples:
+        - type: ping
+
+    ConnectedResponse:
+      type: object
+      required:
+        - type
+        - session_id
+        - knowledge_graph
+      properties:
+        type:
+          type: string
+          const: connected
+        session_id:
+          type: integer
+          format: int64
+          description: Auto-created session ID
+        knowledge_graph:
+          type: string
+          description: Initial knowledge graph the session is bound to
+      examples:
+        - type: connected
+          session_id: 42
+          knowledge_graph: default
+
+    ResultResponse:
+      type: object
+      required:
+        - type
+        - columns
+        - rows
+        - row_count
+        - total_count
+        - truncated
+        - execution_time_ms
+      properties:
+        type:
+          type: string
+          const: result
+        columns:
+          type: array
+          items:
+            type: string
+          description: Column names from the result schema
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+          description: Result rows, each row is an array of values
+        row_count:
+          type: integer
+          description: Number of rows returned
+        total_count:
+          type: integer
+          description: Total number of rows (before truncation)
+        truncated:
+          type: boolean
+          description: Whether the result was truncated
+        execution_time_ms:
+          type: integer
+          format: int64
+          description: Execution time in milliseconds
+        row_provenance:
+          type: array
+          items:
+            type: string
+          description: |
+            Per-row provenance. Values include "persistent", "ephemeral", "mixed",
+            or "unknown" when provenance cannot be determined.
+        metadata:
+          $ref: '#/components/schemas/SessionQueryMetadata'
+        switched_kg:
+          type: string
+          description: |
+            Present when the command switched the session's knowledge graph
+            (e.g., after `.kg use <name>` or `.kg create <name>`).
+            The client should update its local KG tracking.
+      examples:
+        - type: result
+          columns: ["col0", "col1"]
+          rows: [[1, 2], [3, 4]]
+          row_count: 2
+          total_count: 2
+          truncated: false
+          execution_time_ms: 5
+        - type: result
+          columns: ["message"]
+          rows: [["Switched to knowledge graph: test"]]
+          row_count: 1
+          total_count: 1
+          truncated: false
+          execution_time_ms: 1
+          switched_kg: test
+
+    ErrorResponse:
+      type: object
+      required:
+        - type
+        - message
+      properties:
+        type:
+          type: string
+          const: error
+        message:
+          type: string
+          description: Human-readable error message
+        validation_errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          description: Detailed validation errors (present for parse/validation errors)
+      examples:
+        - type: error
+          message: "Invalid query syntax"
+        - type: error
+          message: "Knowledge graph 'missing' not found"
+
+    PongResponse:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: pong
+      examples:
+        - type: pong
+
+    NotificationResponse:
+      type: object
+      required:
+        - type
+        - event
+        - knowledge_graph
+        - relation
+        - operation
+        - count
+      properties:
+        type:
+          type: string
+          const: notification
+        event:
+          type: string
+          description: Event type (currently always "persistent_update")
+        knowledge_graph:
+          type: string
+          description: Knowledge graph where the change occurred
+        relation:
+          type: string
+          description: Relation that was modified
+        operation:
+          type: string
+          enum: [insert, delete]
+          description: Type of data operation
+        count:
+          type: integer
+          description: Number of tuples affected
+      examples:
+        - type: notification
+          event: persistent_update
+          knowledge_graph: default
+          relation: edge
+          operation: insert
+          count: 5
+
+    ValidationError:
+      type: object
+      required:
+        - line
+        - statement_index
+        - error
+      properties:
+        line:
+          type: integer
+          description: 1-based line number in the original program text
+        statement_index:
+          type: integer
+          description: 0-based index of the statement (counting only non-empty lines)
+        error:
+          type: string
+          description: The parse error message
+
+    SessionQueryMetadata:
+      type: object
+      properties:
+        has_ephemeral:
+          type: boolean
+          description: Whether the result includes ephemeral (session-scoped) data
+        ephemeral_sources:
+          type: array
+          items:
+            type: string
+          description: Relations that contributed ephemeral data to the result
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Any warnings generated during query execution
+
+  # HTTP Endpoints (not WebSocket, documented here for completeness)
+  # These are served alongside the WebSocket endpoint on the same port.
+  x-http-endpoints:
+    health:
+      method: GET
+      path: /health
+      description: Health check endpoint. Returns 200 with JSON body.
+      response:
+        type: object
+        properties:
+          status:
+            type: string
+            const: healthy
+    metrics:
+      method: GET
+      path: /metrics
+      description: Server statistics endpoint. Returns query counts, uptime, and KG info.

@@ -22,4 +22,16 @@ Inserted 1 fact(s) into 'embedding'.
 └──────┴──────────────────────┴─────────────────────────┘
 2 rows
 > self_dist(Id, Dist) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> embedding(Id, V),
+Parse error: Expected parentheses: (Id, V),
+> Q = quantize_linear(V),
+Parse error: Expected parentheses: (V),
+> Dist = euclidean_int8(Q, Q)
+Cannot insert variable 'Q' - use constants only
+> ?self_dist(Id, Dist)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_euclidean_int8_n30t05
+Knowledge graph 'test_euclidean_int8_n30t05' dropped.

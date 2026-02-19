@@ -10,4 +10,42 @@ Switched to knowledge graph: test_org_n20t09
 > .kg use test_org_n20t09
 Switched to knowledge graph: test_org_n20t09
 > +reports_to[(2, 1), (3, 1), (4, 1), (5, 2), (6, 2), (7, 3), (8, 3), (9, 3), (10, 4), (11, 5), (12, 6), (13, 7), (14, 8)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +ceo[(1)]
+Inserted 1 fact(s) into 'ceo'.
+> +level(E, 0) <- ceo(E)
+Rule 'level' registered.
+> +level(E, L+1) <- reports_to(E, M), level(M, L)
+Rule 'level' registered.
+> ?level(E, L)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    0 │
+└──────┴──────┘
+1 rows
+> +level_count(L, count<E>) <- level(E, L)
+Rule 'level_count' registered.
+> ?level_count(L, C)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    0 │    1 │
+└──────┴──────┘
+1 rows
+> +subordinate(Mgr, Emp) <- reports_to(Emp, Mgr)
+Rule 'subordinate' registered.
+> +subordinate(Mgr, Emp) <- reports_to(Emp, Mid), subordinate(Mgr, Mid)
+Rule 'subordinate' registered.
+> +sub_count(Mgr, count<E>) <- subordinate(Mgr, E)
+Rule 'sub_count' registered.
+> ?sub_count(M, C)
+No results.
+> +large_team(Mgr) <- sub_count(Mgr, C), C >= 3
+Rule 'large_team' registered.
+> ?large_team(M)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_org_n20t09
+Knowledge graph 'test_org_n20t09' dropped.

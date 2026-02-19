@@ -105,7 +105,6 @@ num_threads = 4
 
 [storage.persist]
 buffer_size = 1000
-immediate_sync = false
 ```
 
 ## Data Directory

@@ -22,4 +22,43 @@ Inserted 3 fact(s) into 'a'.
 > +b[(2), (3), (4)]
 Inserted 3 fact(s) into 'b'.
 > +non_buyer(Id, Name) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> person(Id, Name),
+Parse error: Expected parentheses: (Id, Name),
+> !purchase(Id, _)
+Cannot insert variable 'Id' - use constants only
+> ?non_buyer(Id, Name)
+No results.
+> +sink(X) <- node(X), !edge(X, _)
+Rule 'sink' registered.
+> ?sink(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    4 │
+│    5 │
+└──────┘
+2 rows
+> +source(X) <- node(X), !edge(_, X)
+Rule 'source' registered.
+> ?source(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+│    5 │
+└──────┘
+2 rows
+> +only_in_a(X) <- a(X), !b(X)
+Rule 'only_in_a' registered.
+> ?only_in_a(X)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_negation_n28t09
+Knowledge graph 'test_syntax_negation_n28t09' dropped.

@@ -52,7 +52,18 @@ impl PersistWal {
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&self.current_file)?;
+                .open(&self.current_file)
+                .map_err(|e| {
+                    eprintln!(
+                        "[wal] ERROR ensure_writer: path={}, parent_exists={}, error={}",
+                        self.current_file.display(),
+                        self.current_file
+                            .parent()
+                            .is_some_and(std::path::Path::exists),
+                        e
+                    );
+                    e
+                })?;
             self.writer = Some(BufWriter::new(file));
         }
         Ok(self.writer.as_mut().unwrap())
@@ -182,6 +193,38 @@ impl PersistWal {
     /// Get number of entries written since last clear
     pub fn entries_written(&self) -> usize {
         self.entries_written
+    }
+
+    /// Remove all WAL entries for a specific shard.
+    /// Rewrites the WAL excluding those entries. Other shards' data is preserved.
+    pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
+        let entries = self.read_all()?;
+
+        // Close writer before manipulating the file
+        self.writer = None;
+
+        // Archive old WAL (use nanos for unique names under rapid calls)
+        if self.current_file.exists() {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let archive_path = self.wal_dir.join(format!("wal_{timestamp}.archived"));
+            fs::rename(&self.current_file, &archive_path)?;
+        }
+
+        // Rewrite with surviving entries only
+        self.entries_written = 0;
+        for entry in entries {
+            if entry.shard != shard_name {
+                self.append_inner(&entry.shard, &entry.update, false)?;
+            }
+        }
+        if let Some(ref mut writer) = self.writer {
+            writer.flush()?;
+        }
+
+        Ok(())
     }
 
     /// Get WAL file size
@@ -330,5 +373,87 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         let back: WalEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.shard, "db:edge");
+    }
+
+    #[test]
+    fn test_wal_remove_shard_entries() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(5, 6), 30))
+            .unwrap();
+        wal.append("other:rel", &Update::insert(Tuple::from_pair(7, 8), 40))
+            .unwrap();
+        assert_eq!(wal.entries_written(), 4);
+
+        // Remove only db:edge entries
+        wal.remove_shard_entries("db:edge").unwrap();
+
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].shard, "db:node");
+        assert_eq!(entries[1].shard, "other:rel");
+
+        // entries_written should reflect the rewritten count
+        assert_eq!(wal.entries_written(), 2);
+    }
+
+    #[test]
+    fn test_wal_remove_shard_entries_all() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+
+        // Remove all entries (only shard)
+        wal.remove_shard_entries("db:edge").unwrap();
+
+        let entries = wal.read_all().unwrap();
+        assert!(entries.is_empty());
+        assert_eq!(wal.entries_written(), 0);
+    }
+
+    #[test]
+    fn test_wal_remove_shard_entries_nonexistent() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+
+        // Remove entries for a shard that doesn't exist — should be a no-op
+        wal.remove_shard_entries("nonexistent").unwrap();
+
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_wal_remove_shard_entries_then_append() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+
+        wal.remove_shard_entries("db:edge").unwrap();
+
+        // New appends should work after removal
+        wal.append("db:new", &Update::insert(Tuple::from_pair(5, 6), 30))
+            .unwrap();
+
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].shard, "db:node");
+        assert_eq!(entries[1].shard, "db:new");
     }
 }

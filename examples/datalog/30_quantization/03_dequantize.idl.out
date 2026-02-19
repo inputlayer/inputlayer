@@ -25,4 +25,16 @@ Inserted 1 fact(s) into 'embedding'.
 └──────┴────────────────────────────┴──────────────────────┴──────────────────────────────┘
 3 rows
 > roundtrip(Id, Original, Quantized, Dequantized) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> embedding(Id, Original),
+Parse error: Expected parentheses: (Id, Original),
+> Quantized = quantize_linear(Original),
+Parse error: Expected parentheses: (Original),
+> Dequantized = dequantize(Quantized)
+Cannot insert variable 'Quantized' - use constants only
+> ?roundtrip(Id, O, Q, D)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dequantize_n30t03
+Knowledge graph 'test_dequantize_n30t03' dropped.

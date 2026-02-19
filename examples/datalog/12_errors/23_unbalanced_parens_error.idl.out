@@ -9,3 +9,9 @@ Knowledge graph 'test_unbal_parens_n12t23' created.
 Switched to knowledge graph: test_unbal_parens_n12t23
 > .kg use test_unbal_parens_n12t23
 Switched to knowledge graph: test_unbal_parens_n12t23
+> +facts[(1, 2, 3]
+Parse error: unterminated statement (unbalanced delimiters)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unbal_parens_n12t23
+Knowledge graph 'test_unbal_parens_n12t23' dropped.

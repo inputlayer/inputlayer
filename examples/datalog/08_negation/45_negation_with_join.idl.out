@@ -14,4 +14,14 @@ Inserted 3 fact(s) into 'employees'.
 > +managers[(1, "Eng")]
 Inserted 1 fact(s) into 'managers'.
 > non_managers(Id, Name, Dept) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> employees(Id, Name, Dept),
+Parse error: Expected parentheses: (Id, Name, Dept),
+> !managers(Id, Dept)
+Cannot insert variable 'Id' - use constants only
+> ?non_managers(Id, Name, Dept)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_neg_join_n08t45
+Knowledge graph 'test_neg_join_n08t45' dropped.

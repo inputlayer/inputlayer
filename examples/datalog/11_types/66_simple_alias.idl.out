@@ -10,10 +10,24 @@ Switched to knowledge graph: test_type_alias_n11t66
 > .kg use test_type_alias_n11t66
 Switched to knowledge graph: test_type_alias_n11t66
 > type Email: string
-Type 'Email' declared (local only).
+Type 'Email' declared.
 > type UserId: int
-Type 'UserId' declared (local only).
+Type 'UserId' declared.
 > type Score: int
-Type 'Score' declared (local only).
+Type 'Score' declared.
 > +users(id: UserId, email: Email, score: Score)
-Script error: Query execution failed: Invalid term: 'id: UserId'
+Schema for 'users' registered with 3 columns (persistent)
+> +users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)]
+Inserted 2 fact(s) into 'users'.
+> ?users(X, Y, Z)
+┌──────┬─────────────────────┬──────┐
+│ col0 │ col1                │ col2 │
+├──────┼─────────────────────┼──────┤
+│    1 │ "alice@example.com" │  100 │
+│    2 │ "bob@example.com"   │   85 │
+└──────┴─────────────────────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_type_alias_n11t66
+Knowledge graph 'test_type_alias_n11t66' dropped.

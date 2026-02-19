@@ -16,4 +16,8 @@ Rule 'a' registered.
 > +b(X) <- base(X), !c(X)
 Rule 'b' registered.
 > +c(X) <- base(X), !a(X)
-Script error: Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b, c]
+Failed to register rule: Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b, c]
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_3way_neg_n12t31
+Knowledge graph 'test_3way_neg_n12t31' dropped.

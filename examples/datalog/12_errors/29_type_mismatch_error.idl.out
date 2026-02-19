@@ -10,4 +10,10 @@ Switched to knowledge graph: test_type_mismatch_n12t29
 > .kg use test_type_mismatch_n12t29
 Switched to knowledge graph: test_type_mismatch_n12t29
 > +typed_rel(id: int, name: string, score: float)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'typed_rel' registered with 3 columns (persistent)
+> +typed_rel("not_an_int", 123, "not_a_float")
+Insert rejected for 'typed_rel': Insert rejected for 'typed_rel': batch of 1 tuples had type/arity errors
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_type_mismatch_n12t29
+Knowledge graph 'test_type_mismatch_n12t29' dropped.

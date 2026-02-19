@@ -49,4 +49,9 @@ Session rules (1):
 └──────┴──────┘
 2 rows
 > .session drop nonexistent
-Script error: No session rules found for relation 'nonexistent'.
+No session rules found for relation 'nonexistent'.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 2 session rule(s), 0 session fact(s))
+> .kg drop test_session_drop_name_n04t26
+Knowledge graph 'test_session_drop_name_n04t26' dropped.

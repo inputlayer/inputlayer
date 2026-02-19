@@ -12,4 +12,14 @@ Switched to knowledge graph: test_combined_filter_n07t12
 > +products[(1, "Electronics", 500), (2, "Electronics", 100), (3, "Clothing", 50), (4, "Electronics", 200)]
 Inserted 4 fact(s) into 'products'.
 > expensive_electronics(Id, Price) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> products(Id, "Electronics", Price),
+Parse error: Expected parentheses: (Id, "Electronics", Price),
+> Price > 150
+Parse error: Unrecognized statement: Price > 150
+> ?expensive_electronics(Id, Price)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_combined_filter_n07t12
+Knowledge graph 'test_combined_filter_n07t12' dropped.

@@ -12,4 +12,20 @@ Switched to knowledge graph: test_int_ops_n11t25
 > +nums[(10,), (20,), (30,)]
 Inserted 3 fact(s) into 'nums'.
 > computed(X, Add, Sub, Mul, Div, Mod) <- nums(X),
-Script error: Unsafe rule 'computed': Head variable(s) Add, Div, Mod, Mul, Sub not bound by any positive body atom. All head variables must appear in at least one positive body predicate.
+Unsafe rule 'computed': Head variable(s) Add, Div, Mod, Mul, Sub not bound by any positive body atom. All head variables must appear in at least one positive body predicate.
+> Add = X + 5,
+Parse error: Unrecognized statement: Add = X + 5,
+> Sub = X - 5,
+Parse error: Unrecognized statement: Sub = X - 5,
+> Mul = X * 2,
+Parse error: Unrecognized statement: Mul = X * 2,
+> Div = X / 5,
+Parse error: Unrecognized statement: Div = X / 5,
+> Mod = X % 7
+Parse error: Unrecognized statement: Mod = X % 7
+> ?computed(X, A, S, M, D, R)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_int_ops_n11t25
+Knowledge graph 'test_int_ops_n11t25' dropped.

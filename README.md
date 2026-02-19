@@ -163,7 +163,7 @@ InputLayer sits between your data and your LLM. It's the reasoning layer  - it f
 - Incremental computation via Differential Dataflow
 - Persistent storage (Parquet + write-ahead log)
 - Multi-tenancy (isolated knowledge graphs per tenant)
-- HTTP API with OpenAPI docs and Swagger UI
+- WebSocket API with AsyncAPI docs
 - Single binary. No cluster, no JVM, no dependencies.
 
 ---
@@ -179,9 +179,11 @@ cargo build --release
 # Interactive REPL
 ./target/release/inputlayer
 
-# HTTP server
+# WebSocket server
 ./target/release/inputlayer-server --port 8080
-# API docs at http://localhost:8080/api/docs
+# WebSocket endpoint: ws://localhost:8080/ws
+# AsyncAPI docs: http://localhost:8080/api/ws-docs
+# AsyncAPI YAML: http://localhost:8080/api/asyncapi.yaml
 ```
 
 See the [documentation](docs/) for guides, syntax reference, and the full function library.

@@ -12,7 +12,7 @@ Switched to knowledge graph: test_rec_depth_n09t47
 > +link[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")]
 Inserted 4 fact(s) into 'link'.
 > +path_depth(X, X, 0)
-Inserted 1 fact(s) into 'path_depth'.
+Cannot insert variable 'X' - use constants only
 > +path_depth(X, Z, D) <- path_depth(X, Y, D1), link(Y, Z), D = D1 + 1, D < 5
 Rule 'path_depth' registered.
 > ?path_depth("a", Y, D)

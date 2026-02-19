@@ -133,7 +133,7 @@ To add a new built-in function:
 - Count distinct aggregate (`count_distinct`)
 - TopK, TopKThreshold, WithinRadius aggregates
 - 1567 unit tests + 1109 snapshot tests (as of 2026-02-08)
-- REST API with 20+ endpoints
+- WebSocket API (AsyncAPI-documented)
 - WAL-based persistence with configurable durability
 - Basic Datalog operations
 - Persistent and session rules

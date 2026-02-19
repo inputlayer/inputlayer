@@ -12,4 +12,10 @@ Switched to knowledge graph: test_cd_group_n14t41
 > +sales[(1, "North", "Widget"), (2, "North", "Gadget"), (3, "North", "Widget"), (4, "South", "Widget")]
 Inserted 4 fact(s) into 'sales'.
 > +distinct_by_region(Region, <COUNT_DISTINCT:Product>) <- sales(_, Region, Product)
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> ?distinct_by_region(Region, N)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_cd_group_n14t41
+Knowledge graph 'test_cd_group_n14t41' dropped.

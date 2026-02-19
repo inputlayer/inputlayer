@@ -31,4 +31,17 @@ Inserted 3 fact(s) into 'vectors'.
 └──────┴─────────────────┴───────────────┘
 3 rows
 > same_bucket(Id1, Id2, B) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> vectors(Id1, V1), vectors(Id2, V2), Id1 < Id2,
+Parse error: Expected parentheses: (Id1, V1), vectors(Id2, V2), Id1 < Id2,
+> B = lsh_bucket(V1, 4, 42),
+Parse error: Expected parentheses: (V1, 4, 42),
+> B = lsh_bucket(V2, 4, 42)
+Cannot insert variable 'V2' - use constants only
+> ?same_bucket(Id1, Id2, B)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_lsh_identical_n31t05
+Knowledge graph 'test_lsh_identical_n31t05' dropped.

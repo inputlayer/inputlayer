@@ -12,4 +12,20 @@ Switched to knowledge graph: test_triangle_n18t81
 > +edge[("a", "b"), ("b", "c"), ("c", "a"), ("a", "d"), ("d", "e")]
 Inserted 5 fact(s) into 'edge'.
 > triangle(A, B, C) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> edge(A, B),
+Parse error: Expected parentheses: (A, B),
+> edge(B, C),
+Parse error: Expected parentheses: (B, C),
+> edge(C, A),
+Parse error: Expected parentheses: (C, A),
+> A < B,
+Parse error: Unrecognized statement: A < B,
+> B < C
+Parse error: Unrecognized statement: B < C
+> ?triangle(A, B, C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triangle_n18t81
+Knowledge graph 'test_triangle_n18t81' dropped.

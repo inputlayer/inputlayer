@@ -12,4 +12,10 @@ Switched to knowledge graph: test_drop_noexist_n17t10
 > .rule list
 No rules defined.
 > .rule drop nonexistent_rule
-Script error: Rule 'nonexistent_rule' not found
+Rule 'nonexistent_rule' not found: Failed to drop rule: Rule 'nonexistent_rule' does not exist
+> .rule list
+No rules defined.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_noexist_n17t10
+Knowledge graph 'test_drop_noexist_n17t10' dropped.

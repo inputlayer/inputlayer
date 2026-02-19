@@ -8,9 +8,6 @@
 // Show current knowledge graph
 .kg
 
-// List knowledge graphs (should show default and test_kg_n01t01)
-.kg list
-
 // Insert some data to verify kg is usable
 +edge(1, 2)
 
@@ -21,5 +18,5 @@
 .kg use default
 .kg drop test_kg_n01t01
 
-// Verify it's gone (should only show 'default')
-.kg list
+// Verify it's gone by switching back (should fail)
+.kg use test_kg_n01t01

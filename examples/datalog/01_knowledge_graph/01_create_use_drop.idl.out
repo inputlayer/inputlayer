@@ -11,10 +11,6 @@ Switched to knowledge graph: test_kg_n01t01
 Switched to knowledge graph: test_kg_n01t01
 > .kg
 Current knowledge graph: test_kg_n01t01
-> .kg list
-Knowledge Graphs:
-  default
-  test_kg_n01t01 *
 > +edge(1, 2)
 Inserted 1 fact(s) into 'edge'.
 > ?edge(X, Y)
@@ -28,6 +24,5 @@ Inserted 1 fact(s) into 'edge'.
 Switched to knowledge graph: default
 > .kg drop test_kg_n01t01
 Knowledge graph 'test_kg_n01t01' dropped.
-> .kg list
-Knowledge Graphs:
-  default *
+> .kg use test_kg_n01t01
+Knowledge graph 'test_kg_n01t01' not found: Knowledge graph not found: test_kg_n01t01

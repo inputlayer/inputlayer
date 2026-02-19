@@ -27,4 +27,3 @@ edge(100, 200)
 // Cleanup
 .kg use default
 .kg drop test_sess_facts_n04t02
-.kg list

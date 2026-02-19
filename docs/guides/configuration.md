@@ -113,10 +113,10 @@ level = "info"
 format = "text"
 
 # =============================================================================
-# HTTP SERVER (REST API)
+# HTTP SERVER (WebSocket API)
 # =============================================================================
 [http]
-# Enable HTTP server for REST API access
+# Enable HTTP server for WebSocket API access
 enabled = false
 
 # Bind address
@@ -125,7 +125,7 @@ host = "127.0.0.1"
 # Port number
 port = 8080
 
-# CORS allowed origins (empty = allow all in dev mode)
+# CORS allowed origins for WebSocket connections (empty = allow all in dev mode)
 cors_origins = []
 
 # -----------------------------------------------------------------------------

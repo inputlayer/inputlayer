@@ -5,7 +5,7 @@ Server status: healthy
 Current knowledge graph: default
 
 > .help kg
-InputLayer Client (HTTP)
+InputLayer Client (WebSocket)
 ================================
 
 Meta Commands:
@@ -25,17 +25,19 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
+  .explain <query>     Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit
 
 Data Manipulation:
-  edge(1, 2)           Insert fact
+  +edge(1, 2)          Insert fact (persistent)
   -edge(1, 2)          Delete fact
+  edge(1, 2)           Session fact (transient)
 
 Rules:
   +path(X, Y) <- edge(X, Y)    Persistent rule
-  foo(X, Y) <- bar(X, Y)       Session rule
+  foo(X, Y) <- bar(X, Y)       Session rule (transient)
 
 Queries:
   ?path(1, X)          Query

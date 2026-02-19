@@ -20,4 +20,16 @@ Inserted 2 fact(s) into 'mixed'.
 └──────┴──────┘
 2 rows
 > +mixed[(5, 6, 7)]
-Script error: Insert failed: Arity mismatch for relation 'mixed': existing arity is 2, but trying to insert tuples with arity 3
+Arity mismatch for relation 'mixed': existing arity is 2, but trying to insert tuples with arity 3
+> ?mixed(X, Y)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │    2 │
+│    3 │    4 │
+└──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arity_err_n12t04
+Knowledge graph 'test_arity_err_n12t04' dropped.

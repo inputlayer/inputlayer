@@ -27,7 +27,7 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        Path, WebSocketUpgrade,
+        Path, Query, WebSocketUpgrade,
     },
     response::IntoResponse,
     Extension,
@@ -36,7 +36,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use super::wire_value_to_json;
-use crate::protocol::handler::PersistentNotification;
+use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
@@ -168,18 +168,7 @@ enum WsResponse {
 /// - The client sends a close frame
 /// - The underlying session is closed (server sends an error message before closing)
 /// - The notification broadcast channel is shut down
-#[utoipa::path(
-    get,
-    path = "/sessions/{id}/ws",
-    tag = "websocket",
-    params(
-        ("id" = u64, Path, description = "Session ID")
-    ),
-    responses(
-        (status = 101, description = "WebSocket connection established — see endpoint description for the full message protocol"),
-        (status = 404, description = "Session not found"),
-    )
-)]
+/// Deprecated: Use the global `/ws` endpoint instead, which auto-manages session lifecycle.
 pub async fn session_websocket(
     Extension(handler): Extension<Arc<Handler>>,
     Path(id): Path<u64>,
@@ -369,7 +358,7 @@ fn handle_ws_insert_facts(
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
-    let parsed = match super::sessions::json_tuples_to_tuples(&tuples) {
+    let parsed = match super::json_tuples_to_tuples(&tuples) {
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
@@ -387,7 +376,7 @@ fn handle_ws_retract_facts(
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
-    let parsed = match super::sessions::json_tuples_to_tuples(&tuples) {
+    let parsed = match super::json_tuples_to_tuples(&tuples) {
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
@@ -430,6 +419,373 @@ fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: u64, rule_text: &str) 
             message: format!("Rule added for '{head}'"),
         },
         Err(e) => WsResponse::Error { message: e },
+    }
+}
+
+// =============================================================================
+// Global WebSocket Endpoint (/ws)
+//
+// Auto-session lifecycle: connect → server creates session → sends Connected →
+// all commands via Execute message → disconnect closes session.
+// =============================================================================
+
+/// Query parameters for the global WebSocket connection
+#[derive(Debug, Deserialize)]
+pub struct WsConnectParams {
+    /// Knowledge graph to bind to (defaults to "default")
+    #[serde(default = "default_kg")]
+    pub kg: String,
+}
+
+fn default_kg() -> String {
+    "default".to_string()
+}
+
+/// Incoming message for the global WebSocket protocol
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum GlobalWsRequest {
+    /// Execute any Datalog statement or meta command as raw text
+    Execute { program: String },
+    /// Keep-alive ping
+    Ping,
+}
+
+/// Outgoing message for the global WebSocket protocol
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum GlobalWsResponse {
+    /// Sent immediately after connection, confirming session creation
+    Connected {
+        session_id: u64,
+        knowledge_graph: String,
+    },
+    /// Query/command result
+    Result {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        row_count: usize,
+        total_count: usize,
+        truncated: bool,
+        execution_time_ms: u64,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        row_provenance: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<SessionQueryMetadataDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        switched_kg: Option<String>,
+    },
+    /// Error response
+    Error {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        validation_errors: Option<Vec<ValidationError>>,
+    },
+    /// Pong response to keep-alive ping
+    Pong,
+    /// Push notification when persistent data changes
+    Notification {
+        event: String,
+        knowledge_graph: String,
+        relation: String,
+        operation: String,
+        count: usize,
+    },
+}
+
+/// Global WebSocket endpoint with auto-session lifecycle.
+///
+/// Connect to `/ws?kg=<name>` to auto-create a session bound to the given
+/// knowledge graph (defaults to "default"). The server sends a `Connected`
+/// message with the session ID. On disconnect, the session is automatically
+/// closed.
+///
+/// ## Client → Server Messages
+///
+/// **Execute** — Send any Datalog statement or meta command as raw text:
+/// ```json
+/// {"type": "execute", "program": "+edge(1,2)."}
+/// {"type": "execute", "program": "?edge(X,Y)"}
+/// {"type": "execute", "program": ".kg list"}
+/// {"type": "execute", "program": ".rule list"}
+/// ```
+///
+/// **Ping** — Keep-alive:
+/// ```json
+/// {"type": "ping"}
+/// ```
+///
+/// ## Server → Client Messages
+///
+/// **Connected** — Sent on connection:
+/// ```json
+/// {"type": "connected", "session_id": 42, "knowledge_graph": "default"}
+/// ```
+///
+/// **Result** — Command/query results:
+/// ```json
+/// {"type": "result", "columns": ["col0", "col1"], "rows": [[1, 2]], "row_count": 1,
+///  "total_count": 1, "truncated": false, "execution_time_ms": 5}
+/// ```
+///
+/// **Error** — Error:
+/// ```json
+/// {"type": "error", "message": "..."}
+/// ```
+///
+/// **Pong** — Response to ping:
+/// ```json
+/// {"type": "pong"}
+/// ```
+///
+/// **Notification** — Push notification for persistent data changes:
+/// ```json
+/// {"type": "notification", "event": "persistent_update", ...}
+/// ```
+pub async fn global_websocket(
+    Extension(handler): Extension<Arc<Handler>>,
+    ws: WebSocketUpgrade,
+    Query(params): Query<WsConnectParams>,
+) -> Result<impl IntoResponse, RestError> {
+    Ok(ws.on_upgrade(move |socket| handle_global_ws_connection(socket, handler, params.kg)))
+}
+
+/// Handle a global WebSocket connection with auto-session lifecycle.
+async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, kg: String) {
+    let (mut sender, mut receiver) = socket.split();
+
+    eprintln!("[ws] New connection for kg={kg}");
+
+    // Auto-create session
+    let session_id = match handler.create_session(&kg) {
+        Ok(id) => {
+            eprintln!("[ws] Session {id} created for kg={kg}");
+            id
+        }
+        Err(e) => {
+            eprintln!("[ws] ERROR: Failed to create session for kg={kg}: {e}");
+            let err_msg = GlobalWsResponse::Error {
+                message: format!("Failed to create session: {e}"),
+                validation_errors: None,
+            };
+            if let Ok(json) = serde_json::to_string(&err_msg) {
+                let _ = sender.send(Message::Text(json)).await;
+            }
+            let _ = sender.close().await;
+            return;
+        }
+    };
+
+    // Send Connected message
+    let connected = GlobalWsResponse::Connected {
+        session_id,
+        knowledge_graph: kg,
+    };
+    if let Ok(json) = serde_json::to_string(&connected) {
+        if sender.send(Message::Text(json)).await.is_err() {
+            let _ = handler.close_session(session_id);
+            return;
+        }
+    }
+
+    let mut notify_rx = handler.subscribe_notifications();
+
+    loop {
+        tokio::select! {
+            // Client message
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        let response = process_global_ws_message(&handler, session_id, &text).await;
+                        let json = match serde_json::to_string(&response) {
+                            Ok(j) => j,
+                            Err(e) => {
+                                let err = GlobalWsResponse::Error {
+                                    message: format!("Serialization error: {e}"),
+                                    validation_errors: None,
+                                };
+                                serde_json::to_string(&err).unwrap_or_else(|_| {
+                                    r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
+                                })
+                            }
+                        };
+                        if sender.send(Message::Text(json)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        eprintln!("[ws] Session {session_id} received close frame");
+                        break;
+                    }
+                    None => {
+                        eprintln!("[ws] Session {session_id} stream ended");
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        eprintln!("[ws] Session {session_id} protocol error: {e}");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            // Push notification
+            notification = notify_rx.recv() => {
+                match notification {
+                    Ok(PersistentNotification::PersistentUpdate { knowledge_graph, relation, operation, count }) => {
+                        let session_kg = match handler
+                            .session_manager()
+                            .with_session(session_id, |s| s.knowledge_graph.clone())
+                        {
+                            Ok(kg) => kg,
+                            Err(_) => break,
+                        };
+                        if knowledge_graph == session_kg {
+                            let ws_msg = GlobalWsResponse::Notification {
+                                event: "persistent_update".to_string(),
+                                knowledge_graph,
+                                relation,
+                                operation,
+                                count,
+                            };
+                            if let Ok(json) = serde_json::to_string(&ws_msg) {
+                                if sender.send(Message::Text(json)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        let warn = GlobalWsResponse::Error {
+                            message: format!("Missed {count} notification(s) due to backpressure"),
+                            validation_errors: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&warn) {
+                            if sender.send(Message::Text(json)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-close session on disconnect
+    eprintln!("[ws] Session {session_id} disconnecting");
+    let _ = handler.close_session(session_id);
+}
+
+/// Process a single global WebSocket message
+async fn process_global_ws_message(
+    handler: &Arc<Handler>,
+    session_id: u64,
+    text: &str,
+) -> GlobalWsResponse {
+    let request: GlobalWsRequest = match serde_json::from_str(text) {
+        Ok(r) => r,
+        Err(e) => {
+            return GlobalWsResponse::Error {
+                message: format!("Invalid message: {e}"),
+                validation_errors: None,
+            };
+        }
+    };
+
+    match request {
+        GlobalWsRequest::Execute { program } => {
+            handle_global_execute(handler, session_id, program).await
+        }
+        GlobalWsRequest::Ping => GlobalWsResponse::Pong,
+    }
+}
+
+/// Handle an Execute message on the global WebSocket
+async fn handle_global_execute(
+    handler: &Arc<Handler>,
+    session_id: u64,
+    program: String,
+) -> GlobalWsResponse {
+    let start = std::time::Instant::now();
+    // Run on the spawn_blocking thread pool to avoid starving tokio worker threads.
+    // The handler uses parking_lot::RwLock (synchronous) which blocks the calling thread;
+    // under high concurrency this can exhaust all tokio workers and deadlock the runtime.
+    let handler_clone = Arc::clone(handler);
+    let program_clone = program.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(handler_clone.execute_program(
+            Some(session_id),
+            None,
+            program_clone,
+        ))
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("Task panicked: {e}")));
+    let elapsed = start.elapsed();
+    if elapsed.as_secs() >= 5 {
+        eprintln!(
+            "[ws] SLOW execute session={session_id} ({:.1}s): {}",
+            elapsed.as_secs_f64(),
+            &program[..program.len().min(80)]
+        );
+    }
+    match result {
+        Ok(response) => {
+            let row_provenance: Vec<String> = response
+                .rows
+                .iter()
+                .map(|row| {
+                    row.provenance
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string)
+                })
+                .collect();
+
+            let rows: Vec<Vec<serde_json::Value>> = response
+                .rows
+                .into_iter()
+                .map(|row| row.values.into_iter().map(wire_value_to_json).collect())
+                .collect();
+
+            let columns: Vec<String> = response.schema.iter().map(|c| c.name.clone()).collect();
+            let row_count = rows.len();
+
+            let metadata = response.metadata.map(|m| SessionQueryMetadataDto {
+                has_ephemeral: m.has_ephemeral,
+                ephemeral_sources: m.ephemeral_sources,
+                warnings: m.warnings,
+            });
+
+            GlobalWsResponse::Result {
+                columns,
+                rows,
+                row_count,
+                total_count: response.total_count,
+                truncated: response.truncated,
+                execution_time_ms: response.execution_time_ms,
+                row_provenance,
+                metadata,
+                switched_kg: response.switched_kg,
+            }
+        }
+        Err(e) => {
+            // Check for structured validation errors
+            if let Some(json_str) = e.strip_prefix(VALIDATION_ERROR_PREFIX) {
+                if let Ok(errors) = serde_json::from_str::<Vec<ValidationError>>(json_str) {
+                    let count = errors.len();
+                    return GlobalWsResponse::Error {
+                        message: format!("Program has {count} parse error(s)"),
+                        validation_errors: Some(errors),
+                    };
+                }
+            }
+            GlobalWsResponse::Error {
+                message: e,
+                validation_errors: None,
+            }
+        }
     }
 }
 
@@ -541,5 +897,143 @@ mod tests {
         let json = serde_json::to_string(&notif).unwrap();
         assert!(json.contains("\"type\":\"persistent_update\""));
         assert!(json.contains("\"relation\":\"users\""));
+    }
+
+    // === Global WebSocket protocol tests ===
+
+    #[test]
+    fn test_global_ws_request_execute_deserialize() {
+        let json = r#"{"type": "execute", "program": "+edge(1,2)."}"#;
+        let req: GlobalWsRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, GlobalWsRequest::Execute { program } if program == "+edge(1,2)."));
+    }
+
+    #[test]
+    fn test_global_ws_request_ping_deserialize() {
+        let json = r#"{"type": "ping"}"#;
+        let req: GlobalWsRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, GlobalWsRequest::Ping));
+    }
+
+    #[test]
+    fn test_global_ws_response_connected_serialize() {
+        let resp = GlobalWsResponse::Connected {
+            session_id: 42,
+            knowledge_graph: "default".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"connected\""));
+        assert!(json.contains("\"session_id\":42"));
+        assert!(json.contains("\"knowledge_graph\":\"default\""));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_serialize() {
+        let resp = GlobalWsResponse::Result {
+            columns: vec!["col0".to_string()],
+            rows: vec![vec![serde_json::json!(1)]],
+            row_count: 1,
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 5,
+            row_provenance: vec![],
+            metadata: None,
+            switched_kg: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result\""));
+        assert!(json.contains("\"total_count\":1"));
+        assert!(json.contains("\"truncated\":false"));
+        // switched_kg should be omitted when None
+        assert!(!json.contains("switched_kg"));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_with_kg_switch() {
+        let resp = GlobalWsResponse::Result {
+            columns: vec!["message".to_string()],
+            rows: vec![],
+            row_count: 0,
+            total_count: 0,
+            truncated: false,
+            execution_time_ms: 1,
+            row_provenance: vec![],
+            metadata: None,
+            switched_kg: Some("new_kg".to_string()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"switched_kg\":\"new_kg\""));
+    }
+
+    #[test]
+    fn test_global_ws_response_error_serialize() {
+        let resp = GlobalWsResponse::Error {
+            message: "test error".to_string(),
+            validation_errors: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"error\""));
+        assert!(json.contains("test error"));
+    }
+
+    #[test]
+    fn test_global_ws_response_pong_serialize() {
+        let resp = GlobalWsResponse::Pong;
+        let json = serde_json::to_string(&resp).unwrap();
+        assert_eq!(json, r#"{"type":"pong"}"#);
+    }
+
+    #[test]
+    fn test_global_ws_response_notification_serialize() {
+        let resp = GlobalWsResponse::Notification {
+            event: "persistent_update".to_string(),
+            knowledge_graph: "test_kg".to_string(),
+            relation: "edge".to_string(),
+            operation: "insert".to_string(),
+            count: 3,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"notification\""));
+        assert!(json.contains("\"count\":3"));
+    }
+
+    #[test]
+    fn test_ws_connect_params_default() {
+        let params: WsConnectParams = serde_json::from_str("{}").unwrap();
+        assert_eq!(params.kg, "default");
+    }
+
+    #[test]
+    fn test_ws_connect_params_custom_kg() {
+        let params: WsConnectParams = serde_json::from_str(r#"{"kg": "my_graph"}"#).unwrap();
+        assert_eq!(params.kg, "my_graph");
+    }
+
+    #[test]
+    fn test_global_ws_response_error_with_validation_errors() {
+        let resp = GlobalWsResponse::Error {
+            message: "Program has 1 parse error(s)".to_string(),
+            validation_errors: Some(vec![ValidationError {
+                line: 2,
+                statement_index: 1,
+                error: "Expected relation name".to_string(),
+            }]),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"error\""));
+        assert!(json.contains("\"validation_errors\""));
+        assert!(json.contains("\"line\":2"));
+        assert!(json.contains("\"statement_index\":1"));
+    }
+
+    #[test]
+    fn test_global_ws_response_error_without_validation_errors() {
+        let resp = GlobalWsResponse::Error {
+            message: "some error".to_string(),
+            validation_errors: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"error\""));
+        assert!(!json.contains("validation_errors"));
     }
 }
