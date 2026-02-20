@@ -2,11 +2,14 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback } from "react"
 import { Play, Copy, Check, Trash2, Sparkles, ChevronDown, Lightbulb } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { useDatalogStore } from "@/lib/datalog-store"
+import { AutocompletePopup } from "@/components/autocomplete-popup"
+import { getCompletions, getCursorCoordinates, type CompletionItem } from "@/lib/autocomplete"
 
 interface QueryEditorPanelProps {
   onExecute: (query: string) => void
@@ -21,12 +24,25 @@ const EXAMPLE_QUERIES = [
   { label: "List all relations", code: "?- $relation(Name, Arity)." },
 ]
 
+const MAX_COMPLETIONS = 30
+const MAX_COMPLETIONS_FORCED = 100
+
 export function QueryEditorPanel({ onExecute, onExplain, isExecuting, isExplaining = false }: QueryEditorPanelProps) {
   const [query, setQuery] = useState(`% Datalog Query
 ?- edge(X, Y).`)
   const [copied, setCopied] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lineNumbersRef = useRef<HTMLDivElement>(null)
+  const editorAreaRef = useRef<HTMLDivElement>(null)
+
+  // Autocomplete state
+  const [completionItems, setCompletionItems] = useState<CompletionItem[]>([])
+  const [completionStartIndex, setCompletionStartIndex] = useState(0)
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0 })
+  const showAutocomplete = completionItems.length > 0
+
+  const { relations, views } = useDatalogStore()
 
   const lines = query.split("\n")
   const lineCount = lines.length
@@ -49,12 +65,114 @@ export function QueryEditorPanel({ onExecute, onExplain, isExecuting, isExplaini
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const dismissAutocomplete = useCallback(() => {
+    setCompletionItems([])
+    setSelectedIndex(0)
+  }, [])
+
+  const acceptCompletion = useCallback((item: CompletionItem) => {
+    if (!textareaRef.current) return
+
+    const newQuery =
+      query.substring(0, completionStartIndex) +
+      item.insertText +
+      query.substring(textareaRef.current.selectionStart)
+
+    setQuery(newQuery)
+    dismissAutocomplete()
+
+    // Restore cursor after inserted text
+    const newPos = completionStartIndex + item.insertText.length
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = newPos
+        textareaRef.current.selectionEnd = newPos
+        textareaRef.current.focus()
+      }
+    }, 0)
+  }, [query, completionStartIndex, dismissAutocomplete])
+
+  const updateCompletions = useCallback((text: string, cursorPos: number) => {
+    const { items, startIndex } = getCompletions(text, cursorPos, relations, views)
+    const limited = items.slice(0, MAX_COMPLETIONS)
+
+    if (limited.length > 0 && textareaRef.current && editorAreaRef.current) {
+      const coords = getCursorCoordinates(textareaRef.current, cursorPos)
+      // Position relative to the editor area, offset by line numbers width (3rem = ~48px)
+      const lineNumberWidth = 48
+      setPopupPosition({
+        top: coords.top + 24, // Below the current line
+        left: coords.left + lineNumberWidth,
+      })
+      setCompletionItems(limited)
+      setCompletionStartIndex(startIndex)
+      setSelectedIndex(0)
+    } else {
+      dismissAutocomplete()
+    }
+  }, [relations, views, dismissAutocomplete])
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newQuery = e.target.value
+    setQuery(newQuery)
+
+    const cursorPos = e.target.selectionStart
+    updateCompletions(newQuery, cursorPos)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Autocomplete keyboard handling (when popup is open)
+    if (showAutocomplete) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev + 1) % completionItems.length)
+        return
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setSelectedIndex((prev) => (prev - 1 + completionItems.length) % completionItems.length)
+        return
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault()
+        acceptCompletion(completionItems[selectedIndex])
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        dismissAutocomplete()
+        return
+      }
+    }
+
+    // Ctrl+A: force show all completions
+    if (e.ctrlKey && e.key === "a") {
+      e.preventDefault()
+      if (textareaRef.current) {
+        const cursorPos = textareaRef.current.selectionStart
+        const { items, startIndex } = getCompletions(query, cursorPos, relations, views, true)
+        const limited = items.slice(0, MAX_COMPLETIONS_FORCED)
+        if (limited.length > 0 && editorAreaRef.current) {
+          const coords = getCursorCoordinates(textareaRef.current, cursorPos)
+          const lineNumberWidth = 48
+          setPopupPosition({
+            top: coords.top + 24,
+            left: coords.left + lineNumberWidth,
+          })
+          setCompletionItems(limited)
+          setCompletionStartIndex(startIndex)
+          setSelectedIndex(0)
+        }
+      }
+      return
+    }
+
+    // Normal editor keyboard handling
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault()
       handleExecute()
     }
-    // Tab support
+    // Tab support (only when autocomplete is NOT open)
     if (e.key === "Tab") {
       e.preventDefault()
       const start = e.currentTarget.selectionStart
@@ -73,6 +191,8 @@ export function QueryEditorPanel({ onExecute, onExplain, isExecuting, isExplaini
     if (textareaRef.current && lineNumbersRef.current) {
       lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop
     }
+    // Dismiss autocomplete on scroll
+    dismissAutocomplete()
   }
 
   return (
@@ -141,7 +261,7 @@ export function QueryEditorPanel({ onExecute, onExplain, isExecuting, isExplaini
       </div>
 
       {/* Code editor area */}
-      <div className="relative flex flex-1 overflow-hidden bg-[var(--code-bg)]">
+      <div ref={editorAreaRef} className="relative flex flex-1 overflow-hidden bg-[var(--code-bg)]">
         {/* Line numbers */}
         <div
           ref={lineNumbersRef}
@@ -159,13 +279,24 @@ export function QueryEditorPanel({ onExecute, onExplain, isExecuting, isExplaini
         <textarea
           ref={textareaRef}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           onScroll={handleScroll}
           spellCheck={false}
           className="flex-1 resize-none bg-transparent p-3 font-mono text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground scrollbar-thin"
           placeholder="Enter your Datalog query..."
         />
+
+        {/* Autocomplete popup */}
+        {showAutocomplete && (
+          <AutocompletePopup
+            items={completionItems}
+            selectedIndex={selectedIndex}
+            position={popupPosition}
+            onSelect={acceptCompletion}
+            onSetSelected={setSelectedIndex}
+          />
+        )}
       </div>
 
       {/* Status bar */}
