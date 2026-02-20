@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sip_three_way_n80t03
+Knowledge graph 'test_sip_three_way_n80t03' created.
+Switched to knowledge graph: test_sip_three_way_n80t03
+> .kg use test_sip_three_way_n80t03
+Switched to knowledge graph: test_sip_three_way_n80t03
+> +employee[(1, "alice", 10), (2, "bob", 20), (3, "carol", 10)]
+Inserted 3 fact(s) into 'employee'.
+> +department[(10, "eng"), (20, "sales")]
+Inserted 2 fact(s) into 'department'.
+> +project[(101, 1), (102, 2), (103, 3)]
+Inserted 3 fact(s) into 'project'.
+> ?employee(EmpId, Name, DeptId), department(DeptId, "eng"), project(ProjId, EmpId)
+┌──────┬─────────┬──────┬──────┐
+│ col0 │ col1    │ col2 │ col3 │
+├──────┼─────────┼──────┼──────┤
+│    1 │ "alice" │   10 │  101 │
+│    3 │ "carol" │   10 │  103 │
+└──────┴─────────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sip_three_way_n80t03
+Knowledge graph 'test_sip_three_way_n80t03' dropped.

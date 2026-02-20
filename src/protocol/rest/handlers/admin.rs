@@ -24,55 +24,63 @@ pub async fn health(
 }
 
 /// Server statistics endpoint
+///
+/// Uses `spawn_blocking` because acquiring the storage read lock can block
+/// when a write lock is pending (parking_lot write-preferring policy).
+/// Running this on a Tokio worker thread would risk starving the async runtime.
 pub async fn stats(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<StatsDto>>, RestError> {
-    let storage = handler.get_storage();
-    let kgs = storage.list_knowledge_graphs();
-    let knowledge_graphs = kgs.len();
+    let stats = tokio::task::spawn_blocking(move || {
+        let storage = handler.get_storage();
+        let kgs = storage.list_knowledge_graphs();
+        let knowledge_graphs = kgs.len();
 
-    // Count total relations and views across all KGs
-    let mut total_relations = 0;
-    let mut total_views = 0;
+        // Count total relations and views across all KGs
+        let mut total_relations = 0;
+        let mut total_views = 0;
 
-    // Estimate memory usage from tuple counts across all KGs.
-    // Each tuple is approximately 64 bytes (Value enum + heap allocations).
-    let mut total_tuples: u64 = 0;
-    for kg_name in &kgs {
-        if let Ok(relations) = storage.list_relations_in(kg_name) {
-            total_relations += relations.len();
-            for rel_name in &relations {
-                if let Ok(Some((_schema, count))) =
-                    storage.get_relation_metadata_in(kg_name, rel_name)
-                {
-                    total_tuples += count as u64;
+        // Estimate memory usage from tuple counts across all KGs.
+        // Each tuple is approximately 64 bytes (Value enum + heap allocations).
+        let mut total_tuples: u64 = 0;
+        for kg_name in &kgs {
+            if let Ok(relations) = storage.list_relations_in(kg_name) {
+                total_relations += relations.len();
+                for rel_name in &relations {
+                    if let Ok(Some((_schema, count))) =
+                        storage.get_relation_metadata_in(kg_name, rel_name)
+                    {
+                        total_tuples += count as u64;
+                    }
                 }
             }
+            if let Ok(rules) = storage.list_rules_in(kg_name) {
+                total_views += rules.len();
+            }
         }
-        if let Ok(rules) = storage.list_rules_in(kg_name) {
-            total_views += rules.len();
+        let estimated_memory = total_tuples * 64;
+
+        drop(storage);
+
+        let session_stats = handler.session_stats();
+        StatsDto {
+            knowledge_graphs,
+            relations: total_relations,
+            views: total_views,
+            memory_usage_bytes: estimated_memory,
+            query_count: handler.total_queries(),
+            uptime_secs: handler.uptime_seconds(),
+            sessions: SessionStatsDto {
+                total: session_stats.total_sessions,
+                clean: session_stats.clean_sessions,
+                dirty: session_stats.dirty_sessions,
+                total_ephemeral_facts: session_stats.total_ephemeral_facts,
+                total_ephemeral_rules: session_stats.total_ephemeral_rules,
+            },
         }
-    }
-    let estimated_memory = total_tuples * 64;
-
-    drop(storage);
-
-    let session_stats = handler.session_stats();
-    let stats = StatsDto {
-        knowledge_graphs,
-        relations: total_relations,
-        views: total_views,
-        memory_usage_bytes: estimated_memory,
-        query_count: handler.total_queries(),
-        uptime_secs: handler.uptime_seconds(),
-        sessions: SessionStatsDto {
-            total: session_stats.total_sessions,
-            clean: session_stats.clean_sessions,
-            dirty: session_stats.dirty_sessions,
-            total_ephemeral_facts: session_stats.total_ephemeral_facts,
-            total_ephemeral_rules: session_stats.total_ephemeral_rules,
-        },
-    };
+    })
+    .await
+    .map_err(|e| RestError::internal(format!("Stats computation failed: {e}")))?;
 
     Ok(Json(ApiResponse::success(stats)))
 }

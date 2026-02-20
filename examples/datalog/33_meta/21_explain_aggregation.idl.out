@@ -1,0 +1,66 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_agg_n33t21
+Knowledge graph 'test_explain_agg_n33t21' created.
+Switched to knowledge graph: test_explain_agg_n33t21
+> .kg use test_explain_agg_n33t21
+Switched to knowledge graph: test_explain_agg_n33t21
+> +sales[(1, 100), (1, 200), (2, 300)]
+Inserted 3 fact(s) into 'sales'.
+> +sales_count(Region, count<Amount>) <- sales(Region, Amount)
+Rule 'sales_count' registered.
+> .explain ?sales_count(Region, Count)
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 2
+
+  Rule 1: sales_count(Variable("Region"), Aggregate(Count, "Amount")) <- sales(Variable("Region"), Variable("Amount"))
+  Rule 2: __query__(Variable("Region"), Variable("Count")) <- sales_count(Variable("Region"), Variable("Count"))
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 3
+  Rules: 2
+
+  Rule 1 IR:
+    Aggregate[group_by=[0], aggs=[Count(1)]] -> [Region, count_Amount]
+      Scan(sales)[Region, Amount]
+
+  Rule 2 IR:
+    Scan(sales_count)[Region, Count]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 3 -> 3 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Aggregate[group_by=[0], aggs=[Count(1)]] -> [Region, count_Amount]
+      Scan(sales)[Region, Amount]
+
+  Rule 2 Optimized IR:
+    Scan(sales_count)[Region, Count]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_agg_n33t21
+Knowledge graph 'test_explain_agg_n33t21' dropped.

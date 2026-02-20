@@ -1,0 +1,14 @@
+// Test: SIP with string-keyed join columns.
+// Verifies SIP works correctly for symbol/string keys.
+.kg create test_sip_string_n80t05
+.kg use test_sip_string_n80t05
+
++author[("alice", 2020), ("bob", 2021), ("carol", 2019)]
++paper[("p1", "alice", "ML"), ("p2", "bob", "DB"), ("p3", "alice", "AI")]
+
+// Join using string key: find alice's papers
+?author("alice", Year), paper(PaperId, "alice", Topic)
+
+// Cleanup
+.kg use default
+.kg drop test_sip_string_n80t05

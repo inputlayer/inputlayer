@@ -1,0 +1,103 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_join_n33t17
+Knowledge graph 'test_explain_join_n33t17' created.
+Switched to knowledge graph: test_explain_join_n33t17
+> .kg use test_explain_join_n33t17
+Switched to knowledge graph: test_explain_join_n33t17
+> +user[(1, "alice"), (2, "bob")]
+Inserted 2 fact(s) into 'user'.
+> +order[(101, 1), (102, 2)]
+Inserted 2 fact(s) into 'order'.
+> .explain ?user(UserId, Name), order(OrderId, UserId)
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 3
+
+  Rule 1: order_sip0f1(Variable("OrderId"), Variable("UserId")) <- order(Variable("OrderId"), Variable("UserId")), user(Variable("UserId"), Placeholder)
+  Rule 2: user_sip0b1(Variable("UserId"), Variable("Name")) <- user(Variable("UserId"), Variable("Name")), order_sip0f1(Placeholder, Variable("UserId"))
+  Rule 3: __query__(Variable("UserId"), Variable("Name"), Variable("OrderId")) <- user_sip0b1(Variable("UserId"), Variable("Name")), order_sip0f1(Variable("OrderId"), Variable("UserId"))
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 11
+  Rules: 3
+
+  Rule 1 IR:
+    Map[[0, 1]] -> [OrderId, UserId]
+      Join[L:[1], R:[0]] -> [OrderId, UserId, _ph_user_1]
+      |- Left:
+          Scan(order)[OrderId, UserId]
+      `- Right:
+          Scan(user)[UserId, _ph_user_1]
+
+  Rule 2 IR:
+    Map[[0, 1]] -> [UserId, Name]
+      Join[L:[0], R:[1]] -> [UserId, Name, _ph_order_sip0f1_0]
+      |- Left:
+          Scan(user)[UserId, Name]
+      `- Right:
+          Scan(order_sip0f1)[_ph_order_sip0f1_0, UserId]
+
+  Rule 3 IR:
+    Join[L:[0], R:[1]] -> [UserId, Name, OrderId]
+    |- Left:
+        Scan(user_sip0b1)[UserId, Name]
+    `- Right:
+        Scan(order_sip0f1)[OrderId, UserId]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 11 -> 15 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Map[[2, 0]] -> [OrderId, UserId]
+      Distinct
+        Join[L:[0], R:[1]] -> [UserId, _ph_user_1, OrderId]
+        |- Left:
+            Scan(user)[UserId, _ph_user_1]
+        `- Right:
+            Scan(order)[OrderId, UserId]
+
+  Rule 2 Optimized IR:
+    Map[[1, 2]] -> [UserId, Name]
+      Distinct
+        Join[L:[1], R:[0]] -> [_ph_order_sip0f1_0, UserId, Name]
+        |- Left:
+            Scan(order_sip0f1)[_ph_order_sip0f1_0, UserId]
+        `- Right:
+            Scan(user)[UserId, Name]
+
+  Rule 3 Optimized IR:
+    Map[[1, 2, 0]] -> [UserId, Name, OrderId]
+      Distinct
+        Join[L:[1], R:[0]] -> [OrderId, UserId, Name]
+        |- Left:
+            Scan(order_sip0f1)[OrderId, UserId]
+        `- Right:
+            Scan(user_sip0b1)[UserId, Name]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_join_n33t17
+Knowledge graph 'test_explain_join_n33t17' dropped.
