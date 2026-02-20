@@ -617,7 +617,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         // Already exceeded idle timeout
                         Box::pin(std::future::ready(()))
                     } else {
-                        Box::pin(tokio::time::sleep(dur - elapsed))
+                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
                     }
                 }
                 None => Box::pin(std::future::pending()),
