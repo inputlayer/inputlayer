@@ -10,4 +10,30 @@ Switched to knowledge graph: test_schema_views_n24t03
 > .kg use test_schema_views_n24t03
 Switched to knowledge graph: test_schema_views_n24t03
 > +orders(order_id: int, customer_id: int, amount: int)
-Script error: Query execution failed: Invalid term: 'order_id: int'
+Schema for 'orders' registered with 3 columns (persistent)
+> +customers(customer_id: int, name: string)
+Schema for 'customers' registered with 2 columns (persistent)
+> +orders[(1, 100, 500), (2, 100, 300), (3, 200, 1500), (4, 200, 200)]
+Inserted 4 fact(s) into 'orders'.
+> +customers[(100, "Acme Corp"), (200, "Widgets Inc")]
+Inserted 2 fact(s) into 'customers'.
+> +customer_total(CustId, sum<Amount>) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(_, CustId, Amount)
+Cannot insert placeholder '_' - use constants only
+> ?customer_total(C, T)
+No results.
+> +high_value(CustId, Name, Total) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> customer_total(CustId, Total),
+Parse error: Expected parentheses: (CustId, Total),
+> customers(CustId, Name),
+Parse error: Expected parentheses: (CustId, Name),
+> Total > 500
+Parse error: Unrecognized statement: Total > 500
+> ?high_value(Id, Name, Total)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_schema_views_n24t03
+Knowledge graph 'test_schema_views_n24t03' dropped.

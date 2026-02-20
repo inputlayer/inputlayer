@@ -1,0 +1,28 @@
+# Rust build artifacts
+target/
+
+# Node.js dependencies and build artifacts
+**/node_modules/
+gui/dist/
+gui/out/
+gui/.next/
+packages/*/dist/
+
+# Runtime data
+data/
+
+# Test data
+tmp/
+*.tmp
+
+# Local config overrides
+config.local.toml
+
+# IDE
+.vscode/
+.idea/
+
+# Local-only directories (git-ignored)
+rfcs/
+proposals/
+.gback/

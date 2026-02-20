@@ -10,4 +10,44 @@ Switched to knowledge graph: test_record_sugar_n24t02
 > .kg use test_record_sugar_n24t02
 Switched to knowledge graph: test_record_sugar_n24t02
 > type Person: { id: int, name: string, age: int }.
-Script error: Parse error: Unknown base type: '{ id: int, name: string, age: int }.'. Use int, string, bool, float, or a type name.
+Parse error: Unknown base type: '{ id: int, name: string, age: int }.'. Use int, string, bool, float, or a type name.
+> type Address: { person_id: int, city: string }.
+Parse error: Unknown base type: '{ person_id: int, city: string }.'. Use int, string, bool, float, or a type name.
+> +person(id: int, name: string, age: int)
+Schema for 'person' registered with 3 columns (persistent)
+> +address(person_id: int, city: string)
+Schema for 'address' registered with 2 columns (persistent)
+> +person[(1, "Alice", 30), (2, "Bob", 25), (3, "Charlie", 35)]
+Inserted 3 fact(s) into 'person'.
+> +address[(1, "New York"), (2, "Boston"), (3, "Chicago")]
+Inserted 3 fact(s) into 'address'.
+> ?person(Id, Name, Age)
+┌──────┬───────────┬──────┐
+│ col0 │ col1      │ col2 │
+├──────┼───────────┼──────┤
+│    1 │ "Alice"   │   30 │
+│    2 │ "Bob"     │   25 │
+│    3 │ "Charlie" │   35 │
+└──────┴───────────┴──────┘
+3 rows
+> ?address(Pid, City)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│    1 │ "New York" │
+│    2 │ "Boston"   │
+│    3 │ "Chicago"  │
+└──────┴────────────┘
+3 rows
+> +person_location(Name, City) <-
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> person(Id, Name, _),
+Parse error: Expected parentheses: (Id, Name, _),
+> address(Id, City)
+Cannot insert variable 'Id' - use constants only
+> ?person_location(N, C)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_record_sugar_n24t02
+Knowledge graph 'test_record_sugar_n24t02' dropped.

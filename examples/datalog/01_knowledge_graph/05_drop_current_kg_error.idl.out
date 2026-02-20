@@ -19,4 +19,8 @@ Inserted 1 fact(s) into 'test_data'.
 └──────┴────────┘
 1 rows
 > .kg drop test_drop_current_n01t05
-Script error: Cannot drop current knowledge graph. Switch to another first.
+Cannot drop current knowledge graph. Switch to another first.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_drop_current_n01t05
+Knowledge graph 'test_drop_current_n01t05' dropped.

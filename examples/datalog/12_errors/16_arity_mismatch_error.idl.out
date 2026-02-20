@@ -22,4 +22,8 @@ Inserted 1 fact(s) into 'edge'.
 └──────┴──────┘
 2 rows
 > +edge(5, 6, 7)
-Script error: Insert failed: Arity mismatch for relation 'edge': existing arity is 2, but trying to insert tuples with arity 3
+Arity mismatch for relation 'edge': existing arity is 2, but trying to insert tuples with arity 3
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arity_n12t16
+Knowledge graph 'test_arity_n12t16' dropped.

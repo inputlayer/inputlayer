@@ -21,7 +21,7 @@ Inserted 3 fact(s) into 'prices'.
 └──────┴──────┘
 3 rows
 > -prices(Id, Price)
-Deleted 0 facts from 'prices'.
+Delete error: Cannot insert variable 'Id' - use constants only
 > +prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
 Rule 'prices' registered.
 > ?prices(Id, Price)

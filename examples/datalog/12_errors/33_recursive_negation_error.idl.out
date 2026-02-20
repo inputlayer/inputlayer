@@ -12,4 +12,8 @@ Switched to knowledge graph: test_rec_neg_err_n12t33
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
 > +bad(X) <- base(X), !bad(X)
-Script error: Failed to register rule: Unstratified negation: Rule 'bad' negates itself (!bad in body). Self-negation is not supported.
+Failed to register rule: Unstratified negation: Rule 'bad' negates itself (!bad in body). Self-negation is not supported.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rec_neg_err_n12t33
+Knowledge graph 'test_rec_neg_err_n12t33' dropped.

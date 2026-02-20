@@ -24,7 +24,7 @@ Rules:
 └──────┴──────┘
 1 rows
 > .rule remove simple 1
-Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining).
+Rule 'simple' deleted (last clause removed).
 > .rule list
 No rules defined.
 > .kg use default

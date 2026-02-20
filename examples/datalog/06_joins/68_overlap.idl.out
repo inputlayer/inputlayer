@@ -12,4 +12,20 @@ Switched to knowledge graph: test_overlap_n06t68
 > +ranges[(1, 0, 10), (2, 5, 15), (3, 20, 30)]
 Inserted 3 fact(s) into 'ranges'.
 > +overlaps(Id1, Id2) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> ranges(Id1, S1, E1),
+Parse error: Expected parentheses: (Id1, S1, E1),
+> ranges(Id2, S2, E2),
+Parse error: Expected parentheses: (Id2, S2, E2),
+> Id1 < Id2,
+Parse error: Unrecognized statement: Id1 < Id2,
+> S1 <= E2,
+Parse error: Unrecognized statement: S1 <= E2,
+> S2 <= E1
+Parse error: Unrecognized statement: S2 <= E1
+> ?overlaps(A, B)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_overlap_n06t68
+Knowledge graph 'test_overlap_n06t68' dropped.

@@ -18,4 +18,18 @@ Inserted 3 fact(s) into 'roles'.
 > +departments[(1, "engineering"), (2, "sales")]
 Inserted 2 fact(s) into 'departments'.
 > full_user_info(Name, Email, Role, Dept) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> users(Id, Name),
+Parse error: Expected parentheses: (Id, Name),
+> emails(Id, Email),
+Parse error: Expected parentheses: (Id, Email),
+> roles(Id, Role),
+Parse error: Expected parentheses: (Id, Role),
+> departments(Id, Dept)
+Cannot insert variable 'Id' - use constants only
+> ?full_user_info(Name, Email, Role, Dept)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_4way_n06t06
+Knowledge graph 'test_4way_n06t06' dropped.

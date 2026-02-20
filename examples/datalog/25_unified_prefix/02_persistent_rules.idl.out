@@ -34,7 +34,7 @@ Rule 'reachable' registered.
 └──────┴──────┘
 6 rows
 > -reachable
-Rule 'reachable' deleted.
+Rule 'reachable' dropped.
 > .rule
 No rules defined.
 > .kg use default

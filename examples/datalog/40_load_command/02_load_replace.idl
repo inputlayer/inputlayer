@@ -9,7 +9,7 @@
 ?existing_data(X, Y)
 
 // Load with replace mode - should clear existing rules/data first
-.load examples/datalog/40_load_command/_helper_data.dl --replace
+.load examples/datalog/40_load_command/_helper_data.idl --replace
 
 // Verify loaded data
 ?loaded_relation(X, Y)

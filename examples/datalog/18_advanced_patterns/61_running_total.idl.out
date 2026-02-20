@@ -12,4 +12,16 @@ Switched to knowledge graph: test_running_total_n18t61
 > +transactions[(1, 100), (2, 50), (3, 75), (4, 25)]
 Inserted 4 fact(s) into 'transactions'.
 > running_total(Id, Val, sum<V2>) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> transactions(Id, Val),
+Parse error: Expected parentheses: (Id, Val),
+> transactions(Id2, V2),
+Parse error: Expected parentheses: (Id2, V2),
+> Id2 <= Id
+Parse error: Unrecognized statement: Id2 <= Id
+> ?running_total(Id, Val, Total)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_running_total_n18t61
+Knowledge graph 'test_running_total_n18t61' dropped.

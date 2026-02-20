@@ -14,4 +14,18 @@ Inserted 4 fact(s) into 'nodes'.
 > +edges[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edges'.
 > same_type_edge(A, B) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> edges(A, B),
+Parse error: Expected parentheses: (A, B),
+> nodes(A, TypeA),
+Parse error: Expected parentheses: (A, TypeA),
+> nodes(B, TypeB),
+Parse error: Expected parentheses: (B, TypeB),
+> TypeA = TypeB
+Parse error: Unrecognized statement: TypeA = TypeB
+> ?same_type_edge(A, B)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bipartite_n18t86
+Knowledge graph 'test_bipartite_n18t86' dropped.

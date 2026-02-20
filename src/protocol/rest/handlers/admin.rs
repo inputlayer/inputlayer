@@ -11,14 +11,6 @@ use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
 
 /// Health check endpoint
-#[utoipa::path(
-    get,
-    path = "/health",
-    tag = "admin",
-    responses(
-        (status = 200, description = "Server is healthy", body = ApiResponse<HealthDto>),
-    )
-)]
 pub async fn health(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<HealthDto>>, RestError> {
@@ -32,14 +24,6 @@ pub async fn health(
 }
 
 /// Server statistics endpoint
-#[utoipa::path(
-    get,
-    path = "/stats",
-    tag = "admin",
-    responses(
-        (status = 200, description = "Server statistics", body = ApiResponse<StatsDto>),
-    )
-)]
 pub async fn stats(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<StatsDto>>, RestError> {

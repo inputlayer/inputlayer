@@ -9,6 +9,16 @@ Knowledge graph 'test_load_empty_n40t05' created.
 Switched to knowledge graph: test_load_empty_n40t05
 > .kg use test_load_empty_n40t05
 Switched to knowledge graph: test_load_empty_n40t05
-> .load examples/datalog/40_load_command/_helper_data.dl
-Loading file: examples/datalog/40_load_command/_helper_data.dl
-Script error: Failed to read script 'examples/datalog/40_load_command/_helper_data.dl': No such file or directory (os error 2)
+> .load examples/datalog/40_load_command/_helper_data.idl
+Loading file: examples/datalog/40_load_command/_helper_data.idl
+> +loaded_relation[(1, "from_file"), (2, "also_loaded")]
+Inserted 2 fact(s) into 'loaded_relation'.
+> +loaded_rule(X, Y) <- loaded_relation(X, Y)
+Rule 'loaded_rule' registered.
+File loaded.
+> ?loaded_data(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_load_empty_n40t05
+Knowledge graph 'test_load_empty_n40t05' dropped.

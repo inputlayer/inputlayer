@@ -21,4 +21,9 @@ Inserted 3 fact(s) into 'data'.
 2 rows
 (session: 1 rule(s))
 > result(within_radius<2.0, X, Y:asc>) <- data(X, Y)
-Script error: Conflicting aggregation: cannot add clause with 'within_radius<2, X, Y:asc>' to session rule 'result' which already has a clause with 'top_k<2, X, Y:desc>'. Use '.session drop result' to remove the existing rule first.
+Conflicting aggregation: cannot add clause with 'within_radius<2, X, Y:asc>' to session rule 'result' which already has a clause with 'top_k<2, X, Y:desc>'. Use '.session drop result' to remove the existing rule first.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_session_rank_n04t24
+Knowledge graph 'test_session_rank_n04t24' dropped.

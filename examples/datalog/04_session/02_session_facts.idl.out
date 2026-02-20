@@ -49,6 +49,3 @@ Switched to knowledge graph: test_sess_facts_n04t02
 Switched to knowledge graph: default
 > .kg drop test_sess_facts_n04t02
 Knowledge graph 'test_sess_facts_n04t02' dropped.
-> .kg list
-Knowledge Graphs:
-  default *

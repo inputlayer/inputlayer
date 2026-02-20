@@ -1,6 +1,6 @@
 //! `InputLayer` Protocol
 //!
-//! Client-server communication: HTTP REST API, wire format, error handling.
+//! Client-server communication: HTTP/WebSocket API, wire format, error handling.
 //!
 //! # Architecture
 //!
@@ -8,14 +8,13 @@
 //! +-------------------------------------------------------------+
 //! |                   InputLayer Protocol                       |
 //! +-------------------------------------------------------------+
-//! |  HTTP API (REST):                                           |
-//! |    - /api/v1/knowledge-graphs: knowledge graph management  |
-//! |    - /api/v1/query: execute Datalog queries                |
-//! |    - /api/v1/knowledge-graphs/:kg/relations: data ops      |
-//! |    - /api/v1/health: health checks                          |
+//! |  HTTP Endpoints:                                            |
+//! |    - /health: health check                                  |
+//! |    - /metrics: server statistics                             |
+//! |    - /ws: WebSocket (all data operations)                   |
 //! +-------------------------------------------------------------+
-//! |  Wire Format: JSON serialization (HTTP) / bincode (internal)|
-//! |  Transport: HTTP                                             |
+//! |  Wire Format: JSON (WebSocket) / bincode (internal)         |
+//! |  Transport: WebSocket                                        |
 //! +-------------------------------------------------------------+
 //! ```
 //!
@@ -24,7 +23,7 @@
 //! - `wire` - Wire format types (`WireValue`, `WireTuple`, `QueryResult`, etc.)
 //! - `error` - Protocol error types
 //! - `handler` - Handler implementing business logic
-//! - `rest` - REST API handlers and routing
+//! - `rest` - HTTP handlers and routing
 
 pub mod error;
 pub mod handler;

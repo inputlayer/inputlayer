@@ -12,4 +12,16 @@ Switched to knowledge graph: test_session_dur_n29t16
 > +sessions[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2300)]
 Inserted 4 fact(s) into 'sessions'.
 > session_duration(SessId, Duration) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> sessions(SessId, "start", StartTime),
+Parse error: Expected parentheses: (SessId, "start", StartTime),
+> sessions(SessId, "end", EndTime),
+Parse error: Expected parentheses: (SessId, "end", EndTime),
+> Duration = EndTime - StartTime
+Parse error: Unrecognized statement: Duration = EndTime - StartTime
+> ?session_duration(SessId, Duration)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_session_dur_n29t16
+Knowledge graph 'test_session_dur_n29t16' dropped.

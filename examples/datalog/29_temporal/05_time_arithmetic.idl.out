@@ -12,4 +12,16 @@ Switched to knowledge graph: test_time_arith_n29t05
 > +events[(1, "start", 1000), (1, "end", 1500), (2, "start", 2000), (2, "end", 2800)]
 Inserted 4 fact(s) into 'events'.
 > duration(Id, D) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> events(Id, "start", S),
+Parse error: Expected parentheses: (Id, "start", S),
+> events(Id, "end", E),
+Parse error: Expected parentheses: (Id, "end", E),
+> D = E - S
+Parse error: Unrecognized statement: D = E - S
+> ?duration(Id, D)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_time_arith_n29t05
+Knowledge graph 'test_time_arith_n29t05' dropped.

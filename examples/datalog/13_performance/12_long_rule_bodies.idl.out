@@ -44,4 +44,24 @@ Rule 'multi_cond' registered.
 > +complex_rule(A, E) <- r1(A, B), r2(B, C), r3(C, D), r4(D, E),
 Rule 'complex_rule' registered.
 > A > 0, B > 1, C > 10, D > 100, E > 1000
-Script error: Parse error: Unrecognized statement: A > 0, B > 1, C > 10, D > 100, E > 1000
+Parse error: Unrecognized statement: A > 0, B > 1, C > 10, D > 100, E > 1000
+> ?complex_rule(A, E)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │ 2000 │
+│    2 │ 3000 │
+└──────┴──────┘
+2 rows
+> +chain[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)]
+Inserted 7 fact(s) into 'chain'.
+> +path8(A, H) <- chain(A, B), chain(B, C), chain(C, D), chain(D, E),
+Failed to register rule: Unsafe rule 'path8': Head variable(s) H not bound by any positive body atom. All head variables must appear in at least one positive body predicate.
+> chain(E, F), chain(F, G), chain(G, H)
+Parse error: Invalid term: 'F)'
+> ?path8(A, H)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_long_rules_n13t12
+Knowledge graph 'test_long_rules_n13t12' dropped.

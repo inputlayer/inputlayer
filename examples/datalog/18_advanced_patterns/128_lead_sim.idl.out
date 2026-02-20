@@ -12,4 +12,16 @@ Switched to knowledge graph: test_lead_n18t128
 > +data[(1, 100), (2, 150), (3, 120), (4, 180)]
 Inserted 4 fact(s) into 'data'.
 > +with_next(Id, Val, NextVal) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> data(Id, Val),
+Parse error: Expected parentheses: (Id, Val),
+> data(NextId, NextVal),
+Parse error: Expected parentheses: (NextId, NextVal),
+> NextId = Id + 1
+Parse error: Unrecognized statement: NextId = Id + 1
+> ?with_next(Id, Val, Next)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_lead_n18t128
+Knowledge graph 'test_lead_n18t128' dropped.

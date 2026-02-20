@@ -1,23 +1,16 @@
-//! REST API Handlers
+//! HTTP API Handlers
 //!
-//! Contains all HTTP endpoint handlers organized by domain.
+//! Contains endpoint handlers for health/stats and WebSocket connections.
 
 pub mod admin;
-pub mod data;
-pub mod knowledge_graph;
-pub mod query;
-pub mod relations;
-pub mod rules;
-pub mod sessions;
-pub mod views;
 pub mod ws;
 
 use crate::protocol::wire::WireValue;
-use crate::value::Value;
+use crate::value::{Tuple, Value};
 
 /// Convert a JSON value to a storage Value
 ///
-/// Used by data, session, and WebSocket handlers for consistent JSON → Value conversion.
+/// Used by WebSocket handlers for consistent JSON → Value conversion.
 pub fn json_to_value(json: &serde_json::Value) -> Result<Value, String> {
     match json {
         serde_json::Value::Null => Ok(Value::Null),
@@ -58,7 +51,7 @@ pub fn json_to_value(json: &serde_json::Value) -> Result<Value, String> {
 
 /// Convert `WireValue` to `serde_json::Value`
 ///
-/// Used by multiple handlers to convert query results to JSON responses.
+/// Used by WebSocket handlers to convert query results to JSON responses.
 pub fn wire_value_to_json(value: WireValue) -> serde_json::Value {
     match value {
         WireValue::Null => serde_json::Value::Null,
@@ -72,6 +65,19 @@ pub fn wire_value_to_json(value: WireValue) -> serde_json::Value {
         WireValue::VectorInt8(v) => serde_json::json!(v),
         WireValue::Bytes(b) => serde_json::json!(b),
     }
+}
+
+/// Convert JSON tuples to storage Tuples
+///
+/// Used by WebSocket handlers for fact insert/retract operations.
+pub fn json_tuples_to_tuples(json_tuples: &[Vec<serde_json::Value>]) -> Result<Vec<Tuple>, String> {
+    json_tuples
+        .iter()
+        .map(|row| {
+            let values: Result<Vec<Value>, String> = row.iter().map(json_to_value).collect();
+            values.map(Tuple::new)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -255,7 +261,6 @@ mod tests {
 
     #[test]
     fn test_json_to_value_vector_f64_overflow_to_f32() {
-        // f64 value that overflows f32 should be rejected
         let huge = f64::MAX;
         let arr = serde_json::json!([huge]);
         assert!(json_to_value(&arr).is_err());
@@ -263,9 +268,31 @@ mod tests {
 
     #[test]
     fn test_json_to_value_vector_normal_f32_range() {
-        // Normal f32-range values should work fine
         let arr = serde_json::json!([1.5, -2.5, 0.0]);
         let result = json_to_value(&arr).unwrap();
         assert_eq!(result, Value::vector(vec![1.5, -2.5, 0.0]));
+    }
+
+    #[test]
+    fn test_json_tuples_to_tuples() {
+        let input = vec![
+            vec![serde_json::json!(1), serde_json::json!(2)],
+            vec![serde_json::json!(3), serde_json::json!(4)],
+        ];
+        let tuples = json_tuples_to_tuples(&input).unwrap();
+        assert_eq!(tuples.len(), 2);
+    }
+
+    #[test]
+    fn test_json_tuples_to_tuples_empty() {
+        let input: Vec<Vec<serde_json::Value>> = vec![];
+        let tuples = json_tuples_to_tuples(&input).unwrap();
+        assert!(tuples.is_empty());
+    }
+
+    #[test]
+    fn test_json_tuples_to_tuples_error() {
+        let input = vec![vec![serde_json::json!({"bad": "value"})]];
+        assert!(json_tuples_to_tuples(&input).is_err());
     }
 }

@@ -12,4 +12,8 @@ Switched to knowledge graph: test_wrong_args_n12t26
 > +embeddings[(1, [0.1, 0.2, 0.3]), (2, [0.4, 0.5, 0.6])]
 Inserted 2 fact(s) into 'embeddings'.
 > ?embeddings(Id, V), Dist = euclidean(V)
-Script error: Query execution failed: Function 'euclidean' requires 2 argument(s), but 1 provided
+Query execution failed: Function 'euclidean' requires 2 argument(s), but 1 provided
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_wrong_args_n12t26
+Knowledge graph 'test_wrong_args_n12t26' dropped.

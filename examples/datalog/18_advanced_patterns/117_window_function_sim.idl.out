@@ -14,4 +14,14 @@ Inserted 4 fact(s) into 'sales'.
 > +region_total(Region, sum<Amount>) <- sales(_, Region, Amount)
 Rule 'region_total' registered.
 > +sale_with_total(Id, Region, Amount, Total) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> sales(Id, Region, Amount),
+Parse error: Expected parentheses: (Id, Region, Amount),
+> region_total(Region, Total)
+Cannot insert variable 'Region' - use constants only
+> ?sale_with_total(Id, R, A, T)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_window_n18t117
+Knowledge graph 'test_window_n18t117' dropped.

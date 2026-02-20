@@ -10,4 +10,43 @@ Switched to knowledge graph: test_arity_n24t04
 > .kg use test_arity_n24t04
 Switched to knowledge graph: test_arity_n24t04
 > +employees(id: int, name: string, dept: string)
-Script error: Query execution failed: Invalid term: 'id: int'
+Schema for 'employees' registered with 3 columns (persistent)
+> +employees[(1, "Alice", "Engineering"), (2, "Bob", "Sales")]
+Inserted 2 fact(s) into 'employees'.
+> ?employees(Id, Name, Dept)
+┌──────┬─────────┬───────────────┐
+│ col0 │ col1    │ col2          │
+├──────┼─────────┼───────────────┤
+│    1 │ "Alice" │ "Engineering" │
+│    2 │ "Bob"   │ "Sales"       │
+└──────┴─────────┴───────────────┘
+2 rows
+> .rel employees
+Relation: employees
+┌──────┬─────────┬───────────────┐
+│ col0 │ col1    │ col2          │
+├──────┼─────────┼───────────────┤
+│    1 │ "Alice" │ "Engineering" │
+│    2 │ "Bob"   │ "Sales"       │
+└──────┴─────────┴───────────────┘
+2 of 2 total rows
+> +projects(id: int, name: string)
+Schema for 'projects' registered with 2 columns (persistent)
+> +projects[(100, "ProjectA"), (101, "ProjectB")]
+Inserted 2 fact(s) into 'projects'.
+> ?projects(Id, Name)
+┌──────┬────────────┐
+│ col0 │ col1       │
+├──────┼────────────┤
+│  100 │ "ProjectA" │
+│  101 │ "ProjectB" │
+└──────┴────────────┘
+2 rows
+> .rel
+Relations:
+  employees (arity: 3)
+  projects (arity: 2)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_arity_n24t04
+Knowledge graph 'test_arity_n24t04' dropped.

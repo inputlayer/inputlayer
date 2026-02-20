@@ -37,4 +37,3 @@ wise(X) <- mortal(X)
 // Cleanup
 .kg use default
 .kg drop test_sess_rules_facts_n04t03
-.kg list

@@ -10,4 +10,37 @@ Switched to knowledge graph: test_bom_cost_n20t06
 > .kg use test_bom_cost_n20t06
 Switched to knowledge graph: test_bom_cost_n20t06
 > +part_of[(10, 1, 2), (20, 1, 3), (30, 10, 4), (40, 10, 1), (50, 20, 2)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +base_cost[(30, 5), (40, 20), (50, 15)]
+Inserted 3 fact(s) into 'base_cost'.
+> +leaf_contribution(Assembly, Part, Cost*Qty) <- part_of(Part, Assembly, Qty), base_cost(Part, Cost)
+Rule 'leaf_contribution' registered.
+> ?leaf_contribution(A, P, C)
+No results.
+> +assembly_direct_cost(Assembly, sum<C>) <- leaf_contribution(Assembly, _, C)
+Rule 'assembly_direct_cost' registered.
+> ?assembly_direct_cost(A, C)
+No results.
+> +has_children(P) <- part_of(_, P, _)
+Rule 'has_children' registered.
+> +is_leaf(P) <- base_cost(P, _), !has_children(P)
+Rule 'is_leaf' registered.
+> ?is_leaf(P)
+┌──────┐
+│ col0 │
+├──────┤
+│   30 │
+│   40 │
+│   50 │
+└──────┘
+3 rows
+> +descendant(1, Child) <- part_of(Child, 1, _)
+Rule 'descendant' registered.
+> +descendant(1, Desc) <- descendant(1, Mid), part_of(Desc, Mid, _)
+Rule 'descendant' registered.
+> ?descendant(1, D)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_bom_cost_n20t06
+Knowledge graph 'test_bom_cost_n20t06' dropped.

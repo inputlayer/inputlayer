@@ -23,7 +23,7 @@ Inserted 5 fact(s) into 'items'.
 └──────┴──────┘
 5 rows
 > -items[(2, "b"), (4, "d")]
-Deleted 2 facts from 'items'.
+Deleted 2 fact(s) from 'items'.
 > ?items(Id, Val)
 ┌──────┬──────┐
 │ col0 │ col1 │

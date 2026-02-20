@@ -27,7 +27,7 @@ Session fact added for 'base'. (Use +base(...) to persist)
 └──────┘
 3 rows
 > .session clear
-Cleared 3 session fact(s), 0 session rule(s).
+Cleared 2 session fact(s), 0 session rule(s).
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_sess_dup_n04t40

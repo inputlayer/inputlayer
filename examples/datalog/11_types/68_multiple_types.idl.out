@@ -10,12 +10,40 @@ Switched to knowledge graph: test_multi_types_n11t68
 > .kg use test_multi_types_n11t68
 Switched to knowledge graph: test_multi_types_n11t68
 > type ProductId: int
-Type 'ProductId' declared (local only).
+Type 'ProductId' declared.
 > type Price: int
-Type 'Price' declared (local only).
+Type 'Price' declared.
 > type Quantity: int
-Type 'Quantity' declared (local only).
+Type 'Quantity' declared.
 > type ProductName: string
-Type 'ProductName' declared (local only).
+Type 'ProductName' declared.
 > +products(id: ProductId, name: ProductName, price: Price)
-Script error: Query execution failed: Invalid term: 'id: ProductId'
+Schema for 'products' registered with 3 columns (persistent)
+> +inventory(product_id: ProductId, qty: Quantity)
+Schema for 'inventory' registered with 2 columns (persistent)
+> +products[(1, "Widget", 100), (2, "Gadget", 200), (3, "Gizmo", 150)]
+Inserted 3 fact(s) into 'products'.
+> +inventory[(1, 50), (2, 30), (3, 75)]
+Inserted 3 fact(s) into 'inventory'.
+> ?products(Id, Name, Price)
+┌──────┬──────────┬──────┐
+│ col0 │ col1     │ col2 │
+├──────┼──────────┼──────┤
+│    1 │ "Widget" │  100 │
+│    2 │ "Gadget" │  200 │
+│    3 │ "Gizmo"  │  150 │
+└──────┴──────────┴──────┘
+3 rows
+> ?inventory(Pid, Qty)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    1 │   50 │
+│    2 │   30 │
+│    3 │   75 │
+└──────┴──────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_types_n11t68
+Knowledge graph 'test_multi_types_n11t68' dropped.

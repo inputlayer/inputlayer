@@ -12,4 +12,8 @@ Switched to knowledge graph: test_unknown_func_n12t25
 > +values[(1, 2), (3, 4)]
 Inserted 2 fact(s) into 'values'.
 > ?values(X, Y), Z = nonexistent_func(X, Y)
-Script error: Parse error: Invalid term: 'nonexistent_func(X, Y)'
+Parse error: Invalid term: 'nonexistent_func(X, Y)'
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_unknown_func_n12t25
+Knowledge graph 'test_unknown_func_n12t25' dropped.

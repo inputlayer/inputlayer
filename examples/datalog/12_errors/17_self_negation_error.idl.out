@@ -12,4 +12,10 @@ Switched to knowledge graph: test_self_neg_err_n12t17
 > +base[(1), (2), (3)]
 Inserted 3 fact(s) into 'base'.
 > +a(X) <- base(X), !a(X)
-Script error: Failed to register rule: Unstratified negation: Rule 'a' negates itself (!a in body). Self-negation is not supported.
+Failed to register rule: Unstratified negation: Rule 'a' negates itself (!a in body). Self-negation is not supported.
+> ?a(X)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_self_neg_err_n12t17
+Knowledge graph 'test_self_neg_err_n12t17' dropped.

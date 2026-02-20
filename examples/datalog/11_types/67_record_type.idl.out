@@ -10,4 +10,21 @@ Switched to knowledge graph: test_record_type_n11t67
 > .kg use test_record_type_n11t67
 Switched to knowledge graph: test_record_type_n11t67
 > type User: { id: int, name: string }.
-Script error: Parse error: Unknown base type: '{ id: int, name: string }.'. Use int, string, bool, float, or a type name.
+Parse error: Unknown base type: '{ id: int, name: string }.'. Use int, string, bool, float, or a type name.
+> +user(id: int, name: string)
+Schema for 'user' registered with 2 columns (persistent)
+> +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+Inserted 3 fact(s) into 'user'.
+> ?user(X, Y)
+┌──────┬───────────┐
+│ col0 │ col1      │
+├──────┼───────────┤
+│    1 │ "Alice"   │
+│    2 │ "Bob"     │
+│    3 │ "Charlie" │
+└──────┴───────────┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_record_type_n11t67
+Knowledge graph 'test_record_type_n11t67' dropped.

@@ -11,3 +11,9 @@ Switched to knowledge graph: test_syntax_err_n12t02
 Switched to knowledge graph: test_syntax_err_n12t02
 > +edge[(1, 2), (2, 3)]
 Inserted 2 fact(s) into 'edge'.
+> +broken[(1, 2
+Parse error: unterminated statement (unbalanced delimiters)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_syntax_err_n12t02
+Knowledge graph 'test_syntax_err_n12t02' dropped.

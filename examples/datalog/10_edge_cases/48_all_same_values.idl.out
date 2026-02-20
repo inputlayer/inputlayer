@@ -19,4 +19,28 @@ Inserted 1 fact(s) into 'same'.
 └──────┘
 1 rows
 > +distinct_count(<COUNT_DISTINCT:X>) <- same(X)
-Script error: Parse error: Unknown aggregate function: 
+Parse error: Unknown aggregate function: 
+> ?distinct_count(N)
+No results.
+> pairs(A, B) <- same(A), same(B)
+┌──────┬──────┐
+│ col0 │ col1 │
+├──────┼──────┤
+│    5 │    5 │
+└──────┴──────┘
+1 rows
+(session: 1 rule(s))
+> +pair_count(count<A>) <- pairs(A, _)
+Rule 'pair_count' registered.
+> ?pair_count(N)
+┌──────┐
+│ col0 │
+├──────┤
+│    1 │
+└──────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_all_same_n10t48
+Knowledge graph 'test_all_same_n10t48' dropped.

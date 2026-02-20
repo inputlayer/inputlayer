@@ -16,4 +16,16 @@ Inserted 2 fact(s) into 'departments'.
 > +budgets[(100, 50000), (200, 30000)]
 Inserted 2 fact(s) into 'budgets'.
 > +employee_budget(Name, Dept, Budget) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> employees(_, Name, DeptId),
+Parse error: Expected parentheses: (_, Name, DeptId),
+> departments(DeptId, Dept, BudgetId),
+Parse error: Expected parentheses: (DeptId, Dept, BudgetId),
+> budgets(BudgetId, Budget)
+Cannot insert variable 'BudgetId' - use constants only
+> ?employee_budget(Name, Dept, Budget)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_triple_join_n06t72
+Knowledge graph 'test_triple_join_n06t72' dropped.

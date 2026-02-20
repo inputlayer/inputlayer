@@ -16,7 +16,11 @@ Rule 'reach' registered.
 > +reach(X, Z) <- reach(X, Y), edge(Y, Z)
 Rule 'reach' registered.
 > .rule def reach
-This command is available in embedded mode. HTTP support is planned for a future release.
+Rule: reach
+Clauses:
+  1. reach(X, Y) <- edge(X, Y)
+  2. reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_rule_def_n17t04

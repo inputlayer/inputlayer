@@ -12,4 +12,10 @@ Switched to knowledge graph: test_clamp_n32t23
 > +vals[(-5,), (0,), (5,), (15,), (25,)]
 Inserted 5 fact(s) into 'vals'.
 > clamped(X, Y) <- vals(X), Y = max_int64(0, min_int64(X, 10))
-Script error: Parse error: Invalid term: 'max_int64(0, min_int64(X, 10))'
+Parse error: Invalid term: 'max_int64(0, min_int64(X, 10))'
+> ?clamped(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_clamp_n32t23
+Knowledge graph 'test_clamp_n32t23' dropped.

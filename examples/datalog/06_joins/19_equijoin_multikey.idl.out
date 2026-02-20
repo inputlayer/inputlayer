@@ -14,4 +14,14 @@ Inserted 3 fact(s) into 'orders'.
 > +targets[(1, "2024", "Q1", 90), (2, "2024", "Q2", 150)]
 Inserted 2 fact(s) into 'targets'.
 > matched(OrdId, Year, Qtr, Actual, Target) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(OrdId, Year, Qtr, Actual),
+Parse error: Expected parentheses: (OrdId, Year, Qtr, Actual),
+> targets(_, Year, Qtr, Target)
+Cannot insert placeholder '_' - use constants only
+> ?matched(OrdId, Year, Qtr, Actual, Target)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multikey_n06t19
+Knowledge graph 'test_multikey_n06t19' dropped.

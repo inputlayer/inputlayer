@@ -1,13 +1,15 @@
 //! Handler for `InputLayer`
 //!
-//! Core business logic for Datalog queries and data operations, used by the REST API.
+//! Core business logic for Datalog queries and data operations, used by the HTTP/WebSocket API.
 //! Uses `parking_lot::RwLock` (no poisoning) and `AtomicU64` (lock-free counters).
 
 use crate::ast::Term;
+use crate::index_manager::{DistanceMetric, HnswConfig, IndexStats, IndexType, RegisteredIndex};
 use crate::rule_catalog::validate_rule;
 use crate::schema::{ColumnSchema, RelationSchema};
 use crate::session::{SessionConfig, SessionId, SessionManager};
 use crate::statement;
+use crate::statement::meta::{IndexCreateOptions, MetaCommand};
 use crate::statement::parser::SortDirection;
 use crate::storage_engine::StorageEngine;
 use crate::value::{Tuple, Value};
@@ -69,6 +71,21 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
     }
 }
 
+/// Prefix used to encode structured validation errors in error strings.
+/// WebSocket handlers can detect this prefix to extract per-line error info.
+pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
+
+/// A parse/validation error for a specific statement in a program.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ValidationError {
+    /// 1-based line number in the original program text
+    pub line: usize,
+    /// 0-based index of the statement (counting only non-empty lines)
+    pub statement_index: usize,
+    /// The parse error message
+    pub error: String,
+}
+
 /// Notification sent to WebSocket subscribers when persistent data changes.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -102,7 +119,7 @@ pub struct Handler {
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(256);
+        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
         Self {
             storage: Arc::new(RwLock::new(storage)),
             start_time: Instant::now(),
@@ -122,7 +139,7 @@ impl Handler {
 
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(256);
+        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
         Self {
             storage: Arc::new(RwLock::new(storage)),
             start_time: Instant::now(),
@@ -186,12 +203,12 @@ impl Handler {
         self.start_time.elapsed().as_secs()
     }
 
-    /// Get access to the storage engine (for REST API handlers).
+    /// Get access to the storage engine (for HTTP handlers).
     pub fn get_storage(&self) -> parking_lot::RwLockReadGuard<'_, StorageEngine> {
         self.storage.read()
     }
 
-    /// Get mutable access to the storage engine (for REST API handlers).
+    /// Get mutable access to the storage engine (for HTTP handlers).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
     }
@@ -248,6 +265,156 @@ impl Handler {
             .map_err(|e| e.to_string())
     }
 
+    // === Index Management API ===
+
+    /// Create an HNSW index on a knowledge graph.
+    ///
+    /// Resolves the column name to an index via the schema catalog,
+    /// enables the incremental engine if needed, and registers the index.
+    pub fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
+        let storage = self.storage.read();
+
+        // Resolve column index from schema
+        let column_idx = {
+            let schema = storage
+                .get_schema_in(kg, &opts.relation)
+                .map_err(|e| e.to_string())?;
+            match schema {
+                Some(s) => s.column_index(&opts.column).ok_or_else(|| {
+                    format!(
+                        "Column '{}' not found in relation '{}'. Available: {:?}",
+                        opts.column,
+                        opts.relation,
+                        s.column_names()
+                    )
+                })?,
+                None => {
+                    return Err(format!(
+                        "No schema found for relation '{}'. Register a schema first.",
+                        opts.relation
+                    ));
+                }
+            }
+        };
+
+        // Validate index type
+        let index_type_str = opts.index_type.as_str();
+        if index_type_str != "hnsw" {
+            return Err(format!(
+                "Unsupported index type '{index_type_str}'. Currently only 'hnsw' is supported."
+            ));
+        }
+
+        // Parse distance metric
+        let metric = opts
+            .metric
+            .as_deref()
+            .unwrap_or("cosine")
+            .parse::<DistanceMetric>()
+            .map_err(|e| format!("Invalid metric: {e}"))?;
+
+        let hnsw_config = HnswConfig {
+            m: opts.m.unwrap_or(16),
+            ef_construction: opts.ef_construction.unwrap_or(200),
+            ef_search: opts.ef_search.unwrap_or(50),
+            metric,
+        };
+
+        let registered = RegisteredIndex {
+            name: opts.name.clone(),
+            relation: opts.relation.clone(),
+            column_idx,
+            column_name: opts.column.clone(),
+            index_type: IndexType::Hnsw(hnsw_config),
+        };
+
+        // Enable incremental engine and register index
+        storage
+            .with_kg_mut(kg, |kg_data| {
+                kg_data.enable_incremental().map_err(|e| e.to_string())?;
+                if let Some(dd) = kg_data.incremental() {
+                    dd.register_index(registered)
+                } else {
+                    Err("Failed to enable incremental engine".to_string())
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!(
+            "Index '{}' created on {}.{}.",
+            opts.name, opts.relation, opts.column
+        ))
+    }
+
+    /// Drop an index from a knowledge graph.
+    pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.remove_index(name)
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!("Index '{name}' dropped."))
+    }
+
+    /// List all indexes in a knowledge graph.
+    /// Returns (name, relation, status) tuples.
+    pub fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(None)
+                } else {
+                    Ok(vec![])
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// Get stats for a specific index.
+    pub fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(Some(name))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    /// Rebuild an index by verifying it exists and notifying that it will
+    /// be rebuilt on the next data change or query.
+    pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    // Verify the index exists
+                    let stats = dd.get_index_stats(Some(name))?;
+                    if stats.is_empty() {
+                        return Err(format!("Index '{name}' not found"));
+                    }
+                    // Indexes are automatically rebuilt when their base relation
+                    // receives updates. Notify the base relation to trigger rebuild.
+                    Ok(format!(
+                        "Index '{name}' will be rebuilt on next data update."
+                    ))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
     /// Execute a Datalog program and return results.
     pub async fn query_program(
         &self,
@@ -259,10 +426,12 @@ impl Handler {
 
         // Use READ lock  -  all operations use _on()/_into() variants with explicit KG name.
         // This allows concurrent queries to execute without blocking each other.
-        let storage = self.storage.read();
+        // Note: `storage` is `mut` because some meta commands (KgDrop, RuleClear)
+        // temporarily release the read lock to acquire a write lock.
+        let mut storage = self.storage.read();
 
         // Determine target knowledge graph name
-        let kg_name = if let Some(ref kg) = knowledge_graph {
+        let mut kg_name = if let Some(ref kg) = knowledge_graph {
             // Ensure target KG exists (auto-creates if config allows)
             storage
                 .ensure_knowledge_graph(kg)
@@ -278,10 +447,39 @@ impl Handler {
         // Strip comment lines
         let program_text = strip_comments(&program);
 
-        // Process statements
+        // Phase 1: Parse-all-first validation.
+        // Parse every statement upfront. If ANY statement fails to parse,
+        // reject the ENTIRE program with structured error info.
+        // This prevents partial state from partial execution.
+        {
+            let mut parse_errors: Vec<ValidationError> = Vec::new();
+            let mut stmt_index: usize = 0;
+            for (line_num, line) in program_text.lines().enumerate() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Err(e) = statement::parse_statement(line) {
+                    parse_errors.push(ValidationError {
+                        line: line_num + 1,
+                        statement_index: stmt_index,
+                        error: e,
+                    });
+                }
+                stmt_index += 1;
+            }
+            if !parse_errors.is_empty() {
+                let errors_json = serde_json::to_string(&parse_errors).unwrap_or_default();
+                return Err(format!("{VALIDATION_ERROR_PREFIX}{errors_json}"));
+            }
+        }
+
+        // Phase 2: Execute statements (all guaranteed to parse successfully)
         let mut messages = Vec::new();
         let mut query_to_execute: Option<String> = None;
         let mut current_stmt = String::new();
+        // Track KG switch for WS session binding update
+        let mut switched_kg_result: Option<String> = None;
         // Collect session facts (non-persisted) to temporarily insert before query
         // Format: (relation_name, tuple_values)
         let mut session_fact_tuples: Vec<(String, Tuple)> = Vec::new();
@@ -802,9 +1000,394 @@ impl Handler {
                             statement::Statement::TypeDecl(decl) => {
                                 messages.push(format!("Type '{}' declared.", decl.name));
                             }
-                            statement::Statement::Meta(_) => {
-                                messages
-                                    .push("Meta commands not supported in query API.".to_string());
+                            statement::Statement::Meta(meta) => {
+                                let kg = kg_name.as_str();
+                                match meta {
+                                    // === Knowledge Graph commands ===
+                                    MetaCommand::KgShow => {
+                                        messages.push(format!("Current knowledge graph: {kg}"));
+                                    }
+                                    MetaCommand::KgList => {
+                                        let kgs = storage.list_knowledge_graphs();
+                                        if kgs.is_empty() {
+                                            messages.push("No knowledge graphs found.".to_string());
+                                        } else {
+                                            messages.push("Knowledge Graphs:".to_string());
+                                            for name in &kgs {
+                                                let marker = if name == kg { " *" } else { "" };
+                                                messages.push(format!("  {name}{marker}"));
+                                            }
+                                        }
+                                    }
+                                    MetaCommand::KgCreate(name) => {
+                                        match storage.create_knowledge_graph(&name) {
+                                            Ok(()) => {
+                                                messages.push(format!(
+                                                    "Knowledge graph '{name}' created."
+                                                ));
+                                                messages.push(format!(
+                                                    "Switched to knowledge graph: {name}"
+                                                ));
+                                                kg_name.clone_from(&name);
+                                                switched_kg_result = Some(name);
+                                            }
+                                            Err(e) => {
+                                                messages.push(format!("Create failed: {e}"));
+                                            }
+                                        }
+                                    }
+                                    MetaCommand::KgUse(name) => {
+                                        match storage.ensure_knowledge_graph(&name) {
+                                            Ok(()) => {
+                                                messages.push(format!(
+                                                    "Switched to knowledge graph: {name}"
+                                                ));
+                                                kg_name.clone_from(&name);
+                                                switched_kg_result = Some(name);
+                                            }
+                                            Err(e) => {
+                                                messages.push(format!(
+                                                    "Knowledge graph '{name}' not found: {e}"
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    MetaCommand::KgDrop(name) => {
+                                        if name == kg {
+                                            messages.push("Cannot drop current knowledge graph. Switch to another first.".to_string());
+                                        } else {
+                                            // Release read lock for Phase 1 (needs write lock)
+                                            drop(storage);
+
+                                            // Phase 1: Fast in-memory removal (under write lock, ~microseconds)
+                                            let drop_result = {
+                                                let mut storage_w = self.storage.write();
+                                                storage_w.prepare_drop_knowledge_graph(&name)
+                                            }; // write lock released immediately
+
+                                            match drop_result {
+                                                Ok(cleanup) => {
+                                                    messages.push(format!(
+                                                        "Knowledge graph '{name}' dropped."
+                                                    ));
+                                                    // Phase 2: Slow file cleanup (NO storage lock held)
+                                                    let storage_ref = self.storage.read();
+                                                    storage_ref
+                                                        .finish_drop_knowledge_graph(cleanup);
+                                                    drop(storage_ref);
+                                                }
+                                                Err(e) => {
+                                                    messages.push(format!("Drop failed: {e}"));
+                                                }
+                                            }
+
+                                            // Re-acquire read lock
+                                            storage = self.storage.read();
+                                        }
+                                    }
+
+                                    // === Relation commands ===
+                                    MetaCommand::RelList => {
+                                        match storage.list_relations_with_metadata(kg) {
+                                            Ok(relations) => {
+                                                if relations.is_empty() {
+                                                    messages.push(
+                                                        "No relations in current knowledge graph."
+                                                            .to_string(),
+                                                    );
+                                                } else {
+                                                    let mut sorted = relations;
+                                                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                                                    messages.push("Relations:".to_string());
+                                                    for (name, schema, _count) in &sorted {
+                                                        messages.push(format!(
+                                                            "  {name} (arity: {})",
+                                                            schema.len()
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::RelDescribe(name) => {
+                                        // Get metadata to determine arity
+                                        match storage.get_relation_metadata_in(kg, &name) {
+                                            Ok(Some((schema, total_count))) => {
+                                                if schema.is_empty() {
+                                                    messages.push(format!(
+                                                        "Relation '{name}' is empty."
+                                                    ));
+                                                } else {
+                                                    let arity = schema.len();
+                                                    let vars: Vec<String> = (0..arity)
+                                                        .map(|i| {
+                                                            let letter =
+                                                                (b'A' + (i % 26) as u8) as char;
+                                                            let suffix = i / 26;
+                                                            if suffix == 0 {
+                                                                letter.to_string()
+                                                            } else {
+                                                                format!("{letter}{suffix}")
+                                                            }
+                                                        })
+                                                        .collect();
+                                                    // Execute query to get data (limit 10)
+                                                    let query_text =
+                                                        format!("?{name}({})", vars.join(", "));
+                                                    query_to_execute = Some(query_text);
+                                                    messages.push(format!("Relation '{name}': {arity} columns, {total_count} total tuples"));
+                                                }
+                                            }
+                                            Ok(None) => messages
+                                                .push(format!("Relation '{name}' not found.")),
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+
+                                    // === Rule commands ===
+                                    MetaCommand::RuleList => match storage.list_rules_in(kg) {
+                                        Ok(rules) => {
+                                            if rules.is_empty() {
+                                                messages.push("No rules defined.".to_string());
+                                            } else {
+                                                messages.push("Rules:".to_string());
+                                                for name in &rules {
+                                                    let clause_count = storage
+                                                        .rule_count_in(kg, name)
+                                                        .ok()
+                                                        .flatten()
+                                                        .unwrap_or(0);
+                                                    messages.push(format!(
+                                                        "  {name} ({clause_count} clause(s))"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        Err(e) => messages.push(format!("Error: {e}")),
+                                    },
+                                    MetaCommand::RuleDrop(name) => {
+                                        match storage.drop_rule_in(kg, &name) {
+                                            Ok(()) => {
+                                                messages.push(format!("Rule '{name}' dropped."));
+                                            }
+                                            Err(e) => messages
+                                                .push(format!("Rule '{name}' not found: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::RuleDropPrefix(prefix) => {
+                                        match storage.drop_rules_by_prefix_in(kg, &prefix) {
+                                            Ok(dropped) => {
+                                                if dropped.is_empty() {
+                                                    messages.push(format!(
+                                                        "No rules matching prefix '{prefix}'."
+                                                    ));
+                                                } else {
+                                                    messages.push(format!(
+                                                        "Dropped {} rule(s) with prefix '{prefix}': {}",
+                                                        dropped.len(),
+                                                        dropped.join(", ")
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::RuleQuery(name) => {
+                                        // Execute as a query — delegate to query path
+                                        let query_text = format!("?{name}(X, Y)");
+                                        query_to_execute = Some(query_text);
+                                    }
+                                    MetaCommand::RuleShowDef(name) => {
+                                        match storage.describe_rule_in(kg, &name) {
+                                            Ok(Some(desc)) => messages.push(desc),
+                                            Ok(None) => {
+                                                messages.push(format!("Rule '{name}' not found."));
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::RuleRemove { name, index } => {
+                                        match storage.remove_rule_clause_in(kg, &name, index) {
+                                            Ok(rule_deleted) => {
+                                                if rule_deleted {
+                                                    messages.push(format!("Rule '{name}' deleted (last clause removed)."));
+                                                } else {
+                                                    messages.push(format!(
+                                                        "Clause {} removed from rule '{name}'.",
+                                                        index + 1
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::RuleClear(name) => {
+                                        // Need write lock
+                                        drop(storage);
+                                        {
+                                            let mut storage_w = self.storage.write();
+                                            match storage_w.clear_rule_in(kg, &name) {
+                                                Ok(()) => {
+                                                    messages
+                                                        .push(format!("Rule '{name}' cleared."));
+                                                }
+                                                Err(e) => messages.push(format!("Error: {e}")),
+                                            }
+                                        }
+                                        storage = self.storage.read();
+                                    }
+                                    MetaCommand::RuleEdit { .. } => {
+                                        messages.push(
+                                            "Rule editing is not supported in server mode."
+                                                .to_string(),
+                                        );
+                                    }
+
+                                    // === Clear commands ===
+                                    MetaCommand::ClearPrefix(prefix) => {
+                                        match storage.clear_relations_by_prefix_in(kg, &prefix) {
+                                            Ok(cleared) => {
+                                                if cleared.is_empty() {
+                                                    messages.push(format!(
+                                                        "No relations matching prefix '{prefix}'."
+                                                    ));
+                                                } else {
+                                                    let total: usize =
+                                                        cleared.iter().map(|(_, c)| c).sum();
+                                                    let detail: Vec<String> = cleared
+                                                        .iter()
+                                                        .map(|(name, count)| {
+                                                            format!("{name} ({count})")
+                                                        })
+                                                        .collect();
+                                                    messages.push(format!(
+                                                        "Cleared {} fact(s) from {} relation(s) with prefix '{prefix}': {}",
+                                                        total, cleared.len(), detail.join(", ")
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+
+                                    // === System commands ===
+                                    MetaCommand::Status => {
+                                        let kgs = storage.list_knowledge_graphs();
+                                        let uptime = self.uptime_seconds();
+                                        let queries = self.total_queries();
+                                        messages.push("Server Status".to_string());
+                                        messages.push("  Health: healthy".to_string());
+                                        messages.push(format!(
+                                            "  Version: {}",
+                                            env!("CARGO_PKG_VERSION")
+                                        ));
+                                        messages.push(format!("  Uptime: {uptime} seconds"));
+                                        messages.push(format!("  Total queries: {queries}"));
+                                        messages.push(format!("  Knowledge graphs: {}", kgs.len()));
+                                    }
+                                    MetaCommand::Compact => match storage.compact_all() {
+                                        Ok(()) => messages.push("Compaction complete.".to_string()),
+                                        Err(e) => messages.push(format!("Compaction error: {e}")),
+                                    },
+
+                                    // === Explain command ===
+                                    MetaCommand::Explain(query) => {
+                                        // Transform ?shorthand before explain
+                                        let explain_query = match transform_query_shorthand(&query)
+                                        {
+                                            Ok(t) => t.query,
+                                            Err(_) => query,
+                                        };
+                                        match self
+                                            .explain_query(Some(kg.to_string()), explain_query)
+                                        {
+                                            Ok((plan, optimizations)) => {
+                                                messages.push("Query Plan:".to_string());
+                                                messages.push(plan);
+                                                messages.push(String::new());
+                                                messages.push("Optimization passes:".to_string());
+                                                for opt in &optimizations {
+                                                    messages.push(format!("  - {opt}"));
+                                                }
+                                            }
+                                            Err(e) => {
+                                                messages.push(format!("Explain error: {e}"));
+                                            }
+                                        }
+                                    }
+
+                                    // === Index commands ===
+                                    MetaCommand::IndexCreate(opts) => {
+                                        match self.create_index(kg, &opts) {
+                                            Ok(msg) => messages.push(msg),
+                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::IndexDrop(name) => {
+                                        match self.drop_index(kg, &name) {
+                                            Ok(msg) => messages.push(msg),
+                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::IndexList => match self.list_indexes(kg) {
+                                        Ok(stats) => {
+                                            if stats.is_empty() {
+                                                messages.push("No indexes.".to_string());
+                                            } else {
+                                                for s in &stats {
+                                                    messages.push(format!(
+                                                            "Index '{}' on {}.{} (type: {}, metric: {}, vectors: {}, valid: {})",
+                                                            s.name, s.relation, s.column,
+                                                            s.index_type, s.metric,
+                                                            s.tuple_count, s.valid
+                                                        ));
+                                                }
+                                            }
+                                        }
+                                        Err(e) => messages.push(format!("Index error: {e}")),
+                                    },
+                                    MetaCommand::IndexStats(name) => {
+                                        match self.get_index_stats(kg, &name) {
+                                            Ok(stats) => {
+                                                for s in &stats {
+                                                    messages.push(format!(
+                                                        "Index '{}': relation={}, column={}, type={}, metric={}, vectors={}, tombstones={}, valid={}, dimension={}",
+                                                        s.name, s.relation, s.column,
+                                                        s.index_type, s.metric,
+                                                        s.tuple_count, s.tombstone_count,
+                                                        s.valid, s.dimension
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::IndexRebuild(name) => {
+                                        match self.rebuild_index(kg, &name) {
+                                            Ok(msg) => messages.push(msg),
+                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                        }
+                                    }
+
+                                    // === Session commands (handled by execute_program) ===
+                                    MetaCommand::SessionList
+                                    | MetaCommand::SessionClear
+                                    | MetaCommand::SessionDrop(_)
+                                    | MetaCommand::SessionDropName(_) => {
+                                        messages.push(
+                                            "Session commands require a WebSocket connection."
+                                                .to_string(),
+                                        );
+                                    }
+
+                                    // === Client-only commands ===
+                                    MetaCommand::Help
+                                    | MetaCommand::Quit
+                                    | MetaCommand::Load { .. } => {
+                                        messages.push("This command is client-only and not available via server API.".to_string());
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -835,6 +1418,7 @@ impl Handler {
                 truncated: false,
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 metadata: None,
+                switched_kg: switched_kg_result,
             });
         }
 
@@ -950,6 +1534,7 @@ impl Handler {
             truncated,
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
+            switched_kg: None,
         })
     }
 
@@ -1154,6 +1739,7 @@ impl Handler {
             truncated,
             execution_time_ms,
             metadata: result_metadata,
+            switched_kg: None,
         })
     }
 
@@ -1194,6 +1780,271 @@ impl Handler {
     pub fn session_stats(&self) -> crate::session::SessionStats {
         self.sessions.stats()
     }
+
+    /// Execute a program with optional session context.
+    ///
+    /// This is the unified entry point for the WebSocket protocol. It handles:
+    /// - Session commands (when `session_id` is `Some`)
+    /// - KG switching with session binding updates
+    /// - All other statements via `query_program()` or `query_program_with_session()`
+    pub async fn execute_program(
+        &self,
+        session_id: Option<SessionId>,
+        knowledge_graph: Option<String>,
+        program: String,
+    ) -> Result<QueryResult, String> {
+        let trimmed = program.trim();
+
+        // Any session-bound activity should keep the session alive.
+        if let Some(sid) = session_id {
+            self.sessions.touch_session(sid)?;
+        }
+
+        // Fast path: intercept session meta commands that need SessionManager
+        if trimmed.starts_with('.') {
+            if let Ok(statement::Statement::Meta(ref meta)) = statement::parse_statement(trimmed) {
+                match meta {
+                    MetaCommand::SessionList => {
+                        let sid = session_id.ok_or_else(|| "No active session".to_string())?;
+                        return self.handle_session_list(sid);
+                    }
+                    MetaCommand::SessionClear => {
+                        let sid = session_id.ok_or_else(|| "No active session".to_string())?;
+                        // Get counts before clearing
+                        let (facts_count, rules_count) =
+                            self.sessions.with_session(sid, |session| {
+                                let facts: usize =
+                                    session.ephemeral_facts().values().map(Vec::len).sum();
+                                (facts, session.rules().len())
+                            })?;
+                        self.sessions.clear_session(sid)?;
+                        let msg = format!(
+                            "Cleared {facts_count} session fact(s), {rules_count} session rule(s)."
+                        );
+                        return Ok(self.message_result(&msg));
+                    }
+                    MetaCommand::SessionDrop(index) => {
+                        let sid = session_id.ok_or_else(|| "No active session".to_string())?;
+                        return self.handle_session_drop(sid, *index);
+                    }
+                    MetaCommand::SessionDropName(name) => {
+                        let sid = session_id.ok_or_else(|| "No active session".to_string())?;
+                        return self.handle_session_drop_name(sid, name);
+                    }
+                    _ => {} // handled by query_program
+                }
+            }
+        }
+
+        // Intercept session rules and facts when session_id is present.
+        // In the WS protocol each statement is a separate request, so we must
+        // persist them in the SessionManager (not in a request-local vector).
+        if let Some(sid) = session_id {
+            if let Ok(ref stmt) = statement::parse_statement(trimmed) {
+                match stmt {
+                    statement::Statement::SessionRule(rule) => {
+                        // Validate rule safety (self-negation, head variable safety, etc.)
+                        validate_rule(rule, &rule.head.relation)?;
+
+                        // Validate aggregation/arity compatibility with existing session rules
+                        let existing_rules = self
+                            .sessions
+                            .with_session(sid, |session| session.rules().to_vec())?;
+                        crate::rule_catalog::validate_session_rule_compatibility(
+                            &existing_rules,
+                            rule,
+                        )?;
+
+                        let rule_text = format_rule_text(rule);
+                        self.sessions
+                            .add_ephemeral_rule(sid, rule.clone(), rule_text)?;
+                        return Ok(self.message_result(&format!(
+                            "Session rule added for '{}'.",
+                            rule.head.relation
+                        )));
+                    }
+                    statement::Statement::Fact(rule) => {
+                        if rule.head.args.is_empty() {
+                            return Err("Fact must have at least one argument".to_string());
+                        }
+
+                        // Convert terms to values
+                        let mut values: Vec<Value> = Vec::new();
+                        for term in &rule.head.args {
+                            values.push(term_to_value(term)?);
+                        }
+
+                        let relation = rule.head.relation.clone();
+                        self.sessions
+                            .insert_ephemeral(sid, &relation, vec![Tuple::new(values)])?;
+                        return Ok(self.message_result(&format!(
+                            "Session fact added for '{relation}'. (Use +{relation}(...) to persist)"
+                        )));
+                    }
+                    _ => {} // handled by query_program / query_program_with_session
+                }
+            }
+        }
+
+        // Determine effective KG: use provided, or session's KG, or default
+        let effective_kg = if knowledge_graph.is_some() {
+            knowledge_graph
+        } else if let Some(sid) = session_id {
+            Some(self.sessions.session_kg(sid)?)
+        } else {
+            None
+        };
+
+        // Only queries need session-aware execution (to prepend ephemeral rules).
+        // All other statements (meta commands, inserts, deletes, persistent rules)
+        // must go through query_program() directly because query_program_with_session()
+        // prepends session rules and sends to the query engine, which breaks
+        // non-query input (e.g., ".kg use default" is not a valid Datalog atom).
+        // Note: SessionRule and Fact are already intercepted above and stored
+        // in the SessionManager, so they never reach this point.
+        let is_query = trimmed.starts_with('?');
+
+        let result = if is_query {
+            if let Some(sid) = session_id {
+                self.query_program_with_session(sid, program).await?
+            } else {
+                self.query_program(effective_kg, program).await?
+            }
+        } else {
+            self.query_program(effective_kg, program).await?
+        };
+
+        // If KG was switched, update session binding
+        if let (Some(ref new_kg), Some(sid)) = (&result.switched_kg, session_id) {
+            self.sessions.switch_kg(sid, new_kg)?;
+        }
+
+        // Convert error-like messages to Err for the WS protocol.
+        // query_program() accumulates errors as Ok(message) for multi-statement compat,
+        // but the WS protocol sends one statement at a time, so errors should abort.
+        if result.schema.len() == 1 && result.schema[0].name == "message" && result.rows.len() == 1
+        {
+            if let Some(WireValue::String(ref msg)) = result.rows[0].values.first() {
+                if is_error_message(msg) {
+                    return Err(msg.clone());
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Build a single-message QueryResult
+    fn message_result(&self, msg: &str) -> QueryResult {
+        QueryResult {
+            rows: vec![WireTuple {
+                values: vec![WireValue::String(msg.to_string())],
+                provenance: None,
+            }],
+            schema: vec![ColumnDef {
+                name: "message".to_string(),
+                data_type: WireDataType::String,
+            }],
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+        }
+    }
+
+    /// Handle `.session` list command
+    fn handle_session_list(&self, session_id: SessionId) -> Result<QueryResult, String> {
+        let mut messages = Vec::new();
+        self.sessions.with_session(session_id, |session| {
+            let has_facts = !session.ephemeral_facts().is_empty();
+            let has_rules = !session.rules().is_empty();
+
+            if !has_facts && !has_rules {
+                messages.push("No session data defined.".to_string());
+            } else {
+                if has_facts {
+                    let count: usize = session.ephemeral_facts().values().map(Vec::len).sum();
+                    messages.push(format!("Session facts ({count}):"));
+                    let mut relations: Vec<&String> = session.ephemeral_facts().keys().collect();
+                    relations.sort();
+                    for rel in relations {
+                        if let Some(tuples) = session.ephemeral_facts().get(rel) {
+                            for tuple in tuples {
+                                messages.push(format!("  {rel}({tuple})"));
+                            }
+                        }
+                    }
+                }
+                if has_rules {
+                    messages.push(format!("Session rules ({}):", session.rules().len()));
+                    for (i, rule) in session.rules().iter().enumerate() {
+                        messages.push(format!("  {}. {rule}", i + 1));
+                    }
+                }
+            }
+        })?;
+
+        let rows: Vec<WireTuple> = messages
+            .iter()
+            .map(|msg| WireTuple {
+                values: vec![WireValue::String(msg.clone())],
+                provenance: None,
+            })
+            .collect();
+        let total_count = rows.len();
+        Ok(QueryResult {
+            rows,
+            schema: vec![ColumnDef {
+                name: "message".to_string(),
+                data_type: WireDataType::String,
+            }],
+            total_count,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+        })
+    }
+
+    /// Handle `.session drop <index>` command
+    fn handle_session_drop(
+        &self,
+        session_id: SessionId,
+        index: usize,
+    ) -> Result<QueryResult, String> {
+        let inner_result: Result<String, String> =
+            self.sessions.with_session_mut(session_id, |session| {
+                if index >= session.rules().len() {
+                    Err(format!("Rule index {} out of bounds.", index + 1))
+                } else {
+                    let removed = session.rules()[index].clone();
+                    session.remove_ephemeral_rule(index);
+                    Ok(format!("Removed rule {}: {removed}", index + 1))
+                }
+            })?;
+        let msg = inner_result?;
+        Ok(self.message_result(&msg))
+    }
+
+    /// Handle `.session drop <name>` command
+    fn handle_session_drop_name(
+        &self,
+        session_id: SessionId,
+        name: &str,
+    ) -> Result<QueryResult, String> {
+        let msg = self.sessions.with_session_mut(session_id, |session| {
+            let before = session.rules().len();
+            session.remove_ephemeral_rules_by_name(name);
+            let removed = before - session.rules().len();
+            if removed == 0 {
+                format!("No session rules found for relation '{name}'.")
+            } else {
+                format!("Dropped {removed} session rule(s) for '{name}'.")
+            }
+        })?;
+        Ok(self.message_result(&msg))
+    }
 }
 
 // Helper Functions
@@ -1201,7 +2052,7 @@ impl Handler {
 /// Transform `?shorthand` query syntax into a `__query__(...) <- ...` rule.
 ///
 /// This enables the shorthand `?relation(X, Y)` syntax that the REPL and
-/// REST API use, converting it to a proper Datalog rule before execution.
+/// WebSocket API use, converting it to a proper Datalog rule before execution.
 /// Returns the original text unchanged if it's not a `?shorthand` query.
 ///
 /// Also extracts `:asc`/`:desc` sort annotations from query head variables,
@@ -1353,10 +2204,25 @@ fn format_term(term: &Term) -> String {
     term.to_string()
 }
 
+/// Check if a message from query_program() represents an error that should abort execution.
+/// Used by execute_program() to convert soft errors (Ok with message) to hard errors (Err)
+/// for the WebSocket protocol where each statement is a separate request.
+///
+/// Only matches errors that previously mapped to HTTP 4xx/5xx responses.
+/// Other errors (delete, insert validation) stay as messages (soft errors).
+fn is_error_message(msg: &str) -> bool {
+    // KG management errors (historically mapped to HTTP 400/404 responses)
+    msg.starts_with("Cannot drop current knowledge graph")
+        || msg.starts_with("Create failed:")
+        || msg.starts_with("Drop failed:")
+        || (msg.starts_with("Knowledge graph") && msg.contains("not found"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::Term;
+    use std::time::Duration;
 
     /// Create a Config with a unique temp directory. Returns TempDir so it stays alive
     /// for the test's duration and auto-cleans on drop.
@@ -3145,6 +4011,159 @@ mod tests {
         let rows = make_int_rows(5);
         let result = apply_pagination(rows, Some(0), None);
         assert!(result.is_empty());
+    }
+
+    // --- execute_program session persistence tests ---
+
+    #[tokio::test]
+    async fn test_execute_program_session_rule_persists() {
+        let (handler, _tmp) = handler_with_kg("exec_prog_sr");
+
+        // Insert base data
+        handler
+            .execute_program(
+                None,
+                Some("exec_prog_sr".to_string()),
+                "+edge[(1,2), (2,3)]".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Create a session
+        let sid = handler.create_session("exec_prog_sr").unwrap();
+
+        // Add a session rule
+        let result = handler
+            .execute_program(Some(sid), None, "path(X, Y) <- edge(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert!(result.rows[0].values[0]
+            .as_str()
+            .unwrap()
+            .contains("Session rule added"));
+
+        // Verify session is now dirty (has rules)
+        let is_clean = handler.session_manager().is_session_clean(sid).unwrap();
+        assert!(!is_clean, "Session should be dirty after adding rule");
+
+        // Query using the session rule — should return results
+        let result = handler
+            .execute_program(Some(sid), None, "?path(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
+    }
+
+    #[tokio::test]
+    async fn test_execute_program_touches_session_on_non_query() {
+        let (mut config, tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        let storage = StorageEngine::new(config).unwrap();
+        let session_config = SessionConfig {
+            idle_timeout_secs: 1,
+            ..SessionConfig::default()
+        };
+        let handler = Handler::with_session_config(storage, session_config);
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("sess_touch")
+            .unwrap();
+
+        let sid = handler.create_session("sess_touch").unwrap();
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        handler
+            .execute_program(Some(sid), None, "+edge[(1,2)]".to_string())
+            .await
+            .unwrap();
+
+        let reaped = handler.session_manager().reap_expired();
+        assert_eq!(reaped, 0, "Session should remain alive after execute");
+        assert!(handler.session_manager().has_session(sid));
+
+        drop(tmp);
+    }
+
+    // --- Parse-all-first validation tests ---
+
+    #[tokio::test]
+    async fn test_multi_statement_parse_error_rejects_entire_program() {
+        let (handler, _tmp) = handler_with_kg("parse_reject");
+        // Program: valid insert, then invalid line, then another insert
+        // The invalid line should cause the ENTIRE program to be rejected
+        let program = "+edge[(1,2)]\n+edge(bad syntax\n+edge[(3,4)]".to_string();
+        let result = handler
+            .query_program(Some("parse_reject".to_string()), program)
+            .await;
+        assert!(result.is_err(), "Should reject program with parse error");
+        let err = result.unwrap_err();
+        assert!(
+            err.starts_with(VALIDATION_ERROR_PREFIX),
+            "Error should contain validation prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_partial_state_on_rejection() {
+        let (handler, _tmp) = handler_with_kg("no_partial");
+        // Try to execute a program with a parse error
+        let program = "+edge[(1,2)]\n+edge(bad\n+edge[(3,4)]".to_string();
+        let _ = handler
+            .query_program(Some("no_partial".to_string()), program)
+            .await;
+        // The insert should NOT have been committed
+        let query_result = handler
+            .query_program(Some("no_partial".to_string()), "?edge(X, Y)".to_string())
+            .await
+            .unwrap();
+        assert!(
+            query_result.rows.is_empty(),
+            "No data should exist after rejected program"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_multi_statement_all_valid_executes() {
+        let (handler, _tmp) = handler_with_kg("all_valid");
+        let program = "+edge[(1,2)]\n+edge[(3,4)]".to_string();
+        let result = handler
+            .query_program(Some("all_valid".to_string()), program)
+            .await;
+        assert!(result.is_ok(), "All-valid program should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_parse_error_reports_line_numbers() {
+        let (handler, _tmp) = handler_with_kg("line_nums");
+        let program = "+edge[(1,2)]\n+edge(bad syntax".to_string();
+        let result = handler
+            .query_program(Some("line_nums".to_string()), program)
+            .await;
+        let err = result.unwrap_err();
+        let json_str = err.strip_prefix(VALIDATION_ERROR_PREFIX).unwrap();
+        let errors: Vec<ValidationError> = serde_json::from_str(json_str).unwrap();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, 2, "Error should be on line 2");
+        assert_eq!(
+            errors[0].statement_index, 1,
+            "Error should be statement index 1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_multiple_parse_errors_all_reported() {
+        let (handler, _tmp) = handler_with_kg("multi_err");
+        let program = "+edge(bad1\n+edge[(1,2)]\n+edge(bad2".to_string();
+        let result = handler
+            .query_program(Some("multi_err".to_string()), program)
+            .await;
+        let err = result.unwrap_err();
+        let json_str = err.strip_prefix(VALIDATION_ERROR_PREFIX).unwrap();
+        let errors: Vec<ValidationError> = serde_json::from_str(json_str).unwrap();
+        assert_eq!(errors.len(), 2, "Should report both parse errors");
+        assert_eq!(errors[0].line, 1);
+        assert_eq!(errors[1].line, 3);
     }
 }
 

@@ -1,0 +1,57 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_n33t16
+Knowledge graph 'test_explain_n33t16' created.
+Switched to knowledge graph: test_explain_n33t16
+> .kg use test_explain_n33t16
+Switched to knowledge graph: test_explain_n33t16
+> +edge[(1, 2), (2, 3), (3, 4)]
+Inserted 3 fact(s) into 'edge'.
+> +node[(1,), (2,), (3,), (4,)]
+Inserted 4 fact(s) into 'node'.
+> .explain ?edge(X, Y)
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 1
+
+  Rule 1: __query__(Variable("X"), Variable("Y")) <- edge(Variable("X"), Variable("Y"))
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 1
+  Rules: 1
+
+  Rule 1 IR:
+    Scan(edge)[X, Y]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 1 -> 1 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Scan(edge)[X, Y]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_n33t16
+Knowledge graph 'test_explain_n33t16' dropped.

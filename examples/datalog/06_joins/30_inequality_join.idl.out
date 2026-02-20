@@ -14,4 +14,18 @@ Inserted 3 fact(s) into 'ranges'.
 > +points[(3,), (12,), (25,), (35,)]
 Inserted 4 fact(s) into 'points'.
 > in_range(Start, End, P) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> ranges(Start, End),
+Parse error: Expected parentheses: (Start, End),
+> points(P),
+Parse error: Expected parentheses: (P),
+> P >= Start,
+Parse error: Unrecognized statement: P >= Start,
+> P <= End
+Parse error: Unrecognized statement: P <= End
+> ?in_range(Start, End, P)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_ineq_join_n06t30
+Knowledge graph 'test_ineq_join_n06t30' dropped.

@@ -16,7 +16,6 @@ Rule 'connected' registered.
 > +connected(X, Y) <- edge(X, Z), connected(Z, Y)
 Rule 'connected' registered.
 > .rule connected
-Rule: connected
 ┌──────┬──────┐
 │ col0 │ col1 │
 ├──────┼──────┤

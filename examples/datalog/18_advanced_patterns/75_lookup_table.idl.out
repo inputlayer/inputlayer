@@ -14,4 +14,16 @@ Inserted 3 fact(s) into 'orders'.
 > +products[(101, "Widget", 10.00), (102, "Gadget", 25.00)]
 Inserted 2 fact(s) into 'products'.
 > order_details(OId, ProdName, Qty, Total) <-
-Script error: Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
+> orders(OId, ProdId, Qty),
+Parse error: Expected parentheses: (OId, ProdId, Qty),
+> products(ProdId, ProdName, Price),
+Parse error: Expected parentheses: (ProdId, ProdName, Price),
+> Total = Price * Qty
+Parse error: Unrecognized statement: Total = Price * Qty
+> ?order_details(OId, ProdName, Qty, Total)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_lookup_n18t75
+Knowledge graph 'test_lookup_n18t75' dropped.

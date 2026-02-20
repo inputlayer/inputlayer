@@ -1,6 +1,6 @@
 //! `InputLayer` Server Binary
 //!
-//! Starts an `InputLayer` server with HTTP REST API and optional GUI.
+//! Starts an `InputLayer` server with WebSocket API and optional GUI.
 //!
 //! ## Usage
 //!
@@ -15,8 +15,8 @@
 //! ## HTTP Server
 //!
 //! The HTTP server provides:
-//! - REST API at `/api/v1/*`
-//! - Swagger UI at `/api/docs`
+//! - WebSocket API at `/ws`
+//! - AsyncAPI docs at `/api/ws-docs`
 //! - GUI dashboard at `/` (if GUI is enabled)
 
 use inputlayer::protocol::rest;

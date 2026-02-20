@@ -12,4 +12,22 @@ Switched to knowledge graph: test_rbac_deny_n20t02
 > +user_role[(1, 100), (2, 100), (3, 101), (4, 102)]
 Inserted 4 fact(s) into 'user_role'.
 > +role_allow[(100, 1), (100, 2), (100, 3), (101, 1), (101, 2), (102, 1)].
-Script error: Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +user_deny[(2, 3), (3, 2)].
+Parse error: Bulk insert must be in format: relation[(t1), (t2), ...]
+> +base_permission(User, Perm) <- user_role(User, Role), role_allow(Role, Perm)
+Rule 'base_permission' registered.
+> +effective_permission(User, Perm) <- base_permission(User, Perm), !user_deny(User, Perm)
+Rule 'effective_permission' registered.
+> ?base_permission(U, P)
+No results.
+> ?effective_permission(U, P)
+No results.
+> +denied(User, Perm) <- base_permission(User, Perm), user_deny(User, Perm)
+Rule 'denied' registered.
+> ?denied(U, P)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_rbac_deny_n20t02
+Knowledge graph 'test_rbac_deny_n20t02' dropped.

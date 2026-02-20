@@ -28,7 +28,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 1 rows
 > .session
 Session facts (1):
-  1. human("socrates")
+  human(("socrates"))
 Session rules (1):
   1. mortal(X) <- human(X)
 > human("plato")
@@ -71,6 +71,3 @@ No session data defined.
 Switched to knowledge graph: default
 > .kg drop test_sess_rules_facts_n04t03
 Knowledge graph 'test_sess_rules_facts_n04t03' dropped.
-> .kg list
-Knowledge Graphs:
-  default *

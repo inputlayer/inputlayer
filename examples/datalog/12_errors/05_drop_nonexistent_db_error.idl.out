@@ -5,4 +5,4 @@ Server status: healthy
 Current knowledge graph: default
 
 > .kg drop nonexistent_database_xyz_n12t05
-Script error: Failed to drop knowledge graph 'nonexistent_database_xyz_n12t05'
+Drop failed: Knowledge graph not found: nonexistent_database_xyz_n12t05
