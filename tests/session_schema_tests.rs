@@ -252,12 +252,31 @@ mod schema_type_tests {
 
     #[test]
     fn test_vector_type_matching() {
-        assert!(SchemaType::Vector.matches(&Value::Vector(Arc::new(vec![1.0, 2.0, 3.0]))));
-        assert!(SchemaType::Vector.matches(&Value::Vector(Arc::new(vec![]))));
-        assert!(SchemaType::Vector.matches(&Value::VectorInt8(Arc::new(vec![1, 2, 3]))));
+        // dim: None accepts any dimension
+        assert!(
+            SchemaType::Vector { dim: None }.matches(&Value::Vector(Arc::new(vec![1.0, 2.0, 3.0])))
+        );
+        assert!(SchemaType::Vector { dim: None }.matches(&Value::Vector(Arc::new(vec![]))));
+        assert!(
+            SchemaType::Vector { dim: None }.matches(&Value::VectorInt8(Arc::new(vec![1, 2, 3])))
+        );
 
-        assert!(!SchemaType::Vector.matches(&Value::string("[1,2,3]")));
-        assert!(!SchemaType::Vector.matches(&Value::Int64(123)));
+        assert!(!SchemaType::Vector { dim: None }.matches(&Value::string("[1,2,3]")));
+        assert!(!SchemaType::Vector { dim: None }.matches(&Value::Int64(123)));
+
+        // dim: Some(n) enforces exact dimension
+        assert!(SchemaType::Vector { dim: Some(3) }
+            .matches(&Value::Vector(Arc::new(vec![1.0, 2.0, 3.0]))));
+        assert!(
+            !SchemaType::Vector { dim: Some(3) }.matches(&Value::Vector(Arc::new(vec![1.0, 2.0])))
+        );
+        assert!(!SchemaType::Vector { dim: Some(3) }
+            .matches(&Value::Vector(Arc::new(vec![1.0, 2.0, 3.0, 4.0]))));
+        assert!(SchemaType::Vector { dim: Some(3) }
+            .matches(&Value::VectorInt8(Arc::new(vec![1, 2, 3]))));
+        assert!(
+            !SchemaType::Vector { dim: Some(3) }.matches(&Value::VectorInt8(Arc::new(vec![1, 2])))
+        );
     }
 
     #[test]
@@ -300,7 +319,7 @@ mod schema_type_tests {
         assert_eq!(format!("{}", SchemaType::Symbol), "symbol");
         assert_eq!(format!("{}", SchemaType::Bool), "bool");
         assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
-        assert_eq!(format!("{}", SchemaType::Vector), "vector");
+        assert_eq!(format!("{}", SchemaType::Vector { dim: None }), "vector");
         assert_eq!(format!("{}", SchemaType::Any), "any");
         assert_eq!(
             format!("{}", SchemaType::Named("Email".to_string())),
@@ -835,8 +854,8 @@ mod edge_case_tests {
 
     #[test]
     fn test_validate_empty_vector() {
-        let schema =
-            RelationSchema::new("Test").with_column(ColumnSchema::new("vec", SchemaType::Vector));
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("vec", SchemaType::Vector { dim: None }));
 
         let mut engine = ValidationEngine::new();
 
@@ -848,8 +867,8 @@ mod edge_case_tests {
 
     #[test]
     fn test_validate_large_vector() {
-        let schema =
-            RelationSchema::new("Test").with_column(ColumnSchema::new("vec", SchemaType::Vector));
+        let schema = RelationSchema::new("Test")
+            .with_column(ColumnSchema::new("vec", SchemaType::Vector { dim: None }));
 
         let mut engine = ValidationEngine::new();
 

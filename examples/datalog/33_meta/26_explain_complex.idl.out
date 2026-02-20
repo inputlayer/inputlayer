@@ -1,0 +1,150 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_complex_n33t26
+Knowledge graph 'test_explain_complex_n33t26' created.
+Switched to knowledge graph: test_explain_complex_n33t26
+> .kg use test_explain_complex_n33t26
+Switched to knowledge graph: test_explain_complex_n33t26
+> +product[(1, "Widget"), (2, "Gadget")]
+Inserted 2 fact(s) into 'product'.
+> +sale[(101, 1, 50), (102, 2, 30)]
+Inserted 2 fact(s) into 'sale'.
+> +order_item[(101, 201), (102, 201)]
+Inserted 2 fact(s) into 'order_item'.
+> .explain ?product(PId, Name), sale(SId, PId, Price), order_item(SId, CId)
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 5
+
+  Rule 1: sale_sip0f1(Variable("SId"), Variable("PId"), Variable("Price")) <- sale(Variable("SId"), Variable("PId"), Variable("Price")), product(Variable("PId"), Placeholder)
+  Rule 2: order_item_sip0f2(Variable("SId"), Variable("CId")) <- order_item(Variable("SId"), Variable("CId")), sale_sip0f1(Variable("SId"), Placeholder, Placeholder)
+  Rule 3: sale_sip0f1_sip0b1(Variable("SId"), Variable("PId"), Variable("Price")) <- sale_sip0f1(Variable("SId"), Variable("PId"), Variable("Price")), order_item_sip0f2(Variable("SId"), Placeholder)
+  Rule 4: product_sip0b2(Variable("PId"), Variable("Name")) <- product(Variable("PId"), Variable("Name")), sale_sip0f1_sip0b1(Placeholder, Variable("PId"), Placeholder)
+  Rule 5: __query__(Variable("PId"), Variable("Name"), Variable("SId"), Variable("Price"), Variable("CId")) <- product_sip0b2(Variable("PId"), Variable("Name")), sale_sip0f1_sip0b1(Variable("SId"), Variable("PId"), Variable("Price")), order_item_sip0f2(Variable("SId"), Variable("CId"))
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 21
+  Rules: 5
+
+  Rule 1 IR:
+    Map[[0, 1, 2]] -> [SId, PId, Price]
+      Join[L:[1], R:[0]] -> [SId, PId, Price, _ph_product_1]
+      |- Left:
+          Scan(sale)[SId, PId, Price]
+      `- Right:
+          Scan(product)[PId, _ph_product_1]
+
+  Rule 2 IR:
+    Map[[0, 1]] -> [SId, CId]
+      Join[L:[0], R:[0]] -> [SId, CId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+      |- Left:
+          Scan(order_item)[SId, CId]
+      `- Right:
+          Scan(sale_sip0f1)[SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+
+  Rule 3 IR:
+    Map[[0, 1, 2]] -> [SId, PId, Price]
+      Join[L:[0], R:[0]] -> [SId, PId, Price, _ph_order_item_sip0f2_1]
+      |- Left:
+          Scan(sale_sip0f1)[SId, PId, Price]
+      `- Right:
+          Scan(order_item_sip0f2)[SId, _ph_order_item_sip0f2_1]
+
+  Rule 4 IR:
+    Map[[0, 1]] -> [PId, Name]
+      Join[L:[0], R:[1]] -> [PId, Name, _ph_sale_sip0f1_sip0b1_0, _ph_sale_sip0f1_sip0b1_2]
+      |- Left:
+          Scan(product)[PId, Name]
+      `- Right:
+          Scan(sale_sip0f1_sip0b1)[_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2]
+
+  Rule 5 IR:
+    Join[L:[2], R:[0]] -> [PId, Name, SId, Price, CId]
+    |- Left:
+        Join[L:[0], R:[1]] -> [PId, Name, SId, Price]
+        |- Left:
+            Scan(product_sip0b2)[PId, Name]
+        `- Right:
+            Scan(sale_sip0f1_sip0b1)[SId, PId, Price]
+    `- Right:
+        Scan(order_item_sip0f2)[SId, CId]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 21 -> 28 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Map[[2, 0, 3]] -> [SId, PId, Price]
+      Distinct
+        Join[L:[0], R:[1]] -> [PId, _ph_product_1, SId, Price]
+        |- Left:
+            Scan(product)[PId, _ph_product_1]
+        `- Right:
+            Scan(sale)[SId, PId, Price]
+
+  Rule 2 Optimized IR:
+    Map[[0, 3]] -> [SId, CId]
+      Distinct
+        Join[L:[0], R:[0]] -> [SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2, CId]
+        |- Left:
+            Scan(sale_sip0f1)[SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+        `- Right:
+            Scan(order_item)[SId, CId]
+
+  Rule 3 Optimized IR:
+    Map[[0, 2, 3]] -> [SId, PId, Price]
+      Distinct
+        Join[L:[0], R:[0]] -> [SId, _ph_order_item_sip0f2_1, PId, Price]
+        |- Left:
+            Scan(order_item_sip0f2)[SId, _ph_order_item_sip0f2_1]
+        `- Right:
+            Scan(sale_sip0f1)[SId, PId, Price]
+
+  Rule 4 Optimized IR:
+    Map[[1, 3]] -> [PId, Name]
+      Distinct
+        Join[L:[1], R:[0]] -> [_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2, Name]
+        |- Left:
+            Scan(sale_sip0f1_sip0b1)[_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2]
+        `- Right:
+            Scan(product)[PId, Name]
+
+  Rule 5 Optimized IR:
+    Map[[2, 3, 0, 4, 1]] -> [PId, Name, SId, Price, CId]
+      Distinct
+        Join[L:[0, 2], R:[0, 1]] -> [SId, CId, PId, Name, Price]
+        |- Left:
+            Distinct
+              Join[L:[], R:[]] -> [SId, CId, PId, Name]
+              |- Left:
+                  Scan(order_item_sip0f2)[SId, CId]
+              `- Right:
+                  Scan(product_sip0b2)[PId, Name]
+        `- Right:
+            Scan(sale_sip0f1_sip0b1)[SId, PId, Price]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_complex_n33t26
+Knowledge graph 'test_explain_complex_n33t26' dropped.

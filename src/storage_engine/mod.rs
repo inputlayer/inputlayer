@@ -152,6 +152,9 @@ impl StorageEngine {
         Ok(engine)
     }
 
+    /// Maximum allowed byte length for a knowledge graph name.
+    pub const MAX_KG_NAME_BYTES: usize = 128;
+
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         // Validate knowledge graph name
@@ -163,6 +166,15 @@ impl StorageEngine {
             || name == "."
         {
             return Err(StorageError::InvalidRelationName(name.to_string()));
+        }
+
+        // Validate name length to prevent filesystem PATH_MAX failures
+        if name.len() > Self::MAX_KG_NAME_BYTES {
+            return Err(StorageError::InvalidRelationName(format!(
+                "Knowledge graph name too long: {} bytes (max {})",
+                name.len(),
+                Self::MAX_KG_NAME_BYTES
+            )));
         }
 
         // Block creation if a same-name KG is being dropped (prevents RC-2)

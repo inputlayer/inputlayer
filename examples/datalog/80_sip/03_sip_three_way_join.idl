@@ -1,0 +1,14 @@
+// Test: Three-way join — SIP can propagate bindings across multiple relations.
+.kg create test_sip_three_way_n80t03
+.kg use test_sip_three_way_n80t03
+
++employee[(1, "alice", 10), (2, "bob", 20), (3, "carol", 10)]
++department[(10, "eng"), (20, "sales")]
++project[(101, 1), (102, 2), (103, 3)]
+
+// Three-way join: employees in the "eng" department and their projects
+?employee(EmpId, Name, DeptId), department(DeptId, "eng"), project(ProjId, EmpId)
+
+// Cleanup
+.kg use default
+.kg drop test_sip_three_way_n80t03

@@ -1309,4 +1309,79 @@ mod tests {
         assert!(!SemiringType::Counting.is_more_general_than(&SemiringType::Max));
         assert!(SemiringType::Counting.is_more_general_than(&SemiringType::Boolean));
     }
+
+    // WI-05: Regression tests verifying no production panic paths exist.
+    // The only panic! in this file is at line 1045 inside a test assertion.
+    // These tests exercise every major IR node variant through specialize() to
+    // confirm no unreachable/panic branches exist in production code paths.
+
+    #[test]
+    fn test_specialize_all_node_variants_no_panic() {
+        let mut s = BooleanSpecializer::new();
+
+        // Scan
+        let (_, a) = s.specialize(make_scan("R"));
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Map
+        let (_, a) = s.specialize(IRNode::Map {
+            input: Box::new(make_scan("R")),
+            projection: vec![0],
+            output_schema: vec!["x".to_string()],
+        });
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Filter
+        let (_, a) = s.specialize(IRNode::Filter {
+            input: Box::new(make_scan("R")),
+            predicate: crate::ir::Predicate::ColumnEqConst(0, 42),
+        });
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Join
+        let (_, a) = s.specialize(make_join(make_scan("R"), make_scan("S")));
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Distinct
+        let (_, a) = s.specialize(IRNode::Distinct {
+            input: Box::new(make_scan("R")),
+        });
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Union
+        let (_, a) = s.specialize(IRNode::Union {
+            inputs: vec![make_scan("R"), make_scan("S")],
+        });
+        assert_eq!(a.semiring, SemiringType::Boolean);
+
+        // Antijoin — left is NOT already Distinct; must not panic, wraps left in Distinct
+        let (node, a) = s.specialize(IRNode::Antijoin {
+            left: Box::new(make_join(make_scan("R"), make_scan("S"))),
+            right: Box::new(make_scan("T")),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        });
+        assert_eq!(a.semiring, SemiringType::Boolean);
+        // Production path must wrap non-Distinct left in Distinct
+        assert!(
+            matches!(node, IRNode::Antijoin { left, .. } if matches!(*left, IRNode::Distinct { .. })),
+            "Antijoin left must be wrapped in Distinct for Boolean semiring"
+        );
+
+        // Antijoin — left is already Distinct; must not double-wrap
+        let (node2, _) = s.specialize(IRNode::Antijoin {
+            left: Box::new(IRNode::Distinct {
+                input: Box::new(make_scan("R")),
+            }),
+            right: Box::new(make_scan("T")),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        });
+        assert!(
+            matches!(node2, IRNode::Antijoin { .. }),
+            "Antijoin with already-Distinct left must remain valid"
+        );
+    }
 }

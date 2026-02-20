@@ -106,27 +106,251 @@ pub enum PersistentNotification {
 /// can inject ephemeral facts/rules that combine with persistent data for queries.
 pub struct Handler {
     storage: Arc<RwLock<StorageEngine>>,
+    /// Cached copy of the engine configuration for fast access in hot paths.
+    config: Arc<crate::Config>,
     start_time: Instant,
-    query_count: AtomicU64,
-    insert_count: AtomicU64,
+    query_count: Arc<AtomicU64>,
+    insert_count: Arc<AtomicU64>,
     /// Session manager for ephemeral state
     sessions: SessionManager,
     /// Broadcast channel for persistent data change notifications.
     /// WebSocket connections subscribe to receive push updates.
     notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    /// Semaphore limiting concurrent DD computations.
+    /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
+    /// at the hardware thread count. Tokio workers queue via async `acquire()`.
+    query_semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+/// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
+/// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
+/// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
+struct QueryJob {
+    storage: Arc<RwLock<StorageEngine>>,
+    config: Arc<crate::Config>,
+    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    insert_count: Arc<AtomicU64>,
+    query_count: Arc<AtomicU64>,
+    start_time: Instant,
+}
+
+impl QueryJob {
+    fn inc_query_count(&self) {
+        self.query_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn total_queries(&self) -> u64 {
+        self.query_count.load(Ordering::Relaxed)
+    }
+
+    fn uptime_seconds(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
+    fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
+        if self
+            .notify_tx
+            .send(PersistentNotification::PersistentUpdate {
+                knowledge_graph: kg.to_string(),
+                relation: relation.to_string(),
+                operation: operation.to_string(),
+                count,
+            })
+            .is_err()
+        {
+            tracing::debug!("notify_persistent_update: no active subscribers");
+        }
+    }
+
+    fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
+        let storage = self.storage.read();
+
+        // Resolve column index from schema
+        let column_idx = {
+            let schema = storage
+                .get_schema_in(kg, &opts.relation)
+                .map_err(|e| e.to_string())?;
+            match schema {
+                Some(s) => s.column_index(&opts.column).ok_or_else(|| {
+                    format!(
+                        "Column '{}' not found in relation '{}'. Available: {:?}",
+                        opts.column,
+                        opts.relation,
+                        s.column_names()
+                    )
+                })?,
+                None => {
+                    return Err(format!(
+                        "No schema found for relation '{}'. Register a schema first.",
+                        opts.relation
+                    ));
+                }
+            }
+        };
+
+        // Validate index type
+        let index_type_str = opts.index_type.as_str();
+        if index_type_str != "hnsw" {
+            return Err(format!(
+                "Unsupported index type '{index_type_str}'. Currently only 'hnsw' is supported."
+            ));
+        }
+
+        // Parse distance metric
+        let metric = opts
+            .metric
+            .as_deref()
+            .unwrap_or("cosine")
+            .parse::<DistanceMetric>()
+            .map_err(|e| format!("Invalid metric: {e}"))?;
+
+        let hnsw_config = HnswConfig {
+            m: opts.m.unwrap_or(16),
+            ef_construction: opts.ef_construction.unwrap_or(200),
+            ef_search: opts.ef_search.unwrap_or(50),
+            metric,
+        };
+
+        let registered = RegisteredIndex {
+            name: opts.name.clone(),
+            relation: opts.relation.clone(),
+            column_idx,
+            column_name: opts.column.clone(),
+            index_type: IndexType::Hnsw(hnsw_config),
+        };
+
+        // Enable incremental engine and register index
+        storage
+            .with_kg_mut(kg, |kg_data| {
+                kg_data.enable_incremental().map_err(|e| e.to_string())?;
+                if let Some(dd) = kg_data.incremental() {
+                    dd.register_index(registered)
+                } else {
+                    Err("Failed to enable incremental engine".to_string())
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!(
+            "Index '{}' created on {}.{}.",
+            opts.name, opts.relation, opts.column
+        ))
+    }
+
+    fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.remove_index(name)
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!("Index '{name}' dropped."))
+    }
+
+    fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(None)
+                } else {
+                    Ok(vec![])
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(Some(name))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    // Verify the index exists
+                    let stats = dd.get_index_stats(Some(name))?;
+                    if stats.is_empty() {
+                        return Err(format!("Index '{name}' not found"));
+                    }
+                    // Indexes are automatically rebuilt when their base relation
+                    // receives updates. Notify the base relation to trigger rebuild.
+                    Ok(format!(
+                        "Index '{name}' will be rebuilt on next data update."
+                    ))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn explain_query(
+        &self,
+        knowledge_graph: Option<String>,
+        query: String,
+    ) -> Result<(String, Vec<String>), String> {
+        let storage = self.storage.read();
+
+        let kg_name = if let Some(ref kg) = knowledge_graph {
+            storage
+                .ensure_knowledge_graph(kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            kg.clone()
+        } else {
+            storage
+                .current_knowledge_graph()
+                .ok_or("No knowledge graph selected")?
+                .to_string()
+        };
+
+        let trace = storage
+            .explain_query_on(&kg_name, &query)
+            .map_err(|e| format!("{e}"))?;
+
+        let optimizations = vec![
+            "Join Planning (spanning tree reordering)".to_string(),
+            "SIP Rewriting (semijoin reduction)".to_string(),
+            "Subplan Sharing (common subexpression elimination)".to_string(),
+            "Basic Optimizations (identity elimination, filter simplification)".to_string(),
+        ];
+
+        Ok((trace.format_trace(), optimizations))
+    }
 }
 
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
         let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let config = Arc::new(storage.config().clone());
+        let ncpu = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4);
         Self {
             storage: Arc::new(RwLock::new(storage)),
+            config,
             start_time: Instant::now(),
-            query_count: AtomicU64::new(0),
-            insert_count: AtomicU64::new(0),
+            query_count: Arc::new(AtomicU64::new(0)),
+            insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
             notify_tx,
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(ncpu)),
         }
     }
 
@@ -140,14 +364,37 @@ impl Handler {
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
         let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let config = Arc::new(storage.config().clone());
+        let ncpu = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4);
         Self {
             storage: Arc::new(RwLock::new(storage)),
+            config,
             start_time: Instant::now(),
-            query_count: AtomicU64::new(0),
-            insert_count: AtomicU64::new(0),
+            query_count: Arc::new(AtomicU64::new(0)),
+            insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
             notify_tx,
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(ncpu)),
         }
+    }
+
+    /// Create a QueryJob with Arc-cloned fields for use in `spawn_blocking`.
+    fn make_query_job(&self) -> QueryJob {
+        QueryJob {
+            storage: Arc::clone(&self.storage),
+            config: Arc::clone(&self.config),
+            notify_tx: self.notify_tx.clone(),
+            insert_count: Arc::clone(&self.insert_count),
+            query_count: Arc::clone(&self.query_count),
+            start_time: self.start_time,
+        }
+    }
+
+    /// Get reference to the handler's configuration.
+    pub fn config(&self) -> &crate::Config {
+        &self.config
     }
 
     /// Subscribe to persistent data change notifications.
@@ -167,14 +414,18 @@ impl Handler {
         operation: &str,
         count: usize,
     ) {
-        let _ = self
+        if self
             .notify_tx
             .send(PersistentNotification::PersistentUpdate {
                 knowledge_graph: kg.to_string(),
                 relation: relation.to_string(),
                 operation: operation.to_string(),
                 count,
-            });
+            })
+            .is_err()
+        {
+            tracing::debug!("notify_persistent_update: no active subscribers");
+        }
     }
 
     /// Get the session manager.
@@ -421,6 +672,59 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        // Input size validation (WI-07)
+        let perf = &self.config.storage.performance;
+        if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
+            return Err(format!(
+                "Query too large: {} bytes (max {})",
+                program.len(),
+                perf.max_query_size_bytes
+            ));
+        }
+
+        // Acquire a semaphore permit to bound concurrent DD computations at ncpu.
+        // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
+        // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
+        // `acquire_owned()` is an async wait — Tokio workers remain free while queued.
+        let permit = Arc::clone(&self.query_semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| "Query semaphore closed (server shutting down)")?;
+
+        // Offload CPU-bound DD computation to the blocking thread pool.
+        // This keeps Tokio worker threads free for I/O and other async tasks.
+        let job = self.make_query_job();
+        let timeout_ms = self.config.storage.performance.query_timeout_ms;
+
+        // The permit is moved into the blocking task so it's released when DD finishes.
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            let result = job.execute(knowledge_graph, program);
+            drop(permit); // Explicit drop; semaphore slot returned here
+            result
+        });
+
+        if timeout_ms > 0 {
+            tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
+                .await
+                .map_err(|_| "Query execution timed out".to_string())?
+                .map_err(|e| format!("Query task panicked: {e}"))?
+        } else {
+            blocking_task
+                .await
+                .map_err(|e| format!("Query task panicked: {e}"))?
+        }
+    }
+}
+
+impl QueryJob {
+    /// Execute a Datalog program synchronously on the current thread.
+    /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
+    /// so that Tokio worker threads are never blocked by DD computation.
+    fn execute(
+        self,
+        knowledge_graph: Option<String>,
+        program: String,
+    ) -> Result<QueryResult, String> {
         self.inc_query_count();
         let start = Instant::now();
 
@@ -547,6 +851,8 @@ impl Handler {
                                 // Convert all terms to Values and create Tuples
                                 let mut tuples: Vec<Tuple> = Vec::new();
                                 let mut conversion_error = None;
+                                let max_str_bytes =
+                                    self.config.storage.performance.max_string_value_bytes;
 
                                 for tuple_terms in &op.tuples {
                                     if tuple_terms.is_empty() {
@@ -555,6 +861,16 @@ impl Handler {
                                     let mut values: Vec<Value> = Vec::new();
                                     for term in tuple_terms {
                                         match term_to_value(term) {
+                                            Ok(Value::String(ref s))
+                                                if max_str_bytes > 0 && s.len() > max_str_bytes =>
+                                            {
+                                                conversion_error = Some(format!(
+                                                    "String value too long: {} bytes (max {})",
+                                                    s.len(),
+                                                    max_str_bytes
+                                                ));
+                                                break;
+                                            }
                                             Ok(v) => values.push(v),
                                             Err(e) => {
                                                 conversion_error = Some(e);
@@ -570,6 +886,19 @@ impl Handler {
 
                                 if let Some(err) = conversion_error {
                                     messages.push(err);
+                                    current_stmt.clear();
+                                    continue;
+                                }
+
+                                // Validate tuple count limit (WI-07)
+                                let max_tuples = self.config.storage.performance.max_insert_tuples;
+                                if max_tuples > 0 && tuples.len() > max_tuples {
+                                    messages.push(format!(
+                                        "Insert rejected for '{}': {} tuples exceeds max {}",
+                                        op.relation,
+                                        tuples.len(),
+                                        max_tuples
+                                    ));
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -593,13 +922,11 @@ impl Handler {
                                     .fetch_add(inserted as u64, Ordering::Relaxed);
                                 // Notify WebSocket subscribers of persistent data change
                                 if inserted > 0 {
-                                    let _ = self.notify_tx.send(
-                                        PersistentNotification::PersistentUpdate {
-                                            knowledge_graph: kg_name.clone(),
-                                            relation: op.relation.clone(),
-                                            operation: "insert".to_string(),
-                                            count: inserted,
-                                        },
+                                    self.notify_persistent_update(
+                                        &kg_name,
+                                        &op.relation,
+                                        "insert",
+                                        inserted,
                                     );
                                 }
                                 messages.push(format!(
@@ -667,13 +994,11 @@ impl Handler {
                                                 )
                                                 .map_err(|e| e.to_string())?;
                                             if deleted_count > 0 {
-                                                let _ = self.notify_tx.send(
-                                                    PersistentNotification::PersistentUpdate {
-                                                        knowledge_graph: kg_name.clone(),
-                                                        relation: op.relation.clone(),
-                                                        operation: "delete".to_string(),
-                                                        count: deleted_count,
-                                                    },
+                                                self.notify_persistent_update(
+                                                    &kg_name,
+                                                    &op.relation,
+                                                    "delete",
+                                                    deleted_count,
                                                 );
                                             }
                                             messages.push(format!(
@@ -703,13 +1028,11 @@ impl Handler {
                                             }
                                         }
                                         if total_deleted > 0 {
-                                            let _ = self.notify_tx.send(
-                                                PersistentNotification::PersistentUpdate {
-                                                    knowledge_graph: kg_name.clone(),
-                                                    relation: op.relation.clone(),
-                                                    operation: "delete".to_string(),
-                                                    count: total_deleted,
-                                                },
+                                            self.notify_persistent_update(
+                                                &kg_name,
+                                                &op.relation,
+                                                "delete",
+                                                total_deleted,
                                             );
                                         }
                                         messages.push(format!(
@@ -826,13 +1149,11 @@ impl Handler {
                                         }
 
                                         if deleted > 0 {
-                                            let _ = self.notify_tx.send(
-                                                PersistentNotification::PersistentUpdate {
-                                                    knowledge_graph: kg_name.clone(),
-                                                    relation: op.relation.clone(),
-                                                    operation: "delete".to_string(),
-                                                    count: deleted,
-                                                },
+                                            self.notify_persistent_update(
+                                                &kg_name,
+                                                &op.relation,
+                                                "delete",
+                                                deleted,
                                             );
                                         }
                                         messages.push(format!(
@@ -852,6 +1173,17 @@ impl Handler {
                                 messages.push(format!("Rule '{}' registered.", rule.head.relation));
                             }
                             statement::Statement::SessionRule(rule) => {
+                                // Reject reserved '__' prefix to prevent shadowing internal relations.
+                                // The head relation may have a leading '~' (transient syntax marker),
+                                // so strip it before checking.
+                                let bare_name = rule.head.relation.trim_start_matches('~');
+                                if bare_name.starts_with("__") {
+                                    return Err(format!(
+                                        "Session rule '{}' uses reserved '__' prefix. Choose a different relation name.",
+                                        rule.head.relation
+                                    ));
+                                }
+
                                 // Validate session rule for safety constraints
                                 // (self-negation, head variable safety, range restriction)
                                 validate_rule(&rule, &rule.head.relation)?;
@@ -984,13 +1316,11 @@ impl Handler {
                                     .fetch_add(inserted as u64, Ordering::Relaxed);
 
                                 if deleted > 0 || inserted > 0 {
-                                    let _ = self.notify_tx.send(
-                                        PersistentNotification::PersistentUpdate {
-                                            knowledge_graph: kg_name.clone(),
-                                            relation: "multiple".to_string(),
-                                            operation: "update".to_string(),
-                                            count: deleted + inserted,
-                                        },
+                                    self.notify_persistent_update(
+                                        &kg_name,
+                                        "multiple",
+                                        "update",
+                                        deleted + inserted,
                                     );
                                 }
                                 messages.push(format!(
@@ -1537,7 +1867,9 @@ impl Handler {
             switched_kg: None,
         })
     }
+}
 
+impl Handler {
     /// Explain a query plan without executing it.
     ///
     /// Runs the full compilation pipeline (parse → IR → optimize) and returns
@@ -1843,6 +2175,16 @@ impl Handler {
             if let Ok(ref stmt) = statement::parse_statement(trimmed) {
                 match stmt {
                     statement::Statement::SessionRule(rule) => {
+                        // Reject reserved '__' prefix to prevent shadowing internal relations.
+                        // Strip leading '~' (transient syntax marker) before checking.
+                        let bare_name = rule.head.relation.trim_start_matches('~');
+                        if bare_name.starts_with("__") {
+                            return Err(format!(
+                                "Session rule '{}' uses reserved '__' prefix. Choose a different relation name.",
+                                rule.head.relation
+                            ));
+                        }
+
                         // Validate rule safety (self-negation, head variable safety, etc.)
                         validate_rule(rule, &rule.head.relation)?;
 

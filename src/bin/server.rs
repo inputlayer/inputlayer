@@ -56,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let http_config = config.http.clone();
 
     // Create handler
-    let handler = Arc::new(Handler::from_config(config).expect("Failed to create handler"));
+    let handler = Arc::new(Handler::from_config(config).map_err(|e| {
+        eprintln!("ERROR: Failed to initialize InputLayer: {e}");
+        Box::<dyn std::error::Error + Send + Sync>::from(e.clone())
+    })?);
 
     println!("Storage engine initialized");
     println!();
