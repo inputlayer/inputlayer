@@ -189,11 +189,14 @@ export function getCompletions(
       })
     }
     for (const view of views) {
+      const vars = view.arity > 0
+        ? `(${Array.from({ length: view.arity }, (_, i) => String.fromCharCode(65 + i)).join(", ")})`
+        : ""
       items.push({
         label: view.name,
         kind: "view",
-        detail: "view",
-        insertText: view.name,
+        detail: view.arity > 0 ? `view — arity ${view.arity}` : "view",
+        insertText: view.name + vars,
       })
     }
     return { items, startIndex: cursorPos }

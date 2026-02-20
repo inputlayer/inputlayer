@@ -47,6 +47,7 @@ export interface View {
   id: string
   name: string
   definition: string
+  arity: number
   dependencies: string[]
   computationSteps: ComputationStep[]
 }
@@ -136,6 +137,7 @@ function toView(v: ApiView, index: number): View {
     id: `v${index + 1}`,
     name: v.name,
     definition: v.definition,
+    arity: v.arity,
     dependencies: v.dependencies,
     computationSteps: [],
   }
