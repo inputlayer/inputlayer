@@ -34,6 +34,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tracing::{info, Instrument};
 
 use super::wire_value_to_json;
 use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
@@ -559,11 +560,13 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let (mut sender, mut receiver) = socket.split();
 
     eprintln!("[ws] New connection for kg={kg}");
+    info!(kg = %kg, "ws_connection_start");
 
     // Auto-create session
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
             eprintln!("[ws] Session {id} created for kg={kg}");
+            info!(session_id = id, kg = %kg, "ws_session_created");
             id
         }
         Err(e) => {
@@ -593,6 +596,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     }
 
     let mut notify_rx = handler.subscribe_notifications();
+    let mut request_seq: u64 = 0;
 
     // Idle timeout configuration (WI-02)
     let idle_ms = handler.config().http.ws_idle_timeout_ms;
@@ -639,7 +643,16 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         last_activity = std::time::Instant::now();
-                        let response = process_global_ws_message(&handler, session_id, &text).await;
+                        request_seq = request_seq.saturating_add(1);
+                        let span = tracing::info_span!(
+                            "ws_request",
+                            session_id,
+                            request_id = request_seq,
+                            msg_bytes = text.len()
+                        );
+                        let response = process_global_ws_message(&handler, session_id, &text)
+                            .instrument(span)
+                            .await;
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
@@ -752,6 +765,14 @@ async fn handle_global_execute(
     program: String,
 ) -> GlobalWsResponse {
     let start = std::time::Instant::now();
+    let program_len = program.len();
+    let program_preview = program.lines().next().unwrap_or("").trim();
+    info!(
+        session_id,
+        program_len,
+        program_preview = %program_preview,
+        "ws_execute_start"
+    );
     // query_program() inside execute_program() already offloads DD computation to
     // spawn_blocking internally (with a semaphore limiting concurrency to ncpu).
     // Calling execute_program() directly keeps Tokio workers free for I/O while
@@ -767,6 +788,13 @@ async fn handle_global_execute(
             &program[..program.len().min(80)]
         );
     }
+    info!(
+        session_id,
+        program_len,
+        elapsed_ms = elapsed.as_millis() as u64,
+        ok = result.is_ok(),
+        "ws_execute_end"
+    );
     match result {
         Ok(response) => {
             let row_provenance: Vec<String> = response

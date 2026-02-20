@@ -57,6 +57,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
+use tracing::info;
 
 /// Cleanup token returned by Phase 1 of KG drop.
 /// Carries the data needed for Phase 2 (slow file I/O cleanup).
@@ -157,6 +159,7 @@ impl StorageEngine {
 
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        let start = Instant::now();
         // Validate knowledge graph name
         if name.is_empty()
             || name.contains('/')
@@ -208,13 +211,17 @@ impl StorageEngine {
         // Update system metadata
         self.save_knowledge_graphs_metadata()?;
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        info!(kg = %name, elapsed_ms, "kg_create_complete");
+
         Ok(())
     }
 
     /// Phase 1 of KG drop: Fast in-memory removal (~microseconds).
     /// Returns a `KgDropCleanup` token for Phase 2.
-    /// Requires `&mut self` (write lock) but releases quickly.
-    pub fn prepare_drop_knowledge_graph(&mut self, name: &str) -> StorageResult<KgDropCleanup> {
+    /// Uses interior mutability (DashMap + RwLock) so only needs `&self`.
+    pub fn prepare_drop_knowledge_graph(&self, name: &str) -> StorageResult<KgDropCleanup> {
+        let start = Instant::now();
         // Cannot drop default knowledge graph
         if name == self.config.storage.default_knowledge_graph {
             return Err(StorageError::CannotDropDefault);
@@ -241,6 +248,9 @@ impl StorageEngine {
         // Save metadata JSON (small file write, fast)
         self.save_knowledge_graphs_metadata()?;
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        info!(kg = %name, elapsed_ms, "kg_drop_prepare_complete");
+
         Ok(KgDropCleanup {
             name: name.to_string(),
             data_dir: self.config.storage.data_dir.join(name),
@@ -251,6 +261,7 @@ impl StorageEngine {
     /// Phase 2 of KG drop: Slow file I/O cleanup (NO storage write lock needed).
     /// Deletes persist shards and data directory, then removes tombstone.
     pub fn finish_drop_knowledge_graph(&self, cleanup: KgDropCleanup) {
+        let start = Instant::now();
         let prefix = format!("{}:", cleanup.name);
         if let Ok(shards) = cleanup.persist.list_shards() {
             for shard in shards.iter().filter(|s| s.starts_with(&prefix)) {
@@ -262,11 +273,13 @@ impl StorageEngine {
         }
         // Remove tombstone — name is now safe to reuse
         self.dropping_kgs.write().remove(&cleanup.name);
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        info!(kg = %cleanup.name, elapsed_ms, "kg_drop_finish_complete");
     }
 
     /// Drop a knowledge graph (delete all data).
     /// Convenience method that combines prepare + finish phases.
-    pub fn drop_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+    pub fn drop_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         let cleanup = self.prepare_drop_knowledge_graph(name)?;
         self.finish_drop_knowledge_graph(cleanup);
         Ok(())
@@ -274,6 +287,7 @@ impl StorageEngine {
 
     /// Switch to a different knowledge graph
     pub fn use_knowledge_graph(&mut self, name: &str) -> StorageResult<()> {
+        let start = Instant::now();
         if !self.knowledge_graphs.contains_key(name) {
             if self.config.storage.auto_create_knowledge_graphs {
                 self.create_knowledge_graph(name)?;
@@ -286,17 +300,25 @@ impl StorageEngine {
         // We do NOT overwrite created_at here to preserve the original creation timestamp.
 
         self.current_kg = Some(name.to_string());
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        info!(kg = %name, elapsed_ms, "kg_use_complete");
         Ok(())
     }
 
     /// Ensure a knowledge graph exists, creating it if auto-create is enabled.
     /// This is a `&self` method suitable for use from read-lock contexts.
     pub fn ensure_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        let start = Instant::now();
         if self.knowledge_graphs.contains_key(name) {
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            info!(kg = %name, elapsed_ms, "kg_ensure_exists");
             return Ok(());
         }
         if self.config.storage.auto_create_knowledge_graphs {
-            self.create_knowledge_graph(name)
+            let result = self.create_knowledge_graph(name);
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            info!(kg = %name, elapsed_ms, "kg_ensure_created");
+            result
         } else {
             Err(StorageError::KnowledgeGraphNotFound(name.to_string()))
         }
@@ -437,8 +459,17 @@ impl StorageEngine {
             .collect();
 
         // Persist first (durability guarantee via WAL + batches)
+        let persist_start = Instant::now();
         self.persist.ensure_shard(&shard)?;
         self.persist.append(&shard, &updates)?;
+        let persist_ms = persist_start.elapsed().as_millis() as u64;
+        info!(
+            kg = %kg,
+            relation = %relation,
+            tuples = updates.len(),
+            persist_ms,
+            "persist_append_complete"
+        );
 
         // Update in-memory state
         let db = self
@@ -844,7 +875,7 @@ impl StorageEngine {
 
     /// Clear all clauses from a rule for editing/redefining (current knowledge graph)
     /// The rule remains registered but with no clauses, ready for new clause registration
-    pub fn clear_rule(&mut self, name: &str) -> StorageResult<()> {
+    pub fn clear_rule(&self, name: &str) -> StorageResult<()> {
         let db_name = self
             .current_kg
             .as_ref()
@@ -855,7 +886,7 @@ impl StorageEngine {
     }
 
     /// Clear all clauses from a rule for editing/redefining (specific knowledge graph)
-    pub fn clear_rule_in(&mut self, kg: &str, name: &str) -> StorageResult<()> {
+    pub fn clear_rule_in(&self, kg: &str, name: &str) -> StorageResult<()> {
         let db = self
             .knowledge_graphs
             .get(kg)
@@ -1216,6 +1247,21 @@ impl StorageEngine {
         self.execute_query_with_rules_tuples_on(&db_name, program)
     }
 
+    /// Get a snapshot for a specific knowledge graph.
+    ///
+    /// Returns an `Arc<KnowledgeGraphSnapshot>` that can be used for lock-free
+    /// query execution. Callers can release the storage lock after obtaining
+    /// the snapshot and run DD computations without holding any locks.
+    pub fn get_snapshot_for(&self, kg: &str) -> StorageResult<Arc<KnowledgeGraphSnapshot>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db_guard = db.read();
+        Ok(db_guard.snapshot())
+    }
+
     /// Execute a query with rules prepended, returning tuples of arbitrary arity (specific knowledge graph)
     ///
     /// Uses a completely lock-free read path via snapshots.
@@ -1536,6 +1582,7 @@ impl StorageEngine {
 
     /// Save system-wide knowledge graphs metadata
     fn save_knowledge_graphs_metadata(&self) -> StorageResult<()> {
+        let start = Instant::now();
         let metadata_dir = self.config.storage.data_dir.join("metadata");
         if let Err(e) = fs::create_dir_all(&metadata_dir) {
             eprintln!(
@@ -1570,6 +1617,8 @@ impl StorageEngine {
 
         metadata.save(&metadata_dir.join("knowledge_graphs.json"))?;
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        info!(elapsed_ms, "save_metadata_complete");
         Ok(())
     }
 
@@ -1815,6 +1864,7 @@ impl KnowledgeGraph {
     /// Without this, another thread could invalidate materializations between
     /// reading them and publishing the snapshot.
     fn publish_snapshot(&self) {
+        let snapshot_start = Instant::now();
         // Start with base relation data
         let mut input_tuples = self.engine.input_tuples.clone();
         let rules = self.rule_catalog.all_rules();
@@ -1863,6 +1913,13 @@ impl KnowledgeGraph {
             );
             self.snapshot.store(Arc::new(new_snapshot));
         }
+
+        info!(
+            relations = self.engine.input_tuples.len(),
+            rules = self.rule_catalog.all_rules().len(),
+            snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
+            "snapshot_publish_complete"
+        );
     }
 
     /// Get the current snapshot for lock-free reads
@@ -1955,8 +2012,6 @@ impl KnowledgeGraph {
                 // Invalidate indexes that depend on this base relation
                 dd.notify_indexes_base_update(relation)
                     .map_err(StorageError::IncrementalEngineError)?;
-                // Auto-rematerialize invalidated rules
-                self.auto_rematerialize_invalid_rules();
             }
         }
 
@@ -1964,6 +2019,14 @@ impl KnowledgeGraph {
         if new_count > 0 {
             self.publish_snapshot();
         }
+
+        info!(
+            relation = %relation,
+            new_count,
+            dup_count,
+            time,
+            "insert_in_memory_complete"
+        );
 
         Ok((new_count, dup_count))
     }
@@ -2030,8 +2093,6 @@ impl KnowledgeGraph {
                     // Invalidate indexes that depend on this base relation
                     dd.notify_indexes_base_update(relation)
                         .map_err(StorageError::IncrementalEngineError)?;
-                    // Auto-rematerialize invalidated rules
-                    self.auto_rematerialize_invalid_rules();
                 }
             }
 
@@ -2135,32 +2196,6 @@ impl KnowledgeGraph {
         }
 
         Ok(())
-    }
-
-    /// Auto-rematerialize all invalid derived relations
-    ///
-    /// Called after base data changes to ensure materializations stay current.
-    /// This enables session rules to always see up-to-date materialized data.
-    fn auto_rematerialize_invalid_rules(&self) {
-        let dd = match &self.incremental {
-            Some(dd) => dd,
-            None => return,
-        };
-
-        // Get list of invalid (needs rematerialization) relations
-        let invalid_relations = {
-            let manager = dd.derived_relations();
-            let guard = manager.lock();
-            guard.get_invalid_relations()
-        };
-
-        // Rematerialize each invalid relation
-        for relation in invalid_relations {
-            if let Err(e) = self.auto_materialize_rule(&relation) {
-                // Log warning but don't fail - best effort rematerialization
-                eprintln!("Warning: failed to rematerialize '{relation}': {e}");
-            }
-        }
     }
 
     /// Compile a RuleDef into a CompiledRule for IncrementalEngine
@@ -2311,10 +2346,6 @@ impl KnowledgeGraph {
         }
 
         if !results.is_empty() {
-            // Auto-rematerialize invalidated rules
-            if self.incremental.is_some() {
-                self.auto_rematerialize_invalid_rules();
-            }
             self.publish_snapshot();
         }
 

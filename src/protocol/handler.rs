@@ -18,6 +18,7 @@ use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::{info, warn};
 
 use super::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
 
@@ -342,6 +343,10 @@ impl Handler {
         let ncpu = std::thread::available_parallelism()
             .map(std::num::NonZero::get)
             .unwrap_or(4);
+        // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
+        // The rest are available for CPU-bound DD computations via spawn_blocking.
+        let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
+        let compute_permits = ncpu - io_reserve;
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -350,7 +355,7 @@ impl Handler {
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
             notify_tx,
-            query_semaphore: Arc::new(tokio::sync::Semaphore::new(ncpu)),
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
         }
     }
 
@@ -368,6 +373,9 @@ impl Handler {
         let ncpu = std::thread::available_parallelism()
             .map(std::num::NonZero::get)
             .unwrap_or(4);
+        // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
+        let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
+        let compute_permits = ncpu - io_reserve;
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -376,7 +384,7 @@ impl Handler {
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
             notify_tx,
-            query_semaphore: Arc::new(tokio::sync::Semaphore::new(ncpu)),
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
         }
     }
 
@@ -672,6 +680,9 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        let program_len = program.len();
+        let query_start = Instant::now();
+
         // Input size validation (WI-07)
         let perf = &self.config.storage.performance;
         if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
@@ -686,10 +697,15 @@ impl Handler {
         // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
         // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
         // `acquire_owned()` is an async wait — Tokio workers remain free while queued.
+        let wait_start = Instant::now();
         let permit = Arc::clone(&self.query_semaphore)
             .acquire_owned()
             .await
             .map_err(|_| "Query semaphore closed (server shutting down)")?;
+        let queued_ms = wait_start.elapsed().as_millis() as u64;
+        if queued_ms > 0 {
+            info!(queued_ms, program_len, "query_semaphore_wait");
+        }
 
         // Offload CPU-bound DD computation to the blocking thread pool.
         // This keeps Tokio worker threads free for I/O and other async tasks.
@@ -704,14 +720,32 @@ impl Handler {
         });
 
         if timeout_ms > 0 {
-            tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
-                .await
-                .map_err(|_| "Query execution timed out".to_string())?
-                .map_err(|e| format!("Query task panicked: {e}"))?
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
+                    .await;
+            match result {
+                Ok(joined) => {
+                    let compute_ms = query_start.elapsed().as_millis() as u64;
+                    info!(program_len, compute_ms, "query_complete");
+                    joined.map_err(|e| format!("Query task panicked: {e}"))?
+                }
+                Err(_) => {
+                    warn!(
+                        program_len,
+                        timeout_ms,
+                        elapsed_ms = query_start.elapsed().as_millis() as u64,
+                        "query_timeout"
+                    );
+                    Err("Query execution timed out".to_string())
+                }
+            }
         } else {
-            blocking_task
+            let joined = blocking_task
                 .await
-                .map_err(|e| format!("Query task panicked: {e}"))?
+                .map_err(|e| format!("Query task panicked: {e}"))?;
+            let compute_ms = query_start.elapsed().as_millis() as u64;
+            info!(program_len, compute_ms, "query_complete");
+            joined
         }
     }
 }
@@ -727,12 +761,13 @@ impl QueryJob {
     ) -> Result<QueryResult, String> {
         self.inc_query_count();
         let start = Instant::now();
+        let program_len = program.len();
+        info!(program_len, "query_job_start");
 
-        // Use READ lock  -  all operations use _on()/_into() variants with explicit KG name.
+        // Use READ lock — all operations use _on()/_into() variants with explicit KG name.
         // This allows concurrent queries to execute without blocking each other.
-        // Note: `storage` is `mut` because some meta commands (KgDrop, RuleClear)
-        // temporarily release the read lock to acquire a write lock.
-        let mut storage = self.storage.read();
+        // KgDrop and RuleClear use interior mutability, so no write lock is needed.
+        let storage = self.storage.read();
 
         // Determine target knowledge graph name
         let mut kg_name = if let Some(ref kg) = knowledge_graph {
@@ -755,6 +790,7 @@ impl QueryJob {
         // Parse every statement upfront. If ANY statement fails to parse,
         // reject the ENTIRE program with structured error info.
         // This prevents partial state from partial execution.
+        let parse_start = Instant::now();
         {
             let mut parse_errors: Vec<ValidationError> = Vec::new();
             let mut stmt_index: usize = 0;
@@ -772,6 +808,13 @@ impl QueryJob {
                 }
                 stmt_index += 1;
             }
+            let parse_ms = parse_start.elapsed().as_millis() as u64;
+            info!(
+                program_len,
+                statements = stmt_index,
+                parse_ms,
+                "query_parse_complete"
+            );
             if !parse_errors.is_empty() {
                 let errors_json = serde_json::to_string(&parse_errors).unwrap_or_default();
                 return Err(format!("{VALIDATION_ERROR_PREFIX}{errors_json}"));
@@ -792,6 +835,7 @@ impl QueryJob {
         // Parsed session rules for validation (arity/aggregation compatibility)
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
 
+        let stmt_exec_start = Instant::now();
         for line in program_text.lines() {
             let line = line.trim();
             if line.is_empty() {
@@ -1350,8 +1394,10 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::KgCreate(name) => {
+                                        info!(kg = %name, "meta_kg_create_start");
                                         match storage.create_knowledge_graph(&name) {
                                             Ok(()) => {
+                                                info!(kg = %name, "meta_kg_create_ok");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
                                                 ));
@@ -1362,13 +1408,16 @@ impl QueryJob {
                                                 switched_kg_result = Some(name);
                                             }
                                             Err(e) => {
+                                                info!(kg = %name, error = %e, "meta_kg_create_err");
                                                 messages.push(format!("Create failed: {e}"));
                                             }
                                         }
                                     }
                                     MetaCommand::KgUse(name) => {
+                                        info!(kg = %name, "meta_kg_use_start");
                                         match storage.ensure_knowledge_graph(&name) {
                                             Ok(()) => {
+                                                info!(kg = %name, "meta_kg_use_ok");
                                                 messages.push(format!(
                                                     "Switched to knowledge graph: {name}"
                                                 ));
@@ -1376,6 +1425,7 @@ impl QueryJob {
                                                 switched_kg_result = Some(name);
                                             }
                                             Err(e) => {
+                                                info!(kg = %name, error = %e, "meta_kg_use_err");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' not found: {e}"
                                                 ));
@@ -1386,33 +1436,26 @@ impl QueryJob {
                                         if name == kg {
                                             messages.push("Cannot drop current knowledge graph. Switch to another first.".to_string());
                                         } else {
-                                            // Release read lock for Phase 1 (needs write lock)
-                                            drop(storage);
-
-                                            // Phase 1: Fast in-memory removal (under write lock, ~microseconds)
-                                            let drop_result = {
-                                                let mut storage_w = self.storage.write();
-                                                storage_w.prepare_drop_knowledge_graph(&name)
-                                            }; // write lock released immediately
-
-                                            match drop_result {
+                                            info!(kg = %name, "meta_kg_drop_start");
+                                            // Phase 1: Fast in-memory removal (~microseconds).
+                                            // Uses interior mutability (DashMap + RwLock), so no
+                                            // storage-level write lock is needed. This avoids
+                                            // the lock convoy that previously froze the server.
+                                            match storage.prepare_drop_knowledge_graph(&name) {
                                                 Ok(cleanup) => {
+                                                    info!(kg = %name, "meta_kg_drop_prepare_ok");
                                                     messages.push(format!(
                                                         "Knowledge graph '{name}' dropped."
                                                     ));
-                                                    // Phase 2: Slow file cleanup (NO storage lock held)
-                                                    let storage_ref = self.storage.read();
-                                                    storage_ref
-                                                        .finish_drop_knowledge_graph(cleanup);
-                                                    drop(storage_ref);
+                                                    // Phase 2: Slow file cleanup
+                                                    storage.finish_drop_knowledge_graph(cleanup);
+                                                    info!(kg = %name, "meta_kg_drop_finish_ok");
                                                 }
                                                 Err(e) => {
+                                                    info!(kg = %name, error = %e, "meta_kg_drop_err");
                                                     messages.push(format!("Drop failed: {e}"));
                                                 }
                                             }
-
-                                            // Re-acquire read lock
-                                            storage = self.storage.read();
                                         }
                                     }
 
@@ -1553,19 +1596,12 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::RuleClear(name) => {
-                                        // Need write lock
-                                        drop(storage);
-                                        {
-                                            let mut storage_w = self.storage.write();
-                                            match storage_w.clear_rule_in(kg, &name) {
-                                                Ok(()) => {
-                                                    messages
-                                                        .push(format!("Rule '{name}' cleared."));
-                                                }
-                                                Err(e) => messages.push(format!("Error: {e}")),
+                                        match storage.clear_rule_in(kg, &name) {
+                                            Ok(()) => {
+                                                messages.push(format!("Rule '{name}' cleared."));
                                             }
+                                            Err(e) => messages.push(format!("Error: {e}")),
                                         }
-                                        storage = self.storage.read();
                                     }
                                     MetaCommand::RuleEdit { .. } => {
                                         messages.push(
@@ -1649,19 +1685,34 @@ impl QueryJob {
 
                                     // === Index commands ===
                                     MetaCommand::IndexCreate(opts) => {
+                                        info!(index = %opts.name, "meta_index_create_start");
                                         match self.create_index(kg, &opts) {
-                                            Ok(msg) => messages.push(msg),
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Ok(msg) => {
+                                                info!(index = %opts.name, "meta_index_create_ok");
+                                                messages.push(msg);
+                                            }
+                                            Err(e) => {
+                                                info!(index = %opts.name, error = %e, "meta_index_create_err");
+                                                messages.push(format!("Index error: {e}"));
+                                            }
                                         }
                                     }
                                     MetaCommand::IndexDrop(name) => {
+                                        info!(index = %name, "meta_index_drop_start");
                                         match self.drop_index(kg, &name) {
-                                            Ok(msg) => messages.push(msg),
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Ok(msg) => {
+                                                info!(index = %name, "meta_index_drop_ok");
+                                                messages.push(msg);
+                                            }
+                                            Err(e) => {
+                                                info!(index = %name, error = %e, "meta_index_drop_err");
+                                                messages.push(format!("Index error: {e}"));
+                                            }
                                         }
                                     }
                                     MetaCommand::IndexList => match self.list_indexes(kg) {
                                         Ok(stats) => {
+                                            info!(count = stats.len(), "meta_index_list_ok");
                                             if stats.is_empty() {
                                                 messages.push("No indexes.".to_string());
                                             } else {
@@ -1675,11 +1726,16 @@ impl QueryJob {
                                                 }
                                             }
                                         }
-                                        Err(e) => messages.push(format!("Index error: {e}")),
+                                        Err(e) => {
+                                            info!(error = %e, "meta_index_list_err");
+                                            messages.push(format!("Index error: {e}"));
+                                        }
                                     },
                                     MetaCommand::IndexStats(name) => {
+                                        info!(index = %name, "meta_index_stats_start");
                                         match self.get_index_stats(kg, &name) {
                                             Ok(stats) => {
+                                                info!(index = %name, count = stats.len(), "meta_index_stats_ok");
                                                 for s in &stats {
                                                     messages.push(format!(
                                                         "Index '{}': relation={}, column={}, type={}, metric={}, vectors={}, tombstones={}, valid={}, dimension={}",
@@ -1727,9 +1783,20 @@ impl QueryJob {
                 current_stmt.clear();
             }
         }
+        let stmt_exec_ms = stmt_exec_start.elapsed().as_millis() as u64;
+        if stmt_exec_ms > 0 {
+            info!(
+                program_len,
+                stmt_exec_ms,
+                session_facts = session_fact_tuples.len(),
+                session_rules = session_rules.len(),
+                "query_statement_exec_complete"
+            );
+        }
 
         // Return messages if no query
         if !messages.is_empty() && query_to_execute.is_none() {
+            drop(storage); // Release storage lock — we no longer need it
             let rows: Vec<WireTuple> = messages
                 .iter()
                 .map(|msg| WireTuple {
@@ -1738,6 +1805,11 @@ impl QueryJob {
                 })
                 .collect();
             let total_count = rows.len();
+            info!(
+                program_len,
+                total_ms = start.elapsed().as_millis() as u64,
+                "query_job_complete_messages"
+            );
             return Ok(QueryResult {
                 rows,
                 schema: vec![ColumnDef {
@@ -1769,10 +1841,16 @@ impl QueryJob {
             format!("{rules_text}\n{query_program}")
         };
 
-        // Execute query with session facts using isolated execution
-        // Session facts are added to an ISOLATED COPY of the snapshot's data,
-        // providing request-scoped isolation. Concurrent queries cannot see
-        // each other's session facts.
+        // Get a snapshot of the KG data under the lock (O(1) Arc clone),
+        // then RELEASE the storage lock before the heavy DD computation.
+        // This prevents lock convoys: when another thread needs a write lock
+        // (e.g. .kg drop), parking_lot's write-preferring policy would otherwise
+        // block ALL new readers while waiting for long-running DD computations.
+        let snapshot = storage
+            .get_snapshot_for(&kg_name)
+            .map_err(|e| e.to_string())?;
+        drop(storage); // Release storage read lock BEFORE DD computation
+
         let debug_session = std::env::var("IL_DEBUG_SESSION").is_ok();
         if debug_session && !session_fact_tuples.is_empty() {
             eprintln!(
@@ -1784,19 +1862,27 @@ impl QueryJob {
             }
         }
 
-        // Use isolated execution - session facts are added to a CLONE, not the shared store
-        // This fixes the race condition where concurrent queries could see each other's session facts
-        let results = if session_fact_tuples.is_empty() {
-            // No session facts - use the regular query path
-            storage
-                .execute_query_with_rules_tuples_on(&kg_name, &query_program)
-                .map_err(|e| e.to_string())?
+        // Execute DD computation on the snapshot — completely lock-free.
+        // Session facts are added to an ISOLATED COPY, providing request-scoped isolation.
+        let query_exec_start = Instant::now();
+        let has_session_facts = !session_fact_tuples.is_empty();
+        let results = if !has_session_facts {
+            snapshot
+                .execute_with_rules_tuples(&query_program)
+                .map_err(|e| format!("Query execution failed: {e}"))?
         } else {
-            // Has session facts - use isolated execution
-            storage
-                .execute_query_with_session_facts_on(&kg_name, &query_program, session_fact_tuples)
-                .map_err(|e| e.to_string())?
+            snapshot
+                .execute_with_session_facts(&query_program, session_fact_tuples)
+                .map_err(|e| format!("Query execution failed: {e}"))?
         };
+        let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
+        info!(
+            program_len,
+            kg = %kg_name,
+            query_exec_ms,
+            has_session_facts,
+            "query_engine_exec_complete"
+        );
 
         // Convert Tuple results to WireTuple, supporting mixed types
         let rows: Vec<WireTuple> = results
@@ -1856,6 +1942,15 @@ impl QueryJob {
         let total_count = rows.len();
         let rows = apply_pagination(rows, query_limit, query_offset);
         let truncated = rows.len() < total_count;
+
+        info!(
+            program_len,
+            total_ms = start.elapsed().as_millis() as u64,
+            row_count = rows.len(),
+            total_count,
+            truncated,
+            "query_job_complete"
+        );
 
         Ok(QueryResult {
             rows,

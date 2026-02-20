@@ -28,10 +28,12 @@ use differential_dataflow::Collection;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use timely::dataflow::operators::{Inspect, Map, Probe, ToStream};
 use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
 use timely::order::Product;
+use tracing::info;
 
 use crate::temporal_ops;
 use crate::value::{Tuple, Value};
@@ -166,6 +168,9 @@ impl CodeGenerator {
         // Execute DD computation
         timely::execute_directly(move |worker| {
             let mut probe = ProbeHandle::new();
+            let mut steps: u64 = 0;
+            let start = Instant::now();
+            let mut last_log = Instant::now();
 
             worker.dataflow::<(), _, _>(|scope| {
                 // Generate collection from IR
@@ -185,6 +190,16 @@ impl CodeGenerator {
             // Wait for computation to complete
             while !probe.done() {
                 worker.step();
+                std::thread::yield_now();
+                steps = steps.saturating_add(1);
+                if steps.is_multiple_of(1000) && last_log.elapsed().as_secs() >= 5 {
+                    info!(
+                        steps,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        "execution_progress"
+                    );
+                    last_log = Instant::now();
+                }
             }
         });
 
@@ -486,6 +501,7 @@ impl CodeGenerator {
             // Wait for computation to complete
             while !probe.done() {
                 worker.step();
+                std::thread::yield_now();
             }
         });
 
@@ -711,6 +727,7 @@ impl CodeGenerator {
             // Wait for computation to complete
             while !probe.done() {
                 worker.step();
+                std::thread::yield_now();
             }
         });
 
@@ -1691,7 +1708,9 @@ impl CodeGenerator {
                 });
             });
             // Step until complete
-            while worker.step() {}
+            while worker.step() {
+                std::thread::yield_now();
+            }
         });
 
         // Safely extract results from Arc<Mutex<Vec<Tuple>>>
@@ -3239,6 +3258,7 @@ impl CodeGenerator {
             // Wait for computation to complete
             while !probe.done() {
                 worker.step();
+                std::thread::yield_now();
             }
         });
 
@@ -3352,6 +3372,7 @@ impl CodeGenerator {
             // Wait for computation to complete
             while !probe.done() {
                 worker.step();
+                std::thread::yield_now();
             }
         });
 

@@ -22,12 +22,15 @@ test-all: check
 	@FAILURES=0; \
 	STRIP_ANSI='s/\x1b\[[0-9;]*m//g'; \
 	NCPU=$$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4); \
+	rm -f /tmp/il_make_test_all.log 2>/dev/null || true; \
+	exec > >(tee /tmp/il_make_test_all.log) 2>&1; \
 	echo "Running all tests ($$NCPU CPUs)..."; \
 	echo ""; \
 	echo "=== Cleanup (pre-test) ==="; \
 	rm -rf ./data 2>/dev/null || true; \
 	echo "Cleaned ./data directory"; \
 	echo ""; \
+	rm -f /tmp/il_trace.log /tmp/il_server.log 2>/dev/null || true; \
 	echo "=== Build (release) ==="; \
 	if cargo build --all-features --release 2>&1; then \
 		BUILD_STATUS="PASS"; \
@@ -64,7 +67,8 @@ test-all: check
 	echo "=== Snapshot Tests (E2E) ==="; \
 	SNAP_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	./scripts/run_snapshot_tests.sh --skip-build 2>&1 | tee "$$SNAP_TMPFILE"; \
+	IL_TRACE=1 IL_TRACE_LEVEL=trace IL_SERVER_LOG=/tmp/il_server.log IL_TRACE_FILE=/tmp/il_trace.log \
+	   ./scripts/run_snapshot_tests.sh --skip-build 2>&1 | tee "$$SNAP_TMPFILE"; \
 	SNAP_EXIT=$${PIPESTATUS[0]}; \
 	tail -10 "$$SNAP_TMPFILE"; \
 	SNAP_PASSED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Passed:" | awk '{print $$2}'); \

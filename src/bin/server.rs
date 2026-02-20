@@ -25,12 +25,17 @@ use inputlayer::Config;
 
 use std::env;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 8080;
 
+static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    init_tracing();
+
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
     let host = get_arg(&args, "--host").unwrap_or_else(|| DEFAULT_HOST.to_string());
@@ -75,6 +80,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     rest::start_http_server(handler, &http_config).await?;
 
     Ok(())
+}
+
+fn init_tracing() {
+    let enabled = env::var("IL_TRACE").ok().is_some_and(|v| v != "0");
+    if !enabled {
+        return;
+    }
+
+    let log_path = env::var("IL_TRACE_FILE").unwrap_or_else(|_| "il_trace.log".to_string());
+    let json = env::var("IL_TRACE_JSON").ok().is_some_and(|v| v != "0");
+    let level = env::var("IL_TRACE_LEVEL").unwrap_or_else(|_| "trace".to_string());
+
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("ERROR: Unable to open IL_TRACE_FILE '{log_path}': {e}");
+            return;
+        }
+    };
+
+    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+    let _ = TRACE_GUARD.set(guard);
+
+    let filter = tracing_subscriber::EnvFilter::try_new(level)
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
+
+    let base = || {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter.clone())
+            .with_ansi(false)
+            .with_thread_names(true)
+            .with_thread_ids(true)
+            .with_writer(non_blocking.clone())
+            .with_timer(tracing_subscriber::fmt::time::SystemTime)
+    };
+
+    let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
+        Box::new(base().json().finish())
+    } else {
+        Box::new(base().compact().finish())
+    };
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
 fn get_arg(args: &[String], flag: &str) -> Option<String> {
