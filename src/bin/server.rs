@@ -19,6 +19,7 @@
 //! - AsyncAPI docs at `/api/ws-docs`
 //! - GUI dashboard at `/` (if GUI is enabled)
 
+use inputlayer::config::LoggingConfig;
 use inputlayer::protocol::rest;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
@@ -34,8 +35,6 @@ static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = Once
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    init_tracing();
-
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
     let host = get_arg(&args, "--host").unwrap_or_else(|| DEFAULT_HOST.to_string());
@@ -52,6 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Using default configuration");
         Config::default()
     });
+
+    // Initialize tracing using config as fallback when env vars are not set
+    init_tracing(&config.logging);
 
     // Override HTTP config from command line
     config.http.host = host;
@@ -82,15 +84,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-fn init_tracing() {
+fn init_tracing(logging_config: &LoggingConfig) {
+    // Environment variables take precedence over config file values
     let enabled = env::var("IL_TRACE").ok().is_some_and(|v| v != "0");
     if !enabled {
         return;
     }
 
     let log_path = env::var("IL_TRACE_FILE").unwrap_or_else(|_| "il_trace.log".to_string());
-    let json = env::var("IL_TRACE_JSON").ok().is_some_and(|v| v != "0");
-    let level = env::var("IL_TRACE_LEVEL").unwrap_or_else(|_| "trace".to_string());
+
+    // Use IL_TRACE_JSON env var if set, otherwise fall back to config.logging.format
+    let json = env::var("IL_TRACE_JSON")
+        .ok()
+        .map_or_else(|| logging_config.format == "json", |v| v != "0");
+
+    // Use IL_TRACE_LEVEL env var if set, otherwise fall back to config.logging.level
+    let level = env::var("IL_TRACE_LEVEL")
+        .ok()
+        .unwrap_or_else(|| logging_config.level.clone());
 
     let file = match std::fs::OpenOptions::new()
         .create(true)

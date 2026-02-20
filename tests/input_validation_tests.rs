@@ -186,7 +186,7 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_execute_program(
     let sid = handler.create_session("default").unwrap();
     let result = handler
         .execute_program(
-            Some(sid),
+            Some(&sid),
             Some("default".to_string()),
             "~__hidden(X) <- data(X)".to_string(),
         )

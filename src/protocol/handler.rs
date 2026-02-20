@@ -453,7 +453,7 @@ impl Handler {
     }
 
     /// Close a session.
-    pub fn close_session(&self, session_id: SessionId) -> Result<(), String> {
+    pub fn close_session(&self, session_id: &SessionId) -> Result<(), String> {
         self.sessions.close_session(session_id)
     }
 
@@ -467,7 +467,29 @@ impl Handler {
         self.storage.read()
     }
 
-    /// Get mutable access to the storage engine (for HTTP handlers).
+    /// Try to acquire a read lock on the storage engine with a timeout.
+    /// Returns `None` if the lock cannot be acquired within the given duration.
+    /// Used by the health check to detect a degraded state (e.g. lock convoy).
+    pub fn try_get_storage(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Option<parking_lot::RwLockReadGuard<'_, StorageEngine>> {
+        self.storage.try_read_for(timeout)
+    }
+
+    /// Graceful shutdown: flush WAL and save metadata for all knowledge graphs.
+    pub fn shutdown(&self) {
+        eprintln!("Flushing WAL and saving metadata...");
+        if let Err(e) = self.storage.read().save_all() {
+            eprintln!("WARNING: Error during shutdown save: {e}");
+        }
+        eprintln!("Shutdown complete.");
+    }
+
+    /// Get mutable access to the storage engine.
+    ///
+    /// **Warning**: This acquires a write lock on the entire storage engine.
+    /// Only use in tests — production code should use `get_storage()` (read lock).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
     }
@@ -712,9 +734,15 @@ impl Handler {
         let job = self.make_query_job();
         let timeout_ms = self.config.storage.performance.query_timeout_ms;
 
+        // Cooperative cancellation flag: set on timeout so DD spin loops exit promptly.
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_flag_clone = Arc::clone(&cancel_flag);
+
         // The permit is moved into the blocking task so it's released when DD finishes.
         let blocking_task = tokio::task::spawn_blocking(move || {
+            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
             let result = job.execute(knowledge_graph, program);
+            crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Explicit drop; semaphore slot returned here
             result
         });
@@ -730,6 +758,8 @@ impl Handler {
                     joined.map_err(|e| format!("Query task panicked: {e}"))?
                 }
                 Err(_) => {
+                    // Signal the DD spin loop to stop
+                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                     warn!(
                         program_len,
                         timeout_ms,
@@ -2012,7 +2042,7 @@ impl Handler {
     /// delegates directly to `query_program` with no overhead.
     pub async fn query_program_with_session(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
         // Touch session to prevent idle reaping during query execution
@@ -2053,30 +2083,76 @@ impl Handler {
 
         self.inc_query_count();
         let start = Instant::now();
-        let storage = self.storage.read();
 
-        storage
-            .ensure_knowledge_graph(&kg)
-            .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+        // Get snapshot under read lock, then RELEASE lock immediately.
+        // This prevents lock convoys: holding the lock during DD computation
+        // would block all mutations (the exact bug fixed in PR #12 for regular queries).
+        let snapshot = {
+            let storage = self.storage.read();
+            storage
+                .ensure_knowledge_graph(&kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?
+        }; // storage read lock released here
 
-        // Use isolated execution with session facts
-        let results = storage
-            .execute_query_with_session_facts_on(&kg, &combined_program, session_facts)
-            .map_err(|e| e.to_string())?;
+        // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
+        let permit = Arc::clone(&self.query_semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| "Query semaphore closed (server shutting down)")?;
 
-        // Per-tuple provenance: run the original query (without ephemeral rules)
-        // against persistent-only data to identify ephemeral contributions.
-        use crate::session::Provenance;
-        use std::collections::HashSet;
-        let baseline: HashSet<Tuple> = match storage
-            .execute_query_with_rules_tuples_on(&kg, &preprocessed)
-        {
-            Ok(tuples) => tuples.into_iter().collect(),
-            Err(e) => {
-                eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
-                HashSet::new()
+        let timeout_ms = self.config.storage.performance.query_timeout_ms;
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_flag_clone = Arc::clone(&cancel_flag);
+
+        // Offload CPU-bound DD computation to the blocking thread pool
+        let combined_program_clone = combined_program;
+        let preprocessed_clone = preprocessed;
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
+
+            // Run session query on snapshot (lock-free)
+            let results = snapshot
+                .execute_with_session_facts(&combined_program_clone, session_facts)
+                .map_err(|e| format!("Query execution failed: {e}"))?;
+
+            // Per-tuple provenance: run the original query (without ephemeral rules)
+            // against persistent-only data to identify ephemeral contributions.
+            use std::collections::HashSet;
+            let baseline: HashSet<Tuple> = match snapshot
+                .execute_with_rules_tuples(&preprocessed_clone)
+            {
+                Ok(tuples) => tuples.into_iter().collect(),
+                Err(e) => {
+                    eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
+                    HashSet::new()
+                }
+            };
+
+            crate::code_generator::set_query_cancel_flag(None);
+            drop(permit); // Release semaphore slot
+
+            Ok::<_, String>((results, baseline))
+        });
+
+        // Apply timeout if configured
+        let (results, baseline) = if timeout_ms > 0 {
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
+                .await
+            {
+                Ok(joined) => joined.map_err(|e| format!("Query task panicked: {e}"))?,
+                Err(_) => {
+                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err("Query execution timed out".to_string());
+                }
             }
-        };
+        } else {
+            blocking_task
+                .await
+                .map_err(|e| format!("Query task panicked: {e}"))?
+        }?;
+
+        use crate::session::Provenance;
 
         // Convert results to wire format with per-tuple provenance
         let rows: Vec<WireTuple> = results
@@ -2097,8 +2173,6 @@ impl Handler {
                         Value::Timestamp(ts) => WireValue::Timestamp(*ts),
                     })
                     .collect();
-                // Tag provenance: if tuple exists in persistent baseline → Persistent,
-                // otherwise it was introduced by ephemeral data → Ephemeral
                 let prov = if baseline.contains(tuple) {
                     Provenance::Persistent
                 } else {
@@ -2174,7 +2248,7 @@ impl Handler {
     /// Returns the number of facts actually inserted (after dedup).
     pub fn session_insert_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -2184,7 +2258,7 @@ impl Handler {
     /// Retract ephemeral facts from a session.
     pub fn session_retract_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -2195,7 +2269,7 @@ impl Handler {
     /// Add an ephemeral rule to a session.
     pub fn session_add_rule(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         rule: crate::ast::Rule,
         rule_text: String,
     ) -> Result<(), String> {
@@ -2216,7 +2290,7 @@ impl Handler {
     /// - All other statements via `query_program()` or `query_program_with_session()`
     pub async fn execute_program(
         &self,
-        session_id: Option<SessionId>,
+        session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
@@ -2391,7 +2465,7 @@ impl Handler {
     }
 
     /// Handle `.session` list command
-    fn handle_session_list(&self, session_id: SessionId) -> Result<QueryResult, String> {
+    fn handle_session_list(&self, session_id: &SessionId) -> Result<QueryResult, String> {
         let mut messages = Vec::new();
         self.sessions.with_session(session_id, |session| {
             let has_facts = !session.ephemeral_facts().is_empty();
@@ -2447,7 +2521,7 @@ impl Handler {
     /// Handle `.session drop <index>` command
     fn handle_session_drop(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         index: usize,
     ) -> Result<QueryResult, String> {
         let inner_result: Result<String, String> =
@@ -2467,7 +2541,7 @@ impl Handler {
     /// Handle `.session drop <name>` command
     fn handle_session_drop_name(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         name: &str,
     ) -> Result<QueryResult, String> {
         let msg = self.sessions.with_session_mut(session_id, |session| {
@@ -2795,14 +2869,14 @@ mod tests {
     fn test_handler_create_and_close_session() {
         let (handler, _tmp) = handler_with_kg("sess_create_test");
         let session_id = handler.create_session("sess_create_test").unwrap();
-        assert!(session_id > 0);
-        handler.close_session(session_id).unwrap();
+        assert!(!session_id.is_empty());
+        handler.close_session(&session_id).unwrap();
     }
 
     #[test]
     fn test_handler_close_nonexistent_session() {
         let (handler, _tmp) = make_test_handler();
-        assert!(handler.close_session(999).is_err());
+        assert!(handler.close_session(&"nonexistent".to_string()).is_err());
     }
 
     #[test]
@@ -2811,7 +2885,7 @@ mod tests {
         let sid = handler.create_session("sess_insert_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])];
         handler
-            .session_insert_ephemeral(sid, "edge", tuples)
+            .session_insert_ephemeral(&sid, "edge", tuples)
             .unwrap();
     }
 
@@ -2821,9 +2895,11 @@ mod tests {
         let sid = handler.create_session("sess_retract_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         handler
-            .session_insert_ephemeral(sid, "r", tuples.clone())
+            .session_insert_ephemeral(&sid, "r", tuples.clone())
             .unwrap();
-        let retracted = handler.session_retract_ephemeral(sid, "r", tuples).unwrap();
+        let retracted = handler
+            .session_retract_ephemeral(&sid, "r", tuples)
+            .unwrap();
         assert_eq!(retracted, 1);
     }
 
@@ -3200,11 +3276,11 @@ mod tests {
         let sid = handler.create_session("sess_clean_q").unwrap();
         // Clean session uses fast path (delegates to query_program)
         let result = handler
-            .query_program_with_session(sid, "?sdata(X)".to_string())
+            .query_program_with_session(&sid, "?sdata(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -3216,22 +3292,22 @@ mod tests {
             .unwrap();
         let sid = handler.create_session("sess_eph_q").unwrap();
         handler
-            .session_insert_ephemeral(sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
+            .session_insert_ephemeral(&sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
             .unwrap();
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- data(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- data(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
     async fn test_query_program_with_session_invalid_id() {
         let (handler, _tmp) = make_test_handler();
         let result = handler
-            .query_program_with_session(99999, "?data(X)".to_string())
+            .query_program_with_session(&"99999".to_string(), "?data(X)".to_string())
             .await;
         assert!(result.is_err());
     }
@@ -3253,15 +3329,15 @@ mod tests {
         let rule_text = "doubled(X, Y) <- base(X), Y = X * 2";
         let rule = crate::parser::parse_rule(rule_text).unwrap();
         handler
-            .session_add_rule(sid, rule, rule_text.to_string())
+            .session_add_rule(&sid, rule, rule_text.to_string())
             .unwrap();
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
-            .query_program_with_session(sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
+            .query_program_with_session(&sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     // --- validate_tuples_against_schema tests ---
@@ -3391,7 +3467,7 @@ mod tests {
         // 4. Client A inserts ephemeral edge(1, 2)
         handler
             .session_insert_ephemeral(
-                client_a,
+                &client_a,
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
             )
@@ -3400,7 +3476,7 @@ mod tests {
         // 5. Client B inserts ephemeral edge(3, 4)
         handler
             .session_insert_ephemeral(
-                client_b,
+                &client_b,
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(3), Value::Int64(4)])],
             )
@@ -3408,7 +3484,7 @@ mod tests {
 
         // 6. Client A queries reachable → sees persistent (10,20) + ephemeral (1,2)
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- reachable(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(
@@ -3419,7 +3495,7 @@ mod tests {
 
         // 7. Client B queries reachable → sees persistent (10,20) + ephemeral (3,4)
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- reachable(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(
@@ -3461,8 +3537,8 @@ mod tests {
             "Without session, only the persistent edge(10,20) should produce reachable(10,20)"
         );
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3487,7 +3563,7 @@ mod tests {
         // Client A: link(1,2), link(2,3)
         handler
             .session_insert_ephemeral(
-                client_a,
+                &client_a,
                 "link",
                 vec![
                     Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
@@ -3499,7 +3575,7 @@ mod tests {
         // Client B: link(100,200) (completely different)
         handler
             .session_insert_ephemeral(
-                client_b,
+                &client_b,
                 "link",
                 vec![Tuple::new(vec![Value::Int64(100), Value::Int64(200)])],
             )
@@ -3507,14 +3583,14 @@ mod tests {
 
         // Client A → 2 path results
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B → 1 path result
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_b.rows.len(), 1);
@@ -3526,8 +3602,8 @@ mod tests {
             .unwrap();
         assert_eq!(result_none.rows.len(), 0);
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3545,11 +3621,11 @@ mod tests {
         let sid = handler.create_session(kg).unwrap();
         // Ephemeral fact
         handler
-            .session_insert_ephemeral(sid, "items", vec![Tuple::new(vec![Value::Int64(3)])])
+            .session_insert_ephemeral(&sid, "items", vec![Tuple::new(vec![Value::Int64(3)])])
             .unwrap();
 
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- items(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- items(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
@@ -3570,7 +3646,7 @@ mod tests {
         assert_eq!(persistent_count, 2, "2 tuples from persistent data");
         assert_eq!(ephemeral_count, 1, "1 tuple from ephemeral data");
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -3591,31 +3667,31 @@ mod tests {
         // Client A adds an ephemeral rule: path(X,Y) <- edge(X,Y)
         let rule_a = crate::parser::parse_rule("path(X, Y) <- edge(X, Y)").unwrap();
         handler
-            .session_add_rule(client_a, rule_a, "path(X, Y) <- edge(X, Y)".to_string())
+            .session_add_rule(&client_a, rule_a, "path(X, Y) <- edge(X, Y)".to_string())
             .unwrap();
 
         // Client B inserts a trivial ephemeral fact to make it "dirty"
         // (so it uses the slow path and doesn't delegate to query_program)
         handler
-            .session_insert_ephemeral(client_b, "marker", vec![Tuple::new(vec![Value::Int64(0)])])
+            .session_insert_ephemeral(&client_b, "marker", vec![Tuple::new(vec![Value::Int64(0)])])
             .unwrap();
 
         // Client A queries path → 2 results (from the ephemeral rule on persistent edges)
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B queries path → 0 results (no "path" rule in client B's scope)
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_b.rows.len(), 0);
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3634,18 +3710,18 @@ mod tests {
 
         let sid = handler.create_session(kg).unwrap();
         handler
-            .session_insert_ephemeral(sid, "base", vec![Tuple::new(vec![Value::Int64(42)])])
+            .session_insert_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(42)])])
             .unwrap();
 
         // Query while session is active → 1 result
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- cleanup_rule(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- cleanup_rule(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 1);
 
         // Close session
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
 
         // Query without session → 0 results
         let result = handler
@@ -3681,7 +3757,7 @@ mod tests {
             // Each session queries for a different doc: session i queries for doc i%3+1
             handler
                 .session_insert_ephemeral(
-                    sid,
+                    &sid,
                     "query_embedding",
                     vec![Tuple::new(vec![Value::Int64(i % 3 + 1)])],
                 )
@@ -3690,7 +3766,7 @@ mod tests {
         }
 
         // Query all sessions sequentially (each is isolated)
-        for (i, &sid) in sessions.iter().enumerate() {
+        for (i, sid) in sessions.iter().enumerate() {
             let result = handler
                 .query_program_with_session(sid, "__q__(X) <- relevant(X)".to_string())
                 .await
@@ -3703,7 +3779,7 @@ mod tests {
         }
 
         // Cleanup
-        for sid in sessions {
+        for sid in &sessions {
             handler.close_session(sid).unwrap();
         }
     }
@@ -3722,7 +3798,7 @@ mod tests {
         let sid = handler.create_session(kg).unwrap();
         handler
             .session_insert_ephemeral(
-                sid,
+                &sid,
                 "item",
                 vec![
                     Tuple::new(vec![Value::Int64(1)]),
@@ -3734,24 +3810,24 @@ mod tests {
 
         // Query → 3 visible
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- visible(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
 
         // Retract item(2)
         handler
-            .session_retract_ephemeral(sid, "item", vec![Tuple::new(vec![Value::Int64(2)])])
+            .session_retract_ephemeral(&sid, "item", vec![Tuple::new(vec![Value::Int64(2)])])
             .unwrap();
 
         // Query → 2 visible
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- visible(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -3766,11 +3842,11 @@ mod tests {
 
         let sid = handler.create_session(kg).unwrap();
         handler
-            .session_insert_ephemeral(sid, "src", vec![Tuple::new(vec![Value::Int64(1)])])
+            .session_insert_ephemeral(&sid, "src", vec![Tuple::new(vec![Value::Int64(1)])])
             .unwrap();
 
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- derived(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- derived(X)".to_string())
             .await
             .unwrap();
 
@@ -3783,7 +3859,7 @@ mod tests {
             "metadata should report 'src' as ephemeral source"
         );
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     // --- Notifications from mutations ---
@@ -3960,7 +4036,7 @@ mod tests {
         // Add ephemeral facts
         handler
             .session_insert_ephemeral(
-                sid,
+                &sid,
                 "base",
                 vec![
                     Tuple::new(vec![Value::Int64(20)]),
@@ -3971,31 +4047,34 @@ mod tests {
 
         // Query with session → 3 results
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
 
         // Retract one ephemeral fact
         handler
-            .session_retract_ephemeral(sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
+            .session_retract_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
             .unwrap();
 
         // Query again → 2 results
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[test]
     fn test_session_insert_invalid_session() {
         let (handler, _tmp) = make_test_handler();
-        let result =
-            handler.session_insert_ephemeral(99999, "rel", vec![Tuple::new(vec![Value::Int64(1)])]);
+        let result = handler.session_insert_ephemeral(
+            &"99999".to_string(),
+            "rel",
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
         assert!(result.is_err());
     }
 
@@ -4003,7 +4082,7 @@ mod tests {
     fn test_session_retract_invalid_session() {
         let (handler, _tmp) = make_test_handler();
         let result = handler.session_retract_ephemeral(
-            99999,
+            &"99999".to_string(),
             "rel",
             vec![Tuple::new(vec![Value::Int64(1)])],
         );
@@ -4255,7 +4334,7 @@ mod tests {
     #[test]
     fn test_handler_close_session_invalid() {
         let (handler, _tmp) = make_test_handler();
-        let result = handler.close_session(999999);
+        let result = handler.close_session(&"999999".to_string());
         assert!(result.is_err());
     }
 
@@ -4471,7 +4550,7 @@ mod tests {
 
         // Add a session rule
         let result = handler
-            .execute_program(Some(sid), None, "path(X, Y) <- edge(X, Y)".to_string())
+            .execute_program(Some(&sid), None, "path(X, Y) <- edge(X, Y)".to_string())
             .await
             .unwrap();
         assert!(result.rows[0].values[0]
@@ -4480,12 +4559,12 @@ mod tests {
             .contains("Session rule added"));
 
         // Verify session is now dirty (has rules)
-        let is_clean = handler.session_manager().is_session_clean(sid).unwrap();
+        let is_clean = handler.session_manager().is_session_clean(&sid).unwrap();
         assert!(!is_clean, "Session should be dirty after adding rule");
 
         // Query using the session rule — should return results
         let result = handler
-            .execute_program(Some(sid), None, "?path(X, Y)".to_string())
+            .execute_program(Some(&sid), None, "?path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
@@ -4511,13 +4590,13 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         handler
-            .execute_program(Some(sid), None, "+edge[(1,2)]".to_string())
+            .execute_program(Some(&sid), None, "+edge[(1,2)]".to_string())
             .await
             .unwrap();
 
         let reaped = handler.session_manager().reap_expired();
         assert_eq!(reaped, 0, "Session should remain alive after execute");
-        assert!(handler.session_manager().has_session(sid));
+        assert!(handler.session_manager().has_session(&sid));
 
         drop(tmp);
     }
@@ -4601,6 +4680,98 @@ mod tests {
         assert_eq!(errors.len(), 2, "Should report both parse errors");
         assert_eq!(errors[0].line, 1);
         assert_eq!(errors[1].line, 3);
+    }
+
+    // === Regression tests for production readiness fixes ===
+
+    /// P0-6 regression: try_get_storage returns None when write lock is held.
+    /// Ensures the health check can detect lock contention.
+    #[test]
+    fn test_try_get_storage_returns_none_when_write_locked() {
+        let (handler, _tmp) = make_test_handler();
+        let handler = Arc::new(handler);
+
+        // Hold a write lock from another thread for 2 seconds
+        let h2 = Arc::clone(&handler);
+        let lock_thread = std::thread::spawn(move || {
+            let _guard = h2.get_storage_mut();
+            std::thread::sleep(Duration::from_secs(2));
+        });
+
+        // Give the thread time to acquire the write lock
+        std::thread::sleep(Duration::from_millis(50));
+
+        // try_get_storage should fail quickly (10ms timeout)
+        let result = handler.try_get_storage(Duration::from_millis(10));
+        assert!(
+            result.is_none(),
+            "try_get_storage should return None when write lock is held"
+        );
+
+        lock_thread.join().unwrap();
+    }
+
+    /// P0-6 regression: Session IDs are unique UUIDs, not sequential integers.
+    /// Prevents session enumeration attacks.
+    #[test]
+    fn test_session_ids_are_unique_uuids() {
+        let (mut config, _tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        let id1 = handler.create_session("default").unwrap();
+        let id2 = handler.create_session("default").unwrap();
+
+        assert_ne!(id1, id2, "Session IDs must be unique");
+        // UUID v4 format: 8-4-4-4-12 = 36 chars
+        assert_eq!(id1.len(), 36, "Session ID should be UUID format (36 chars)");
+        assert_eq!(id2.len(), 36, "Session ID should be UUID format (36 chars)");
+        assert!(id1.contains('-'), "Session ID should contain UUID dashes");
+        // Ensure not sequential
+        let id3 = handler.create_session("default").unwrap();
+        assert_ne!(id2, id3);
+        assert_ne!(id1, id3);
+    }
+
+    /// Shutdown regression: handler.shutdown() flushes data so it survives restart.
+    #[tokio::test]
+    async fn test_handler_shutdown_flushes_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().to_path_buf();
+
+        // Phase 1: Create handler, insert data, shutdown
+        {
+            let mut config = Config::default();
+            config.storage.data_dir = data_dir.clone();
+            config.storage.auto_create_knowledge_graphs = true;
+            let handler = Handler::from_config(config).unwrap();
+            handler
+                .query_program(
+                    Some("shutdown_kg".to_string()),
+                    "+persist_data[(1, 2), (3, 4)]".to_string(),
+                )
+                .await
+                .unwrap();
+            handler.shutdown();
+        }
+
+        // Phase 2: Reopen from same data_dir, verify data survived
+        {
+            let mut config = Config::default();
+            config.storage.data_dir = data_dir;
+            let handler = Handler::from_config(config).unwrap();
+            let result = handler
+                .query_program(
+                    Some("shutdown_kg".to_string()),
+                    "?persist_data(X, Y)".to_string(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                result.rows.len(),
+                2,
+                "Data should survive shutdown + restart"
+            );
+        }
     }
 }
 

@@ -66,6 +66,10 @@ pub struct StorageConfig {
     /// Performance settings
     #[serde(default)]
     pub performance: PerformanceConfig,
+
+    /// Maximum number of knowledge graphs allowed (0 = unlimited)
+    #[serde(default = "default_max_knowledge_graphs")]
+    pub max_knowledge_graphs: usize,
 }
 
 /// Persistence configuration (legacy)
@@ -246,9 +250,13 @@ pub struct HttpConfig {
     #[serde(default = "default_http_port")]
     pub port: u16,
 
-    /// Allowed CORS origins (empty = allow all in dev mode)
+    /// Allowed CORS origins (empty = same-origin only, unless cors_allow_all is true)
     #[serde(default)]
     pub cors_origins: Vec<String>,
+
+    /// Explicitly allow all CORS origins (dev mode opt-in)
+    #[serde(default)]
+    pub cors_allow_all: bool,
 
     /// GUI static file serving configuration
     #[serde(default)]
@@ -315,6 +323,9 @@ fn default_max_insert_tuples() -> usize {
 }
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
+}
+fn default_max_knowledge_graphs() -> usize {
+    1000
 }
 fn default_ws_idle_timeout_ms() -> u64 {
     300_000 // 5 minutes
@@ -388,6 +399,7 @@ impl Config {
                     max_insert_tuples: 10_000,
                     max_string_value_bytes: 65_536,
                 },
+                max_knowledge_graphs: 1000,
             },
             optimization: OptimizationConfig {
                 enable_join_planning: true,
@@ -441,6 +453,7 @@ impl Default for HttpConfig {
             host: default_http_host(),
             port: default_http_port(),
             cors_origins: Vec::new(),
+            cors_allow_all: false,
             gui: GuiConfig::default(),
             auth: AuthConfig::default(),
             ws_idle_timeout_ms: default_ws_idle_timeout_ms(),
