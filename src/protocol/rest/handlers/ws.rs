@@ -41,6 +41,7 @@ use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATI
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::Handler;
+use crate::protocol::MAX_MESSAGE_SIZE;
 
 /// Incoming WebSocket message from client
 #[derive(Debug, Deserialize)]
@@ -172,25 +173,28 @@ enum WsResponse {
 /// Deprecated: Use the global `/ws` endpoint instead, which auto-manages session lifecycle.
 pub async fn session_websocket(
     Extension(handler): Extension<Arc<Handler>>,
-    Path(id): Path<u64>,
+    Path(id): Path<String>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, RestError> {
     // Verify session exists before upgrading
-    if !handler.session_manager().has_session(id) {
+    if !handler.session_manager().has_session(&id) {
         return Err(RestError::not_found(format!("Session {id} not found")));
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_ws_connection(socket, handler, id)))
+    Ok(ws
+        .max_message_size(MAX_MESSAGE_SIZE)
+        .max_frame_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_ws_connection(socket, handler, id)))
 }
 
 /// Handle a WebSocket connection for a specific session.
 /// Uses `tokio::select!` to concurrently process client messages and push notifications.
-async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_id: u64) {
+async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_id: String) {
     let (mut sender, mut receiver) = socket.split();
 
     // Re-validate session exists after upgrade (it may have closed during the
     // HTTP→WebSocket upgrade handshake)
-    if !handler.session_manager().has_session(session_id) {
+    if !handler.session_manager().has_session(&session_id) {
         let err_msg = WsResponse::Error {
             message: format!("Session {session_id} closed during upgrade"),
         };
@@ -209,7 +213,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let response = process_ws_message(&handler, session_id, &text).await;
+                        let response = process_ws_message(&handler, &session_id, &text).await;
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
@@ -237,7 +241,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         // Get current session KG (may have changed via switch_kg)
                         let session_kg = match handler
                             .session_manager()
-                            .with_session(session_id, |s| s.knowledge_graph.clone())
+                            .with_session(&session_id, |s| s.knowledge_graph.clone())
                         {
                             Ok(kg) => kg,
                             Err(_) => {
@@ -288,11 +292,11 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
     }
 
     // Guarantee session cleanup on WS disconnect (WI-03)
-    let _ = handler.close_session(session_id);
+    let _ = handler.close_session(&session_id);
 }
 
 /// Process a single WebSocket message and return a response
-async fn process_ws_message(handler: &Arc<Handler>, session_id: u64, text: &str) -> WsResponse {
+async fn process_ws_message(handler: &Arc<Handler>, session_id: &str, text: &str) -> WsResponse {
     let request: WsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
@@ -315,9 +319,12 @@ async fn process_ws_message(handler: &Arc<Handler>, session_id: u64, text: &str)
     }
 }
 
-async fn handle_ws_query(handler: &Arc<Handler>, session_id: u64, query: String) -> WsResponse {
+async fn handle_ws_query(handler: &Arc<Handler>, session_id: &str, query: String) -> WsResponse {
     let start = std::time::Instant::now();
-    match handler.query_program_with_session(session_id, query).await {
+    match handler
+        .query_program_with_session(&session_id.to_string(), query)
+        .await
+    {
         Ok(response) => {
             let row_provenance: Vec<String> = response
                 .rows
@@ -359,7 +366,7 @@ async fn handle_ws_query(handler: &Arc<Handler>, session_id: u64, query: String)
 
 fn handle_ws_insert_facts(
     handler: &Arc<Handler>,
-    session_id: u64,
+    session_id: &str,
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
@@ -367,7 +374,7 @@ fn handle_ws_insert_facts(
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
-    match handler.session_insert_ephemeral(session_id, relation, parsed) {
+    match handler.session_insert_ephemeral(&session_id.to_string(), relation, parsed) {
         Ok(inserted) => WsResponse::Ack {
             message: format!("Inserted {inserted} fact(s) into '{relation}'"),
         },
@@ -377,7 +384,7 @@ fn handle_ws_insert_facts(
 
 fn handle_ws_retract_facts(
     handler: &Arc<Handler>,
-    session_id: u64,
+    session_id: &str,
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
@@ -385,7 +392,7 @@ fn handle_ws_retract_facts(
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
-    match handler.session_retract_ephemeral(session_id, relation, parsed) {
+    match handler.session_retract_ephemeral(&session_id.to_string(), relation, parsed) {
         Ok(retracted) => WsResponse::Ack {
             message: format!("Retracted {retracted} fact(s) from '{relation}'"),
         },
@@ -393,7 +400,7 @@ fn handle_ws_retract_facts(
     }
 }
 
-fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: u64, rule_text: &str) -> WsResponse {
+fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: &str, rule_text: &str) -> WsResponse {
     let program = match crate::parser::parse_program(rule_text) {
         Ok(p) => p,
         Err(e) => {
@@ -419,7 +426,7 @@ fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: u64, rule_text: &str) 
     let rule = program.rules.into_iter().next().unwrap();
 
     let head = rule.head.relation.clone();
-    match handler.session_add_rule(session_id, rule, rule_text.to_string()) {
+    match handler.session_add_rule(&session_id.to_string(), rule, rule_text.to_string()) {
         Ok(()) => WsResponse::Ack {
             message: format!("Rule added for '{head}'"),
         },
@@ -462,7 +469,7 @@ enum GlobalWsRequest {
 enum GlobalWsResponse {
     /// Sent immediately after connection, confirming session creation
     Connected {
-        session_id: u64,
+        session_id: String,
         knowledge_graph: String,
     },
     /// Query/command result
@@ -552,7 +559,10 @@ pub async fn global_websocket(
     ws: WebSocketUpgrade,
     Query(params): Query<WsConnectParams>,
 ) -> Result<impl IntoResponse, RestError> {
-    Ok(ws.on_upgrade(move |socket| handle_global_ws_connection(socket, handler, params.kg)))
+    Ok(ws
+        .max_message_size(MAX_MESSAGE_SIZE)
+        .max_frame_size(MAX_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_global_ws_connection(socket, handler, params.kg)))
 }
 
 /// Handle a global WebSocket connection with auto-session lifecycle.
@@ -566,7 +576,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
             eprintln!("[ws] Session {id} created for kg={kg}");
-            info!(session_id = id, kg = %kg, "ws_session_created");
+            info!(session_id = %id, kg = %kg, "ws_session_created");
             id
         }
         Err(e) => {
@@ -585,12 +595,12 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
 
     // Send Connected message
     let connected = GlobalWsResponse::Connected {
-        session_id,
+        session_id: session_id.clone(),
         knowledge_graph: kg,
     };
     if let Ok(json) = serde_json::to_string(&connected) {
         if sender.send(Message::Text(json)).await.is_err() {
-            let _ = handler.close_session(session_id);
+            let _ = handler.close_session(&session_id);
             return;
         }
     }
@@ -646,11 +656,11 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         request_seq = request_seq.saturating_add(1);
                         let span = tracing::info_span!(
                             "ws_request",
-                            session_id,
+                            session_id = %session_id,
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        let response = process_global_ws_message(&handler, session_id, &text)
+                        let response = process_global_ws_message(&handler, &session_id, &text)
                             .instrument(span)
                             .await;
                         let json = match serde_json::to_string(&response) {
@@ -690,7 +700,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                     Ok(PersistentNotification::PersistentUpdate { knowledge_graph, relation, operation, count }) => {
                         let session_kg = match handler
                             .session_manager()
-                            .with_session(session_id, |s| s.knowledge_graph.clone())
+                            .with_session(&session_id, |s| s.knowledge_graph.clone())
                         {
                             Ok(kg) => kg,
                             Err(_) => break,
@@ -731,13 +741,13 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
 
     // Auto-close session on disconnect
     eprintln!("[ws] Session {session_id} disconnecting");
-    let _ = handler.close_session(session_id);
+    let _ = handler.close_session(&session_id);
 }
 
 /// Process a single global WebSocket message
 async fn process_global_ws_message(
     handler: &Arc<Handler>,
-    session_id: u64,
+    session_id: &str,
     text: &str,
 ) -> GlobalWsResponse {
     let request: GlobalWsRequest = match serde_json::from_str(text) {
@@ -761,7 +771,7 @@ async fn process_global_ws_message(
 /// Handle an Execute message on the global WebSocket
 async fn handle_global_execute(
     handler: &Arc<Handler>,
-    session_id: u64,
+    session_id: &str,
     program: String,
 ) -> GlobalWsResponse {
     let start = std::time::Instant::now();
@@ -777,8 +787,9 @@ async fn handle_global_execute(
     // spawn_blocking internally (with a semaphore limiting concurrency to ncpu).
     // Calling execute_program() directly keeps Tokio workers free for I/O while
     // DD runs on blocking threads — no extra spawn_blocking layer needed here.
+    let sid = session_id.to_string();
     let result = handler
-        .execute_program(Some(session_id), None, program.clone())
+        .execute_program(Some(&sid), None, program.clone())
         .await;
     let elapsed = start.elapsed();
     if elapsed.as_secs() >= 5 {
@@ -982,12 +993,12 @@ mod tests {
     #[test]
     fn test_global_ws_response_connected_serialize() {
         let resp = GlobalWsResponse::Connected {
-            session_id: 42,
+            session_id: "42".to_string(),
             knowledge_graph: "default".to_string(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"connected\""));
-        assert!(json.contains("\"session_id\":42"));
+        assert!(json.contains("\"session_id\":\"42\""));
         assert!(json.contains("\"knowledge_graph\":\"default\""));
     }
 

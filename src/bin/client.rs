@@ -74,7 +74,7 @@ enum WsRequest {
 enum WsResponse {
     Connected {
         #[allow(dead_code)]
-        session_id: u64,
+        session_id: String,
         knowledge_graph: String,
     },
     Result {
@@ -1333,14 +1333,14 @@ mod tests {
     // WsResponse deserialization tests
     #[test]
     fn test_ws_response_connected_deserialize() {
-        let json = r#"{"type":"connected","session_id":42,"knowledge_graph":"default"}"#;
+        let json = r#"{"type":"connected","session_id":"42","knowledge_graph":"default"}"#;
         let resp: WsResponse = serde_json::from_str(json).unwrap();
         assert!(matches!(
             resp,
             WsResponse::Connected {
-                session_id: 42,
-                knowledge_graph,
-            } if knowledge_graph == "default"
+                ref session_id,
+                ref knowledge_graph,
+            } if session_id == "42" && knowledge_graph == "default"
         ));
     }
 

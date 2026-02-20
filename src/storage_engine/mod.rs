@@ -180,6 +180,14 @@ impl StorageEngine {
             )));
         }
 
+        // Check max knowledge graph limit
+        let max_kgs = self.config.storage.max_knowledge_graphs;
+        if max_kgs > 0 && self.knowledge_graphs.len() >= max_kgs {
+            return Err(StorageError::Other(format!(
+                "Maximum number of knowledge graphs ({max_kgs}) exceeded"
+            )));
+        }
+
         // Block creation if a same-name KG is being dropped (prevents RC-2)
         if self.dropping_kgs.read().contains(name) {
             return Err(StorageError::Other(format!(
@@ -5302,5 +5310,64 @@ mod tests {
 
         let result = storage.clear_relations_by_prefix_in("no_such_kg", "env_");
         assert!(result.is_err());
+    }
+
+    // === Regression tests for production readiness fixes ===
+
+    /// Regression: max_knowledge_graphs limit prevents unbounded KG creation (DoS).
+    #[test]
+    fn test_max_knowledge_graphs_limit_enforced() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.max_knowledge_graphs = 3;
+        let storage = StorageEngine::new(config).unwrap();
+
+        // Default KG exists, so we can create 2 more
+        storage.create_knowledge_graph("kg1").unwrap();
+        storage.create_knowledge_graph("kg2").unwrap();
+
+        // Third should fail (default + kg1 + kg2 = 3)
+        let result = storage.create_knowledge_graph("kg3");
+        assert!(result.is_err(), "Should reject KG creation at limit");
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("Maximum number of knowledge graphs"),
+            "Error should mention limit: {err}"
+        );
+    }
+
+    /// Regression: max_knowledge_graphs=0 means unlimited.
+    #[test]
+    fn test_max_knowledge_graphs_zero_means_unlimited() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.max_knowledge_graphs = 0;
+        let storage = StorageEngine::new(config).unwrap();
+
+        // Should be able to create many KGs
+        for i in 0..20 {
+            storage
+                .create_knowledge_graph(&format!("unlimited_kg_{i}"))
+                .unwrap();
+        }
+    }
+
+    /// Regression: after dropping a KG, creation should succeed again.
+    #[test]
+    fn test_max_knowledge_graphs_drop_frees_slot() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.max_knowledge_graphs = 2;
+        let storage = StorageEngine::new(config).unwrap();
+
+        // default + kg1 = 2 (at limit)
+        storage.create_knowledge_graph("kg1").unwrap();
+        assert!(storage.create_knowledge_graph("kg2").is_err());
+
+        // Drop kg1, should free a slot
+        storage.drop_knowledge_graph("kg1").unwrap();
+        storage
+            .create_knowledge_graph("kg2")
+            .expect("Should succeed after dropping a KG");
     }
 }

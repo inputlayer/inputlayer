@@ -56,9 +56,9 @@ async fn test_session_close_is_idempotent() {
     let (handler, _tmp) = create_test_handler();
     let sid = handler.create_session("default").unwrap();
     // First close succeeds
-    assert!(handler.close_session(sid).is_ok());
+    assert!(handler.close_session(&sid).is_ok());
     // Second close should not panic (may return error, that's fine)
-    let _ = handler.close_session(sid);
+    let _ = handler.close_session(&sid);
     // We reach here without panicking
 }
 
@@ -68,7 +68,7 @@ async fn test_session_count_after_close() {
     let before = handler.session_manager().session_count();
     let sid = handler.create_session("default").unwrap();
     assert_eq!(handler.session_manager().session_count(), before + 1);
-    handler.close_session(sid).unwrap();
+    handler.close_session(&sid).unwrap();
     assert_eq!(
         handler.session_manager().session_count(),
         before,
@@ -83,16 +83,16 @@ async fn test_multiple_sessions_independent_close() {
     let sid2 = handler.create_session("default").unwrap();
     let sid3 = handler.create_session("default").unwrap();
 
-    handler.close_session(sid1).unwrap();
+    handler.close_session(&sid1).unwrap();
     // Other sessions should still be accessible
-    assert!(handler.session_manager().has_session(sid2));
-    assert!(handler.session_manager().has_session(sid3));
+    assert!(handler.session_manager().has_session(&sid2));
+    assert!(handler.session_manager().has_session(&sid3));
 
-    handler.close_session(sid2).unwrap();
-    assert!(handler.session_manager().has_session(sid3));
+    handler.close_session(&sid2).unwrap();
+    assert!(handler.session_manager().has_session(&sid3));
 
-    handler.close_session(sid3).unwrap();
-    assert!(!handler.session_manager().has_session(sid3));
+    handler.close_session(&sid3).unwrap();
+    assert!(!handler.session_manager().has_session(&sid3));
 }
 
 // === WI-10: Broadcast Notification Tests ===

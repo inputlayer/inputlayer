@@ -222,11 +222,8 @@ pub use storage::{
     save_to_csv_with_options, save_to_parquet, CsvOptions, StorageError, StorageResult,
 };
 
-// Re-export execution utilities (timeout, limits, caching)
-pub use execution::{
-    CacheEntry, CacheStats, CancelHandle, ExecutionConfig, ExecutionError, ExecutionResult,
-    MemoryTracker, QueryCache, QueryTimeout, ResourceError, ResourceLimits, TimeoutError,
-};
+// Re-export execution utilities (timeout)
+pub use execution::{CancelHandle, ExecutionError, ExecutionResult, QueryTimeout, TimeoutError};
 
 // Re-export optimization modules for extensibility
 pub use boolean_specialization::{BooleanSpecializer, SemiringAnnotation, SemiringType};
