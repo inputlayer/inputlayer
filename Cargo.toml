@@ -60,6 +60,9 @@ pest_derive = "2.7"
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 bincode = "1.3"
 
 # HTTP Framework (WebSocket API + GUI serving)
@@ -114,6 +117,21 @@ path = "examples/rust/pipeline_demo.rs"
 [[example]]
 name = "storage_demo"
 path = "examples/storage_demo.rs"
+
+[[bench]]
+name = "query_benchmarks"
+path = "benches/query_benchmarks.rs"
+harness = false
+
+[[bench]]
+name = "insert_benchmarks"
+path = "benches/insert_benchmarks.rs"
+harness = false
+
+[[bench]]
+name = "aggregation_benchmarks"
+path = "benches/aggregation_benchmarks.rs"
+harness = false
 
 [features]
 default = []

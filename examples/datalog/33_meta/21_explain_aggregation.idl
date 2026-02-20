@@ -1,0 +1,13 @@
+// Test: .explain shows Aggregate node for aggregation queries
+.kg create test_explain_agg_n33t21
+.kg use test_explain_agg_n33t21
+
++sales[(1, 100), (1, 200), (2, 300)]
++sales_count(Region, count<Amount>) <- sales(Region, Amount)
+
+// Explain a query that uses the aggregation rule - should show Aggregate in plan
+.explain ?sales_count(Region, Count)
+
+// Cleanup
+.kg use default
+.kg drop test_explain_agg_n33t21

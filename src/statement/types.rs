@@ -43,10 +43,21 @@ impl TypeExpr {
             TypeExpr::Base(BaseType::Float) => SchemaType::Float,
             TypeExpr::Base(BaseType::String) => SchemaType::String,
             TypeExpr::Base(BaseType::Bool) => SchemaType::Bool,
+            TypeExpr::Base(BaseType::Vector) => SchemaType::Vector { dim: None },
             TypeExpr::TypeRef(name) => SchemaType::Named(name.clone()),
             TypeExpr::List(_) => SchemaType::Any, // Lists not directly supported yet
             TypeExpr::Record(_) => SchemaType::Any, // Records not directly supported yet
-            TypeExpr::Refined { base, .. } => base.to_schema_type(), // Ignore refinements
+            TypeExpr::Refined { base, refinements } => {
+                // Special case: vector(N) carries a dimension constraint.
+                // The dimension N is stored as the first refinement's name (e.g., "3").
+                if let TypeExpr::Base(BaseType::Vector) = base.as_ref() {
+                    let dim = refinements
+                        .first()
+                        .and_then(|r| r.name.parse::<usize>().ok());
+                    return SchemaType::Vector { dim };
+                }
+                base.to_schema_type() // Ignore other refinements
+            }
         }
     }
 }
@@ -58,6 +69,8 @@ pub enum BaseType {
     String,
     Bool,
     Float,
+    /// Vector of f32 values (embeddings). Dimension is an optional refinement.
+    Vector,
 }
 
 impl fmt::Display for BaseType {
@@ -67,6 +80,7 @@ impl fmt::Display for BaseType {
             BaseType::String => write!(f, "string"),
             BaseType::Bool => write!(f, "bool"),
             BaseType::Float => write!(f, "float"),
+            BaseType::Vector => write!(f, "vector"),
         }
     }
 }
@@ -213,6 +227,7 @@ pub fn parse_type_expr(input: &str) -> Result<TypeExpr, String> {
         "string" => Ok(TypeExpr::Base(BaseType::String)),
         "bool" => Ok(TypeExpr::Base(BaseType::Bool)),
         "float" => Ok(TypeExpr::Base(BaseType::Float)),
+        "vector" | "vec" | "embedding" => Ok(TypeExpr::Base(BaseType::Vector)),
         _ => {
             // Must be a type reference (uppercase name)
             // Note: input is non-empty (checked at start of function)

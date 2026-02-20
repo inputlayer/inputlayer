@@ -1,0 +1,27 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sip_filter_n80t06
+Knowledge graph 'test_sip_filter_n80t06' created.
+Switched to knowledge graph: test_sip_filter_n80t06
+> .kg use test_sip_filter_n80t06
+Switched to knowledge graph: test_sip_filter_n80t06
+> +product[(1, "widget", 50), (2, "gadget", 150), (3, "doohickey", 75)]
+Inserted 3 fact(s) into 'product'.
+> +inventory[(1, 100), (2, 5), (3, 30)]
+Inserted 3 fact(s) into 'inventory'.
+> ?product(Id, Name, Price), inventory(Id, Stock), Price > 60, Stock < 50
+┌──────┬─────────────┬──────┬──────┐
+│ col0 │ col1        │ col2 │ col3 │
+├──────┼─────────────┼──────┼──────┤
+│    2 │ "gadget"    │  150 │    5 │
+│    3 │ "doohickey" │   75 │   30 │
+└──────┴─────────────┴──────┴──────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sip_filter_n80t06
+Knowledge graph 'test_sip_filter_n80t06' dropped.

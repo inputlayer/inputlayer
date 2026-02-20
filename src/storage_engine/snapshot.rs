@@ -16,6 +16,8 @@ use crate::DatalogEngine;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
+use tracing::info;
 
 /// Counter for snapshot versioning
 static SNAPSHOT_VERSION: AtomicU64 = AtomicU64::new(0);
@@ -176,8 +178,16 @@ impl KnowledgeGraphSnapshot {
             return self.execute_tuples(program);
         }
 
+        let start = Instant::now();
         let combined = format!("{}{}", self.rule_prefix, program);
-        self.execute_tuples(&combined)
+        let result = self.execute_tuples(&combined);
+        info!(
+            program_len = program.len(),
+            combined_len = combined.len(),
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute_with_rules"
+        );
+        result
     }
 
     /// Execute a query with temporary session facts that don't affect the shared store
@@ -204,6 +214,8 @@ impl KnowledgeGraphSnapshot {
         program: &str,
         session_facts: Vec<(String, Tuple)>,
     ) -> Result<Vec<Tuple>, String> {
+        let start = Instant::now();
+        let session_fact_count = session_facts.len();
         // Create a fresh engine with cloned data
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
@@ -223,7 +235,15 @@ impl KnowledgeGraphSnapshot {
         let combined = format!("{}{}", self.rule_prefix, program);
 
         // Execute against isolated state
-        engine.execute_tuples(&combined)
+        let result = engine.execute_tuples(&combined);
+        info!(
+            program_len = program.len(),
+            combined_len = combined.len(),
+            session_facts = session_fact_count,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute_with_session_facts"
+        );
+        result
     }
 
     /// Get the number of relations in this snapshot

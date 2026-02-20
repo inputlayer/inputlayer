@@ -1,0 +1,16 @@
+// Test: Recursive transitive closure — SIP prunes search space with bound start node.
+.kg create test_sip_recursive_n80t02
+.kg use test_sip_recursive_n80t02
+
++edge[(1, 2), (2, 3), (3, 4), (4, 5)]
+
+// Persistent recursive rules for transitive reachability
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- edge(X, Y), reach(Y, Z)
+
+// Query all reachable pairs
+?reach(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_sip_recursive_n80t02

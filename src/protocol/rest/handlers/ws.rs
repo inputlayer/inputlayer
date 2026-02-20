@@ -34,6 +34,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use tracing::{info, Instrument};
 
 use super::wire_value_to_json;
 use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
@@ -247,6 +248,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                                 if let Ok(json) = serde_json::to_string(&err_msg) {
                                     let _ = sender.send(Message::Text(json)).await;
                                 }
+
                                 break;
                             }
                         };
@@ -284,6 +286,9 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
             }
         }
     }
+
+    // Guarantee session cleanup on WS disconnect (WI-03)
+    let _ = handler.close_session(session_id);
 }
 
 /// Process a single WebSocket message and return a response
@@ -555,11 +560,13 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let (mut sender, mut receiver) = socket.split();
 
     eprintln!("[ws] New connection for kg={kg}");
+    info!(kg = %kg, "ws_connection_start");
 
     // Auto-create session
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
             eprintln!("[ws] Session {id} created for kg={kg}");
+            info!(session_id = id, kg = %kg, "ws_session_created");
             id
         }
         Err(e) => {
@@ -589,14 +596,63 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     }
 
     let mut notify_rx = handler.subscribe_notifications();
+    let mut request_seq: u64 = 0;
+
+    // Idle timeout configuration (WI-02)
+    let idle_ms = handler.config().http.ws_idle_timeout_ms;
+    let idle_duration = if idle_ms > 0 {
+        Some(std::time::Duration::from_millis(idle_ms))
+    } else {
+        None
+    };
+    let mut last_activity = std::time::Instant::now();
 
     loop {
+        // Compute remaining idle time for this iteration
+        let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+            match idle_duration {
+                Some(dur) => {
+                    let elapsed = last_activity.elapsed();
+                    if elapsed >= dur {
+                        // Already exceeded idle timeout
+                        Box::pin(std::future::ready(()))
+                    } else {
+                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
+                    }
+                }
+                None => Box::pin(std::future::pending()),
+            };
+
         tokio::select! {
+            // Idle timeout
+            () = idle_sleep => {
+                if idle_duration.is_some() {
+                    eprintln!("[ws] Session {session_id} idle timeout ({idle_ms}ms), disconnecting");
+                    let err_msg = GlobalWsResponse::Error {
+                        message: "Idle timeout".to_string(),
+                        validation_errors: None,
+                    };
+                    if let Ok(json) = serde_json::to_string(&err_msg) {
+                        let _ = sender.send(Message::Text(json)).await;
+                    }
+                    break;
+                }
+            }
             // Client message
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        let response = process_global_ws_message(&handler, session_id, &text).await;
+                        last_activity = std::time::Instant::now();
+                        request_seq = request_seq.saturating_add(1);
+                        let span = tracing::info_span!(
+                            "ws_request",
+                            session_id,
+                            request_id = request_seq,
+                            msg_bytes = text.len()
+                        );
+                        let response = process_global_ws_message(&handler, session_id, &text)
+                            .instrument(span)
+                            .await;
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
@@ -709,20 +765,21 @@ async fn handle_global_execute(
     program: String,
 ) -> GlobalWsResponse {
     let start = std::time::Instant::now();
-    // Run on the spawn_blocking thread pool to avoid starving tokio worker threads.
-    // The handler uses parking_lot::RwLock (synchronous) which blocks the calling thread;
-    // under high concurrency this can exhaust all tokio workers and deadlock the runtime.
-    let handler_clone = Arc::clone(handler);
-    let program_clone = program.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(handler_clone.execute_program(
-            Some(session_id),
-            None,
-            program_clone,
-        ))
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("Task panicked: {e}")));
+    let program_len = program.len();
+    let program_preview = program.lines().next().unwrap_or("").trim();
+    info!(
+        session_id,
+        program_len,
+        program_preview = %program_preview,
+        "ws_execute_start"
+    );
+    // query_program() inside execute_program() already offloads DD computation to
+    // spawn_blocking internally (with a semaphore limiting concurrency to ncpu).
+    // Calling execute_program() directly keeps Tokio workers free for I/O while
+    // DD runs on blocking threads — no extra spawn_blocking layer needed here.
+    let result = handler
+        .execute_program(Some(session_id), None, program.clone())
+        .await;
     let elapsed = start.elapsed();
     if elapsed.as_secs() >= 5 {
         eprintln!(
@@ -731,6 +788,13 @@ async fn handle_global_execute(
             &program[..program.len().min(80)]
         );
     }
+    info!(
+        session_id,
+        program_len,
+        elapsed_ms = elapsed.as_millis() as u64,
+        ok = result.is_ok(),
+        "ws_execute_end"
+    );
     match result {
         Ok(response) => {
             let row_provenance: Vec<String> = response

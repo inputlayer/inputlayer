@@ -1,0 +1,16 @@
+// Test: .explain shows recursive rule compilation structure (Union + fixpoint)
+.kg create test_explain_recursive_n33t18
+.kg use test_explain_recursive_n33t18
+
++edge[(1, 2), (2, 3)]
+
+// Register recursive rules as persistent
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- edge(X, Y), path(Y, Z)
+
+// Explain a query against the recursive relation
+.explain ?path(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_explain_recursive_n33t18

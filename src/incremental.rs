@@ -235,6 +235,7 @@ impl IncrementalEngine {
                             }
                             while probe.less_than(&time) {
                                 worker.step();
+                                std::thread::yield_now();
                             }
                             let _ = response.send(());
                         }
