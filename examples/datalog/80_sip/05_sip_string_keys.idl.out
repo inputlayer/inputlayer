@@ -14,12 +14,12 @@ Inserted 3 fact(s) into 'author'.
 > +paper[("p1", "alice", "ML"), ("p2", "bob", "DB"), ("p3", "alice", "AI")]
 Inserted 3 fact(s) into 'paper'.
 > ?author("alice", Year), paper(PaperId, "alice", Topic)
-┌─────────┬──────┬──────┬──────┐
-│ col0    │ col1 │ col2 │ col3 │
-├─────────┼──────┼──────┼──────┤
-│ "alice" │ 2020 │ "p1" │ "ML" │
-│ "alice" │ 2020 │ "p3" │ "AI" │
-└─────────┴──────┴──────┴──────┘
+┌─────────┬──────┬─────────┬───────┐
+│ alice   │ Year │ PaperId │ Topic │
+├─────────┼──────┼─────────┼───────┤
+│ "alice" │ 2020 │ "p1"    │ "ML"  │
+│ "alice" │ 2020 │ "p3"    │ "AI"  │
+└─────────┴──────┴─────────┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

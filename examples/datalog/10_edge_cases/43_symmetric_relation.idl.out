@@ -16,16 +16,16 @@ Rule 'symmetric' registered.
 > +symmetric(A, B) <- friend(B, A)
 Rule 'symmetric' registered.
 > ?symmetric(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    4 │
-│    2 │    1 │
-│    2 │    3 │
-│    3 │    2 │
-│    4 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 4 │
+│ 2 │ 1 │
+│ 2 │ 3 │
+│ 3 │ 2 │
+│ 4 │ 1 │
+└───┴───┘
 6 rows
 > .kg use default
 Switched to knowledge graph: default

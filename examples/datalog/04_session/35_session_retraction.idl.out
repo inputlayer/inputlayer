@@ -17,7 +17,7 @@ Session fact added for 'color'. (Use +color(...) to persist)
 Session fact added for 'color'. (Use +color(...) to persist)
 > all_color(C) <- color(C)
 ┌──────────┐
-│ col0     │
+│ X        │
 ├──────────┤
 │ "blue"   │
 │ "green"  │
@@ -28,7 +28,7 @@ Session fact added for 'color'. (Use +color(...) to persist)
 (session: 1 rule(s))
 > ?all_color(C)
 ┌──────────┐
-│ col0     │
+│ C        │
 ├──────────┤
 │ "blue"   │
 │ "green"  │
@@ -40,7 +40,7 @@ Session fact added for 'color'. (Use +color(...) to persist)
 Cleared 2 session fact(s), 1 session rule(s).
 > ?color(C)
 ┌────────┐
-│ col0   │
+│ C      │
 ├────────┤
 │ "blue" │
 │ "red"  │

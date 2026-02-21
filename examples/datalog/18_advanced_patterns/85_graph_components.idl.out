@@ -18,24 +18,24 @@ Rule 'connected' registered.
 > +connected(X, Z) <- connected(X, Y), connected(Y, Z)
 Rule 'connected' registered.
 > ?connected(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │ "a"  │
-│ "a"  │ "b"  │
-│ "a"  │ "c"  │
-│ "b"  │ "a"  │
-│ "b"  │ "b"  │
-│ "b"  │ "c"  │
-│ "c"  │ "a"  │
-│ "c"  │ "b"  │
-│ "c"  │ "c"  │
-│ "d"  │ "d"  │
-│ "d"  │ "e"  │
-│ "e"  │ "d"  │
-│ "e"  │ "e"  │
-│ "f"  │ "f"  │
-└──────┴──────┘
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "a" │ "a" │
+│ "a" │ "b" │
+│ "a" │ "c" │
+│ "b" │ "a" │
+│ "b" │ "b" │
+│ "b" │ "c" │
+│ "c" │ "a" │
+│ "c" │ "b" │
+│ "c" │ "c" │
+│ "d" │ "d" │
+│ "d" │ "e" │
+│ "e" │ "d" │
+│ "e" │ "e" │
+│ "f" │ "f" │
+└─────┴─────┘
 14 rows
 > .kg use default
 Switched to knowledge graph: default

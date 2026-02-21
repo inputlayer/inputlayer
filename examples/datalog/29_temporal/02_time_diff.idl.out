@@ -12,23 +12,23 @@ Switched to knowledge graph: test_time_diff_n29t02
 > +timestamps[(1, 1000, 500), (2, 2000, 1500), (3, 1000, 1000)]
 Inserted 3 fact(s) into 'timestamps'.
 > result(Id, Diff) <- timestamps(Id, T1, T2), Diff = time_diff(T1, T2)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    2 │  500 │
-│    3 │    0 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 500 │
+│ 2 │ 500 │
+│ 3 │   0 │
+└───┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?result(Id, Diff)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    2 │  500 │
-│    3 │    0 │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Diff │
+├────┼──────┤
+│  1 │  500 │
+│  2 │  500 │
+│  3 │    0 │
+└────┴──────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

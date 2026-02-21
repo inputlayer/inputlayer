@@ -14,21 +14,21 @@ Schema for 'users' registered with 3 columns (persistent)
 > +users[(1, "Alice", 30), (2, "Bob", 25)]
 Inserted 2 fact(s) into 'users'.
 > ?users(Id, Name, Active)
-┌──────┬─────────┬──────┐
-│ col0 │ col1    │ col2 │
-├──────┼─────────┼──────┤
-│    1 │ "Alice" │   30 │
-│    2 │ "Bob"   │   25 │
-└──────┴─────────┴──────┘
+┌────┬─────────┬─────┐
+│ id │ name    │ age │
+├────┼─────────┼─────┤
+│  1 │ "Alice" │  30 │
+│  2 │ "Bob"   │  25 │
+└────┴─────────┴─────┘
 2 rows
 > .rel users
 Relation: users
-┌──────┬─────────┬──────┐
-│ col0 │ col1    │ col2 │
-├──────┼─────────┼──────┤
-│    1 │ "Alice" │   30 │
-│    2 │ "Bob"   │   25 │
-└──────┴─────────┴──────┘
+┌────┬─────────┬─────┐
+│ id │ name    │ age │
+├────┼─────────┼─────┤
+│  1 │ "Alice" │  30 │
+│  2 │ "Bob"   │  25 │
+└────┴─────────┴─────┘
 2 of 2 total rows
 > .kg use default
 Switched to knowledge graph: default

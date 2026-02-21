@@ -14,34 +14,34 @@ Inserted 3 fact(s) into 'set_a'.
 > +set_b[(1,), (2,), (3,), (4,), (5,)]
 Inserted 5 fact(s) into 'set_b'.
 > count_a(count<X>) <- set_a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > count_b(count<X>) <- set_b(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?count_a(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > ?count_b(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

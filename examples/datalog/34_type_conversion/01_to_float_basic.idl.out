@@ -12,23 +12,23 @@ Switched to knowledge graph: test_to_float_basic_n34t01
 > +scores[(100,), (200,), (33,)]
 Inserted 3 fact(s) into 'scores'.
 > float_score(X, Y) <- scores(X), Y = to_float(X)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│   33 │  33.0 │
-│  100 │ 100.0 │
-│  200 │ 200.0 │
-└──────┴───────┘
+┌─────┬───────┐
+│ X   │ Y     │
+├─────┼───────┤
+│  33 │  33.0 │
+│ 100 │ 100.0 │
+│ 200 │ 200.0 │
+└─────┴───────┘
 3 rows
 (session: 1 rule(s))
 > ?float_score(X, Y)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│   33 │  33.0 │
-│  100 │ 100.0 │
-│  200 │ 200.0 │
-└──────┴───────┘
+┌─────┬───────┐
+│ X   │ Y     │
+├─────┼───────┤
+│  33 │  33.0 │
+│ 100 │ 100.0 │
+│ 200 │ 200.0 │
+└─────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,12 +12,12 @@ Switched to knowledge graph: test_long_name_n12t56
 > +this_is_a_very_long_relation_name_that_goes_on_for_quite_some_time[(1,), (2,)]
 Inserted 2 fact(s) into 'this_is_a_very_long_relation_name_that_goes_on_for_quite_some_time'.
 > ?this_is_a_very_long_relation_name_that_goes_on_for_quite_some_time(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

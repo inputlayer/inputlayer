@@ -32,31 +32,31 @@ No results.
 > +sink(X) <- node(X), !edge(X, _)
 Rule 'sink' registered.
 > ?sink(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+│ 5 │
+└───┘
 2 rows
 > +source(X) <- node(X), !edge(_, X)
 Rule 'source' registered.
 > ?source(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 5 │
+└───┘
 2 rows
 > +only_in_a(X) <- a(X), !b(X)
 Rule 'only_in_a' registered.
 > ?only_in_a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,13 +16,13 @@ Rule 'limited_path' registered.
 > +limited_path(X, Z, D) <- limited_path(X, Y, D1), edge(Y, Z), D = D1 + 1, D <= 3
 Rule 'limited_path' registered.
 > ?limited_path("a", Y, D)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│ "a"  │ "b"  │    1 │
-│ "a"  │ "c"  │    2 │
-│ "a"  │ "d"  │    3 │
-└──────┴──────┴──────┘
+┌─────┬─────┬───┐
+│ a   │ Y   │ D │
+├─────┼─────┼───┤
+│ "a" │ "b" │ 1 │
+│ "a" │ "c" │ 2 │
+│ "a" │ "d" │ 3 │
+└─────┴─────┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,13 +16,13 @@ Inserted 2 fact(s) into 'selected'.
 > +not_selected(X) <- candidates(X), !selected(X)
 Rule 'not_selected' registered.
 > ?not_selected(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

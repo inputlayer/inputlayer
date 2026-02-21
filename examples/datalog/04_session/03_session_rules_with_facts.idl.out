@@ -13,7 +13,7 @@ Switched to knowledge graph: test_sess_rules_facts_n04t03
 Session fact added for 'human'. (Use +human(...) to persist)
 > mortal(X) <- human(X)
 ┌────────────┐
-│ col0       │
+│ X          │
 ├────────────┤
 │ "socrates" │
 └────────────┘
@@ -21,7 +21,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 (session: 1 rule(s))
 > ?mortal(X)
 ┌────────────┐
-│ col0       │
+│ X          │
 ├────────────┤
 │ "socrates" │
 └────────────┘
@@ -37,7 +37,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 Session fact added for 'human'. (Use +human(...) to persist)
 > ?mortal(X)
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ "aristotle" │
 │ "plato"     │
@@ -46,7 +46,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 3 rows
 > wise(X) <- mortal(X)
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ "aristotle" │
 │ "plato"     │
@@ -56,7 +56,7 @@ Session fact added for 'human'. (Use +human(...) to persist)
 (session: 2 rule(s))
 > ?wise(X)
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ "aristotle" │
 │ "plato"     │

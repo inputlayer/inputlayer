@@ -17,7 +17,7 @@ Rule 'ancestor' registered.
 Rule 'ancestor' registered.
 > ?ancestor(A, "Dave")
 ┌─────────┬────────┐
-│ col0    │ col1   │
+│ A       │ Dave   │
 ├─────────┼────────┤
 │ "Alice" │ "Dave" │
 │ "Bob"   │ "Dave" │

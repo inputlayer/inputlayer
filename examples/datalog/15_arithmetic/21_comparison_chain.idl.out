@@ -12,23 +12,23 @@ Switched to knowledge graph: test_cmp_chain_n15t21
 > +values[(1,), (5,), (10,), (15,), (20,)]
 Inserted 5 fact(s) into 'values'.
 > in_range(X) <- values(X), X >= 5, X <= 15
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-│   10 │
-│   15 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│  5 │
+│ 10 │
+│ 15 │
+└────┘
 3 rows
 (session: 1 rule(s))
 > ?in_range(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-│   10 │
-│   15 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│  5 │
+│ 10 │
+│ 15 │
+└────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

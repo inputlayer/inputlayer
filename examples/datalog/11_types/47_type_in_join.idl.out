@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'int_data'.
 > +desc[(1, "first item"), (2, "second item")]
 Inserted 2 fact(s) into 'desc'.
 > joined(Id, Name, Desc) <- int_data(Id, Name), desc(Id, Desc)
-┌──────┬───────┬───────────────┐
-│ col0 │ col1  │ col2          │
-├──────┼───────┼───────────────┤
-│    1 │ "one" │ "first item"  │
-│    2 │ "two" │ "second item" │
-└──────┴───────┴───────────────┘
+┌───┬───────┬───────────────┐
+│ X │ Y     │ Z             │
+├───┼───────┼───────────────┤
+│ 1 │ "one" │ "first item"  │
+│ 2 │ "two" │ "second item" │
+└───┴───────┴───────────────┘
 2 rows
 (session: 1 rule(s))
 > ?joined(Id, Name, Desc)
-┌──────┬───────┬───────────────┐
-│ col0 │ col1  │ col2          │
-├──────┼───────┼───────────────┤
-│    1 │ "one" │ "first item"  │
-│    2 │ "two" │ "second item" │
-└──────┴───────┴───────────────┘
+┌────┬───────┬───────────────┐
+│ Id │ Name  │ Desc          │
+├────┼───────┼───────────────┤
+│  1 │ "one" │ "first item"  │
+│  2 │ "two" │ "second item" │
+└────┴───────┴───────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

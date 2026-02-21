@@ -12,11 +12,11 @@ Switched to knowledge graph: test_single_n21t51
 > +unique_data[(42, "answer")]
 Inserted 1 fact(s) into 'unique_data'.
 > ?unique_data(X, Y)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│   42 │ "answer" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ X  │ Y        │
+├────┼──────────┤
+│ 42 │ "answer" │
+└────┴──────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

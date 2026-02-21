@@ -16,13 +16,13 @@ Inserted 1 fact(s) into 'exclude'.
 > +kept(Id, Status) <- items(Id, Status), !exclude(Status)
 Rule 'kept' registered.
 > ?kept(Id, S)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    1 │ "good" │
-│    3 │ "good" │
-│    5 │ "ok"   │
-└──────┴────────┘
+┌────┬────────┐
+│ Id │ S      │
+├────┼────────┤
+│  1 │ "good" │
+│  3 │ "good" │
+│  5 │ "ok"   │
+└────┴────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

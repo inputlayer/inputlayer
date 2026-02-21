@@ -12,23 +12,23 @@ Switched to knowledge graph: test_le_n07t50
 > +temps[(1, 10), (2, 20), (3, 0), (4, -5), (5, 30)]
 Inserted 5 fact(s) into 'temps'.
 > cold(Id, T) <- temps(Id, T), T <= 10
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    3 │    0 │
-│    4 │   -5 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 3 │  0 │
+│ 4 │ -5 │
+└───┴────┘
 3 rows
 (session: 1 rule(s))
 > ?cold(Id, T)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    3 │    0 │
-│    4 │   -5 │
-└──────┴──────┘
+┌────┬────┐
+│ Id │ T  │
+├────┼────┤
+│  1 │ 10 │
+│  3 │  0 │
+│  4 │ -5 │
+└────┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

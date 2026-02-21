@@ -12,24 +12,24 @@ Switched to knowledge graph: test_upsert_n27t25
 > +data[(1, "old1"), (2, "old2")]
 Inserted 2 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    1 │ "old1" │
-│    2 │ "old2" │
-└──────┴────────┘
+┌────┬────────┐
+│ Id │ Val    │
+├────┼────────┤
+│  1 │ "old1" │
+│  2 │ "old2" │
+└────┴────────┘
 2 rows
 > +data[(2, "new2"), (3, "new3")]
 Inserted 2 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    1 │ "old1" │
-│    2 │ "new2" │
-│    2 │ "old2" │
-│    3 │ "new3" │
-└──────┴────────┘
+┌────┬────────┐
+│ Id │ Val    │
+├────┼────────┤
+│  1 │ "old1" │
+│  2 │ "new2" │
+│  2 │ "old2" │
+│  3 │ "new3" │
+└────┴────────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

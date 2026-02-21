@@ -14,22 +14,22 @@ Inserted 2 fact(s) into 'edge'.
 > +reach(X, Y) <- edge(X, Y)
 Rule 'reach' registered.
 > ?reach(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > +reach(X, Y) <- edge(X, Y)
 Rule 'reach' registered.
 > ?reach(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > .rule list
 Rules:

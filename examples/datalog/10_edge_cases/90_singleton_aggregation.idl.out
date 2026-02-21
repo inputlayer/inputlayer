@@ -12,64 +12,64 @@ Switched to knowledge graph: test_single_agg_n10t90
 > +single[(42,)]
 Inserted 1 fact(s) into 'single'.
 > sum_single(sum<X>) <- single(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 (session: 1 rule(s))
 > count_single(count<X>) <- single(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > min_single(min<X>) <- single(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 (session: 3 rule(s))
 > max_single(max<X>) <- single(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 (session: 4 rule(s))
 > ?sum_single(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > ?count_single(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > ?min_single(M)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ M  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > ?max_single(M)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ M  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,11 +12,11 @@ Switched to knowledge graph: test_const_query_n10t110
 > +data[(1, "a"), (2, "b"), (3, "c")]
 Inserted 3 fact(s) into 'data'.
 > ?data(1, "a")
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-└──────┴──────┘
+┌───┬─────┐
+│ 1 │ a   │
+├───┼─────┤
+│ 1 │ "a" │
+└───┴─────┘
 1 rows
 > ?data(99, "z")
 No results.

@@ -12,26 +12,26 @@ Switched to knowledge graph: test_session_clear_n04t10
 > +edge[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edge'.
 > path(X, Y) <- edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 (session: 1 rule(s))
 > path(X, Z) <- edge(X, Y), path(Y, Z)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
 6 rows
 (session: 2 rule(s))
 > node(1)
@@ -46,13 +46,13 @@ Session rules (2):
   1. path(X, Y) <- edge(X, Y)
   2. path(X, Z) <- edge(X, Y), path(Y, Z)
 > ?path(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
 3 rows
 > .session clear
 Cleared 2 session fact(s), 2 session rule(s).
@@ -61,13 +61,13 @@ No session data defined.
 > ?path(1, X)
 No results.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

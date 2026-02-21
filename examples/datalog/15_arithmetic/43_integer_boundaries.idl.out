@@ -13,7 +13,7 @@ Switched to knowledge graph: test_int_bounds_n15t43
 Inserted 1 fact(s) into 'large_int'.
 > ?large_int(X)
 ┌────────────┐
-│ col0       │
+│ X          │
 ├────────────┤
 │ 2147483647 │
 └────────────┘
@@ -22,21 +22,21 @@ Inserted 1 fact(s) into 'large_int'.
 Inserted 1 fact(s) into 'neg_large'.
 > ?neg_large(X)
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ -2147483648 │
 └─────────────┘
 1 rows
 > ?large_int(X), X > 2147483640
 ┌────────────┐
-│ col0       │
+│ X          │
 ├────────────┤
 │ 2147483647 │
 └────────────┘
 1 rows
 > ?neg_large(X), X < -2147483640
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ -2147483648 │
 └─────────────┘

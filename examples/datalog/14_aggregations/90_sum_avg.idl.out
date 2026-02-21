@@ -14,22 +14,22 @@ Inserted 5 fact(s) into 'sales'.
 > +total_sales(Group, sum<Amount>) <- sales(Group, Amount)
 Rule 'total_sales' registered.
 > ?total_sales(G, T)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  450 │
-│    2 │  550 │
-└──────┴──────┘
+┌───┬─────┐
+│ G │ T   │
+├───┼─────┤
+│ 1 │ 450 │
+│ 2 │ 550 │
+└───┴─────┘
 2 rows
 > +avg_sales(Group, avg<Amount>) <- sales(Group, Amount)
 Rule 'avg_sales' registered.
 > ?avg_sales(G, A)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ 150.0 │
-│    2 │ 275.0 │
-└──────┴───────┘
+┌───┬───────┐
+│ G │ A     │
+├───┼───────┤
+│ 1 │ 150.0 │
+│ 2 │ 275.0 │
+└───┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

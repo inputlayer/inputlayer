@@ -14,12 +14,12 @@ Inserted 4 fact(s) into 'edge'.
 > +one_way(X, Y) <- edge(X, Y), !edge(Y, X)
 Rule 'one_way' registered.
 > ?one_way(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,19 +14,19 @@ Inserted 4 fact(s) into 'orders'.
 > +vip[("Alice",), ("Bob",)]
 Inserted 2 fact(s) into 'vip'.
 > vip_order_count(count<OId>) <- orders(OId, Name), vip(Name)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?vip_order_count(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

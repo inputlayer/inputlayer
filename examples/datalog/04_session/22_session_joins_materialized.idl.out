@@ -24,19 +24,19 @@ Rule 'reachable' registered.
 > +reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 Rule 'reachable' registered.
 > path_between_labels(From, To) <- label(From, "start"), label(To, "end"), reachable(From, To)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 4 │
+└───┴───┘
 1 rows
 (session: 1 rule(s))
 > ?path_between_labels(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 4 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

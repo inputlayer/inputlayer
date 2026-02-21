@@ -12,19 +12,19 @@ Switched to knowledge graph: test_long_str_n10t80
 > +data[(1, "this_is_a_very_long_string_that_goes_on_and_on_and_on_for_quite_some_time_to_test_handling_of_longer_values")]
 Inserted 1 fact(s) into 'data'.
 > len_check(Id, S, L) <- data(Id, S), L = LEN(S)
-┌──────┬──────────────────────────────────────────┬──────┐
-│ col0 │ col1                                     │ col2 │
-├──────┼──────────────────────────────────────────┼──────┤
-│    1 │ "this_is_a_very_long_string_that_goes_o… │  107 │
-└──────┴──────────────────────────────────────────┴──────┘
+┌───┬──────────────────────────────────────────┬─────┐
+│ X │ Y                                        │ Z   │
+├───┼──────────────────────────────────────────┼─────┤
+│ 1 │ "this_is_a_very_long_string_that_goes_o… │ 107 │
+└───┴──────────────────────────────────────────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?len_check(Id, S, L)
-┌──────┬──────────────────────────────────────────┬──────┐
-│ col0 │ col1                                     │ col2 │
-├──────┼──────────────────────────────────────────┼──────┤
-│    1 │ "this_is_a_very_long_string_that_goes_o… │  107 │
-└──────┴──────────────────────────────────────────┴──────┘
+┌────┬──────────────────────────────────────────┬─────┐
+│ Id │ S                                        │ L   │
+├────┼──────────────────────────────────────────┼─────┤
+│  1 │ "this_is_a_very_long_string_that_goes_o… │ 107 │
+└────┴──────────────────────────────────────────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

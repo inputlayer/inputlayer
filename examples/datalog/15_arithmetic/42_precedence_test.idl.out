@@ -12,19 +12,19 @@ Switched to knowledge graph: test_prec_n15t42
 > +val[(5,)]
 Inserted 1 fact(s) into 'val'.
 > result(V, R) <- val(V), R = V + 3 * 2
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │   11 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 5 │ 11 │
+└───┴────┘
 1 rows
 (session: 1 rule(s))
 > ?result(V, R)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │   11 │
-└──────┴──────┘
+┌───┬────┐
+│ V │ R  │
+├───┼────┤
+│ 5 │ 11 │
+└───┴────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

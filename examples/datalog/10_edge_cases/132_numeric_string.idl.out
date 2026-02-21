@@ -15,19 +15,19 @@ Inserted 2 fact(s) into 'str_data'.
 Inserted 2 fact(s) into 'int_data'.
 > ?str_data(S)
 ┌───────┐
-│ col0  │
+│ S     │
 ├───────┤
 │ "123" │
 │ "456" │
 └───────┘
 2 rows
 > ?int_data(I)
-┌──────┐
-│ col0 │
-├──────┤
-│  123 │
-│  456 │
-└──────┘
+┌─────┐
+│ I   │
+├─────┤
+│ 123 │
+│ 456 │
+└─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

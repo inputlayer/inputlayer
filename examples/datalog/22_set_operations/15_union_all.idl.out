@@ -14,35 +14,35 @@ Inserted 3 fact(s) into 'set1'.
 > +set2[(2,), (3,), (4,)]
 Inserted 3 fact(s) into 'set2'.
 > combined(X) <- set1(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > combined(X) <- set2(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 4 rows
 (session: 2 rule(s))
 > ?combined(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

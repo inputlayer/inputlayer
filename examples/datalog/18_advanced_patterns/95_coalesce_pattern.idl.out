@@ -14,32 +14,32 @@ Inserted 2 fact(s) into 'primary'.
 > +backup[(1, "A1"), (3, "C3")]
 Inserted 2 fact(s) into 'backup'.
 > combined(Id, Name) <- primary(Id, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    2 │ "Bob"   │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "Alice" │
+│ 2 │ "Bob"   │
+└───┴─────────┘
 2 rows
 (session: 1 rule(s))
 > combined(Id, Name) <- backup(Id, Name), !primary(Id, _)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    2 │ "Bob"   │
-│    3 │ "C3"    │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "Alice" │
+│ 2 │ "Bob"   │
+│ 3 │ "C3"    │
+└───┴─────────┘
 3 rows
 (session: 2 rule(s))
 > ?combined(Id, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    2 │ "Bob"   │
-│    3 │ "C3"    │
-└──────┴─────────┘
+┌────┬─────────┐
+│ Id │ Name    │
+├────┼─────────┤
+│  1 │ "Alice" │
+│  2 │ "Bob"   │
+│  3 │ "C3"    │
+└────┴─────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

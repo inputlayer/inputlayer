@@ -19,46 +19,46 @@ Inserted 1 fact(s) into 'neg_float'.
 Inserted 1 fact(s) into 'near_zero'.
 > ?small_float(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 1e-7 │
 └──────┘
 1 rows
 > ?large_float(X)
 ┌─────────────────┐
-│ col0            │
+│ X               │
 ├─────────────────┤
 │ 999999999999.99 │
 └─────────────────┘
 1 rows
 > ?neg_float(X)
 ┌──────────┐
-│ col0     │
+│ X        │
 ├──────────┤
 │ -123.456 │
 └──────────┘
 1 rows
 > ?near_zero(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  0.0 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 0.0 │
+└─────┘
 1 rows
 > float_calc(Y) <- small_float(X), Y = X * 1000000
-┌──────┐
-│ col0 │
-├──────┤
-│  0.1 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 0.1 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > ?float_calc(Y)
-┌──────┐
-│ col0 │
-├──────┤
-│  0.1 │
-└──────┘
+┌─────┐
+│ Y   │
+├─────┤
+│ 0.1 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

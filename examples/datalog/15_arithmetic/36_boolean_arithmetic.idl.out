@@ -12,13 +12,13 @@ Switched to knowledge graph: test_bool_arith_n15t36
 > +flags[(1, true), (2, false), (3, true)]
 Inserted 3 fact(s) into 'flags'.
 > ?flags(Id, Val)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ true  │
-│    2 │ false │
-│    3 │ true  │
-└──────┴───────┘
+┌────┬───────┐
+│ Id │ Val   │
+├────┼───────┤
+│  1 │ true  │
+│  2 │ false │
+│  3 │ true  │
+└────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

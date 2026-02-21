@@ -12,23 +12,23 @@ Switched to knowledge graph: test_arith_mul_n15t02
 > +item[(1, 10), (2, 25), (3, 15)]
 Inserted 3 fact(s) into 'item'.
 > double_price(Id, Price*2) <- item(Id, Price)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   20 │
-│    2 │   50 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 20 │
+│ 2 │ 50 │
+│ 3 │ 30 │
+└───┴────┘
 3 rows
 (session: 1 rule(s))
 > ?double_price(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   20 │
-│    2 │   50 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 20 │
+│ 2 │ 50 │
+│ 3 │ 30 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -13,7 +13,7 @@ Switched to knowledge graph: test_special_n10t129
 Inserted 4 fact(s) into 'text'.
 > ?text(T)
 ┌───────────────────┐
-│ col0              │
+│ T                 │
 ├───────────────────┤
 │ "100%"            │
 │ "a+b=c"           │

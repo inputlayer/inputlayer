@@ -17,25 +17,25 @@ No results.
 > ?valid_event(Id, Ts)
 No results.
 > in_range(Id, Ts, InRange) <- event(Id, Ts, Start, End), InRange = point_in_interval(Ts, Start, End)
-┌──────┬──────┬───────┐
-│ col0 │ col1 │ col2  │
-├──────┼──────┼───────┤
-│    1 │  150 │ true  │
-│    2 │   50 │ false │
-│    3 │  200 │ true  │
-│    4 │  100 │ true  │
-└──────┴──────┴───────┘
+┌───┬─────┬───────┐
+│ X │ Y   │ Z     │
+├───┼─────┼───────┤
+│ 1 │ 150 │ true  │
+│ 2 │  50 │ false │
+│ 3 │ 200 │ true  │
+│ 4 │ 100 │ true  │
+└───┴─────┴───────┘
 4 rows
 (session: 2 rule(s))
 > ?in_range(Id, Ts, InRange)
-┌──────┬──────┬───────┐
-│ col0 │ col1 │ col2  │
-├──────┼──────┼───────┤
-│    1 │  150 │ true  │
-│    2 │   50 │ false │
-│    3 │  200 │ true  │
-│    4 │  100 │ true  │
-└──────┴──────┴───────┘
+┌────┬─────┬─────────┐
+│ Id │ Ts  │ InRange │
+├────┼─────┼─────────┤
+│  1 │ 150 │ true    │
+│  2 │  50 │ false   │
+│  3 │ 200 │ true    │
+│  4 │ 100 │ true    │
+└────┴─────┴─────────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,26 +12,26 @@ Switched to knowledge graph: test_session_cmd_n01t04
 > +edge[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edge'.
 > reachable(X, Y) <- edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 (session: 1 rule(s))
 > reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
 6 rows
 (session: 2 rule(s))
 > .session
@@ -39,26 +39,26 @@ Session rules (2):
   1. reachable(X, Y) <- edge(X, Y)
   2. reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
 > ?reachable(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
 3 rows
 > .session clear
 Cleared 0 session fact(s), 2 session rule(s).
 > .session
 No session data defined.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

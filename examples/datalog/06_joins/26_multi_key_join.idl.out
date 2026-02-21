@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'left'.
 > +right[(1, "a", "match1"), (2, "b", "match2"), (1, "b", "nomatch")]
 Inserted 3 fact(s) into 'right'.
 > joined(Id, Cat, Val, Label) <- left(Id, Cat, Val), right(Id, Cat, Label)
-┌──────┬──────┬──────┬──────────┐
-│ col0 │ col1 │ col2 │ col3     │
-├──────┼──────┼──────┼──────────┤
-│    1 │ "a"  │  100 │ "match1" │
-│    2 │ "b"  │  200 │ "match2" │
-└──────┴──────┴──────┴──────────┘
+┌───┬─────┬─────┬──────────┐
+│ X │ Y   │ Z   │ W        │
+├───┼─────┼─────┼──────────┤
+│ 1 │ "a" │ 100 │ "match1" │
+│ 2 │ "b" │ 200 │ "match2" │
+└───┴─────┴─────┴──────────┘
 2 rows
 (session: 1 rule(s))
 > ?joined(Id, Cat, Val, Label)
-┌──────┬──────┬──────┬──────────┐
-│ col0 │ col1 │ col2 │ col3     │
-├──────┼──────┼──────┼──────────┤
-│    1 │ "a"  │  100 │ "match1" │
-│    2 │ "b"  │  200 │ "match2" │
-└──────┴──────┴──────┴──────────┘
+┌────┬─────┬─────┬──────────┐
+│ Id │ Cat │ Val │ Label    │
+├────┼─────┼─────┼──────────┤
+│  1 │ "a" │ 100 │ "match1" │
+│  2 │ "b" │ 200 │ "match2" │
+└────┴─────┴─────┴──────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

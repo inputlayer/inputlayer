@@ -24,13 +24,13 @@ Switched to knowledge graph: test_kg_list1_n01t02
 > +data[(1), (2), (3)]
 Inserted 3 fact(s) into 'data'.
 > ?data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,20 +16,20 @@ No results.
 > +numbers[(10), (20), (30)]
 Inserted 3 fact(s) into 'numbers'.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > -numbers(10)
 Deleted 1 facts from 'numbers'.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   50 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 50 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

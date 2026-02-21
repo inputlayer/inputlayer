@@ -14,21 +14,21 @@ Inserted 4 fact(s) into 'orders'.
 > +priority_customers[(100,), (300,)]
 Inserted 2 fact(s) into 'priority_customers'.
 > priority_order(Id, Status) <- orders(Id, CustId, Status), priority_customers(CustId)
-┌──────┬─────────────┐
-│ col0 │ col1        │
-├──────┼─────────────┤
-│    1 │ "pending"   │
-│    4 │ "delivered" │
-└──────┴─────────────┘
+┌───┬─────────────┐
+│ X │ Y           │
+├───┼─────────────┤
+│ 1 │ "pending"   │
+│ 4 │ "delivered" │
+└───┴─────────────┘
 2 rows
 (session: 1 rule(s))
 > ?priority_order(Id, Status)
-┌──────┬─────────────┐
-│ col0 │ col1        │
-├──────┼─────────────┤
-│    1 │ "pending"   │
-│    4 │ "delivered" │
-└──────┴─────────────┘
+┌────┬─────────────┐
+│ Id │ Status      │
+├────┼─────────────┤
+│  1 │ "pending"   │
+│  4 │ "delivered" │
+└────┴─────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

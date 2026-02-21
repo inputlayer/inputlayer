@@ -12,42 +12,42 @@ Switched to knowledge graph: test_degree_n18t107
 > +edge[("a", "b"), ("a", "c"), ("b", "c"), ("c", "d")]
 Inserted 4 fact(s) into 'edge'.
 > out_degree(Node, count<Target>) <- edge(Node, Target)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │    2 │
-│ "b"  │    1 │
-│ "c"  │    1 │
-└──────┴──────┘
+┌─────┬───┐
+│ X   │ Y │
+├─────┼───┤
+│ "a" │ 2 │
+│ "b" │ 1 │
+│ "c" │ 1 │
+└─────┴───┘
 3 rows
 (session: 1 rule(s))
 > in_degree(Node, count<Source>) <- edge(Source, Node)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "b"  │    1 │
-│ "c"  │    2 │
-│ "d"  │    1 │
-└──────┴──────┘
+┌─────┬───┐
+│ X   │ Y │
+├─────┼───┤
+│ "b" │ 1 │
+│ "c" │ 2 │
+│ "d" │ 1 │
+└─────┴───┘
 3 rows
 (session: 2 rule(s))
 > ?out_degree(Node, D)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │    2 │
-│ "b"  │    1 │
-│ "c"  │    1 │
-└──────┴──────┘
+┌──────┬───┐
+│ Node │ D │
+├──────┼───┤
+│ "a"  │ 2 │
+│ "b"  │ 1 │
+│ "c"  │ 1 │
+└──────┴───┘
 3 rows
 > ?in_degree(Node, D)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "b"  │    1 │
-│ "c"  │    2 │
-│ "d"  │    1 │
-└──────┴──────┘
+┌──────┬───┐
+│ Node │ D │
+├──────┼───┤
+│ "b"  │ 1 │
+│ "c"  │ 2 │
+│ "d"  │ 1 │
+└──────┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

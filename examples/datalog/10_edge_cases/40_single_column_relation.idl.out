@@ -15,54 +15,54 @@ Inserted 2 fact(s) into 'flags'.
 Inserted 3 fact(s) into 'ids'.
 > ?flags(F)
 ┌───────┐
-│ col0  │
+│ F     │
 ├───────┤
 │ false │
 │ true  │
 └───────┘
 2 rows
 > ?ids(I)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ I │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > both(I, F) <- ids(I), flags(F)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ false │
-│    1 │ true  │
-│    2 │ false │
-│    2 │ true  │
-│    3 │ false │
-│    3 │ true  │
-└──────┴───────┘
+┌───┬───────┐
+│ X │ Y     │
+├───┼───────┤
+│ 1 │ false │
+│ 1 │ true  │
+│ 2 │ false │
+│ 2 │ true  │
+│ 3 │ false │
+│ 3 │ true  │
+└───┴───────┘
 6 rows
 (session: 1 rule(s))
 > ?both(I, F)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ false │
-│    1 │ true  │
-│    2 │ false │
-│    2 │ true  │
-│    3 │ false │
-│    3 │ true  │
-└──────┴───────┘
+┌───┬───────┐
+│ I │ F     │
+├───┼───────┤
+│ 1 │ false │
+│ 1 │ true  │
+│ 2 │ false │
+│ 2 │ true  │
+│ 3 │ false │
+│ 3 │ true  │
+└───┴───────┘
 6 rows
 > +count_ids(count<I>) <- ids(I)
 Rule 'count_ids' registered.
 > ?count_ids(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -19,16 +19,16 @@ Rule 'reachable' registered.
 Rules:
   reachable (2 clause(s))
 > ?reachable(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
 6 rows
 > .rule remove reachable 1
 Clause 1 removed from rule 'reachable'.

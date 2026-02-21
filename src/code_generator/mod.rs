@@ -64,6 +64,13 @@ fn is_query_cancelled() -> bool {
     })
 }
 
+/// Tolerance for float equality comparisons in filters and joins.
+/// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use — values that
+/// differ by normal floating-point rounding (e.g. `0.1 + 0.2`) would compare
+/// as unequal. 1e-10 is tight enough for 64-bit precision while tolerating
+/// accumulated rounding in typical Datalog arithmetic.
+const FLOAT_EQ_TOLERANCE: f64 = 1e-10;
+
 /// Iteration counter type for recursive scopes
 pub type Iter = u32;
 
@@ -1219,7 +1226,7 @@ impl CodeGenerator {
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
-                        return (f - (val as f64)).abs() < f64::EPSILON;
+                        return (f - (val as f64)).abs() < FLOAT_EQ_TOLERANCE;
                     }
                 }
                 false
@@ -1232,7 +1239,7 @@ impl CodeGenerator {
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
-                        return (f - (val as f64)).abs() >= f64::EPSILON;
+                        return (f - (val as f64)).abs() >= FLOAT_EQ_TOLERANCE;
                     }
                 }
                 true
@@ -1331,13 +1338,13 @@ impl CodeGenerator {
                 tuple
                     .get(col)
                     .and_then(super::value::Value::as_f64)
-                    .is_some_and(|f| (f - val).abs() < f64::EPSILON)
+                    .is_some_and(|f| (f - val).abs() < FLOAT_EQ_TOLERANCE)
             }),
             Predicate::ColumnNeFloat(col, val) => Box::new(move |tuple: &Tuple| {
                 tuple
                     .get(col)
                     .and_then(super::value::Value::as_f64)
-                    .is_none_or(|f| (f - val).abs() >= f64::EPSILON)
+                    .is_none_or(|f| (f - val).abs() >= FLOAT_EQ_TOLERANCE)
             }),
             Predicate::ColumnGtFloat(col, val) => Box::new(move |tuple: &Tuple| {
                 tuple
@@ -1494,10 +1501,10 @@ impl CodeGenerator {
                         let arith_f = arith_val as f64;
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => {
-                                (col_f - arith_f).abs() < f64::EPSILON
+                                (col_f - arith_f).abs() < FLOAT_EQ_TOLERANCE
                             }
                             crate::ast::ComparisonOp::NotEqual => {
-                                (col_f - arith_f).abs() >= f64::EPSILON
+                                (col_f - arith_f).abs() >= FLOAT_EQ_TOLERANCE
                             }
                             crate::ast::ComparisonOp::LessThan => col_f < arith_f,
                             crate::ast::ComparisonOp::LessOrEqual => col_f <= arith_f,

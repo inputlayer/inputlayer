@@ -16,14 +16,14 @@ Rule 'chain' registered.
 > +chain(X, Z) <- chain(X, Y), link(Y, Z)
 Rule 'chain' registered.
 > ?chain("a", Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │ "b"  │
-│ "a"  │ "c"  │
-│ "a"  │ "d"  │
-│ "a"  │ "e"  │
-└──────┴──────┘
+┌─────┬─────┐
+│ a   │ Y   │
+├─────┼─────┤
+│ "a" │ "b" │
+│ "a" │ "c" │
+│ "a" │ "d" │
+│ "a" │ "e" │
+└─────┴─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

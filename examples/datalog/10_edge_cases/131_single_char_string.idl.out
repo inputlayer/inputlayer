@@ -12,14 +12,14 @@ Switched to knowledge graph: test_single_char_n10t131
 > +chars[("a",), ("b",), ("1",), ("@",)]
 Inserted 4 fact(s) into 'chars'.
 > ?chars(C)
-┌──────┐
-│ col0 │
-├──────┤
-│ "1"  │
-│ "@"  │
-│ "a"  │
-│ "b"  │
-└──────┘
+┌─────┐
+│ C   │
+├─────┤
+│ "1" │
+│ "@" │
+│ "a" │
+│ "b" │
+└─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

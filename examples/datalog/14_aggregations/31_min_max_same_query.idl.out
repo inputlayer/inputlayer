@@ -12,34 +12,34 @@ Switched to knowledge graph: test_min_max_n14t31
 > +values[(10,), (20,), (5,), (30,), (15,)]
 Inserted 5 fact(s) into 'values'.
 > min_val(min<V>) <- values(V)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > max_val(max<V>) <- values(V)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 30 │
+└────┘
 1 rows
 (session: 2 rule(s))
 > ?min_val(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > ?max_val(M)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-└──────┘
+┌────┐
+│ M  │
+├────┤
+│ 30 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

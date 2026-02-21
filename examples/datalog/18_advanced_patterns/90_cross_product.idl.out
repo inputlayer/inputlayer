@@ -14,21 +14,21 @@ Inserted 2 fact(s) into 'colors'.
 > +sizes[("S",), ("M",), ("L",)]
 Inserted 3 fact(s) into 'sizes'.
 > combinations(Color, Size) <- colors(Color), sizes(Size)
-┌────────┬──────┐
-│ col0   │ col1 │
-├────────┼──────┤
-│ "blue" │ "L"  │
-│ "blue" │ "M"  │
-│ "blue" │ "S"  │
-│ "red"  │ "L"  │
-│ "red"  │ "M"  │
-│ "red"  │ "S"  │
-└────────┴──────┘
+┌────────┬─────┐
+│ X      │ Y   │
+├────────┼─────┤
+│ "blue" │ "L" │
+│ "blue" │ "M" │
+│ "blue" │ "S" │
+│ "red"  │ "L" │
+│ "red"  │ "M" │
+│ "red"  │ "S" │
+└────────┴─────┘
 6 rows
 (session: 1 rule(s))
 > ?combinations(Color, Size)
 ┌────────┬──────┐
-│ col0   │ col1 │
+│ Color  │ Size │
 ├────────┼──────┤
 │ "blue" │ "L"  │
 │ "blue" │ "M"  │

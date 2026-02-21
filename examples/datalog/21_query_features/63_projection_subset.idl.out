@@ -12,19 +12,19 @@ Switched to knowledge graph: test_proj_sub_n21t63
 > +full[(1, "a", 100, true, "x")]
 Inserted 1 fact(s) into 'full'.
 > subset(A, C, E) <- full(A, _, C, _, E)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │  100 │ "x"  │
-└──────┴──────┴──────┘
+┌───┬─────┬─────┐
+│ X │ Y   │ Z   │
+├───┼─────┼─────┤
+│ 1 │ 100 │ "x" │
+└───┴─────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?subset(A, C, E)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │  100 │ "x"  │
-└──────┴──────┴──────┘
+┌───┬─────┬─────┐
+│ A │ C   │ E   │
+├───┼─────┼─────┤
+│ 1 │ 100 │ "x" │
+└───┴─────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

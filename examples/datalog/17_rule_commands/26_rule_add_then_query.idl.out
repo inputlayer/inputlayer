@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'facts'.
 > +derived(X, Y) <- facts(X), Y = X * 10
 Rule 'derived' registered.
 > ?derived(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

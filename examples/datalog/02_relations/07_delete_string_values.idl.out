@@ -12,23 +12,23 @@ Switched to knowledge graph: test_del_str_n02t07
 > +person[("alice", 25), ("bob", 30), ("charlie", 35)]
 Inserted 3 fact(s) into 'person'.
 > ?person(X, Y)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "alice"   │   25 │
-│ "bob"     │   30 │
-│ "charlie" │   35 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ X         │ Y  │
+├───────────┼────┤
+│ "alice"   │ 25 │
+│ "bob"     │ 30 │
+│ "charlie" │ 35 │
+└───────────┴────┘
 3 rows
 > -person[("bob", 30)]
 Deleted 1 fact(s) from 'person'.
 > ?person(X, Y)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "alice"   │   25 │
-│ "charlie" │   35 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ X         │ Y  │
+├───────────┼────┤
+│ "alice"   │ 25 │
+│ "charlie" │ 35 │
+└───────────┴────┘
 2 rows
 > -person[("alice", 25), ("charlie", 35)]
 Deleted 2 fact(s) from 'person'.

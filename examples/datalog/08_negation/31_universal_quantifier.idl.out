@@ -16,57 +16,57 @@ Inserted 3 fact(s) into 'courses'.
 > +enrolled[(1, "Math"), (1, "Physics"), (1, "Chemistry"), (2, "Math"), (2, "Physics"), (3, "Math")]
 Inserted 6 fact(s) into 'enrolled'.
 > has_enrollment(S) <- enrolled(S, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?has_enrollment(S)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ S │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > not_enrolled(S, C) <- students(S, _), courses(C), !enrolled(S, C)
-┌──────┬─────────────┐
-│ col0 │ col1        │
-├──────┼─────────────┤
-│    2 │ "Chemistry" │
-│    3 │ "Chemistry" │
-│    3 │ "Physics"   │
-└──────┴─────────────┘
+┌───┬─────────────┐
+│ X │ Y           │
+├───┼─────────────┤
+│ 2 │ "Chemistry" │
+│ 3 │ "Chemistry" │
+│ 3 │ "Physics"   │
+└───┴─────────────┘
 3 rows
 (session: 2 rule(s))
 > ?not_enrolled(S, C)
-┌──────┬─────────────┐
-│ col0 │ col1        │
-├──────┼─────────────┤
-│    2 │ "Chemistry" │
-│    3 │ "Chemistry" │
-│    3 │ "Physics"   │
-└──────┴─────────────┘
+┌───┬─────────────┐
+│ S │ C           │
+├───┼─────────────┤
+│ 2 │ "Chemistry" │
+│ 3 │ "Chemistry" │
+│ 3 │ "Physics"   │
+└───┴─────────────┘
 3 rows
 > all_courses(S, Name) <- students(S, Name), !not_enrolled(S, _)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "Alice" │
+└───┴─────────┘
 1 rows
 (session: 3 rule(s))
 > ?all_courses(S, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ S │ Name    │
+├───┼─────────┤
+│ 1 │ "Alice" │
+└───┴─────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

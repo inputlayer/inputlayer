@@ -13,7 +13,7 @@ Switched to knowledge graph: test_unicode_n10t126
 Inserted 4 fact(s) into 'names'.
 > ?names(N)
 ┌─────────┐
-│ col0    │
+│ N       │
 ├─────────┤
 │ "Alice" │
 │ "Böb"   │

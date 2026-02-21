@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'data'.
 > +result(sum<V>) <- data(_, V)
 Rule 'result' registered.
 > ?result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > +result(max<V>) <- data(_, V)
 Rule 'result' registered.
 > ?result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 30 │
+│ 60 │
+└────┘
 2 rows
 > .rule list
 Rules:

@@ -12,23 +12,23 @@ Switched to knowledge graph: test_cond_update_n27t20
 > +inventory[(1, "Widget", 10), (2, "Gadget", 5), (3, "Gizmo", 20)]
 Inserted 3 fact(s) into 'inventory'.
 > ?inventory(Id, Name, Qty)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "Widget" │   10 │
-│    2 │ "Gadget" │    5 │
-│    3 │ "Gizmo"  │   20 │
-└──────┴──────────┴──────┘
+┌────┬──────────┬─────┐
+│ Id │ Name     │ Qty │
+├────┼──────────┼─────┤
+│  1 │ "Widget" │  10 │
+│  2 │ "Gadget" │   5 │
+│  3 │ "Gizmo"  │  20 │
+└────┴──────────┴─────┘
 3 rows
 > -inventory(Id, Name, Qty) <- inventory(Id, Name, Qty), Qty < 10
 Conditional delete: 1 fact(s) deleted from 'inventory'.
 > ?inventory(Id, Name, Qty)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "Widget" │   10 │
-│    3 │ "Gizmo"  │   20 │
-└──────┴──────────┴──────┘
+┌────┬──────────┬─────┐
+│ Id │ Name     │ Qty │
+├────┼──────────┼─────┤
+│  1 │ "Widget" │  10 │
+│  3 │ "Gizmo"  │  20 │
+└────┴──────────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

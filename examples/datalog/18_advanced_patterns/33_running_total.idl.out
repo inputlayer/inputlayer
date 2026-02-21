@@ -14,14 +14,14 @@ Inserted 4 fact(s) into 'ordered_vals'.
 > +running_sum(Id, sum<Val>) <- ordered_vals(I, Val), I <= Id, ordered_vals(Id, _)
 Rule 'running_sum' registered.
 > ?running_sum(Id, Sum)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   30 │
-│    3 │   60 │
-│    4 │  100 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Sum │
+├────┼─────┤
+│  1 │  10 │
+│  2 │  30 │
+│  3 │  60 │
+│  4 │ 100 │
+└────┴─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

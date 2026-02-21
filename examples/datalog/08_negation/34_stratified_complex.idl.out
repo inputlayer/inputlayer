@@ -16,40 +16,40 @@ Rule 'even' registered.
 > +even(X) <- base(X), X = 4
 Rule 'even' registered.
 > odd(X) <- base(X), !even(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?odd(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > not_odd(X) <- base(X), !odd(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 (session: 2 rule(s))
 > ?not_odd(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

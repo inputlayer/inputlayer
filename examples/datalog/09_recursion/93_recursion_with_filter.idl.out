@@ -18,14 +18,14 @@ Rule 'light_reach' registered.
 > +light_reach(X, Z) <- light_reach(X, Y), light_edge(Y, Z, _)
 Rule 'light_reach' registered.
 > ?light_reach(1, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    1 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 1 │ 5 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

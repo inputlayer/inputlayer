@@ -14,14 +14,14 @@ Inserted 4 fact(s) into 'scores'.
 > +quartile(Id, Score, count<OtherId>) <- scores(Id, Score), scores(OtherId, OtherScore), OtherScore >= Score
 Rule 'quartile' registered.
 > ?quartile(Id, Score, Q)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │   95 │    1 │
-│    2 │   85 │    2 │
-│    3 │   75 │    3 │
-│    4 │   65 │    4 │
-└──────┴──────┴──────┘
+┌────┬───────┬───┐
+│ Id │ Score │ Q │
+├────┼───────┼───┤
+│  1 │    95 │ 1 │
+│  2 │    85 │ 2 │
+│  3 │    75 │ 3 │
+│  4 │    65 │ 4 │
+└────┴───────┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

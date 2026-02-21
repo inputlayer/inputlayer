@@ -12,63 +12,63 @@ Switched to knowledge graph: test_denorm_n18t16
 > +orders[(1, "widget", "Alice", 100), (2, "gadget", "Bob", 200), (3, "widget", "Alice", 150), (4, "gizmo", "Carol", 75), (5, "widget", "Bob", 100)]
 Inserted 5 fact(s) into 'orders'.
 > customer_total(Customer, sum<Amt>) <- orders(_, _, Customer, Amt)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │  250 │
-│ "Bob"   │  300 │
-│ "Carol" │   75 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "Alice" │ 250 │
+│ "Bob"   │ 300 │
+│ "Carol" │  75 │
+└─────────┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?customer_total(Customer, Total)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │  250 │
-│ "Bob"   │  300 │
-│ "Carol" │   75 │
-└─────────┴──────┘
+┌──────────┬───────┐
+│ Customer │ Total │
+├──────────┼───────┤
+│ "Alice"  │   250 │
+│ "Bob"    │   300 │
+│ "Carol"  │    75 │
+└──────────┴───────┘
 3 rows
 > product_total(Product, sum<Amt>) <- orders(_, Product, _, Amt)
-┌──────────┬──────┐
-│ col0     │ col1 │
-├──────────┼──────┤
-│ "gadget" │  200 │
-│ "gizmo"  │   75 │
-│ "widget" │  350 │
-└──────────┴──────┘
+┌──────────┬─────┐
+│ X        │ Y   │
+├──────────┼─────┤
+│ "gadget" │ 200 │
+│ "gizmo"  │  75 │
+│ "widget" │ 350 │
+└──────────┴─────┘
 3 rows
 (session: 2 rule(s))
 > ?product_total(Product, Total)
-┌──────────┬──────┐
-│ col0     │ col1 │
-├──────────┼──────┤
-│ "gadget" │  200 │
-│ "gizmo"  │   75 │
-│ "widget" │  350 │
-└──────────┴──────┘
+┌──────────┬───────┐
+│ Product  │ Total │
+├──────────┼───────┤
+│ "gadget" │   200 │
+│ "gizmo"  │    75 │
+│ "widget" │   350 │
+└──────────┴───────┘
 3 rows
 > crosstab(Customer, Product, sum<Amt>) <- orders(_, Product, Customer, Amt)
-┌─────────┬──────────┬──────┐
-│ col0    │ col1     │ col2 │
-├─────────┼──────────┼──────┤
-│ "Alice" │ "widget" │  250 │
-│ "Bob"   │ "gadget" │  200 │
-│ "Bob"   │ "widget" │  100 │
-│ "Carol" │ "gizmo"  │   75 │
-└─────────┴──────────┴──────┘
+┌─────────┬──────────┬─────┐
+│ X       │ Y        │ Z   │
+├─────────┼──────────┼─────┤
+│ "Alice" │ "widget" │ 250 │
+│ "Bob"   │ "gadget" │ 200 │
+│ "Bob"   │ "widget" │ 100 │
+│ "Carol" │ "gizmo"  │  75 │
+└─────────┴──────────┴─────┘
 4 rows
 (session: 3 rule(s))
 > ?crosstab(Customer, Product, Total)
-┌─────────┬──────────┬──────┐
-│ col0    │ col1     │ col2 │
-├─────────┼──────────┼──────┤
-│ "Alice" │ "widget" │  250 │
-│ "Bob"   │ "gadget" │  200 │
-│ "Bob"   │ "widget" │  100 │
-│ "Carol" │ "gizmo"  │   75 │
-└─────────┴──────────┴──────┘
+┌──────────┬──────────┬───────┐
+│ Customer │ Product  │ Total │
+├──────────┼──────────┼───────┤
+│ "Alice"  │ "widget" │   250 │
+│ "Bob"    │ "gadget" │   200 │
+│ "Bob"    │ "widget" │   100 │
+│ "Carol"  │ "gizmo"  │    75 │
+└──────────┴──────────┴───────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

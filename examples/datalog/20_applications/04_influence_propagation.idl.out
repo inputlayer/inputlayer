@@ -18,20 +18,20 @@ Rule 'influenced' registered.
 > +influenced(Y) <- influenced(X), follows(Y, X)
 Rule 'influenced' registered.
 > ?influenced(U)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ U │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > +influence_reach(count<U>) <- influenced(U)
 Rule 'influence_reach' registered.
 > ?influence_reach(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > +influence_dist(X, 0) <- influencer(X)
 Rule 'influence_dist' registered.
@@ -40,20 +40,20 @@ Rule 'influence_dist' registered.
 > +min_dist(User, min<D>) <- influence_dist(User, D)
 Rule 'min_dist' registered.
 > ?min_dist(U, D)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ U │ D │
+├───┼───┤
+│ 1 │ 0 │
+└───┴───┘
 1 rows
 > +at_distance(D, count<U>) <- min_dist(U, D)
 Rule 'at_distance' registered.
 > ?at_distance(D, C)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ D │ C │
+├───┼───┤
+│ 0 │ 1 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

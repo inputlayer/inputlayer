@@ -14,32 +14,32 @@ Inserted 5 fact(s) into 'reading'.
 > +max_temp(Sensor, max<Temp>) <- reading(Sensor, Temp)
 Rule 'max_temp' registered.
 > ?max_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   28 │
-│    2 │   35 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 28 │
+│ 2 │ 35 │
+└───┴────┘
 2 rows
 > -reading(1, 28)
 Deleted 1 facts from 'reading'.
 > ?max_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   25 │
-│    2 │   35 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 25 │
+│ 2 │ 35 │
+└───┴────┘
 2 rows
 > +reading[(1, 50)]
 Inserted 1 fact(s) into 'reading'.
 > ?max_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   50 │
-│    2 │   35 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 50 │
+│ 2 │ 35 │
+└───┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

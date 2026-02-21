@@ -12,48 +12,48 @@ Switched to knowledge graph: test_window_n18t132
 > +sales[(1, 100), (2, 150), (3, 200), (4, 125), (5, 175)]
 Inserted 5 fact(s) into 'sales'.
 > rank(Id, count<Other>) <- sales(Id, Val), sales(Other, OtherVal), OtherVal > Val
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    4 │
-│    2 │    2 │
-│    4 │    3 │
-│    5 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 4 │
+│ 2 │ 2 │
+│ 4 │ 3 │
+│ 5 │ 1 │
+└───┴───┘
 4 rows
 (session: 1 rule(s))
 > ?rank(Id, R)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    4 │
-│    2 │    2 │
-│    4 │    3 │
-│    5 │    1 │
-└──────┴──────┘
+┌────┬───┐
+│ Id │ R │
+├────┼───┤
+│  1 │ 4 │
+│  2 │ 2 │
+│  4 │ 3 │
+│  5 │ 1 │
+└────┴───┘
 4 rows
 > running(Id, count<Other>) <- sales(Id, Val), sales(Other, OtherVal), OtherVal <= Val
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    3 │
-│    3 │    5 │
-│    4 │    2 │
-│    5 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 2 │ 3 │
+│ 3 │ 5 │
+│ 4 │ 2 │
+│ 5 │ 4 │
+└───┴───┘
 5 rows
 (session: 2 rule(s))
 > ?running(Id, R)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    3 │
-│    3 │    5 │
-│    4 │    2 │
-│    5 │    4 │
-└──────┴──────┘
+┌────┬───┐
+│ Id │ R │
+├────┼───┤
+│  1 │ 1 │
+│  2 │ 3 │
+│  3 │ 5 │
+│  4 │ 2 │
+│  5 │ 4 │
+└────┴───┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,21 +14,21 @@ Inserted 4 fact(s) into 'all_products'.
 > +sold_products[(1,), (3,)]
 Inserted 2 fact(s) into 'sold_products'.
 > unsold(Id, Name) <- all_products(Id, Name), !sold_products(Id)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    2 │ "Gadget" │
-│    4 │ "Doodad" │
-└──────┴──────────┘
+┌───┬──────────┐
+│ X │ Y        │
+├───┼──────────┤
+│ 2 │ "Gadget" │
+│ 4 │ "Doodad" │
+└───┴──────────┘
 2 rows
 (session: 1 rule(s))
 > ?unsold(Id, Name)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    2 │ "Gadget" │
-│    4 │ "Doodad" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ Id │ Name     │
+├────┼──────────┤
+│  2 │ "Gadget" │
+│  4 │ "Doodad" │
+└────┴──────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

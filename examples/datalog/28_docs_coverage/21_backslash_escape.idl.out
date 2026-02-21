@@ -12,22 +12,22 @@ Switched to knowledge graph: test_backslash_n28t21
 > +paths[(1, "C:\\Users\\test"), (2, "path\\to\\file"), (3, "\\\\network\\share")]
 Inserted 3 fact(s) into 'paths'.
 > ?paths(Id, P)
-┌──────┬──────────────────────┐
-│ col0 │ col1                 │
-├──────┼──────────────────────┤
-│    1 │ "C:\\Users\\test"    │
-│    2 │ "path\\to\\file"     │
-│    3 │ "\\\\network\\share" │
-└──────┴──────────────────────┘
+┌────┬──────────────────────┐
+│ Id │ P                    │
+├────┼──────────────────────┤
+│  1 │ "C:\\Users\\test"    │
+│  2 │ "path\\to\\file"     │
+│  3 │ "\\\\network\\share" │
+└────┴──────────────────────┘
 3 rows
 > +single[(1, "before\\after")]
 Inserted 1 fact(s) into 'single'.
 > ?single(Id, S)
-┌──────┬─────────────────┐
-│ col0 │ col1            │
-├──────┼─────────────────┤
-│    1 │ "before\\after" │
-└──────┴─────────────────┘
+┌────┬─────────────────┐
+│ Id │ S               │
+├────┼─────────────────┤
+│  1 │ "before\\after" │
+└────┴─────────────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

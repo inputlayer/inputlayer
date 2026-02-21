@@ -17,7 +17,7 @@ Inserted 2 fact(s) into 'large_neg'.
 Inserted 2 fact(s) into 'mixed'.
 > ?large_pos(X, Y)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │  999999 │ 1000001 │
 │ 1000000 │ 2000000 │
@@ -25,7 +25,7 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows
 > ?large_neg(X, Y)
 ┌──────────┬──────────┐
-│ col0     │ col1     │
+│ X        │ Y        │
 ├──────────┼──────────┤
 │ -1000000 │ -2000000 │
 │  -999999 │ -1000001 │
@@ -33,7 +33,7 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows
 > ?mixed(X, Y)
 ┌─────────┬──────────┐
-│ col0    │ col1     │
+│ X       │ Y        │
 ├─────────┼──────────┤
 │ -999999 │   999999 │
 │ 1000000 │ -1000000 │
@@ -43,7 +43,7 @@ Inserted 2 fact(s) into 'mixed'.
 Rule 'big_first' registered.
 > ?big_first(X, Y)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │ 1000000 │ 2000000 │
 └─────────┴─────────┘

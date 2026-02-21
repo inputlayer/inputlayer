@@ -16,12 +16,12 @@ Inserted 2 fact(s) into 'department'.
 > +project[(101, 1), (102, 2), (103, 3)]
 Inserted 3 fact(s) into 'project'.
 > ?employee(EmpId, Name, DeptId), department(DeptId, "eng"), project(ProjId, EmpId)
-┌──────┬─────────┬──────┬──────┐
-│ col0 │ col1    │ col2 │ col3 │
-├──────┼─────────┼──────┼──────┤
-│    1 │ "alice" │   10 │  101 │
-│    3 │ "carol" │   10 │  103 │
-└──────┴─────────┴──────┴──────┘
+┌───────┬─────────┬────────┬────────┐
+│ EmpId │ Name    │ DeptId │ ProjId │
+├───────┼─────────┼────────┼────────┤
+│     1 │ "alice" │     10 │    101 │
+│     3 │ "carol" │     10 │    103 │
+└───────┴─────────┴────────┴────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

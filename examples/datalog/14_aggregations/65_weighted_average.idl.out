@@ -12,34 +12,34 @@ Switched to knowledge graph: test_weighted_avg_n14t65
 > +scores[(1, 90, 3), (2, 80, 2), (3, 70, 1)]
 Inserted 3 fact(s) into 'scores'.
 > weighted_sum(sum<WS>) <- scores(_, S, W), WS = S * W
-┌──────┐
-│ col0 │
-├──────┤
-│  500 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 500 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > total_weight(sum<W>) <- scores(_, _, W)
-┌──────┐
-│ col0 │
-├──────┤
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 6 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?weighted_sum(WS)
-┌──────┐
-│ col0 │
-├──────┤
-│  500 │
-└──────┘
+┌─────┐
+│ WS  │
+├─────┤
+│ 500 │
+└─────┘
 1 rows
 > ?total_weight(TW)
-┌──────┐
-│ col0 │
-├──────┤
-│    6 │
-└──────┘
+┌────┐
+│ TW │
+├────┤
+│  6 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

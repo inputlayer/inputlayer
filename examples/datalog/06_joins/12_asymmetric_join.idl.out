@@ -14,21 +14,21 @@ Inserted 7 fact(s) into 'items'.
 > +selected[(2), (5)]
 Inserted 2 fact(s) into 'selected'.
 > matched(Id, Val) <- items(Id, Val), selected(Id)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    5 │ "e"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ "b" │
+│ 5 │ "e" │
+└───┴─────┘
 2 rows
 (session: 1 rule(s))
 > ?matched(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    5 │ "e"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  2 │ "b" │
+│  5 │ "e" │
+└────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

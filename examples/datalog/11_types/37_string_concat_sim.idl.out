@@ -13,7 +13,7 @@ Switched to knowledge graph: test_str_special_n11t37
 Inserted 4 fact(s) into 'text'.
 > ?text(T)
 ┌───────────────┐
-│ col0          │
+│ T             │
 ├───────────────┤
 │ "a/b/c"       │
 │ "foo_bar"     │

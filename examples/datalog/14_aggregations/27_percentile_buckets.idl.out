@@ -18,26 +18,26 @@ Rule 'bucket' registered.
 > +bucket(Id, Score, "high") <- scores(Id, Score), Score >= 70
 Rule 'bucket' registered.
 > ?bucket(Id, Score, Bucket)
-┌──────┬──────┬──────────┐
-│ col0 │ col1 │ col2     │
-├──────┼──────┼──────────┤
-│    1 │   15 │ "low"    │
-│    2 │   35 │ "low"    │
-│    3 │   55 │ "medium" │
-│    4 │   75 │ "high"   │
-│    5 │   95 │ "high"   │
-└──────┴──────┴──────────┘
+┌────┬───────┬──────────┐
+│ Id │ Score │ Bucket   │
+├────┼───────┼──────────┤
+│  1 │    15 │ "low"    │
+│  2 │    35 │ "low"    │
+│  3 │    55 │ "medium" │
+│  4 │    75 │ "high"   │
+│  5 │    95 │ "high"   │
+└────┴───────┴──────────┘
 5 rows
 > +bucket_count(Bucket, count<Id>) <- bucket(Id, _, Bucket)
 Rule 'bucket_count' registered.
 > ?bucket_count(Bucket, Count)
-┌──────────┬──────┐
-│ col0     │ col1 │
-├──────────┼──────┤
-│ "high"   │    2 │
-│ "low"    │    2 │
-│ "medium" │    1 │
-└──────────┴──────┘
+┌──────────┬───────┐
+│ Bucket   │ Count │
+├──────────┼───────┤
+│ "high"   │     2 │
+│ "low"    │     2 │
+│ "medium" │     1 │
+└──────────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

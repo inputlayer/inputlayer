@@ -14,13 +14,13 @@ Inserted 6 fact(s) into 'reading'.
 > +max_temp(Sensor, max<Temp>) <- reading(Sensor, Temp)
 Rule 'max_temp' registered.
 > ?max_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   28 │
-│    2 │   35 │
-│    3 │   18 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 28 │
+│ 2 │ 35 │
+│ 3 │ 18 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

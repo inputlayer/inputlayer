@@ -22,38 +22,38 @@ Inserted 1 fact(s) into 'entry'.
 > +entry(6, 3)
 Inserted 1 fact(s) into 'entry'.
 > ?entry(Id, Type)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    2 │
-│    3 │    1 │
-│    4 │    2 │
-│    5 │    1 │
-│    6 │    3 │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Type │
+├────┼──────┤
+│  1 │    1 │
+│  2 │    2 │
+│  3 │    1 │
+│  4 │    2 │
+│  5 │    1 │
+│  6 │    3 │
+└────┴──────┘
 6 rows
 > -entry(Id, Type) <- entry(Id, Type), Type = 2
 Conditional delete: 2 fact(s) deleted from 'entry'.
 > ?entry(Id, Type)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    3 │    1 │
-│    5 │    1 │
-│    6 │    3 │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Type │
+├────┼──────┤
+│  1 │    1 │
+│  3 │    1 │
+│  5 │    1 │
+│  6 │    3 │
+└────┴──────┘
 4 rows
 > -entry(Id, Type) <- entry(Id, Type), Id > 4
 Conditional delete: 2 fact(s) deleted from 'entry'.
 > ?entry(Id, Type)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    3 │    1 │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Type │
+├────┼──────┤
+│  1 │    1 │
+│  3 │    1 │
+└────┴──────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

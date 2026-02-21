@@ -13,7 +13,7 @@ Switched to knowledge graph: test_boundary_n10t134
 Inserted 5 fact(s) into 'nums'.
 > ?nums(N)
 ┌─────────────┐
-│ col0        │
+│ N           │
 ├─────────────┤
 │ -2147483648 │
 │          -1 │

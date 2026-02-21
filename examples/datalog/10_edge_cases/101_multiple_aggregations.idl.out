@@ -12,76 +12,76 @@ Switched to knowledge graph: test_multi_agg_n10t101
 > +values[(10,), (20,), (30,), (40,), (50,)]
 Inserted 5 fact(s) into 'values'.
 > sum_val(sum<X>) <- values(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  150 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 150 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > count_val(count<X>) <- values(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > min_val(min<X>) <- values(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+└────┘
 1 rows
 (session: 3 rule(s))
 > max_val(max<X>) <- values(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   50 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 50 │
+└────┘
 1 rows
 (session: 4 rule(s))
 > avg_val(avg<X>) <- values(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 30.0 │
 └──────┘
 1 rows
 (session: 5 rule(s))
 > ?sum_val(S)
-┌──────┐
-│ col0 │
-├──────┤
-│  150 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│ 150 │
+└─────┘
 1 rows
 > ?count_val(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > ?min_val(Mi)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-└──────┘
+┌────┐
+│ Mi │
+├────┤
+│ 10 │
+└────┘
 1 rows
 > ?max_val(Ma)
-┌──────┐
-│ col0 │
-├──────┤
-│   50 │
-└──────┘
+┌────┐
+│ Ma │
+├────┤
+│ 50 │
+└────┘
 1 rows
 > ?avg_val(A)
 ┌──────┐
-│ col0 │
+│ A    │
 ├──────┤
 │ 30.0 │
 └──────┘

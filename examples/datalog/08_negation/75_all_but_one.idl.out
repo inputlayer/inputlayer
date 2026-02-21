@@ -16,14 +16,14 @@ Inserted 1 fact(s) into 'excluded'.
 > +result(X) <- items(X), !excluded(X)
 Rule 'result' registered.
 > ?result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 4 │
+│ 5 │
+└───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,25 +12,25 @@ Switched to knowledge graph: test_pers_ref_n04t08
 > +base[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'base'.
 > temp_double(X, Y) <- base(X), Y = X * 2
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    4 │
-│    3 │    6 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 4 │
+│ 3 │ 6 │
+└───┴───┘
 3 rows
 (session: 1 rule(s))
 > +uses_temp(X, Y) <- temp_double(X, Y)
 Rule 'uses_temp' registered.
 > ?uses_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    4 │
-│    3 │    6 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 4 │
+│ 3 │ 6 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

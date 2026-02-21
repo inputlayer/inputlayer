@@ -16,21 +16,21 @@ Rule 'by_cust_prod' registered.
 > +by_cust(Cust, sum<Amt>) <- orders(_, Cust, _, Amt)
 Rule 'by_cust' registered.
 > ?by_cust_prod(Cust, Prod, Sum)
-┌─────────┬──────────┬──────┐
-│ col0    │ col1     │ col2 │
-├─────────┼──────────┼──────┤
-│ "Alice" │ "Gadget" │  150 │
-│ "Alice" │ "Widget" │  100 │
-│ "Bob"   │ "Widget" │  200 │
-└─────────┴──────────┴──────┘
+┌─────────┬──────────┬─────┐
+│ Cust    │ Prod     │ Sum │
+├─────────┼──────────┼─────┤
+│ "Alice" │ "Gadget" │ 150 │
+│ "Alice" │ "Widget" │ 100 │
+│ "Bob"   │ "Widget" │ 200 │
+└─────────┴──────────┴─────┘
 3 rows
 > ?by_cust(Cust, Sum)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │  250 │
-│ "Bob"   │  200 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ Cust    │ Sum │
+├─────────┼─────┤
+│ "Alice" │ 250 │
+│ "Bob"   │ 200 │
+└─────────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,11 +12,11 @@ Switched to knowledge graph: test_multi_col_n21t32
 > +inventory[(1, "A", 100), (1, "B", 200), (2, "A", 150), (2, "B", 250)]
 Inserted 4 fact(s) into 'inventory'.
 > ?inventory(1, "A", Qty)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │ "A"  │  100 │
-└──────┴──────┴──────┘
+┌───┬─────┬─────┐
+│ 1 │ A   │ Qty │
+├───┼─────┼─────┤
+│ 1 │ "A" │ 100 │
+└───┴─────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

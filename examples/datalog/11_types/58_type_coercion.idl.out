@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'ints'.
 > +floats[(1.0,), (2.0,), (4.0,)]
 Inserted 3 fact(s) into 'floats'.
 > bigger_than_1_5(X) <- ints(X), X > 1.5
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 (session: 1 rule(s))
 > ?bigger_than_1_5(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

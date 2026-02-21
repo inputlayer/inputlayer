@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'data'.
 > +max_id(max<Id>) <- data(Id, _)
 Rule 'max_id' registered.
 > ?max_id(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

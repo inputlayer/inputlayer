@@ -12,40 +12,40 @@ Switched to knowledge graph: test_sess_groupby_n04t46
 > +sale[("alice", 100), ("bob", 200), ("alice", 150)]
 Inserted 3 fact(s) into 'sale'.
 > total_by_person(Name, sum<Amount>) <- sale(Name, Amount)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "alice" │  250 │
-│ "bob"   │  200 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "alice" │ 250 │
+│ "bob"   │ 200 │
+└─────────┴─────┘
 2 rows
 (session: 1 rule(s))
 > ?total_by_person(Name, Total)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "alice" │  250 │
-│ "bob"   │  200 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Name    │ Total │
+├─────────┼───────┤
+│ "alice" │   250 │
+│ "bob"   │   200 │
+└─────────┴───────┘
 2 rows
 > sale("bob", 300)
 Session fact added for 'sale'. (Use +sale(...) to persist)
 > total_by_person2(Name, sum<Amount>) <- sale(Name, Amount)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "alice" │  250 │
-│ "bob"   │  500 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "alice" │ 250 │
+│ "bob"   │ 500 │
+└─────────┴─────┘
 2 rows
 (session: 2 rule(s))
 > ?total_by_person2(Name, Total)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "alice" │  250 │
-│ "bob"   │  500 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Name    │ Total │
+├─────────┼───────┤
+│ "alice" │   250 │
+│ "bob"   │   500 │
+└─────────┴───────┘
 2 rows
 > .session clear
 Cleared 1 session fact(s), 2 session rule(s).

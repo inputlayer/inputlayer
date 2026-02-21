@@ -18,60 +18,60 @@ Rule 'symmetric_friend' registered.
 > +direct_friends_of_1(F) <- symmetric_friend(1, F)
 Rule 'direct_friends_of_1' registered.
 > ?direct_friends_of_1(F)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ F │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 > +fof(User, Fof) <- symmetric_friend(User, F), symmetric_friend(F, Fof), User != Fof, !symmetric_friend(User, Fof)
 Rule 'fof' registered.
 > +fof_of_1(Fof) <- fof(1, Fof)
 Rule 'fof_of_1' registered.
 > ?fof_of_1(F)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-│    5 │
-│    6 │
-└──────┘
+┌───┐
+│ F │
+├───┤
+│ 4 │
+│ 5 │
+│ 6 │
+└───┘
 3 rows
 > +friend_count(User, count<Friend>) <- symmetric_friend(User, Friend)
 Rule 'friend_count' registered.
 > ?friend_count(U, C)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    2 │
-│    4 │    2 │
-│    5 │    2 │
-│    6 │    3 │
-│    7 │    1 │
-│    8 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ U │ C │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 2 │
+│ 4 │ 2 │
+│ 5 │ 2 │
+│ 6 │ 3 │
+│ 7 │ 1 │
+│ 8 │ 1 │
+└───┴───┘
 8 rows
 > +max_friends(max<C>) <- friend_count(_, C)
 Rule 'max_friends' registered.
 > ?max_friends(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > +popular(User) <- friend_count(User, C), C >= 3
 Rule 'popular' registered.
 > ?popular(U)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    6 │
-└──────┘
+┌───┐
+│ U │
+├───┤
+│ 2 │
+│ 6 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'sales'.
 > +total(sum<Amount>) <- sales(_, Amount)
 Rule 'total' registered.
 > ?total(T)
-┌──────┐
-│ col0 │
-├──────┤
-│  600 │
-└──────┘
+┌─────┐
+│ T   │
+├─────┤
+│ 600 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

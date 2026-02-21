@@ -16,19 +16,19 @@ Inserted 3 fact(s) into 'set_b'.
 > +set_c[(3,), (4,), (5,)]
 Inserted 3 fact(s) into 'set_c'.
 > intersect_all(X) <- set_a(X), set_b(X), set_c(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?intersect_all(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

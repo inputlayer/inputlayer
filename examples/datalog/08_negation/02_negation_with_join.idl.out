@@ -16,13 +16,13 @@ Inserted 1 fact(s) into 'excluded_dept'.
 > +active_employee(EmpId, DeptId) <- employee(EmpId, DeptId), !excluded_dept(DeptId, _)
 Rule 'active_employee' registered.
 > ?active_employee(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  100 │
-│    5 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 100 │
+│ 5 │ 300 │
+└───┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

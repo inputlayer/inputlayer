@@ -12,29 +12,29 @@ Switched to knowledge graph: test_single_row_n10t17
 > +singleton(42, "only_one")
 Inserted 1 fact(s) into 'singleton'.
 > ?singleton(X, Y)
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│   42 │ "only_one" │
-└──────┴────────────┘
+┌────┬────────────┐
+│ X  │ Y          │
+├────┼────────────┤
+│ 42 │ "only_one" │
+└────┴────────────┘
 1 rows
 > +numbers[(1,), (2,), (3,), (4,), (5,)]
 Inserted 5 fact(s) into 'numbers'.
 > ?numbers(X), X = 3
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > +total_count(count<X>) <- numbers(X)
 Rule 'total_count' registered.
 > ?total_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

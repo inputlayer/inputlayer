@@ -16,23 +16,23 @@ Rule 'connected' registered.
 > +connected(X, Y) <- edge(X, Z), connected(Z, Y)
 Rule 'connected' registered.
 > .rule connected
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
 6 rows
 > ?connected(1, 3)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ 3 │
+├───┼───┤
+│ 1 │ 3 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

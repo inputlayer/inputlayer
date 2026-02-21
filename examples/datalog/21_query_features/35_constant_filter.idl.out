@@ -12,12 +12,12 @@ Switched to knowledge graph: test_const_filter_n21t35
 > +data[(1, "A", 100), (2, "B", 200), (3, "A", 150)]
 Inserted 3 fact(s) into 'data'.
 > ?data(Id, "A", Val)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │ "A"  │  100 │
-│    3 │ "A"  │  150 │
-└──────┴──────┴──────┘
+┌────┬─────┬─────┐
+│ Id │ A   │ Val │
+├────┼─────┼─────┤
+│  1 │ "A" │ 100 │
+│  3 │ "A" │ 150 │
+└────┴─────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

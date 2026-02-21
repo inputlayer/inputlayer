@@ -16,22 +16,22 @@ Inserted 2 fact(s) into 'customers'.
 > +large_orders(OrderId, CustCredit) <- orders(OrderId, CustId, Qty), customers(CustId, CustCredit), Qty > 10
 Rule 'large_orders' registered.
 > ?large_orders(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ 1000 │
-│    3 │ 2000 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 2 │ 1000 │
+│ 3 │ 2000 │
+└───┴──────┘
 2 rows
 > +customer_total(CustId, sum<Qty>) <- orders(_, CustId, Qty)
 Rule 'customer_total' registered.
 > ?customer_total(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│  100 │   30 │
-│  200 │   20 │
-└──────┴──────┘
+┌─────┬────┐
+│ X   │ Y  │
+├─────┼────┤
+│ 100 │ 30 │
+│ 200 │ 20 │
+└─────┴────┘
 2 rows
 > +employees[(1, 50000, 10), (2, 60000, 10), (3, 55000, 20)]
 Inserted 3 fact(s) into 'employees'.
@@ -40,35 +40,35 @@ Rule 'dept_10' registered.
 > +high_paid_dept10(Id) <- dept_10(Id, Sal), Sal > 55000
 Rule 'high_paid_dept10' registered.
 > ?high_paid_dept10(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > +pairs[(1, 2), (2, 3), (3, 4), (1, 3)]
 Inserted 4 fact(s) into 'pairs'.
 > +two_hop(A, C) <- pairs(A, B), pairs(B, C)
 Rule 'two_hop' registered.
 > ?two_hop(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 4 │
+└───┴───┘
 3 rows
 > +order_value(Oid, Qty*10) <- orders(Oid, _, Qty)
 Rule 'order_value' registered.
 > +total_value(sum<V>) <- order_value(_, V)
 Rule 'total_value' registered.
 > ?total_value(T)
-┌──────┐
-│ col0 │
-├──────┤
-│  500 │
-└──────┘
+┌─────┐
+│ T   │
+├─────┤
+│ 500 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

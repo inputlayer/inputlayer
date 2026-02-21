@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'source'.
 > +doubled(Id, Val) <- source(Id, V), Val = V * 2
 Rule 'doubled' registered.
 > ?doubled(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   20 │
-│    2 │   40 │
-│    3 │   60 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │  20 │
+│  2 │  40 │
+│  3 │  60 │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

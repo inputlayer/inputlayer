@@ -20,21 +20,21 @@ Rule 'app_active' registered.
 > +app_admin(Name) <- app_roles(Name), Name = "admin"
 Rule 'app_admin' registered.
 > ?app_users(X, Y)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "alice" │
-│    2 │ "bob"   │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "alice" │
+│ 2 │ "bob"   │
+└───┴─────────┘
 2 rows
 > .clear prefix app_
 Cleared 4 fact(s) from 2 relation(s) with prefix 'app_': app_roles (2), app_users (2)
 > ?other_data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .rule drop prefix app_
 Dropped 2 rule(s) with prefix 'app_': app_active, app_admin

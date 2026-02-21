@@ -14,13 +14,13 @@ Inserted 4 fact(s) into 'scores'.
 > +rank(Id, Score, count<OtherId>) <- scores(Id, Score), scores(OtherId, OtherScore), OtherScore > Score
 Rule 'rank' registered.
 > ?rank(Id, Score, R)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    2 │   87 │    2 │
-│    3 │   92 │    1 │
-│    4 │   87 │    2 │
-└──────┴──────┴──────┘
+┌────┬───────┬───┐
+│ Id │ Score │ R │
+├────┼───────┼───┤
+│  2 │    87 │ 2 │
+│  3 │    92 │ 1 │
+│  4 │    87 │ 2 │
+└────┴───────┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

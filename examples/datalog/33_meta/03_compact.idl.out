@@ -16,12 +16,12 @@ Deleted 1 fact(s) from 'data'.
 > .compact
 Compaction complete.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  3 │ "c" │
+└────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -18,24 +18,24 @@ Inserted 3 fact(s) into 'c_to_d'.
 > +chain2(A, C) <- a_to_b(A, B), b_to_c(B, C)
 Rule 'chain2' registered.
 > ?chain2(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-│    3 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 200 │
+│ 3 │ 300 │
+└───┴─────┘
 3 rows
 > +chain3(A, D) <- a_to_b(A, B), b_to_c(B, C), c_to_d(C, D)
 Rule 'chain3' registered.
 > ?chain3(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 1000 │
-│    2 │ 2000 │
-│    3 │ 3000 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ 1000 │
+│ 2 │ 2000 │
+│ 3 │ 3000 │
+└───┴──────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

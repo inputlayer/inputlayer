@@ -16,11 +16,11 @@ Rule 'first_val' registered.
 > +min_id(min<Id>) <- data(Id, _)
 Rule 'min_id' registered.
 > ?min_id(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

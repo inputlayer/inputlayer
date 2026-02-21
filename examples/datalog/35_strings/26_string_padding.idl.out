@@ -12,23 +12,23 @@ Switched to knowledge graph: test_padding_n35t26
 > +nums[(1,), (12,), (123,)]
 Inserted 3 fact(s) into 'nums'.
 > num_info(N, L) <- nums(N), L = N
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│   12 │   12 │
-│  123 │  123 │
-└──────┴──────┘
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│   1 │   1 │
+│  12 │  12 │
+│ 123 │ 123 │
+└─────┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?num_info(N, L)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│   12 │   12 │
-│  123 │  123 │
-└──────┴──────┘
+┌─────┬─────┐
+│ N   │ L   │
+├─────┼─────┤
+│   1 │   1 │
+│  12 │  12 │
+│ 123 │ 123 │
+└─────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

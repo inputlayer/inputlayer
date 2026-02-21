@@ -18,20 +18,20 @@ Rule 'level' registered.
 > +level(E, L+1) <- reports_to(E, M), level(M, L)
 Rule 'level' registered.
 > ?level(E, L)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ E │ L │
+├───┼───┤
+│ 1 │ 0 │
+└───┴───┘
 1 rows
 > +level_count(L, count<E>) <- level(E, L)
 Rule 'level_count' registered.
 > ?level_count(L, C)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ L │ C │
+├───┼───┤
+│ 0 │ 1 │
+└───┴───┘
 1 rows
 > +subordinate(Mgr, Emp) <- reports_to(Emp, Mgr)
 Rule 'subordinate' registered.

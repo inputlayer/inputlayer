@@ -16,15 +16,15 @@ Rule 'path_cost' registered.
 > +path_cost(A, C, TotalCost) <- path_cost(A, B, C1), edge(B, C, C2), TotalCost = C1 + C2, TotalCost < 100
 Rule 'path_cost' registered.
 > ?path_cost(1, Dest, Cost)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │    2 │   10 │
-│    1 │    3 │   30 │
-│    1 │    3 │   50 │
-│    1 │    4 │   45 │
-│    1 │    4 │   65 │
-└──────┴──────┴──────┘
+┌───┬──────┬──────┐
+│ 1 │ Dest │ Cost │
+├───┼──────┼──────┤
+│ 1 │    2 │   10 │
+│ 1 │    3 │   30 │
+│ 1 │    3 │   50 │
+│ 1 │    4 │   45 │
+│ 1 │    4 │   65 │
+└───┴──────┴──────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,11 +14,11 @@ Inserted 100 fact(s) into 'edges'.
 > +edge_count(count<X>) <- edges(X, _)
 Rule 'edge_count' registered.
 > ?edge_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ C   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > +path(X, Y) <- edges(X, Y)
 Rule 'path' registered.
@@ -29,11 +29,11 @@ Rule 'reach_from_1' registered.
 > +reach_count(count<X>) <- reach_from_1(X)
 Rule 'reach_count' registered.
 > ?reach_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│   19 │
-└──────┘
+┌────┐
+│ C  │
+├────┤
+│ 19 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default
