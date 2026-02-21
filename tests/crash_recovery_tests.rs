@@ -16,8 +16,8 @@ fn _create_test_persist(temp: &TempDir) -> FilePersist {
     let config = PersistConfig {
         path: temp.path().to_path_buf(),
         buffer_size: 10,
-
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     };
     FilePersist::new(config).expect("Failed to create persist layer")
 }
@@ -26,8 +26,8 @@ fn create_test_persist_with_config(path: PathBuf, buffer_size: usize) -> FilePer
     let config = PersistConfig {
         path,
         buffer_size,
-
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     };
     FilePersist::new(config).expect("Failed to create persist layer")
 }
@@ -166,6 +166,7 @@ fn test_recovery_with_corrupted_wal_json() {
         path: path.clone(),
         buffer_size: 10,
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     });
     assert!(
         persist.is_ok(),
@@ -205,6 +206,7 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
         path: path.clone(),
         buffer_size: 100,
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     })
     .expect("Recovery should succeed — corrupted last line is tolerated");
 
@@ -268,8 +270,8 @@ fn test_recovery_with_corrupted_shard_metadata() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     });
 
     assert!(result.is_err(), "Corrupted metadata should return error");
@@ -296,8 +298,8 @@ fn test_recovery_with_missing_required_metadata_fields() {
     let result = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-
         durability_mode: DurabilityMode::Immediate,
+        ..Default::default()
     });
 
     assert!(
@@ -469,13 +471,16 @@ fn test_recovery_with_orphaned_batch_files() {
     let orphan_path = path.join("batches/orphan.parquet");
     fs::write(&orphan_path, b"not a real parquet file").unwrap();
 
-    // System should start up without issues (orphaned files are ignored)
+    // System should start up and clean orphaned files automatically
     let persist = create_test_persist_with_config(path.clone(), 100);
     let shards = persist.list_shards().unwrap();
     assert!(shards.is_empty(), "No valid shards should exist");
 
-    // The orphaned file should still exist (we don't auto-clean)
-    assert!(orphan_path.exists());
+    // The orphaned file should be cleaned up on startup
+    assert!(
+        !orphan_path.exists(),
+        "Orphaned batch file should be removed during startup cleanup"
+    );
 }
 
 #[test]
@@ -896,37 +901,35 @@ fn test_concurrent_read_during_compaction() {
     use std::thread;
 
     let temp = TempDir::new().unwrap();
-    let path = Arc::new(temp.path().to_path_buf());
+    let path = temp.path().to_path_buf();
 
-    // Create initial data
-    {
-        let persist = create_test_persist_with_config(path.as_ref().clone(), 100);
-        persist.ensure_shard("db:edge").unwrap();
+    // Create a single shared persist instance to avoid orphan-cleanup race
+    // (two separate instances on the same path can race: one cleans up batch
+    // files that the other still references)
+    let persist = Arc::new(create_test_persist_with_config(path, 100));
+    persist.ensure_shard("db:edge").unwrap();
 
-        for i in 0..50i32 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
-        }
-        persist.flush("db:edge").unwrap();
+    for i in 0..50i32 {
+        persist
+            .append(
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
     }
+    persist.flush("db:edge").unwrap();
 
     // Shared flag to signal compaction is happening
     let compacting = Arc::new(AtomicBool::new(false));
     let reads_during_compaction = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     // Reader thread
-    let reader_path = Arc::clone(&path);
+    let reader_persist = Arc::clone(&persist);
     let reader_compacting = Arc::clone(&compacting);
     let reader_count = Arc::clone(&reads_during_compaction);
     let reader = thread::spawn(move || {
-        let persist = create_test_persist_with_config(reader_path.as_ref().clone(), 100);
-
         for _ in 0..20 {
-            let result = persist.read("db:edge", 0);
+            let result = reader_persist.read("db:edge", 0);
             if result.is_ok() && reader_compacting.load(Ordering::Relaxed) {
                 reader_count.fetch_add(1, Ordering::Relaxed);
             }
@@ -935,13 +938,11 @@ fn test_concurrent_read_during_compaction() {
     });
 
     // Compaction thread
-    let compact_path = Arc::clone(&path);
+    let compact_persist = Arc::clone(&persist);
     let compact_flag = Arc::clone(&compacting);
     let compactor = thread::spawn(move || {
-        let persist = create_test_persist_with_config(compact_path.as_ref().clone(), 100);
-
         compact_flag.store(true, Ordering::Relaxed);
-        let result = persist.compact("db:edge", 25);
+        let result = compact_persist.compact("db:edge", 25);
         compact_flag.store(false, Ordering::Relaxed);
 
         result.is_ok()

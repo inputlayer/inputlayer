@@ -65,6 +65,13 @@ impl RestError {
             error: ApiError::internal(message),
         }
     }
+
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            error: ApiError::new("SERVICE_UNAVAILABLE", message),
+        }
+    }
 }
 
 impl IntoResponse for RestError {

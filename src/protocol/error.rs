@@ -88,8 +88,9 @@ impl From<bincode::Error> for InputLayerError {
 
 impl From<std::io::Error> for InputLayerError {
     fn from(e: std::io::Error) -> Self {
+        tracing::warn!(error = %e, "IO error");
         InputLayerError::InternalError {
-            message: format!("IO error: {e}"),
+            message: format!("IO error: {}", e.kind()),
         }
     }
 }
@@ -155,6 +156,46 @@ mod tests {
         let err: InputLayerError = io_err.into();
         assert!(matches!(err, InputLayerError::InternalError { .. }));
         assert!(err.to_string().contains("IO error"));
+    }
+
+    /// Regression: IO error messages must use e.kind() to avoid leaking internal paths.
+    #[test]
+    fn test_io_error_does_not_leak_path() {
+        let io_err = std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "failed to open /etc/shadow: permission denied",
+        );
+        let err: InputLayerError = io_err.into();
+        let msg = err.to_string();
+        // Must contain the error kind, not the detailed message with paths
+        assert!(msg.contains("permission denied"), "Missing error kind");
+        assert!(
+            !msg.contains("/etc/shadow"),
+            "IO error leaked internal path: {msg}"
+        );
+    }
+
+    /// Regression: IO error message should contain kind name for all error types.
+    #[test]
+    fn test_io_error_contains_kind_for_various_errors() {
+        let kinds = vec![
+            (std::io::ErrorKind::NotFound, "not found"),
+            (std::io::ErrorKind::ConnectionRefused, "connection refused"),
+            (std::io::ErrorKind::AlreadyExists, "entity already exists"),
+        ];
+        for (kind, expected_substr) in kinds {
+            let io_err = std::io::Error::new(kind, format!("sensitive path /var/data/{:?}", kind));
+            let err: InputLayerError = io_err.into();
+            let msg = err.to_string();
+            assert!(
+                msg.contains(expected_substr),
+                "Missing kind '{expected_substr}' in: {msg}"
+            );
+            assert!(
+                !msg.contains("/var/data/"),
+                "Leaked path for kind {kind:?}: {msg}"
+            );
+        }
     }
 
     #[test]

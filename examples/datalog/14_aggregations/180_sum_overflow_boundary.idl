@@ -1,0 +1,22 @@
+// Test: SUM near i64 overflow boundary
+
+.kg create test_sumov_n14t180
+.kg use test_sumov_n14t180
+
+// Values that sum close to i64::MAX (9223372036854775807)
++big_nums[(4000000000000000000,), (3000000000000000000,), (2000000000000000000,)]
+
+// SUM = 9000000000000000000 (within i64 range)
++total(sum<X>) <- big_nums(X)
+
+?total(S)
+
+// Also test negative boundary
++neg_nums[(-4000000000000000000,), (-3000000000000000000,), (-2000000000000000000,)]
+
++neg_total(sum<X>) <- neg_nums(X)
+
+?neg_total(S)
+
+.kg use default
+.kg drop test_sumov_n14t180

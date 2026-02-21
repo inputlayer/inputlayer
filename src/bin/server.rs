@@ -87,6 +87,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing using config as fallback when env vars are not set
     init_tracing(&config.logging);
 
+    // Install a panic hook that logs panics via tracing and prints to stderr.
+    // Without this, panics on worker threads may lose diagnostic data because
+    // the non-blocking tracing writer buffers output.
+    std::panic::set_hook(Box::new(|info| {
+        let location = info.location().map_or_else(
+            || "unknown".to_string(),
+            |l| format!("{}:{}:{}", l.file(), l.line(), l.column()),
+        );
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Box<dyn Any>".to_string()
+        };
+        tracing::error!(location, payload, "PANIC — thread panicked");
+        eprintln!("PANIC at {location}: {payload}");
+    }));
+
     // Override from CLI flags
     config.http.host = cli.host;
     config.http.port = cli.port;
@@ -110,6 +129,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "WARNING: Durability mode is {:?} (not Immediate). \
              Recent writes may be lost on crash.",
             config.storage.persist.durability_mode
+        );
+    }
+    if !config.http.auth.enabled || config.http.auth.api_keys.is_empty() {
+        eprintln!(
+            "WARNING: Authentication is DISABLED. \
+             All endpoints are publicly accessible. \
+             Set [http.auth] enabled = true with api_keys for production."
         );
     }
 
@@ -158,41 +184,49 @@ fn init_tracing(logging_config: &LoggingConfig) {
     let filter = tracing_subscriber::EnvFilter::try_new(&level)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
-    if let Ok(log_path) = env::var("IL_TRACE_FILE") {
-        // Log to file
-        let file = match std::fs::OpenOptions::new()
+    let use_file = if let Ok(log_path) = env::var("IL_TRACE_FILE") {
+        // Try to open the log file
+        match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
         {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("ERROR: Unable to open IL_TRACE_FILE '{log_path}': {e}");
-                return;
+            Ok(file) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file);
+                let _ = TRACE_GUARD.set(guard);
+
+                let base = || {
+                    tracing_subscriber::fmt()
+                        .with_env_filter(filter.clone())
+                        .with_ansi(false)
+                        .with_thread_names(true)
+                        .with_thread_ids(true)
+                        .with_writer(non_blocking.clone())
+                        .with_timer(tracing_subscriber::fmt::time::SystemTime)
+                };
+
+                let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
+                    Box::new(base().json().finish())
+                } else {
+                    Box::new(base().compact().finish())
+                };
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                true
             }
-        };
-
-        let (non_blocking, guard) = tracing_appender::non_blocking(file);
-        let _ = TRACE_GUARD.set(guard);
-
-        let base = || {
-            tracing_subscriber::fmt()
-                .with_env_filter(filter.clone())
-                .with_ansi(false)
-                .with_thread_names(true)
-                .with_thread_ids(true)
-                .with_writer(non_blocking.clone())
-                .with_timer(tracing_subscriber::fmt::time::SystemTime)
-        };
-
-        let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
-            Box::new(base().json().finish())
-        } else {
-            Box::new(base().compact().finish())
-        };
-
-        let _ = tracing::subscriber::set_global_default(subscriber);
+            Err(e) => {
+                eprintln!(
+                    "WARNING: Unable to open IL_TRACE_FILE '{log_path}': {e}. \
+                     Falling back to stderr logging."
+                );
+                false
+            }
+        }
     } else {
+        false
+    };
+
+    if !use_file {
         // Log to stderr (production default)
         let base = || {
             tracing_subscriber::fmt()

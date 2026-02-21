@@ -2417,8 +2417,11 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let bucket = vector_ops::lsh_bucket(v, table_idx, num_hyperplanes);
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
+                        let bucket = vector_ops::lsh_bucket(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2579,8 +2582,11 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let bucket = vector_ops::lsh_bucket_int8(v, table_idx, num_hyperplanes);
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
+                        let bucket = vector_ops::lsh_bucket_int8(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2592,11 +2598,12 @@ impl CodeGenerator {
                 // lsh_probes(bucket, num_hyperplanes, num_probes) -> Vec<Int64>
                 if arg_values.len() >= 3 {
                     let bucket = arg_values[0].to_i64();
-                    let num_hyperplanes = arg_values[1].to_i64() as usize;
-                    let num_probes = arg_values[2].to_i64() as usize;
-                    let probes = vector_ops::lsh_probes(bucket, num_hyperplanes, num_probes);
-                    // Return as a vector of f32 (since we don't have Vec<i64> Value type)
-                    // The caller can cast as needed
+                    let hp = arg_values[1].to_i64();
+                    let np = arg_values[2].to_i64();
+                    if hp < 0 || np < 0 {
+                        return Value::Null;
+                    }
+                    let probes = vector_ops::lsh_probes(bucket, hp as usize, np as usize);
                     let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                     return Value::vector(probes_f32);
                 }
@@ -2609,9 +2616,12 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
                         let (bucket, _distances) =
-                            vector_ops::lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+                            vector_ops::lsh_bucket_with_distances(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2622,11 +2632,14 @@ impl CodeGenerator {
                 // Note: distances are provided as a Vector (f32) since that's our available type
                 if arg_values.len() >= 3 {
                     let bucket = arg_values[0].to_i64();
-                    let num_probes = arg_values[2].to_i64() as usize;
+                    let np = arg_values[2].to_i64();
+                    if np < 0 {
+                        return Value::Null;
+                    }
                     if let Some(distances_f32) = arg_values[1].as_vector() {
                         let distances: Vec<f64> =
                             distances_f32.iter().map(|&d| f64::from(d)).collect();
-                        let probes = vector_ops::lsh_probes_ranked(bucket, &distances, num_probes);
+                        let probes = vector_ops::lsh_probes_ranked(bucket, &distances, np as usize);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2638,10 +2651,13 @@ impl CodeGenerator {
                 if arg_values.len() >= 4 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let num_probes = arg_values[3].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        let np = arg_values[3].to_i64();
+                        if hp < 0 || np < 0 {
+                            return Value::Null;
+                        }
                         let probes =
-                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
+                            vector_ops::lsh_multi_probe(v, table_idx, hp as usize, np as usize);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2653,13 +2669,16 @@ impl CodeGenerator {
                 if arg_values.len() >= 4 {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let num_probes = arg_values[3].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        let np = arg_values[3].to_i64();
+                        if hp < 0 || np < 0 {
+                            return Value::Null;
+                        }
                         let probes = vector_ops::lsh_multi_probe_int8(
                             v,
                             table_idx,
-                            num_hyperplanes,
-                            num_probes,
+                            hp as usize,
+                            np as usize,
                         );
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
@@ -2967,9 +2986,13 @@ impl CodeGenerator {
             BuiltinFunction::Substr => {
                 if arg_values.len() >= 3 {
                     if let Some(s) = arg_values[0].as_str() {
-                        let start = arg_values[1].as_i64().unwrap_or(0) as usize;
-                        let len = arg_values[2].as_i64().unwrap_or(0) as usize;
-                        // Handle bounds safely
+                        let start_i = arg_values[1].as_i64().unwrap_or(0);
+                        let len_i = arg_values[2].as_i64().unwrap_or(0);
+                        if start_i < 0 || len_i < 0 {
+                            return Value::String("".into());
+                        }
+                        let start = start_i as usize;
+                        let len = len_i as usize;
                         if start <= s.len() {
                             let end = (start + len).min(s.len());
                             return Value::String(s[start..end].into());
@@ -5454,6 +5477,221 @@ mod tests {
 
         // Similar vectors (1 and 2) might have same bucket (not guaranteed but likely)
         // This is probabilistic, so we don't assert equality
+    }
+
+    /// Regression: negative num_hyperplanes must return Null, not panic from `as usize`.
+    #[test]
+    fn test_lsh_bucket_negative_hyperplanes_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "vectors".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int32(1),
+                Value::vector(vec![1.0, 0.0, 0.0]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "vectors".to_string(),
+                schema: vec!["id".to_string(), "vec".to_string()],
+            }),
+            expressions: vec![(
+                "bucket".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshBucket,
+                    vec![
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-1), // negative hyperplanes
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative num_probes in lsh_probes must return Null.
+    #[test]
+    fn test_lsh_probes_negative_params_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int64(5)])]);
+
+        // Test with negative num_hyperplanes
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbes,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(-1), // negative hp
+                        IRExpression::IntConstant(2),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(1).unwrap(), Value::Null);
+
+        // Test with negative num_probes
+        let ir2 = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbes,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(4),
+                        IRExpression::IntConstant(-3), // negative np
+                    ],
+                ),
+            )],
+        };
+
+        let results2 = codegen.generate_and_execute_tuples(&ir2).unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(*results2[0].get(1).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative num_probes in lsh_probes_ranked must return Null.
+    #[test]
+    fn test_lsh_probes_ranked_negative_probes_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int64(5),
+                Value::vector(vec![0.1, 0.2, 0.3]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string(), "dists".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbesRanked,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(-1), // negative probes
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative params in lsh_multi_probe must return Null.
+    #[test]
+    fn test_lsh_multi_probe_negative_params_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "vectors".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int32(1),
+                Value::vector(vec![1.0, 0.0, 0.0]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "vectors".to_string(),
+                schema: vec!["id".to_string(), "vec".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshMultiProbe,
+                    vec![
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-2), // negative hp
+                        IRExpression::IntConstant(3),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative start/len in substr must return empty string, not panic.
+    #[test]
+    fn test_substr_negative_params_returns_empty() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![Value::string("hello world")])],
+        );
+
+        // Negative start
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["s".to_string()],
+            }),
+            expressions: vec![(
+                "sub".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Substr,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(-1), // negative start
+                        IRExpression::IntConstant(5),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(1).unwrap(), Value::String("".into()));
+
+        // Negative length
+        let ir2 = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["s".to_string()],
+            }),
+            expressions: vec![(
+                "sub".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Substr,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-5), // negative len
+                    ],
+                ),
+            )],
+        };
+
+        let results2 = codegen.generate_and_execute_tuples(&ir2).unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(*results2[0].get(1).unwrap(), Value::String("".into()));
     }
 
     #[test]
