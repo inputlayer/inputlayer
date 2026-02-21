@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'score'.
 > +best(max<Score>) <- score(_, Score)
 Rule 'best' registered.
 > ?best(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  200 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 200 │
+└─────┘
 1 rows
 > .rule remove best 1
 Rule 'best' deleted (last clause removed).
@@ -27,11 +27,11 @@ No results.
 > +best(min<Score>) <- score(_, Score)
 Rule 'best' registered.
 > ?best(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

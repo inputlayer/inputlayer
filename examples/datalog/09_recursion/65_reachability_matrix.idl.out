@@ -16,16 +16,16 @@ Rule 'reach' registered.
 > +reach(X, Z) <- reach(X, Y), edge(Y, Z)
 Rule 'reach' registered.
 > ?reach(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │ "b"  │
-│ "a"  │ "c"  │
-│ "a"  │ "d"  │
-│ "b"  │ "c"  │
-│ "b"  │ "d"  │
-│ "c"  │ "d"  │
-└──────┴──────┘
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "a" │ "b" │
+│ "a" │ "c" │
+│ "a" │ "d" │
+│ "b" │ "c" │
+│ "b" │ "d" │
+│ "c" │ "d" │
+└─────┴─────┘
 6 rows
 > .kg use default
 Switched to knowledge graph: default

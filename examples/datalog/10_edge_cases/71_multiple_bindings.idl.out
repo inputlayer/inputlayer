@@ -12,23 +12,23 @@ Switched to knowledge graph: test_multi_bind_n10t71
 > +data[(1, 1), (1, 2), (2, 2), (3, 3)]
 Inserted 4 fact(s) into 'data'.
 > diagonal(X) <- data(X, X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?diagonal(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

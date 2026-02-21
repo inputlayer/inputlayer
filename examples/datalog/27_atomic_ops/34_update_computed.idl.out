@@ -12,26 +12,26 @@ Switched to knowledge graph: test_update_computed_n27t34
 > +prices[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'prices'.
 > ?prices(Id, Price)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-│    3 │  300 │
-└──────┴──────┘
+┌────┬───────┐
+│ Id │ Price │
+├────┼───────┤
+│  1 │   100 │
+│  2 │   200 │
+│  3 │   300 │
+└────┴───────┘
 3 rows
 > -prices(Id, Price)
 Delete error: Cannot insert variable 'Id' - use constants only
 > +prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
 Rule 'prices' registered.
 > ?prices(Id, Price)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ 110.0 │
-│    2 │ 220.0 │
-│    3 │ 330.0 │
-└──────┴───────┘
+┌────┬───────┐
+│ Id │ Price │
+├────┼───────┤
+│  1 │ 110.0 │
+│  2 │ 220.0 │
+│  3 │ 330.0 │
+└────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

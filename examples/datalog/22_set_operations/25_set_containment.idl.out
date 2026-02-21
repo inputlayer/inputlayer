@@ -19,21 +19,21 @@ Inserted 3 fact(s) into 'subset2'.
 No results.
 (session: 1 rule(s))
 > subset2_not_in_super(X) <- subset2(X), !superset(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 6 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?subset1_not_in_super(X)
 No results.
 > ?subset2_not_in_super(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 6 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

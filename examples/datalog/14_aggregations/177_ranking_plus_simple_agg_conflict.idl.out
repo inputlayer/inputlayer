@@ -14,12 +14,12 @@ Inserted 3 fact(s) into 'data'.
 > +result(top_k<2, Id, V:desc>) <- data(Id, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 2 rows
 > +result(sum<V>) <- data(_, V)
 Failed to register rule: Conflicting aggregation: cannot add clause with 'sum' to rule 'result' which already has a clause with 'top_k<2, Id, V:desc>'. Drop the rule first with '.rule drop result' and re-create it.

@@ -12,36 +12,36 @@ Switched to knowledge graph: test_self_ref_n10t70
 > +graph[("a", "a"), ("a", "b"), ("b", "c"), ("c", "c")]
 Inserted 4 fact(s) into 'graph'.
 > has_self_loop(X) <- graph(X, X)
-┌──────┐
-│ col0 │
-├──────┤
-│ "a"  │
-│ "c"  │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ "a" │
+│ "c" │
+└─────┘
 2 rows
 (session: 1 rule(s))
 > no_self_loop(X) <- graph(X, _), !has_self_loop(X)
-┌──────┐
-│ col0 │
-├──────┤
-│ "b"  │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ "b" │
+└─────┘
 1 rows
 (session: 2 rule(s))
 > ?has_self_loop(X)
-┌──────┐
-│ col0 │
-├──────┤
-│ "a"  │
-│ "c"  │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ "a" │
+│ "c" │
+└─────┘
 2 rows
 > ?no_self_loop(X)
-┌──────┐
-│ col0 │
-├──────┤
-│ "b"  │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ "b" │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

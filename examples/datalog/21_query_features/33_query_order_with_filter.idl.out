@@ -12,14 +12,14 @@ Switched to knowledge graph: test_order_filter_n21t33
 > +scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
 Inserted 5 fact(s) into 'scores'.
 > ?scores(Name, Score:desc), Score > 80
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "dave"  │   95 │
-│ "bob"   │   92 │
-│ "eve"   │   88 │
-│ "alice" │   85 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Name    │ Score │
+├─────────┼───────┤
+│ "dave"  │    95 │
+│ "bob"   │    92 │
+│ "eve"   │    88 │
+│ "alice" │    85 │
+└─────────┴───────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

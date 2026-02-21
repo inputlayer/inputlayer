@@ -12,21 +12,21 @@ Switched to knowledge graph: test_neg_const_n08t51
 > +status[(1, "active"), (2, "inactive"), (3, "active"), (4, "pending")]
 Inserted 4 fact(s) into 'status'.
 > non_active(Id, S) <- status(Id, S), S != "active"
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    2 │ "inactive" │
-│    4 │ "pending"  │
-└──────┴────────────┘
+┌───┬────────────┐
+│ X │ Y          │
+├───┼────────────┤
+│ 2 │ "inactive" │
+│ 4 │ "pending"  │
+└───┴────────────┘
 2 rows
 (session: 1 rule(s))
 > ?non_active(Id, S)
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    2 │ "inactive" │
-│    4 │ "pending"  │
-└──────┴────────────┘
+┌────┬────────────┐
+│ Id │ S          │
+├────┼────────────┤
+│  2 │ "inactive" │
+│  4 │ "pending"  │
+└────┴────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

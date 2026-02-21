@@ -23,7 +23,7 @@ Inserted 2 fact(s) into 'regional_config'.
 Rule 'customer_region' registered.
 > ?customer_region(Name, Region)
 ┌─────────┬────────┐
-│ col0    │ col1   │
+│ Name    │ Region │
 ├─────────┼────────┤
 │ "Alice" │ "east" │
 │ "Bob"   │ "west" │

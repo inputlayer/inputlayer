@@ -14,19 +14,19 @@ Inserted 5 fact(s) into 'items'.
 > +exclude[("B",), ("D",)]
 Inserted 2 fact(s) into 'exclude'.
 > count_included(count<Id>) <- items(Id, Name), !exclude(Name)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?count_included(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

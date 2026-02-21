@@ -14,21 +14,21 @@ Inserted 4 fact(s) into 'sales'.
 > +north_sum(sum<Amt>) <- sales("North", Amt)
 Rule 'north_sum' registered.
 > ?north_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│  250 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│ 250 │
+└─────┘
 1 rows
 > +region_count(Region, count<Amt>) <- sales(Region, Amt)
 Rule 'region_count' registered.
 > ?region_count(Region, C)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │    2 │
-│ "South" │    2 │
-└─────────┴──────┘
+┌─────────┬───┐
+│ Region  │ C │
+├─────────┼───┤
+│ "North" │ 2 │
+│ "South" │ 2 │
+└─────────┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

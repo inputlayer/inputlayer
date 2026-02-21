@@ -12,19 +12,19 @@ Switched to knowledge graph: test_nested_arith_n15t35
 > +base[(2,)]
 Inserted 1 fact(s) into 'base'.
 > nested(X, Y) <- base(X), Y = ((X + 1) * 2 + 3) * 4
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   36 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 36 │
+└───┴────┘
 1 rows
 (session: 1 rule(s))
 > ?nested(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   36 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 36 │
+└───┴────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -18,24 +18,24 @@ Inserted 2 fact(s) into 'premium'.
 > +active_user(X, Y) <- all_users(X, Y), !banned(X, _)
 Rule 'active_user' registered.
 > ?active_user(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    3 │    0 │
-│    4 │    0 │
-│    5 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 0 │
+│ 3 │ 0 │
+│ 4 │ 0 │
+│ 5 │ 0 │
+└───┴───┘
 4 rows
 > +basic_user(X, Y) <- active_user(X, Y), !premium(X, _)
 Rule 'basic_user' registered.
 > ?basic_user(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    4 │    0 │
-│    5 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 4 │ 0 │
+│ 5 │ 0 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

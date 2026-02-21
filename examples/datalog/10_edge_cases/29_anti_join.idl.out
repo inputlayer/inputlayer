@@ -14,40 +14,40 @@ Inserted 5 fact(s) into 'all_items'.
 > +selected[(2), (4)]
 Inserted 2 fact(s) into 'selected'.
 > anti_join(Id, Val) <- all_items(Id, Val), !selected(Id)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    3 │ "c"  │
-│    5 │ "e"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "a" │
+│ 3 │ "c" │
+│ 5 │ "e" │
+└───┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?anti_join(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    3 │ "c"  │
-│    5 │ "e"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  3 │ "c" │
+│  5 │ "e" │
+└────┴─────┘
 3 rows
 > semi_join(Id, Val) <- all_items(Id, Val), selected(Id)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    4 │ "d"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ "b" │
+│ 4 │ "d" │
+└───┴─────┘
 2 rows
 (session: 2 rule(s))
 > ?semi_join(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    4 │ "d"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  2 │ "b" │
+│  4 │ "d" │
+└────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

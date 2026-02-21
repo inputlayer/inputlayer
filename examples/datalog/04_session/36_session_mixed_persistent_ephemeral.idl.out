@@ -14,23 +14,23 @@ Inserted 2 fact(s) into 'base'.
 > base(300)
 Session fact added for 'base'. (Use +base(...) to persist)
 > ?base(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-│  200 │
-│  300 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+│ 200 │
+│ 300 │
+└─────┘
 3 rows
 > .session clear
 Cleared 1 session fact(s), 0 session rule(s).
 > ?base(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-│  200 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+│ 200 │
+└─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

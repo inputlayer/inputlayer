@@ -22,18 +22,18 @@ No results.
 > +right[(2), (4)]
 Inserted 2 fact(s) into 'right'.
 > ?joined(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 2 │
+└───┴───┘
 1 rows
 > ?matched(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > -left(X) <- left(X)
 Conditional delete: 3 fact(s) deleted from 'left'.

@@ -18,28 +18,28 @@ Rule 'by_product' registered.
 > +by_both(Customer, Product, sum<Amount>) <- orders(_, Customer, Product, Amount)
 Rule 'by_both' registered.
 > ?by_customer(C, Sum)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │  250 │
-│ "Bob"   │  200 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ C       │ Sum │
+├─────────┼─────┤
+│ "Alice" │ 250 │
+│ "Bob"   │ 200 │
+└─────────┴─────┘
 2 rows
 > ?by_product(P, Sum)
-┌──────────┬──────┐
-│ col0     │ col1 │
-├──────────┼──────┤
-│ "Gadget" │  200 │
-│ "Widget" │  250 │
-└──────────┴──────┘
+┌──────────┬─────┐
+│ P        │ Sum │
+├──────────┼─────┤
+│ "Gadget" │ 200 │
+│ "Widget" │ 250 │
+└──────────┴─────┘
 2 rows
 > ?by_both(C, P, Sum)
-┌─────────┬──────────┬──────┐
-│ col0    │ col1     │ col2 │
-├─────────┼──────────┼──────┤
-│ "Alice" │ "Widget" │  250 │
-│ "Bob"   │ "Gadget" │  200 │
-└─────────┴──────────┴──────┘
+┌─────────┬──────────┬─────┐
+│ C       │ P        │ Sum │
+├─────────┼──────────┼─────┤
+│ "Alice" │ "Widget" │ 250 │
+│ "Bob"   │ "Gadget" │ 200 │
+└─────────┴──────────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,12 +12,12 @@ Switched to knowledge graph: test_session_rank_n04t24
 > +data[(1, 0.5), (2, 1.5), (3, 2.5)]
 Inserted 3 fact(s) into 'data'.
 > result(top_k<2, X, Y:desc>) <- data(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  1.5 │
-│    3 │  2.5 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 1.5 │
+│ 3 │ 2.5 │
+└───┴─────┘
 2 rows
 (session: 1 rule(s))
 > result(within_radius<2.0, X, Y:asc>) <- data(X, Y)

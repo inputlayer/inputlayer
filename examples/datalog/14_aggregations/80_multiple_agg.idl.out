@@ -22,39 +22,39 @@ Rule 'stats_max' registered.
 > +stats_count(count<V>) <- values(V)
 Rule 'stats_count' registered.
 > ?stats_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│  150 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│ 150 │
+└─────┘
 1 rows
 > ?stats_avg(A)
 ┌──────┐
-│ col0 │
+│ A    │
 ├──────┤
 │ 30.0 │
 └──────┘
 1 rows
 > ?stats_min(M)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-└──────┘
+┌────┐
+│ M  │
+├────┤
+│ 10 │
+└────┘
 1 rows
 > ?stats_max(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   50 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 50 │
+└────┘
 1 rows
 > ?stats_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -18,23 +18,23 @@ Rule 'union_ab' registered.
 > +union_ab(X) <- set_b(X)
 Rule 'union_ab' registered.
 > ?union_ab(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 4 rows
 > +union_count(count<X>) <- union_ab(X)
 Rule 'union_count' registered.
 > ?union_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > +pairs_a[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'pairs_a'.
@@ -45,14 +45,14 @@ Rule 'pair_union' registered.
 > +pair_union(X, Y) <- pairs_b(X, Y)
 Rule 'pair_union' registered.
 > ?pair_union(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   40 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 3 │ 30 │
+│ 4 │ 40 │
+└───┴────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

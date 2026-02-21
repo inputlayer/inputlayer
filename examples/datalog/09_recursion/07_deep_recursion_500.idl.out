@@ -36,22 +36,22 @@ Rule 'path' registered.
 > +reachable_500(X) <- path(1, X), X = 500
 Rule 'reachable_500' registered.
 > ?reachable_500(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  500 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 500 │
+└─────┘
 1 rows
 > +from_one(Y) <- path(1, Y)
 Rule 'from_one' registered.
 > +count_from_one(count<Y>) <- from_one(Y)
 Rule 'count_from_one' registered.
 > ?count_from_one(C)
-┌──────┐
-│ col0 │
-├──────┤
-│  499 │
-└──────┘
+┌─────┐
+│ C   │
+├─────┤
+│ 499 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

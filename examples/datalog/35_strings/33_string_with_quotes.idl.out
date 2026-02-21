@@ -12,23 +12,23 @@ Switched to knowledge graph: test_str_quotes_n35t33
 > +messages[(1, "He said \"hello\""), (2, "It's fine"), (3, "A 'quote' here")]
 Inserted 3 fact(s) into 'messages'.
 > ?messages(Id, Msg)
-┌──────┬─────────────────────┐
-│ col0 │ col1                │
-├──────┼─────────────────────┤
-│    1 │ "He said \"hello\"" │
-│    2 │ "It's fine"         │
-│    3 │ "A 'quote' here"    │
-└──────┴─────────────────────┘
+┌────┬─────────────────────┐
+│ Id │ Msg                 │
+├────┼─────────────────────┤
+│  1 │ "He said \"hello\"" │
+│  2 │ "It's fine"         │
+│  3 │ "A 'quote' here"    │
+└────┴─────────────────────┘
 3 rows
 > +simple[(1, "no quotes here"), (2, "plain text")]
 Inserted 2 fact(s) into 'simple'.
 > ?simple(Id, Text)
-┌──────┬──────────────────┐
-│ col0 │ col1             │
-├──────┼──────────────────┤
-│    1 │ "no quotes here" │
-│    2 │ "plain text"     │
-└──────┴──────────────────┘
+┌────┬──────────────────┐
+│ Id │ Text             │
+├────┼──────────────────┤
+│  1 │ "no quotes here" │
+│  2 │ "plain text"     │
+└────┴──────────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

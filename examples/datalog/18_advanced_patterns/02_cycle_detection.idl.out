@@ -20,14 +20,14 @@ Rule 'reachable' registered.
 > +in_cycle(X, X) <- reachable(X, X)
 Rule 'in_cycle' registered.
 > ?in_cycle(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    2 │
-│    3 │    3 │
-│    4 │    4 │
-│    5 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 2 │
+│ 3 │ 3 │
+│ 4 │ 4 │
+│ 5 │ 5 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

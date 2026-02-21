@@ -16,11 +16,11 @@ Inserted 2 fact(s) into 'admins'.
 > +regular_users(Id, Name) <- users(Id, Name), !admins(Id)
 Rule 'regular_users' registered.
 > ?regular_users(Id, Name)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    2 │ "bob" │
-└──────┴───────┘
+┌────┬───────┐
+│ Id │ Name  │
+├────┼───────┤
+│  2 │ "bob" │
+└────┴───────┘
 1 rows
 > +products[(100, "laptop"), (200, "phone"), (300, "tablet")]
 Inserted 3 fact(s) into 'products'.
@@ -29,11 +29,11 @@ Inserted 2 fact(s) into 'discounted'.
 > +full_price(Id, Name) <- products(Id, Name), !discounted(Id)
 Rule 'full_price' registered.
 > ?full_price(Id, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│  200 │ "phone" │
-└──────┴─────────┘
+┌─────┬─────────┐
+│ Id  │ Name    │
+├─────┼─────────┤
+│ 200 │ "phone" │
+└─────┴─────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

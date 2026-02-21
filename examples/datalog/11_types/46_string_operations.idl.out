@@ -13,14 +13,14 @@ Switched to knowledge graph: test_strings_n11t46
 Inserted 5 fact(s) into 'names'.
 > ?names(N), N = "alice"
 ┌─────────┐
-│ col0    │
+│ N       │
 ├─────────┤
 │ "alice" │
 └─────────┘
 1 rows
 > ?names(N), N != "alice"
 ┌─────────┐
-│ col0    │
+│ N       │
 ├─────────┤
 │ "Alice" │
 │ "BOB"   │
@@ -31,11 +31,11 @@ Inserted 5 fact(s) into 'names'.
 > +people[(1, "John", "Doe"), (2, "Jane", "Smith"), (3, "Bob", "Jones")]
 Inserted 3 fact(s) into 'people'.
 > ?people(Id, First, Last), First = "Jane"
-┌──────┬────────┬─────────┐
-│ col0 │ col1   │ col2    │
-├──────┼────────┼─────────┤
-│    2 │ "Jane" │ "Smith" │
-└──────┴────────┴─────────┘
+┌────┬────────┬─────────┐
+│ Id │ First  │ Last    │
+├────┼────────┼─────────┤
+│  2 │ "Jane" │ "Smith" │
+└────┴────────┴─────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

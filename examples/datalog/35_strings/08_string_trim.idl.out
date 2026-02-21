@@ -13,7 +13,7 @@ Switched to knowledge graph: test_trim_n35t08
 Inserted 3 fact(s) into 'words'.
 > trim_result(S, T) <- words(S), T = TRIM(S)
 ┌─────────────┬──────────┐
-│ col0        │ col1     │
+│ X           │ Y        │
 ├─────────────┼──────────┤
 │ "  hello  " │ "hello"  │
 │ " spaced "  │ "spaced" │
@@ -23,7 +23,7 @@ Inserted 3 fact(s) into 'words'.
 (session: 1 rule(s))
 > ?trim_result(S, T)
 ┌─────────────┬──────────┐
-│ col0        │ col1     │
+│ S           │ T        │
 ├─────────────┼──────────┤
 │ "  hello  " │ "hello"  │
 │ " spaced "  │ "spaced" │

@@ -13,7 +13,7 @@ Switched to knowledge graph: test_int64_bounds_n11t42
 Inserted 2 fact(s) into 'big_vals'.
 > ?big_vals(X)
 ┌─────────────────────┐
-│ col0                │
+│ X                   │
 ├─────────────────────┤
 │                   1 │
 │ 9223372036854775806 │
@@ -23,7 +23,7 @@ Inserted 2 fact(s) into 'big_vals'.
 Inserted 1 fact(s) into 'max_val'.
 > ?max_val(X)
 ┌─────────────────────┐
-│ col0                │
+│ X                   │
 ├─────────────────────┤
 │ 9223372036854775807 │
 └─────────────────────┘
@@ -32,7 +32,7 @@ Inserted 1 fact(s) into 'max_val'.
 Inserted 1 fact(s) into 'min_val'.
 > ?min_val(X)
 ┌──────────────────────┐
-│ col0                 │
+│ X                    │
 ├──────────────────────┤
 │ -9223372036854775807 │
 └──────────────────────┘
@@ -43,7 +43,7 @@ Inserted 2 fact(s) into 'nums'.
 Rule 'sum_big' registered.
 > ?sum_big(S)
 ┌─────────────────────┐
-│ col0                │
+│ S                   │
 ├─────────────────────┤
 │ 9223372036854775807 │
 └─────────────────────┘

@@ -30,12 +30,12 @@ No results.
 > +numbers[(15), (20)]
 Inserted 2 fact(s) into 'numbers'.
 > ?threshold(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   15 │
-│   20 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 15 │
+│ 20 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

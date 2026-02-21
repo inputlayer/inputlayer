@@ -14,12 +14,12 @@ Inserted 1 fact(s) into 'doc'.
 > +doc[(2, "short")]
 Inserted 1 fact(s) into 'doc'.
 > ?doc(Id, D)
-┌──────┬──────────────────────────────────────────┐
-│ col0 │ col1                                     │
-├──────┼──────────────────────────────────────────┤
-│    1 │ "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa… │
-│    2 │ "short"                                  │
-└──────┴──────────────────────────────────────────┘
+┌────┬──────────────────────────────────────────┐
+│ Id │ D                                        │
+├────┼──────────────────────────────────────────┤
+│  1 │ "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa… │
+│  2 │ "short"                                  │
+└────┴──────────────────────────────────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,20 +14,20 @@ Inserted 3 fact(s) into 'data'.
 > +normal_count(count<X>) <- data(X, _)
 Rule 'normal_count' registered.
 > ?normal_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > +normal_sum(sum<V>) <- data(_, V)
 Rule 'normal_sum' registered.
 > ?normal_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > +empty_count(count<X>) <- empty(X, _)
 Rule 'empty_count' registered.
@@ -58,12 +58,12 @@ Inserted 3 fact(s) into 'mixed'.
 > +mixed_count(K, count<V>) <- mixed(K, V)
 Rule 'mixed_count' registered.
 > ?mixed_count(K, C)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    3 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ K │ C │
+├───┼───┤
+│ 1 │ 2 │
+│ 3 │ 1 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,13 +12,13 @@ Switched to knowledge graph: test_del_all_n02t05
 > +edge[(1,2), (2,3), (3,4)]
 Inserted 3 fact(s) into 'edge'.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > -edge(X, Y) <- edge(X, Y)
 Conditional delete: 3 fact(s) deleted from 'edge'.
@@ -27,12 +27,12 @@ No results.
 > +edge[(10,20), (20,30)]
 Inserted 2 fact(s) into 'edge'.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   10 │   20 │
-│   20 │   30 │
-└──────┴──────┘
+┌────┬────┐
+│ X  │ Y  │
+├────┼────┤
+│ 10 │ 20 │
+│ 20 │ 30 │
+└────┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

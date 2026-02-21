@@ -16,13 +16,13 @@ Rule 'path_loop' registered.
 > +path_loop(X, Z) <- loop_edge(X, Y), path_loop(Y, Z)
 Rule 'path_loop' registered.
 > ?path_loop(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    1 │    2 │
-│    1 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+└───┴───┘
 3 rows
 > +cycle_edge[(1, 2), (2, 3), (3, 1)]
 Inserted 3 fact(s) into 'cycle_edge'.
@@ -31,13 +31,13 @@ Rule 'path_cycle' registered.
 > +path_cycle(X, Z) <- cycle_edge(X, Y), path_cycle(Y, Z)
 Rule 'path_cycle' registered.
 > ?path_cycle(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    1 │    2 │
-│    1 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+└───┴───┘
 3 rows
 > +diamond_edge[(1, 2), (1, 3), (2, 4), (3, 4)]
 Inserted 4 fact(s) into 'diamond_edge'.
@@ -48,11 +48,11 @@ Rule 'path_diamond' registered.
 > +to_four(X) <- path_diamond(1, X), X = 4
 Rule 'to_four' registered.
 > ?to_four(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > +empty_edge[]
 Inserted 0 fact(s) into 'empty_edge'.

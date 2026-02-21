@@ -18,21 +18,21 @@ Inserted 3 fact(s) into 'employee'.
 > +department[(10, "Engineering"), (20, "Sales")]
 Inserted 2 fact(s) into 'department'.
 > ?employee(Id, Name, Dept)
-┌──────┬───────────┬──────┐
-│ col0 │ col1      │ col2 │
-├──────┼───────────┼──────┤
-│    1 │ "Alice"   │   10 │
-│    2 │ "Bob"     │   10 │
-│    3 │ "Charlie" │   20 │
-└──────┴───────────┴──────┘
+┌────────┬───────────┬─────────┐
+│ emp_id │ name      │ dept_id │
+├────────┼───────────┼─────────┤
+│      1 │ "Alice"   │      10 │
+│      2 │ "Bob"     │      10 │
+│      3 │ "Charlie" │      20 │
+└────────┴───────────┴─────────┘
 3 rows
 > ?department(Id, Name)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│   10 │ "Engineering" │
-│   20 │ "Sales"       │
-└──────┴───────────────┘
+┌─────────┬───────────────┐
+│ dept_id │ dept_name     │
+├─────────┼───────────────┤
+│      10 │ "Engineering" │
+│      20 │ "Sales"       │
+└─────────┴───────────────┘
 2 rows
 > +emp_dept(EmpName, DeptName) <-
 Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

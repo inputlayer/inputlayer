@@ -12,12 +12,12 @@ Switched to knowledge graph: test_iso_a_n01t06
 > +data[(1, "a"), (2, "b")]
 Inserted 2 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+└────┴─────┘
 2 rows
 > .kg create test_iso_b_n01t06
 Knowledge graph 'test_iso_b_n01t06' created.
@@ -29,21 +29,21 @@ No results.
 > +data[(99, "z")]
 Inserted 1 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   99 │ "z"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│ 99 │ "z" │
+└────┴─────┘
 1 rows
 > .kg use test_iso_a_n01t06
 Switched to knowledge graph: test_iso_a_n01t06
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+└────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

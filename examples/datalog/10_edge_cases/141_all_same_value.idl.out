@@ -18,22 +18,22 @@ Rule 'count_same' registered.
 > +avg_same(avg<V>) <- data(_, V)
 Rule 'avg_same' registered.
 > ?sum_same(S)
-┌──────┐
-│ col0 │
-├──────┤
-│  300 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│ 300 │
+└─────┘
 1 rows
 > ?count_same(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > ?avg_same(A)
 ┌───────┐
-│ col0  │
+│ A     │
 ├───────┤
 │ 100.0 │
 └───────┘

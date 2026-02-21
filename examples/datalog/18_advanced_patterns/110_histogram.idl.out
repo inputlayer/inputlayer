@@ -24,15 +24,15 @@ Rule 'grade_bucket' registered.
 > +histogram(Grade, count<S>) <- grade_bucket(S, Grade)
 Rule 'histogram' registered.
 > ?histogram(Grade, Count)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "A"  │    2 │
-│ "B"  │    2 │
-│ "C"  │    2 │
-│ "D"  │    2 │
-│ "F"  │    2 │
-└──────┴──────┘
+┌───────┬───────┐
+│ Grade │ Count │
+├───────┼───────┤
+│ "A"   │     2 │
+│ "B"   │     2 │
+│ "C"   │     2 │
+│ "D"   │     2 │
+│ "F"   │     2 │
+└───────┴───────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

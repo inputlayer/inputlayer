@@ -16,20 +16,20 @@ Inserted 0 fact(s) into 'data'.
 > +data[(1, "a")]
 Inserted 0 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+└────┴─────┘
 1 rows
 > +count_data(count<Id>) <- data(Id, _)
 Rule 'count_data' registered.
 > ?count_data(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,36 +12,36 @@ Switched to knowledge graph: test_const_query_n10t56
 > +data[(1, "a", 100), (2, "b", 200), (3, "a", 300)]
 Inserted 3 fact(s) into 'data'.
 > match_a(Id, Val) <- data(Id, "a", Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    3 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 3 │ 300 │
+└───┴─────┘
 2 rows
 (session: 1 rule(s))
 > ?match_a(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    3 │  300 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ 100 │
+│  3 │ 300 │
+└────┴─────┘
 2 rows
 > exact(Val) <- data(1, "a", Val)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 (session: 2 rule(s))
 > ?exact(Val)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ Val │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

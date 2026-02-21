@@ -12,29 +12,29 @@ Switched to knowledge graph: test_sess_pers_ins_n04t43
 > +data[(1,)]
 Inserted 1 fact(s) into 'data'.
 > doubled(X, Y) <- data(X), Y = X * 2
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 (session: 1 rule(s))
 > ?doubled(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 > +data[(5,)]
 Inserted 1 fact(s) into 'data'.
 > ?doubled(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    5 │   10 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │  2 │
+│ 5 │ 10 │
+└───┴────┘
 2 rows
 > .session clear
 Cleared 0 session fact(s), 1 session rule(s).

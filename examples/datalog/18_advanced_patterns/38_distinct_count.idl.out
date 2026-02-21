@@ -14,20 +14,20 @@ Inserted 4 fact(s) into 'purchases'.
 > +distinct_products(count_distinct<Product>) <- purchases(_, _, Product)
 Rule 'distinct_products' registered.
 > ?distinct_products(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > +distinct_customers(count_distinct<Customer>) <- purchases(_, Customer, _)
 Rule 'distinct_customers' registered.
 > ?distinct_customers(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

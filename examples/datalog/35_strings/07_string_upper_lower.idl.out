@@ -13,7 +13,7 @@ Switched to knowledge graph: test_case_n35t07
 Inserted 3 fact(s) into 'words'.
 > upper_result(S, U) <- words(S), U = UPPER(S)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │ "Hello" │ "HELLO" │
 │ "MiXeD" │ "MIXED" │
@@ -23,7 +23,7 @@ Inserted 3 fact(s) into 'words'.
 (session: 1 rule(s))
 > lower_result(S, L) <- words(S), L = LOWER(S)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │ "Hello" │ "hello" │
 │ "MiXeD" │ "mixed" │
@@ -33,7 +33,7 @@ Inserted 3 fact(s) into 'words'.
 (session: 2 rule(s))
 > ?upper_result(S, U)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ S       │ U       │
 ├─────────┼─────────┤
 │ "Hello" │ "HELLO" │
 │ "MiXeD" │ "MIXED" │
@@ -42,7 +42,7 @@ Inserted 3 fact(s) into 'words'.
 3 rows
 > ?lower_result(S, L)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ S       │ L       │
 ├─────────┼─────────┤
 │ "Hello" │ "hello" │
 │ "MiXeD" │ "mixed" │

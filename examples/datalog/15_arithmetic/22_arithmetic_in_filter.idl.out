@@ -14,15 +14,15 @@ Inserted 5 fact(s) into 'nums'.
 > ?nums(Id, Val), Val > Id * 15
 No results.
 > ?nums(Id, Val), Val = Id * 10
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   40 │
-│    5 │   50 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │  10 │
+│  2 │  20 │
+│  3 │  30 │
+│  4 │  40 │
+│  5 │  50 │
+└────┴─────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

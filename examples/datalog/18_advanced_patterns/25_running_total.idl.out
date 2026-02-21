@@ -12,50 +12,50 @@ Switched to knowledge graph: test_running_n18t25
 > +transactions[(1, 100), (2, 50), (3, 75), (4, 200), (5, 25)]
 Inserted 5 fact(s) into 'transactions'.
 > running_count(Id, count<OtherId>) <- transactions(Id, _), transactions(OtherId, _), OtherId <= Id
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    1 │
-│    3 │    1 │
-│    4 │    1 │
-│    5 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 2 │ 1 │
+│ 3 │ 1 │
+│ 4 │ 1 │
+│ 5 │ 1 │
+└───┴───┘
 5 rows
 (session: 1 rule(s))
 > ?running_count(Id, Count)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    1 │
-│    3 │    1 │
-│    4 │    1 │
-│    5 │    1 │
-└──────┴──────┘
+┌────┬───────┐
+│ Id │ Count │
+├────┼───────┤
+│  1 │     1 │
+│  2 │     1 │
+│  3 │     1 │
+│  4 │     1 │
+│  5 │     1 │
+└────┴───────┘
 5 rows
 > running_sum(Id, sum<Amt>) <- transactions(Id, _), transactions(OtherId, Amt), OtherId <= Id
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  150 │
-│    3 │  225 │
-│    4 │  425 │
-│    5 │  450 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 150 │
+│ 3 │ 225 │
+│ 4 │ 425 │
+│ 5 │ 450 │
+└───┴─────┘
 5 rows
 (session: 2 rule(s))
 > ?running_sum(Id, Sum)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  150 │
-│    3 │  225 │
-│    4 │  425 │
-│    5 │  450 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Sum │
+├────┼─────┤
+│  1 │ 100 │
+│  2 │ 150 │
+│  3 │ 225 │
+│  4 │ 425 │
+│  5 │ 450 │
+└────┴─────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

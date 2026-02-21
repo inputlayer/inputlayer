@@ -12,21 +12,21 @@ Switched to knowledge graph: test_correlation_n18t64
 > +sales[(1, "A", 100), (2, "A", 150), (3, "A", 200), (4, "B", 300), (5, "B", 250)]
 Inserted 5 fact(s) into 'sales'.
 > avg_per_cat(Cat, avg<Val>) <- sales(_, Cat, Val)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│ "A"  │ 150.0 │
-│ "B"  │ 275.0 │
-└──────┴───────┘
+┌─────┬───────┐
+│ X   │ Y     │
+├─────┼───────┤
+│ "A" │ 150.0 │
+│ "B" │ 275.0 │
+└─────┴───────┘
 2 rows
 (session: 1 rule(s))
 > ?avg_per_cat(Cat, Avg)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│ "A"  │ 150.0 │
-│ "B"  │ 275.0 │
-└──────┴───────┘
+┌─────┬───────┐
+│ Cat │ Avg   │
+├─────┼───────┤
+│ "A" │ 150.0 │
+│ "B" │ 275.0 │
+└─────┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -22,27 +22,27 @@ No results.
 > ?reachable(X, Y)
 No results.
 > reachable2(X, Y) <- edge(X, Y), X = 1
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 (session: 3 rule(s))
 > reachable2(X, Z) <- reachable2(X, Y), edge(Y, Z)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 (session: 4 rule(s))
 > ?reachable2(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

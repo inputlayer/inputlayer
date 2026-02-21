@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
 
@@ -479,11 +479,11 @@ impl Handler {
 
     /// Graceful shutdown: flush WAL and save metadata for all knowledge graphs.
     pub fn shutdown(&self) {
-        eprintln!("Flushing WAL and saving metadata...");
+        info!("Flushing WAL and saving metadata...");
         if let Err(e) = self.storage.read().save_all() {
-            eprintln!("WARNING: Error during shutdown save: {e}");
+            warn!(error = %e, "Error during shutdown save");
         }
-        eprintln!("Shutdown complete.");
+        info!("Shutdown complete.");
     }
 
     /// Get mutable access to the storage engine.
@@ -755,7 +755,10 @@ impl Handler {
                 Ok(joined) => {
                     let compute_ms = query_start.elapsed().as_millis() as u64;
                     info!(program_len, compute_ms, "query_complete");
-                    joined.map_err(|e| format!("Query task panicked: {e}"))?
+                    joined.map_err(|e| {
+                        tracing::error!(error = %e, "Query task panicked");
+                        "Internal query execution error".to_string()
+                    })?
                 }
                 Err(_) => {
                     // Signal the DD spin loop to stop
@@ -770,9 +773,10 @@ impl Handler {
                 }
             }
         } else {
-            let joined = blocking_task
-                .await
-                .map_err(|e| format!("Query task panicked: {e}"))?;
+            let joined = blocking_task.await.map_err(|e| {
+                tracing::error!(error = %e, "Query task panicked");
+                "Internal query execution error".to_string()
+            })?;
             let compute_ms = query_start.elapsed().as_millis() as u64;
             info!(program_len, compute_ms, "query_complete");
             joined
@@ -1895,6 +1899,11 @@ impl QueryJob {
         // This prevents lock convoys: when another thread needs a write lock
         // (e.g. .kg drop), parking_lot's write-preferring policy would otherwise
         // block ALL new readers while waiting for long-running DD computations.
+        // Look up registered schema column names before releasing the lock
+        let schema_col_names: Option<Vec<String>> = find_query_source_relation(&query_program)
+            .and_then(|rel| storage.get_schema_in(&kg_name, &rel).ok().flatten())
+            .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
+
         let snapshot = storage
             .get_snapshot_for(&kg_name)
             .map_err(|e| e.to_string())?;
@@ -1902,12 +1911,12 @@ impl QueryJob {
 
         let debug_session = std::env::var("IL_DEBUG_SESSION").is_ok();
         if debug_session && !session_fact_tuples.is_empty() {
-            eprintln!(
-                "DEBUG: Executing with {} session facts (isolated)",
-                session_fact_tuples.len()
+            debug!(
+                count = session_fact_tuples.len(),
+                "Executing with session facts (isolated)"
             );
             for (relation, tuple) in &session_fact_tuples {
-                eprintln!("DEBUG: Session fact '{relation}': {tuple:?}");
+                debug!(relation, tuple = ?tuple, "session_fact");
             }
         }
 
@@ -1959,14 +1968,27 @@ impl QueryJob {
             })
             .collect();
 
-        // Build schema from first result or default to 2 columns
+        // Build schema from first result or default to 2 columns.
+        // Use registered schema column names if available and arity matches,
+        // otherwise extract variable names from the query head.
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
+            let arity = first.values().len();
+            let col_names = if let Some(ref names) = schema_col_names {
+                if names.len() == arity {
+                    names.clone()
+                } else {
+                    extract_column_names_from_query(&query_program, arity)
+                }
+            } else {
+                extract_column_names_from_query(&query_program, arity)
+            };
+
             first
                 .values()
                 .iter()
                 .enumerate()
                 .map(|(i, v)| ColumnDef {
-                    name: format!("col{i}"),
+                    name: col_names[i].clone(),
                     data_type: match v {
                         Value::Int32(_) => WireDataType::Int32,
                         Value::Int64(_) => WireDataType::Int64,
@@ -2106,12 +2128,16 @@ impl Handler {
         // Get snapshot under read lock, then RELEASE lock immediately.
         // This prevents lock convoys: holding the lock during DD computation
         // would block all mutations (the exact bug fixed in PR #12 for regular queries).
-        let snapshot = {
+        let (snapshot, schema_col_names) = {
             let storage = self.storage.read();
             storage
                 .ensure_knowledge_graph(&kg)
                 .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?
+            let names: Option<Vec<String>> = find_query_source_relation(&preprocessed)
+                .and_then(|rel| storage.get_schema_in(&kg, &rel).ok().flatten())
+                .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
+            let snap = storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?;
+            (snap, names)
         }; // storage read lock released here
 
         // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
@@ -2126,7 +2152,7 @@ impl Handler {
 
         // Offload CPU-bound DD computation to the blocking thread pool
         let combined_program_clone = combined_program;
-        let preprocessed_clone = preprocessed;
+        let preprocessed_clone = preprocessed.clone();
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
 
@@ -2143,7 +2169,7 @@ impl Handler {
             {
                 Ok(tuples) => tuples.into_iter().collect(),
                 Err(e) => {
-                    eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
+                    warn!(error = %e, "Provenance baseline query failed — all tuples tagged as ephemeral");
                     HashSet::new()
                 }
             };
@@ -2159,16 +2185,20 @@ impl Handler {
             match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
                 .await
             {
-                Ok(joined) => joined.map_err(|e| format!("Query task panicked: {e}"))?,
+                Ok(joined) => joined.map_err(|e| {
+                    tracing::error!(error = %e, "Session query task panicked");
+                    "Internal query execution error".to_string()
+                })?,
                 Err(_) => {
                     cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                     return Err("Query execution timed out".to_string());
                 }
             }
         } else {
-            blocking_task
-                .await
-                .map_err(|e| format!("Query task panicked: {e}"))?
+            blocking_task.await.map_err(|e| {
+                tracing::error!(error = %e, "Session query task panicked");
+                "Internal query execution error".to_string()
+            })?
         }?;
 
         use crate::session::Provenance;
@@ -2205,12 +2235,23 @@ impl Handler {
             .collect();
 
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
+            let arity = first.values().len();
+            let col_names = if let Some(ref names) = schema_col_names {
+                if names.len() == arity {
+                    names.clone()
+                } else {
+                    extract_column_names_from_query(&preprocessed, arity)
+                }
+            } else {
+                extract_column_names_from_query(&preprocessed, arity)
+            };
+
             first
                 .values()
                 .iter()
                 .enumerate()
                 .map(|(i, v)| ColumnDef {
-                    name: format!("col{i}"),
+                    name: col_names[i].clone(),
                     data_type: match v {
                         Value::Int32(_) => WireDataType::Int32,
                         Value::Int64(_) => WireDataType::Int64,
@@ -2746,6 +2787,100 @@ fn is_error_message(msg: &str) -> bool {
         || msg.starts_with("Create failed:")
         || msg.starts_with("Drop failed:")
         || (msg.starts_with("Knowledge graph") && msg.contains("not found"))
+}
+
+/// Extract meaningful column names from a query's head variables.
+///
+/// Parses the query program and inspects the last rule's head atom arguments
+/// to derive column names. Falls back to `col0, col1, ...` if parsing fails
+/// or arity doesn't match.
+fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
+    let parsed = match crate::parser::parse_program(program) {
+        Ok(p) => p,
+        Err(_) => return (0..arity).map(|i| format!("col{i}")).collect(),
+    };
+
+    let rule = match parsed.rules.last() {
+        Some(r) => r,
+        None => return (0..arity).map(|i| format!("col{i}")).collect(),
+    };
+
+    let head_args = &rule.head.args;
+    if head_args.len() != arity {
+        return (0..arity).map(|i| format!("col{i}")).collect();
+    }
+
+    // Build a map from parser-generated constant variables (_c0, _c1, ...)
+    // to their bound constant values. The parser desugars constants in query
+    // heads (e.g., ?tc(1, X)) into variables with equality constraints
+    // (e.g., __query__(_c0, X) <- tc(_c0, X), _c0 = 1).
+    let mut const_bindings: std::collections::HashMap<&str, String> =
+        std::collections::HashMap::new();
+    for pred in &rule.body {
+        if let crate::ast::BodyPredicate::Comparison(lhs, crate::ast::ComparisonOp::Equal, rhs) =
+            pred
+        {
+            let (var_name, bound_term) = match (lhs, rhs) {
+                (Term::Variable(v), other) | (other, Term::Variable(v)) if v.starts_with("_c") => {
+                    (v.as_str(), other)
+                }
+                _ => continue,
+            };
+            let val = match bound_term {
+                Term::Constant(n) => format!("{n}"),
+                Term::FloatConstant(f) => format!("{f}"),
+                Term::StringConstant(s) => s.clone(),
+                Term::BoolConstant(b) => format!("{b}"),
+                _ => continue,
+            };
+            const_bindings.insert(var_name, val);
+        }
+    }
+
+    head_args
+        .iter()
+        .enumerate()
+        .map(|(i, term)| match term {
+            Term::Variable(v) => {
+                if let Some(val) = const_bindings.get(v.as_str()) {
+                    val.clone()
+                } else if v.starts_with("_p") {
+                    "_".to_string()
+                } else {
+                    v.clone()
+                }
+            }
+            Term::Aggregate(func, var) => format!("{}_{}", format!("{func:?}").to_lowercase(), var),
+            Term::Constant(n) => format!("{n}"),
+            Term::FloatConstant(f) => format!("{f}"),
+            Term::StringConstant(s) => s.clone(),
+            Term::BoolConstant(b) => format!("{b}"),
+            Term::Placeholder => "_".to_string(),
+            _ => format!("col{i}"),
+        })
+        .collect()
+}
+
+/// Find the source relation for a query.
+///
+/// For `__query__` shorthand queries, returns the first positive body atom's relation.
+/// For named head relations, returns the head relation name.
+/// Used to look up registered schemas in the SchemaCatalog.
+fn find_query_source_relation(program: &str) -> Option<String> {
+    let parsed = crate::parser::parse_program(program).ok()?;
+    let rule = parsed.rules.last()?;
+
+    if rule.head.relation == "__query__" {
+        // Shorthand query: find the first positive body atom
+        for pred in &rule.body {
+            if let crate::ast::BodyPredicate::Positive(atom) = pred {
+                return Some(atom.relation.clone());
+            }
+        }
+        None
+    } else {
+        Some(rule.head.relation.clone())
+    }
 }
 
 #[cfg(test)]
@@ -4791,6 +4926,84 @@ mod tests {
                 "Data should survive shutdown + restart"
             );
         }
+    }
+
+    // === Column naming tests ===
+
+    #[test]
+    fn test_extract_column_names_from_simple_query() {
+        let names = extract_column_names_from_query("__query__(X, Y) <- edge(X, Y)", 2);
+        assert_eq!(names, vec!["X", "Y"]);
+    }
+
+    #[test]
+    fn test_extract_column_names_with_multiple_vars() {
+        let names = extract_column_names_from_query(
+            "__query__(Name, Age, City) <- person(Name, Age, City)",
+            3,
+        );
+        assert_eq!(names, vec!["Name", "Age", "City"]);
+    }
+
+    #[test]
+    fn test_extract_column_names_parse_failure_fallback() {
+        let names = extract_column_names_from_query("this is not valid datalog!!!", 3);
+        assert_eq!(names, vec!["col0", "col1", "col2"]);
+    }
+
+    #[test]
+    fn test_extract_column_names_arity_mismatch_fallback() {
+        // Query has 2 head vars but we ask for 3 columns
+        let names = extract_column_names_from_query("__query__(X, Y) <- edge(X, Y)", 3);
+        assert_eq!(names, vec!["col0", "col1", "col2"]);
+    }
+
+    #[test]
+    fn test_find_query_source_relation_shorthand() {
+        let rel = find_query_source_relation("__query__(X, Y) <- edge(X, Y)");
+        assert_eq!(rel, Some("edge".to_string()));
+    }
+
+    #[test]
+    fn test_find_query_source_relation_named() {
+        let rel = find_query_source_relation("path(X, Y) <- edge(X, Y)");
+        assert_eq!(rel, Some("path".to_string()));
+    }
+
+    #[test]
+    fn test_find_query_source_relation_parse_failure() {
+        let rel = find_query_source_relation("not valid!!!");
+        assert_eq!(rel, None);
+    }
+
+    #[test]
+    fn test_extract_column_names_constants_in_rule() {
+        let names = extract_column_names_from_query("__query__(X, 42) <- edge(X, 42)", 2);
+        assert_eq!(names[0], "X");
+        assert_eq!(names[1], "42");
+    }
+
+    #[test]
+    fn test_extract_column_names_constant_binding_resolved() {
+        // Parser desugars ?tc(1, X) into __query__(_c0, X) <- tc(_c0, X), _c0 = 1
+        // The _c0 should be resolved back to "1"
+        let names = extract_column_names_from_query("?tc(1, X)", 2);
+        assert_eq!(names, vec!["1", "X"]);
+    }
+
+    #[test]
+    fn test_extract_column_names_placeholder_resolved() {
+        // Parser desugars ?people(Id, _, 25) into
+        // __query__(Id, _p1, _c2) <- people(Id, _p1, _c2), _c2 = 25
+        // _p1 should resolve to "_", _c2 to "25"
+        let names = extract_column_names_from_query("?people(Id, _, 25)", 3);
+        assert_eq!(names, vec!["Id", "_", "25"]);
+    }
+
+    #[test]
+    fn test_extract_column_names_all_constants() {
+        let names = extract_column_names_from_query("?facts(1, 2)", 2);
+        assert_eq!(names, vec!["1", "2"]);
     }
 }
 

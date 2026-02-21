@@ -12,11 +12,11 @@ Switched to knowledge graph: test_type_infer_n11t65
 > +mixed[(1, "text", 1.5, true)]
 Inserted 1 fact(s) into 'mixed'.
 > ?mixed(A, B, C, D)
-┌──────┬────────┬──────┬──────┐
-│ col0 │ col1   │ col2 │ col3 │
-├──────┼────────┼──────┼──────┤
-│    1 │ "text" │  1.5 │ true │
-└──────┴────────┴──────┴──────┘
+┌───┬────────┬─────┬──────┐
+│ A │ B      │ C   │ D    │
+├───┼────────┼─────┼──────┤
+│ 1 │ "text" │ 1.5 │ true │
+└───┴────────┴─────┴──────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

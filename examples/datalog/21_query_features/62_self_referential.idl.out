@@ -14,12 +14,12 @@ Inserted 2 fact(s) into 'base'.
 > +closure(X) <- base(X)
 Rule 'closure' registered.
 > ?closure(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

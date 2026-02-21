@@ -14,13 +14,13 @@ Inserted 6 fact(s) into 'score'.
 > +avg_score(Student, avg<Points>) <- score(Student, Points)
 Rule 'avg_score' registered.
 > ?avg_score(X, Y)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │  85.0 │
-│    2 │  72.5 │
-│    3 │ 100.0 │
-└──────┴───────┘
+┌───┬───────┐
+│ X │ Y     │
+├───┼───────┤
+│ 1 │  85.0 │
+│ 2 │  72.5 │
+│ 3 │ 100.0 │
+└───┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

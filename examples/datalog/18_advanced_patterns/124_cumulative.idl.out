@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'data'.
 > +cumulative(Id, sum<Val>) <- data(Id, _), data(OtherId, Val), OtherId <= Id
 Rule 'cumulative' registered.
 > ?cumulative(Id, Sum)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   30 │
-│    3 │   60 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Sum │
+├────┼─────┤
+│  1 │  10 │
+│  2 │  30 │
+│  3 │  60 │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

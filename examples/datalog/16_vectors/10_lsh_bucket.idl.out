@@ -18,25 +18,25 @@ Inserted 1 fact(s) into 'vectors'.
 > +vectors[(4, [0.0, 0.0, 1.0])]
 Inserted 1 fact(s) into 'vectors'.
 > bucket(Id, Bucket) <- vectors(Id, V), Bucket = lsh_bucket(V, 0, 4)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    8 │
-│    2 │    8 │
-│    3 │    8 │
-│    4 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 8 │
+│ 2 │ 8 │
+│ 3 │ 8 │
+│ 4 │ 3 │
+└───┴───┘
 4 rows
 (session: 1 rule(s))
 > ?bucket(Id, Bucket)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    8 │
-│    2 │    8 │
-│    3 │    8 │
-│    4 │    3 │
-└──────┴──────┘
+┌────┬────────┐
+│ Id │ Bucket │
+├────┼────────┤
+│  1 │      8 │
+│  2 │      8 │
+│  3 │      8 │
+│  4 │      3 │
+└────┴────────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

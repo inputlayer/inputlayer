@@ -14,13 +14,13 @@ Inserted 4 fact(s) into 'data'.
 > +same_pair(X, X) <- data(X, X)
 Rule 'same_pair' registered.
 > ?same_pair(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    2 │
-│    4 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 1 │ 1 │
+│ 2 │ 2 │
+│ 4 │ 4 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

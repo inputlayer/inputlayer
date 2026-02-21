@@ -13,7 +13,7 @@ Switched to knowledge graph: test_float_special_n11t16
 Inserted 3 fact(s) into 'small_floats'.
 > ?small_floats(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 1e-8 │
 │ 1e-7 │
@@ -24,7 +24,7 @@ Inserted 3 fact(s) into 'small_floats'.
 Inserted 3 fact(s) into 'large_floats'.
 > ?large_floats(X)
 ┌────────────────────┐
-│ col0               │
+│ X                  │
 ├────────────────────┤
 │      10000000000.0 │
 │ 1000000000000000.0 │
@@ -35,7 +35,7 @@ Inserted 3 fact(s) into 'large_floats'.
 Inserted 2 fact(s) into 'precise_floats'.
 > ?precise_floats(X)
 ┌──────────────────┐
-│ col0             │
+│ X                │
 ├──────────────────┤
 │ 2.71828182845905 │
 │ 3.14159265358979 │

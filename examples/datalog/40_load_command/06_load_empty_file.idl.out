@@ -12,11 +12,11 @@ Switched to knowledge graph: test_load_empty_n40t06
 > +marker[(1,)]
 Inserted 1 fact(s) into 'marker'.
 > ?marker(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

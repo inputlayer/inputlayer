@@ -14,19 +14,19 @@ Inserted 1 fact(s) into 'vec2d'.
 > +vec3d[(1, [1.0, 2.0, 3.0])]
 Inserted 1 fact(s) into 'vec3d'.
 > bad_dist(Id, D) <- vec2d(Id, V2), vec3d(Id, V3), D = euclidean(V2, V3)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ null │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ null │
+└───┴──────┘
 1 rows
 (session: 1 rule(s))
 > ?bad_dist(Id, D)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ null │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ D    │
+├────┼──────┤
+│  1 │ null │
+└────┴──────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

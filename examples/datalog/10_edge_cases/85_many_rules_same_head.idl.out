@@ -20,16 +20,16 @@ Rule 'classified' registered.
 > +classified(X, "large") <- nums(X), X > 5
 Rule 'classified' registered.
 > ?classified(X, Cat)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    1 │ "tiny"   │
-│    2 │ "small"  │
-│    3 │ "small"  │
-│    4 │ "medium" │
-│    5 │ "medium" │
-│    6 │ "large"  │
-└──────┴──────────┘
+┌───┬──────────┐
+│ X │ Cat      │
+├───┼──────────┤
+│ 1 │ "tiny"   │
+│ 2 │ "small"  │
+│ 3 │ "small"  │
+│ 4 │ "medium" │
+│ 5 │ "medium" │
+│ 6 │ "large"  │
+└───┴──────────┘
 6 rows
 > .kg use default
 Switched to knowledge graph: default

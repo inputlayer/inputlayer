@@ -15,7 +15,7 @@ Inserted 3 fact(s) into 'codes'.
 Inserted 3 fact(s) into 'ids'.
 > ?codes(C)
 ┌───────┐
-│ col0  │
+│ C     │
 ├───────┤
 │ "123" │
 │ "456" │
@@ -23,13 +23,13 @@ Inserted 3 fact(s) into 'ids'.
 └───────┘
 3 rows
 > ?ids(I)
-┌──────┐
-│ col0 │
-├──────┤
-│  123 │
-│  456 │
-│  789 │
-└──────┘
+┌─────┐
+│ I   │
+├─────┤
+│ 123 │
+│ 456 │
+│ 789 │
+└─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

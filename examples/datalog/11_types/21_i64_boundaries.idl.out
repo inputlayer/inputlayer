@@ -13,7 +13,7 @@ Switched to knowledge graph: test_i64_boundary_n11t21
 Inserted 2 fact(s) into 'large_ints'.
 > ?large_ints(Val, Name)
 ┌───────────────┬────────────┐
-│ col0          │ col1       │
+│ Val           │ Name       │
 ├───────────────┼────────────┤
 │ 1000000000000 │ "trillion" │
 │ 9999999999999 │ "near_max" │
@@ -21,7 +21,7 @@ Inserted 2 fact(s) into 'large_ints'.
 2 rows
 > large_compare(Val, Name) <- large_ints(Val, Name), Val > 999999999999
 ┌───────────────┬────────────┐
-│ col0          │ col1       │
+│ X             │ Y          │
 ├───────────────┼────────────┤
 │ 1000000000000 │ "trillion" │
 │ 9999999999999 │ "near_max" │
@@ -30,7 +30,7 @@ Inserted 2 fact(s) into 'large_ints'.
 (session: 1 rule(s))
 > ?large_compare(Val, Name)
 ┌───────────────┬────────────┐
-│ col0          │ col1       │
+│ Val           │ Name       │
 ├───────────────┼────────────┤
 │ 1000000000000 │ "trillion" │
 │ 9999999999999 │ "near_max" │
@@ -40,7 +40,7 @@ Inserted 2 fact(s) into 'large_ints'.
 Inserted 1 fact(s) into 'pair'.
 > large_sum(A, B, R) <- pair(A, B), R = A + B
 ┌───────────────┬───────────────┬───────────────┐
-│ col0          │ col1          │ col2          │
+│ X             │ Y             │ Z             │
 ├───────────────┼───────────────┼───────────────┤
 │ 5000000000000 │ 4000000000000 │ 9000000000000 │
 └───────────────┴───────────────┴───────────────┘
@@ -48,7 +48,7 @@ Inserted 1 fact(s) into 'pair'.
 (session: 2 rule(s))
 > ?large_sum(A, B, R)
 ┌───────────────┬───────────────┬───────────────┐
-│ col0          │ col1          │ col2          │
+│ A             │ B             │ R             │
 ├───────────────┼───────────────┼───────────────┤
 │ 5000000000000 │ 4000000000000 │ 9000000000000 │
 └───────────────┴───────────────┴───────────────┘

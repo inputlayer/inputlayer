@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'data'.
 > +cnt(count<X>) <- data(X)
 Rule 'cnt' registered.
 > ?cnt(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > -data(1)
 Deleted 1 facts from 'data'.
@@ -31,11 +31,11 @@ No results.
 > +data[(10)]
 Inserted 1 fact(s) into 'data'.
 > ?cnt(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

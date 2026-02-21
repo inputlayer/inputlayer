@@ -12,13 +12,13 @@ Switched to knowledge graph: test_limit_order_n21t37
 > +scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
 Inserted 5 fact(s) into 'scores'.
 > ?scores(Name, Score:desc), limit(3)
-┌────────┬──────┐
-│ col0   │ col1 │
-├────────┼──────┤
-│ "dave" │   95 │
-│ "bob"  │   92 │
-│ "eve"  │   88 │
-└────────┴──────┘
+┌────────┬───────┐
+│ Name   │ Score │
+├────────┼───────┤
+│ "dave" │    95 │
+│ "bob"  │    92 │
+│ "eve"  │    88 │
+└────────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

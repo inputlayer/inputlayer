@@ -12,30 +12,30 @@ Switched to knowledge graph: test_sess_chain_n04t34
 > +employee[(1, 50000), (2, 75000), (3, 90000)]
 Inserted 3 fact(s) into 'employee'.
 > high_earner(Id, Salary) <- employee(Id, Salary), Salary > 60000
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    2 │ 75000 │
-│    3 │ 90000 │
-└──────┴───────┘
+┌───┬───────┐
+│ X │ Y     │
+├───┼───────┤
+│ 2 │ 75000 │
+│ 3 │ 90000 │
+└───┴───────┘
 2 rows
 (session: 1 rule(s))
 > bonus(Id, Bonus) <- high_earner(Id, Salary), Bonus = Salary * 10 / 100
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    2 │ 7500.0 │
-│    3 │ 9000.0 │
-└──────┴────────┘
+┌───┬────────┐
+│ X │ Y      │
+├───┼────────┤
+│ 2 │ 7500.0 │
+│ 3 │ 9000.0 │
+└───┴────────┘
 2 rows
 (session: 2 rule(s))
 > ?bonus(Id, Bonus)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    2 │ 7500.0 │
-│    3 │ 9000.0 │
-└──────┴────────┘
+┌────┬────────┐
+│ Id │ Bonus  │
+├────┼────────┤
+│  2 │ 7500.0 │
+│  3 │ 9000.0 │
+└────┴────────┘
 2 rows
 > .session clear
 Cleared 0 session fact(s), 2 session rule(s).

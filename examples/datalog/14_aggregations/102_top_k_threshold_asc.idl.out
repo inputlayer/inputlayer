@@ -14,13 +14,13 @@ Inserted 6 fact(s) into 'latency'.
 > +fast_requests(top_k_threshold<3, 100, ReqId, Ms:asc>) <- latency(ReqId, Ms)
 Rule 'fast_requests' registered.
 > ?fast_requests(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   50 │
-│    5 │   80 │
-│    6 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 50 │
+│ 5 │ 80 │
+│ 6 │ 30 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

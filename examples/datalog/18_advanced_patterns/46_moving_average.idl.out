@@ -14,15 +14,15 @@ Inserted 5 fact(s) into 'time_series'.
 > +avg_2(T, avg<V>) <- time_series(T2, V), T2 >= T - 1, T2 <= T, time_series(T, _)
 Rule 'avg_2' registered.
 > ?avg_2(T, Avg)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 10.0 │
-│    2 │ 15.0 │
-│    3 │ 17.5 │
-│    4 │ 20.0 │
-│    5 │ 27.5 │
-└──────┴──────┘
+┌───┬──────┐
+│ T │ Avg  │
+├───┼──────┤
+│ 1 │ 10.0 │
+│ 2 │ 15.0 │
+│ 3 │ 17.5 │
+│ 4 │ 20.0 │
+│ 5 │ 27.5 │
+└───┴──────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

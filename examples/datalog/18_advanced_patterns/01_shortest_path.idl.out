@@ -20,14 +20,14 @@ Rule 'dist' registered.
 > +shortest(Y, min<D>) <- dist(Y, D)
 Rule 'shortest' registered.
 > ?shortest(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │    1 │
-│    3 │    1 │
-│    4 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 0 │
+│ 2 │ 1 │
+│ 3 │ 1 │
+│ 4 │ 2 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,33 +16,33 @@ Inserted 1 fact(s) into 'banned'.
 > +top(Name, max<Grade>) <- score(Name, Grade), !banned(Name)
 Rule 'top' registered.
 > ?top(N, G)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Alice"   │   90 │
-│ "Charlie" │   70 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ N         │ G  │
+├───────────┼────┤
+│ "Alice"   │ 90 │
+│ "Charlie" │ 70 │
+└───────────┴────┘
 2 rows
 > -banned("Bob")
 Deleted 1 facts from 'banned'.
 > ?top(N, G)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Alice"   │   90 │
-│ "Bob"     │   80 │
-│ "Charlie" │   70 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ N         │ G  │
+├───────────┼────┤
+│ "Alice"   │ 90 │
+│ "Bob"     │ 80 │
+│ "Charlie" │ 70 │
+└───────────┴────┘
 3 rows
 > +banned[("Alice")]
 Inserted 1 fact(s) into 'banned'.
 > ?top(N, G)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Bob"     │   80 │
-│ "Charlie" │   70 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ N         │ G  │
+├───────────┼────┤
+│ "Bob"     │ 80 │
+│ "Charlie" │ 70 │
+└───────────┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -23,6 +23,8 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
+use tracing::{info, warn};
+
 use crate::config::HttpConfig;
 use crate::protocol::Handler;
 
@@ -119,7 +121,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
             .filter_map(|s| {
                 let parsed = s.parse();
                 if parsed.is_err() {
-                    eprintln!("WARNING: Invalid CORS origin ignored: {s}");
+                    warn!(origin = %s, "Invalid CORS origin ignored");
                 }
                 parsed.ok()
             })
@@ -208,11 +210,11 @@ pub async fn start_http_server(
                 _ = interval.tick() => {
                     let reaped = reaper_handler.session_manager().reap_expired();
                     if reaped > 0 {
-                        eprintln!("Session reaper: cleaned up {reaped} expired session(s)");
+                        info!(reaped, "session_reaper_cleanup");
                     }
                 }
                 _ = shutdown_rx.changed() => {
-                    eprintln!("Session reaper: shutting down");
+                    info!("session_reaper_shutdown");
                     break;
                 }
             }
@@ -250,11 +252,11 @@ pub async fn start_http_server(
     {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
-            eprintln!("WARNING: Shutdown task panicked: {e}");
+            warn!(error = %e, "Shutdown task panicked");
         }
         Err(_) => {
-            eprintln!(
-                "WARNING: Graceful shutdown timed out after 10s. \
+            warn!(
+                "Graceful shutdown timed out after 10s. \
                  WAL will be replayed on next startup."
             );
         }
@@ -523,14 +525,14 @@ async fn shutdown_signal() {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to install SIGTERM handler");
         tokio::select! {
-            _ = ctrl_c => { eprintln!("\nReceived SIGINT, shutting down..."); }
-            _ = sigterm.recv() => { eprintln!("Received SIGTERM, shutting down..."); }
+            _ = ctrl_c => { info!("Received SIGINT, shutting down..."); }
+            _ = sigterm.recv() => { info!("Received SIGTERM, shutting down..."); }
         }
     }
 
     #[cfg(not(unix))]
     {
         ctrl_c.await.expect("failed to listen for ctrl-c");
-        eprintln!("\nReceived SIGINT, shutting down...");
+        info!("Received SIGINT, shutting down...");
     }
 }

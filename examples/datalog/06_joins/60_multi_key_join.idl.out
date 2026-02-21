@@ -16,12 +16,12 @@ Inserted 3 fact(s) into 'table_b'.
 > +joined(K1, K2, ValA, ValB) <- table_a(K1, K2, ValA), table_b(K1, K2, ValB)
 Rule 'joined' registered.
 > ?joined(K1, K2, A, B)
-┌──────┬──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │ col3 │
-├──────┼──────┼──────┼──────┤
-│    1 │ "x"  │ "A"  │  100 │
-│    1 │ "y"  │ "B"  │  200 │
-└──────┴──────┴──────┴──────┘
+┌────┬─────┬─────┬─────┐
+│ K1 │ K2  │ A   │ B   │
+├────┼─────┼─────┼─────┤
+│  1 │ "x" │ "A" │ 100 │
+│  1 │ "y" │ "B" │ 200 │
+└────┴─────┴─────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

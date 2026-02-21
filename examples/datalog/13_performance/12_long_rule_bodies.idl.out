@@ -22,36 +22,36 @@ Inserted 2 fact(s) into 'r5'.
 > +join5(A, E) <- r1(A, B), r2(B, C), r3(C, D), r4(D, E)
 Rule 'join5' registered.
 > ?join5(A, E)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 2000 │
-│    2 │ 3000 │
-└──────┴──────┘
+┌───┬──────┐
+│ A │ E    │
+├───┼──────┤
+│ 1 │ 2000 │
+│ 2 │ 3000 │
+└───┴──────┘
 2 rows
 > +data[(1, 10, 100), (2, 20, 200), (3, 30, 300), (1, 11, 110)]
 Inserted 4 fact(s) into 'data'.
 > +multi_cond(X) <- data(X, Y, Z), Y > 5, Z > 50, Y < 25, Z < 250
 Rule 'multi_cond' registered.
 > ?multi_cond(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+└───┘
 2 rows
 > +complex_rule(A, E) <- r1(A, B), r2(B, C), r3(C, D), r4(D, E),
 Rule 'complex_rule' registered.
 > A > 0, B > 1, C > 10, D > 100, E > 1000
 Parse error: Unrecognized statement: A > 0, B > 1, C > 10, D > 100, E > 1000
 > ?complex_rule(A, E)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 2000 │
-│    2 │ 3000 │
-└──────┴──────┘
+┌───┬──────┐
+│ A │ E    │
+├───┼──────┤
+│ 1 │ 2000 │
+│ 2 │ 3000 │
+└───┴──────┘
 2 rows
 > +chain[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)]
 Inserted 7 fact(s) into 'chain'.

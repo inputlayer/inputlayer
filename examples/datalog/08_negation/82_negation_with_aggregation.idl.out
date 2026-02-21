@@ -18,12 +18,12 @@ Rule 'has_sales' registered.
 > +no_sales(P) <- products(P), !has_sales(P)
 Rule 'no_sales' registered.
 > ?no_sales(P)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ P │
+├───┤
+│ 4 │
+│ 5 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,12 +14,12 @@ Inserted 5 fact(s) into 'reading'.
 > +min_temp(Sensor, min<Temp>) <- reading(Sensor, Temp)
 Rule 'min_temp' registered.
 > ?min_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   22 │
-│    2 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 22 │
+│ 2 │ 30 │
+└───┴────┘
 2 rows
 > .rule drop min_temp
 Rule 'min_temp' dropped.
@@ -28,12 +28,12 @@ No results.
 > +min_temp(Sensor, min<Temp>) <- reading(Sensor, Temp)
 Rule 'min_temp' registered.
 > ?min_temp(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   22 │
-│    2 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 22 │
+│ 2 │ 30 │
+└───┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

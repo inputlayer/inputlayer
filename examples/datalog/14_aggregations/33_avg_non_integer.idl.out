@@ -14,22 +14,22 @@ Inserted 4 fact(s) into 'vals'.
 > +avg_result(avg<X>) <- vals(X)
 Rule 'avg_result' registered.
 > ?avg_result(R)
-┌──────┐
-│ col0 │
-├──────┤
-│  2.5 │
-└──────┘
+┌─────┐
+│ R   │
+├─────┤
+│ 2.5 │
+└─────┘
 1 rows
 > +vals2[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'vals2'.
 > +avg_result2(avg<X>) <- vals2(X)
 Rule 'avg_result2' registered.
 > ?avg_result2(R)
-┌──────┐
-│ col0 │
-├──────┤
-│  2.0 │
-└──────┘
+┌─────┐
+│ R   │
+├─────┤
+│ 2.0 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,38 +12,38 @@ Switched to knowledge graph: test_pivot_n18t20
 > +sales[("Q1", "North", 100), ("Q1", "South", 150), ("Q2", "North", 120), ("Q2", "South", 180)]
 Inserted 4 fact(s) into 'sales'.
 > q1_sales(Region, sum<Amt>) <- sales("Q1", Region, Amt)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  100 │
-│ "South" │  150 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "North" │ 100 │
+│ "South" │ 150 │
+└─────────┴─────┘
 2 rows
 (session: 1 rule(s))
 > q2_sales(Region, sum<Amt>) <- sales("Q2", Region, Amt)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  120 │
-│ "South" │  180 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "North" │ 120 │
+│ "South" │ 180 │
+└─────────┴─────┘
 2 rows
 (session: 2 rule(s))
 > ?q1_sales(Region, Amt)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  100 │
-│ "South" │  150 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ Region  │ Amt │
+├─────────┼─────┤
+│ "North" │ 100 │
+│ "South" │ 150 │
+└─────────┴─────┘
 2 rows
 > ?q2_sales(Region, Amt)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  120 │
-│ "South" │  180 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ Region  │ Amt │
+├─────────┼─────┤
+│ "North" │ 120 │
+│ "South" │ 180 │
+└─────────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

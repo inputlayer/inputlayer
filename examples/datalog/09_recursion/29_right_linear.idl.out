@@ -16,28 +16,28 @@ Rule 'right_reach' registered.
 > +right_reach(X, Z) <- edge(X, Y), right_reach(Y, Z)
 Rule 'right_reach' registered.
 > ?right_reach(1, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    1 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 1 │ 5 │
+└───┴───┘
 4 rows
 > +left_reach(X, Y) <- edge(X, Y)
 Rule 'left_reach' registered.
 > +left_reach(X, Z) <- left_reach(X, Y), edge(Y, Z)
 Rule 'left_reach' registered.
 > ?left_reach(1, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    1 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 1 │ 5 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

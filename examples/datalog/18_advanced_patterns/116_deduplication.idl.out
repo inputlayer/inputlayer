@@ -15,7 +15,7 @@ Inserted 4 fact(s) into 'records'.
 Rule 'unique_cities' registered.
 > ?unique_cities(C)
 ┌───────┐
-│ col0  │
+│ C     │
 ├───────┤
 │ "LA"  │
 │ "NYC" │

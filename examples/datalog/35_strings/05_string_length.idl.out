@@ -12,25 +12,25 @@ Switched to knowledge graph: test_strlen_n35t05
 > +words[("",), ("a",), ("hello",), ("hello world",)]
 Inserted 4 fact(s) into 'words'.
 > len_result(S, L) <- words(S), L = LEN(S)
-┌───────────────┬──────┐
-│ col0          │ col1 │
-├───────────────┼──────┤
-│ ""            │    0 │
-│ "a"           │    1 │
-│ "hello"       │    5 │
-│ "hello world" │   11 │
-└───────────────┴──────┘
+┌───────────────┬────┐
+│ X             │ Y  │
+├───────────────┼────┤
+│ ""            │  0 │
+│ "a"           │  1 │
+│ "hello"       │  5 │
+│ "hello world" │ 11 │
+└───────────────┴────┘
 4 rows
 (session: 1 rule(s))
 > ?len_result(S, L)
-┌───────────────┬──────┐
-│ col0          │ col1 │
-├───────────────┼──────┤
-│ ""            │    0 │
-│ "a"           │    1 │
-│ "hello"       │    5 │
-│ "hello world" │   11 │
-└───────────────┴──────┘
+┌───────────────┬────┐
+│ S             │ L  │
+├───────────────┼────┤
+│ ""            │  0 │
+│ "a"           │  1 │
+│ "hello"       │  5 │
+│ "hello world" │ 11 │
+└───────────────┴────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

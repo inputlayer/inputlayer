@@ -16,31 +16,31 @@ Unsafe rule 'clamped': Head variable(s) C not bound by any positive body atom. A
 > C = V, V >= MinV, V <= MaxV
 Parse error: Unrecognized statement: C = V, V >= MinV, V <= MaxV
 > clamped(V, C) <- values(V), C = 0, V < 0
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   -5 │    0 │
-└──────┴──────┘
+┌────┬───┐
+│ X  │ Y │
+├────┼───┤
+│ -5 │ 0 │
+└────┴───┘
 1 rows
 (session: 1 rule(s))
 > clamped(V, C) <- values(V), C = 10, V > 10
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   -5 │    0 │
-│   15 │   10 │
-│   20 │   10 │
-└──────┴──────┘
+┌────┬────┐
+│ X  │ Y  │
+├────┼────┤
+│ -5 │  0 │
+│ 15 │ 10 │
+│ 20 │ 10 │
+└────┴────┘
 3 rows
 (session: 2 rule(s))
 > ?clamped(V, C)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   -5 │    0 │
-│   15 │   10 │
-│   20 │   10 │
-└──────┴──────┘
+┌────┬────┐
+│ V  │ C  │
+├────┼────┤
+│ -5 │  0 │
+│ 15 │ 10 │
+│ 20 │ 10 │
+└────┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

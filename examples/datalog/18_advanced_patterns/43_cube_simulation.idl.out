@@ -18,27 +18,27 @@ Rule 'by_quarter' registered.
 > +grand_total(sum<Amount>) <- sales(_, _, Amount)
 Rule 'grand_total' registered.
 > ?by_region(Region, Sum)
-┌────────┬──────┐
-│ col0   │ col1 │
-├────────┼──────┤
-│ "East" │  250 │
-│ "West" │  450 │
-└────────┴──────┘
+┌────────┬─────┐
+│ Region │ Sum │
+├────────┼─────┤
+│ "East" │ 250 │
+│ "West" │ 450 │
+└────────┴─────┘
 2 rows
 > ?by_quarter(Quarter, Sum)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "Q1" │  300 │
-│ "Q2" │  400 │
-└──────┴──────┘
+┌─────────┬─────┐
+│ Quarter │ Sum │
+├─────────┼─────┤
+│ "Q1"    │ 300 │
+│ "Q2"    │ 400 │
+└─────────┴─────┘
 2 rows
 > ?grand_total(Total)
-┌──────┐
-│ col0 │
-├──────┤
-│  700 │
-└──────┘
+┌───────┐
+│ Total │
+├───────┤
+│   700 │
+└───────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

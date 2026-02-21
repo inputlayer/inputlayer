@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'items'.
 > +doubled(X, Y) <- items(X), Y = X * 2
 Rule 'doubled' registered.
 > ?doubled(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    4 │
-│    3 │    6 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 4 │
+│ 3 │ 6 │
+└───┴───┘
 3 rows
 > .kg create test_rule_iso_b_n01t07
 Knowledge graph 'test_rule_iso_b_n01t07' created.

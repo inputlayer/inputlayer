@@ -18,29 +18,29 @@ Rule 'same_component' registered.
 > +same_component(X, Z) <- same_component(X, Y), same_component(Y, Z), X != Z
 Rule 'same_component' registered.
 > .rule same_component
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    1 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    1 │
-│    3 │    2 │
-│    3 │    4 │
-│    4 │    1 │
-│    4 │    2 │
-│    4 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 1 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 1 │
+│ 3 │ 2 │
+│ 3 │ 4 │
+│ 4 │ 1 │
+│ 4 │ 2 │
+│ 4 │ 3 │
+└───┴───┘
 12 rows
 > ?same_component(1, 4)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ 4 │
+├───┼───┤
+│ 1 │ 4 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

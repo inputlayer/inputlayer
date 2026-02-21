@@ -14,19 +14,19 @@ Inserted 3 fact(s) into 'items'.
 > +blocked[("a",)]
 Inserted 1 fact(s) into 'blocked'.
 > not_blocked(Id, Cat, Val) <- items(Id, Cat, Val), !blocked(Cat)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    2 │ "b"  │  200 │
-└──────┴──────┴──────┘
+┌───┬─────┬─────┐
+│ X │ Y   │ Z   │
+├───┼─────┼─────┤
+│ 2 │ "b" │ 200 │
+└───┴─────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?not_blocked(Id, Cat, Val)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    2 │ "b"  │  200 │
-└──────┴──────┴──────┘
+┌────┬─────┬─────┐
+│ Id │ Cat │ Val │
+├────┼─────┼─────┤
+│  2 │ "b" │ 200 │
+└────┴─────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

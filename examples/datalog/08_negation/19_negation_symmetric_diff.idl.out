@@ -16,32 +16,32 @@ Inserted 4 fact(s) into 'set_b'.
 > +a_only(X, Y) <- set_a(X, Y), !set_b(X, _)
 Rule 'a_only' registered.
 > ?a_only(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 0 │
+│ 2 │ 0 │
+└───┴───┘
 2 rows
 > +b_only(X, Y) <- set_b(X, Y), !set_a(X, _)
 Rule 'b_only' registered.
 > ?b_only(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │    0 │
-│    6 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 5 │ 0 │
+│ 6 │ 0 │
+└───┴───┘
 2 rows
 > +intersection(X, Y) <- set_a(X, Y), set_b(X, _)
 Rule 'intersection' registered.
 > ?intersection(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │    0 │
-│    4 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 3 │ 0 │
+│ 4 │ 0 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

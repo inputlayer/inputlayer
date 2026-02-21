@@ -16,12 +16,12 @@ Inserted 2 fact(s) into 'excluded_categories'.
 > +valid_items(Id, Cat, Price) <- items(Id, Cat, Price), !excluded_categories(Cat), Price > 75
 Rule 'valid_items' registered.
 > ?valid_items(Id, Cat, Price)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │ "A"  │  100 │
-│    3 │ "A"  │  150 │
-└──────┴──────┴──────┘
+┌────┬─────┬───────┐
+│ Id │ Cat │ Price │
+├────┼─────┼───────┤
+│  1 │ "A" │   100 │
+│  3 │ "A" │   150 │
+└────┴─────┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

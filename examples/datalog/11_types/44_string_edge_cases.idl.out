@@ -12,17 +12,17 @@ Switched to knowledge graph: test_str_edge_n11t44
 > +empty[("")]
 Inserted 1 fact(s) into 'empty'.
 > ?empty(X)
-┌──────┐
-│ col0 │
-├──────┤
-│ ""   │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ "" │
+└────┘
 1 rows
 > +spaces[("hello world")]
 Inserted 1 fact(s) into 'spaces'.
 > ?spaces(X)
 ┌───────────────┐
-│ col0          │
+│ X             │
 ├───────────────┤
 │ "hello world" │
 └───────────────┘
@@ -31,7 +31,7 @@ Inserted 1 fact(s) into 'spaces'.
 Inserted 3 fact(s) into 'special'.
 > ?special(X)
 ┌───────────┐
-│ col0      │
+│ X         │
 ├───────────┤
 │ "@#$%^&*" │
 │ "a,b,c"   │
@@ -42,7 +42,7 @@ Inserted 3 fact(s) into 'special'.
 Inserted 1 fact(s) into 'long'.
 > ?long(X)
 ┌──────────────────────────────────────────┐
-│ col0                                     │
+│ X                                        │
 ├──────────────────────────────────────────┤
 │ "this_is_a_very_long_string_that_tests_… │
 └──────────────────────────────────────────┘
@@ -51,7 +51,7 @@ Inserted 1 fact(s) into 'long'.
 Inserted 2 fact(s) into 'unicode'.
 > ?unicode(X)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "cafe"  │
 │ "naïve" │
@@ -61,7 +61,7 @@ Inserted 2 fact(s) into 'unicode'.
 Inserted 3 fact(s) into 'numstr'.
 > ?numstr(X)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "-999"  │
 │ "123"   │

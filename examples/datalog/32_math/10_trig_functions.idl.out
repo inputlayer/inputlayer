@@ -13,7 +13,7 @@ Switched to knowledge graph: test_trig_n32t10
 Inserted 3 fact(s) into 'angles'.
 > sin_val(X, Y) <- angles(X), Y = SIN(X)
 ┌─────────┬─────────────────────┐
-│ col0    │ col1                │
+│ X       │ Y                   │
 ├─────────┼─────────────────────┤
 │       0 │                 0.0 │
 │       1 │  0.8414709848078965 │
@@ -23,7 +23,7 @@ Inserted 3 fact(s) into 'angles'.
 (session: 1 rule(s))
 > cos_val(X, Y) <- angles(X), Y = COS(X)
 ┌─────────┬─────────────────────┐
-│ col0    │ col1                │
+│ X       │ Y                   │
 ├─────────┼─────────────────────┤
 │       0 │                 1.0 │
 │       1 │  0.5403023058681398 │
@@ -33,7 +33,7 @@ Inserted 3 fact(s) into 'angles'.
 (session: 2 rule(s))
 > ?sin_val(X, Y)
 ┌─────────┬─────────────────────┐
-│ col0    │ col1                │
+│ X       │ Y                   │
 ├─────────┼─────────────────────┤
 │       0 │                 0.0 │
 │       1 │  0.8414709848078965 │
@@ -42,7 +42,7 @@ Inserted 3 fact(s) into 'angles'.
 3 rows
 > ?cos_val(X, Y)
 ┌─────────┬─────────────────────┐
-│ col0    │ col1                │
+│ X       │ Y                   │
 ├─────────┼─────────────────────┤
 │       0 │                 1.0 │
 │       1 │  0.5403023058681398 │

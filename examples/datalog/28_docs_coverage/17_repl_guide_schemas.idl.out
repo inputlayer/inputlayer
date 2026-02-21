@@ -14,24 +14,24 @@ Schema for 'employee' registered with 3 columns (persistent)
 > +employee[(1, "alice", "engineering"), (2, "bob", "sales")]
 Inserted 2 fact(s) into 'employee'.
 > ?employee(Id, Name, Dept)
-┌──────┬─────────┬───────────────┐
-│ col0 │ col1    │ col2          │
-├──────┼─────────┼───────────────┤
-│    1 │ "alice" │ "engineering" │
-│    2 │ "bob"   │ "sales"       │
-└──────┴─────────┴───────────────┘
+┌────┬─────────┬───────────────┐
+│ id │ name    │ dept          │
+├────┼─────────┼───────────────┤
+│  1 │ "alice" │ "engineering" │
+│  2 │ "bob"   │ "sales"       │
+└────┴─────────┴───────────────┘
 2 rows
 > +user(id: int, email: string)
 Schema for 'user' registered with 2 columns (persistent)
 > +user[(1, "alice@example.com"), (2, "bob@example.com")]
 Inserted 2 fact(s) into 'user'.
 > ?user(Id, Email)
-┌──────┬─────────────────────┐
-│ col0 │ col1                │
-├──────┼─────────────────────┤
-│    1 │ "alice@example.com" │
-│    2 │ "bob@example.com"   │
-└──────┴─────────────────────┘
+┌────┬─────────────────────┐
+│ id │ email               │
+├────┼─────────────────────┤
+│  1 │ "alice@example.com" │
+│  2 │ "bob@example.com"   │
+└────┴─────────────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

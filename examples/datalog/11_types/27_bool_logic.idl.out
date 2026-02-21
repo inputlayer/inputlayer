@@ -12,38 +12,38 @@ Switched to knowledge graph: test_bool_logic_n11t27
 > +flags[(1, true), (2, false), (3, true), (4, false)]
 Inserted 4 fact(s) into 'flags'.
 > enabled(Id) <- flags(Id, true)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+└───┘
 2 rows
 (session: 1 rule(s))
 > disabled(Id) <- flags(Id, false)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 (session: 2 rule(s))
 > ?enabled(Id)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-└──────┘
+┌────┐
+│ Id │
+├────┤
+│  1 │
+│  3 │
+└────┘
 2 rows
 > ?disabled(Id)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌────┐
+│ Id │
+├────┤
+│  2 │
+│  4 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

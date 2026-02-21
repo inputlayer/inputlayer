@@ -13,7 +13,7 @@ Switched to knowledge graph: test_distinct_n18t24
 Inserted 5 fact(s) into 'orders'.
 > distinct_cust(Cust) <- orders(_, Cust, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -24,15 +24,15 @@ Inserted 5 fact(s) into 'orders'.
 > +cust_count(count<C>) <- distinct_cust(C)
 Rule 'cust_count' registered.
 > ?cust_count(Count)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───────┐
+│ Count │
+├───────┤
+│     3 │
+└───────┘
 1 rows
 > distinct_prod(Prod) <- orders(_, _, Prod)
 ┌──────────┐
-│ col0     │
+│ X        │
 ├──────────┤
 │ "Gadget" │
 │ "Widget" │
@@ -42,11 +42,11 @@ Rule 'cust_count' registered.
 > +prod_count(count<P>) <- distinct_prod(P)
 Rule 'prod_count' registered.
 > ?prod_count(Count)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───────┐
+│ Count │
+├───────┤
+│     2 │
+└───────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

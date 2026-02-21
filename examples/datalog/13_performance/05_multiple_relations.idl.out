@@ -20,34 +20,34 @@ Inserted 3 fact(s) into 'project'.
 > +emp_manager(EmpId, MgrId) <- employee(EmpId, DeptId), department(DeptId, MgrId)
 Rule 'emp_manager' registered.
 > ?emp_manager(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  100 │
-│    3 │  200 │
-│    4 │  200 │
-│    5 │  300 │
-│    6 │  100 │
-│    7 │  200 │
-│    8 │  300 │
-│    9 │  100 │
-│   10 │  200 │
-└──────┴──────┘
+┌────┬─────┐
+│ X  │ Y   │
+├────┼─────┤
+│  1 │ 100 │
+│  2 │ 100 │
+│  3 │ 200 │
+│  4 │ 200 │
+│  5 │ 300 │
+│  6 │ 100 │
+│  7 │ 200 │
+│  8 │ 300 │
+│  9 │ 100 │
+│ 10 │ 200 │
+└────┴─────┘
 10 rows
 > +high_budget_emp(EmpId, Budget) <- assignment(EmpId, ProjId), project(ProjId, Budget), Budget > 60000
 Rule 'high_budget_emp' registered.
 > ?high_budget_emp(X, Y)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    1 │  75000 │
-│    3 │  75000 │
-│    4 │  75000 │
-│    5 │ 100000 │
-│    7 │ 100000 │
-│    9 │  75000 │
-└──────┴────────┘
+┌───┬────────┐
+│ X │ Y      │
+├───┼────────┤
+│ 1 │  75000 │
+│ 3 │  75000 │
+│ 4 │  75000 │
+│ 5 │ 100000 │
+│ 7 │ 100000 │
+│ 9 │  75000 │
+└───┴────────┘
 6 rows
 > .kg use default
 Switched to knowledge graph: default

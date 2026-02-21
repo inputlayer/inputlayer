@@ -15,7 +15,7 @@ Inserted 3 fact(s) into 'orders'.
 Inserted 3 fact(s) into 'customers'.
 > has_orders(Name) <- customers(Name), orders(_, Name, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -24,7 +24,7 @@ Inserted 3 fact(s) into 'customers'.
 (session: 1 rule(s))
 > no_orders(Name) <- customers(Name), !has_orders(Name)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Carol" │
 └─────────┘
@@ -32,7 +32,7 @@ Inserted 3 fact(s) into 'customers'.
 (session: 2 rule(s))
 > ?has_orders(Name)
 ┌─────────┐
-│ col0    │
+│ Name    │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -40,7 +40,7 @@ Inserted 3 fact(s) into 'customers'.
 2 rows
 > ?no_orders(Name)
 ┌─────────┐
-│ col0    │
+│ Name    │
 ├─────────┤
 │ "Carol" │
 └─────────┘

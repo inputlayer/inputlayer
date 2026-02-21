@@ -14,12 +14,12 @@ Inserted 3 fact(s) into 'orders'.
 > +monthly_total(Month, sum<Amount>) <- orders(_, Amount, Month)
 Rule 'monthly_total' registered.
 > ?monthly_total(M, T)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "2024-01" │  300 │
-│ "2024-02" │  150 │
-└───────────┴──────┘
+┌───────────┬─────┐
+│ M         │ T   │
+├───────────┼─────┤
+│ "2024-01" │ 300 │
+│ "2024-02" │ 150 │
+└───────────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -13,7 +13,7 @@ Switched to knowledge graph: test_substr_n35t09
 Inserted 1 fact(s) into 'words'.
 > substr_result(S, R) <- words(S), R = SUBSTR(S, 0, 5)
 ┌───────────────┬─────────┐
-│ col0          │ col1    │
+│ X             │ Y       │
 ├───────────────┼─────────┤
 │ "hello world" │ "hello" │
 └───────────────┴─────────┘
@@ -21,7 +21,7 @@ Inserted 1 fact(s) into 'words'.
 (session: 1 rule(s))
 > ?substr_result(S, R)
 ┌───────────────┬─────────┐
-│ col0          │ col1    │
+│ S             │ R       │
 ├───────────────┼─────────┤
 │ "hello world" │ "hello" │
 └───────────────┴─────────┘

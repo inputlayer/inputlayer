@@ -22,14 +22,14 @@ Rule 'min_word' registered.
 Rule 'max_word' registered.
 > ?min_word(M)
 ┌─────────┐
-│ col0    │
+│ M       │
 ├─────────┤
 │ "apple" │
 └─────────┘
 1 rows
 > ?max_word(M)
 ┌──────────┐
-│ col0     │
+│ M        │
 ├──────────┤
 │ "cherry" │
 └──────────┘

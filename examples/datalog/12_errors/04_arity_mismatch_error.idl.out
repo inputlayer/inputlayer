@@ -12,22 +12,22 @@ Switched to knowledge graph: test_arity_err_n12t04
 > +mixed[(1, 2), (3, 4)]
 Inserted 2 fact(s) into 'mixed'.
 > ?mixed(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 > +mixed[(5, 6, 7)]
 Arity mismatch for relation 'mixed': existing arity is 2, but trying to insert tuples with arity 3
 > ?mixed(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

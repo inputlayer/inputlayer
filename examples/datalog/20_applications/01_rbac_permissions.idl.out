@@ -23,7 +23,7 @@ Rule 'has_role' registered.
 Rule 'has_permission' registered.
 > ?has_role(User, Role)
 ┌──────┬──────┐
-│ col0 │ col1 │
+│ User │ Role │
 ├──────┼──────┤
 │  100 │    1 │
 │  101 │    2 │

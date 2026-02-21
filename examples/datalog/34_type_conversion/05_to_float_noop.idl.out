@@ -13,7 +13,7 @@ Switched to knowledge graph: test_to_float_noop_n34t05
 Inserted 3 fact(s) into 'floats'.
 > identity(X, Y) <- floats(X), Y = to_float(X)
 ┌──────┬──────┐
-│ col0 │ col1 │
+│ X    │ Y    │
 ├──────┼──────┤
 │  0.0 │  0.0 │
 │ 2.71 │ 2.71 │
@@ -23,7 +23,7 @@ Inserted 3 fact(s) into 'floats'.
 (session: 1 rule(s))
 > ?identity(X, Y)
 ┌──────┬──────┐
-│ col0 │ col1 │
+│ X    │ Y    │
 ├──────┼──────┤
 │  0.0 │  0.0 │
 │ 2.71 │ 2.71 │

@@ -16,21 +16,21 @@ Rule 'positive' registered.
 > +negative(V) <- values(V), V < 0
 Rule 'negative' registered.
 > ?positive(V)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-│    5 │
-│    7 │
-└──────┘
+┌───┐
+│ V │
+├───┤
+│ 0 │
+│ 5 │
+│ 7 │
+└───┘
 3 rows
 > ?negative(V)
-┌──────┐
-│ col0 │
-├──────┤
-│  -10 │
-│   -3 │
-└──────┘
+┌─────┐
+│ V   │
+├─────┤
+│ -10 │
+│  -3 │
+└─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

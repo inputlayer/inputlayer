@@ -12,23 +12,23 @@ Switched to knowledge graph: test_float_cmp_n11t38
 > +values[(1.5,), (2.5,), (0.5,), (3.0,)]
 Inserted 4 fact(s) into 'values'.
 > big(V) <- values(V), V > 1.0
-┌──────┐
-│ col0 │
-├──────┤
-│  1.5 │
-│  2.5 │
-│  3.0 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 1.5 │
+│ 2.5 │
+│ 3.0 │
+└─────┘
 3 rows
 (session: 1 rule(s))
 > ?big(V)
-┌──────┐
-│ col0 │
-├──────┤
-│  1.5 │
-│  2.5 │
-│  3.0 │
-└──────┘
+┌─────┐
+│ V   │
+├─────┤
+│ 1.5 │
+│ 2.5 │
+│ 3.0 │
+└─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default
