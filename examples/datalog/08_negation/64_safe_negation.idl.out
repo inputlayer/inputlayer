@@ -16,13 +16,13 @@ Inserted 2 fact(s) into 'processed'.
 > +unprocessed(X) <- all_ids(X), !processed(X)
 Rule 'unprocessed' registered.
 > ?unprocessed(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+│ 5 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

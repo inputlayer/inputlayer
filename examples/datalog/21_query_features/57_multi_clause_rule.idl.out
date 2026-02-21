@@ -18,14 +18,14 @@ Rule 'pets' registered.
 > +pets(Id, Name) <- cats(Id, Name)
 Rule 'pets' registered.
 > ?pets(Id, Name)
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    1 │ "Buddy"    │
-│    2 │ "Max"      │
-│    3 │ "Whiskers" │
-│    4 │ "Luna"     │
-└──────┴────────────┘
+┌────┬────────────┐
+│ Id │ Name       │
+├────┼────────────┤
+│  1 │ "Buddy"    │
+│  2 │ "Max"      │
+│  3 │ "Whiskers" │
+│  4 │ "Luna"     │
+└────┴────────────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

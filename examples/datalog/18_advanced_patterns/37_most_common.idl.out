@@ -14,22 +14,22 @@ Inserted 3 fact(s) into 'events'.
 > +event_counts(Event, count<Event>) <- events(Event)
 Rule 'event_counts' registered.
 > ?event_counts(Event, Count)
-┌────────────┬──────┐
-│ col0       │ col1 │
-├────────────┼──────┤
-│ "click"    │    1 │
-│ "purchase" │    1 │
-│ "view"     │    1 │
-└────────────┴──────┘
+┌────────────┬───────┐
+│ Event      │ Count │
+├────────────┼───────┤
+│ "click"    │     1 │
+│ "purchase" │     1 │
+│ "view"     │     1 │
+└────────────┴───────┘
 3 rows
 > +max_count(max<Count>) <- event_counts(_, Count)
 Rule 'max_count' registered.
 > ?max_count(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

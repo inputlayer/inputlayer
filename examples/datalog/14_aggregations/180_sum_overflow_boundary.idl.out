@@ -1,0 +1,37 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_sumov_n14t180
+Knowledge graph 'test_sumov_n14t180' created.
+Switched to knowledge graph: test_sumov_n14t180
+> .kg use test_sumov_n14t180
+Switched to knowledge graph: test_sumov_n14t180
+> +big_nums[(4000000000000000000,), (3000000000000000000,), (2000000000000000000,)]
+Inserted 3 fact(s) into 'big_nums'.
+> +total(sum<X>) <- big_nums(X)
+Rule 'total' registered.
+> ?total(S)
+┌─────────────────────┐
+│ S                   │
+├─────────────────────┤
+│ 9000000000000000000 │
+└─────────────────────┘
+1 rows
+> +neg_nums[(-4000000000000000000,), (-3000000000000000000,), (-2000000000000000000,)]
+Inserted 3 fact(s) into 'neg_nums'.
+> +neg_total(sum<X>) <- neg_nums(X)
+Rule 'neg_total' registered.
+> ?neg_total(S)
+┌──────────────────────┐
+│ S                    │
+├──────────────────────┤
+│ -9000000000000000000 │
+└──────────────────────┘
+1 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_sumov_n14t180
+Knowledge graph 'test_sumov_n14t180' dropped.

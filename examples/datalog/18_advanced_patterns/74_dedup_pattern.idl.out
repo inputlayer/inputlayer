@@ -13,7 +13,7 @@ Switched to knowledge graph: test_dedup_n18t74
 Inserted 5 fact(s) into 'events'.
 > unique_types(T) <- events(_, T)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "click" │
 │ "view"  │
@@ -22,7 +22,7 @@ Inserted 5 fact(s) into 'events'.
 (session: 1 rule(s))
 > ?unique_types(T)
 ┌─────────┐
-│ col0    │
+│ T       │
 ├─────────┤
 │ "click" │
 │ "view"  │

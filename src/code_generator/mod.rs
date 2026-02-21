@@ -64,6 +64,13 @@ fn is_query_cancelled() -> bool {
     })
 }
 
+/// Tolerance for float equality comparisons in filters and joins.
+/// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use — values that
+/// differ by normal floating-point rounding (e.g. `0.1 + 0.2`) would compare
+/// as unequal. 1e-10 is tight enough for 64-bit precision while tolerating
+/// accumulated rounding in typical Datalog arithmetic.
+const FLOAT_EQ_TOLERANCE: f64 = 1e-10;
+
 /// Iteration counter type for recursive scopes
 pub type Iter = u32;
 
@@ -101,23 +108,33 @@ impl ExecutionConfig {
 
 /// Executes IR trees using Differential Dataflow.
 pub struct CodeGenerator {
-    /// Input data for base relations
-    input_tuples: HashMap<String, Vec<Tuple>>,
+    /// Input data for base relations (Arc-wrapped for cheap cloning into DD closures).
+    /// Using Arc avoids deep-cloning potentially large datasets on every query.
+    input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
     /// Semiring annotations (debug tracing only).
     #[allow(dead_code)]
     semiring_annotations: Vec<crate::boolean_specialization::SemiringAnnotation>,
     /// Diff type dispatch: Boolean -> BooleanDiff(i8), Counting/Min/Max -> isize.
     semiring_type: SemiringType,
+    /// Maximum number of result rows (0 = unlimited).
+    /// Prevents OOM from queries returning unbounded result sets.
+    max_result_rows: usize,
 }
 
 impl CodeGenerator {
     /// Create a new code generator
     pub fn new() -> Self {
         CodeGenerator {
-            input_tuples: HashMap::new(),
+            input_tuples: Arc::new(HashMap::new()),
             semiring_annotations: Vec::new(),
             semiring_type: SemiringType::Counting, // safe default
+            max_result_rows: 0,                    // unlimited
         }
+    }
+
+    /// Set the maximum number of result rows (0 = unlimited).
+    pub fn set_max_result_rows(&mut self, max: usize) {
+        self.max_result_rows = max;
     }
 
     /// Set the semiring type for diff-type dispatch.
@@ -144,7 +161,12 @@ impl CodeGenerator {
 
     /// Add input data for a relation
     pub fn add_input(&mut self, relation: String, data: Vec<Tuple>) {
-        self.input_tuples.insert(relation, data);
+        Arc::make_mut(&mut self.input_tuples).insert(relation, data);
+    }
+
+    /// Set shared input data from an Arc (avoids deep clone for snapshot queries)
+    pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
+        self.input_tuples = data;
     }
 
     /// Add input data for a relation (alias for `add_input`)
@@ -189,6 +211,7 @@ impl CodeGenerator {
         // Clone data for move into closure
         let input_data = self.input_tuples.clone();
         let ir_clone = ir.clone();
+        let result_limit = self.max_result_rows;
 
         // Execute DD computation
         timely::execute_directly(move |worker| {
@@ -207,7 +230,10 @@ impl CodeGenerator {
                     .distinct_core::<R>()
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -455,6 +481,7 @@ impl CodeGenerator {
     ) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
+        let result_limit = self.max_result_rows;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -525,7 +552,10 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -651,6 +681,7 @@ impl CodeGenerator {
         let results_clone = Arc::clone(&results);
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
+        let result_limit = self.max_result_rows;
 
         if std::env::var("IL_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
@@ -679,7 +710,7 @@ impl CodeGenerator {
                     // - All base relations entered into the iterative scope
                     // - The recursive relation backed by the SemigroupVariable
                     let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
-                    for (name, tuples) in &input_data {
+                    for (name, tuples) in input_data.iter() {
                         let coll: Collection<_, Tuple, R> = Collection::new(
                             tuples
                                 .clone()
@@ -758,7 +789,10 @@ impl CodeGenerator {
                 result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -1192,7 +1226,7 @@ impl CodeGenerator {
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
-                        return (f - (val as f64)).abs() < f64::EPSILON;
+                        return (f - (val as f64)).abs() < FLOAT_EQ_TOLERANCE;
                     }
                 }
                 false
@@ -1205,7 +1239,7 @@ impl CodeGenerator {
                     }
                     // Fall back to float comparison for Float64 values
                     if let Some(f) = v.as_f64() {
-                        return (f - (val as f64)).abs() >= f64::EPSILON;
+                        return (f - (val as f64)).abs() >= FLOAT_EQ_TOLERANCE;
                     }
                 }
                 true
@@ -1304,13 +1338,13 @@ impl CodeGenerator {
                 tuple
                     .get(col)
                     .and_then(super::value::Value::as_f64)
-                    .is_some_and(|f| (f - val).abs() < f64::EPSILON)
+                    .is_some_and(|f| (f - val).abs() < FLOAT_EQ_TOLERANCE)
             }),
             Predicate::ColumnNeFloat(col, val) => Box::new(move |tuple: &Tuple| {
                 tuple
                     .get(col)
                     .and_then(super::value::Value::as_f64)
-                    .is_none_or(|f| (f - val).abs() >= f64::EPSILON)
+                    .is_none_or(|f| (f - val).abs() >= FLOAT_EQ_TOLERANCE)
             }),
             Predicate::ColumnGtFloat(col, val) => Box::new(move |tuple: &Tuple| {
                 tuple
@@ -1467,10 +1501,10 @@ impl CodeGenerator {
                         let arith_f = arith_val as f64;
                         return match cmp_op {
                             crate::ast::ComparisonOp::Equal => {
-                                (col_f - arith_f).abs() < f64::EPSILON
+                                (col_f - arith_f).abs() < FLOAT_EQ_TOLERANCE
                             }
                             crate::ast::ComparisonOp::NotEqual => {
-                                (col_f - arith_f).abs() >= f64::EPSILON
+                                (col_f - arith_f).abs() >= FLOAT_EQ_TOLERANCE
                             }
                             crate::ast::ComparisonOp::LessThan => col_f < arith_f,
                             crate::ast::ComparisonOp::LessOrEqual => col_f <= arith_f,
@@ -2383,8 +2417,11 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let bucket = vector_ops::lsh_bucket(v, table_idx, num_hyperplanes);
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
+                        let bucket = vector_ops::lsh_bucket(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2545,8 +2582,11 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let bucket = vector_ops::lsh_bucket_int8(v, table_idx, num_hyperplanes);
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
+                        let bucket = vector_ops::lsh_bucket_int8(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2558,11 +2598,12 @@ impl CodeGenerator {
                 // lsh_probes(bucket, num_hyperplanes, num_probes) -> Vec<Int64>
                 if arg_values.len() >= 3 {
                     let bucket = arg_values[0].to_i64();
-                    let num_hyperplanes = arg_values[1].to_i64() as usize;
-                    let num_probes = arg_values[2].to_i64() as usize;
-                    let probes = vector_ops::lsh_probes(bucket, num_hyperplanes, num_probes);
-                    // Return as a vector of f32 (since we don't have Vec<i64> Value type)
-                    // The caller can cast as needed
+                    let hp = arg_values[1].to_i64();
+                    let np = arg_values[2].to_i64();
+                    if hp < 0 || np < 0 {
+                        return Value::Null;
+                    }
+                    let probes = vector_ops::lsh_probes(bucket, hp as usize, np as usize);
                     let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                     return Value::vector(probes_f32);
                 }
@@ -2575,9 +2616,12 @@ impl CodeGenerator {
                 if arg_values.len() >= 3 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        if hp < 0 {
+                            return Value::Null;
+                        }
                         let (bucket, _distances) =
-                            vector_ops::lsh_bucket_with_distances(v, table_idx, num_hyperplanes);
+                            vector_ops::lsh_bucket_with_distances(v, table_idx, hp as usize);
                         return Value::Int64(bucket);
                     }
                 }
@@ -2588,11 +2632,14 @@ impl CodeGenerator {
                 // Note: distances are provided as a Vector (f32) since that's our available type
                 if arg_values.len() >= 3 {
                     let bucket = arg_values[0].to_i64();
-                    let num_probes = arg_values[2].to_i64() as usize;
+                    let np = arg_values[2].to_i64();
+                    if np < 0 {
+                        return Value::Null;
+                    }
                     if let Some(distances_f32) = arg_values[1].as_vector() {
                         let distances: Vec<f64> =
                             distances_f32.iter().map(|&d| f64::from(d)).collect();
-                        let probes = vector_ops::lsh_probes_ranked(bucket, &distances, num_probes);
+                        let probes = vector_ops::lsh_probes_ranked(bucket, &distances, np as usize);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2604,10 +2651,13 @@ impl CodeGenerator {
                 if arg_values.len() >= 4 {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let num_probes = arg_values[3].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        let np = arg_values[3].to_i64();
+                        if hp < 0 || np < 0 {
+                            return Value::Null;
+                        }
                         let probes =
-                            vector_ops::lsh_multi_probe(v, table_idx, num_hyperplanes, num_probes);
+                            vector_ops::lsh_multi_probe(v, table_idx, hp as usize, np as usize);
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
                     }
@@ -2619,13 +2669,16 @@ impl CodeGenerator {
                 if arg_values.len() >= 4 {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
-                        let num_hyperplanes = arg_values[2].to_i64() as usize;
-                        let num_probes = arg_values[3].to_i64() as usize;
+                        let hp = arg_values[2].to_i64();
+                        let np = arg_values[3].to_i64();
+                        if hp < 0 || np < 0 {
+                            return Value::Null;
+                        }
                         let probes = vector_ops::lsh_multi_probe_int8(
                             v,
                             table_idx,
-                            num_hyperplanes,
-                            num_probes,
+                            hp as usize,
+                            np as usize,
                         );
                         let probes_f32: Vec<f32> = probes.iter().map(|&p| p as f32).collect();
                         return Value::vector(probes_f32);
@@ -2933,9 +2986,13 @@ impl CodeGenerator {
             BuiltinFunction::Substr => {
                 if arg_values.len() >= 3 {
                     if let Some(s) = arg_values[0].as_str() {
-                        let start = arg_values[1].as_i64().unwrap_or(0) as usize;
-                        let len = arg_values[2].as_i64().unwrap_or(0) as usize;
-                        // Handle bounds safely
+                        let start_i = arg_values[1].as_i64().unwrap_or(0);
+                        let len_i = arg_values[2].as_i64().unwrap_or(0);
+                        if start_i < 0 || len_i < 0 {
+                            return Value::String("".into());
+                        }
+                        let start = start_i as usize;
+                        let len = len_i as usize;
                         if start <= s.len() {
                             let end = (start + len).min(s.len());
                             return Value::String(s[start..end].into());
@@ -3227,6 +3284,7 @@ impl CodeGenerator {
     pub fn execute_transitive_closure_dd(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
+        let result_limit = self.max_result_rows;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -3296,7 +3354,10 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -3359,6 +3420,7 @@ impl CodeGenerator {
 
         let source_data = sources.clone();
         let edge_data = edges.clone();
+        let result_limit = self.max_result_rows;
 
         // Execute DD computation with TRUE recursion
         timely::execute_directly(move |worker| {
@@ -3417,7 +3479,10 @@ impl CodeGenerator {
                 reach_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -5412,6 +5477,221 @@ mod tests {
 
         // Similar vectors (1 and 2) might have same bucket (not guaranteed but likely)
         // This is probabilistic, so we don't assert equality
+    }
+
+    /// Regression: negative num_hyperplanes must return Null, not panic from `as usize`.
+    #[test]
+    fn test_lsh_bucket_negative_hyperplanes_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "vectors".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int32(1),
+                Value::vector(vec![1.0, 0.0, 0.0]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "vectors".to_string(),
+                schema: vec!["id".to_string(), "vec".to_string()],
+            }),
+            expressions: vec![(
+                "bucket".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshBucket,
+                    vec![
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-1), // negative hyperplanes
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative num_probes in lsh_probes must return Null.
+    #[test]
+    fn test_lsh_probes_negative_params_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples("data".to_string(), vec![Tuple::new(vec![Value::Int64(5)])]);
+
+        // Test with negative num_hyperplanes
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbes,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(-1), // negative hp
+                        IRExpression::IntConstant(2),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(1).unwrap(), Value::Null);
+
+        // Test with negative num_probes
+        let ir2 = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbes,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(4),
+                        IRExpression::IntConstant(-3), // negative np
+                    ],
+                ),
+            )],
+        };
+
+        let results2 = codegen.generate_and_execute_tuples(&ir2).unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(*results2[0].get(1).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative num_probes in lsh_probes_ranked must return Null.
+    #[test]
+    fn test_lsh_probes_ranked_negative_probes_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int64(5),
+                Value::vector(vec![0.1, 0.2, 0.3]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["bucket".to_string(), "dists".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshProbesRanked,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(-1), // negative probes
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative params in lsh_multi_probe must return Null.
+    #[test]
+    fn test_lsh_multi_probe_negative_params_returns_null() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "vectors".to_string(),
+            vec![Tuple::new(vec![
+                Value::Int32(1),
+                Value::vector(vec![1.0, 0.0, 0.0]),
+            ])],
+        );
+
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "vectors".to_string(),
+                schema: vec!["id".to_string(), "vec".to_string()],
+            }),
+            expressions: vec![(
+                "probes".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::LshMultiProbe,
+                    vec![
+                        IRExpression::Column(1),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-2), // negative hp
+                        IRExpression::IntConstant(3),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(2).unwrap(), Value::Null);
+    }
+
+    /// Regression: negative start/len in substr must return empty string, not panic.
+    #[test]
+    fn test_substr_negative_params_returns_empty() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "data".to_string(),
+            vec![Tuple::new(vec![Value::string("hello world")])],
+        );
+
+        // Negative start
+        let ir = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["s".to_string()],
+            }),
+            expressions: vec![(
+                "sub".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Substr,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(-1), // negative start
+                        IRExpression::IntConstant(5),
+                    ],
+                ),
+            )],
+        };
+
+        let results = codegen.generate_and_execute_tuples(&ir).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0].get(1).unwrap(), Value::String("".into()));
+
+        // Negative length
+        let ir2 = IRNode::Compute {
+            input: Box::new(IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["s".to_string()],
+            }),
+            expressions: vec![(
+                "sub".to_string(),
+                IRExpression::FunctionCall(
+                    BuiltinFunction::Substr,
+                    vec![
+                        IRExpression::Column(0),
+                        IRExpression::IntConstant(0),
+                        IRExpression::IntConstant(-5), // negative len
+                    ],
+                ),
+            )],
+        };
+
+        let results2 = codegen.generate_and_execute_tuples(&ir2).unwrap();
+        assert_eq!(results2.len(), 1);
+        assert_eq!(*results2[0].get(1).unwrap(), Value::String("".into()));
     }
 
     #[test]
@@ -7678,5 +7958,114 @@ mod tests {
         );
 
         set_query_cancel_flag(None);
+    }
+
+    // === Regression tests for result set size limit ===
+
+    /// Verify max_result_rows=0 means unlimited (default behavior)
+    #[test]
+    fn test_result_limit_zero_means_unlimited() {
+        let mut codegen = CodeGenerator::new();
+        assert_eq!(codegen.max_result_rows, 0);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=100)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 100, "No limit should return all 100 rows");
+    }
+
+    /// Verify max_result_rows caps the number of returned rows
+    #[test]
+    fn test_result_limit_caps_output() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(10);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=100)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 10, "Should cap at max_result_rows=10");
+    }
+
+    /// Verify limit works when result count is below the limit
+    #[test]
+    fn test_result_limit_below_threshold() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(1000);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=5).map(|i| Tuple::new(vec![Value::Int64(i)])).collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 5, "Should return all 5 when limit is 1000");
+    }
+
+    /// Regression: set_shared_input() provides data via Arc without deep clone.
+    /// Verifies the Arc path produces correct query results.
+    #[test]
+    fn test_set_shared_input_produces_correct_results() {
+        let mut data = HashMap::new();
+        data.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+        let shared = Arc::new(data);
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_shared_input(Arc::clone(&shared));
+
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(
+            results.len(),
+            2,
+            "set_shared_input should provide data for queries"
+        );
+    }
+
+    /// Regression: add_input after set_shared_input uses copy-on-write (Arc::make_mut).
+    /// The original Arc must not be mutated.
+    #[test]
+    fn test_add_input_after_shared_does_not_mutate_original() {
+        let mut data = HashMap::new();
+        data.insert(
+            "edge".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
+        );
+        let shared = Arc::new(data);
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_shared_input(Arc::clone(&shared));
+
+        // add_input triggers Arc::make_mut (copy-on-write)
+        codegen.add_input("node".to_string(), vec![Tuple::new(vec![Value::Int64(10)])]);
+
+        // Original Arc should still only have "edge"
+        assert_eq!(shared.len(), 1, "Original Arc must not be mutated");
+        assert!(shared.contains_key("edge"));
+        assert!(!shared.contains_key("node"));
     }
 }

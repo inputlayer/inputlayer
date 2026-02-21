@@ -12,23 +12,23 @@ Switched to knowledge graph: test_interval_dur_n29t10
 > +intervals[(1, 100, 200), (2, 0, 1000), (3, 500, 500)]
 Inserted 3 fact(s) into 'intervals'.
 > duration_result(Id, Duration) <- intervals(Id, Start, End), Duration = interval_duration(Start, End)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │ 1000 │
-│    3 │    0 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │  100 │
+│ 2 │ 1000 │
+│ 3 │    0 │
+└───┴──────┘
 3 rows
 (session: 1 rule(s))
 > ?duration_result(Id, Duration)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │ 1000 │
-│    3 │    0 │
-└──────┴──────┘
+┌────┬──────────┐
+│ Id │ Duration │
+├────┼──────────┤
+│  1 │      100 │
+│  2 │     1000 │
+│  3 │        0 │
+└────┴──────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

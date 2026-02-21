@@ -16,21 +16,21 @@ Inserted 4 fact(s) into 'set_b'.
 > +intersection(X) <- set_a(X), set_b(X)
 Rule 'intersection' registered.
 > ?intersection(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 4 │
+└───┘
 2 rows
 > +intersect_count(count<X>) <- intersection(X)
 Rule 'intersect_count' registered.
 > ?intersect_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > +pairs_a[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'pairs_a'.
@@ -39,12 +39,12 @@ Inserted 3 fact(s) into 'pairs_b'.
 > +common_pairs(X, Y) <- pairs_a(X, Y), pairs_b(X, Y)
 Rule 'common_pairs' registered.
 > ?common_pairs(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 2 rows
 > +set_x[(1), (2)]
 Inserted 2 fact(s) into 'set_x'.

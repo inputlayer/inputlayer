@@ -18,13 +18,13 @@ Deleted 1 facts from 'empty_exclude'.
 > +result(X, Y) <- data(X, Y), !empty_exclude(X, _)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,24 +12,24 @@ Switched to knowledge graph: test_cond_del_empty_n27t33
 > +items[(1, 10), (2, 20), (3, 30)]
 Inserted 3 fact(s) into 'items'.
 > ?items(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │  10 │
+│  2 │  20 │
+│  3 │  30 │
+└────┴─────┘
 3 rows
 > -items(Id, Val) <- items(Id, Val), Val > 1000
 Conditional delete: 0 fact(s) deleted from 'items'.
 > ?items(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │  10 │
+│  2 │  20 │
+│  3 │  30 │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

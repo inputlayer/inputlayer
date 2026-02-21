@@ -18,12 +18,12 @@ Rule 'target_node' registered.
 > +pure_source(X, Y) <- source_node(X, Y), !target_node(X, _)
 Rule 'pure_source' registered.
 > ?pure_source(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

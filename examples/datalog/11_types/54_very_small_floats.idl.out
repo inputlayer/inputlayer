@@ -14,15 +14,15 @@ Inserted 3 fact(s) into 'tiny'.
 > +sum_tiny(sum<X>) <- tiny(X)
 Rule 'sum_tiny' registered.
 > ?sum_tiny(S)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-└──────┘
+┌───┐
+│ S │
+├───┤
+│ 0 │
+└───┘
 1 rows
 > tiny_cmp(A, B) <- tiny(A), tiny(B), A < B
 ┌────────┬────────┐
-│ col0   │ col1   │
+│ X      │ Y      │
 ├────────┼────────┤
 │ 1e-100 │ 2e-100 │
 │ 1e-100 │ 3e-100 │
@@ -32,7 +32,7 @@ Rule 'sum_tiny' registered.
 (session: 1 rule(s))
 > ?tiny_cmp(A, B)
 ┌────────┬────────┐
-│ col0   │ col1   │
+│ A      │ B      │
 ├────────┼────────┤
 │ 1e-100 │ 2e-100 │
 │ 1e-100 │ 3e-100 │

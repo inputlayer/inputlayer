@@ -18,21 +18,21 @@ Rule 'level1' registered.
 > +level2(X) <- level1(X), X > 2
 Rule 'level2' registered.
 > ?level1(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > ?level2(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 5 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

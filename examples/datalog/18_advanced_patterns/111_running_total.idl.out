@@ -14,11 +14,11 @@ Inserted 4 fact(s) into 'txns'.
 > +total_sum(sum<Amt>) <- txns(_, Amt)
 Rule 'total_sum' registered.
 > ?total_sum(T)
-┌──────┐
-│ col0 │
-├──────┤
-│  250 │
-└──────┘
+┌─────┐
+│ T   │
+├─────┤
+│ 250 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

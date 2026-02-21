@@ -13,7 +13,7 @@ Switched to knowledge graph: test_escaped_n10t127
 Inserted 3 fact(s) into 'messages'.
 > ?messages(M)
 ┌───────────────┐
-│ col0          │
+│ M             │
 ├───────────────┤
 │ "Hello World" │
 │ "It's fine"   │

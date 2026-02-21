@@ -1,0 +1,14 @@
+// Test: Double negative arithmetic X - (-Y) = X + Y
+
+.kg create test_dblneg_n15t57
+.kg use test_dblneg_n15t57
+
++vals[(5,), (10,), (-3,)]
+
+// Double negative: subtracting a negative should add
+result(X, Y, R) <- vals(X), vals(Y), R = X - (0 - Y)
+
+?result(X, Y, R)
+
+.kg use default
+.kg drop test_dblneg_n15t57

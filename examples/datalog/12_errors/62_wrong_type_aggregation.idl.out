@@ -12,19 +12,19 @@ Switched to knowledge graph: test_wrong_agg_n12t62
 > +strings[("hello",), ("world",)]
 Inserted 2 fact(s) into 'strings'.
 > sum_str(sum<S>) <- strings(S)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 0 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?sum_str(R)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-└──────┘
+┌───┐
+│ R │
+├───┤
+│ 0 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

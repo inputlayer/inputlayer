@@ -14,14 +14,14 @@ Inserted 5 fact(s) into 'parent'.
 > +sibling(X, Y) <- parent(P, X), parent(P, Y), X < Y
 Rule 'sibling' registered.
 > ?sibling(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    4 │
-│    5 │    6 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+│ 5 │ 6 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

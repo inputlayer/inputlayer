@@ -14,46 +14,46 @@ Inserted 1 fact(s) into 'trigger'.
 > +constant_fact(0, 1) <- trigger(_)
 Rule 'constant_fact' registered.
 > ?constant_fact(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 0 │ 1 │
+└───┴───┘
 1 rows
 > +source[(1, 100), (2, 100), (3, 100)]
 Inserted 3 fact(s) into 'source'.
 > +extract_second(Y) <- source(_, Y)
 Rule 'extract_second' registered.
 > ?extract_second(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > +any_data[(1), (2), (3)]
 Inserted 3 fact(s) into 'any_data'.
 > +always_true(0, 1) <- any_data(_)
 Rule 'always_true' registered.
 > ?always_true(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │    1 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 0 │ 1 │
+└───┴───┘
 1 rows
 > +pairs[(1, 1), (2, 2), (3, 4), (5, 5)]
 Inserted 4 fact(s) into 'pairs'.
 > +diagonal(X) <- pairs(X, X)
 Rule 'diagonal' registered.
 > ?diagonal(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 5 │
+└───┘
 3 rows
 > +nums[(1), (2), (3), (4)]
 Inserted 4 fact(s) into 'nums'.
@@ -68,11 +68,11 @@ Inserted 3 fact(s) into 'edges'.
 > +triangle(A, B, C) <- edges(A, B), edges(B, C), edges(A, C), A < B, B < C
 Rule 'triangle' registered.
 > ?triangle(A, B, C)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │    2 │    3 │
-└──────┴──────┴──────┘
+┌───┬───┬───┐
+│ A │ B │ C │
+├───┼───┼───┤
+│ 1 │ 2 │ 3 │
+└───┴───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

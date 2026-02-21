@@ -13,7 +13,7 @@ Switched to knowledge graph: test_float_prec_n11t23
 Inserted 5 fact(s) into 'values'.
 > ?values(V)
 ┌───────┐
-│ col0  │
+│ V     │
 ├───────┤
 │  0.01 │
 │   0.1 │
@@ -24,7 +24,7 @@ Inserted 5 fact(s) into 'values'.
 5 rows
 > computed(V, R) <- values(V), R = V * 2.0
 ┌───────┬───────┐
-│ col0  │ col1  │
+│ X     │ Y     │
 ├───────┼───────┤
 │  0.01 │  0.02 │
 │   0.1 │   0.2 │
@@ -36,7 +36,7 @@ Inserted 5 fact(s) into 'values'.
 (session: 1 rule(s))
 > ?computed(V, R)
 ┌───────┬───────┐
-│ col0  │ col1  │
+│ V     │ R     │
 ├───────┼───────┤
 │  0.01 │  0.02 │
 │   0.1 │   0.2 │

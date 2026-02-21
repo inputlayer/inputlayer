@@ -12,23 +12,23 @@ Switched to knowledge graph: test_decay_linear_n29t17
 > +events[(1, 10000, 10000, 10000), (2, 5000, 10000, 10000), (3, 0, 10000, 10000)]
 Inserted 3 fact(s) into 'events'.
 > linear_result(Id, Weight) <- events(Id, Ts, Now, MaxAge), Weight = time_decay_linear(Ts, Now, MaxAge)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  1.0 │
-│    2 │  0.5 │
-│    3 │  0.0 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 1.0 │
+│ 2 │ 0.5 │
+│ 3 │ 0.0 │
+└───┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?linear_result(Id, Weight)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  1.0 │
-│    2 │  0.5 │
-│    3 │  0.0 │
-└──────┴──────┘
+┌────┬────────┐
+│ Id │ Weight │
+├────┼────────┤
+│  1 │    1.0 │
+│  2 │    0.5 │
+│  3 │    0.0 │
+└────┴────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

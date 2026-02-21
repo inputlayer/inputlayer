@@ -34,12 +34,13 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::{info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::wire_value_to_json;
 use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
+use crate::protocol::rest::WsSemaphore;
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
 
@@ -173,6 +174,7 @@ enum WsResponse {
 /// Deprecated: Use the global `/ws` endpoint instead, which auto-manages session lifecycle.
 pub async fn session_websocket(
     Extension(handler): Extension<Arc<Handler>>,
+    Extension(ws_sem): Extension<WsSemaphore>,
     Path(id): Path<String>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, RestError> {
@@ -181,10 +183,31 @@ pub async fn session_websocket(
         return Err(RestError::not_found(format!("Session {id} not found")));
     }
 
+    // Enforce WebSocket connection limit
+    let ws_permit = if let Some(ref sem) = ws_sem.0 {
+        match sem.clone().try_acquire_owned() {
+            Ok(permit) => Some(permit),
+            Err(_) => {
+                return Err(RestError::service_unavailable(
+                    "Too many WebSocket connections".to_string(),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
     Ok(ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE)
-        .on_upgrade(move |socket| handle_ws_connection(socket, handler, id)))
+        .on_upgrade(move |socket| {
+            // Move permit into the async block so it's held for connection lifetime
+            let permit = ws_permit;
+            async move {
+                handle_ws_connection(socket, handler, id).await;
+                drop(permit);
+            }
+        }))
 }
 
 /// Handle a WebSocket connection for a specific session.
@@ -207,23 +230,125 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
 
     let mut notify_rx = handler.subscribe_notifications();
 
+    // Idle timeout (matches global WS handler behavior)
+    let idle_ms = handler.config().http.ws_idle_timeout_ms;
+    let idle_duration = if idle_ms > 0 {
+        Some(std::time::Duration::from_millis(idle_ms))
+    } else {
+        None
+    };
+    let mut last_activity = std::time::Instant::now();
+
+    // Cumulative notification lag — disconnect if subscriber falls too far behind
+    let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
+    let mut total_lagged: u64 = 0;
+
+    // Per-connection message rate limiting
+    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
+    let mut rate_window_start = std::time::Instant::now();
+    let mut rate_window_count: u32 = 0;
+
+    // Connection lifetime limit
+    let connection_start = std::time::Instant::now();
+    let max_lifetime_secs = handler.config().http.rate_limit.ws_max_lifetime_secs;
+    let max_lifetime = if max_lifetime_secs > 0 {
+        Some(std::time::Duration::from_secs(max_lifetime_secs))
+    } else {
+        None
+    };
+
     loop {
+        // Check connection lifetime
+        if let Some(max_lt) = max_lifetime {
+            if connection_start.elapsed() >= max_lt {
+                info!(session_id = %session_id, max_lifetime_secs, "ws_max_lifetime_exceeded");
+                let err_msg = WsResponse::Error {
+                    message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
+                };
+                if let Ok(json) = serde_json::to_string(&err_msg) {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                break;
+            }
+        }
+
+        // Compute remaining idle time for this iteration
+        let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+            match idle_duration {
+                Some(dur) => {
+                    let elapsed = last_activity.elapsed();
+                    if elapsed >= dur {
+                        Box::pin(std::future::ready(()))
+                    } else {
+                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
+                    }
+                }
+                None => Box::pin(std::future::pending()),
+            };
+
         tokio::select! {
+            // Idle timeout
+            () = idle_sleep => {
+                if idle_duration.is_some() {
+                    info!(session_id = %session_id, idle_ms, "ws_idle_timeout");
+                    let err_msg = WsResponse::Error {
+                        message: "Idle timeout".to_string(),
+                    };
+                    if let Ok(json) = serde_json::to_string(&err_msg) {
+                        let _ = sender.send(Message::Text(json)).await;
+                    }
+                    break;
+                }
+            }
             // Client message
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        last_activity = std::time::Instant::now();
+
+                        // Per-connection message rate limiting
+                        if max_msgs_per_sec > 0 {
+                            let now = std::time::Instant::now();
+                            if now.duration_since(rate_window_start) >= std::time::Duration::from_secs(1) {
+                                rate_window_start = now;
+                                rate_window_count = 0;
+                            }
+                            rate_window_count += 1;
+                            if rate_window_count > max_msgs_per_sec {
+                                let err_msg = WsResponse::Error {
+                                    message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
+                                };
+                                if let Ok(json) = serde_json::to_string(&err_msg) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                continue;
+                            }
+                        }
+
                         let response = process_ws_message(&handler, &session_id, &text).await;
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
+                                tracing::error!(error = %e, "Failed to serialize WsResponse");
                                 let err = WsResponse::Error {
-                                    message: format!("Serialization error: {e}"),
+                                    message: "Internal server error".to_string(),
                                 };
                                 serde_json::to_string(&err).unwrap_or_else(|_| {
                                     r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
                                 })
                             }
+                        };
+                        // Guard against oversized WS frames
+                        let json = if json.len() > MAX_MESSAGE_SIZE {
+                            warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+                            let err = WsResponse::Error {
+                                message: format!("Result too large ({} bytes, max {})", json.len(), MAX_MESSAGE_SIZE),
+                            };
+                            serde_json::to_string(&err).unwrap_or_else(|_| {
+                                r#"{"type":"error","message":"Result too large"}"#.to_string()
+                            })
+                        } else {
+                            json
                         };
                         if sender.send(Message::Text(json)).await.is_err() {
                             break;
@@ -273,7 +398,17 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        // Missed some notifications — warn the client
+                        total_lagged += count;
+                        if total_lagged > max_lag {
+                            warn!(session_id = %session_id, total_lagged, max_lag, "ws_slow_subscriber_disconnected");
+                            let err = WsResponse::Error {
+                                message: format!("Disconnected: missed {total_lagged} total notification(s)"),
+                            };
+                            if let Ok(json) = serde_json::to_string(&err) {
+                                let _ = sender.send(Message::Text(json)).await;
+                            }
+                            break;
+                        }
                         let warn = WsResponse::Error {
                             message: format!("Missed {count} notification(s) due to backpressure"),
                         };
@@ -284,6 +419,13 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Notification channel closed — server shutting down
+                        let shutdown_msg = WsResponse::Error {
+                            message: "Server shutting down".to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&shutdown_msg) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
                         break;
                     }
                 }
@@ -291,8 +433,15 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
         }
     }
 
+    // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
+    let _ = sender.send(Message::Close(None)).await;
+
     // Guarantee session cleanup on WS disconnect (WI-03)
-    let _ = handler.close_session(&session_id);
+    let stats = handler.session_stats();
+    info!(session_id = %session_id, active_sessions = stats.total_sessions, "ws_legacy_session_disconnecting");
+    if let Err(e) = handler.close_session(&session_id) {
+        tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+    }
 }
 
 /// Process a single WebSocket message and return a response
@@ -300,8 +449,9 @@ async fn process_ws_message(handler: &Arc<Handler>, session_id: &str, text: &str
     let request: WsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
+            tracing::debug!(error = %e, "Invalid WsRequest message");
             return WsResponse::Error {
-                message: format!("Invalid message: {e}"),
+                message: "Invalid message format".to_string(),
             };
         }
     };
@@ -370,7 +520,8 @@ fn handle_ws_insert_facts(
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
-    let parsed = match super::json_tuples_to_tuples(&tuples) {
+    let max_str = handler.config().storage.performance.max_string_value_bytes;
+    let parsed = match super::json_tuples_to_tuples_with_limits(&tuples, max_str, 65_536) {
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
@@ -388,7 +539,8 @@ fn handle_ws_retract_facts(
     relation: &str,
     tuples: Vec<Vec<serde_json::Value>>,
 ) -> WsResponse {
-    let parsed = match super::json_tuples_to_tuples(&tuples) {
+    let max_str = handler.config().storage.performance.max_string_value_bytes;
+    let parsed = match super::json_tuples_to_tuples_with_limits(&tuples, max_str, 65_536) {
         Ok(t) => t,
         Err(e) => return WsResponse::Error { message: e },
     };
@@ -401,6 +553,18 @@ fn handle_ws_retract_facts(
 }
 
 fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: &str, rule_text: &str) -> WsResponse {
+    // Enforce max_query_size_bytes on rule text to prevent DoS via huge rules
+    let max_bytes = handler.config().storage.performance.max_query_size_bytes;
+    if max_bytes > 0 && rule_text.len() > max_bytes {
+        return WsResponse::Error {
+            message: format!(
+                "Rule text too large: {} bytes (max {})",
+                rule_text.len(),
+                max_bytes
+            ),
+        };
+    }
+
     let program = match crate::parser::parse_program(rule_text) {
         Ok(p) => p,
         Err(e) => {
@@ -423,7 +587,14 @@ fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: &str, rule_text: &str)
             ),
         };
     }
-    let rule = program.rules.into_iter().next().unwrap();
+    let rule = match program.rules.into_iter().next() {
+        Some(r) => r,
+        None => {
+            return WsResponse::Error {
+                message: "Internal error: parsed rule not found".to_string(),
+            };
+        }
+    };
 
     let head = rule.head.relation.clone();
     match handler.session_add_rule(&session_id.to_string(), rule, rule_text.to_string()) {
@@ -471,6 +642,7 @@ enum GlobalWsResponse {
     Connected {
         session_id: String,
         knowledge_graph: String,
+        version: String,
     },
     /// Query/command result
     Result {
@@ -556,33 +728,53 @@ enum GlobalWsResponse {
 /// ```
 pub async fn global_websocket(
     Extension(handler): Extension<Arc<Handler>>,
+    Extension(ws_sem): Extension<WsSemaphore>,
     ws: WebSocketUpgrade,
     Query(params): Query<WsConnectParams>,
 ) -> Result<impl IntoResponse, RestError> {
+    // Enforce WebSocket connection limit
+    let ws_permit = if let Some(ref sem) = ws_sem.0 {
+        match sem.clone().try_acquire_owned() {
+            Ok(permit) => Some(permit),
+            Err(_) => {
+                return Err(RestError::service_unavailable(
+                    "Too many WebSocket connections".to_string(),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
     Ok(ws
         .max_message_size(MAX_MESSAGE_SIZE)
         .max_frame_size(MAX_MESSAGE_SIZE)
-        .on_upgrade(move |socket| handle_global_ws_connection(socket, handler, params.kg)))
+        .on_upgrade(move |socket| {
+            let permit = ws_permit;
+            async move {
+                handle_global_ws_connection(socket, handler, params.kg).await;
+                drop(permit);
+            }
+        }))
 }
 
 /// Handle a global WebSocket connection with auto-session lifecycle.
 async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, kg: String) {
     let (mut sender, mut receiver) = socket.split();
 
-    eprintln!("[ws] New connection for kg={kg}");
     info!(kg = %kg, "ws_connection_start");
 
     // Auto-create session
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
-            eprintln!("[ws] Session {id} created for kg={kg}");
-            info!(session_id = %id, kg = %kg, "ws_session_created");
+            let stats = handler.session_stats();
+            info!(session_id = %id, kg = %kg, active_sessions = stats.total_sessions, "ws_session_created");
             id
         }
         Err(e) => {
-            eprintln!("[ws] ERROR: Failed to create session for kg={kg}: {e}");
+            warn!(kg = %kg, error = %e, "ws_session_create_failed");
             let err_msg = GlobalWsResponse::Error {
-                message: format!("Failed to create session: {e}"),
+                message: "Failed to create session".to_string(),
                 validation_errors: None,
             };
             if let Ok(json) = serde_json::to_string(&err_msg) {
@@ -597,16 +789,24 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let connected = GlobalWsResponse::Connected {
         session_id: session_id.clone(),
         knowledge_graph: kg,
+        version: env!("CARGO_PKG_VERSION").to_string(),
     };
     if let Ok(json) = serde_json::to_string(&connected) {
         if sender.send(Message::Text(json)).await.is_err() {
-            let _ = handler.close_session(&session_id);
+            if let Err(e) = handler.close_session(&session_id) {
+                tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+            }
+            let _ = sender.send(Message::Close(None)).await;
             return;
         }
     }
 
     let mut notify_rx = handler.subscribe_notifications();
     let mut request_seq: u64 = 0;
+
+    // Cumulative notification lag — disconnect if subscriber falls too far behind
+    let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
+    let mut total_lagged: u64 = 0;
 
     // Idle timeout configuration (WI-02)
     let idle_ms = handler.config().http.ws_idle_timeout_ms;
@@ -616,6 +816,20 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
         None
     };
     let mut last_activity = std::time::Instant::now();
+
+    // Connection lifetime limit
+    let connection_start = std::time::Instant::now();
+    let max_lifetime_secs = handler.config().http.rate_limit.ws_max_lifetime_secs;
+    let max_lifetime = if max_lifetime_secs > 0 {
+        Some(std::time::Duration::from_secs(max_lifetime_secs))
+    } else {
+        None
+    };
+
+    // Per-connection message rate limiting
+    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
+    let mut rate_window_start = std::time::Instant::now();
+    let mut rate_window_count: u32 = 0;
 
     loop {
         // Compute remaining idle time for this iteration
@@ -633,11 +847,26 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                 None => Box::pin(std::future::pending()),
             };
 
+        // Check connection lifetime
+        if let Some(max_lt) = max_lifetime {
+            if connection_start.elapsed() >= max_lt {
+                info!(session_id = %session_id, max_lifetime_secs, "ws_max_lifetime_exceeded");
+                let err_msg = GlobalWsResponse::Error {
+                    message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
+                    validation_errors: None,
+                };
+                if let Ok(json) = serde_json::to_string(&err_msg) {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                break;
+            }
+        }
+
         tokio::select! {
             // Idle timeout
             () = idle_sleep => {
                 if idle_duration.is_some() {
-                    eprintln!("[ws] Session {session_id} idle timeout ({idle_ms}ms), disconnecting");
+                    info!(session_id = %session_id, idle_ms, "ws_idle_timeout");
                     let err_msg = GlobalWsResponse::Error {
                         message: "Idle timeout".to_string(),
                         validation_errors: None,
@@ -654,6 +883,26 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                     Some(Ok(Message::Text(text))) => {
                         last_activity = std::time::Instant::now();
                         request_seq = request_seq.saturating_add(1);
+
+                        // Per-connection message rate limiting
+                        if max_msgs_per_sec > 0 {
+                            let now = std::time::Instant::now();
+                            if now.duration_since(rate_window_start) >= std::time::Duration::from_secs(1) {
+                                rate_window_start = now;
+                                rate_window_count = 0;
+                            }
+                            rate_window_count += 1;
+                            if rate_window_count > max_msgs_per_sec {
+                                let err_msg = GlobalWsResponse::Error {
+                                    message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
+                                    validation_errors: None,
+                                };
+                                if let Ok(json) = serde_json::to_string(&err_msg) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                continue;
+                            }
+                        }
                         let span = tracing::info_span!(
                             "ws_request",
                             session_id = %session_id,
@@ -666,8 +915,9 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
+                                tracing::error!(error = %e, "Failed to serialize GlobalWsResponse");
                                 let err = GlobalWsResponse::Error {
-                                    message: format!("Serialization error: {e}"),
+                                    message: "Internal server error".to_string(),
                                     validation_errors: None,
                                 };
                                 serde_json::to_string(&err).unwrap_or_else(|_| {
@@ -675,20 +925,33 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                                 })
                             }
                         };
+                        // Guard against oversized WS frames
+                        let json = if json.len() > MAX_MESSAGE_SIZE {
+                            warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+                            let err = GlobalWsResponse::Error {
+                                message: format!("Result too large ({} bytes, max {})", json.len(), MAX_MESSAGE_SIZE),
+                                validation_errors: None,
+                            };
+                            serde_json::to_string(&err).unwrap_or_else(|_| {
+                                r#"{"type":"error","message":"Result too large"}"#.to_string()
+                            })
+                        } else {
+                            json
+                        };
                         if sender.send(Message::Text(json)).await.is_err() {
                             break;
                         }
                     }
                     Some(Ok(Message::Close(_))) => {
-                        eprintln!("[ws] Session {session_id} received close frame");
+                        debug!(session_id = %session_id, "ws_close_frame_received");
                         break;
                     }
                     None => {
-                        eprintln!("[ws] Session {session_id} stream ended");
+                        debug!(session_id = %session_id, "ws_stream_ended");
                         break;
                     }
                     Some(Err(e)) => {
-                        eprintln!("[ws] Session {session_id} protocol error: {e}");
+                        warn!(session_id = %session_id, error = %e, "ws_protocol_error");
                         break;
                     }
                     _ => {}
@@ -721,6 +984,18 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        total_lagged += count;
+                        if total_lagged > max_lag {
+                            warn!(session_id = %session_id, total_lagged, max_lag, "ws_slow_subscriber_disconnected");
+                            let err = GlobalWsResponse::Error {
+                                message: format!("Disconnected: missed {total_lagged} total notification(s)"),
+                                validation_errors: None,
+                            };
+                            if let Ok(json) = serde_json::to_string(&err) {
+                                let _ = sender.send(Message::Text(json)).await;
+                            }
+                            break;
+                        }
                         let warn = GlobalWsResponse::Error {
                             message: format!("Missed {count} notification(s) due to backpressure"),
                             validation_errors: None,
@@ -732,6 +1007,14 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Notification channel closed — server shutting down
+                        let shutdown_msg = GlobalWsResponse::Error {
+                            message: "Server shutting down".to_string(),
+                            validation_errors: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&shutdown_msg) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
                         break;
                     }
                 }
@@ -739,9 +1022,15 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
         }
     }
 
+    // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
+    let _ = sender.send(Message::Close(None)).await;
+
     // Auto-close session on disconnect
-    eprintln!("[ws] Session {session_id} disconnecting");
-    let _ = handler.close_session(&session_id);
+    let stats = handler.session_stats();
+    info!(session_id = %session_id, active_sessions = stats.total_sessions, "ws_session_disconnecting");
+    if let Err(e) = handler.close_session(&session_id) {
+        tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+    }
 }
 
 /// Process a single global WebSocket message
@@ -753,8 +1042,9 @@ async fn process_global_ws_message(
     let request: GlobalWsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
+            tracing::debug!(error = %e, "Invalid GlobalWsRequest message");
             return GlobalWsResponse::Error {
-                message: format!("Invalid message: {e}"),
+                message: "Invalid message format".to_string(),
                 validation_errors: None,
             };
         }
@@ -792,11 +1082,14 @@ async fn handle_global_execute(
         .execute_program(Some(&sid), None, program.clone())
         .await;
     let elapsed = start.elapsed();
-    if elapsed.as_secs() >= 5 {
-        eprintln!(
-            "[ws] SLOW execute session={session_id} ({:.1}s): {}",
-            elapsed.as_secs_f64(),
-            &program[..program.len().min(80)]
+    let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
+    if slow_query_ms > 0 && elapsed.as_millis() as u64 >= slow_query_ms {
+        warn!(
+            session_id,
+            elapsed_ms = elapsed.as_millis() as u64,
+            threshold_ms = slow_query_ms,
+            program_preview = %&program[..program.len().min(80)],
+            "ws_slow_execute"
         );
     }
     info!(
@@ -995,6 +1288,7 @@ mod tests {
         let resp = GlobalWsResponse::Connected {
             session_id: "42".to_string(),
             knowledge_graph: "default".to_string(),
+            version: "0.1.0".to_string(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"connected\""));

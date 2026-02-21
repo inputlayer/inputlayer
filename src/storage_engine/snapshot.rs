@@ -57,6 +57,9 @@ pub struct KnowledgeGraphSnapshot {
     /// Contains all non-materialized rules formatted as text with trailing newline.
     /// Reused across all query executions to avoid redundant formatting.
     rule_prefix: Arc<String>,
+
+    /// Maximum result rows returned per query (0 = unlimited)
+    pub max_result_rows: usize,
 }
 
 impl KnowledgeGraphSnapshot {
@@ -111,6 +114,7 @@ impl KnowledgeGraphSnapshot {
             num_workers,
             materialized_relations: Arc::new(materialized_names),
             rule_prefix: Arc::new(prefix),
+            max_result_rows: 0,
         }
     }
 
@@ -144,7 +148,9 @@ impl KnowledgeGraphSnapshot {
     pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
         engine.input_tuples.clone_from(&self.input_tuples);
+        engine.set_shared_input(Arc::clone(&self.input_tuples));
         engine.execute(program)
     }
 
@@ -165,7 +171,9 @@ impl KnowledgeGraphSnapshot {
     pub fn execute_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
         let mut engine = DatalogEngine::new();
         engine.input_tuples.clone_from(&self.input_tuples);
+        engine.set_shared_input(Arc::clone(&self.input_tuples));
         engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
         engine.execute_tuples(program)
     }
 
@@ -219,6 +227,7 @@ impl KnowledgeGraphSnapshot {
         // Create a fresh engine with cloned data
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
 
         // Copy-on-write: only clone relation vectors that receive session facts.
         // Relations without session facts share the same underlying data via Arc.
@@ -247,8 +256,11 @@ impl KnowledgeGraphSnapshot {
             isolated_tuples.insert(rel, tuples);
         }
 
-        // Set the isolated tuples on the engine
-        engine.input_tuples = isolated_tuples;
+        // Set the isolated tuples on the engine (needed for pipeline)
+        // Also wrap in Arc for CodeGenerator (avoids deep clone into DD closures)
+        let shared = Arc::new(isolated_tuples);
+        engine.input_tuples.clone_from(&shared);
+        engine.set_shared_input(shared);
 
         // Build combined program using cached rule prefix
         let combined = format!("{}{}", self.rule_prefix, program);

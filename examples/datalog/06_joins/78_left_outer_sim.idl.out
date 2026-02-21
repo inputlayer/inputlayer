@@ -14,36 +14,36 @@ Inserted 3 fact(s) into 'employees'.
 > +departments[(1, "Engineering"), (2, "Sales")]
 Inserted 2 fact(s) into 'departments'.
 > inner_joined(EmpId, Name, Dept) <- employees(EmpId, Name), departments(EmpId, Dept)
-┌──────┬─────────┬───────────────┐
-│ col0 │ col1    │ col2          │
-├──────┼─────────┼───────────────┤
-│    1 │ "Alice" │ "Engineering" │
-│    2 │ "Bob"   │ "Sales"       │
-└──────┴─────────┴───────────────┘
+┌───┬─────────┬───────────────┐
+│ X │ Y       │ Z             │
+├───┼─────────┼───────────────┤
+│ 1 │ "Alice" │ "Engineering" │
+│ 2 │ "Bob"   │ "Sales"       │
+└───┴─────────┴───────────────┘
 2 rows
 (session: 1 rule(s))
 > ?inner_joined(EmpId, Name, Dept)
-┌──────┬─────────┬───────────────┐
-│ col0 │ col1    │ col2          │
-├──────┼─────────┼───────────────┤
-│    1 │ "Alice" │ "Engineering" │
-│    2 │ "Bob"   │ "Sales"       │
-└──────┴─────────┴───────────────┘
+┌───────┬─────────┬───────────────┐
+│ EmpId │ Name    │ Dept          │
+├───────┼─────────┼───────────────┤
+│     1 │ "Alice" │ "Engineering" │
+│     2 │ "Bob"   │ "Sales"       │
+└───────┴─────────┴───────────────┘
 2 rows
 > no_dept(EmpId, Name) <- employees(EmpId, Name), !departments(EmpId, _)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    3 │ "Carol" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 3 │ "Carol" │
+└───┴─────────┘
 1 rows
 (session: 2 rule(s))
 > ?no_dept(EmpId, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    3 │ "Carol" │
-└──────┴─────────┘
+┌───────┬─────────┐
+│ EmpId │ Name    │
+├───────┼─────────┤
+│     3 │ "Carol" │
+└───────┴─────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

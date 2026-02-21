@@ -14,20 +14,20 @@ Inserted 3 fact(s) into 'data'.
 > +agg(sum<V>) <- data(_, V)
 Rule 'agg' registered.
 > ?agg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > +data[(4, 40)]
 Inserted 1 fact(s) into 'data'.
 > ?agg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .rule drop agg
 Rule 'agg' dropped.
@@ -36,20 +36,20 @@ No results.
 > +agg(max<V>) <- data(_, V)
 Rule 'agg' registered.
 > ?agg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   40 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 40 │
+└────┘
 1 rows
 > -data(4, 40)
 Deleted 1 facts from 'data'.
 > ?agg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 30 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

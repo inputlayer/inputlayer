@@ -18,33 +18,33 @@ Rule 'path' registered.
 > +path(X, Z) <- path(X, Y), edge(Y, Z)
 Rule 'path' registered.
 > ?path(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-│    2 │    2 │
-│    2 │    3 │
-│    2 │    4 │
-│    3 │    2 │
-│    3 │    3 │
-│    3 │    4 │
-│    4 │    2 │
-│    4 │    3 │
-│    4 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 2 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 2 │
+│ 3 │ 3 │
+│ 3 │ 4 │
+│ 4 │ 2 │
+│ 4 │ 3 │
+│ 4 │ 4 │
+└───┴───┘
 12 rows
 > +in_cycle(X) <- path(X, X)
 Rule 'in_cycle' registered.
 > ?in_cycle(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 3 rows
 > +bidir(X, Y) <- edge(X, Y)
 Rule 'bidir' registered.
@@ -55,33 +55,33 @@ Rule 'connected' registered.
 > +connected(X, Z) <- connected(X, Y), bidir(Y, Z)
 Rule 'connected' registered.
 > ?connected(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
 4 rows
 > +sink(X) <- node(X), !edge(X, _)
 Rule 'sink' registered.
 > ?sink(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > +source(X) <- node(X), !edge(_, X)
 Rule 'source' registered.
 > ?source(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 5 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -13,7 +13,7 @@ Switched to knowledge graph: test_multiline_n35t34
 Inserted 2 fact(s) into 'text'.
 > ?text(T)
 ┌────────────────┐
-│ col0           │
+│ T              │
 ├────────────────┤
 │ "line1\nline2" │
 │ "single"       │
@@ -21,7 +21,7 @@ Inserted 2 fact(s) into 'text'.
 2 rows
 > has_newline(T) <- text(T), T = "line1\nline2"
 ┌────────────────┐
-│ col0           │
+│ X              │
 ├────────────────┤
 │ "line1\nline2" │
 └────────────────┘
@@ -29,7 +29,7 @@ Inserted 2 fact(s) into 'text'.
 (session: 1 rule(s))
 > ?has_newline(T)
 ┌────────────────┐
-│ col0           │
+│ T              │
 ├────────────────┤
 │ "line1\nline2" │
 └────────────────┘

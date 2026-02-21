@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'pairs'.
 > +forbidden[(1, 2)]
 Inserted 1 fact(s) into 'forbidden'.
 > allowed(X, Y) <- pairs(X, Y), !forbidden(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 (session: 1 rule(s))
 > ?allowed(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -26,13 +26,13 @@ Rule 'has_children' registered.
 > +is_leaf(P) <- base_cost(P, _), !has_children(P)
 Rule 'is_leaf' registered.
 > ?is_leaf(P)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-│   40 │
-│   50 │
-└──────┘
+┌────┐
+│ P  │
+├────┤
+│ 30 │
+│ 40 │
+│ 50 │
+└────┘
 3 rows
 > +descendant(1, Child) <- part_of(Child, 1, _)
 Rule 'descendant' registered.

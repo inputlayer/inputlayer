@@ -18,30 +18,30 @@ Rule 'product_total' registered.
 > +both_total(Region, Product, sum<Amt>) <- sales(Region, Product, Amt)
 Rule 'both_total' registered.
 > ?region_total(R, T)
-┌────────┬──────┐
-│ col0   │ col1 │
-├────────┼──────┤
-│ "East" │  300 │
-│ "West" │  400 │
-└────────┴──────┘
+┌────────┬─────┐
+│ R      │ T   │
+├────────┼─────┤
+│ "East" │ 300 │
+│ "West" │ 400 │
+└────────┴─────┘
 2 rows
 > ?product_total(P, T)
-┌──────────┬──────┐
-│ col0     │ col1 │
-├──────────┼──────┤
-│ "Gadget" │  450 │
-│ "Widget" │  250 │
-└──────────┴──────┘
+┌──────────┬─────┐
+│ P        │ T   │
+├──────────┼─────┤
+│ "Gadget" │ 450 │
+│ "Widget" │ 250 │
+└──────────┴─────┘
 2 rows
 > ?both_total(R, P, T)
-┌────────┬──────────┬──────┐
-│ col0   │ col1     │ col2 │
-├────────┼──────────┼──────┤
-│ "East" │ "Gadget" │  200 │
-│ "East" │ "Widget" │  100 │
-│ "West" │ "Gadget" │  250 │
-│ "West" │ "Widget" │  150 │
-└────────┴──────────┴──────┘
+┌────────┬──────────┬─────┐
+│ R      │ P        │ T   │
+├────────┼──────────┼─────┤
+│ "East" │ "Gadget" │ 200 │
+│ "East" │ "Widget" │ 100 │
+│ "West" │ "Gadget" │ 250 │
+│ "West" │ "Widget" │ 150 │
+└────────┴──────────┴─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

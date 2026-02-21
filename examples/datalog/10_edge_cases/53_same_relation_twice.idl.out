@@ -12,32 +12,32 @@ Switched to knowledge graph: test_same_twice_n10t53
 > +nums[(1,), (2,), (3,)]
 Inserted 3 fact(s) into 'nums'.
 > pairs(A, B) <- nums(A), nums(B), A < B
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 2 │ 3 │
+└───┴───┘
 3 rows
 (session: 1 rule(s))
 > ?pairs(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 2 │ 3 │
+└───┴───┘
 3 rows
 > +pair_count(count<A>) <- pairs(A, _)
 Rule 'pair_count' registered.
 > ?pair_count(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,20 +12,20 @@ Switched to knowledge graph: test_null_n11t45
 > +data[(1, 0), (2, 100), (3, 0), (4, 50)]
 Inserted 4 fact(s) into 'data'.
 > ?data(Id, Val), Val = 0
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    3 │    0 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │   0 │
+│  3 │   0 │
+└────┴─────┘
 2 rows
 > ?data(Id, Val), Val != 0
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  100 │
-│    4 │   50 │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  2 │ 100 │
+│  4 │  50 │
+└────┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

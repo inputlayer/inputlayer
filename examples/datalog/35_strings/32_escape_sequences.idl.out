@@ -12,52 +12,52 @@ Switched to knowledge graph: test_escapes_n35t32
 > +quote_strings[(1, "He said \"hello\""), (2, "Contains \"quotes\" inside")]
 Inserted 2 fact(s) into 'quote_strings'.
 > ?quote_strings(Id, S)
-┌──────┬──────────────────────────────┐
-│ col0 │ col1                         │
-├──────┼──────────────────────────────┤
-│    1 │ "He said \"hello\""          │
-│    2 │ "Contains \"quotes\" inside" │
-└──────┴──────────────────────────────┘
+┌────┬──────────────────────────────┐
+│ Id │ S                            │
+├────┼──────────────────────────────┤
+│  1 │ "He said \"hello\""          │
+│  2 │ "Contains \"quotes\" inside" │
+└────┴──────────────────────────────┘
 2 rows
 > +newline_strings[(1, "line1\nline2"), (2, "first\nsecond\nthird")]
 Inserted 2 fact(s) into 'newline_strings'.
 > ?newline_strings(Id, S)
-┌──────┬────────────────────────┐
-│ col0 │ col1                   │
-├──────┼────────────────────────┤
-│    1 │ "line1\nline2"         │
-│    2 │ "first\nsecond\nthird" │
-└──────┴────────────────────────┘
+┌────┬────────────────────────┐
+│ Id │ S                      │
+├────┼────────────────────────┤
+│  1 │ "line1\nline2"         │
+│  2 │ "first\nsecond\nthird" │
+└────┴────────────────────────┘
 2 rows
 > +tab_strings[(1, "col1\tcol2"), (2, "name\tage\tcity")]
 Inserted 2 fact(s) into 'tab_strings'.
 > ?tab_strings(Id, S)
-┌──────┬───────────────────┐
-│ col0 │ col1              │
-├──────┼───────────────────┤
-│    1 │ "col1\tcol2"      │
-│    2 │ "name\tage\tcity" │
-└──────┴───────────────────┘
+┌────┬───────────────────┐
+│ Id │ S                 │
+├────┼───────────────────┤
+│  1 │ "col1\tcol2"      │
+│  2 │ "name\tage\tcity" │
+└────┴───────────────────┘
 2 rows
 > +cr_strings[(1, "windows\r\nstyle"), (2, "old\rmac")]
 Inserted 2 fact(s) into 'cr_strings'.
 > ?cr_strings(Id, S)
-┌──────┬────────────────────┐
-│ col0 │ col1               │
-├──────┼────────────────────┤
-│    1 │ "windows\r\nstyle" │
-│    2 │ "old\rmac"         │
-└──────┴────────────────────┘
+┌────┬────────────────────┐
+│ Id │ S                  │
+├────┼────────────────────┤
+│  1 │ "windows\r\nstyle" │
+│  2 │ "old\rmac"         │
+└────┴────────────────────┘
 2 rows
 > +mixed_escapes[(1, "path\\to\\file\twith \"tabs\""), (2, "line1\nline2\twith\ttabs")]
 Inserted 2 fact(s) into 'mixed_escapes'.
 > ?mixed_escapes(Id, S)
-┌──────┬─────────────────────────────────┐
-│ col0 │ col1                            │
-├──────┼─────────────────────────────────┤
-│    1 │ "path\\to\\file\twith \"tabs\"" │
-│    2 │ "line1\nline2\twith\ttabs"      │
-└──────┴─────────────────────────────────┘
+┌────┬─────────────────────────────────┐
+│ Id │ S                               │
+├────┼─────────────────────────────────┤
+│  1 │ "path\\to\\file\twith \"tabs\"" │
+│  2 │ "line1\nline2\twith\ttabs"      │
+└────┴─────────────────────────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

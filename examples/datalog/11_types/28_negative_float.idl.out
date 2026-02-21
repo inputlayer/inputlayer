@@ -13,7 +13,7 @@ Switched to knowledge graph: test_neg_float_n11t28
 Inserted 4 fact(s) into 'temps'.
 > ?temps(T)
 ┌───────┐
-│ col0  │
+│ T     │
 ├───────┤
 │ -10.5 │
 │ -5.25 │
@@ -23,7 +23,7 @@ Inserted 4 fact(s) into 'temps'.
 4 rows
 > negative(T) <- temps(T), T < 0.0
 ┌───────┐
-│ col0  │
+│ X     │
 ├───────┤
 │ -10.5 │
 │ -5.25 │
@@ -32,7 +32,7 @@ Inserted 4 fact(s) into 'temps'.
 (session: 1 rule(s))
 > ?negative(T)
 ┌───────┐
-│ col0  │
+│ T     │
 ├───────┤
 │ -10.5 │
 │ -5.25 │

@@ -26,22 +26,22 @@ Inserted 3 fact(s) into 'products'.
 > +inventory[(1, 50), (2, 30), (3, 75)]
 Inserted 3 fact(s) into 'inventory'.
 > ?products(Id, Name, Price)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "Widget" │  100 │
-│    2 │ "Gadget" │  200 │
-│    3 │ "Gizmo"  │  150 │
-└──────┴──────────┴──────┘
+┌────┬──────────┬───────┐
+│ id │ name     │ price │
+├────┼──────────┼───────┤
+│  1 │ "Widget" │   100 │
+│  2 │ "Gadget" │   200 │
+│  3 │ "Gizmo"  │   150 │
+└────┴──────────┴───────┘
 3 rows
 > ?inventory(Pid, Qty)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   50 │
-│    2 │   30 │
-│    3 │   75 │
-└──────┴──────┘
+┌────────────┬─────┐
+│ product_id │ qty │
+├────────────┼─────┤
+│          1 │  50 │
+│          2 │  30 │
+│          3 │  75 │
+└────────────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

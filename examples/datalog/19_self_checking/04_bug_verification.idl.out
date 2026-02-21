@@ -15,7 +15,7 @@ Inserted 2 fact(s) into 'src3'.
 Inserted 2 fact(s) into 'link'.
 > result(Y, D+1) <- src3(X, D, _), link(X, Y)
 ┌──────┬──────┐
-│ col0 │ col1 │
+│ X    │ Y    │
 ├──────┼──────┤
 │ 1001 │ 7778 │
 │ 1002 │ 8889 │
@@ -24,7 +24,7 @@ Inserted 2 fact(s) into 'link'.
 (session: 1 rule(s))
 > ?result(A, B)
 ┌──────┬──────┐
-│ col0 │ col1 │
+│ A    │ B    │
 ├──────┼──────┤
 │ 1001 │ 7778 │
 │ 1002 │ 8889 │

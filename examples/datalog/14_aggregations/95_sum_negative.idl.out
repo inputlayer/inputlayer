@@ -12,19 +12,19 @@ Switched to knowledge graph: test_sum_neg_n14t95
 > +amounts[(100,), (-50,), (200,), (-75,), (25,)]
 Inserted 5 fact(s) into 'amounts'.
 > total(sum<X>) <- amounts(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  200 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 200 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > ?total(T)
-┌──────┐
-│ col0 │
-├──────┤
-│  200 │
-└──────┘
+┌─────┐
+│ T   │
+├─────┤
+│ 200 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

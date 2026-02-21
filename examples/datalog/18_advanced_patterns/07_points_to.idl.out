@@ -22,12 +22,12 @@ Rule 'pt' registered.
 > +pt(X, Z) <- load(X, P), pt(P, H), pt(H, Z)
 Rule 'pt' registered.
 > ?pt(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  101 │
-│    2 │  102 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 101 │
+│ 2 │ 102 │
+└───┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

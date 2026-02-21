@@ -14,38 +14,38 @@ Inserted 3 fact(s) into 'int_vals'.
 > +float_vals[(1.5,), (2.5,), (3.5,)]
 Inserted 3 fact(s) into 'float_vals'.
 > big_int(X) <- int_vals(X), X > 1.5
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 (session: 1 rule(s))
 > small_float(X) <- float_vals(X), X < 3
-┌──────┐
-│ col0 │
-├──────┤
-│  1.5 │
-│  2.5 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 1.5 │
+│ 2.5 │
+└─────┘
 2 rows
 (session: 2 rule(s))
 > ?big_int(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 > ?small_float(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  1.5 │
-│  2.5 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 1.5 │
+│ 2.5 │
+└─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

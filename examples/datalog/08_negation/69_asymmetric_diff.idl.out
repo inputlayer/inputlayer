@@ -18,18 +18,18 @@ Rule 'a_minus_b' registered.
 > +b_minus_a(X) <- set_b(X), !set_a(X)
 Rule 'b_minus_a' registered.
 > ?a_minus_b(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > ?b_minus_a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

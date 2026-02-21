@@ -14,23 +14,23 @@ Inserted 3 fact(s) into 'data'.
 > +result(sum<V>) <- data(_, V)
 Rule 'result' registered.
 > ?result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > .rule drop result
 Rule 'result' dropped.
 > +result(X, Y) <- data(X, Y), Y > 15
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

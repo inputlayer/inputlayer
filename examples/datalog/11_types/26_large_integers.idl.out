@@ -13,7 +13,7 @@ Switched to knowledge graph: test_large_int_n11t26
 Inserted 3 fact(s) into 'big_nums'.
 > ?big_nums(N)
 ┌───────────┐
-│ col0      │
+│ N         │
 ├───────────┤
 │   1000000 │
 │ 123456789 │
@@ -22,7 +22,7 @@ Inserted 3 fact(s) into 'big_nums'.
 3 rows
 > computed(N, R) <- big_nums(N), R = N + 1
 ┌───────────┬────────────┐
-│ col0      │ col1       │
+│ X         │ Y          │
 ├───────────┼────────────┤
 │   1000000 │    1000001 │
 │ 123456789 │  123456790 │
@@ -32,7 +32,7 @@ Inserted 3 fact(s) into 'big_nums'.
 (session: 1 rule(s))
 > ?computed(N, R)
 ┌───────────┬────────────┐
-│ col0      │ col1       │
+│ N         │ R          │
 ├───────────┼────────────┤
 │   1000000 │    1000001 │
 │ 123456789 │  123456790 │

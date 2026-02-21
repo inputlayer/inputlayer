@@ -12,40 +12,40 @@ Switched to knowledge graph: test_wildcard_n21t23
 > +data[(1, "a", 100), (2, "b", 200), (3, "a", 300)]
 Inserted 3 fact(s) into 'data'.
 > ids_only(Id) <- data(Id, _, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > category_a(Id) <- data(Id, "a", _)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+└───┘
 2 rows
 (session: 2 rule(s))
 > ?ids_only(Id)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌────┐
+│ Id │
+├────┤
+│  1 │
+│  2 │
+│  3 │
+└────┘
 3 rows
 > ?category_a(Id)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-└──────┘
+┌────┐
+│ Id │
+├────┤
+│  1 │
+│  3 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

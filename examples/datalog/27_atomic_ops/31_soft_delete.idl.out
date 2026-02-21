@@ -14,30 +14,30 @@ Inserted 3 fact(s) into 'items'.
 > +deleted[]
 Inserted 0 fact(s) into 'deleted'.
 > ?items(Id, Name)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Name │
+├────┼──────┤
+│  1 │ "a"  │
+│  2 │ "b"  │
+│  3 │ "c"  │
+└────┴──────┘
 3 rows
 > +deleted[(1,), (2,)]
 Inserted 2 fact(s) into 'deleted'.
 > active(Id, Name) <- items(Id, Name), !deleted(Id)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │ "c"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 3 │ "c" │
+└───┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?active(Id, Name)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Name │
+├────┼──────┤
+│  3 │ "c"  │
+└────┴──────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

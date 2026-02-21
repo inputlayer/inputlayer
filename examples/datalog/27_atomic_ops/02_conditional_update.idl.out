@@ -12,36 +12,36 @@ Switched to knowledge graph: test_conditional_update_n27t02
 > +counter[(1, 100), (2, 200), (3, 50), (4, 150)]
 Inserted 4 fact(s) into 'counter'.
 > ?counter(Id, Value)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-│    3 │   50 │
-│    4 │  150 │
-└──────┴──────┘
+┌────┬───────┐
+│ Id │ Value │
+├────┼───────┤
+│  1 │   100 │
+│  2 │   200 │
+│  3 │    50 │
+│  4 │   150 │
+└────┴───────┘
 4 rows
 > -counter(Id, Value) <- counter(Id, Value), Value > 100
 Conditional delete: 2 fact(s) deleted from 'counter'.
 > ?counter(Id, Value)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    3 │   50 │
-└──────┴──────┘
+┌────┬───────┐
+│ Id │ Value │
+├────┼───────┤
+│  1 │   100 │
+│  3 │    50 │
+└────┴───────┘
 2 rows
 > +counter[(2, 210), (4, 160)]
 Inserted 2 fact(s) into 'counter'.
 > ?counter(Id, Value)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  210 │
-│    3 │   50 │
-│    4 │  160 │
-└──────┴──────┘
+┌────┬───────┐
+│ Id │ Value │
+├────┼───────┤
+│  1 │   100 │
+│  2 │   210 │
+│  3 │    50 │
+│  4 │   160 │
+└────┴───────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

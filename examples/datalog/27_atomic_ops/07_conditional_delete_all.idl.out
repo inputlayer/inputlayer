@@ -12,14 +12,14 @@ Switched to knowledge graph: test_cond_del_all_n27t07
 > +items[(1, "a"), (2, "b"), (3, "c"), (4, "d")]
 Inserted 4 fact(s) into 'items'.
 > ?items(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-│    4 │ "d"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+│  3 │ "c" │
+│  4 │ "d" │
+└────┴─────┘
 4 rows
 > -items(X, Y) <- items(X, Y)
 Conditional delete: 4 fact(s) deleted from 'items'.

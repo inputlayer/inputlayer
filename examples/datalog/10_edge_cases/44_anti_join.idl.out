@@ -14,21 +14,21 @@ Inserted 4 fact(s) into 'all_users'.
 > +active_users[(1,), (3,)]
 Inserted 2 fact(s) into 'active_users'.
 > inactive(Id, Name) <- all_users(Id, Name), !active_users(Id)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    2 │ "Bob"  │
-│    4 │ "Dave" │
-└──────┴────────┘
+┌───┬────────┐
+│ X │ Y      │
+├───┼────────┤
+│ 2 │ "Bob"  │
+│ 4 │ "Dave" │
+└───┴────────┘
 2 rows
 (session: 1 rule(s))
 > ?inactive(Id, Name)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    2 │ "Bob"  │
-│    4 │ "Dave" │
-└──────┴────────┘
+┌────┬────────┐
+│ Id │ Name   │
+├────┼────────┤
+│  2 │ "Bob"  │
+│  4 │ "Dave" │
+└────┴────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

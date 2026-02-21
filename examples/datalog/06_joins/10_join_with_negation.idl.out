@@ -27,7 +27,7 @@ Cannot insert variable 'Id' - use constants only
 No results.
 > no_orders(Name) <- customers(Id, Name), !orders(Id, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Carol" │
 └─────────┘
@@ -35,7 +35,7 @@ No results.
 (session: 1 rule(s))
 > ?no_orders(Name)
 ┌─────────┐
-│ col0    │
+│ Name    │
 ├─────────┤
 │ "Carol" │
 └─────────┘

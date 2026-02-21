@@ -14,77 +14,77 @@ Inserted 4 fact(s) into 'data'.
 > +zeros(Id) <- data(Id, 0)
 Rule 'zeros' registered.
 > ?zeros(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+└───┘
 2 rows
 > +nonzeros(Id, V) <- data(Id, V), V > 0
 Rule 'nonzeros' registered.
 > ?nonzeros(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   10 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 10 │
+│ 4 │ 20 │
+└───┴────┘
 2 rows
 > +plus_zero(Id, V+0) <- data(Id, V)
 Rule 'plus_zero' registered.
 > ?plus_zero(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │   10 │
-│    3 │    0 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │  0 │
+│ 2 │ 10 │
+│ 3 │  0 │
+│ 4 │ 20 │
+└───┴────┘
 4 rows
 > +times_zero(Id, V*0) <- data(Id, V)
 Rule 'times_zero' registered.
 > ?times_zero(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │    0 │
-│    3 │    0 │
-│    4 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 0 │
+│ 2 │ 0 │
+│ 3 │ 0 │
+│ 4 │ 0 │
+└───┴───┘
 4 rows
 > +sum_with_zeros(sum<V>) <- data(_, V)
 Rule 'sum_with_zeros' registered.
 > ?sum_with_zeros(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 30 │
+└────┘
 1 rows
 > +count_with_zeros(count<Id>) <- data(Id, _)
 Rule 'count_with_zeros' registered.
 > ?count_with_zeros(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > +safe_div[(10, 2), (20, 5), (0, 1)]
 Inserted 3 fact(s) into 'safe_div'.
 > +div_result(N, D, N/D) <- safe_div(N, D)
 Rule 'div_result' registered.
 > ?div_result(X, Y, Z)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    0 │    1 │  0.0 │
-│   10 │    2 │  5.0 │
-│   20 │    5 │  4.0 │
-└──────┴──────┴──────┘
+┌────┬───┬─────┐
+│ X  │ Y │ Z   │
+├────┼───┼─────┤
+│  0 │ 1 │ 0.0 │
+│ 10 │ 2 │ 5.0 │
+│ 20 │ 5 │ 4.0 │
+└────┴───┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

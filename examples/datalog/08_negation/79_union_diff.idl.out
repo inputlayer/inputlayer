@@ -22,13 +22,13 @@ Rule 'union_ab' registered.
 > +result(X) <- union_ab(X), !set_c(X)
 Rule 'result' registered.
 > ?result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

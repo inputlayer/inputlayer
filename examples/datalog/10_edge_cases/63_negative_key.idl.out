@@ -12,28 +12,28 @@ Switched to knowledge graph: test_neg_key_n10t63
 > +data[(-1, "neg_one"), (0, "zero"), (1, "one")]
 Inserted 3 fact(s) into 'data'.
 > ?data(Key, Val)
-┌──────┬───────────┐
-│ col0 │ col1      │
-├──────┼───────────┤
-│   -1 │ "neg_one" │
-│    0 │ "zero"    │
-│    1 │ "one"     │
-└──────┴───────────┘
+┌─────┬───────────┐
+│ Key │ Val       │
+├─────┼───────────┤
+│  -1 │ "neg_one" │
+│   0 │ "zero"    │
+│   1 │ "one"     │
+└─────┴───────────┘
 3 rows
 > negative(Key, Val) <- data(Key, Val), Key < 0
-┌──────┬───────────┐
-│ col0 │ col1      │
-├──────┼───────────┤
-│   -1 │ "neg_one" │
-└──────┴───────────┘
+┌────┬───────────┐
+│ X  │ Y         │
+├────┼───────────┤
+│ -1 │ "neg_one" │
+└────┴───────────┘
 1 rows
 (session: 1 rule(s))
 > ?negative(Key, Val)
-┌──────┬───────────┐
-│ col0 │ col1      │
-├──────┼───────────┤
-│   -1 │ "neg_one" │
-└──────┴───────────┘
+┌─────┬───────────┐
+│ Key │ Val       │
+├─────┼───────────┤
+│  -1 │ "neg_one" │
+└─────┴───────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

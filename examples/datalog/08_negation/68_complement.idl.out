@@ -16,12 +16,12 @@ Inserted 3 fact(s) into 'subset'.
 > +complement(X) <- universe(X), !subset(X)
 Rule 'complement' registered.
 > ?complement(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

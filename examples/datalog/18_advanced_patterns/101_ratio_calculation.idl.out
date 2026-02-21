@@ -12,21 +12,21 @@ Switched to knowledge graph: test_ratio_n18t101
 > +parts[(1, "A", 30), (2, "A", 20), (3, "B", 50), (4, "B", 25), (5, "B", 25)]
 Inserted 5 fact(s) into 'parts'.
 > sum_per_cat(Cat, sum<Val>) <- parts(_, Cat, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "A"  │   50 │
-│ "B"  │  100 │
-└──────┴──────┘
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "A" │  50 │
+│ "B" │ 100 │
+└─────┴─────┘
 2 rows
 (session: 1 rule(s))
 > ?sum_per_cat(Cat, Total)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "A"  │   50 │
-│ "B"  │  100 │
-└──────┴──────┘
+┌─────┬───────┐
+│ Cat │ Total │
+├─────┼───────┤
+│ "A" │    50 │
+│ "B" │   100 │
+└─────┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

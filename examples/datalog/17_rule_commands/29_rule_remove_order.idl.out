@@ -18,13 +18,13 @@ Rule 'output' registered.
 > +output(X, 30) <- nums(X), X = 3
 Rule 'output' registered.
 > ?output(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 3 │ 30 │
+└───┴────┘
 3 rows
 > .rule def output
 Rule: output
@@ -42,12 +42,12 @@ Clauses:
   2. output(X, 30) <- nums(X), X = 3
 
 > ?output(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    3 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 3 │ 30 │
+└───┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

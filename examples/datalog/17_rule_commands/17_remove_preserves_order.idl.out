@@ -18,13 +18,13 @@ Rule 'multi' registered.
 > +multi(X, "large") <- src(X), X >= 50
 Rule 'multi' registered.
 > ?multi(X, Size)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    1 │ "small"  │
-│   10 │ "medium" │
-│  100 │ "large"  │
-└──────┴──────────┘
+┌─────┬──────────┐
+│ X   │ Size     │
+├─────┼──────────┤
+│   1 │ "small"  │
+│  10 │ "medium" │
+│ 100 │ "large"  │
+└─────┴──────────┘
 3 rows
 > .rule def multi
 Rule: multi
@@ -42,12 +42,12 @@ Clauses:
   2. multi(X, "large") <- src(X), X >= 50
 
 > ?multi(X, Size)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "small" │
-│  100 │ "large" │
-└──────┴─────────┘
+┌─────┬─────────┐
+│ X   │ Size    │
+├─────┼─────────┤
+│   1 │ "small" │
+│ 100 │ "large" │
+└─────┴─────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

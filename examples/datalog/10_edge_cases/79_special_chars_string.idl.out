@@ -12,13 +12,13 @@ Switched to knowledge graph: test_special_chars_n10t79
 > +texts[(1, "hello\nworld"), (2, "tab\there"), (3, "back\\slash")]
 Inserted 3 fact(s) into 'texts'.
 > ?texts(Id, T)
-┌──────┬────────────────┐
-│ col0 │ col1           │
-├──────┼────────────────┤
-│    1 │ "hello\nworld" │
-│    2 │ "tab\there"    │
-│    3 │ "back\\slash"  │
-└──────┴────────────────┘
+┌────┬────────────────┐
+│ Id │ T              │
+├────┼────────────────┤
+│  1 │ "hello\nworld" │
+│  2 │ "tab\there"    │
+│  3 │ "back\\slash"  │
+└────┴────────────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

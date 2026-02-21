@@ -17,19 +17,19 @@ No results.
 > ?higher_than(N1, N2, S1, S2)
 No results.
 > ties(Name1, Name2, Score) <- scores(Id1, Name1, Score), scores(Id2, Name2, Score), Id1 < Id2
-┌───────┬────────┬──────┐
-│ col0  │ col1   │ col2 │
-├───────┼────────┼──────┤
-│ "Bob" │ "Dave" │   92 │
-└───────┴────────┴──────┘
+┌───────┬────────┬────┐
+│ X     │ Y      │ Z  │
+├───────┼────────┼────┤
+│ "Bob" │ "Dave" │ 92 │
+└───────┴────────┴────┘
 1 rows
 (session: 2 rule(s))
 > ?ties(N1, N2, S)
-┌───────┬────────┬──────┐
-│ col0  │ col1   │ col2 │
-├───────┼────────┼──────┤
-│ "Bob" │ "Dave" │   92 │
-└───────┴────────┴──────┘
+┌───────┬────────┬────┐
+│ N1    │ N2     │ S  │
+├───────┼────────┼────┤
+│ "Bob" │ "Dave" │ 92 │
+└───────┴────────┴────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -15,7 +15,7 @@ Inserted 2 fact(s) into 'employees'.
 Inserted 2 fact(s) into 'contractors'.
 > all_names(Name) <- employees(_, Name, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -24,7 +24,7 @@ Inserted 2 fact(s) into 'contractors'.
 (session: 1 rule(s))
 > all_names(Name) <- contractors(_, Name, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -35,7 +35,7 @@ Inserted 2 fact(s) into 'contractors'.
 (session: 2 rule(s))
 > ?all_names(Name)
 ┌─────────┐
-│ col0    │
+│ Name    │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │

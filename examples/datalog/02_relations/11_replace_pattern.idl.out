@@ -12,36 +12,36 @@ Switched to knowledge graph: test_replace_n02t11
 > +config[(1, "value1"), (2, "value2")]
 Inserted 2 fact(s) into 'config'.
 > ?config(Id, Val)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    1 │ "value1" │
-│    2 │ "value2" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ Id │ Val      │
+├────┼──────────┤
+│  1 │ "value1" │
+│  2 │ "value2" │
+└────┴──────────┘
 2 rows
 > -config(1, "value1")
 Deleted 1 facts from 'config'.
 > +config(1, "new_value1")
 Inserted 1 fact(s) into 'config'.
 > ?config(Id, Val)
-┌──────┬──────────────┐
-│ col0 │ col1         │
-├──────┼──────────────┤
-│    1 │ "new_value1" │
-│    2 │ "value2"     │
-└──────┴──────────────┘
+┌────┬──────────────┐
+│ Id │ Val          │
+├────┼──────────────┤
+│  1 │ "new_value1" │
+│  2 │ "value2"     │
+└────┴──────────────┘
 2 rows
 > -config(2, "value2")
 Deleted 1 facts from 'config'.
 > +config(2, "new_value2")
 Inserted 1 fact(s) into 'config'.
 > ?config(Id, Val)
-┌──────┬──────────────┐
-│ col0 │ col1         │
-├──────┼──────────────┤
-│    1 │ "new_value1" │
-│    2 │ "new_value2" │
-└──────┴──────────────┘
+┌────┬──────────────┐
+│ Id │ Val          │
+├────┼──────────────┤
+│  1 │ "new_value1" │
+│  2 │ "new_value2" │
+└────┴──────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

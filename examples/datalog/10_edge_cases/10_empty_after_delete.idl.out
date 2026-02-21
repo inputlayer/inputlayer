@@ -12,25 +12,25 @@ Switched to knowledge graph: test_empty_del_n10t10
 > +items[(1), (2), (3), (4), (5)]
 Inserted 5 fact(s) into 'items'.
 > ?items(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+│ 5 │
+└───┘
 5 rows
 > +big_items(X) <- items(X), X > 3
 Rule 'big_items' registered.
 > ?big_items(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+│ 5 │
+└───┘
 2 rows
 > -items(X) <- items(X)
 Conditional delete: 5 fact(s) deleted from 'items'.
@@ -41,20 +41,20 @@ No results.
 > +items[(10), (20)]
 Inserted 2 fact(s) into 'items'.
 > ?items(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-│   20 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+│ 20 │
+└────┘
 2 rows
 > ?big_items(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-│   20 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+│ 20 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

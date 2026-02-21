@@ -14,19 +14,19 @@ Inserted 3 fact(s) into 'orders'.
 > +vip[("Alice",)]
 Inserted 1 fact(s) into 'vip'.
 > non_vip_high(Id, Name, Val) <- orders(Id, Name, Val), !vip(Name), Val > 100
-┌──────┬───────┬──────┐
-│ col0 │ col1  │ col2 │
-├──────┼───────┼──────┤
-│    2 │ "Bob" │  200 │
-└──────┴───────┴──────┘
+┌───┬───────┬─────┐
+│ X │ Y     │ Z   │
+├───┼───────┼─────┤
+│ 2 │ "Bob" │ 200 │
+└───┴───────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?non_vip_high(Id, Name, Val)
-┌──────┬───────┬──────┐
-│ col0 │ col1  │ col2 │
-├──────┼───────┼──────┤
-│    2 │ "Bob" │  200 │
-└──────┴───────┴──────┘
+┌────┬───────┬─────┐
+│ Id │ Name  │ Val │
+├────┼───────┼─────┤
+│  2 │ "Bob" │ 200 │
+└────┴───────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,40 +16,40 @@ Rule 'top_desc' registered.
 > +top_asc(top_k<2, Id, Name:asc>) <- item(Id, Name)
 Rule 'top_asc' registered.
 > ?top_desc(X, Y)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "zebra" │
-│    3 │ "mango" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "zebra" │
+│ 3 │ "mango" │
+└───┴─────────┘
 2 rows
 > ?top_asc(X, Y)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    2 │ "apple"  │
-│    4 │ "banana" │
-└──────┴──────────┘
+┌───┬──────────┐
+│ X │ Y        │
+├───┼──────────┤
+│ 2 │ "apple"  │
+│ 4 │ "banana" │
+└───┴──────────┘
 2 rows
 > -item(1, "zebra")
 Deleted 1 facts from 'item'.
 > ?top_desc(X, Y)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    3 │ "mango"  │
-│    4 │ "banana" │
-└──────┴──────────┘
+┌───┬──────────┐
+│ X │ Y        │
+├───┼──────────┤
+│ 3 │ "mango"  │
+│ 4 │ "banana" │
+└───┴──────────┘
 2 rows
 > +item[(5, "zoo")]
 Inserted 1 fact(s) into 'item'.
 > ?top_desc(X, Y)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    3 │ "mango" │
-│    5 │ "zoo"   │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 3 │ "mango" │
+│ 5 │ "zoo"   │
+└───┴─────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -18,13 +18,13 @@ Inserted 1 fact(s) into 'edge'.
 > +edge(4, 5)
 Inserted 1 fact(s) into 'edge'.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-│    3 │    4 │
-│    4 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 3 │
+│ 3 │ 4 │
+│ 4 │ 5 │
+└───┴───┘
 3 rows
 > +path(X, Y) <- edge(X, Y).
 Parse error: Invalid term: 'Y).'

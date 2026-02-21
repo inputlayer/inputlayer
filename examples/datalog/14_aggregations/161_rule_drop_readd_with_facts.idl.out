@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'data'.
 > +total(sum<V>) <- data(_, V)
 Rule 'total' registered.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > .rule drop total
 Rule 'total' dropped.
@@ -29,11 +29,11 @@ Inserted 1 fact(s) into 'data'.
 > +total(sum<V>) <- data(_, V)
 Rule 'total' registered.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

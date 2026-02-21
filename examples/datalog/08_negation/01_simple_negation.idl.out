@@ -16,12 +16,12 @@ Inserted 2 fact(s) into 'skip'.
 > +filtered(X, Y) <- edge(X, Y), !skip(X, Y)
 Rule 'filtered' registered.
 > ?filtered(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

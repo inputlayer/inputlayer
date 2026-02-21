@@ -18,27 +18,27 @@ Inserted 0 fact(s) into 'data'.
 > +data[(2, "b")]
 Inserted 1 fact(s) into 'data'.
 > count_rows(count<X>) <- data(X, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?count_rows(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > ?data(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "a" │
+│ 2 │ "b" │
+└───┴─────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

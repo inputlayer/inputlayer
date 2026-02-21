@@ -14,23 +14,23 @@ Inserted 5 fact(s) into 'nums'.
 > +thresholds[(3,)]
 Inserted 1 fact(s) into 'thresholds'.
 > below_threshold(X) <- nums(X), thresholds(T), X <= T
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?below_threshold(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,25 +16,25 @@ Inserted 1 fact(s) into 'shortcut'.
 > +reach(X, Y) <- edge(X, Y)
 Rule 'reach' registered.
 > ?reach(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > +reach(X, Y) <- shortcut(X, Y)
 Rule 'reach' registered.
 > ?reach(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    4 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 4 rows
 > .rule list
 Rules:

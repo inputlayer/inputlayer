@@ -13,7 +13,7 @@ Switched to knowledge graph: test_long_str_n10t125
 Inserted 3 fact(s) into 'texts'.
 > ?texts(T)
 ┌──────────────────────────────────────────┐
-│ col0                                     │
+│ T                                        │
 ├──────────────────────────────────────────┤
 │ "medium length string here"              │
 │ "short"                                  │

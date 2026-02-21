@@ -16,19 +16,19 @@ Rule 'all_nodes' registered.
 > +all_nodes(X) <- parent(_, X)
 Rule 'all_nodes' registered.
 > root(X) <- all_nodes(X), !parent(_, X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?root(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

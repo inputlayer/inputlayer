@@ -13,7 +13,7 @@ Switched to knowledge graph: test_bool_n11t20
 Inserted 3 fact(s) into 'flags'.
 > ?flags(Name, Value)
 ┌─────────────┬───────┐
-│ col0        │ col1  │
+│ Name        │ Value │
 ├─────────────┼───────┤
 │ "feature_a" │ true  │
 │ "feature_b" │ false │
@@ -22,7 +22,7 @@ Inserted 3 fact(s) into 'flags'.
 3 rows
 > enabled(Name) <- flags(Name, true)
 ┌─────────────┐
-│ col0        │
+│ X           │
 ├─────────────┤
 │ "feature_a" │
 │ "feature_c" │
@@ -31,7 +31,7 @@ Inserted 3 fact(s) into 'flags'.
 (session: 1 rule(s))
 > ?enabled(Name)
 ┌─────────────┐
-│ col0        │
+│ Name        │
 ├─────────────┤
 │ "feature_a" │
 │ "feature_c" │

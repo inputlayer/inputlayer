@@ -15,7 +15,7 @@ Inserted 3 fact(s) into 'large_nums'.
 Rule 'mult_result' registered.
 > ?mult_result(A, B, C)
 ┌────────────┬────────────┬─────────────────────┐
-│ col0       │ col1       │ col2                │
+│ A          │ B          │ C                   │
 ├────────────┼────────────┼─────────────────────┤
 │ 1000000000 │ 2000000000 │ 2000000000000000000 │
 │ 1000000000 │ 3000000000 │ 3000000000000000000 │
@@ -31,7 +31,7 @@ Inserted 2 fact(s) into 'big_add'.
 Rule 'add_result' registered.
 > ?add_result(A, B, C)
 ┌───────────────┬───────────────┬───────────────┐
-│ col0          │ col1          │ col2          │
+│ A             │ B             │ C             │
 ├───────────────┼───────────────┼───────────────┤
 │  500000000000 │  500000000000 │ 1000000000000 │
 │ 1000000000000 │ 2000000000000 │ 3000000000000 │
@@ -42,23 +42,23 @@ Inserted 3 fact(s) into 'exp_base'.
 > +power_of_two(X, 1024) <- exp_base(X, 10), X = 2
 Rule 'power_of_two' registered.
 > ?power_of_two(B, R)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ 1024 │
-└──────┴──────┘
+┌───┬──────┐
+│ B │ R    │
+├───┼──────┤
+│ 2 │ 1024 │
+└───┴──────┘
 1 rows
 > +sub_pairs[(100, 200), (50, 100)]
 Inserted 2 fact(s) into 'sub_pairs'.
 > +sub_result(X, Y, X-Y) <- sub_pairs(X, Y)
 Rule 'sub_result' registered.
 > ?sub_result(A, B, C)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│   50 │  100 │  -50 │
-│  100 │  200 │ -100 │
-└──────┴──────┴──────┘
+┌─────┬─────┬──────┐
+│ A   │ B   │ C    │
+├─────┼─────┼──────┤
+│  50 │ 100 │  -50 │
+│ 100 │ 200 │ -100 │
+└─────┴─────┴──────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,13 +12,13 @@ Switched to knowledge graph: test_unicode_n35t28
 > +greeting[(1, "Hello World"), (2, "Bonjour"), (3, "Hola")]
 Inserted 3 fact(s) into 'greeting'.
 > ?greeting(Id, Msg)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "Hello World" │
-│    2 │ "Bonjour"     │
-│    3 │ "Hola"        │
-└──────┴───────────────┘
+┌────┬───────────────┐
+│ Id │ Msg           │
+├────┼───────────────┤
+│  1 │ "Hello World" │
+│  2 │ "Bonjour"     │
+│  3 │ "Hola"        │
+└────┴───────────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

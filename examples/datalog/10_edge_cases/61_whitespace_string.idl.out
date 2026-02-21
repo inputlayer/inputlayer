@@ -12,28 +12,28 @@ Switched to knowledge graph: test_whitespace_n10t61
 > +names[(1, "John Doe"), (2, "Jane Smith"), (3, "Bob")]
 Inserted 3 fact(s) into 'names'.
 > ?names(Id, Name)
-┌──────┬──────────────┐
-│ col0 │ col1         │
-├──────┼──────────────┤
-│    1 │ "John Doe"   │
-│    2 │ "Jane Smith" │
-│    3 │ "Bob"        │
-└──────┴──────────────┘
+┌────┬──────────────┐
+│ Id │ Name         │
+├────┼──────────────┤
+│  1 │ "John Doe"   │
+│  2 │ "Jane Smith" │
+│  3 │ "Bob"        │
+└────┴──────────────┘
 3 rows
 > has_space(Id, Name) <- names(Id, Name), Name = "John Doe"
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    1 │ "John Doe" │
-└──────┴────────────┘
+┌───┬────────────┐
+│ X │ Y          │
+├───┼────────────┤
+│ 1 │ "John Doe" │
+└───┴────────────┘
 1 rows
 (session: 1 rule(s))
 > ?has_space(Id, Name)
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    1 │ "John Doe" │
-└──────┴────────────┘
+┌────┬────────────┐
+│ Id │ Name       │
+├────┼────────────┤
+│  1 │ "John Doe" │
+└────┴────────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

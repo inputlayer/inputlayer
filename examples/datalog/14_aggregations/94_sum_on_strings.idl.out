@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'data'.
 > +bad_sum(sum<X>) <- data(X)
 Rule 'bad_sum' registered.
 > ?bad_sum(R)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-└──────┘
+┌───┐
+│ R │
+├───┤
+│ 0 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

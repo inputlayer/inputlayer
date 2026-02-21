@@ -6,10 +6,16 @@
 //!
 //! ```bash
 //! # Start server with default settings
-//! cargo run --bin inputlayer-server
+//! inputlayer-server
 //!
-//! # Start with custom HTTP address
-//! cargo run --bin inputlayer-server -- --addr 0.0.0.0:8080
+//! # Start with custom host and port
+//! inputlayer-server --host 0.0.0.0 --port 9090
+//!
+//! # Start with custom data directory
+//! inputlayer-server --data-dir /var/lib/inputlayer/data
+//!
+//! # Start with a specific config file
+//! inputlayer-server --config /etc/inputlayer/config.toml
 //! ```
 //!
 //! ## HTTP Server
@@ -19,48 +25,119 @@
 //! - AsyncAPI docs at `/api/ws-docs`
 //! - GUI dashboard at `/` (if GUI is enabled)
 
+use clap::Parser;
 use inputlayer::config::LoggingConfig;
 use inputlayer::protocol::rest;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
 
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 8080;
-
 static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
+/// InputLayer — streaming deductive knowledge graph database
+#[derive(Parser, Debug)]
+#[command(name = "inputlayer-server", version, about)]
+struct Cli {
+    /// Host address to bind to
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
+    /// Port to listen on
+    #[arg(long, default_value_t = 8080)]
+    port: u16,
+
+    /// Path to configuration file (TOML)
+    #[arg(long, short)]
+    config: Option<PathBuf>,
+
+    /// Override data directory
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Parse command line arguments
-    let args: Vec<String> = env::args().collect();
-    let host = get_arg(&args, "--host").unwrap_or_else(|| DEFAULT_HOST.to_string());
-    let port: u16 = get_arg(&args, "--port")
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
+    let cli = Cli::parse();
 
     println!("InputLayer Server");
     println!("=================");
     println!();
 
     // Load configuration
-    let mut config = Config::load().unwrap_or_else(|_| {
-        println!("Using default configuration");
-        Config::default()
-    });
+    let mut config = if let Some(ref config_path) = cli.config {
+        Config::from_file(config_path.to_str().unwrap_or("config.toml")).unwrap_or_else(|e| {
+            eprintln!(
+                "WARNING: Failed to load config from {}: {e}",
+                config_path.display()
+            );
+            println!("Using default configuration");
+            Config::default()
+        })
+    } else {
+        Config::load().unwrap_or_else(|_| {
+            println!("Using default configuration");
+            Config::default()
+        })
+    };
 
     // Initialize tracing using config as fallback when env vars are not set
     init_tracing(&config.logging);
 
-    // Override HTTP config from command line
-    config.http.host = host;
-    config.http.port = port;
+    // Install a panic hook that logs panics via tracing and prints to stderr.
+    // Without this, panics on worker threads may lose diagnostic data because
+    // the non-blocking tracing writer buffers output.
+    std::panic::set_hook(Box::new(|info| {
+        let location = info.location().map_or_else(
+            || "unknown".to_string(),
+            |l| format!("{}:{}:{}", l.file(), l.line(), l.column()),
+        );
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Box<dyn Any>".to_string()
+        };
+        tracing::error!(location, payload, "PANIC — thread panicked");
+        eprintln!("PANIC at {location}: {payload}");
+    }));
+
+    // Override from CLI flags
+    config.http.host = cli.host;
+    config.http.port = cli.port;
     config.http.enabled = true;
 
+    if let Some(data_dir) = cli.data_dir {
+        config.storage.data_dir = data_dir;
+    }
+
     let http_config = config.http.clone();
+
+    // Warn about durability settings before config is moved
+    if !config.storage.persist.enabled {
+        eprintln!(
+            "WARNING: DD-native persist layer is DISABLED. \
+             Data will NOT survive restarts. Set [storage.persist] enabled = true for production."
+        );
+    }
+    if config.storage.persist.durability_mode != inputlayer::config::DurabilityMode::Immediate {
+        eprintln!(
+            "WARNING: Durability mode is {:?} (not Immediate). \
+             Recent writes may be lost on crash.",
+            config.storage.persist.durability_mode
+        );
+    }
+    if !config.http.auth.enabled || config.http.auth.api_keys.is_empty() {
+        eprintln!(
+            "WARNING: Authentication is DISABLED. \
+             All endpoints are publicly accessible. \
+             Set [http.auth] enabled = true with api_keys for production."
+        );
+    }
 
     // Create handler
     let handler = Arc::new(Handler::from_config(config).map_err(|e| {
@@ -85,13 +162,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 fn init_tracing(logging_config: &LoggingConfig) {
-    // Environment variables take precedence over config file values
-    let enabled = env::var("IL_TRACE").ok().is_some_and(|v| v != "0");
-    if !enabled {
+    // IL_TRACE_FILE controls where logs go:
+    //   - Not set: logs to stderr (production default)
+    //   - Set to a path: logs to that file
+    // IL_TRACE=0 disables tracing entirely (not recommended for production)
+    let disabled = env::var("IL_TRACE").ok().is_some_and(|v| v == "0");
+    if disabled {
         return;
     }
-
-    let log_path = env::var("IL_TRACE_FILE").unwrap_or_else(|_| "il_trace.log".to_string());
 
     // Use IL_TRACE_JSON env var if set, otherwise fall back to config.logging.format
     let json = env::var("IL_TRACE_JSON")
@@ -103,45 +181,68 @@ fn init_tracing(logging_config: &LoggingConfig) {
         .ok()
         .unwrap_or_else(|| logging_config.level.clone());
 
-    let file = match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("ERROR: Unable to open IL_TRACE_FILE '{log_path}': {e}");
-            return;
+    let filter = tracing_subscriber::EnvFilter::try_new(&level)
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let use_file = if let Ok(log_path) = env::var("IL_TRACE_FILE") {
+        // Try to open the log file
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file);
+                let _ = TRACE_GUARD.set(guard);
+
+                let base = || {
+                    tracing_subscriber::fmt()
+                        .with_env_filter(filter.clone())
+                        .with_ansi(false)
+                        .with_thread_names(true)
+                        .with_thread_ids(true)
+                        .with_writer(non_blocking.clone())
+                        .with_timer(tracing_subscriber::fmt::time::SystemTime)
+                };
+
+                let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
+                    Box::new(base().json().finish())
+                } else {
+                    Box::new(base().compact().finish())
+                };
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "WARNING: Unable to open IL_TRACE_FILE '{log_path}': {e}. \
+                     Falling back to stderr logging."
+                );
+                false
+            }
         }
-    };
-
-    let (non_blocking, guard) = tracing_appender::non_blocking(file);
-    let _ = TRACE_GUARD.set(guard);
-
-    let filter = tracing_subscriber::EnvFilter::try_new(level)
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("trace"));
-
-    let base = || {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter.clone())
-            .with_ansi(false)
-            .with_thread_names(true)
-            .with_thread_ids(true)
-            .with_writer(non_blocking.clone())
-            .with_timer(tracing_subscriber::fmt::time::SystemTime)
-    };
-
-    let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
-        Box::new(base().json().finish())
     } else {
-        Box::new(base().compact().finish())
+        false
     };
 
-    let _ = tracing::subscriber::set_global_default(subscriber);
-}
+    if !use_file {
+        // Log to stderr (production default)
+        let base = || {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter.clone())
+                .with_ansi(true)
+                .with_thread_names(false)
+                .with_writer(std::io::stderr)
+                .with_timer(tracing_subscriber::fmt::time::SystemTime)
+        };
 
-fn get_arg(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == flag)
-        .and_then(|i| args.get(i + 1).cloned())
+        let subscriber: Box<dyn tracing::Subscriber + Send + Sync> = if json {
+            Box::new(base().json().finish())
+        } else {
+            Box::new(base().compact().finish())
+        };
+
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    }
 }

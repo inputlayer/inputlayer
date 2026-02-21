@@ -14,60 +14,60 @@ Inserted 5 fact(s) into 'data'.
 > +result(Grp, sum<V>) <- data(Grp, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   30 │
-│    2 │  120 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │  30 │
+│ 2 │ 120 │
+└───┴─────┘
 2 rows
 > .rule drop result
 Rule 'result' dropped.
 > +result(Grp, count<V>) <- data(Grp, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > .rule drop result
 Rule 'result' dropped.
 > +result(Grp, max<V>) <- data(Grp, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   20 │
-│    2 │   50 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 20 │
+│ 2 │ 50 │
+└───┴────┘
 2 rows
 > .rule drop result
 Rule 'result' dropped.
 > +result(Grp, min<V>) <- data(Grp, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   30 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 30 │
+└───┴────┘
 2 rows
 > .rule drop result
 Rule 'result' dropped.
 > +result(Grp, avg<V>) <- data(Grp, V)
 Rule 'result' registered.
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 15.0 │
-│    2 │ 40.0 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ 15.0 │
+│ 2 │ 40.0 │
+└───┴──────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

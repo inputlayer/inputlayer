@@ -16,21 +16,21 @@ Inserted 4 fact(s) into 'set2'.
 > +set3[(3,), (4,), (5,), (6,)]
 Inserted 4 fact(s) into 'set3'.
 > common(X) <- set1(X), set2(X), set3(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 4 │
+└───┘
 2 rows
 (session: 1 rule(s))
 > ?common(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 4 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

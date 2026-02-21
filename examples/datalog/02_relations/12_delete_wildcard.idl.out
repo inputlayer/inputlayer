@@ -12,26 +12,26 @@ Switched to knowledge graph: test_delete_wildcard_n02t12
 > +items[(1, "a", 100), (2, "b", 200), (3, "a", 300), (4, "c", 400)]
 Inserted 4 fact(s) into 'items'.
 > ?items(Id, Cat, Val)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │ "a"  │  100 │
-│    2 │ "b"  │  200 │
-│    3 │ "a"  │  300 │
-│    4 │ "c"  │  400 │
-└──────┴──────┴──────┘
+┌────┬─────┬─────┐
+│ Id │ Cat │ Val │
+├────┼─────┼─────┤
+│  1 │ "a" │ 100 │
+│  2 │ "b" │ 200 │
+│  3 │ "a" │ 300 │
+│  4 │ "c" │ 400 │
+└────┴─────┴─────┘
 4 rows
 > -items(Id, "a", Val)
 Delete error: Cannot insert variable 'Id' - use constants only
 > ?items(Id, Cat, Val)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    1 │ "a"  │  100 │
-│    2 │ "b"  │  200 │
-│    3 │ "a"  │  300 │
-│    4 │ "c"  │  400 │
-└──────┴──────┴──────┘
+┌────┬─────┬─────┐
+│ Id │ Cat │ Val │
+├────┼─────┼─────┤
+│  1 │ "a" │ 100 │
+│  2 │ "b" │ 200 │
+│  3 │ "a" │ 300 │
+│  4 │ "c" │ 400 │
+└────┴─────┴─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

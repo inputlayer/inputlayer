@@ -16,11 +16,11 @@ Rule 'totals' registered.
 > +big_customers(Customer, Total) <- totals(Customer, Total), Total > 100
 Rule 'big_customers' registered.
 > ?big_customers(C, T)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │  150 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ C       │ T   │
+├─────────┼─────┤
+│ "Alice" │ 150 │
+└─────────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

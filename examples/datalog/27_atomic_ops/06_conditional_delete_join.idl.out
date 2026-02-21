@@ -14,22 +14,22 @@ Inserted 3 fact(s) into 'orders'.
 > +banned[("Alice",)]
 Inserted 1 fact(s) into 'banned'.
 > ?orders(Id, Name, Amount)
-┌──────┬─────────┬──────┐
-│ col0 │ col1    │ col2 │
-├──────┼─────────┼──────┤
-│    1 │ "Alice" │  100 │
-│    2 │ "Bob"   │  200 │
-│    3 │ "Alice" │  300 │
-└──────┴─────────┴──────┘
+┌────┬─────────┬────────┐
+│ Id │ Name    │ Amount │
+├────┼─────────┼────────┤
+│  1 │ "Alice" │    100 │
+│  2 │ "Bob"   │    200 │
+│  3 │ "Alice" │    300 │
+└────┴─────────┴────────┘
 3 rows
 > -orders(Id, Name, Amount) <- banned(Name)
 Conditional delete: 2 fact(s) deleted from 'orders'.
 > ?orders(Id, Name, Amount)
-┌──────┬───────┬──────┐
-│ col0 │ col1  │ col2 │
-├──────┼───────┼──────┤
-│    2 │ "Bob" │  200 │
-└──────┴───────┴──────┘
+┌────┬───────┬────────┐
+│ Id │ Name  │ Amount │
+├────┼───────┼────────┤
+│  2 │ "Bob" │    200 │
+└────┴───────┴────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

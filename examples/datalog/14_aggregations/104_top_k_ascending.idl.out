@@ -14,13 +14,13 @@ Inserted 6 fact(s) into 'price'.
 > +cheapest(top_k<3, Item, Cost:asc>) <- price(Item, Cost)
 Rule 'cheapest' registered.
 > ?cheapest(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   99 │
-│    3 │   50 │
-│    5 │   75 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 99 │
+│ 3 │ 50 │
+│ 5 │ 75 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

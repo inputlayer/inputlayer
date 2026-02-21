@@ -13,7 +13,7 @@ Switched to knowledge graph: test_substr_n35t27
 Inserted 5 fact(s) into 'files'.
 > ?files(F)
 ┌───────────────┐
-│ col0          │
+│ F             │
 ├───────────────┤
 │ "config.json" │
 │ "data.csv"    │

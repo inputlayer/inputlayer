@@ -12,12 +12,12 @@ Switched to knowledge graph: test_session_topk_n04t23
 > +score[(1, 100), (2, 200), (3, 300)]
 Inserted 3 fact(s) into 'score'.
 > top2(top_k<2, X, Y:desc>) <- score(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  200 │
-│    3 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 200 │
+│ 3 │ 300 │
+└───┴─────┘
 2 rows
 (session: 1 rule(s))
 > top2(top_k<2, X, Y:asc>) <- score(X, Y)

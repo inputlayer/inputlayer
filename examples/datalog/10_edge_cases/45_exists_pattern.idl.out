@@ -14,36 +14,36 @@ Inserted 3 fact(s) into 'departments'.
 > +employees[(1, 1), (2, 1), (3, 2)]
 Inserted 3 fact(s) into 'employees'.
 > has_employees(DeptId, Name) <- departments(DeptId, Name), employees(_, DeptId)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "Engineering" │
-│    2 │ "Sales"       │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ "Engineering" │
+│ 2 │ "Sales"       │
+└───┴───────────────┘
 2 rows
 (session: 1 rule(s))
 > ?has_employees(DeptId, Name)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "Engineering" │
-│    2 │ "Sales"       │
-└──────┴───────────────┘
+┌────────┬───────────────┐
+│ DeptId │ Name          │
+├────────┼───────────────┤
+│      1 │ "Engineering" │
+│      2 │ "Sales"       │
+└────────┴───────────────┘
 2 rows
 > no_employees(DeptId, Name) <- departments(DeptId, Name), !employees(_, DeptId)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │ "HR" │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 3 │ "HR" │
+└───┴──────┘
 1 rows
 (session: 2 rule(s))
 > ?no_employees(DeptId, Name)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │ "HR" │
-└──────┴──────┘
+┌────────┬──────┐
+│ DeptId │ Name │
+├────────┼──────┤
+│      3 │ "HR" │
+└────────┴──────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

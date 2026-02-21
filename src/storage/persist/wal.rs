@@ -135,9 +135,10 @@ impl PersistWal {
 
     /// Read all entries from the WAL.
     ///
-    /// Tolerates a truncated last line (from a crash mid-write) by logging a
-    /// warning and skipping it. Parse errors on non-last lines are fatal since
-    /// they indicate real corruption rather than a partial write.
+    /// Tolerates corrupt or truncated lines by logging a warning and skipping
+    /// them. This makes WAL recovery resilient to partial writes (crash mid-write)
+    /// AND bit-rot or other corruption — the system recovers as many valid
+    /// entries as possible rather than refusing to start.
     pub fn read_all(&self) -> StorageResult<Vec<WalEntry>> {
         if !self.current_file.exists() {
             return Ok(Vec::new());
@@ -156,30 +157,28 @@ impl PersistWal {
             lines.push(line);
         }
 
-        let total = lines.len();
+        let mut skipped = 0usize;
         for (i, line) in lines.iter().enumerate() {
             match serde_json::from_str::<WalEntry>(line) {
                 Ok(entry) => entries.push(entry),
                 Err(e) => {
-                    if i == total - 1 {
-                        // Last line: likely truncated from a crash mid-write.
-                        // Skip it with a warning — the partial entry is lost but
-                        // all preceding entries are valid.
-                        eprintln!(
-                            "[wal] WARNING: Skipping truncated last WAL entry ({}): {}",
-                            self.current_file.display(),
-                            e
-                        );
-                    } else {
-                        // Non-last line: real corruption, abort recovery
-                        return Err(StorageError::Other(format!(
-                            "WAL parse error on line {} of {}: {e}",
-                            i + 1,
-                            self.current_file.display()
-                        )));
-                    }
+                    eprintln!(
+                        "[wal] WARNING: Skipping corrupt WAL entry on line {} of {}: {}",
+                        i + 1,
+                        self.current_file.display(),
+                        e
+                    );
+                    skipped += 1;
                 }
             }
+        }
+
+        if skipped > 0 {
+            eprintln!(
+                "[wal] WARNING: Skipped {skipped} corrupt WAL entry/entries in {}. Recovered {} valid entries.",
+                self.current_file.display(),
+                entries.len()
+            );
         }
 
         Ok(entries)
@@ -663,9 +662,10 @@ mod tests {
         assert_eq!(entries[1].shard, "db:node");
     }
 
-    /// P0-5: Verify that corruption on a NON-last line is still fatal.
+    /// P0-5: Verify that corruption on a NON-last line is skipped (resilient recovery).
+    /// The WAL recovers as many valid entries as possible, skipping corrupt ones.
     #[test]
-    fn test_wal_recovery_corrupted_middle_line_is_fatal() {
+    fn test_wal_recovery_corrupted_middle_line_is_skipped() {
         let temp = TempDir::new().unwrap();
         let wal_dir = temp.path().to_path_buf();
         let wal_file = wal_dir.join("current.wal");
@@ -693,11 +693,14 @@ mod tests {
         }
 
         let wal = PersistWal::new(wal_dir).unwrap();
-        let result = wal.read_all();
-        assert!(
-            result.is_err(),
-            "Corruption on a non-last line should be a fatal error"
+        let entries = wal.read_all().unwrap();
+        assert_eq!(
+            entries.len(),
+            2,
+            "Should recover 2 valid entries, skipping the corrupt middle line"
         );
+        assert_eq!(entries[0].shard, "db:edge");
+        assert_eq!(entries[1].shard, "db:edge");
     }
 
     /// P1-7: Verify cleanup_archives removes stale .archived and .new files.

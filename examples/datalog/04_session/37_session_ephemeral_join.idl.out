@@ -18,23 +18,23 @@ Session fact added for 'grade'. (Use +grade(...) to persist)
 > grade(3, "science", 90)
 Session fact added for 'grade'. (Use +grade(...) to persist)
 > student_grade(Id, Course, Grade) <- enrolled(Id, Course), grade(Id, Course, Grade)
-┌──────┬───────────┬──────┐
-│ col0 │ col1      │ col2 │
-├──────┼───────────┼──────┤
-│    1 │ "math"    │   95 │
-│    2 │ "math"    │   80 │
-│    3 │ "science" │   90 │
-└──────┴───────────┴──────┘
+┌───┬───────────┬────┐
+│ X │ Y         │ Z  │
+├───┼───────────┼────┤
+│ 1 │ "math"    │ 95 │
+│ 2 │ "math"    │ 80 │
+│ 3 │ "science" │ 90 │
+└───┴───────────┴────┘
 3 rows
 (session: 1 rule(s))
 > ?student_grade(Id, Course, Grade)
-┌──────┬───────────┬──────┐
-│ col0 │ col1      │ col2 │
-├──────┼───────────┼──────┤
-│    1 │ "math"    │   95 │
-│    2 │ "math"    │   80 │
-│    3 │ "science" │   90 │
-└──────┴───────────┴──────┘
+┌────┬───────────┬───────┐
+│ Id │ Course    │ Grade │
+├────┼───────────┼───────┤
+│  1 │ "math"    │    95 │
+│  2 │ "math"    │    80 │
+│  3 │ "science" │    90 │
+└────┴───────────┴───────┘
 3 rows
 > .session clear
 Cleared 3 session fact(s), 1 session rule(s).

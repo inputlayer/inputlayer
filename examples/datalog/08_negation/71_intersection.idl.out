@@ -16,12 +16,12 @@ Inserted 4 fact(s) into 'set_b'.
 > +intersection(X) <- set_a(X), set_b(X)
 Rule 'intersection' registered.
 > ?intersection(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 4 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

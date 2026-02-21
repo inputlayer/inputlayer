@@ -12,32 +12,32 @@ Switched to knowledge graph: test_all_same_n10t48
 > +same[(5,), (5,), (5,)]
 Inserted 1 fact(s) into 'same'.
 > ?same(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+└───┘
 1 rows
 > +distinct_count(<COUNT_DISTINCT:X>) <- same(X)
 Parse error: Unknown aggregate function: 
 > ?distinct_count(N)
 No results.
 > pairs(A, B) <- same(A), same(B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 5 │ 5 │
+└───┴───┘
 1 rows
 (session: 1 rule(s))
 > +pair_count(count<A>) <- pairs(A, _)
 Rule 'pair_count' registered.
 > ?pair_count(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

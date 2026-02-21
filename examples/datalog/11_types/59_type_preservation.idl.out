@@ -12,31 +12,31 @@ Switched to knowledge graph: test_type_pres_n11t59
 > +mixed[(1, "text", 3.14, true)]
 Inserted 1 fact(s) into 'mixed'.
 > pass_through(A, B, C, D) <- mixed(A, B, C, D)
-┌──────┬────────┬──────┬──────┐
-│ col0 │ col1   │ col2 │ col3 │
-├──────┼────────┼──────┼──────┤
-│    1 │ "text" │ 3.14 │ true │
-└──────┴────────┴──────┴──────┘
+┌───┬────────┬──────┬──────┐
+│ X │ Y      │ Z    │ W    │
+├───┼────────┼──────┼──────┤
+│ 1 │ "text" │ 3.14 │ true │
+└───┴────────┴──────┴──────┘
 1 rows
 (session: 1 rule(s))
 > ?pass_through(A, B, C, D)
-┌──────┬────────┬──────┬──────┐
-│ col0 │ col1   │ col2 │ col3 │
-├──────┼────────┼──────┼──────┤
-│    1 │ "text" │ 3.14 │ true │
-└──────┴────────┴──────┴──────┘
+┌───┬────────┬──────┬──────┐
+│ A │ B      │ C    │ D    │
+├───┼────────┼──────┼──────┤
+│ 1 │ "text" │ 3.14 │ true │
+└───┴────────┴──────┴──────┘
 1 rows
 > int_only(X) <- mixed(X, _, _, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > str_only(X) <- mixed(_, X, _, _)
 ┌────────┐
-│ col0   │
+│ X      │
 ├────────┤
 │ "text" │
 └────────┘
@@ -44,7 +44,7 @@ Inserted 1 fact(s) into 'mixed'.
 (session: 3 rule(s))
 > float_only(X) <- mixed(_, _, X, _)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 3.14 │
 └──────┘
@@ -52,36 +52,36 @@ Inserted 1 fact(s) into 'mixed'.
 (session: 4 rule(s))
 > bool_only(X) <- mixed(_, _, _, X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ true │
 └──────┘
 1 rows
 (session: 5 rule(s))
 > ?int_only(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > ?str_only(X)
 ┌────────┐
-│ col0   │
+│ X      │
 ├────────┤
 │ "text" │
 └────────┘
 1 rows
 > ?float_only(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 3.14 │
 └──────┘
 1 rows
 > ?bool_only(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ true │
 └──────┘

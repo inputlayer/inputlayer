@@ -86,7 +86,7 @@ pub struct PersistenceConfig {
     pub auto_save_interval: u64,
 
     /// Enable write-ahead logging for durability
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub enable_wal: bool,
 }
 
@@ -108,10 +108,19 @@ pub struct PersistLayerConfig {
     /// Compaction window: how much history to retain (0 = keep all)
     #[serde(default)]
     pub compaction_window: u64,
+
+    /// Maximum WAL file size in bytes before forcing a flush of all dirty shards.
+    /// Prevents unbounded WAL growth and slow startup replay. 0 = unlimited.
+    #[serde(default = "default_max_wal_size_bytes")]
+    pub max_wal_size_bytes: u64,
 }
 
 fn default_buffer_size() -> usize {
     10000
+}
+
+fn default_max_wal_size_bytes() -> u64 {
+    67_108_864 // 64 MB
 }
 
 impl Default for PersistLayerConfig {
@@ -121,6 +130,7 @@ impl Default for PersistLayerConfig {
             buffer_size: 10000,
             durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
+            max_wal_size_bytes: default_max_wal_size_bytes(),
         }
     }
 }
@@ -203,6 +213,15 @@ pub struct PerformanceConfig {
     /// Maximum string value length in bytes. 0 = no limit.
     #[serde(default = "default_max_string_value_bytes")]
     pub max_string_value_bytes: usize,
+
+    /// Maximum number of result rows returned by a query. 0 = no limit.
+    #[serde(default)]
+    pub max_result_rows: usize,
+
+    /// Slow query warning threshold in milliseconds. Queries exceeding this
+    /// are logged at WARN level. 0 = disabled.
+    #[serde(default = "default_slow_query_log_ms")]
+    pub slow_query_log_ms: u64,
 }
 
 /// Optimization configuration (re-use existing from lib.rs)
@@ -269,6 +288,20 @@ pub struct HttpConfig {
     /// WebSocket idle timeout in milliseconds. 0 = disabled.
     #[serde(default = "default_ws_idle_timeout_ms")]
     pub ws_idle_timeout_ms: u64,
+
+    /// Graceful shutdown timeout in seconds. If the storage lock cannot be acquired
+    /// within this time during shutdown, WAL flush is skipped (safe — replayed on restart).
+    #[serde(default = "default_shutdown_timeout_secs")]
+    pub shutdown_timeout_secs: u64,
+
+    /// Stats endpoint computation timeout in seconds. Large deployments with many
+    /// KGs/relations may need a higher value.
+    #[serde(default = "default_stats_timeout_secs")]
+    pub stats_timeout_secs: u64,
+
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 /// GUI static file serving configuration
@@ -286,9 +319,15 @@ pub struct GuiConfig {
 /// Authentication configuration for HTTP API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
-    /// Enable authentication (JWT-based)
+    /// Enable authentication (API key or JWT)
     #[serde(default)]
     pub enabled: bool,
+
+    /// API keys that grant full access. Empty = no API key auth.
+    /// When auth is enabled and api_keys is non-empty, requests must include
+    /// `Authorization: Bearer <key>` header with a matching key.
+    #[serde(default)]
+    pub api_keys: Vec<String>,
 
     /// JWT signing secret (MUST be changed in production)
     #[serde(default = "default_jwt_secret")]
@@ -297,6 +336,30 @@ pub struct AuthConfig {
     /// Session timeout in seconds (default: 24 hours)
     #[serde(default = "default_session_timeout")]
     pub session_timeout_secs: u64,
+}
+
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    /// Maximum concurrent connections (0 = unlimited)
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+
+    /// Maximum concurrent WebSocket connections (0 = unlimited)
+    #[serde(default = "default_max_ws_connections")]
+    pub max_ws_connections: usize,
+
+    /// Maximum WebSocket messages per second per connection (0 = unlimited)
+    #[serde(default = "default_ws_max_messages_per_sec")]
+    pub ws_max_messages_per_sec: u32,
+
+    /// Maximum WebSocket connection lifetime in seconds (0 = unlimited)
+    #[serde(default = "default_ws_max_lifetime_secs")]
+    pub ws_max_lifetime_secs: u64,
+
+    /// Notification broadcast channel buffer size (per-subscriber queue depth)
+    #[serde(default = "default_notification_buffer_size")]
+    pub notification_buffer_size: usize,
 }
 
 // Default value functions
@@ -324,11 +387,20 @@ fn default_max_insert_tuples() -> usize {
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
 }
+fn default_slow_query_log_ms() -> u64 {
+    5000 // 5 seconds
+}
 fn default_max_knowledge_graphs() -> usize {
     1000
 }
 fn default_ws_idle_timeout_ms() -> u64 {
     300_000 // 5 minutes
+}
+fn default_shutdown_timeout_secs() -> u64 {
+    30
+}
+fn default_stats_timeout_secs() -> u64 {
+    5
 }
 fn default_log_level() -> String {
     "info".to_string()
@@ -351,6 +423,33 @@ fn default_jwt_secret() -> String {
 fn default_session_timeout() -> u64 {
     86400
 } // 24 hours
+fn default_max_connections() -> usize {
+    10_000
+}
+fn default_max_ws_connections() -> usize {
+    5_000
+}
+fn default_ws_max_messages_per_sec() -> u32 {
+    1000
+}
+fn default_ws_max_lifetime_secs() -> u64 {
+    86400
+} // 24 hours
+fn default_notification_buffer_size() -> usize {
+    4096
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        RateLimitConfig {
+            max_connections: default_max_connections(),
+            max_ws_connections: default_max_ws_connections(),
+            ws_max_messages_per_sec: default_ws_max_messages_per_sec(),
+            ws_max_lifetime_secs: default_ws_max_lifetime_secs(),
+            notification_buffer_size: default_notification_buffer_size(),
+        }
+    }
+}
 
 impl Config {
     /// Load configuration from default locations
@@ -369,10 +468,77 @@ impl Config {
 
     /// Load configuration from specific file path
     pub fn from_file(path: &str) -> Result<Self, figment::Error> {
-        Figment::new()
+        let config: Self = Figment::new()
             .merge(Toml::file(path))
             .merge(Env::prefixed("INPUTLAYER_").split("__"))
-            .extract()
+            .extract()?;
+        config.warn_unsafe_defaults();
+        Ok(config)
+    }
+
+    /// Validate configuration values and auto-correct safe-to-fix issues.
+    /// Returns Err for fatal misconfigurations that would cause panics.
+    pub fn validate(&mut self) -> Result<(), String> {
+        // notification_buffer_size=0 causes broadcast::channel(0) panic
+        if self.http.rate_limit.notification_buffer_size == 0 {
+            tracing::warn!("notification_buffer_size = 0 is invalid, auto-correcting to 4096");
+            self.http.rate_limit.notification_buffer_size = 4096;
+        }
+
+        // notification_buffer_size too large wastes memory per subscriber
+        if self.http.rate_limit.notification_buffer_size > 100_000 {
+            tracing::warn!(
+                value = self.http.rate_limit.notification_buffer_size,
+                "notification_buffer_size is very large, capping at 100000"
+            );
+            self.http.rate_limit.notification_buffer_size = 100_000;
+        }
+
+        // persist buffer_size=0 would cause infinite flush loops
+        if self.storage.persist.buffer_size == 0 {
+            tracing::warn!("persist.buffer_size = 0 is invalid, auto-correcting to 1000");
+            self.storage.persist.buffer_size = 1000;
+        }
+
+        // Warn about very long query timeouts (> 10 minutes)
+        if self.storage.performance.query_timeout_ms > 600_000 {
+            tracing::warn!(
+                value_ms = self.storage.performance.query_timeout_ms,
+                "query_timeout_ms exceeds 10 minutes — queries may appear hung"
+            );
+        }
+
+        // Warn about extremely high WS connection limits
+        if self.http.rate_limit.max_ws_connections > 100_000 {
+            tracing::warn!(
+                value = self.http.rate_limit.max_ws_connections,
+                "max_ws_connections > 100000 may exhaust file descriptors"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Log warnings for configuration values that may be unsafe for production.
+    pub fn warn_unsafe_defaults(&self) {
+        if self.storage.performance.max_result_rows == 0 {
+            eprintln!(
+                "WARNING: max_result_rows = 0 (unlimited). \
+                 Unbounded queries may exhaust server memory."
+            );
+        }
+        if self.http.cors_allow_all {
+            eprintln!(
+                "WARNING: cors_allow_all = true. \
+                 Any origin can access the API. Disable for production."
+            );
+        }
+        if self.http.rate_limit.notification_buffer_size == 0 {
+            eprintln!(
+                "WARNING: notification_buffer_size = 0. \
+                 Using default of 4096."
+            );
+        }
     }
 
     /// Create default configuration
@@ -386,7 +552,7 @@ impl Config {
                     format: StorageFormat::Parquet,
                     compression: CompressionType::Snappy,
                     auto_save_interval: 0, // Manual save only
-                    enable_wal: false,
+                    enable_wal: true,
                 },
                 persist: PersistLayerConfig::default(),
                 performance: PerformanceConfig {
@@ -398,6 +564,8 @@ impl Config {
                     max_query_size_bytes: 1_048_576,
                     max_insert_tuples: 10_000,
                     max_string_value_bytes: 65_536,
+                    max_result_rows: 100_000,
+                    slow_query_log_ms: 5000,
                 },
                 max_knowledge_graphs: 1000,
             },
@@ -433,6 +601,8 @@ impl Default for PerformanceConfig {
             max_query_size_bytes: default_max_query_size_bytes(),
             max_insert_tuples: default_max_insert_tuples(),
             max_string_value_bytes: default_max_string_value_bytes(),
+            max_result_rows: 0, // 0 = no limit
+            slow_query_log_ms: default_slow_query_log_ms(),
         }
     }
 }
@@ -457,6 +627,9 @@ impl Default for HttpConfig {
             gui: GuiConfig::default(),
             auth: AuthConfig::default(),
             ws_idle_timeout_ms: default_ws_idle_timeout_ms(),
+            shutdown_timeout_secs: default_shutdown_timeout_secs(),
+            stats_timeout_secs: default_stats_timeout_secs(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
@@ -474,6 +647,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         AuthConfig {
             enabled: false,
+            api_keys: Vec::new(),
             jwt_secret: default_jwt_secret(),
             session_timeout_secs: default_session_timeout(),
         }
@@ -515,7 +689,7 @@ mod tests {
         let config = Config::default();
         assert!(!config.storage.auto_create_knowledge_graphs);
         assert_eq!(config.storage.persistence.auto_save_interval, 0);
-        assert!(!config.storage.persistence.enable_wal);
+        assert!(config.storage.persistence.enable_wal);
     }
 
     #[test]
@@ -638,5 +812,207 @@ mod tests {
         let auth2 = AuthConfig::default();
         // Each call generates a new UUID
         assert_ne!(auth1.jwt_secret, auth2.jwt_secret);
+    }
+
+    // === Regression tests for P1 security config ===
+
+    #[test]
+    fn test_default_auth_has_no_api_keys() {
+        let auth = AuthConfig::default();
+        assert!(!auth.enabled);
+        assert!(auth.api_keys.is_empty());
+    }
+
+    #[test]
+    fn test_default_rate_limit_config() {
+        let rl = RateLimitConfig::default();
+        assert_eq!(rl.max_connections, 10_000);
+        assert_eq!(rl.max_ws_connections, 5_000);
+        assert_eq!(rl.ws_max_messages_per_sec, 1000);
+        assert_eq!(rl.ws_max_lifetime_secs, 86400);
+    }
+
+    #[test]
+    fn test_rate_limit_config_serialization() {
+        let config = Config::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("[http.rate_limit]"));
+    }
+
+    #[test]
+    fn test_auth_with_api_keys() {
+        let auth = AuthConfig {
+            enabled: true,
+            api_keys: vec!["key1".to_string(), "key2".to_string()],
+            jwt_secret: "secret".to_string(),
+            session_timeout_secs: 3600,
+        };
+        assert!(auth.enabled);
+        assert_eq!(auth.api_keys.len(), 2);
+    }
+
+    #[test]
+    fn test_http_config_has_rate_limit() {
+        let config = HttpConfig::default();
+        assert_eq!(config.rate_limit.max_connections, 10_000);
+        assert_eq!(config.rate_limit.ws_max_messages_per_sec, 1000);
+    }
+
+    /// Regression: WS rate limit and lifetime fields must roundtrip through TOML.
+    #[test]
+    fn test_ws_rate_limit_config_roundtrip() {
+        let mut config = Config::default();
+        config.http.rate_limit.ws_max_messages_per_sec = 500;
+        config.http.rate_limit.ws_max_lifetime_secs = 7200;
+        config.http.rate_limit.max_ws_connections = 100;
+
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.http.rate_limit.ws_max_messages_per_sec, 500);
+        assert_eq!(parsed.http.rate_limit.ws_max_lifetime_secs, 7200);
+        assert_eq!(parsed.http.rate_limit.max_ws_connections, 100);
+    }
+
+    /// Regression: WS idle timeout config defaults and survives serialization.
+    #[test]
+    fn test_ws_idle_timeout_config() {
+        let config = HttpConfig::default();
+        assert_eq!(config.ws_idle_timeout_ms, 300_000);
+
+        let full = Config::default();
+        let toml_str = toml::to_string(&full).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.http.ws_idle_timeout_ms, 300_000);
+    }
+
+    // === Regression tests for Config::validate() auto-correction ===
+
+    #[test]
+    fn test_validate_auto_corrects_zero_notification_buffer() {
+        let mut config = Config::default();
+        config.http.rate_limit.notification_buffer_size = 0;
+        config.validate().unwrap();
+        assert_eq!(config.http.rate_limit.notification_buffer_size, 4096);
+    }
+
+    #[test]
+    fn test_validate_caps_large_notification_buffer() {
+        let mut config = Config::default();
+        config.http.rate_limit.notification_buffer_size = 200_000;
+        config.validate().unwrap();
+        assert_eq!(config.http.rate_limit.notification_buffer_size, 100_000);
+    }
+
+    #[test]
+    fn test_validate_auto_corrects_zero_persist_buffer_size() {
+        let mut config = Config::default();
+        config.storage.persist.buffer_size = 0;
+        config.validate().unwrap();
+        assert_eq!(config.storage.persist.buffer_size, 1000);
+    }
+
+    #[test]
+    fn test_validate_accepts_normal_values() {
+        let mut config = Config::default();
+        let original_notification = config.http.rate_limit.notification_buffer_size;
+        let original_buffer = config.storage.persist.buffer_size;
+        config.validate().unwrap();
+        // Normal defaults should not be changed
+        assert_eq!(
+            config.http.rate_limit.notification_buffer_size,
+            original_notification
+        );
+        assert_eq!(config.storage.persist.buffer_size, original_buffer);
+    }
+
+    // === Regression tests for new config field defaults ===
+
+    #[test]
+    fn test_default_max_wal_size_bytes() {
+        let persist = PersistLayerConfig::default();
+        assert_eq!(persist.max_wal_size_bytes, 67_108_864); // 64 MB
+    }
+
+    #[test]
+    fn test_default_slow_query_log_ms() {
+        let perf = PerformanceConfig::default();
+        assert_eq!(perf.slow_query_log_ms, 5000);
+    }
+
+    #[test]
+    fn test_default_shutdown_timeout_secs() {
+        let http = HttpConfig::default();
+        assert_eq!(http.shutdown_timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_default_stats_timeout_secs() {
+        let http = HttpConfig::default();
+        assert_eq!(http.stats_timeout_secs, 5);
+    }
+
+    #[test]
+    fn test_default_notification_buffer_size() {
+        let rl = RateLimitConfig::default();
+        assert_eq!(rl.notification_buffer_size, 4096);
+    }
+
+    /// Regression: the manual Config::default() impl sets max_result_rows = 100_000.
+    #[test]
+    fn test_config_default_max_result_rows() {
+        let config = Config::default();
+        assert_eq!(config.storage.performance.max_result_rows, 100_000);
+    }
+
+    #[test]
+    fn test_config_default_slow_query_log_ms() {
+        let config = Config::default();
+        assert_eq!(config.storage.performance.slow_query_log_ms, 5000);
+    }
+
+    /// Regression: new config fields must survive TOML roundtrip.
+    #[test]
+    fn test_new_config_fields_toml_roundtrip() {
+        let mut config = Config::default();
+        config.storage.persist.max_wal_size_bytes = 123_456;
+        config.storage.performance.slow_query_log_ms = 2000;
+        config.http.shutdown_timeout_secs = 60;
+        config.http.stats_timeout_secs = 10;
+        config.http.rate_limit.notification_buffer_size = 8192;
+
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.storage.persist.max_wal_size_bytes, 123_456);
+        assert_eq!(parsed.storage.performance.slow_query_log_ms, 2000);
+        assert_eq!(parsed.http.shutdown_timeout_secs, 60);
+        assert_eq!(parsed.http.stats_timeout_secs, 10);
+        assert_eq!(parsed.http.rate_limit.notification_buffer_size, 8192);
+    }
+
+    /// Regression: Zero values for rate limit fields mean "unlimited".
+    #[test]
+    fn test_rate_limit_zero_means_unlimited() {
+        let mut rl = RateLimitConfig::default();
+        rl.max_connections = 0;
+        rl.max_ws_connections = 0;
+        rl.ws_max_messages_per_sec = 0;
+        rl.ws_max_lifetime_secs = 0;
+
+        let config = Config {
+            http: HttpConfig {
+                rate_limit: rl,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.http.rate_limit.max_connections, 0);
+        assert_eq!(parsed.http.rate_limit.max_ws_connections, 0);
+        assert_eq!(parsed.http.rate_limit.ws_max_messages_per_sec, 0);
+        assert_eq!(parsed.http.rate_limit.ws_max_lifetime_secs, 0);
     }
 }

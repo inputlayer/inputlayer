@@ -16,13 +16,13 @@ Schema for 'user' registered with 2 columns (persistent)
 > +user[(1, "Alice"), (2, "Bob"), (3, "Charlie")]
 Inserted 3 fact(s) into 'user'.
 > ?user(X, Y)
-┌──────┬───────────┐
-│ col0 │ col1      │
-├──────┼───────────┤
-│    1 │ "Alice"   │
-│    2 │ "Bob"     │
-│    3 │ "Charlie" │
-└──────┴───────────┘
+┌────┬───────────┐
+│ id │ name      │
+├────┼───────────┤
+│  1 │ "Alice"   │
+│  2 │ "Bob"     │
+│  3 │ "Charlie" │
+└────┴───────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

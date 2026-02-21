@@ -12,39 +12,39 @@ Switched to knowledge graph: test_shadow_n04t07
 > +items[(1, "a"), (2, "b"), (3, "c")]
 Inserted 3 fact(s) into 'items'.
 > ?items(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+│  3 │ "c" │
+└────┴─────┘
 3 rows
 > filtered(Id, Val) <- items(Id, Val), Id > 1
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ "b" │
+│ 3 │ "c" │
+└───┴─────┘
 2 rows
 (session: 1 rule(s))
 > ?filtered(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  2 │ "b" │
+│  3 │ "c" │
+└────┴─────┘
 2 rows
 > +persistent_filtered(Id, Val) <- items(Id, Val), Id > 2
 Rule 'persistent_filtered' registered.
 > ?persistent_filtered(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  3 │ "c" │
+└────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

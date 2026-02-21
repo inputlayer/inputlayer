@@ -16,11 +16,11 @@ Rule 'reaches' registered.
 > +reaches(X, Z) <- reaches(X, Y), edge(Y, Z)
 Rule 'reaches' registered.
 > ?reaches("a", "d")
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │ "d"  │
-└──────┴──────┘
+┌─────┬─────┐
+│ a   │ d   │
+├─────┼─────┤
+│ "a" │ "d" │
+└─────┴─────┘
 1 rows
 > ?reaches("a", "y")
 No results.

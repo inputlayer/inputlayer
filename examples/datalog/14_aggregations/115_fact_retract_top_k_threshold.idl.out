@@ -14,35 +14,35 @@ Inserted 6 fact(s) into 'score'.
 > +top_high(top_k_threshold<3, 100, Player, Points:desc>) <- score(Player, Points)
 Rule 'top_high' registered.
 > ?top_high(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  250 │
-│    4 │  300 │
-│    6 │  200 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 250 │
+│ 4 │ 300 │
+│ 6 │ 200 │
+└───┴─────┘
 3 rows
 > -score(4, 300)
 Deleted 1 facts from 'score'.
 > ?top_high(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  250 │
-│    3 │  175 │
-│    6 │  200 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 250 │
+│ 3 │ 175 │
+│ 6 │ 200 │
+└───┴─────┘
 3 rows
 > -score(1, 50)
 Deleted 1 facts from 'score'.
 > ?top_high(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  250 │
-│    3 │  175 │
-│    6 │  200 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 250 │
+│ 3 │ 175 │
+│ 6 │ 200 │
+└───┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

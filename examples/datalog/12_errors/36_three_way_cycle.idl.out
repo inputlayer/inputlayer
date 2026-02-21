@@ -12,30 +12,30 @@ Switched to knowledge graph: test_3way_cycle_n12t36
 > +base(1)
 Inserted 1 fact(s) into 'base'.
 > cycle_a(X) <- base(X), !cycle_b(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > cycle_b(X) <- base(X), !cycle_c(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > cycle_c(X) <- base(X), !cycle_a(X)
 No results.
 (session: 3 rule(s))
 > ?cycle_a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

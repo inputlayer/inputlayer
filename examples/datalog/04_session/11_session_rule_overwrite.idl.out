@@ -14,26 +14,26 @@ Inserted 3 fact(s) into 'edge'.
 > +special[(2,)]
 Inserted 1 fact(s) into 'special'.
 > connected(X, Y) <- edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 (session: 1 rule(s))
 > .session
 Session rules (1):
   1. connected(X, Y) <- edge(X, Y)
 > ?connected(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > connected(X, Z) <- edge(X, Y), edge(Y, Z)
 ┌──────┬──────┬──────┐

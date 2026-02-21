@@ -12,28 +12,28 @@ Switched to knowledge graph: test_empty_key_n10t60
 > +data[("", 100), ("a", 200), ("b", 300)]
 Inserted 3 fact(s) into 'data'.
 > ?data(Key, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ ""   │  100 │
-│ "a"  │  200 │
-│ "b"  │  300 │
-└──────┴──────┘
+┌─────┬─────┐
+│ Key │ Val │
+├─────┼─────┤
+│ ""  │ 100 │
+│ "a" │ 200 │
+│ "b" │ 300 │
+└─────┴─────┘
 3 rows
 > empty_key(Val) <- data("", Val)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > ?empty_key(Val)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ Val │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

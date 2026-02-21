@@ -14,19 +14,19 @@ Inserted 3 fact(s) into 'pairs'.
 > +exclude[(1, 2), (3, 4)]
 Inserted 2 fact(s) into 'exclude'.
 > not_excluded(A, B) <- pairs(A, B), !exclude(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 2 │ 3 │
+└───┴───┘
 1 rows
 (session: 1 rule(s))
 > ?not_excluded(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 2 │ 3 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

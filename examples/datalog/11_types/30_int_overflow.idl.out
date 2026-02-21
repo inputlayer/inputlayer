@@ -13,7 +13,7 @@ Switched to knowledge graph: test_large_int_n11t30
 Inserted 3 fact(s) into 'big_nums'.
 > sum_big(sum<X>) <- big_nums(X)
 ┌────────────┐
-│ col0       │
+│ X          │
 ├────────────┤
 │ 6000000000 │
 └────────────┘
@@ -21,7 +21,7 @@ Inserted 3 fact(s) into 'big_nums'.
 (session: 1 rule(s))
 > ?sum_big(S)
 ┌────────────┐
-│ col0       │
+│ S          │
 ├────────────┤
 │ 6000000000 │
 └────────────┘

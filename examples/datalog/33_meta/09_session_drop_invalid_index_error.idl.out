@@ -12,11 +12,11 @@ Switched to knowledge graph: test_session_invalid_n33t09
 > +base[(1, 2)]
 Inserted 1 fact(s) into 'base'.
 > computed(X, Y) <- base(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 (session: 1 rule(s))
 > .session

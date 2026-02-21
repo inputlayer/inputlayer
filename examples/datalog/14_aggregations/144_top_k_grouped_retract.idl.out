@@ -14,26 +14,26 @@ Inserted 6 fact(s) into 'score'.
 > +top_in_subject(Subject, top_k<2, Name, Grade:desc>) <- score(Subject, Name, Grade)
 Rule 'top_in_subject' registered.
 > ?top_in_subject(S, N, G)
-┌───────────┬───────────┬──────┐
-│ col0      │ col1      │ col2 │
-├───────────┼───────────┼──────┤
-│ "math"    │ "Alice"   │   95 │
-│ "math"    │ "Charlie" │   90 │
-│ "science" │ "Bob"     │   92 │
-│ "science" │ "Charlie" │   88 │
-└───────────┴───────────┴──────┘
+┌───────────┬───────────┬────┐
+│ S         │ N         │ G  │
+├───────────┼───────────┼────┤
+│ "math"    │ "Alice"   │ 95 │
+│ "math"    │ "Charlie" │ 90 │
+│ "science" │ "Bob"     │ 92 │
+│ "science" │ "Charlie" │ 88 │
+└───────────┴───────────┴────┘
 4 rows
 > -score("math", "Alice", 95)
 Deleted 1 facts from 'score'.
 > ?top_in_subject(S, N, G)
-┌───────────┬───────────┬──────┐
-│ col0      │ col1      │ col2 │
-├───────────┼───────────┼──────┤
-│ "math"    │ "Bob"     │   85 │
-│ "math"    │ "Charlie" │   90 │
-│ "science" │ "Bob"     │   92 │
-│ "science" │ "Charlie" │   88 │
-└───────────┴───────────┴──────┘
+┌───────────┬───────────┬────┐
+│ S         │ N         │ G  │
+├───────────┼───────────┼────┤
+│ "math"    │ "Bob"     │ 85 │
+│ "math"    │ "Charlie" │ 90 │
+│ "science" │ "Bob"     │ 92 │
+│ "science" │ "Charlie" │ 88 │
+└───────────┴───────────┴────┘
 4 rows
 > -score("science", "Alice", 80)
 Deleted 1 facts from 'score'.
@@ -42,12 +42,12 @@ Deleted 1 facts from 'score'.
 > -score("science", "Charlie", 88)
 Deleted 1 facts from 'score'.
 > ?top_in_subject(S, N, G)
-┌────────┬───────────┬──────┐
-│ col0   │ col1      │ col2 │
-├────────┼───────────┼──────┤
-│ "math" │ "Bob"     │   85 │
-│ "math" │ "Charlie" │   90 │
-└────────┴───────────┴──────┘
+┌────────┬───────────┬────┐
+│ S      │ N         │ G  │
+├────────┼───────────┼────┤
+│ "math" │ "Bob"     │ 85 │
+│ "math" │ "Charlie" │ 90 │
+└────────┴───────────┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

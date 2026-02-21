@@ -12,27 +12,27 @@ Switched to knowledge graph: test_self_ref_n10t50
 > +person[(1, "Alice", 0), (2, "Bob", 1), (3, "Carol", 1), (4, "Dave", 2)]
 Inserted 4 fact(s) into 'person'.
 > reports(EmpId, EmpName, MgrId) <- person(EmpId, EmpName, MgrId), MgrId > 0
-┌──────┬─────────┬──────┐
-│ col0 │ col1    │ col2 │
-├──────┼─────────┼──────┤
-│    2 │ "Bob"   │    1 │
-│    3 │ "Carol" │    1 │
-│    4 │ "Dave"  │    2 │
-└──────┴─────────┴──────┘
+┌───┬─────────┬───┐
+│ X │ Y       │ Z │
+├───┼─────────┼───┤
+│ 2 │ "Bob"   │ 1 │
+│ 3 │ "Carol" │ 1 │
+│ 4 │ "Dave"  │ 2 │
+└───┴─────────┴───┘
 3 rows
 (session: 1 rule(s))
 > ?reports(EmpId, EmpName, MgrId)
-┌──────┬─────────┬──────┐
-│ col0 │ col1    │ col2 │
-├──────┼─────────┼──────┤
-│    2 │ "Bob"   │    1 │
-│    3 │ "Carol" │    1 │
-│    4 │ "Dave"  │    2 │
-└──────┴─────────┴──────┘
+┌───────┬─────────┬───────┐
+│ EmpId │ EmpName │ MgrId │
+├───────┼─────────┼───────┤
+│     2 │ "Bob"   │     1 │
+│     3 │ "Carol" │     1 │
+│     4 │ "Dave"  │     2 │
+└───────┴─────────┴───────┘
 3 rows
 > with_manager(EmpName, MgrName) <- person(EmpId, EmpName, MgrId), person(MgrId, MgrName, _), MgrId > 0
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │ "Bob"   │ "Alice" │
 │ "Carol" │ "Alice" │
@@ -42,7 +42,7 @@ Inserted 4 fact(s) into 'person'.
 (session: 2 rule(s))
 > ?with_manager(EmpName, MgrName)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ EmpName │ MgrName │
 ├─────────┼─────────┤
 │ "Bob"   │ "Alice" │
 │ "Carol" │ "Alice" │

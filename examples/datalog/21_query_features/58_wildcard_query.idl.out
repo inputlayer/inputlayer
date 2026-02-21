@@ -12,23 +12,23 @@ Switched to knowledge graph: test_wildcard_n21t58
 > +records[(1, "A", 100, true), (2, "B", 200, false), (3, "C", 150, true)]
 Inserted 3 fact(s) into 'records'.
 > first_last(First, Last) <- records(First, _, _, Last)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ true  │
-│    2 │ false │
-│    3 │ true  │
-└──────┴───────┘
+┌───┬───────┐
+│ X │ Y     │
+├───┼───────┤
+│ 1 │ true  │
+│ 2 │ false │
+│ 3 │ true  │
+└───┴───────┘
 3 rows
 (session: 1 rule(s))
 > ?first_last(F, L)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│    1 │ true  │
-│    2 │ false │
-│    3 │ true  │
-└──────┴───────┘
+┌───┬───────┐
+│ F │ L     │
+├───┼───────┤
+│ 1 │ true  │
+│ 2 │ false │
+│ 3 │ true  │
+└───┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

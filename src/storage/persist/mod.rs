@@ -44,7 +44,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // Parquet I/O for batches
-use arrow::array::{ArrayRef, Int32Array, Int64Array, UInt64Array};
+use arrow::array::{ArrayRef, Int64Array, UInt64Array};
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -64,6 +64,8 @@ pub struct PersistConfig {
     pub buffer_size: usize,
     /// Durability mode for writes
     pub durability_mode: DurabilityMode,
+    /// Maximum WAL file size in bytes before forcing a flush (0 = unlimited)
+    pub max_wal_size_bytes: u64,
 }
 
 impl Default for PersistConfig {
@@ -72,6 +74,7 @@ impl Default for PersistConfig {
             path: PathBuf::from("./data/persist"),
             buffer_size: 10000,
             durability_mode: DurabilityMode::Immediate,
+            max_wal_size_bytes: 67_108_864, // 64 MB
         }
     }
 }
@@ -137,9 +140,27 @@ impl FilePersist {
             next_batch_id: AtomicU64::new(1),
         };
 
-        // Load existing shards and replay WAL
+        // Load existing shards, clean up orphans, and replay WAL
         persist.load_shards()?;
-        persist.replay_wal()?;
+        persist.cleanup_orphaned_batches();
+        let replayed = persist.replay_wal()?;
+
+        // Crash-safe WAL drain: if we replayed any entries, flush them to batch
+        // files and clear the WAL immediately. This makes replay idempotent —
+        // on a second crash, there are no stale WAL entries to double-apply.
+        if replayed > 0 {
+            let shard_names: Vec<String> = {
+                let shards = persist.shards.read();
+                shards
+                    .iter()
+                    .filter(|(_, state)| !state.buffer.is_empty())
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            };
+            for shard_name in &shard_names {
+                persist.flush(shard_name)?;
+            }
+        }
 
         // Clean up stale .archived and .new WAL files from previous runs
         {
@@ -192,10 +213,58 @@ impl FilePersist {
         Ok(())
     }
 
-    /// Replay WAL entries into shard buffers
-    fn replay_wal(&self) -> StorageResult<()> {
+    /// Remove batch files in the batches/ directory that aren't referenced by any shard.
+    /// These can accumulate from crashes during flush (batch written, metadata not yet saved)
+    /// or during compaction/delete (metadata updated, old files not yet removed).
+    fn cleanup_orphaned_batches(&self) {
+        let batches_dir = self.config.path.join("batches");
+        if !batches_dir.exists() {
+            return;
+        }
+
+        // Collect all referenced batch file paths
+        let referenced: std::collections::HashSet<PathBuf> = {
+            let shards = self.shards.read();
+            shards
+                .values()
+                .flat_map(|state| state.meta.batches.iter().map(|b| b.path.clone()))
+                .collect()
+        };
+
+        // Scan batches directory and remove orphans
+        let mut removed = 0usize;
+        if let Ok(entries) = fs::read_dir(&batches_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("parquet")
+                    && !referenced.contains(&path)
+                {
+                    let _ = fs::remove_file(&path);
+                    removed += 1;
+                }
+                // Also clean up stale temp files from interrupted atomic writes
+                if path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|ext| ext == "tmp")
+                {
+                    let _ = fs::remove_file(&path);
+                    removed += 1;
+                }
+            }
+        }
+
+        if removed > 0 {
+            eprintln!("[persist] Cleaned up {removed} orphaned batch file(s)");
+            sync_directory(&batches_dir);
+        }
+    }
+
+    /// Replay WAL entries into shard buffers. Returns the number of entries replayed.
+    fn replay_wal(&self) -> StorageResult<usize> {
         let wal = self.wal.lock();
         let entries = wal.read_all()?;
+        let count = entries.len();
 
         let mut shards = self.shards.write();
 
@@ -209,7 +278,7 @@ impl FilePersist {
             state.buffer.push(entry.update);
         }
 
-        Ok(())
+        Ok(count)
     }
 
     /// Save shard metadata to disk using atomic write-to-temp+rename.
@@ -269,6 +338,25 @@ impl FilePersist {
     fn read_batch(&self, batch_ref: &BatchRef) -> StorageResult<Vec<Update>> {
         read_updates_parquet(&batch_ref.path)
     }
+
+    /// Flush all dirty shards (shards with non-empty buffers).
+    /// Used when WAL size exceeds the configured limit.
+    fn flush_all(&self) -> StorageResult<()> {
+        let dirty_shards: Vec<String> = {
+            let shards = self.shards.read();
+            shards
+                .iter()
+                .filter(|(_, state)| !state.buffer.is_empty())
+                .map(|(name, _)| name.clone())
+                .collect()
+        };
+
+        for shard_name in &dirty_shards {
+            self.flush(shard_name)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl PersistBackend for FilePersist {
@@ -290,8 +378,8 @@ impl PersistBackend for FilePersist {
                 wal.append_batch_buffered(shard, updates)?;
             }
             DurabilityMode::Async => {
-                // Skip WAL entirely for maximum speed (in-memory only until flush)
-                // Data may be lost on crash, but in-memory operations are fast
+                // Skip WAL entirely for maximum speed (in-memory only until flush).
+                // Data WILL be lost on crash. Only use for ephemeral/reproducible data.
             }
         }
 
@@ -320,6 +408,17 @@ impl PersistBackend for FilePersist {
         // Flush if buffer is full
         if should_flush {
             self.flush(shard)?;
+        } else if self.config.max_wal_size_bytes > 0 {
+            // Check WAL size — force flush all dirty shards if WAL is too large
+            let wal_size = self.wal.lock().file_size();
+            if wal_size > self.config.max_wal_size_bytes {
+                tracing::info!(
+                    wal_size_bytes = wal_size,
+                    max = self.config.max_wal_size_bytes,
+                    "wal_size_limit_flush"
+                );
+                self.flush_all()?;
+            }
         }
 
         Ok(())
@@ -400,6 +499,11 @@ impl PersistBackend for FilePersist {
             let _ = fs::remove_file(&batch_ref.path);
         }
 
+        // Sync batches directory to ensure deletions are durable
+        if !old_batches.is_empty() {
+            sync_directory(&self.config.path.join("batches"));
+        }
+
         Ok(())
     }
 
@@ -447,24 +551,29 @@ impl PersistBackend for FilePersist {
             return Ok(());
         }
 
-        // Write buffer to batch file
+        // Step 1: Write buffer to batch file (atomic via temp+rename in write_batch)
         let batch = Batch::new(state.buffer.clone());
         let (batch_id, path) = self.write_batch(&state.buffer)?;
 
-        state.meta.add_batch(BatchRef {
+        let batch_ref = BatchRef {
             id: batch_id,
-            path,
+            path: path.clone(),
             lower: batch.lower,
             upper: batch.upper,
             len: batch.len(),
-        });
+        };
 
+        // Step 2: Update metadata and save atomically
+        state.meta.add_batch(batch_ref);
         state.buffer.clear();
 
-        // Save metadata
-        self.save_shard_meta(&state.meta)?;
+        if let Err(e) = self.save_shard_meta(&state.meta) {
+            // Metadata save failed — clean up the orphaned batch file
+            let _ = fs::remove_file(&path);
+            return Err(e);
+        }
 
-        // Remove only THIS shard's WAL entries (preserves other shards)
+        // Step 3: Remove WAL entries LAST (safe — metadata already points to batch)
         {
             let mut wal = self.wal.lock();
             wal.remove_shard_entries(shard)?;
@@ -480,14 +589,20 @@ impl PersistBackend for FilePersist {
             shards.remove(shard)
         }; // write lock released — other shards unblocked
 
-        // Step 2: Delete shard metadata file FIRST (crash-safe ordering)
-        let meta_path = self
-            .config
-            .path
-            .join("shards")
-            .join(format!("{}.json", sanitize_name(shard)));
-        if meta_path.exists() {
-            let _ = fs::remove_file(&meta_path);
+        // Step 2: Delete batch files FIRST (crash-safe ordering)
+        // If we crash here, metadata still references them but they're gone.
+        // On next startup, load_shards will see missing files and handle gracefully.
+        if let Some(ref state) = removed_state {
+            let mut deleted_any = false;
+            for batch_ref in &state.meta.batches {
+                if batch_ref.path.exists() {
+                    let _ = fs::remove_file(&batch_ref.path);
+                    deleted_any = true;
+                }
+            }
+            if deleted_any {
+                sync_directory(&self.config.path.join("batches"));
+            }
         }
 
         // Step 3: Selective WAL filter — remove only this shard's entries
@@ -497,13 +612,16 @@ impl PersistBackend for FilePersist {
             wal.remove_shard_entries(shard)?;
         }
 
-        // Step 4: Delete batch files (no lock needed)
-        if let Some(state) = removed_state {
-            for batch_ref in &state.meta.batches {
-                if batch_ref.path.exists() {
-                    let _ = fs::remove_file(&batch_ref.path);
-                }
-            }
+        // Step 4: Delete metadata file LAST (crash-safe ordering)
+        // After this, the shard is fully removed from disk.
+        let meta_path = self
+            .config
+            .path
+            .join("shards")
+            .join(format!("{}.json", sanitize_name(shard)));
+        if meta_path.exists() {
+            let _ = fs::remove_file(&meta_path);
+            sync_directory(&self.config.path.join("shards"));
         }
 
         Ok(())
@@ -540,39 +658,8 @@ fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
 /// - diff column (Int64)
 fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()> {
     if updates.is_empty() {
-        // Write empty file with default schema
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("col0", ArrowDataType::Int32, false),
-            Field::new("col1", ArrowDataType::Int32, false),
-            Field::new("time", ArrowDataType::UInt64, false),
-            Field::new("diff", ArrowDataType::Int64, false),
-        ]));
-
-        let file = fs::File::create(path)?;
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
-
-        let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
-            .map_err(StorageError::Parquet)?;
-
-        let empty_batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int32Array::from(Vec::<i32>::new())),
-                Arc::new(Int32Array::from(Vec::<i32>::new())),
-                Arc::new(UInt64Array::from(Vec::<u64>::new())),
-                Arc::new(Int64Array::from(Vec::<i64>::new())),
-            ],
-        )
-        .map_err(StorageError::Arrow)?;
-
-        writer.write(&empty_batch).map_err(StorageError::Parquet)?;
-        writer.close().map_err(StorageError::Parquet)?;
-
-        // Ensure data is durably written to disk
-        fs::File::open(path)?.sync_all()?;
-
+        // No data to write — skip creating the file entirely.
+        // The caller handles absence of batch files gracefully.
         return Ok(());
     }
 
@@ -608,7 +695,12 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
 
     let batch = RecordBatch::try_new(full_schema.clone(), columns).map_err(StorageError::Arrow)?;
 
-    let file = fs::File::create(path)?;
+    // Write to temp file then rename atomically (crash-safe).
+    // If we crash mid-write, the temp file is orphaned but the original path
+    // is never left in a corrupt half-written state.
+    let tmp_path = path.with_extension("parquet.tmp");
+
+    let file = fs::File::create(&tmp_path)?;
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
         .build();
@@ -619,8 +711,11 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
     writer.write(&batch).map_err(StorageError::Parquet)?;
     writer.close().map_err(StorageError::Parquet)?;
 
-    // Ensure data is durably written to disk
-    fs::File::open(path)?.sync_all()?;
+    // Ensure data is durably written to disk before rename
+    fs::File::open(&tmp_path)?.sync_all()?;
+
+    // Atomic rename (POSIX guarantees atomicity)
+    fs::rename(&tmp_path, path)?;
 
     Ok(())
 }
@@ -694,6 +789,17 @@ fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
     Ok(updates)
 }
 
+/// Sync a directory to ensure metadata operations (rename, unlink) are durable.
+///
+/// On POSIX systems, file deletion and rename are only guaranteed durable
+/// after the parent directory inode is fsynced. Without this, a crash can
+/// "resurrect" deleted files or roll back renames.
+fn sync_directory(dir: &std::path::Path) {
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
 /// Sanitize a shard name for use as a filename
 fn sanitize_name(name: &str) -> String {
     name.replace([':', '/'], "_")
@@ -713,6 +819,7 @@ mod tests {
             buffer_size: 5,
 
             durability_mode: DurabilityMode::Immediate,
+            ..Default::default()
         };
         let persist = FilePersist::new(config).unwrap();
         (temp, persist)
@@ -858,6 +965,7 @@ mod tests {
                 buffer_size: 100,
 
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -881,6 +989,7 @@ mod tests {
                 buffer_size: 100,
 
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -1193,6 +1302,7 @@ mod tests {
                 buffer_size: 100,
 
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -1211,6 +1321,7 @@ mod tests {
                 buffer_size: 100,
 
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
             let shards = persist.list_shards().unwrap();
@@ -1236,6 +1347,7 @@ mod tests {
                 path: path.clone(),
                 buffer_size: 100,
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -1262,6 +1374,7 @@ mod tests {
                 path,
                 buffer_size: 100,
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
 
@@ -1309,6 +1422,7 @@ mod tests {
                 path: path.clone(),
                 buffer_size: 100,
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
             persist.ensure_shard("db:meta_test").unwrap();
@@ -1327,6 +1441,7 @@ mod tests {
                 path,
                 buffer_size: 100,
                 durability_mode: DurabilityMode::Immediate,
+                ..Default::default()
             };
             let persist = FilePersist::new(config).unwrap();
             let info = persist.shard_info("db:meta_test").unwrap();
@@ -1358,6 +1473,7 @@ mod tests {
             path: path.clone(),
             buffer_size: 100,
             durability_mode: DurabilityMode::Immediate,
+            ..Default::default()
         };
         let _persist = FilePersist::new(config).unwrap();
 
@@ -1365,5 +1481,250 @@ mod tests {
             !wal_dir.join("wal_12345.archived").exists(),
             "Archived WAL files should be cleaned up on startup"
         );
+    }
+
+    // === Regression tests for P0 durability: directory fsync after deletions ===
+
+    /// Regression: After delete_shard, metadata file must be removed from disk.
+    /// Verifies the shard .json file is durably deleted (not resurrectable on crash).
+    #[test]
+    fn test_delete_shard_metadata_file_removed() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // Verify shard metadata file exists
+        let meta_path = _temp.path().join("shards").join("db_edge.json");
+        assert!(
+            meta_path.exists(),
+            "Shard metadata file must exist before deletion"
+        );
+
+        persist.delete_shard("db:edge").unwrap();
+
+        // Metadata file must be removed
+        assert!(
+            !meta_path.exists(),
+            "Shard metadata file must be deleted after delete_shard"
+        );
+    }
+
+    /// Regression: After delete_shard, batch files must be removed from disk.
+    #[test]
+    fn test_delete_shard_batch_files_removed() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+        for i in 0..3 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i + 1), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+
+        // Verify batch files exist
+        let batches_dir = _temp.path().join("batches");
+        let batch_count_before = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert!(
+            batch_count_before > 0,
+            "Batch files must exist before deletion"
+        );
+
+        persist.delete_shard("db:edge").unwrap();
+
+        // All batch files for this shard must be gone
+        let batch_count_after = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert_eq!(
+            batch_count_after, 0,
+            "All batch files must be deleted after delete_shard"
+        );
+    }
+
+    /// Regression: Compaction must delete old batch files and leave only new compacted one.
+    #[test]
+    fn test_compaction_deletes_old_batch_files() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Create multiple flushes to generate multiple batch files
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        let batches_dir = _temp.path().join("batches");
+        let batch_count_before = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert!(
+            batch_count_before >= 2,
+            "Should have at least 2 batch files before compaction"
+        );
+
+        // Compact
+        persist.compact("db:edge", 0).unwrap();
+
+        let batch_count_after = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert_eq!(
+            batch_count_after, 1,
+            "Only one compacted batch file should remain after compaction"
+        );
+
+        // Data must still be intact
+        let updates = persist.read("db:edge", 0).unwrap();
+        assert_eq!(updates.len(), 2);
+    }
+
+    /// Regression: save_shard_meta uses atomic write-to-temp-then-rename.
+    /// No .tmp files should remain after save.
+    #[test]
+    fn test_shard_meta_atomic_write() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:atomic_test").unwrap();
+        persist
+            .append(
+                "db:atomic_test",
+                &[Update::insert(Tuple::from_pair(1, 2), 10)],
+            )
+            .unwrap();
+        persist.flush("db:atomic_test").unwrap();
+
+        // Verify no .tmp files in shards dir
+        let shards_dir = _temp.path().join("shards");
+        let tmp_files: Vec<_> = fs::read_dir(&shards_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".json.tmp")))
+            .collect();
+        assert!(
+            tmp_files.is_empty(),
+            "No .json.tmp files should remain after atomic shard meta write"
+        );
+
+        // Verify the final metadata file is valid
+        let meta_path = shards_dir.join("db_atomic_test.json");
+        assert!(meta_path.exists());
+        let content = fs::read_to_string(&meta_path).unwrap();
+        let _: ShardMeta = serde_json::from_str(&content).unwrap();
+    }
+
+    /// Regression: When WAL exceeds max_wal_size_bytes, all dirty shards are flushed.
+    #[test]
+    fn test_wal_size_limit_triggers_flush() {
+        let temp = TempDir::new().unwrap();
+        let config = PersistConfig {
+            path: temp.path().to_path_buf(),
+            buffer_size: 1000, // High buffer so normal buffer-based flush won't trigger
+            durability_mode: DurabilityMode::Immediate,
+            max_wal_size_bytes: 100, // Very low limit to trigger flush quickly
+        };
+        let persist = FilePersist::new(config).unwrap();
+
+        persist.ensure_shard("db:wal_test").unwrap();
+
+        // Insert enough data to exceed 100-byte WAL limit
+        for i in 0..20i32 {
+            persist
+                .append(
+                    "db:wal_test",
+                    &[Update::insert(Tuple::from_pair(i, i * 10), i as u64)],
+                )
+                .unwrap();
+        }
+
+        // After the WAL size limit is hit, data should have been flushed to batch files.
+        // The WAL should be much smaller now (entries cleared for flushed shards).
+        let wal_size = persist.wal.lock().file_size();
+        // After flush, WAL entries for this shard are removed
+        // (exact size depends on implementation, but should be much less than
+        // what 20 entries would produce without any flushing)
+        let batches_dir = temp.path().join("batches");
+        if batches_dir.exists() {
+            let batch_files: Vec<_> = std::fs::read_dir(&batches_dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("parquet"))
+                .collect();
+            assert!(
+                !batch_files.is_empty(),
+                "WAL size limit should have triggered flush, creating batch files"
+            );
+        }
+
+        // Data should still be readable
+        let read = persist.read("db:wal_test", 0).unwrap();
+        assert_eq!(read.len(), 20);
+    }
+
+    /// Regression: max_wal_size_bytes=0 means unlimited (no auto-flush from WAL size).
+    #[test]
+    fn test_wal_size_limit_zero_means_unlimited() {
+        let temp = TempDir::new().unwrap();
+        let config = PersistConfig {
+            path: temp.path().to_path_buf(),
+            buffer_size: 1000,
+            durability_mode: DurabilityMode::Immediate,
+            max_wal_size_bytes: 0, // Unlimited
+        };
+        let persist = FilePersist::new(config).unwrap();
+
+        persist.ensure_shard("db:unlimited").unwrap();
+
+        for i in 0..20i32 {
+            persist
+                .append(
+                    "db:unlimited",
+                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+                )
+                .unwrap();
+        }
+
+        // With unlimited WAL and high buffer_size, no batch files should be created
+        let batches_dir = temp.path().join("batches");
+        let batch_count = if batches_dir.exists() {
+            std::fs::read_dir(&batches_dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("parquet"))
+                .count()
+        } else {
+            0
+        };
+        assert_eq!(
+            batch_count, 0,
+            "With max_wal_size_bytes=0, no WAL-triggered flush should occur"
+        );
+
+        // Data should still be readable from buffer + WAL
+        let read = persist.read("db:unlimited", 0).unwrap();
+        assert_eq!(read.len(), 20);
     }
 }

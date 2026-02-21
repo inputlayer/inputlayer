@@ -20,12 +20,12 @@ Schema for 'users' registered with 3 columns (persistent)
 > +users[(1, "alice@example.com", 100), (2, "bob@example.com", 85)]
 Inserted 2 fact(s) into 'users'.
 > ?users(X, Y, Z)
-┌──────┬─────────────────────┬──────┐
-│ col0 │ col1                │ col2 │
-├──────┼─────────────────────┼──────┤
-│    1 │ "alice@example.com" │  100 │
-│    2 │ "bob@example.com"   │   85 │
-└──────┴─────────────────────┴──────┘
+┌────┬─────────────────────┬───────┐
+│ id │ email               │ score │
+├────┼─────────────────────┼───────┤
+│  1 │ "alice@example.com" │   100 │
+│  2 │ "bob@example.com"   │    85 │
+└────┴─────────────────────┴───────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

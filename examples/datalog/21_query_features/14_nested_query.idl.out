@@ -16,16 +16,16 @@ Rule 'regional_total' registered.
 > +global_avg(avg<Total>) <- regional_total(_, Total)
 Rule 'global_avg' registered.
 > ?regional_total(Region, Total)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  250 │
-│ "South" │  250 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Region  │ Total │
+├─────────┼───────┤
+│ "North" │   250 │
+│ "South" │   250 │
+└─────────┴───────┘
 2 rows
 > ?global_avg(Avg)
 ┌───────┐
-│ col0  │
+│ Avg   │
 ├───────┤
 │ 250.0 │
 └───────┘

@@ -13,13 +13,13 @@ Switched to knowledge graph: test_rel_insert_n33t10
 Inserted 3 fact(s) into 'data'.
 > .rel data
 Relation: data
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌───┬─────┐
+│ A │ B   │
+├───┼─────┤
+│ 1 │ "a" │
+│ 2 │ "b" │
+│ 3 │ "c" │
+└───┴─────┘
 3 of 3 total rows
 > .kg use default
 Switched to knowledge graph: default

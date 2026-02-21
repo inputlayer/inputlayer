@@ -12,20 +12,20 @@ Switched to knowledge graph: test_single_n10t55
 > +single[(42, "answer")]
 Inserted 1 fact(s) into 'single'.
 > ?single(X, Y)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│   42 │ "answer" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ X  │ Y        │
+├────┼──────────┤
+│ 42 │ "answer" │
+└────┴──────────┘
 1 rows
 > +one_sum(sum<X>) <- single(X, _)
 Rule 'one_sum' registered.
 > ?one_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

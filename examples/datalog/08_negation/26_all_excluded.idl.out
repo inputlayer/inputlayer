@@ -20,11 +20,11 @@ No results.
 > +items(4)
 Inserted 1 fact(s) into 'items'.
 > ?not_excluded(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > +excluded(4)
 Inserted 1 fact(s) into 'excluded'.

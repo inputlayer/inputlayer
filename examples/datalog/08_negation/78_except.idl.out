@@ -16,11 +16,11 @@ Inserted 2 fact(s) into 'query2'.
 > +except_result(X, Y) <- query1(X, Y), !query2(X, Y)
 Rule 'except_result' registered.
 > ?except_result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "a" │
+└───┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

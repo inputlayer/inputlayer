@@ -12,13 +12,13 @@ Switched to knowledge graph: test_special_chars_n35t29
 > +text[(1, "line1\nline2"), (2, "tab\there"), (3, "quote: \"hello\"")]
 Inserted 3 fact(s) into 'text'.
 > ?text(Id, T)
-┌──────┬────────────────────┐
-│ col0 │ col1               │
-├──────┼────────────────────┤
-│    1 │ "line1\nline2"     │
-│    2 │ "tab\there"        │
-│    3 │ "quote: \"hello\"" │
-└──────┴────────────────────┘
+┌────┬────────────────────┐
+│ Id │ T                  │
+├────┼────────────────────┤
+│  1 │ "line1\nline2"     │
+│  2 │ "tab\there"        │
+│  3 │ "quote: \"hello\"" │
+└────┴────────────────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

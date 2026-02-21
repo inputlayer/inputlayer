@@ -16,15 +16,15 @@ Rule 'categorized' registered.
 > +categorized(X, "large") <- numbers(X), X > 2
 Rule 'categorized' registered.
 > ?categorized(X, Cat)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "small" │
-│    2 │ "small" │
-│    3 │ "large" │
-│    4 │ "large" │
-│    5 │ "large" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Cat     │
+├───┼─────────┤
+│ 1 │ "small" │
+│ 2 │ "small" │
+│ 3 │ "large" │
+│ 4 │ "large" │
+│ 5 │ "large" │
+└───┴─────────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

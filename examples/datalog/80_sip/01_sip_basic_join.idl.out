@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'user'.
 > +order[(101, 1, 100), (102, 1, 200), (103, 2, 150), (104, 5, 300)]
 Inserted 4 fact(s) into 'order'.
 > ?user(UserId, Name), order(OrderId, UserId, Amount)
-┌──────┬─────────┬──────┬──────┐
-│ col0 │ col1    │ col2 │ col3 │
-├──────┼─────────┼──────┼──────┤
-│    1 │ "alice" │  101 │  100 │
-│    1 │ "alice" │  102 │  200 │
-│    2 │ "bob"   │  103 │  150 │
-└──────┴─────────┴──────┴──────┘
+┌────────┬─────────┬─────────┬────────┐
+│ UserId │ Name    │ OrderId │ Amount │
+├────────┼─────────┼─────────┼────────┤
+│      1 │ "alice" │     101 │    100 │
+│      1 │ "alice" │     102 │    200 │
+│      2 │ "bob"   │     103 │    150 │
+└────────┴─────────┴─────────┴────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,12 +14,12 @@ Inserted 5 fact(s) into 'score'.
 > +avg_score(Student, avg<Points>) <- score(Student, Points)
 Rule 'avg_score' registered.
 > ?avg_score(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 85.0 │
-│    2 │ 72.5 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ 85.0 │
+│ 2 │ 72.5 │
+└───┴──────┘
 2 rows
 > .rule drop avg_score
 Rule 'avg_score' dropped.
@@ -28,12 +28,12 @@ No results.
 > +avg_score(Student, avg<Points>) <- score(Student, Points)
 Rule 'avg_score' registered.
 > ?avg_score(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ 85.0 │
-│    2 │ 72.5 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ 85.0 │
+│ 2 │ 72.5 │
+└───┴──────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

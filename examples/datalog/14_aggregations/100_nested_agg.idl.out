@@ -16,16 +16,16 @@ Rule 'regional_sum' registered.
 > +avg_regional(avg<Sum>) <- regional_sum(_, Sum)
 Rule 'avg_regional' registered.
 > ?regional_sum(Region, Sum)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "North" │  250 │
-│ "South" │  450 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ Region  │ Sum │
+├─────────┼─────┤
+│ "North" │ 250 │
+│ "South" │ 450 │
+└─────────┴─────┘
 2 rows
 > ?avg_regional(Avg)
 ┌───────┐
-│ col0  │
+│ Avg   │
 ├───────┤
 │ 350.0 │
 └───────┘

@@ -27,7 +27,10 @@ pub async fn health(
             .is_some()
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Health check task panicked");
+        false
+    });
 
     let status = if storage_ok {
         "healthy".to_string()
@@ -50,6 +53,38 @@ pub async fn health(
     (http_status, Json(ApiResponse::success(health)))
 }
 
+/// Liveness probe: returns 200 if the process is alive.
+///
+/// Kubernetes liveness probes should hit this endpoint. It always returns 200
+/// and does NOT check storage accessibility (to avoid false restarts).
+pub async fn liveness() -> StatusCode {
+    StatusCode::OK
+}
+
+/// Readiness probe: returns 200 if the server can handle requests.
+///
+/// Checks that the storage engine is accessible (read lock can be acquired).
+/// Returns 503 if the server is not ready to handle requests.
+pub async fn readiness(Extension(handler): Extension<Arc<Handler>>) -> StatusCode {
+    let handler_clone = Arc::clone(&handler);
+    let storage_ok = tokio::task::spawn_blocking(move || {
+        handler_clone
+            .try_get_storage(std::time::Duration::from_secs(1))
+            .is_some()
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Readiness check task panicked");
+        false
+    });
+
+    if storage_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
 /// Server statistics endpoint
 ///
 /// Uses `spawn_blocking` because acquiring the storage read lock can block
@@ -58,56 +93,64 @@ pub async fn health(
 pub async fn stats(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<StatsDto>>, RestError> {
-    let stats = tokio::task::spawn_blocking(move || {
-        let storage = handler.get_storage();
-        let kgs = storage.list_knowledge_graphs();
-        let knowledge_graphs = kgs.len();
+    let timeout_secs = handler.config().http.stats_timeout_secs.max(1);
+    let stats = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(move || {
+            let storage = handler.get_storage();
+            let kgs = storage.list_knowledge_graphs();
+            let knowledge_graphs = kgs.len();
 
-        // Count total relations and views across all KGs
-        let mut total_relations = 0;
-        let mut total_views = 0;
+            // Count total relations and views across all KGs
+            let mut total_relations = 0;
+            let mut total_views = 0;
 
-        // Estimate memory usage from tuple counts across all KGs.
-        // Each tuple is approximately 64 bytes (Value enum + heap allocations).
-        let mut total_tuples: u64 = 0;
-        for kg_name in &kgs {
-            if let Ok(relations) = storage.list_relations_in(kg_name) {
-                total_relations += relations.len();
-                for rel_name in &relations {
-                    if let Ok(Some((_schema, count))) =
-                        storage.get_relation_metadata_in(kg_name, rel_name)
-                    {
-                        total_tuples += count as u64;
+            // Estimate memory usage from tuple counts across all KGs.
+            // Each tuple is approximately 64 bytes (Value enum + heap allocations).
+            let mut total_tuples: u64 = 0;
+            for kg_name in &kgs {
+                if let Ok(relations) = storage.list_relations_in(kg_name) {
+                    total_relations += relations.len();
+                    for rel_name in &relations {
+                        if let Ok(Some((_schema, count))) =
+                            storage.get_relation_metadata_in(kg_name, rel_name)
+                        {
+                            total_tuples += count as u64;
+                        }
                     }
                 }
+                if let Ok(rules) = storage.list_rules_in(kg_name) {
+                    total_views += rules.len();
+                }
             }
-            if let Ok(rules) = storage.list_rules_in(kg_name) {
-                total_views += rules.len();
+            let estimated_memory = total_tuples.saturating_mul(64);
+
+            drop(storage);
+
+            let session_stats = handler.session_stats();
+            StatsDto {
+                knowledge_graphs,
+                relations: total_relations,
+                views: total_views,
+                memory_usage_bytes: estimated_memory,
+                query_count: handler.total_queries(),
+                uptime_secs: handler.uptime_seconds(),
+                sessions: SessionStatsDto {
+                    total: session_stats.total_sessions,
+                    clean: session_stats.clean_sessions,
+                    dirty: session_stats.dirty_sessions,
+                    total_ephemeral_facts: session_stats.total_ephemeral_facts,
+                    total_ephemeral_rules: session_stats.total_ephemeral_rules,
+                },
             }
-        }
-        let estimated_memory = total_tuples * 64;
-
-        drop(storage);
-
-        let session_stats = handler.session_stats();
-        StatsDto {
-            knowledge_graphs,
-            relations: total_relations,
-            views: total_views,
-            memory_usage_bytes: estimated_memory,
-            query_count: handler.total_queries(),
-            uptime_secs: handler.uptime_seconds(),
-            sessions: SessionStatsDto {
-                total: session_stats.total_sessions,
-                clean: session_stats.clean_sessions,
-                dirty: session_stats.dirty_sessions,
-                total_ephemeral_facts: session_stats.total_ephemeral_facts,
-                total_ephemeral_rules: session_stats.total_ephemeral_rules,
-            },
-        }
-    })
+        }),
+    )
     .await
-    .map_err(|e| RestError::internal(format!("Stats computation failed: {e}")))?;
+    .map_err(|_| RestError::internal(format!("Stats computation timed out after {timeout_secs}s")))?
+    .map_err(|e| {
+        tracing::warn!(error = %e, "Stats computation failed");
+        RestError::internal("Stats computation failed".to_string())
+    })?;
 
     Ok(Json(ApiResponse::success(stats)))
 }
@@ -208,6 +251,21 @@ mod tests {
         );
     }
 
+    /// P1: Liveness probe always returns 200 (even under load).
+    #[tokio::test]
+    async fn test_liveness_always_200() {
+        let status = liveness().await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// P1: Readiness probe returns 200 when storage is accessible.
+    #[tokio::test]
+    async fn test_readiness_returns_ok() {
+        let (handler, _tmp) = make_handler();
+        let status = readiness(Extension(handler)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
     /// P2-13 regression: Health check returns degraded/503 when storage lock is contended.
     /// This verifies the health check doesn't hang when a write lock blocks readers.
     #[tokio::test]
@@ -235,6 +293,33 @@ mod tests {
         assert_eq!(
             data.status, "degraded",
             "Status should be 'degraded' when lock is contended"
+        );
+
+        lock_thread.join().unwrap();
+    }
+
+    /// Regression: Readiness probe returns 503 when storage lock is contended.
+    /// Mirrors test_health_returns_degraded_when_storage_locked but for the /ready endpoint.
+    #[tokio::test]
+    async fn test_readiness_returns_503_when_storage_locked() {
+        let (handler, _tmp) = make_handler();
+
+        // Hold a write lock from another thread for 3 seconds
+        let h2 = Arc::clone(&handler);
+        let lock_thread = std::thread::spawn(move || {
+            let _guard = h2.get_storage_mut();
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        });
+
+        // Give the thread time to acquire the write lock
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Readiness should return 503 when lock is contended
+        let status = readiness(Extension(handler)).await;
+        assert_eq!(
+            status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Readiness should return 503 when storage lock is contended"
         );
 
         lock_thread.join().unwrap();

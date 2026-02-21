@@ -20,12 +20,12 @@ Parse error: Expected parentheses: (Asm, Sub, _),
 > requires(Sub, Part)
 Cannot insert variable 'Sub' - use constants only
 > ?requires(100, Part)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│  100 │   10 │
-│  100 │   20 │
-└──────┴──────┘
+┌─────┬──────┐
+│ 100 │ Part │
+├─────┼──────┤
+│ 100 │   10 │
+│ 100 │   20 │
+└─────┴──────┘
 2 rows
 > +total_qty(Asm, Part, sum<Qty>) <-
 Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.
