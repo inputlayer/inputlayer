@@ -32,6 +32,8 @@ pub(crate) struct QueryTransform {
     pub limit: Option<usize>,
     /// Number of rows to skip before applying limit.
     pub offset: Option<usize>,
+    /// Primary relation name from a `?relation(...)` shorthand (for schema column lookup).
+    pub source_relation: Option<String>,
 }
 
 /// Term -> Value (constants only, rejects variables/placeholders).
@@ -1502,9 +1504,10 @@ impl QueryJob {
                                                     let mut sorted = relations;
                                                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
                                                     messages.push("Relations:".to_string());
-                                                    for (name, schema, _count) in &sorted {
+                                                    for (name, schema, count) in &sorted {
+                                                        let cols = schema.join(", ");
                                                         messages.push(format!(
-                                                            "  {name} (arity: {})",
+                                                            "  {name} (arity: {}, columns: [{cols}], tuples: {count})",
                                                             schema.len()
                                                         ));
                                                     }
@@ -1862,6 +1865,7 @@ impl QueryJob {
         let order_by = transform.order_by;
         let query_limit = transform.limit;
         let query_offset = transform.offset;
+        let source_relation = transform.source_relation;
 
         // Prepend session rules to the query program
         let query_program = if session_rules.is_empty() {
@@ -1940,6 +1944,17 @@ impl QueryJob {
             })
             .collect();
 
+        // Look up schema column names from the source relation (if available)
+        let schema_columns: Option<Vec<String>> = source_relation.as_ref().and_then(|rel_name| {
+            let storage = self.storage.read();
+            storage
+                .get_schema_in(&kg_name, rel_name)
+                .ok()
+                .flatten()
+                .filter(|s| !results.is_empty() && s.columns.len() == results[0].arity())
+                .map(|s| s.columns.iter().map(|c| c.name.clone()).collect())
+        });
+
         // Build schema from first result or default to 2 columns
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             first
@@ -1947,7 +1962,10 @@ impl QueryJob {
                 .iter()
                 .enumerate()
                 .map(|(i, v)| ColumnDef {
-                    name: format!("col{i}"),
+                    name: schema_columns
+                        .as_ref()
+                        .and_then(|cols| cols.get(i).cloned())
+                        .unwrap_or_else(|| format!("col{i}")),
                     data_type: match v {
                         Value::Int32(_) => WireDataType::Int32,
                         Value::Int64(_) => WireDataType::Int64,
@@ -2071,6 +2089,7 @@ impl Handler {
         let order_by = transform.order_by;
         let query_limit = transform.limit;
         let query_offset = transform.offset;
+        let source_relation = transform.source_relation;
 
         // Build combined program: ephemeral rules + preprocessed query
         // Keep `preprocessed` for the persistent-only baseline (provenance diff)
@@ -2185,13 +2204,27 @@ impl Handler {
             })
             .collect();
 
+        // Look up schema column names from the source relation (if available)
+        let schema_columns: Option<Vec<String>> = source_relation.as_ref().and_then(|rel_name| {
+            let storage = self.storage.read();
+            storage
+                .get_schema_in(&kg, rel_name)
+                .ok()
+                .flatten()
+                .filter(|s| !results.is_empty() && s.columns.len() == results[0].arity())
+                .map(|s| s.columns.iter().map(|c| c.name.clone()).collect())
+        });
+
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             first
                 .values()
                 .iter()
                 .enumerate()
                 .map(|(i, v)| ColumnDef {
-                    name: format!("col{i}"),
+                    name: schema_columns
+                        .as_ref()
+                        .and_then(|cols| cols.get(i).cloned())
+                        .unwrap_or_else(|| format!("col{i}")),
                     data_type: match v {
                         Value::Int32(_) => WireDataType::Int32,
                         Value::Int64(_) => WireDataType::Int64,
@@ -2577,6 +2610,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
                 order_by: vec![],
                 limit: None,
                 offset: None,
+                source_relation: None,
             });
         }
         let query_text = after_q;
@@ -2677,6 +2711,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by,
             limit: goal.limit,
             offset: goal.offset,
+            source_relation: Some(goal.goal.relation.clone()),
         })
     } else {
         Ok(QueryTransform {
@@ -2684,6 +2719,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by: vec![],
             limit: None,
             offset: None,
+            source_relation: None,
         })
     }
 }

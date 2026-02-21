@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import type { View } from "@/lib/datalog-store"
 import { useDatalogStore } from "@/lib/datalog-store"
-import { InputLayerClient } from "@inputlayer/api-client"
+import { generateVariables } from "@/lib/ws-parsers"
 import { Download, RefreshCw, Rows3, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -13,21 +13,19 @@ interface ViewDataTabProps {
 
 interface ViewData {
   columns: string[]
-  data: (string | number | boolean)[][]
+  data: (string | number | boolean | null)[][]
   totalCount: number
 }
 
-const client = new InputLayerClient({ baseUrl: "/api/v1" })
-
 export function ViewDataTab({ view }: ViewDataTabProps) {
-  const { selectedDatabase } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeQuery } = useDatalogStore()
   const [viewData, setViewData] = useState<ViewData>({ columns: [], data: [], totalCount: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
-    if (!selectedDatabase) {
-      setError("No database selected")
+    if (!selectedKnowledgeGraph) {
+      setError("No knowledge graph selected")
       setLoading(false)
       return
     }
@@ -36,19 +34,27 @@ export function ViewDataTab({ view }: ViewDataTabProps) {
     setError(null)
 
     try {
-      const result = await client.views.getData(selectedDatabase.name, view.name)
-      setViewData({
-        columns: result.columns,
-        data: result.rows as (string | number | boolean)[][],
-        totalCount: result.totalCount,
-      })
+      // Query the view data using generated variable names
+      const vars = generateVariables(view.arity > 0 ? view.arity : 2)
+      const query = `?${view.name}(${vars.join(", ")})`
+      const result = await executeQuery(query)
+
+      if (result.status === "error") {
+        setError(result.error || "Failed to load view data")
+      } else {
+        setViewData({
+          columns: result.columns,
+          data: result.data,
+          totalCount: result.data.length,
+        })
+      }
     } catch (err) {
       console.error("Failed to load view data:", err)
       setError(err instanceof Error ? err.message : "Failed to load view data")
     } finally {
       setLoading(false)
     }
-  }, [selectedDatabase, view.name])
+  }, [selectedKnowledgeGraph, view.name, view.arity, executeQuery])
 
   useEffect(() => {
     loadData()

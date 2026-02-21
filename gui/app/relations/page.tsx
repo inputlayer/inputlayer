@@ -27,17 +27,23 @@ export default function RelationsPage() {
     }
   }, [selectedKnowledgeGraph?.name]) // Only refresh when KG changes, not on every render
 
-  // Clear selection when relations/views list changes (e.g., after refresh)
+  // Keep selection in sync with store data (e.g., after loadRelationData updates tupleCount/columns)
   useEffect(() => {
-    // If the selected relation no longer exists, clear it
-    if (selectedRelation && !relations.find(r => r.id === selectedRelation.id)) {
-      setSelectedRelation(null)
+    if (selectedRelation) {
+      const updated = relations.find(r => r.name === selectedRelation.name)
+      if (updated) {
+        // Only update if data actually changed to avoid unnecessary re-renders
+        if (updated !== selectedRelation) setSelectedRelation(updated)
+      } else {
+        setSelectedRelation(null)
+      }
     }
-    // If the selected view no longer exists, clear it
-    if (selectedView && !views.find(v => v.id === selectedView.id)) {
-      setSelectedView(null)
+    if (selectedView) {
+      if (!views.find(v => v.name === selectedView.name)) {
+        setSelectedView(null)
+      }
     }
-  }, [relations, views, selectedRelation, selectedView])
+  }, [relations, views])
 
   return (
     <AppShell>

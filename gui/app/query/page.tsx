@@ -6,7 +6,6 @@ import { QueryEditorPanel } from "@/components/query-editor-panel"
 import { QueryResultsPanel } from "@/components/query-results-panel"
 import { QuerySidebar } from "@/components/query-sidebar"
 import { useDatalogStore } from "@/lib/datalog-store"
-import { InputLayerClient } from "@inputlayer/api-client"
 import { Zap } from "lucide-react"
 
 export interface QueryResult {
@@ -23,10 +22,8 @@ export interface ExplainResult {
   query: string
 }
 
-const client = new InputLayerClient({ baseUrl: "/api/v1" })
-
 export default function QueryPage() {
-  const { selectedKnowledgeGraph, executeQuery } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeQuery, explainQuery } = useDatalogStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [explainResult, setExplainResult] = useState<ExplainResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
@@ -79,14 +76,11 @@ export default function QueryPage() {
       setQueryResult(null) // Clear results when explaining
 
       try {
-        const result = await client.query.explain({
-          query,
-          knowledgeGraph: selectedKnowledgeGraph.name,
-        })
+        const plan = await explainQuery(query)
 
         setExplainResult({
-          plan: result.plan,
-          optimizations: result.optimizations,
+          plan,
+          optimizations: [],
           query,
         })
       } catch (err) {
@@ -97,7 +91,7 @@ export default function QueryPage() {
 
       setIsExplaining(false)
     },
-    [selectedKnowledgeGraph],
+    [selectedKnowledgeGraph, explainQuery],
   )
 
   return (

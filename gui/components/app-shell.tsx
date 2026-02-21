@@ -17,7 +17,8 @@ export function AppShell({ children }: AppShellProps) {
   // Try to restore session from localStorage on mount
   useEffect(() => {
     initFromStorage()
-  }, [initFromStorage])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Show loading state while initializing
   if (!isInitialized) {

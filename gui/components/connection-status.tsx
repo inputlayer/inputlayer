@@ -26,6 +26,11 @@ export function ConnectionStatus() {
       label: "Connecting",
       className: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
     },
+    reconnecting: {
+      icon: Loader2,
+      label: "Reconnecting",
+      className: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
+    },
   }
 
   const config = statusConfig[status]
@@ -33,7 +38,7 @@ export function ConnectionStatus() {
 
   return (
     <Badge variant="secondary" className={cn("border", config.className)}>
-      <Icon className={cn("mr-1.5 h-3 w-3", status === "connecting" && "animate-spin")} />
+      <Icon className={cn("mr-1.5 h-3 w-3", (status === "connecting" || status === "reconnecting") && "animate-spin")} />
       {config.label}
       {connection?.name && status === "connected" && <span className="ml-1.5 opacity-70">({connection.name})</span>}
     </Badge>
