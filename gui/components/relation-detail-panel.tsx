@@ -20,20 +20,20 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
   const [sortColumn, setSortColumn] = useState<number | null>(null)
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
   const [loading, setLoading] = useState(false)
-  const [currentData, setCurrentData] = useState<(string | number | boolean)[][]>(relation.data)
+  const [currentData, setCurrentData] = useState<(string | number | boolean | null)[][]>(relation.data)
   const [currentColumns, setCurrentColumns] = useState<string[]>(relation.columns)
+  const [currentTupleCount, setCurrentTupleCount] = useState(relation.tupleCount)
 
   // Update local state when relation prop changes
   useEffect(() => {
     setCurrentData(relation.data)
     setCurrentColumns(relation.columns)
-  }, [relation.data, relation.columns])
+    setCurrentTupleCount(relation.tupleCount)
+  }, [relation.data, relation.columns, relation.tupleCount])
 
-  // Load data on mount if not already loaded
+  // Load data when a relation is selected
   useEffect(() => {
-    if (currentData.length === 0 && relation.tupleCount > 0) {
-      handleRefresh()
-    }
+    handleRefresh()
   }, [relation.name])
 
   const handleRefresh = useCallback(async () => {
@@ -43,6 +43,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
       if (updated) {
         setCurrentData(updated.data)
         setCurrentColumns(updated.columns)
+        setCurrentTupleCount(updated.tupleCount)
       }
     } finally {
       setLoading(false)
@@ -163,7 +164,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
           </span>
           <span className="flex items-center gap-1.5">
             <Rows3 className="h-3.5 w-3.5" />
-            {relation.tupleCount.toLocaleString()} tuples
+            {currentTupleCount.toLocaleString()} tuples
           </span>
         </div>
         <div className="relative w-48">
@@ -236,7 +237,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
       {/* Footer */}
       <div className="border-t border-border/50 bg-muted/30 px-4 py-2">
         <p className="text-[10px] text-muted-foreground">
-          Showing {sortedData.length} of {relation.tupleCount.toLocaleString()} tuples
+          Showing {sortedData.length} of {currentTupleCount.toLocaleString()} tuples
           {filter && ` (filtered)`}
         </p>
       </div>
