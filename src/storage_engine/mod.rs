@@ -129,6 +129,7 @@ impl StorageEngine {
             path: config.storage.data_dir.join("persist"),
             buffer_size: config.storage.persist.buffer_size,
             durability_mode: config.storage.persist.durability_mode,
+            max_wal_size_bytes: config.storage.persist.max_wal_size_bytes,
         };
         let persist = Arc::new(FilePersist::new(persist_config)?);
 
@@ -461,8 +462,12 @@ impl StorageEngine {
             }
         }
 
-        // Block writes to KGs being dropped (prevents RC-1)
-        if self.dropping_kgs.read().contains(kg) {
+        // Hold dropping_kgs read guard across the entire persist operation
+        // to prevent a TOCTOU race where a KG drop starts between the check
+        // and the persist call. The read lock allows concurrent inserts but
+        // blocks KG drops from marking the KG as dropping until we finish.
+        let dropping_guard = self.dropping_kgs.read();
+        if dropping_guard.contains(kg) {
             return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
 
@@ -488,6 +493,9 @@ impl StorageEngine {
             persist_ms,
             "persist_append_complete"
         );
+
+        // Release dropping_kgs guard before acquiring KG write lock
+        drop(dropping_guard);
 
         // Update in-memory state
         let db = self
@@ -568,8 +576,9 @@ impl StorageEngine {
             return Ok(0);
         }
 
-        // Block writes to KGs being dropped (prevents RC-1)
-        if self.dropping_kgs.read().contains(kg) {
+        // Hold dropping_kgs read guard across the persist operation (same as insert)
+        let dropping_guard = self.dropping_kgs.read();
+        if dropping_guard.contains(kg) {
             return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
 
@@ -586,6 +595,9 @@ impl StorageEngine {
         // Persist first (durability guarantee via WAL + batches)
         self.persist.ensure_shard(&shard)?;
         self.persist.append(&shard, &updates)?;
+
+        // Release dropping_kgs guard before acquiring KG write lock
+        drop(dropping_guard);
 
         // Update in-memory state
         let db = self
@@ -1473,14 +1485,25 @@ impl StorageEngine {
         }
 
         // Load each knowledge graph
-        for kg_name in kg_names {
+        let total_kgs = kg_names.len();
+        let load_start = std::time::Instant::now();
+        for (i, kg_name) in kg_names.into_iter().enumerate() {
             let kg_dir = self.config.storage.data_dir.join(&kg_name);
             fs::create_dir_all(&kg_dir)?;
 
             let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir)?;
             self.knowledge_graphs
                 .insert(kg_name, Arc::new(RwLock::new(kg)));
+
+            if total_kgs >= 10 && (i + 1) % 10 == 0 {
+                tracing::info!(loaded = i + 1, total = total_kgs, "kg_load_progress");
+            }
         }
+        tracing::info!(
+            knowledge_graphs = total_kgs,
+            elapsed_ms = load_start.elapsed().as_millis() as u64,
+            "kg_load_complete"
+        );
 
         // Update logical time to be after all loaded data
         let max_time = self.find_max_logical_time()?;

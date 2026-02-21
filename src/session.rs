@@ -54,6 +54,10 @@ pub struct SessionConfig {
     pub max_sessions: usize,
     /// Idle timeout in seconds before session is reaped (0 = no timeout)
     pub idle_timeout_secs: u64,
+    /// Maximum ephemeral facts per session (0 = unlimited)
+    pub max_ephemeral_facts: usize,
+    /// Maximum ephemeral rules per session (0 = unlimited)
+    pub max_ephemeral_rules: usize,
 }
 
 impl Default for SessionConfig {
@@ -61,6 +65,8 @@ impl Default for SessionConfig {
         Self {
             max_sessions: 10_000,
             idle_timeout_secs: 3600, // 1 hour
+            max_ephemeral_facts: 100_000,
+            max_ephemeral_rules: 1_000,
         }
     }
 }
@@ -460,9 +466,20 @@ impl SessionManager {
             return Err("Relation name cannot be empty".to_string());
         }
         let inserted = self.with_session_mut(session_id, |session| {
+            // Enforce per-session fact limit
+            if self.config.max_ephemeral_facts > 0 {
+                let current = session.ephemeral_fact_count();
+                let incoming = tuples.len();
+                if current + incoming > self.config.max_ephemeral_facts {
+                    return Err(format!(
+                        "Session ephemeral fact limit exceeded: {} + {} > {} max",
+                        current, incoming, self.config.max_ephemeral_facts
+                    ));
+                }
+            }
             session.touch();
-            session.insert_ephemeral(relation, tuples)
-        })?;
+            Ok(session.insert_ephemeral(relation, tuples))
+        })??;
 
         self.audit.record(AuditEvent::EphemeralInsert {
             session_id: session_id.clone(),
@@ -510,9 +527,20 @@ impl SessionManager {
     ) -> Result<(), String> {
         let head_relation = rule.head.relation.clone();
         self.with_session_mut(session_id, |session| {
+            // Enforce per-session rule limit
+            if self.config.max_ephemeral_rules > 0
+                && session.ephemeral_rule_count() >= self.config.max_ephemeral_rules
+            {
+                return Err(format!(
+                    "Session ephemeral rule limit exceeded: {} >= {} max",
+                    session.ephemeral_rule_count(),
+                    self.config.max_ephemeral_rules
+                ));
+            }
             session.touch();
             session.add_ephemeral_rule(rule, rule_text);
-        })?;
+            Ok(())
+        })??;
 
         self.audit.record(AuditEvent::EphemeralRuleAdded {
             session_id: session_id.clone(),
@@ -583,6 +611,20 @@ impl SessionManager {
     /// Reap expired sessions based on idle timeout
     ///
     /// Returns the number of sessions reaped.
+    /// Close all sessions bound to a specific knowledge graph.
+    /// Called when a KG is dropped to prevent stale sessions from lingering.
+    pub fn close_sessions_for_kg(&self, kg: &str) -> usize {
+        let mut sessions = self.sessions.write();
+        let before = sessions.len();
+        sessions.retain(|_, session| session.knowledge_graph != kg);
+        let closed = before - sessions.len();
+        if closed > 0 {
+            drop(sessions);
+            tracing::info!(kg, closed, "sessions_closed_for_dropped_kg");
+        }
+        closed
+    }
+
     pub fn reap_expired(&self) -> usize {
         if self.config.idle_timeout_secs == 0 {
             return 0;
@@ -890,6 +932,7 @@ mod tests {
         let config = SessionConfig {
             max_sessions: 2,
             idle_timeout_secs: 0,
+            ..Default::default()
         };
         let mgr = SessionManager::new(config);
 
@@ -1145,6 +1188,7 @@ mod tests {
         let config = SessionConfig {
             max_sessions: 100,
             idle_timeout_secs: 0,
+            ..Default::default()
         };
         let mgr = SessionManager::new(config);
         mgr.create_session("kg1").unwrap();
@@ -2079,6 +2123,7 @@ mod tests {
         let config = SessionConfig {
             max_sessions: 10,
             idle_timeout_secs: 0,
+            ..Default::default()
         };
         let mgr = SessionManager::new(config);
 
@@ -2290,5 +2335,166 @@ mod tests {
         }
 
         assert_eq!(mgr.session_count(), 0);
+    }
+
+    // === Per-session resource limits ===
+
+    // === Regression tests for close_sessions_for_kg ===
+
+    #[test]
+    fn test_close_sessions_for_kg_removes_matching() {
+        let mgr = SessionManager::new(SessionConfig::default());
+        let id1 = mgr.create_session("kg_a").unwrap();
+        let id2 = mgr.create_session("kg_a").unwrap();
+        let id3 = mgr.create_session("kg_b").unwrap();
+
+        assert_eq!(mgr.session_count(), 3);
+
+        let closed = mgr.close_sessions_for_kg("kg_a");
+        assert_eq!(closed, 2);
+        assert_eq!(mgr.session_count(), 1);
+
+        // The kg_b session should still exist
+        assert!(mgr.with_session(&id3, |_| {}).is_ok());
+        // The kg_a sessions should be gone
+        assert!(mgr.with_session(&id1, |_| {}).is_err());
+        assert!(mgr.with_session(&id2, |_| {}).is_err());
+    }
+
+    #[test]
+    fn test_close_sessions_for_kg_no_match() {
+        let mgr = SessionManager::new(SessionConfig::default());
+        mgr.create_session("kg_x").unwrap();
+
+        let closed = mgr.close_sessions_for_kg("nonexistent");
+        assert_eq!(closed, 0);
+        assert_eq!(mgr.session_count(), 1);
+    }
+
+    #[test]
+    fn test_close_sessions_for_kg_empty() {
+        let mgr = SessionManager::new(SessionConfig::default());
+        let closed = mgr.close_sessions_for_kg("any");
+        assert_eq!(closed, 0);
+    }
+
+    #[test]
+    fn test_ephemeral_fact_limit_enforced() {
+        let config = SessionConfig {
+            max_ephemeral_facts: 5,
+            max_ephemeral_rules: 100,
+            ..Default::default()
+        };
+        let mgr = SessionManager::new(config);
+        let id = mgr.create_session("default").unwrap();
+
+        // Insert 3 facts — OK
+        mgr.insert_ephemeral(
+            &id,
+            "edge",
+            vec![
+                make_tuple(vec![1, 2]),
+                make_tuple(vec![2, 3]),
+                make_tuple(vec![3, 4]),
+            ],
+        )
+        .unwrap();
+
+        // Insert 3 more — exceeds limit of 5
+        let result = mgr.insert_ephemeral(
+            &id,
+            "edge",
+            vec![
+                make_tuple(vec![4, 5]),
+                make_tuple(vec![5, 6]),
+                make_tuple(vec![6, 7]),
+            ],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("limit exceeded"));
+
+        // Original 3 facts should still be intact
+        let facts = mgr.get_session_facts(&id).unwrap();
+        assert_eq!(facts.len(), 3);
+    }
+
+    #[test]
+    fn test_ephemeral_fact_limit_zero_means_unlimited() {
+        let config = SessionConfig {
+            max_ephemeral_facts: 0,
+            ..Default::default()
+        };
+        let mgr = SessionManager::new(config);
+        let id = mgr.create_session("default").unwrap();
+
+        // Insert many facts — should succeed with 0 (unlimited)
+        let tuples: Vec<Tuple> = (0..1000).map(|i| make_tuple(vec![i])).collect();
+        mgr.insert_ephemeral(&id, "data", tuples).unwrap();
+        assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 1000);
+    }
+
+    #[test]
+    fn test_ephemeral_rule_limit_enforced() {
+        let config = SessionConfig {
+            max_ephemeral_rules: 2,
+            max_ephemeral_facts: 100_000,
+            ..Default::default()
+        };
+        let mgr = SessionManager::new(config);
+        let id = mgr.create_session("default").unwrap();
+
+        let make_rule = |name: &str| crate::ast::Rule {
+            head: crate::ast::Atom {
+                relation: name.to_string(),
+                args: vec![],
+            },
+            body: vec![],
+        };
+
+        // Add 2 rules — OK
+        mgr.add_ephemeral_rule(&id, make_rule("r1"), "r1() <-".to_string())
+            .unwrap();
+        mgr.add_ephemeral_rule(&id, make_rule("r2"), "r2() <-".to_string())
+            .unwrap();
+
+        // 3rd rule should fail
+        let result = mgr.add_ephemeral_rule(&id, make_rule("r3"), "r3() <-".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("limit exceeded"));
+
+        // Only 2 rules should exist
+        mgr.with_session(&id, |s| {
+            assert_eq!(s.ephemeral_rule_count(), 2);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn test_ephemeral_rule_limit_zero_means_unlimited() {
+        let config = SessionConfig {
+            max_ephemeral_rules: 0,
+            ..Default::default()
+        };
+        let mgr = SessionManager::new(config);
+        let id = mgr.create_session("default").unwrap();
+
+        let make_rule = |name: &str| crate::ast::Rule {
+            head: crate::ast::Atom {
+                relation: name.to_string(),
+                args: vec![],
+            },
+            body: vec![],
+        };
+
+        // Should succeed with unlimited
+        for i in 0..100 {
+            mgr.add_ephemeral_rule(&id, make_rule(&format!("r{i}")), format!("r{i}() <-"))
+                .unwrap();
+        }
+
+        mgr.with_session(&id, |s| {
+            assert_eq!(s.ephemeral_rule_count(), 100);
+        })
+        .unwrap();
     }
 }

@@ -9,7 +9,6 @@ pub mod error;
 pub mod handlers;
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::{
@@ -21,6 +20,7 @@ use axum::{
     Extension, Router,
 };
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use tracing::{info, warn};
@@ -30,24 +30,23 @@ use crate::protocol::Handler;
 
 use self::handlers::{admin, ws};
 
-/// Global connection counter for enforcing max_connections limit.
-static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
-
-/// Middleware: Enforce maximum concurrent connections.
+/// Middleware: Enforce maximum concurrent connections using a Semaphore.
+/// Unlike an atomic counter, Semaphore provides atomic check-and-acquire,
+/// eliminating the TOCTOU race that could allow over-limit connections.
 async fn connection_limit_middleware(
-    Extension(max_conns): Extension<MaxConnections>,
+    Extension(conn_semaphore): Extension<Option<Arc<tokio::sync::Semaphore>>>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    let limit = max_conns.0;
-    if limit > 0 {
-        let current = ACTIVE_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
-        if current >= limit {
-            ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
-            return (StatusCode::SERVICE_UNAVAILABLE, "Too many connections").into_response();
-        }
+    if let Some(ref sem) = conn_semaphore {
+        let permit = match sem.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                return (StatusCode::SERVICE_UNAVAILABLE, "Too many connections").into_response();
+            }
+        };
         let response = next.run(req).await;
-        ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
+        drop(permit);
         response
     } else {
         next.run(req).await
@@ -89,10 +88,12 @@ async fn auth_middleware(
 }
 
 #[derive(Clone)]
-struct MaxConnections(usize);
-
-#[derive(Clone)]
 struct ApiKeys(Arc<Vec<String>>);
+
+/// Newtype wrapper for WebSocket-specific connection semaphore.
+/// Distinct from the general HTTP connection semaphore.
+#[derive(Clone)]
+pub struct WsSemaphore(pub Option<Arc<tokio::sync::Semaphore>>);
 
 /// Embedded AsyncAPI spec (from docs/spec/asyncapi.yaml)
 const ASYNCAPI_YAML: &str = include_str!("../../../docs/spec/asyncapi.yaml");
@@ -164,16 +165,36 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         app = app.layer(Extension(ApiKeys(Arc::new(Vec::new()))));
     }
 
-    // Apply connection limit middleware
-    // Extension(MaxConnections) must be outer so the middleware can extract it.
-    let max_conns = MaxConnections(config.rate_limit.max_connections);
+    // Apply connection limit middleware using Semaphore for atomic check-and-acquire
+    let conn_semaphore: Option<Arc<tokio::sync::Semaphore>> =
+        if config.rate_limit.max_connections > 0 {
+            Some(Arc::new(tokio::sync::Semaphore::new(
+                config.rate_limit.max_connections,
+            )))
+        } else {
+            None
+        };
     app = app
         .layer(middleware::from_fn(connection_limit_middleware))
-        .layer(Extension(max_conns));
+        .layer(Extension(conn_semaphore));
+
+    // WebSocket-specific connection limit (separate from HTTP connection limit)
+    let ws_semaphore: Option<Arc<tokio::sync::Semaphore>> =
+        if config.rate_limit.max_ws_connections > 0 {
+            Some(Arc::new(tokio::sync::Semaphore::new(
+                config.rate_limit.max_ws_connections,
+            )))
+        } else {
+            None
+        };
+    app = app.layer(Extension(WsSemaphore(ws_semaphore)));
 
     if let Some(cors) = cors {
         app = app.layer(cors);
     }
+
+    // Enforce HTTP request body size limit (16 MB, matching WebSocket MAX_MESSAGE_SIZE)
+    app = app.layer(RequestBodyLimitLayer::new(16 * 1024 * 1024));
 
     // Serve GUI static files if enabled
     if config.gui.enabled {
@@ -221,6 +242,17 @@ pub async fn start_http_server(
         }
     });
 
+    // Warn if binding to a public interface without authentication
+    let is_public = config.host == "0.0.0.0" || config.host == "::";
+    if is_public && !config.auth.enabled {
+        warn!(
+            host = %config.host,
+            "Server binding to a public interface WITHOUT authentication. \
+             All endpoints are publicly accessible. \
+             Set [http.auth] enabled = true for production."
+        );
+    }
+
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
     println!("HTTP server listening on: http://{addr}");
@@ -243,9 +275,10 @@ pub async fn start_http_server(
     // Flush WAL and save metadata with a timeout.
     // If a long-running query holds the storage lock, we don't want to hang indefinitely.
     // The WAL is designed to replay on next startup, so skipping the final flush is safe.
+    let timeout_secs = handler.config().http.shutdown_timeout_secs.max(1);
     let shutdown_handler = handler.clone();
     match tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(timeout_secs),
         tokio::task::spawn_blocking(move || shutdown_handler.shutdown()),
     )
     .await
@@ -256,8 +289,8 @@ pub async fn start_http_server(
         }
         Err(_) => {
             warn!(
-                "Graceful shutdown timed out after 10s. \
-                 WAL will be replayed on next startup."
+                timeout_secs,
+                "Graceful shutdown timed out. WAL will be replayed on next startup."
             );
         }
     }

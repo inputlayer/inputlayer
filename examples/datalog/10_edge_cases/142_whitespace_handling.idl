@@ -1,0 +1,28 @@
+// Test: Whitespace edge cases
+
+.kg create test_ws_n10t142
+.kg use test_ws_n10t142
+
+// Normal inserts
++data[(1, "a"), (2, "b"), (3, "c")]
+
+// Query with extra whitespace around parentheses
+?data(  X  ,  Y  )
+
+// Rule spanning multiple lines
++long_rule(X, Y) <-
+  data(X, Y),
+  X > 1
+
+?long_rule(X, Y)
+
+// Empty lines between statements should be fine
+
+
++more[(10,), (20,)]
+
+
+?more(X)
+
+.kg use default
+.kg drop test_ws_n10t142
