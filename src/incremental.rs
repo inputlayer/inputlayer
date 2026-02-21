@@ -132,7 +132,7 @@ impl IncrementalEngine {
     ///
     /// `relations` specifies the initial base relations to create InputSessions for.
     pub fn new(relations: Vec<String>) -> Result<Self, String> {
-        let (command_tx, command_rx) = channel::unbounded::<EngineCommand>();
+        let (command_tx, command_rx) = channel::bounded::<EngineCommand>(1024);
         let current_time = Arc::new(AtomicU64::new(0));
         let max_write_time = Arc::new(AtomicU64::new(0));
         let known_relations = Mutex::new(relations.iter().cloned().collect());

@@ -104,6 +104,8 @@ pub struct KnowledgeGraph {
     incremental: Option<IncrementalEngine>,
     /// Number of workers for parallel query execution
     num_workers: usize,
+    /// Maximum result rows per query (0 = unlimited)
+    max_result_rows: usize,
 }
 
 impl StorageEngine {
@@ -210,7 +212,9 @@ impl StorageEngine {
 
                 // Create knowledge graph instance (uses persist layer for durability)
                 let num_workers = self.config.storage.performance.num_threads;
-                let kg = KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
+                let mut kg =
+                    KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
+                kg.max_result_rows = self.config.storage.performance.max_result_rows;
 
                 vacant.insert(Arc::new(RwLock::new(kg)));
             }
@@ -278,6 +282,12 @@ impl StorageEngine {
         }
         if cleanup.data_dir.exists() {
             let _ = fs::remove_dir_all(&cleanup.data_dir);
+            // Sync parent directory to ensure directory deletion is durable
+            if let Some(parent) = cleanup.data_dir.parent() {
+                if let Ok(dir) = fs::File::open(parent) {
+                    let _ = dir.sync_all();
+                }
+            }
         }
         // Remove tombstone — name is now safe to reuse
         self.dropping_kgs.write().remove(&cleanup.name);
@@ -1571,6 +1581,7 @@ impl StorageEngine {
             snapshot,
             incremental: None,
             num_workers,
+            max_result_rows: self.config.storage.performance.max_result_rows,
         })
     }
 
@@ -1820,6 +1831,7 @@ impl KnowledgeGraph {
             snapshot,
             incremental: None,
             num_workers,
+            max_result_rows: 0,
         }
     }
 
@@ -1902,23 +1914,25 @@ impl KnowledgeGraph {
             // Create AND publish snapshot while still holding the lock
             // This ensures no concurrent invalidation can occur between
             // reading materializations and making them visible to readers.
-            let new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
                 input_tuples,
                 rules,
                 self.num_workers,
                 materialized_names,
             );
+            new_snapshot.max_result_rows = self.max_result_rows;
             self.snapshot.store(Arc::new(new_snapshot));
 
             // Lock drops here AFTER publication - this is the fix for TOCTOU
         } else {
             // No DD computation - publish without materializations
-            let new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
                 input_tuples,
                 rules,
                 self.num_workers,
                 HashSet::new(),
             );
+            new_snapshot.max_result_rows = self.max_result_rows;
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -5369,5 +5383,56 @@ mod tests {
         storage
             .create_knowledge_graph("kg2")
             .expect("Should succeed after dropping a KG");
+    }
+
+    /// Regression: max_result_rows propagates through Config → StorageEngine → KG → Snapshot → Engine.
+    /// Verifies the entire pipeline caps results at the configured limit.
+    #[test]
+    fn test_max_result_rows_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.performance.max_result_rows = 3;
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("limit_kg").unwrap();
+        storage
+            .insert_into(
+                "limit_kg",
+                "data",
+                vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)],
+            )
+            .unwrap();
+
+        let result = storage
+            .execute_query_tuples_on("limit_kg", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert!(
+            result.len() <= 3,
+            "max_result_rows=3 should cap output at 3, got {}",
+            result.len()
+        );
+    }
+
+    /// Regression: max_result_rows=0 means unlimited (no cap).
+    #[test]
+    fn test_max_result_rows_zero_means_unlimited() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.performance.max_result_rows = 0;
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("unlim_kg").unwrap();
+        storage
+            .insert_into(
+                "unlim_kg",
+                "data",
+                vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)],
+            )
+            .unwrap();
+
+        let result = storage
+            .execute_query_tuples_on("unlim_kg", "result(X, Y) <- data(X, Y)")
+            .unwrap();
+        assert_eq!(result.len(), 5, "max_result_rows=0 should return all rows");
     }
 }

@@ -8,10 +8,33 @@ pub mod ws;
 use crate::protocol::wire::WireValue;
 use crate::value::{Tuple, Value};
 
-/// Convert a JSON value to a storage Value
+/// Maximum string value size in bytes (default 64 KB).
+/// Prevents memory exhaustion via oversized string values in JSON payloads.
+const DEFAULT_MAX_STRING_VALUE_BYTES: usize = 65_536;
+
+/// Maximum vector dimension count (default 65536).
+/// Prevents memory exhaustion via oversized vectors in JSON payloads.
+const DEFAULT_MAX_VECTOR_DIMENSIONS: usize = 65_536;
+
+/// Convert a JSON value to a storage Value with size validation.
 ///
 /// Used by WebSocket handlers for consistent JSON → Value conversion.
+/// Enforces `max_string_bytes` limit on string values and `max_vector_dims`
+/// on vector dimensions to prevent memory exhaustion.
 pub fn json_to_value(json: &serde_json::Value) -> Result<Value, String> {
+    json_to_value_with_limits(
+        json,
+        DEFAULT_MAX_STRING_VALUE_BYTES,
+        DEFAULT_MAX_VECTOR_DIMENSIONS,
+    )
+}
+
+/// Convert a JSON value to a storage Value with configurable size limits.
+pub fn json_to_value_with_limits(
+    json: &serde_json::Value,
+    max_string_bytes: usize,
+    max_vector_dims: usize,
+) -> Result<Value, String> {
     match json {
         serde_json::Value::Null => Ok(Value::Null),
         serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
@@ -27,8 +50,22 @@ pub fn json_to_value(json: &serde_json::Value) -> Result<Value, String> {
                 Err(format!("Unsupported number: {n}"))
             }
         }
-        serde_json::Value::String(s) => Ok(Value::string(s)),
+        serde_json::Value::String(s) => {
+            if s.len() > max_string_bytes {
+                return Err(format!(
+                    "String value too large: {} bytes (max {max_string_bytes})",
+                    s.len()
+                ));
+            }
+            Ok(Value::string(s))
+        }
         serde_json::Value::Array(arr) => {
+            if arr.len() > max_vector_dims {
+                return Err(format!(
+                    "Vector too large: {} dimensions (max {max_vector_dims})",
+                    arr.len()
+                ));
+            }
             let floats: Result<Vec<f32>, String> = arr
                 .iter()
                 .map(|v| {
@@ -71,10 +108,26 @@ pub fn wire_value_to_json(value: WireValue) -> serde_json::Value {
 ///
 /// Used by WebSocket handlers for fact insert/retract operations.
 pub fn json_tuples_to_tuples(json_tuples: &[Vec<serde_json::Value>]) -> Result<Vec<Tuple>, String> {
+    json_tuples_to_tuples_with_limits(
+        json_tuples,
+        DEFAULT_MAX_STRING_VALUE_BYTES,
+        DEFAULT_MAX_VECTOR_DIMENSIONS,
+    )
+}
+
+/// Convert JSON tuples to storage Tuples with configurable size limits.
+pub fn json_tuples_to_tuples_with_limits(
+    json_tuples: &[Vec<serde_json::Value>],
+    max_string_bytes: usize,
+    max_vector_dims: usize,
+) -> Result<Vec<Tuple>, String> {
     json_tuples
         .iter()
         .map(|row| {
-            let values: Result<Vec<Value>, String> = row.iter().map(json_to_value).collect();
+            let values: Result<Vec<Value>, String> = row
+                .iter()
+                .map(|v| json_to_value_with_limits(v, max_string_bytes, max_vector_dims))
+                .collect();
             values.map(Tuple::new)
         })
         .collect()
@@ -294,5 +347,86 @@ mod tests {
     fn test_json_tuples_to_tuples_error() {
         let input = vec![vec![serde_json::json!({"bad": "value"})]];
         assert!(json_tuples_to_tuples(&input).is_err());
+    }
+
+    // === Regression tests for P1 input validation: string/vector size limits ===
+
+    #[test]
+    fn test_json_to_value_string_within_limit() {
+        let s = "a".repeat(100);
+        let result = json_to_value_with_limits(&serde_json::json!(s), 200, 1000);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_json_to_value_string_exceeds_limit() {
+        let s = "x".repeat(1000);
+        let result = json_to_value_with_limits(&serde_json::json!(s), 500, 1000);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("String value too large"),
+            "Error should mention string size: {err}"
+        );
+        assert!(
+            err.contains("1000 bytes"),
+            "Error should show actual size: {err}"
+        );
+    }
+
+    #[test]
+    fn test_json_to_value_string_exact_limit() {
+        let s = "a".repeat(64);
+        // Exactly at limit: should succeed
+        let result = json_to_value_with_limits(&serde_json::json!(s), 64, 1000);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_json_to_value_string_one_over_limit() {
+        let s = "a".repeat(65);
+        let result = json_to_value_with_limits(&serde_json::json!(s), 64, 1000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_to_value_vector_within_limit() {
+        let arr: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let result = json_to_value_with_limits(&serde_json::json!(arr), 1000, 200);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_json_to_value_vector_exceeds_limit() {
+        let arr: Vec<f64> = (0..1000).map(|i| i as f64).collect();
+        let result = json_to_value_with_limits(&serde_json::json!(arr), 1000, 500);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Vector too large"),
+            "Error should mention vector size: {err}"
+        );
+    }
+
+    #[test]
+    fn test_json_to_value_default_string_limit_64kb() {
+        // Default limit is 64KB — a 100KB string should fail
+        let s = "x".repeat(100_000);
+        let result = json_to_value(&serde_json::json!(s));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_tuples_with_oversized_string() {
+        let big_string = "x".repeat(1000);
+        let input = vec![vec![serde_json::json!(1), serde_json::json!(big_string)]];
+        let result = json_tuples_to_tuples_with_limits(&input, 500, 1000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_to_value_empty_string_ok() {
+        let result = json_to_value_with_limits(&serde_json::json!(""), 10, 10);
+        assert!(result.is_ok());
     }
 }

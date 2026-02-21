@@ -617,6 +617,20 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     };
     let mut last_activity = std::time::Instant::now();
 
+    // Connection lifetime limit
+    let connection_start = std::time::Instant::now();
+    let max_lifetime_secs = handler.config().http.rate_limit.ws_max_lifetime_secs;
+    let max_lifetime = if max_lifetime_secs > 0 {
+        Some(std::time::Duration::from_secs(max_lifetime_secs))
+    } else {
+        None
+    };
+
+    // Per-connection message rate limiting
+    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
+    let mut rate_window_start = std::time::Instant::now();
+    let mut rate_window_count: u32 = 0;
+
     loop {
         // Compute remaining idle time for this iteration
         let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
@@ -632,6 +646,21 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                 }
                 None => Box::pin(std::future::pending()),
             };
+
+        // Check connection lifetime
+        if let Some(max_lt) = max_lifetime {
+            if connection_start.elapsed() >= max_lt {
+                eprintln!("[ws] Session {session_id} max lifetime ({max_lifetime_secs}s) exceeded");
+                let err_msg = GlobalWsResponse::Error {
+                    message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
+                    validation_errors: None,
+                };
+                if let Ok(json) = serde_json::to_string(&err_msg) {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                break;
+            }
+        }
 
         tokio::select! {
             // Idle timeout
@@ -654,6 +683,26 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                     Some(Ok(Message::Text(text))) => {
                         last_activity = std::time::Instant::now();
                         request_seq = request_seq.saturating_add(1);
+
+                        // Per-connection message rate limiting
+                        if max_msgs_per_sec > 0 {
+                            let now = std::time::Instant::now();
+                            if now.duration_since(rate_window_start) >= std::time::Duration::from_secs(1) {
+                                rate_window_start = now;
+                                rate_window_count = 0;
+                            }
+                            rate_window_count += 1;
+                            if rate_window_count > max_msgs_per_sec {
+                                let err_msg = GlobalWsResponse::Error {
+                                    message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
+                                    validation_errors: None,
+                                };
+                                if let Ok(json) = serde_json::to_string(&err_msg) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                continue;
+                            }
+                        }
                         let span = tracing::info_span!(
                             "ws_request",
                             session_id = %session_id,

@@ -48,6 +48,9 @@ pub fn save_tuples_to_parquet(
     writer.write(&batch)?;
     writer.close()?;
 
+    // Ensure data is durably written to disk
+    File::open(path)?.sync_all()?;
+
     Ok(())
 }
 
@@ -117,6 +120,9 @@ pub fn save_to_parquet(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> 
     writer.write(&batch)?;
     writer.close()?;
 
+    // Ensure data is durably written to disk
+    File::open(path)?.sync_all()?;
+
     Ok(())
 }
 
@@ -172,6 +178,10 @@ pub fn save_to_csv(path: &Path, tuples: &[(i32, i32)]) -> StorageResult<()> {
     for (a, b) in tuples {
         writeln!(file, "{a},{b}")?;
     }
+
+    // Ensure data is durably written to disk
+    file.flush()?;
+    file.sync_all()?;
 
     Ok(())
 }
@@ -351,5 +361,83 @@ mod tests {
         let (loaded, schema) = load_tuples_from_parquet(&path).unwrap();
         assert_eq!(loaded.len(), 0);
         assert_eq!(schema.arity(), 0);
+    }
+
+    // === Regression tests for P0 durability fixes ===
+
+    /// Regression: save_to_parquet must fsync so data survives power loss.
+    /// Verify the file is readable and valid immediately after save.
+    #[test]
+    fn test_save_to_parquet_is_durable() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("durable.parquet");
+
+        let data = vec![(10, 20), (30, 40)];
+        save_to_parquet(&path, &data).unwrap();
+
+        // File must exist and be readable
+        assert!(path.exists());
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert!(
+            metadata.len() > 0,
+            "Parquet file must not be empty after durable write"
+        );
+
+        let loaded = load_from_parquet(&path).unwrap();
+        assert_eq!(loaded, data);
+    }
+
+    /// Regression: save_tuples_to_parquet must fsync so data survives power loss.
+    #[test]
+    fn test_save_tuples_to_parquet_is_durable() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("durable_tuples.parquet");
+
+        let tuples = vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)];
+        let schema = TupleSchema::new(vec![
+            ("x".to_string(), ValueDataType::Int32),
+            ("y".to_string(), ValueDataType::Int32),
+        ]);
+
+        save_tuples_to_parquet(&path, &tuples, &schema).unwrap();
+
+        assert!(path.exists());
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert!(metadata.len() > 0);
+
+        let (loaded, _) = load_tuples_from_parquet(&path).unwrap();
+        assert_eq!(loaded.len(), 2);
+    }
+
+    /// Regression: save_to_csv must flush and fsync so data survives power loss.
+    #[test]
+    fn test_save_to_csv_is_durable() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("durable.csv");
+
+        let data = vec![(100, 200), (300, 400)];
+        save_to_csv(&path, &data).unwrap();
+
+        assert!(path.exists());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("100,200"));
+        assert!(content.contains("300,400"));
+
+        let loaded = load_from_csv(&path).unwrap();
+        assert_eq!(loaded, data);
+    }
+
+    /// Regression: Parquet writers must create parent directories if needed.
+    #[test]
+    fn test_parquet_creates_parent_dirs() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("nested").join("dir").join("test.parquet");
+
+        let data = vec![(1, 2)];
+        save_to_parquet(&path, &data).unwrap();
+
+        assert!(path.exists());
+        let loaded = load_from_parquet(&path).unwrap();
+        assert_eq!(loaded, data);
     }
 }
