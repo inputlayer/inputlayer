@@ -338,7 +338,8 @@ impl QueryJob {
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
+        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism()
             .map(std::num::NonZero::get)
@@ -360,7 +361,8 @@ impl Handler {
     }
 
     /// Create a new handler from configuration.
-    pub fn from_config(config: Config) -> Result<Self, String> {
+    pub fn from_config(mut config: Config) -> Result<Self, String> {
+        config.validate()?;
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
         Ok(Self::new(storage))
@@ -368,7 +370,8 @@ impl Handler {
 
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
-        let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
+        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism()
             .map(std::num::NonZero::get)
@@ -719,11 +722,20 @@ impl Handler {
         // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
         // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
         // `acquire_owned()` is an async wait — Tokio workers remain free while queued.
+        // Timeout after 30s to reject requests when server is overloaded.
         let wait_start = Instant::now();
-        let permit = Arc::clone(&self.query_semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| "Query semaphore closed (server shutting down)")?;
+        let permit = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            Arc::clone(&self.query_semaphore).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err("Query semaphore closed (server shutting down)".to_string()),
+            Err(_) => {
+                return Err("Server overloaded: query queue full (timed out after 30s)".to_string())
+            }
+        };
         let queued_ms = wait_start.elapsed().as_millis() as u64;
         if queued_ms > 0 {
             info!(queued_ms, program_len, "query_semaphore_wait");
@@ -755,6 +767,15 @@ impl Handler {
                 Ok(joined) => {
                     let compute_ms = query_start.elapsed().as_millis() as u64;
                     info!(program_len, compute_ms, "query_complete");
+                    let slow_ms = self.config.storage.performance.slow_query_log_ms;
+                    if slow_ms > 0 && compute_ms >= slow_ms {
+                        warn!(
+                            program_len,
+                            compute_ms,
+                            threshold_ms = slow_ms,
+                            "slow_query"
+                        );
+                    }
                     joined.map_err(|e| {
                         tracing::error!(error = %e, "Query task panicked");
                         "Internal query execution error".to_string()
@@ -779,6 +800,15 @@ impl Handler {
             })?;
             let compute_ms = query_start.elapsed().as_millis() as u64;
             info!(program_len, compute_ms, "query_complete");
+            let slow_ms = self.config.storage.performance.slow_query_log_ms;
+            if slow_ms > 0 && compute_ms >= slow_ms {
+                warn!(
+                    program_len,
+                    compute_ms,
+                    threshold_ms = slow_ms,
+                    "slow_query"
+                );
+            }
             joined
         }
     }
@@ -2086,6 +2116,16 @@ impl Handler {
         session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
+        // Input size validation (same as query_program)
+        let perf = &self.config.storage.performance;
+        if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
+            return Err(format!(
+                "Query too large: {} bytes (max {})",
+                program.len(),
+                perf.max_query_size_bytes
+            ));
+        }
+
         // Touch session to prevent idle reaping during query execution
         self.sessions.touch_session(session_id)?;
 
@@ -2275,6 +2315,18 @@ impl Handler {
 
         let execution_time_ms = start.elapsed().as_millis() as u64;
 
+        // Slow query logging (same as query_program)
+        let program_len = program.len();
+        let slow_ms = self.config.storage.performance.slow_query_log_ms;
+        if slow_ms > 0 && execution_time_ms >= slow_ms {
+            warn!(
+                program_len,
+                compute_ms = execution_time_ms,
+                threshold_ms = slow_ms,
+                "slow_session_query"
+            );
+        }
+
         // Record audit event for query with ephemeral data
         if query_meta.has_ephemeral {
             self.sessions.record_query_with_ephemeral(
@@ -2304,6 +2356,27 @@ impl Handler {
         })
     }
 
+    /// Maximum allowed relation name length in bytes.
+    const MAX_RELATION_NAME_BYTES: usize = 256;
+
+    /// Validate a relation name for use in inserts/retracts.
+    fn validate_relation_name(name: &str) -> Result<(), String> {
+        if name.is_empty() || name.trim().is_empty() {
+            return Err("Relation name cannot be empty".to_string());
+        }
+        if name.len() > Self::MAX_RELATION_NAME_BYTES {
+            return Err(format!(
+                "Relation name too long: {} bytes (max {})",
+                name.len(),
+                Self::MAX_RELATION_NAME_BYTES
+            ));
+        }
+        if name.starts_with("__") {
+            return Err(format!("Relation name '{name}' uses reserved '__' prefix"));
+        }
+        Ok(())
+    }
+
     /// Insert ephemeral facts into a session.
     /// Returns the number of facts actually inserted (after dedup).
     pub fn session_insert_ephemeral(
@@ -2312,6 +2385,19 @@ impl Handler {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
+        Self::validate_relation_name(relation)?;
+        let max_tuples = self.config.storage.performance.max_insert_tuples;
+        if max_tuples > 0 && tuples.len() > max_tuples {
+            return Err(format!(
+                "Too many tuples: {} (max {})",
+                tuples.len(),
+                max_tuples
+            ));
+        }
+        // Validate arity against persistent schema (if one exists)
+        if let Ok(kg) = self.sessions.session_kg(session_id) {
+            self.validate_tuples_against_schema(&kg, relation, &tuples)?;
+        }
         self.sessions.insert_ephemeral(session_id, relation, tuples)
     }
 
@@ -2322,6 +2408,15 @@ impl Handler {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
+        Self::validate_relation_name(relation)?;
+        let max_tuples = self.config.storage.performance.max_insert_tuples;
+        if max_tuples > 0 && tuples.len() > max_tuples {
+            return Err(format!(
+                "Too many tuples: {} (max {})",
+                tuples.len(),
+                max_tuples
+            ));
+        }
         self.sessions
             .retract_ephemeral(session_id, relation, tuples)
     }
@@ -2354,6 +2449,16 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        // Input size validation (protects parsing and downstream handlers)
+        let max_bytes = self.config.storage.performance.max_query_size_bytes;
+        if max_bytes > 0 && program.len() > max_bytes {
+            return Err(format!(
+                "Program too large: {} bytes (max {})",
+                program.len(),
+                max_bytes
+            ));
+        }
+
         let trimmed = program.trim();
 
         // Any session-bound activity should keep the session alive.
@@ -2488,6 +2593,20 @@ impl Handler {
         // If KG was switched, update session binding
         if let (Some(ref new_kg), Some(sid)) = (&result.switched_kg, session_id) {
             self.sessions.switch_kg(sid, new_kg)?;
+        }
+
+        // If a KG was dropped, clean up sessions still bound to it.
+        // The drop message format is "Knowledge graph 'X' dropped."
+        if result.schema.len() == 1 && result.schema[0].name == "message" {
+            for row in &result.rows {
+                if let Some(WireValue::String(ref msg)) = row.values.first() {
+                    if let Some(rest) = msg.strip_prefix("Knowledge graph '") {
+                        if let Some(kg_name) = rest.strip_suffix("' dropped.") {
+                            self.sessions.close_sessions_for_kg(kg_name);
+                        }
+                    }
+                }
+            }
         }
 
         // Convert error-like messages to Err for the WS protocol.
@@ -4219,6 +4338,133 @@ mod tests {
         assert_eq!(result.rows.len(), 2);
 
         handler.close_session(&sid).unwrap();
+    }
+
+    // === Regression tests for validate_relation_name ===
+
+    #[test]
+    fn test_validate_relation_name_valid() {
+        assert!(Handler::validate_relation_name("edge").is_ok());
+        assert!(Handler::validate_relation_name("my_relation").is_ok());
+        assert!(Handler::validate_relation_name("a").is_ok());
+    }
+
+    #[test]
+    fn test_validate_relation_name_empty() {
+        assert!(Handler::validate_relation_name("").is_err());
+        let err = Handler::validate_relation_name("").unwrap_err();
+        assert!(err.contains("empty"), "Error should mention empty: {err}");
+    }
+
+    #[test]
+    fn test_validate_relation_name_whitespace_only() {
+        assert!(Handler::validate_relation_name("   ").is_err());
+    }
+
+    #[test]
+    fn test_validate_relation_name_too_long() {
+        let long_name = "a".repeat(257);
+        let result = Handler::validate_relation_name(&long_name);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("too long"),
+            "Error should mention too long: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_relation_name_max_length_ok() {
+        let name = "a".repeat(256);
+        assert!(Handler::validate_relation_name(&name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_relation_name_reserved_prefix() {
+        let result = Handler::validate_relation_name("__internal");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("reserved"),
+            "Error should mention reserved: {err}"
+        );
+    }
+
+    // === Regression tests for max_insert_tuples in session_insert/retract_ephemeral ===
+
+    #[test]
+    fn test_session_insert_ephemeral_exceeds_max_tuples() {
+        let (mut config, _tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        config.storage.performance.max_insert_tuples = 3;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("test_limit")
+            .unwrap();
+        let sid = handler.create_session("test_limit").unwrap();
+
+        // 4 tuples should exceed the limit of 3
+        let tuples: Vec<Tuple> = (0..4).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
+        let result = handler.session_insert_ephemeral(&sid, "rel", tuples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Too many tuples"));
+    }
+
+    #[test]
+    fn test_session_retract_ephemeral_exceeds_max_tuples() {
+        let (mut config, _tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        config.storage.performance.max_insert_tuples = 2;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("test_limit2")
+            .unwrap();
+        let sid = handler.create_session("test_limit2").unwrap();
+
+        let tuples: Vec<Tuple> = (0..3).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
+        let result = handler.session_retract_ephemeral(&sid, "rel", tuples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Too many tuples"));
+    }
+
+    #[test]
+    fn test_session_insert_ephemeral_within_max_tuples() {
+        let (mut config, _tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        config.storage.performance.max_insert_tuples = 10;
+        let handler = Handler::from_config(config).unwrap();
+        handler
+            .get_storage()
+            .ensure_knowledge_graph("test_ok")
+            .unwrap();
+        let sid = handler.create_session("test_ok").unwrap();
+
+        let tuples: Vec<Tuple> = (0..5).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
+        assert!(handler
+            .session_insert_ephemeral(&sid, "rel", tuples)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_session_insert_ephemeral_rejects_empty_relation() {
+        let (handler, _tmp) = handler_with_kg("rel_name_test");
+        let sid = handler.create_session("rel_name_test").unwrap();
+        let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
+        let result = handler.session_insert_ephemeral(&sid, "", tuples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_session_insert_ephemeral_rejects_reserved_prefix() {
+        let (handler, _tmp) = handler_with_kg("rel_prefix_test");
+        let sid = handler.create_session("rel_prefix_test").unwrap();
+        let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
+        let result = handler.session_insert_ephemeral(&sid, "__internal", tuples);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("reserved"));
     }
 
     #[test]

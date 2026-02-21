@@ -27,7 +27,10 @@ pub async fn health(
             .is_some()
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Health check task panicked");
+        false
+    });
 
     let status = if storage_ok {
         "healthy".to_string()
@@ -70,7 +73,10 @@ pub async fn readiness(Extension(handler): Extension<Arc<Handler>>) -> StatusCod
             .is_some()
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Readiness check task panicked");
+        false
+    });
 
     if storage_ok {
         StatusCode::OK
@@ -87,56 +93,64 @@ pub async fn readiness(Extension(handler): Extension<Arc<Handler>>) -> StatusCod
 pub async fn stats(
     Extension(handler): Extension<Arc<Handler>>,
 ) -> Result<Json<ApiResponse<StatsDto>>, RestError> {
-    let stats = tokio::task::spawn_blocking(move || {
-        let storage = handler.get_storage();
-        let kgs = storage.list_knowledge_graphs();
-        let knowledge_graphs = kgs.len();
+    let timeout_secs = handler.config().http.stats_timeout_secs.max(1);
+    let stats = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(move || {
+            let storage = handler.get_storage();
+            let kgs = storage.list_knowledge_graphs();
+            let knowledge_graphs = kgs.len();
 
-        // Count total relations and views across all KGs
-        let mut total_relations = 0;
-        let mut total_views = 0;
+            // Count total relations and views across all KGs
+            let mut total_relations = 0;
+            let mut total_views = 0;
 
-        // Estimate memory usage from tuple counts across all KGs.
-        // Each tuple is approximately 64 bytes (Value enum + heap allocations).
-        let mut total_tuples: u64 = 0;
-        for kg_name in &kgs {
-            if let Ok(relations) = storage.list_relations_in(kg_name) {
-                total_relations += relations.len();
-                for rel_name in &relations {
-                    if let Ok(Some((_schema, count))) =
-                        storage.get_relation_metadata_in(kg_name, rel_name)
-                    {
-                        total_tuples += count as u64;
+            // Estimate memory usage from tuple counts across all KGs.
+            // Each tuple is approximately 64 bytes (Value enum + heap allocations).
+            let mut total_tuples: u64 = 0;
+            for kg_name in &kgs {
+                if let Ok(relations) = storage.list_relations_in(kg_name) {
+                    total_relations += relations.len();
+                    for rel_name in &relations {
+                        if let Ok(Some((_schema, count))) =
+                            storage.get_relation_metadata_in(kg_name, rel_name)
+                        {
+                            total_tuples += count as u64;
+                        }
                     }
                 }
+                if let Ok(rules) = storage.list_rules_in(kg_name) {
+                    total_views += rules.len();
+                }
             }
-            if let Ok(rules) = storage.list_rules_in(kg_name) {
-                total_views += rules.len();
+            let estimated_memory = total_tuples.saturating_mul(64);
+
+            drop(storage);
+
+            let session_stats = handler.session_stats();
+            StatsDto {
+                knowledge_graphs,
+                relations: total_relations,
+                views: total_views,
+                memory_usage_bytes: estimated_memory,
+                query_count: handler.total_queries(),
+                uptime_secs: handler.uptime_seconds(),
+                sessions: SessionStatsDto {
+                    total: session_stats.total_sessions,
+                    clean: session_stats.clean_sessions,
+                    dirty: session_stats.dirty_sessions,
+                    total_ephemeral_facts: session_stats.total_ephemeral_facts,
+                    total_ephemeral_rules: session_stats.total_ephemeral_rules,
+                },
             }
-        }
-        let estimated_memory = total_tuples * 64;
-
-        drop(storage);
-
-        let session_stats = handler.session_stats();
-        StatsDto {
-            knowledge_graphs,
-            relations: total_relations,
-            views: total_views,
-            memory_usage_bytes: estimated_memory,
-            query_count: handler.total_queries(),
-            uptime_secs: handler.uptime_seconds(),
-            sessions: SessionStatsDto {
-                total: session_stats.total_sessions,
-                clean: session_stats.clean_sessions,
-                dirty: session_stats.dirty_sessions,
-                total_ephemeral_facts: session_stats.total_ephemeral_facts,
-                total_ephemeral_rules: session_stats.total_ephemeral_rules,
-            },
-        }
-    })
+        }),
+    )
     .await
-    .map_err(|e| RestError::internal(format!("Stats computation failed: {e}")))?;
+    .map_err(|_| RestError::internal(format!("Stats computation timed out after {timeout_secs}s")))?
+    .map_err(|e| {
+        tracing::warn!(error = %e, "Stats computation failed");
+        RestError::internal("Stats computation failed".to_string())
+    })?;
 
     Ok(Json(ApiResponse::success(stats)))
 }

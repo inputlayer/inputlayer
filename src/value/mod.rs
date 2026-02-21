@@ -346,7 +346,15 @@ impl Value {
         match self {
             Value::Int32(v) => i64::from(*v),
             Value::Int64(v) => *v,
-            Value::Float64(v) => *v as i64,
+            Value::Float64(v) => {
+                // NaN/Infinity → 0; finite values use Rust's saturating `as` cast
+                // (since Rust 1.45, out-of-range f64→i64 is well-defined: clamps to i64::MIN/MAX)
+                if v.is_finite() {
+                    *v as i64
+                } else {
+                    0
+                }
+            }
             Value::Bool(b) => i64::from(*b),
             Value::Timestamp(t) => *t,
             _ => 0,
@@ -1628,6 +1636,35 @@ mod tests {
     fn test_timestamp_to_i64() {
         let ts = Value::Timestamp(1700000000000i64);
         assert_eq!(ts.to_i64(), 1700000000000i64);
+    }
+
+    /// Regression: Float64 NaN must convert to 0 via to_i64(), not produce UB.
+    #[test]
+    fn test_float64_nan_to_i64() {
+        let v = Value::Float64(f64::NAN);
+        assert_eq!(v.to_i64(), 0);
+    }
+
+    /// Regression: Float64 Infinity must convert to 0 via to_i64().
+    #[test]
+    fn test_float64_infinity_to_i64() {
+        let v = Value::Float64(f64::INFINITY);
+        assert_eq!(v.to_i64(), 0);
+    }
+
+    /// Regression: Float64 -Infinity must convert to 0 via to_i64().
+    #[test]
+    fn test_float64_neg_infinity_to_i64() {
+        let v = Value::Float64(f64::NEG_INFINITY);
+        assert_eq!(v.to_i64(), 0);
+    }
+
+    /// Regression: Normal float values still convert correctly.
+    #[test]
+    fn test_float64_normal_to_i64() {
+        assert_eq!(Value::Float64(42.9).to_i64(), 42);
+        assert_eq!(Value::Float64(-7.5).to_i64(), -7);
+        assert_eq!(Value::Float64(0.0).to_i64(), 0);
     }
 
     #[test]

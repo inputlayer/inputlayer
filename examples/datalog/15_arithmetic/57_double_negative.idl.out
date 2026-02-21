@@ -1,0 +1,49 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_dblneg_n15t57
+Knowledge graph 'test_dblneg_n15t57' created.
+Switched to knowledge graph: test_dblneg_n15t57
+> .kg use test_dblneg_n15t57
+Switched to knowledge graph: test_dblneg_n15t57
+> +vals[(5,), (10,), (-3,)]
+Inserted 3 fact(s) into 'vals'.
+> result(X, Y, R) <- vals(X), vals(Y), R = X - (0 - Y)
+┌────┬────┬────┐
+│ X  │ Y  │ Z  │
+├────┼────┼────┤
+│ -3 │ -3 │ -6 │
+│ -3 │  5 │  2 │
+│ -3 │ 10 │  7 │
+│  5 │ -3 │  2 │
+│  5 │  5 │ 10 │
+│  5 │ 10 │ 15 │
+│ 10 │ -3 │  7 │
+│ 10 │  5 │ 15 │
+│ 10 │ 10 │ 20 │
+└────┴────┴────┘
+9 rows
+(session: 1 rule(s))
+> ?result(X, Y, R)
+┌────┬────┬────┐
+│ X  │ Y  │ R  │
+├────┼────┼────┤
+│ -3 │ -3 │ -6 │
+│ -3 │  5 │  2 │
+│ -3 │ 10 │  7 │
+│  5 │ -3 │  2 │
+│  5 │  5 │ 10 │
+│  5 │ 10 │ 15 │
+│ 10 │ -3 │  7 │
+│ 10 │  5 │ 15 │
+│ 10 │ 10 │ 20 │
+└────┴────┴────┘
+9 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_dblneg_n15t57
+Knowledge graph 'test_dblneg_n15t57' dropped.
