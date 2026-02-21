@@ -13,7 +13,7 @@ Switched to knowledge graph: test_hierarchy_n18t35
 Inserted 4 fact(s) into 'reports_to'.
 > direct_report(Mgr, Emp) <- reports_to(Emp, Mgr)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ X       │ Y       │
 ├─────────┼─────────┤
 │ "Bob"   │ "Alice" │
 │ "Bob"   │ "Dave"  │
@@ -24,7 +24,7 @@ Inserted 4 fact(s) into 'reports_to'.
 (session: 1 rule(s))
 > ?direct_report(Mgr, Emp)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ Mgr     │ Emp     │
 ├─────────┼─────────┤
 │ "Bob"   │ "Alice" │
 │ "Bob"   │ "Dave"  │
@@ -38,7 +38,7 @@ Rule 'all_reports' registered.
 Rule 'all_reports' registered.
 > ?all_reports("Carol", Emp)
 ┌─────────┬─────────┐
-│ col0    │ col1    │
+│ Carol   │ Emp     │
 ├─────────┼─────────┤
 │ "Carol" │ "Alice" │
 │ "Carol" │ "Bob"   │

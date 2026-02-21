@@ -13,7 +13,7 @@ Switched to knowledge graph: test_float_abs_n32t22
 Inserted 5 fact(s) into 'floats'.
 > with_abs(X, A) <- floats(X), A = abs_float64(X)
 ┌───────┬──────┐
-│ col0  │ col1 │
+│ X     │ Y    │
 ├───────┼──────┤
 │ -3.14 │ 3.14 │
 │  -1.5 │  1.5 │
@@ -25,7 +25,7 @@ Inserted 5 fact(s) into 'floats'.
 (session: 1 rule(s))
 > ?with_abs(X, A)
 ┌───────┬──────┐
-│ col0  │ col1 │
+│ X     │ A    │
 ├───────┼──────┤
 │ -3.14 │ 3.14 │
 │  -1.5 │  1.5 │
@@ -38,7 +38,7 @@ Inserted 5 fact(s) into 'floats'.
 Inserted 2 fact(s) into 'tiny'.
 > tiny_abs(X, A) <- tiny(X), A = abs_float64(X)
 ┌────────┬───────┐
-│ col0   │ col1  │
+│ X      │ Y     │
 ├────────┼───────┤
 │ -0.001 │ 0.001 │
 │  0.001 │ 0.001 │
@@ -47,7 +47,7 @@ Inserted 2 fact(s) into 'tiny'.
 (session: 2 rule(s))
 > ?tiny_abs(X, A)
 ┌────────┬───────┐
-│ col0   │ col1  │
+│ X      │ A     │
 ├────────┼───────┤
 │ -0.001 │ 0.001 │
 │  0.001 │ 0.001 │

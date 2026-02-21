@@ -18,25 +18,25 @@ Rule 'sum_sq' registered.
 > +n(count<V>) <- vals(V)
 Rule 'n' registered.
 > ?total(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > ?sum_sq(Sq)
 ┌──────┐
-│ col0 │
+│ Sq   │
 ├──────┤
 │ 1400 │
 └──────┘
 1 rows
 > ?n(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,20 +14,20 @@ Inserted 3 fact(s) into 'score'.
 > +total(sum<S>) <- score(_, S)
 Rule 'total' registered.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  600 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 600 │
+└─────┘
 1 rows
 > +total(sum<S>) <- score(_, S)
 Rule 'total' registered.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  600 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 600 │
+└─────┘
 1 rows
 > .rule list
 Rules:

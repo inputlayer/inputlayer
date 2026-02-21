@@ -13,7 +13,7 @@ Switched to knowledge graph: test_mixed_types_n11t63
 Inserted 2 fact(s) into 'mixed'.
 > names(N) <- mixed(_, N, _, _)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -22,7 +22,7 @@ Inserted 2 fact(s) into 'mixed'.
 (session: 1 rule(s))
 > amounts(A) <- mixed(_, _, A, _)
 ┌────────┐
-│ col0   │
+│ X      │
 ├────────┤
 │  100.5 │
 │ 200.75 │
@@ -31,7 +31,7 @@ Inserted 2 fact(s) into 'mixed'.
 (session: 2 rule(s))
 > flags(F) <- mixed(_, _, _, F)
 ┌───────┐
-│ col0  │
+│ X     │
 ├───────┤
 │ false │
 │ true  │
@@ -40,7 +40,7 @@ Inserted 2 fact(s) into 'mixed'.
 (session: 3 rule(s))
 > ?names(N)
 ┌─────────┐
-│ col0    │
+│ N       │
 ├─────────┤
 │ "Alice" │
 │ "Bob"   │
@@ -48,7 +48,7 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows
 > ?amounts(A)
 ┌────────┐
-│ col0   │
+│ A      │
 ├────────┤
 │  100.5 │
 │ 200.75 │
@@ -56,7 +56,7 @@ Inserted 2 fact(s) into 'mixed'.
 2 rows
 > ?flags(F)
 ┌───────┐
-│ col0  │
+│ F     │
 ├───────┤
 │ false │
 │ true  │

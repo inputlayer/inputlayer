@@ -13,7 +13,7 @@ Switched to knowledge graph: test_int64_bounds_n11t15
 Inserted 1 fact(s) into 'max_int'.
 > ?max_int(X)
 ┌─────────────────────┐
-│ col0                │
+│ X                   │
 ├─────────────────────┤
 │ 9223372036854775807 │
 └─────────────────────┘
@@ -22,7 +22,7 @@ Inserted 1 fact(s) into 'max_int'.
 Inserted 1 fact(s) into 'min_int'.
 > ?min_int(X)
 ┌──────────────────────┐
-│ col0                 │
+│ X                    │
 ├──────────────────────┤
 │ -9223372036854775808 │
 └──────────────────────┘
@@ -33,14 +33,14 @@ Inserted 1 fact(s) into 'near_max'.
 Inserted 1 fact(s) into 'near_min'.
 > ?near_max(X)
 ┌─────────────────────┐
-│ col0                │
+│ X                   │
 ├─────────────────────┤
 │ 9223372036854775806 │
 └─────────────────────┘
 1 rows
 > ?near_min(X)
 ┌──────────────────────┐
-│ col0                 │
+│ X                    │
 ├──────────────────────┤
 │ -9223372036854775807 │
 └──────────────────────┘
@@ -48,11 +48,11 @@ Inserted 1 fact(s) into 'near_min'.
 > +zero[(0)]
 Inserted 1 fact(s) into 'zero'.
 > ?zero(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    0 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 0 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

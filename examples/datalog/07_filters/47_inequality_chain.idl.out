@@ -12,23 +12,23 @@ Switched to knowledge graph: test_ineq_chain_n07t47
 > +data[(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]
 Inserted 5 fact(s) into 'data'.
 > in_range(Id, V) <- data(Id, V), V > 15, V < 45
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   40 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+│ 4 │ 40 │
+└───┴────┘
 3 rows
 (session: 1 rule(s))
 > ?in_range(Id, V)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   40 │
-└──────┴──────┘
+┌────┬────┐
+│ Id │ V  │
+├────┼────┤
+│  2 │ 20 │
+│  3 │ 30 │
+│  4 │ 40 │
+└────┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

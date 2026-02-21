@@ -18,12 +18,12 @@ Rule 'node' registered.
 > +root(X) <- node(X), !parent(_, X)
 Rule 'root' registered.
 > ?root(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 6 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

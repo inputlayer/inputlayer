@@ -12,25 +12,25 @@ Switched to knowledge graph: test_arith_mod_n15t05
 > +num[(1, 17), (2, 24), (3, 35), (4, 12)]
 Inserted 4 fact(s) into 'num'.
 > remainder(Id, Value%5) <- num(Id, Value)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    4 │
-│    3 │    0 │
-│    4 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 4 │
+│ 3 │ 0 │
+│ 4 │ 2 │
+└───┴───┘
 4 rows
 (session: 1 rule(s))
 > ?remainder(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    4 │
-│    3 │    0 │
-│    4 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 4 │
+│ 3 │ 0 │
+│ 4 │ 2 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

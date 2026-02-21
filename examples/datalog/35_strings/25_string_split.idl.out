@@ -12,21 +12,21 @@ Switched to knowledge graph: test_string_path_n35t25
 > +paths[("/home/user/file.txt",), ("/var/log/app.log",)]
 Inserted 2 fact(s) into 'paths'.
 > path_info(P, L) <- paths(P), L = LEN(P)
-┌───────────────────────┬──────┐
-│ col0                  │ col1 │
-├───────────────────────┼──────┤
-│ "/home/user/file.txt" │   19 │
-│ "/var/log/app.log"    │   16 │
-└───────────────────────┴──────┘
+┌───────────────────────┬────┐
+│ X                     │ Y  │
+├───────────────────────┼────┤
+│ "/home/user/file.txt" │ 19 │
+│ "/var/log/app.log"    │ 16 │
+└───────────────────────┴────┘
 2 rows
 (session: 1 rule(s))
 > ?path_info(P, L)
-┌───────────────────────┬──────┐
-│ col0                  │ col1 │
-├───────────────────────┼──────┤
-│ "/home/user/file.txt" │   19 │
-│ "/var/log/app.log"    │   16 │
-└───────────────────────┴──────┘
+┌───────────────────────┬────┐
+│ P                     │ L  │
+├───────────────────────┼────┤
+│ "/home/user/file.txt" │ 19 │
+│ "/var/log/app.log"    │ 16 │
+└───────────────────────┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

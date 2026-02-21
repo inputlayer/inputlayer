@@ -12,13 +12,13 @@ Switched to knowledge graph: test_order_none_n21t34
 > +data[("a", 3), ("b", 1), ("c", 2)]
 Inserted 3 fact(s) into 'data'.
 > ?data(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │    3 │
-│ "b"  │    1 │
-│ "c"  │    2 │
-└──────┴──────┘
+┌─────┬───┐
+│ X   │ Y │
+├─────┼───┤
+│ "a" │ 3 │
+│ "b" │ 1 │
+│ "c" │ 2 │
+└─────┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

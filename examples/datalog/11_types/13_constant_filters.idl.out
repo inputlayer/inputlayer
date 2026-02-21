@@ -15,7 +15,7 @@ Inserted 4 fact(s) into 'products'.
 Rule 'id_one' registered.
 > ?id_one(X)
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "apple" │
 └─────────┘
@@ -23,42 +23,42 @@ Rule 'id_one' registered.
 > +fruits(Id, Name, Price) <- products(Id, Name, Price, "fruit")
 Rule 'fruits' registered.
 > ?fruits(X, Y, Z)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "apple"  │  199 │
-│    2 │ "banana" │   99 │
-└──────┴──────────┴──────┘
+┌───┬──────────┬─────┐
+│ X │ Y        │ Z   │
+├───┼──────────┼─────┤
+│ 1 │ "apple"  │ 199 │
+│ 2 │ "banana" │  99 │
+└───┴──────────┴─────┘
 2 rows
 > +find_apple(Id, Price) <- products(Id, "apple", Price, _)
 Rule 'find_apple' registered.
 > ?find_apple(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  199 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 199 │
+└───┴─────┘
 1 rows
 > +non_fruit(Id, Name) <- products(Id, Name, _, Category), Category != "fruit"
 Rule 'non_fruit' registered.
 > ?non_fruit(X, Y)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    3 │ "bread" │
-│    4 │ "milk"  │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 3 │ "bread" │
+│ 4 │ "milk"  │
+└───┴─────────┘
 2 rows
 > +cheap(Id, Name, Price) <- products(Id, Name, Price, _), Price < 200
 Rule 'cheap' registered.
 > ?cheap(X, Y, Z)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "apple"  │  199 │
-│    2 │ "banana" │   99 │
-│    4 │ "milk"   │  150 │
-└──────┴──────────┴──────┘
+┌───┬──────────┬─────┐
+│ X │ Y        │ Z   │
+├───┼──────────┼─────┤
+│ 1 │ "apple"  │ 199 │
+│ 2 │ "banana" │  99 │
+│ 4 │ "milk"   │ 150 │
+└───┴──────────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

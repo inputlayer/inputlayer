@@ -15,7 +15,7 @@ Inserted 2 fact(s) into 'large'.
 Inserted 2 fact(s) into 'small'.
 > ?large(V)
 ┌───────────┐
-│ col0      │
+│ V         │
 ├───────────┤
 │ 1000000.0 │
 │ 2500000.0 │
@@ -23,7 +23,7 @@ Inserted 2 fact(s) into 'small'.
 2 rows
 > ?small(V)
 ┌────────┐
-│ col0   │
+│ V      │
 ├────────┤
 │  0.001 │
 │ 0.0025 │

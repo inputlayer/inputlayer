@@ -14,40 +14,40 @@ Inserted 12 fact(s) into 'scores'.
 > +student_total(Student, sum<Score>) <- scores(Student, _, Score)
 Rule 'student_total' registered.
 > ?student_total(S, Total)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  270 │
-│    2 │  225 │
-│    3 │  263 │
-│    4 │  195 │
-└──────┴──────┘
+┌───┬───────┐
+│ S │ Total │
+├───┼───────┤
+│ 1 │   270 │
+│ 2 │   225 │
+│ 3 │   263 │
+│ 4 │   195 │
+└───┴───────┘
 4 rows
 > +best_total(max<Total>) <- student_total(_, Total)
 Rule 'best_total' registered.
 > ?best_total(T)
-┌──────┐
-│ col0 │
-├──────┤
-│  270 │
-└──────┘
+┌─────┐
+│ T   │
+├─────┤
+│ 270 │
+└─────┘
 1 rows
 > +course_avg(Course, avg<Score>) <- scores(_, Course, Score)
 Rule 'course_avg' registered.
 > ?course_avg(C, A)
-┌──────┬───────┐
-│ col0 │ col1  │
-├──────┼───────┤
-│  101 │ 76.25 │
-│  102 │ 78.75 │
-│  103 │ 83.25 │
-└──────┴───────┘
+┌─────┬───────┐
+│ C   │ A     │
+├─────┼───────┤
+│ 101 │ 76.25 │
+│ 102 │ 78.75 │
+│ 103 │ 83.25 │
+└─────┴───────┘
 3 rows
 > +top_course_avg(max<Avg>) <- course_avg(_, Avg)
 Rule 'top_course_avg' registered.
 > ?top_course_avg(A)
 ┌───────┐
-│ col0  │
+│ A     │
 ├───────┤
 │ 83.25 │
 └───────┘
@@ -57,11 +57,11 @@ Rule 'high_scorer' registered.
 > +high_count(count<S>) <- high_scorer(S)
 Rule 'high_count' registered.
 > ?high_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

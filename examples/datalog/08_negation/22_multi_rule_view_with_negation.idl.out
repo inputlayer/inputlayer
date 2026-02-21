@@ -18,14 +18,14 @@ Rule 'sym_diff' registered.
 > +sym_diff(X, Y) <- set_b(X, Y), !set_a(X, _)
 Rule 'sym_diff' registered.
 > ?sym_diff(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │    0 │
-│    5 │    0 │
-│    6 │    0 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 0 │
+│ 2 │ 0 │
+│ 5 │ 0 │
+│ 6 │ 0 │
+└───┴───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -22,22 +22,22 @@ Inserted 3 fact(s) into 'person'.
 > +address[(1, "New York"), (2, "Boston"), (3, "Chicago")]
 Inserted 3 fact(s) into 'address'.
 > ?person(Id, Name, Age)
-┌──────┬───────────┬──────┐
-│ col0 │ col1      │ col2 │
-├──────┼───────────┼──────┤
-│    1 │ "Alice"   │   30 │
-│    2 │ "Bob"     │   25 │
-│    3 │ "Charlie" │   35 │
-└──────┴───────────┴──────┘
+┌────┬───────────┬─────┐
+│ id │ name      │ age │
+├────┼───────────┼─────┤
+│  1 │ "Alice"   │  30 │
+│  2 │ "Bob"     │  25 │
+│  3 │ "Charlie" │  35 │
+└────┴───────────┴─────┘
 3 rows
 > ?address(Pid, City)
-┌──────┬────────────┐
-│ col0 │ col1       │
-├──────┼────────────┤
-│    1 │ "New York" │
-│    2 │ "Boston"   │
-│    3 │ "Chicago"  │
-└──────┴────────────┘
+┌───────────┬────────────┐
+│ person_id │ city       │
+├───────────┼────────────┤
+│         1 │ "New York" │
+│         2 │ "Boston"   │
+│         3 │ "Chicago"  │
+└───────────┴────────────┘
 3 rows
 > +person_location(Name, City) <-
 Parse error: Empty rule body with head variables is not allowed. Use 'foo(constant).' for facts, or add body predicates.

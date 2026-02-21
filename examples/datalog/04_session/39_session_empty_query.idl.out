@@ -14,11 +14,11 @@ No results.
 > temp(42)
 Session fact added for 'temp'. (Use +temp(...) to persist)
 > ?temp(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > .session clear
 Cleared 1 session fact(s), 0 session rule(s).

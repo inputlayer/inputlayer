@@ -14,13 +14,13 @@ Inserted 3 fact(s) into 'base'.
 > +compute(X, Y) <- base(X), Y = X + 10
 Rule 'compute' registered.
 > ?compute(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   11 │
-│    2 │   12 │
-│    3 │   13 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 11 │
+│ 2 │ 12 │
+│ 3 │ 13 │
+└───┴────┘
 3 rows
 > .rule clear compute
 Rule 'compute' cleared.
@@ -30,13 +30,13 @@ Rules:
 > +compute(X, Y) <- base(X), Y = X * 100
 Rule 'compute' registered.
 > ?compute(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-│    3 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 200 │
+│ 3 │ 300 │
+└───┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

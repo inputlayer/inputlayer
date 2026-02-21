@@ -13,14 +13,14 @@ Switched to knowledge graph: test_str_cmp_n07t27
 Inserted 4 fact(s) into 'words'.
 > ?words(W), W = "apple"
 ┌─────────┐
-│ col0    │
+│ W       │
 ├─────────┤
 │ "apple" │
 └─────────┘
 1 rows
 > ?words(W), W != "banana"
 ┌───────────┐
-│ col0      │
+│ W         │
 ├───────────┤
 │ "apple"   │
 │ "apricot" │
@@ -29,7 +29,7 @@ Inserted 4 fact(s) into 'words'.
 3 rows
 > ?words(W), W < "banana"
 ┌───────────┐
-│ col0      │
+│ W         │
 ├───────────┤
 │ "apple"   │
 │ "apricot" │
@@ -37,21 +37,21 @@ Inserted 4 fact(s) into 'words'.
 2 rows
 > ?words(W), W > "banana"
 ┌──────────┐
-│ col0     │
+│ W        │
 ├──────────┤
 │ "cherry" │
 └──────────┘
 1 rows
 > ?words(W), W <= "apple"
 ┌─────────┐
-│ col0    │
+│ W       │
 ├─────────┤
 │ "apple" │
 └─────────┘
 1 rows
 > ?words(W), W >= "cherry"
 ┌──────────┐
-│ col0     │
+│ W        │
 ├──────────┤
 │ "cherry" │
 └──────────┘

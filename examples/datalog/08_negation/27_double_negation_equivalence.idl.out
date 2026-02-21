@@ -16,42 +16,42 @@ Inserted 2 fact(s) into 'special'.
 > +not_special(X) <- items(X), !special(X)
 Rule 'not_special' registered.
 > ?not_special(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > +double_neg(X) <- items(X), !not_special(X)
 Rule 'double_neg' registered.
 > ?double_neg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 > ?special(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 > +triple_neg(X) <- items(X), !double_neg(X)
 Rule 'triple_neg' registered.
 > ?triple_neg(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    3 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 3 │
+│ 5 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

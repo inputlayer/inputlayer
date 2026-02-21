@@ -18,23 +18,23 @@ Rule 'union_ab' registered.
 > +union_ab(X) <- set_b(X)
 Rule 'union_ab' registered.
 > ?union_ab(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 4 rows
 > +count_union(count<X>) <- union_ab(X)
 Rule 'count_union' registered.
 > ?count_union(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -14,23 +14,23 @@ Inserted 1 fact(s) into 'edge'.
 > +edge(2, 3)
 Inserted 1 fact(s) into 'edge'.
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > edge(100, 200)
 Session fact added for 'edge'. (Use +edge(...) to persist)
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│  100 │  200 │
-└──────┴──────┘
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│   1 │   2 │
+│   2 │   3 │
+│ 100 │ 200 │
+└─────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default
@@ -38,12 +38,12 @@ Switched to knowledge graph: default
 > .kg use test_sess_facts_n04t02
 Switched to knowledge graph: test_sess_facts_n04t02
 > ?edge(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

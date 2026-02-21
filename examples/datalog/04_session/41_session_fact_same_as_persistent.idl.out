@@ -16,23 +16,23 @@ Session fact added for 'val'. (Use +val(...) to persist)
 > val(30)
 Session fact added for 'val'. (Use +val(...) to persist)
 > ?val(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-│   20 │
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+│ 20 │
+│ 30 │
+└────┘
 3 rows
 > .session clear
 Cleared 2 session fact(s), 0 session rule(s).
 > ?val(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-│   20 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+│ 20 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

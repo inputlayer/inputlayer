@@ -14,23 +14,23 @@ Inserted 4 fact(s) into 'score'.
 > +top_score(Name, max<Grade>) <- score(Name, Grade), Grade > 75
 Rule 'top_score' registered.
 > ?top_score(N, G)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │   90 │
-│ "Bob"   │   80 │
-└─────────┴──────┘
+┌─────────┬────┐
+│ N       │ G  │
+├─────────┼────┤
+│ "Alice" │ 90 │
+│ "Bob"   │ 80 │
+└─────────┴────┘
 2 rows
 > +top_score(Name, max<Grade>) <- score(Name, Grade), Grade > 65
 Rule 'top_score' registered.
 > ?top_score(N, G)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Alice"   │   90 │
-│ "Bob"     │   80 │
-│ "Charlie" │   70 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ N         │ G  │
+├───────────┼────┤
+│ "Alice"   │ 90 │
+│ "Bob"     │ 80 │
+│ "Charlie" │ 70 │
+└───────────┴────┘
 3 rows
 > .rule list
 Rules:

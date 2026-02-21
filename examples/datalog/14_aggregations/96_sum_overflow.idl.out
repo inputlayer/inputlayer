@@ -15,7 +15,7 @@ Inserted 3 fact(s) into 'big_nums'.
 Rule 'big_sum' registered.
 > ?big_sum(S)
 ┌────────────┐
-│ col0       │
+│ S          │
 ├────────────┤
 │ 6000000000 │
 └────────────┘

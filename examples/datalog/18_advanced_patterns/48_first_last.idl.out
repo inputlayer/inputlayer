@@ -14,36 +14,36 @@ Inserted 3 fact(s) into 'events'.
 > +first_time(min<T>) <- events(T, _, _)
 Rule 'first_time' registered.
 > first_event(Event, Val) <- events(T, Event, Val), first_time(T)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "start" │  100 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ X       │ Y   │
+├─────────┼─────┤
+│ "start" │ 100 │
+└─────────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?first_event(Event, Val)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "start" │  100 │
-└─────────┴──────┘
+┌─────────┬─────┐
+│ Event   │ Val │
+├─────────┼─────┤
+│ "start" │ 100 │
+└─────────┴─────┘
 1 rows
 > +last_time(max<T>) <- events(T, _, _)
 Rule 'last_time' registered.
 > last_event(Event, Val) <- events(T, Event, Val), last_time(T)
-┌───────┬──────┐
-│ col0  │ col1 │
-├───────┼──────┤
-│ "end" │  300 │
-└───────┴──────┘
+┌───────┬─────┐
+│ X     │ Y   │
+├───────┼─────┤
+│ "end" │ 300 │
+└───────┴─────┘
 1 rows
 (session: 2 rule(s))
 > ?last_event(Event, Val)
-┌───────┬──────┐
-│ col0  │ col1 │
-├───────┼──────┤
-│ "end" │  300 │
-└───────┴──────┘
+┌───────┬─────┐
+│ Event │ Val │
+├───────┼─────┤
+│ "end" │ 300 │
+└───────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

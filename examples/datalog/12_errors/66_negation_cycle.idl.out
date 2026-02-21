@@ -12,22 +12,22 @@ Switched to knowledge graph: test_neg_cycle_n12t66
 > +base(1)
 Inserted 1 fact(s) into 'base'.
 > a(X) <- base(X), !b(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > b(X) <- base(X), !a(X)
 No results.
 (session: 2 rule(s))
 > ?a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

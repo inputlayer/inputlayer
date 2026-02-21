@@ -12,23 +12,23 @@ Switched to knowledge graph: test_reflexive_n06t41
 > +matrix[(1, 1), (1, 2), (2, 1), (2, 2), (3, 3)]
 Inserted 5 fact(s) into 'matrix'.
 > diagonal(X) <- matrix(X, X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?diagonal(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -34,13 +34,13 @@ Clauses:
   1. reachable(X, Y) <- edge(X, Y)
 
 > ?reachable(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    3 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 4 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

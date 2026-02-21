@@ -18,11 +18,11 @@ Inserted 3 fact(s) into 'set_c'.
 > +only_in_a(X) <- set_a(X), !set_b(X), !set_c(X)
 Rule 'only_in_a' registered.
 > ?only_in_a(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

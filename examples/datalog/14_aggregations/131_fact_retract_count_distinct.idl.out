@@ -16,22 +16,22 @@ Rule 'unique_products' registered.
 > +product_count(Store, count<Product>) <- unique_products(Store, Product)
 Rule 'product_count' registered.
 > ?product_count(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    2 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 2 │
+└───┴───┘
 2 rows
 > -sales(1, "B", 2)
 Deleted 1 facts from 'sales'.
 > ?product_count(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    1 │
-│    2 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 2 │ 2 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

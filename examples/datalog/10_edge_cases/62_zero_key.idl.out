@@ -12,17 +12,17 @@ Switched to knowledge graph: test_zero_key_n10t62
 > +data[(0, "zero"), (1, "one"), (2, "two")]
 Inserted 3 fact(s) into 'data'.
 > ?data(Key, Val)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    0 │ "zero" │
-│    1 │ "one"  │
-│    2 │ "two"  │
-└──────┴────────┘
+┌─────┬────────┐
+│ Key │ Val    │
+├─────┼────────┤
+│   0 │ "zero" │
+│   1 │ "one"  │
+│   2 │ "two"  │
+└─────┴────────┘
 3 rows
 > zero_entry(Val) <- data(0, Val)
 ┌────────┐
-│ col0   │
+│ X      │
 ├────────┤
 │ "zero" │
 └────────┘
@@ -30,7 +30,7 @@ Inserted 3 fact(s) into 'data'.
 (session: 1 rule(s))
 > ?zero_entry(Val)
 ┌────────┐
-│ col0   │
+│ Val    │
 ├────────┤
 │ "zero" │
 └────────┘

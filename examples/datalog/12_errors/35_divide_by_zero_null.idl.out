@@ -12,21 +12,21 @@ Switched to knowledge graph: test_div_zero_n12t35
 > +nums[(10,), (0,)]
 Inserted 2 fact(s) into 'nums'.
 > result(X, Y) <- nums(X), Y = 100 / X
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │ null │
-│   10 │ 10.0 │
-└──────┴──────┘
+┌────┬──────┐
+│ X  │ Y    │
+├────┼──────┤
+│  0 │ null │
+│ 10 │ 10.0 │
+└────┴──────┘
 2 rows
 (session: 1 rule(s))
 > ?result(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    0 │ null │
-│   10 │ 10.0 │
-└──────┴──────┘
+┌────┬──────┐
+│ X  │ Y    │
+├────┼──────┤
+│  0 │ null │
+│ 10 │ 10.0 │
+└────┴──────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

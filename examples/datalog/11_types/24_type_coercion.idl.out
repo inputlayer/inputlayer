@@ -14,17 +14,17 @@ Inserted 3 fact(s) into 'int_vals'.
 > +float_vals[(10.0,), (25.0,), (30.0,)]
 Inserted 3 fact(s) into 'float_vals'.
 > ?int_vals(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   10 │
-│   20 │
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 10 │
+│ 20 │
+│ 30 │
+└────┘
 3 rows
 > ?float_vals(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 10.0 │
 │ 25.0 │

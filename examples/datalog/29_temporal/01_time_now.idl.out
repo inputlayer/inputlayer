@@ -12,19 +12,19 @@ Switched to knowledge graph: test_time_now_n29t01
 > +ref[(1, 1736640000000)]
 Inserted 1 fact(s) into 'ref'.
 > valid_ref(Id, RefTime) <- ref(Id, RefTime), Now = time_now(), Now > RefTime
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ 1736640000000 │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ 1736640000000 │
+└───┴───────────────┘
 1 rows
 (session: 1 rule(s))
 > ?valid_ref(Id, RefTime)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ 1736640000000 │
-└──────┴───────────────┘
+┌────┬───────────────┐
+│ Id │ RefTime       │
+├────┼───────────────┤
+│  1 │ 1736640000000 │
+└────┴───────────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -20,25 +20,25 @@ Rule 'left_only' registered.
 > +right_only(K, R) <- right_t(K, R), !left_t(K, _)
 Rule 'right_only' registered.
 > ?inner_matched(K, L, R)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    2 │ "B"  │  100 │
-└──────┴──────┴──────┘
+┌───┬─────┬─────┐
+│ K │ L   │ R   │
+├───┼─────┼─────┤
+│ 2 │ "B" │ 100 │
+└───┴─────┴─────┘
 1 rows
 > ?left_only(K, L)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "A"  │
-└──────┴──────┘
+┌───┬─────┐
+│ K │ L   │
+├───┼─────┤
+│ 1 │ "A" │
+└───┴─────┘
 1 rows
 > ?right_only(K, R)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │  200 │
-└──────┴──────┘
+┌───┬─────┐
+│ K │ R   │
+├───┼─────┤
+│ 3 │ 200 │
+└───┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

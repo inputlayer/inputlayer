@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'categories'.
 > +items[("A", 1), ("A", 2), ("C", 3)]
 Inserted 3 fact(s) into 'items'.
 > items_per_cat(Cat, count<Id>) <- items(Cat, Id)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "A"  │    2 │
-│ "C"  │    1 │
-└──────┴──────┘
+┌─────┬───┐
+│ X   │ Y │
+├─────┼───┤
+│ "A" │ 2 │
+│ "C" │ 1 │
+└─────┴───┘
 2 rows
 (session: 1 rule(s))
 > ?items_per_cat(Cat, N)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "A"  │    2 │
-│ "C"  │    1 │
-└──────┴──────┘
+┌─────┬───┐
+│ Cat │ N │
+├─────┼───┤
+│ "A" │ 2 │
+│ "C" │ 1 │
+└─────┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

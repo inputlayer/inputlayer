@@ -14,13 +14,13 @@ Inserted 4 fact(s) into 'scores'.
 > +distinct_scores(S) <- scores(_, S)
 Rule 'distinct_scores' registered.
 > ?distinct_scores(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   80 │
-│   90 │
-│  100 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│  80 │
+│  90 │
+│ 100 │
+└─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

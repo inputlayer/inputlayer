@@ -13,7 +13,7 @@ Switched to knowledge graph: test_bool_key_n10t65
 Inserted 2 fact(s) into 'flags'.
 > ?flags(Key, Val)
 ┌───────┬───────┐
-│ col0  │ col1  │
+│ Key   │ Val   │
 ├───────┼───────┤
 │ false │ "no"  │
 │ true  │ "yes" │
@@ -21,7 +21,7 @@ Inserted 2 fact(s) into 'flags'.
 2 rows
 > true_only(Val) <- flags(true, Val)
 ┌───────┐
-│ col0  │
+│ X     │
 ├───────┤
 │ "yes" │
 └───────┘
@@ -29,7 +29,7 @@ Inserted 2 fact(s) into 'flags'.
 (session: 1 rule(s))
 > ?true_only(Val)
 ┌───────┐
-│ col0  │
+│ Val   │
 ├───────┤
 │ "yes" │
 └───────┘

@@ -14,14 +14,14 @@ Inserted 4 fact(s) into 'daily'.
 > +cumsum(Day, sum<Amt>) <- daily(D, Amt), D <= Day, daily(Day, _)
 Rule 'cumsum' registered.
 > ?cumsum(Day, Total)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   30 │
-│    3 │   45 │
-│    4 │   70 │
-└──────┴──────┘
+┌─────┬───────┐
+│ Day │ Total │
+├─────┼───────┤
+│   1 │    10 │
+│   2 │    30 │
+│   3 │    45 │
+│   4 │    70 │
+└─────┴───────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

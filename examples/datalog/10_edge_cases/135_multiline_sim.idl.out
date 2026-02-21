@@ -13,7 +13,7 @@ Switched to knowledge graph: test_multiline_n10t135
 Inserted 1 fact(s) into 'text'.
 > ?text(T)
 ┌──────────────────────────────────────────┐
-│ col0                                     │
+│ T                                        │
 ├──────────────────────────────────────────┤
 │ "This is a longer text string that span… │
 └──────────────────────────────────────────┘

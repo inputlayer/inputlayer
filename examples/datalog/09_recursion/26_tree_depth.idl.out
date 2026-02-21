@@ -18,26 +18,26 @@ Rule 'depth' registered.
 > +depth(Node, D) <- parent(Node, Parent), depth(Parent, PD), D = PD + 1
 Rule 'depth' registered.
 > ?depth(Node, Depth)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    0 │
-│    2 │    1 │
-│    3 │    1 │
-│    4 │    2 │
-│    5 │    2 │
-│    6 │    2 │
-│    7 │    3 │
-└──────┴──────┘
+┌──────┬───────┐
+│ Node │ Depth │
+├──────┼───────┤
+│    1 │     0 │
+│    2 │     1 │
+│    3 │     1 │
+│    4 │     2 │
+│    5 │     2 │
+│    6 │     2 │
+│    7 │     3 │
+└──────┴───────┘
 7 rows
 > +max_depth(max<D>) <- depth(_, D)
 Rule 'max_depth' registered.
 > ?max_depth(M)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ M │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

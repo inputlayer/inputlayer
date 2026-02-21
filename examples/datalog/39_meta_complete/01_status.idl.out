@@ -12,13 +12,13 @@ Switched to knowledge graph: test_status_n39t01
 > +data[(1, "a"), (2, "b"), (3, "c")]
 Inserted 3 fact(s) into 'data'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+│  3 │ "c" │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

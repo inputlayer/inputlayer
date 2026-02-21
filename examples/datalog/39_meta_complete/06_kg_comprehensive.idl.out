@@ -27,12 +27,12 @@ Switched to knowledge graph: test_kg_alpha_n39t06
 > +alpha_data[(1, "first"), (2, "second")]
 Inserted 2 fact(s) into 'alpha_data'.
 > ?alpha_data(Id, Val)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    1 │ "first"  │
-│    2 │ "second" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ Id │ Val      │
+├────┼──────────┤
+│  1 │ "first"  │
+│  2 │ "second" │
+└────┴──────────┘
 2 rows
 > .kg use test_kg_beta_n39t06
 Switched to knowledge graph: test_kg_beta_n39t06
@@ -53,12 +53,12 @@ Knowledge Graphs:
 > .kg use test_kg_alpha_n39t06
 Switched to knowledge graph: test_kg_alpha_n39t06
 > ?alpha_data(Id, Val)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    1 │ "first"  │
-│    2 │ "second" │
-└──────┴──────────┘
+┌────┬──────────┐
+│ Id │ Val      │
+├────┼──────────┤
+│  1 │ "first"  │
+│  2 │ "second" │
+└────┴──────────┘
 2 rows
 > ?beta_data(X, Y)
 No results.

@@ -12,42 +12,42 @@ Switched to knowledge graph: test_sess_agg_n04t32
 > +score[(1, 100), (2, 200)]
 Inserted 2 fact(s) into 'score'.
 > total_count(count<X>) <- score(X, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > ?total_count(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 2 │
+└───┘
 1 rows
 > score(3, 300)
 Session fact added for 'score'. (Use +score(...) to persist)
 > score(4, 400)
 Session fact added for 'score'. (Use +score(...) to persist)
 > total_count2(count<X>) <- score(X, _)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?total_count2(N)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ N │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > total_sum(sum<V>) <- score(_, V)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ 1000 │
 └──────┘
@@ -55,7 +55,7 @@ Session fact added for 'score'. (Use +score(...) to persist)
 (session: 3 rule(s))
 > ?total_sum(S)
 ┌──────┐
-│ col0 │
+│ S    │
 ├──────┤
 │ 1000 │
 └──────┘

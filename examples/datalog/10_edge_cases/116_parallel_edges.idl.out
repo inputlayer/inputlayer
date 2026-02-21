@@ -12,21 +12,21 @@ Switched to knowledge graph: test_parallel_n10t116
 > +multi_edge[("a", "b", 1), ("a", "b", 2), ("a", "b", 3), ("b", "c", 1)]
 Inserted 4 fact(s) into 'multi_edge'.
 > edge_count(A, B, count<Label>) <- multi_edge(A, B, Label)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│ "a"  │ "b"  │    3 │
-│ "b"  │ "c"  │    1 │
-└──────┴──────┴──────┘
+┌─────┬─────┬───┐
+│ X   │ Y   │ Z │
+├─────┼─────┼───┤
+│ "a" │ "b" │ 3 │
+│ "b" │ "c" │ 1 │
+└─────┴─────┴───┘
 2 rows
 (session: 1 rule(s))
 > ?edge_count(A, B, N)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│ "a"  │ "b"  │    3 │
-│ "b"  │ "c"  │    1 │
-└──────┴──────┴──────┘
+┌─────┬─────┬───┐
+│ A   │ B   │ N │
+├─────┼─────┼───┤
+│ "a" │ "b" │ 3 │
+│ "b" │ "c" │ 1 │
+└─────┴─────┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,20 +12,20 @@ Switched to knowledge graph: test_single_tuple_n10t137
 > +singleton[(42, "answer", true)]
 Inserted 1 fact(s) into 'singleton'.
 > ?singleton(A, B, C)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│   42 │ "answer" │ true │
-└──────┴──────────┴──────┘
+┌────┬──────────┬──────┐
+│ A  │ B        │ C    │
+├────┼──────────┼──────┤
+│ 42 │ "answer" │ true │
+└────┴──────────┴──────┘
 1 rows
 > +single_sum(sum<A>) <- singleton(A, _, _)
 Rule 'single_sum' registered.
 > ?single_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│   42 │
-└──────┘
+┌────┐
+│ S  │
+├────┤
+│ 42 │
+└────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

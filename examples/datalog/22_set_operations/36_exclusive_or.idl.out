@@ -18,12 +18,12 @@ Rule 'xor_ab' registered.
 > +xor_ab(X) <- set_b(X), !set_a(X)
 Rule 'xor_ab' registered.
 > ?xor_ab(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 4 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

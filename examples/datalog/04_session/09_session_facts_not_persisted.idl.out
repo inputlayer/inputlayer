@@ -14,20 +14,20 @@ Inserted 3 fact(s) into 'base_data'.
 > session_fact(100)
 Session fact added for 'session_fact'. (Use +session_fact(...) to persist)
 > ?base_data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > ?session_fact(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default
@@ -35,13 +35,13 @@ Switched to knowledge graph: default
 > .kg use test_session_persist_n04t09
 Switched to knowledge graph: test_session_persist_n04t09
 > ?base_data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > ?session_fact(X)
 No results.

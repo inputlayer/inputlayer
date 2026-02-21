@@ -16,31 +16,31 @@ Inserted 1 fact(s) into 'excluded'.
 > +not_excluded(X) <- item(X), !excluded(X)
 Rule 'not_excluded' registered.
 > ?not_excluded(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   20 │
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 20 │
+│ 30 │
+└────┘
 2 rows
 > excluded(20)
 Session fact added for 'excluded'. (Use +excluded(...) to persist)
 > ?not_excluded(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 30 │
+└────┘
 1 rows
 > .session clear
 Cleared 1 session fact(s), 0 session rule(s).
 > ?not_excluded(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   20 │
-│   30 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 20 │
+│ 30 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

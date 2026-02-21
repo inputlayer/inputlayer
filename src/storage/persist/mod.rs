@@ -44,7 +44,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // Parquet I/O for batches
-use arrow::array::{ArrayRef, Int32Array, Int64Array, UInt64Array};
+use arrow::array::{ArrayRef, Int64Array, UInt64Array};
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -292,6 +292,9 @@ impl PersistBackend for FilePersist {
             DurabilityMode::Async => {
                 // Skip WAL entirely for maximum speed (in-memory only until flush)
                 // Data may be lost on crash, but in-memory operations are fast
+                tracing::warn!(
+                    "DurabilityMode::Async: WAL writes SKIPPED — data loss will occur on crash"
+                );
             }
         }
 
@@ -553,39 +556,8 @@ fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
 /// - diff column (Int64)
 fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()> {
     if updates.is_empty() {
-        // Write empty file with default schema
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("col0", ArrowDataType::Int32, false),
-            Field::new("col1", ArrowDataType::Int32, false),
-            Field::new("time", ArrowDataType::UInt64, false),
-            Field::new("diff", ArrowDataType::Int64, false),
-        ]));
-
-        let file = fs::File::create(path)?;
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
-
-        let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
-            .map_err(StorageError::Parquet)?;
-
-        let empty_batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int32Array::from(Vec::<i32>::new())),
-                Arc::new(Int32Array::from(Vec::<i32>::new())),
-                Arc::new(UInt64Array::from(Vec::<u64>::new())),
-                Arc::new(Int64Array::from(Vec::<i64>::new())),
-            ],
-        )
-        .map_err(StorageError::Arrow)?;
-
-        writer.write(&empty_batch).map_err(StorageError::Parquet)?;
-        writer.close().map_err(StorageError::Parquet)?;
-
-        // Ensure data is durably written to disk
-        fs::File::open(path)?.sync_all()?;
-
+        // No data to write — skip creating the file entirely.
+        // The caller handles absence of batch files gracefully.
         return Ok(());
     }
 

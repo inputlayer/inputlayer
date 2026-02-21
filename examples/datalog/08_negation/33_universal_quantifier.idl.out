@@ -16,29 +16,29 @@ Inserted 5 fact(s) into 'passed'.
 > +required[("Math",), ("English",)]
 Inserted 2 fact(s) into 'required'.
 > missing_course(StudentId) <- students(StudentId, _), required(Course), !passed(StudentId, Course)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
 1 rows
 (session: 1 rule(s))
 > passed_all(StudentId, Name) <- students(StudentId, Name), !missing_course(StudentId)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    3 │ "Carol" │
-└──────┴─────────┘
+┌───┬─────────┐
+│ X │ Y       │
+├───┼─────────┤
+│ 1 │ "Alice" │
+│ 3 │ "Carol" │
+└───┴─────────┘
 2 rows
 (session: 2 rule(s))
 > ?passed_all(StudentId, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    3 │ "Carol" │
-└──────┴─────────┘
+┌───────────┬─────────┐
+│ StudentId │ Name    │
+├───────────┼─────────┤
+│         1 │ "Alice" │
+│         3 │ "Carol" │
+└───────────┴─────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

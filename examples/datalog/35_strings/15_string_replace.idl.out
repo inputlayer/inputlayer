@@ -13,7 +13,7 @@ Switched to knowledge graph: test_replace_n35t15
 Inserted 2 fact(s) into 'words'.
 > replaced(S, R) <- words(S), R = REPLACE(S, "hello", "hi")
 ┌───────────────┬────────────┐
-│ col0          │ col1       │
+│ X             │ Y          │
 ├───────────────┼────────────┤
 │ "hello there" │ "hi there" │
 │ "hello world" │ "hi world" │
@@ -22,7 +22,7 @@ Inserted 2 fact(s) into 'words'.
 (session: 1 rule(s))
 > ?replaced(S, R)
 ┌───────────────┬────────────┐
-│ col0          │ col1       │
+│ S             │ R          │
 ├───────────────┼────────────┤
 │ "hello there" │ "hi there" │
 │ "hello world" │ "hi world" │

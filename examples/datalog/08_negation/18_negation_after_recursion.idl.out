@@ -18,19 +18,19 @@ Rule 'path' registered.
 > +path(X, Z) <- path(X, Y), edge(Y, Z), !forbidden_edge(Y, Z)
 Rule 'path' registered.
 > ?path(1, X)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ X │
+├───┼───┤
+│ 1 │ 2 │
+└───┴───┘
 1 rows
 > ?path(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    3 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 3 │ 4 │
+└───┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

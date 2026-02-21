@@ -12,15 +12,15 @@ Switched to knowledge graph: test_order_asc_n21t31
 > +scores[("alice", 85), ("bob", 92), ("carol", 78), ("dave", 95), ("eve", 88)]
 Inserted 5 fact(s) into 'scores'.
 > ?scores(Name, Score:asc)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "carol" │   78 │
-│ "alice" │   85 │
-│ "eve"   │   88 │
-│ "bob"   │   92 │
-│ "dave"  │   95 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Name    │ Score │
+├─────────┼───────┤
+│ "carol" │    78 │
+│ "alice" │    85 │
+│ "eve"   │    88 │
+│ "bob"   │    92 │
+│ "dave"  │    95 │
+└─────────┴───────┘
 5 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -16,12 +16,12 @@ Inserted 3 fact(s) into 'selected'.
 > +not_selected(X) <- all_items(X), !selected(X)
 Rule 'not_selected' registered.
 > ?not_selected(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 4 │
+└───┘
 2 rows
 > +base_set[(1), (2), (3)]
 Inserted 3 fact(s) into 'base_set'.
@@ -32,11 +32,11 @@ Inserted 1 fact(s) into 'exclude2'.
 > +remaining(X) <- base_set(X), !exclude1(X), !exclude2(X)
 Rule 'remaining' registered.
 > ?remaining(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > +universe[(1), (2), (3), (4), (5), (6)]
 Inserted 6 fact(s) into 'universe'.
@@ -49,22 +49,22 @@ Rule 'layer2_exclude' registered.
 > +layer2_result(X) <- layer1_result(X), !layer2_exclude(X)
 Rule 'layer2_result' registered.
 > ?layer1_result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-│    4 │
-│    5 │
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+│ 4 │
+│ 5 │
+│ 6 │
+└───┘
 4 rows
 > ?layer2_result(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    5 │
-│    6 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 5 │
+│ 6 │
+└───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -13,7 +13,7 @@ Switched to knowledge graph: test_case_n10t133
 Inserted 3 fact(s) into 'words'.
 > ?words(W)
 ┌─────────┐
-│ col0    │
+│ W       │
 ├─────────┤
 │ "HELLO" │
 │ "Hello" │
@@ -22,7 +22,7 @@ Inserted 3 fact(s) into 'words'.
 3 rows
 > lower(W) <- words(W), W = "hello"
 ┌─────────┐
-│ col0    │
+│ X       │
 ├─────────┤
 │ "hello" │
 └─────────┘
@@ -30,7 +30,7 @@ Inserted 3 fact(s) into 'words'.
 (session: 1 rule(s))
 > ?lower(W)
 ┌─────────┐
-│ col0    │
+│ W       │
 ├─────────┤
 │ "hello" │
 └─────────┘

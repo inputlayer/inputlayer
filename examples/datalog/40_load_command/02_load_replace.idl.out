@@ -12,12 +12,12 @@ Switched to knowledge graph: test_load_replace_n40t02
 > +existing_data[(1, "original"), (2, "also_original")]
 Inserted 2 fact(s) into 'existing_data'.
 > ?existing_data(X, Y)
-┌──────┬─────────────────┐
-│ col0 │ col1            │
-├──────┼─────────────────┤
-│    1 │ "original"      │
-│    2 │ "also_original" │
-└──────┴─────────────────┘
+┌───┬─────────────────┐
+│ X │ Y               │
+├───┼─────────────────┤
+│ 1 │ "original"      │
+│ 2 │ "also_original" │
+└───┴─────────────────┘
 2 rows
 > .load examples/datalog/40_load_command/_helper_data.idl --replace
 Loading file: examples/datalog/40_load_command/_helper_data.idl
@@ -27,28 +27,28 @@ Inserted 2 fact(s) into 'loaded_relation'.
 Rule 'loaded_rule' registered.
 File loaded.
 > ?loaded_relation(X, Y)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "from_file"   │
-│    2 │ "also_loaded" │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ "from_file"   │
+│ 2 │ "also_loaded" │
+└───┴───────────────┘
 2 rows
 > ?loaded_rule(X, Y)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "from_file"   │
-│    2 │ "also_loaded" │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ "from_file"   │
+│ 2 │ "also_loaded" │
+└───┴───────────────┘
 2 rows
 > ?existing_data(X, Y)
-┌──────┬─────────────────┐
-│ col0 │ col1            │
-├──────┼─────────────────┤
-│    1 │ "original"      │
-│    2 │ "also_original" │
-└──────┴─────────────────┘
+┌───┬─────────────────┐
+│ X │ Y               │
+├───┼─────────────────┤
+│ 1 │ "original"      │
+│ 2 │ "also_original" │
+└───┴─────────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

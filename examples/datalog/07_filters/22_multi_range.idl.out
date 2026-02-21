@@ -12,19 +12,19 @@ Switched to knowledge graph: test_multi_range_n07t22
 > +data[(1, 10, 100), (2, 20, 200), (3, 15, 150), (4, 25, 250)]
 Inserted 4 fact(s) into 'data'.
 > filtered(Id, A, B) <- data(Id, A, B), A > 10, B < 200
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    3 │   15 │  150 │
-└──────┴──────┴──────┘
+┌───┬────┬─────┐
+│ X │ Y  │ Z   │
+├───┼────┼─────┤
+│ 3 │ 15 │ 150 │
+└───┴────┴─────┘
 1 rows
 (session: 1 rule(s))
 > ?filtered(Id, A, B)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    3 │   15 │  150 │
-└──────┴──────┴──────┘
+┌────┬────┬─────┐
+│ Id │ A  │ B   │
+├────┼────┼─────┤
+│  3 │ 15 │ 150 │
+└────┴────┴─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

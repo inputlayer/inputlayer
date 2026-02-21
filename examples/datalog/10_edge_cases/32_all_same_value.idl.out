@@ -20,47 +20,47 @@ Rule 'uniform_max' registered.
 > +uniform_count(count<V>) <- uniform(_, V)
 Rule 'uniform_count' registered.
 > ?uniform_sum(S)
-┌──────┐
-│ col0 │
-├──────┤
-│  400 │
-└──────┘
+┌─────┐
+│ S   │
+├─────┤
+│ 400 │
+└─────┘
 1 rows
 > ?uniform_min(M)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ M   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > ?uniform_max(M)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ M   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > ?uniform_count(C)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ C │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > distinct_vals(V) <- uniform(_, V)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 (session: 1 rule(s))
 > ?distinct_vals(V)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ V   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

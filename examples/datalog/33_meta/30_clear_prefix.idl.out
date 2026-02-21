@@ -18,11 +18,11 @@ Inserted 1 fact(s) into 'keep_data'.
 > .clear prefix env_
 Cleared 3 fact(s) from 2 relation(s) with prefix 'env_': env_a (2), env_b (1)
 > ?keep_data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  100 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ 100 │
+└─────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

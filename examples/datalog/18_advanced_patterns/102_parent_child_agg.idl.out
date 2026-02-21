@@ -12,21 +12,21 @@ Switched to knowledge graph: test_parent_child_n18t102
 > +parent_child[("dept1", "emp1"), ("dept1", "emp2"), ("dept1", "emp3"), ("dept2", "emp4"), ("dept2", "emp5")]
 Inserted 5 fact(s) into 'parent_child'.
 > emp_count(Dept, count<Emp>) <- parent_child(Dept, Emp)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "dept1" │    3 │
-│ "dept2" │    2 │
-└─────────┴──────┘
+┌─────────┬───┐
+│ X       │ Y │
+├─────────┼───┤
+│ "dept1" │ 3 │
+│ "dept2" │ 2 │
+└─────────┴───┘
 2 rows
 (session: 1 rule(s))
 > ?emp_count(Dept, N)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "dept1" │    3 │
-│ "dept2" │    2 │
-└─────────┴──────┘
+┌─────────┬───┐
+│ Dept    │ N │
+├─────────┼───┤
+│ "dept1" │ 3 │
+│ "dept2" │ 2 │
+└─────────┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

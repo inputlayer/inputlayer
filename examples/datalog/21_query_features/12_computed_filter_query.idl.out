@@ -12,21 +12,21 @@ Switched to knowledge graph: test_computed_filter_n21t12
 > +items[(1, 10), (2, 20), (3, 30), (4, 40)]
 Inserted 4 fact(s) into 'items'.
 > over_threshold(Id, Val, Doubled) <- items(Id, Val), Doubled = Val * 2, Doubled > 50
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    3 │   30 │   60 │
-│    4 │   40 │   80 │
-└──────┴──────┴──────┘
+┌───┬────┬────┐
+│ X │ Y  │ Z  │
+├───┼────┼────┤
+│ 3 │ 30 │ 60 │
+│ 4 │ 40 │ 80 │
+└───┴────┴────┘
 2 rows
 (session: 1 rule(s))
 > ?over_threshold(Id, Val, Doubled)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    3 │   30 │   60 │
-│    4 │   40 │   80 │
-└──────┴──────┴──────┘
+┌────┬─────┬─────────┐
+│ Id │ Val │ Doubled │
+├────┼─────┼─────────┤
+│  3 │  30 │      60 │
+│  4 │  40 │      80 │
+└────┴─────┴─────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

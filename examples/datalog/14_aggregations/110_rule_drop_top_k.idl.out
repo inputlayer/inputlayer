@@ -14,13 +14,13 @@ Inserted 5 fact(s) into 'score'.
 > +top_players(top_k<3, Player, Points:desc>) <- score(Player, Points)
 Rule 'top_players' registered.
 > ?top_players(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │  250 │
-│    3 │  175 │
-│    4 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 250 │
+│ 3 │ 175 │
+│ 4 │ 300 │
+└───┴─────┘
 3 rows
 > .rule drop top_players
 Rule 'top_players' dropped.

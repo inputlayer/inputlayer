@@ -34,7 +34,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::{info, Instrument};
+use tracing::{debug, info, warn, Instrument};
 
 use super::wire_value_to_json;
 use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
@@ -217,6 +217,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
+                                tracing::error!(error = %e, "Failed to serialize WsResponse");
                                 let err = WsResponse::Error {
                                     message: format!("Serialization error: {e}"),
                                 };
@@ -284,6 +285,13 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Notification channel closed — server shutting down
+                        let shutdown_msg = WsResponse::Error {
+                            message: "Server shutting down".to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&shutdown_msg) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
                         break;
                     }
                 }
@@ -300,8 +308,9 @@ async fn process_ws_message(handler: &Arc<Handler>, session_id: &str, text: &str
     let request: WsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
+            tracing::debug!(error = %e, "Invalid WsRequest message");
             return WsResponse::Error {
-                message: format!("Invalid message: {e}"),
+                message: "Invalid message format".to_string(),
             };
         }
     };
@@ -423,7 +432,14 @@ fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: &str, rule_text: &str)
             ),
         };
     }
-    let rule = program.rules.into_iter().next().unwrap();
+    let rule = match program.rules.into_iter().next() {
+        Some(r) => r,
+        None => {
+            return WsResponse::Error {
+                message: "Internal error: parsed rule not found".to_string(),
+            };
+        }
+    };
 
     let head = rule.head.relation.clone();
     match handler.session_add_rule(&session_id.to_string(), rule, rule_text.to_string()) {
@@ -569,18 +585,16 @@ pub async fn global_websocket(
 async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, kg: String) {
     let (mut sender, mut receiver) = socket.split();
 
-    eprintln!("[ws] New connection for kg={kg}");
     info!(kg = %kg, "ws_connection_start");
 
     // Auto-create session
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
-            eprintln!("[ws] Session {id} created for kg={kg}");
             info!(session_id = %id, kg = %kg, "ws_session_created");
             id
         }
         Err(e) => {
-            eprintln!("[ws] ERROR: Failed to create session for kg={kg}: {e}");
+            warn!(kg = %kg, error = %e, "ws_session_create_failed");
             let err_msg = GlobalWsResponse::Error {
                 message: format!("Failed to create session: {e}"),
                 validation_errors: None,
@@ -601,6 +615,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     if let Ok(json) = serde_json::to_string(&connected) {
         if sender.send(Message::Text(json)).await.is_err() {
             let _ = handler.close_session(&session_id);
+            let _ = sender.send(Message::Close(None)).await;
             return;
         }
     }
@@ -650,7 +665,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
         // Check connection lifetime
         if let Some(max_lt) = max_lifetime {
             if connection_start.elapsed() >= max_lt {
-                eprintln!("[ws] Session {session_id} max lifetime ({max_lifetime_secs}s) exceeded");
+                info!(session_id = %session_id, max_lifetime_secs, "ws_max_lifetime_exceeded");
                 let err_msg = GlobalWsResponse::Error {
                     message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
                     validation_errors: None,
@@ -666,7 +681,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
             // Idle timeout
             () = idle_sleep => {
                 if idle_duration.is_some() {
-                    eprintln!("[ws] Session {session_id} idle timeout ({idle_ms}ms), disconnecting");
+                    info!(session_id = %session_id, idle_ms, "ws_idle_timeout");
                     let err_msg = GlobalWsResponse::Error {
                         message: "Idle timeout".to_string(),
                         validation_errors: None,
@@ -715,6 +730,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         let json = match serde_json::to_string(&response) {
                             Ok(j) => j,
                             Err(e) => {
+                                tracing::error!(error = %e, "Failed to serialize GlobalWsResponse");
                                 let err = GlobalWsResponse::Error {
                                     message: format!("Serialization error: {e}"),
                                     validation_errors: None,
@@ -729,15 +745,15 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         }
                     }
                     Some(Ok(Message::Close(_))) => {
-                        eprintln!("[ws] Session {session_id} received close frame");
+                        debug!(session_id = %session_id, "ws_close_frame_received");
                         break;
                     }
                     None => {
-                        eprintln!("[ws] Session {session_id} stream ended");
+                        debug!(session_id = %session_id, "ws_stream_ended");
                         break;
                     }
                     Some(Err(e)) => {
-                        eprintln!("[ws] Session {session_id} protocol error: {e}");
+                        warn!(session_id = %session_id, error = %e, "ws_protocol_error");
                         break;
                     }
                     _ => {}
@@ -781,6 +797,14 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Notification channel closed — server shutting down
+                        let shutdown_msg = GlobalWsResponse::Error {
+                            message: "Server shutting down".to_string(),
+                            validation_errors: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&shutdown_msg) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
                         break;
                     }
                 }
@@ -789,7 +813,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     }
 
     // Auto-close session on disconnect
-    eprintln!("[ws] Session {session_id} disconnecting");
+    info!(session_id = %session_id, "ws_session_disconnecting");
     let _ = handler.close_session(&session_id);
 }
 
@@ -802,8 +826,9 @@ async fn process_global_ws_message(
     let request: GlobalWsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
+            tracing::debug!(error = %e, "Invalid GlobalWsRequest message");
             return GlobalWsResponse::Error {
-                message: format!("Invalid message: {e}"),
+                message: "Invalid message format".to_string(),
                 validation_errors: None,
             };
         }
@@ -842,10 +867,11 @@ async fn handle_global_execute(
         .await;
     let elapsed = start.elapsed();
     if elapsed.as_secs() >= 5 {
-        eprintln!(
-            "[ws] SLOW execute session={session_id} ({:.1}s): {}",
-            elapsed.as_secs_f64(),
-            &program[..program.len().min(80)]
+        warn!(
+            session_id,
+            elapsed_secs = elapsed.as_secs_f64(),
+            program_preview = %&program[..program.len().min(80)],
+            "ws_slow_execute"
         );
     }
     info!(

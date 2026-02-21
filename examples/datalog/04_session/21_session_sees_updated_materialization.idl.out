@@ -18,46 +18,46 @@ Rule 'path' registered.
 > +path(X, Z) <- path(X, Y), edge(Y, Z)
 Rule 'path' registered.
 > from_one(Y) <- path(1, Y)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 (session: 1 rule(s))
 > ?from_one(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
 2 rows
 > +edge(3, 4)
 Inserted 1 fact(s) into 'edge'.
 > +edge(4, 5)
 Inserted 1 fact(s) into 'edge'.
 > from_one_updated(Y) <- path(1, Y)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+│ 4 │
+│ 5 │
+└───┘
 4 rows
 (session: 2 rule(s))
 > ?from_one_updated(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    2 │
-│    3 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 2 │
+│ 3 │
+│ 4 │
+│ 5 │
+└───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

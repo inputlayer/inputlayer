@@ -12,42 +12,42 @@ Switched to knowledge graph: test_islands_n18t40
 > +events[(1, "A"), (2, "A"), (3, "B"), (4, "B"), (5, "B"), (6, "A")]
 Inserted 6 fact(s) into 'events'.
 > island_start(T, Val) <- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "A"  │
-│    2 │ "A"  │
-│    3 │ "B"  │
-│    4 │ "B"  │
-│    5 │ "B"  │
-│    6 │ "A"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "A" │
+│ 2 │ "A" │
+│ 3 │ "B" │
+│ 4 │ "B" │
+│ 5 │ "B" │
+│ 6 │ "A" │
+└───┴─────┘
 6 rows
 (session: 1 rule(s))
 > island_start(T, Val) <- events(T, Val), T = 1
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "A"  │
-│    2 │ "A"  │
-│    3 │ "B"  │
-│    4 │ "B"  │
-│    5 │ "B"  │
-│    6 │ "A"  │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "A" │
+│ 2 │ "A" │
+│ 3 │ "B" │
+│ 4 │ "B" │
+│ 5 │ "B" │
+│ 6 │ "A" │
+└───┴─────┘
 6 rows
 (session: 2 rule(s))
 > ?island_start(T, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "A"  │
-│    2 │ "A"  │
-│    3 │ "B"  │
-│    4 │ "B"  │
-│    5 │ "B"  │
-│    6 │ "A"  │
-└──────┴──────┘
+┌───┬─────┐
+│ T │ Val │
+├───┼─────┤
+│ 1 │ "A" │
+│ 2 │ "A" │
+│ 3 │ "B" │
+│ 4 │ "B" │
+│ 5 │ "B" │
+│ 6 │ "A" │
+└───┴─────┘
 6 rows
 > .kg use default
 Switched to knowledge graph: default

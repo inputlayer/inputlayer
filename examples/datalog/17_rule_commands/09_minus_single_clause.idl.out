@@ -25,13 +25,13 @@ Clauses:
   2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 
 > ?reachable(1, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
 3 rows
 > -reachable(X, Y) <- edge(X, Y)
 Conditional delete: 0 fact(s) deleted from 'reachable'.
@@ -42,13 +42,13 @@ Clauses:
   2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 
 > ?reachable(1, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │    2 │
-│    1 │    3 │
-│    1 │    4 │
-└──────┴──────┘
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

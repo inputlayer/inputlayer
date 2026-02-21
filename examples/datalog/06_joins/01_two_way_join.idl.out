@@ -16,14 +16,14 @@ Inserted 2 fact(s) into 'department'.
 > +emp_dept(EmpId, DeptName) <- employee(EmpId, DeptId), department(DeptId, DeptName)
 Rule 'emp_dept' registered.
 > ?emp_dept(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   10 │
-│    3 │   20 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 10 │
+│ 3 │ 20 │
+│ 4 │ 20 │
+└───┴────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -19,19 +19,19 @@ No results.
 > ?not_in_large(X)
 No results.
 > extra_in_large(X) <- large(X), !small(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?extra_in_large(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

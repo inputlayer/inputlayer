@@ -14,33 +14,33 @@ Inserted 5 fact(s) into 'sales'.
 > +region_total(Region, sum<Amt>) <- sales(Region, Amt)
 Rule 'region_total' registered.
 > ?region_total(Region, Total)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "East"  │   50 │
-│ "North" │  250 │
-│ "South" │  450 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Region  │ Total │
+├─────────┼───────┤
+│ "East"  │    50 │
+│ "North" │   250 │
+│ "South" │   450 │
+└─────────┴───────┘
 3 rows
 > +grand_total(sum<Amt>) <- sales(_, Amt)
 Rule 'grand_total' registered.
 > ?grand_total(Total)
-┌──────┐
-│ col0 │
-├──────┤
-│  750 │
-└──────┘
+┌───────┐
+│ Total │
+├───────┤
+│   750 │
+└───────┘
 1 rows
 > +region_count(Region, count<Amt>) <- sales(Region, Amt)
 Rule 'region_count' registered.
 > ?region_count(Region, Count)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "East"  │    1 │
-│ "North" │    2 │
-│ "South" │    2 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Region  │ Count │
+├─────────┼───────┤
+│ "East"  │     1 │
+│ "North" │     2 │
+│ "South" │     2 │
+└─────────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

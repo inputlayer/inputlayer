@@ -12,13 +12,13 @@ Switched to knowledge graph: test_limit_exceeds_n21t38
 > +data[("a", 1), ("b", 2), ("c", 3)]
 Inserted 3 fact(s) into 'data'.
 > ?data(X, Y), limit(10)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│ "a"  │    1 │
-│ "b"  │    2 │
-│ "c"  │    3 │
-└──────┴──────┘
+┌─────┬───┐
+│ X   │ Y │
+├─────┼───┤
+│ "a" │ 1 │
+│ "b" │ 2 │
+│ "c" │ 3 │
+└─────┴───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

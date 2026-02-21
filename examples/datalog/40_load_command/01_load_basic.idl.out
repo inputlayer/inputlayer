@@ -17,20 +17,20 @@ Inserted 2 fact(s) into 'loaded_relation'.
 Rule 'loaded_rule' registered.
 File loaded.
 > ?loaded_relation(X, Y)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "from_file"   │
-│    2 │ "also_loaded" │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ "from_file"   │
+│ 2 │ "also_loaded" │
+└───┴───────────────┘
 2 rows
 > ?loaded_rule(X, Y)
-┌──────┬───────────────┐
-│ col0 │ col1          │
-├──────┼───────────────┤
-│    1 │ "from_file"   │
-│    2 │ "also_loaded" │
-└──────┴───────────────┘
+┌───┬───────────────┐
+│ X │ Y             │
+├───┼───────────────┤
+│ 1 │ "from_file"   │
+│ 2 │ "also_loaded" │
+└───┴───────────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

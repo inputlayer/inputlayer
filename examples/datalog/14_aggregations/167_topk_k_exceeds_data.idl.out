@@ -14,23 +14,23 @@ Inserted 2 fact(s) into 'score'.
 > +top5(top_k<5, Id, Score:desc>) <- score(Id, Score)
 Rule 'top5' registered.
 > ?top5(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 200 │
+└───┴─────┘
 2 rows
 > +score[(3, 300)]
 Inserted 1 fact(s) into 'score'.
 > ?top5(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  100 │
-│    2 │  200 │
-│    3 │  300 │
-└──────┴──────┘
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ 100 │
+│ 2 │ 200 │
+│ 3 │ 300 │
+└───┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

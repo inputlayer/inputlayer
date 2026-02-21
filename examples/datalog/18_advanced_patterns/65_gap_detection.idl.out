@@ -22,25 +22,25 @@ Parse error: Unrecognized statement: Y > X,
 > Y = X + 1
 Parse error: Unrecognized statement: Y = X + 1
 > gap_after(X) <- ids(X), !has_gap_after(X), ids(Y), Y > X
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 4 │
+│ 5 │
+└───┘
 4 rows
 (session: 1 rule(s))
 > ?gap_after(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    4 │
-│    5 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 4 │
+│ 5 │
+└───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

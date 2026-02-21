@@ -14,24 +14,24 @@ Inserted 3 fact(s) into 'data'.
 > +to_delete[(99)]
 Inserted 1 fact(s) into 'to_delete'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+│  3 │ "c" │
+└────┴─────┘
 3 rows
 > -data(Id, Val) <- to_delete(Id), data(Id, Val)
 Conditional delete: 0 fact(s) deleted from 'data'.
 > ?data(Id, Val)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │ "a"  │
-│    2 │ "b"  │
-│    3 │ "c"  │
-└──────┴──────┘
+┌────┬─────┐
+│ Id │ Val │
+├────┼─────┤
+│  1 │ "a" │
+│  2 │ "b" │
+│  3 │ "c" │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

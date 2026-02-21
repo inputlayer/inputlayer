@@ -14,14 +14,14 @@ Inserted 5 fact(s) into 'data'.
 > +row_pos(Id, Name, count<OtherId>) <- data(Id, Name), data(OtherId, _), OtherId < Id
 Rule 'row_pos' registered.
 > ?row_pos(Id, Name, Pos)
-┌──────┬──────┬──────┐
-│ col0 │ col1 │ col2 │
-├──────┼──────┼──────┤
-│    2 │ "B"  │    1 │
-│    3 │ "C"  │    2 │
-│    4 │ "D"  │    3 │
-│    5 │ "E"  │    4 │
-└──────┴──────┴──────┘
+┌────┬──────┬─────┐
+│ Id │ Name │ Pos │
+├────┼──────┼─────┤
+│  2 │ "B"  │   1 │
+│  3 │ "C"  │   2 │
+│  4 │ "D"  │   3 │
+│  5 │ "E"  │   4 │
+└────┴──────┴─────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

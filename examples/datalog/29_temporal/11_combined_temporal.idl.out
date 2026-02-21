@@ -19,25 +19,25 @@ No results.
 > ?recent_weighted(Id, Weight)
 No results.
 > event_age(Id, Age) <- events(Id, Ts), config(Now, _), Age = time_diff(Now, Ts)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    2 │ 2000 │
-│    3 │ 5000 │
-│    4 │    0 │
-└──────┴──────┘
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │  500 │
+│ 2 │ 2000 │
+│ 3 │ 5000 │
+│ 4 │    0 │
+└───┴──────┘
 4 rows
 (session: 2 rule(s))
 > ?event_age(Id, Age)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │  500 │
-│    2 │ 2000 │
-│    3 │ 5000 │
-│    4 │    0 │
-└──────┴──────┘
+┌────┬──────┐
+│ Id │ Age  │
+├────┼──────┤
+│  1 │  500 │
+│  2 │ 2000 │
+│  3 │ 5000 │
+│  4 │    0 │
+└────┴──────┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

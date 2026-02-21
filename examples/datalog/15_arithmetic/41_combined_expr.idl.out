@@ -12,21 +12,21 @@ Switched to knowledge graph: test_comb_expr_n15t41
 > +data[(5, 2), (10, 3), (15, 4)]
 Inserted 3 fact(s) into 'data'.
 > big_product(A, B) <- data(A, B), A * B > 20
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   10 │    3 │
-│   15 │    4 │
-└──────┴──────┘
+┌────┬───┐
+│ X  │ Y │
+├────┼───┤
+│ 10 │ 3 │
+│ 15 │ 4 │
+└────┴───┘
 2 rows
 (session: 1 rule(s))
 > ?big_product(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   10 │    3 │
-│   15 │    4 │
-└──────┴──────┘
+┌────┬───┐
+│ A  │ B │
+├────┼───┤
+│ 10 │ 3 │
+│ 15 │ 4 │
+└────┴───┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

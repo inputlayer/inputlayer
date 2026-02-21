@@ -14,11 +14,11 @@ Inserted 3 fact(s) into 'data'.
 > +total(sum<V>) <- data(_, V)
 Rule 'total' registered.
 > ?total(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   60 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 60 │
+└────┘
 1 rows
 > +total(G, sum<V>) <- data(G, V)
 Failed to register rule: Arity mismatch: rule 'total' has 1 argument(s) but new clause has 2. Drop the rule first with '.rule drop total' and re-create it.

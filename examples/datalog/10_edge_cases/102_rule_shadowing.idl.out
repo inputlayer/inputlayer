@@ -14,12 +14,12 @@ Inserted 2 fact(s) into 'data'.
 > +data(X) <- data(Y), X = Y + 10
 Rule 'data' registered.
 > ?data(X)
-┌──────┐
-│ col0 │
-├──────┤
-│   11 │
-│   12 │
-└──────┘
+┌────┐
+│ X  │
+├────┤
+│ 11 │
+│ 12 │
+└────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

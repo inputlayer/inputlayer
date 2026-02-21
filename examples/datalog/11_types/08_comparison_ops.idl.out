@@ -14,80 +14,80 @@ Inserted 5 fact(s) into 'vals'.
 > +less_than_25(Id, V) <- vals(Id, V), V < 25
 Rule 'less_than_25' registered.
 > ?less_than_25(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 4 │ 20 │
+└───┴────┘
 3 rows
 > +less_eq_20(Id, V) <- vals(Id, V), V <= 20
 Rule 'less_eq_20' registered.
 > ?less_eq_20(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    2 │   20 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 2 │ 20 │
+│ 4 │ 20 │
+└───┴────┘
 3 rows
 > +greater_than_25(Id, V) <- vals(Id, V), V > 25
 Rule 'greater_than_25' registered.
 > ?greater_than_25(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    3 │   30 │
-│    5 │   40 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 3 │ 30 │
+│ 5 │ 40 │
+└───┴────┘
 2 rows
 > +greater_eq_20(Id, V) <- vals(Id, V), V >= 20
 Rule 'greater_eq_20' registered.
 > ?greater_eq_20(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   20 │
-│    5 │   40 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+│ 4 │ 20 │
+│ 5 │ 40 │
+└───┴────┘
 4 rows
 > +targets[(20)]
 Inserted 1 fact(s) into 'targets'.
 > +equals_target(Id, V) <- vals(Id, V), targets(V)
 Rule 'equals_target' registered.
 > ?equals_target(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 4 │ 20 │
+└───┴────┘
 2 rows
 > +not_twenty(Id, V) <- vals(Id, V), !targets(V)
 Rule 'not_twenty' registered.
 > ?not_twenty(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    1 │   10 │
-│    3 │   30 │
-│    5 │   40 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 1 │ 10 │
+│ 3 │ 30 │
+│ 5 │ 40 │
+└───┴────┘
 3 rows
 > +in_range(Id, V) <- vals(Id, V), V > 15, V < 35
 Rule 'in_range' registered.
 > ?in_range(X, Y)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    2 │   20 │
-│    3 │   30 │
-│    4 │   20 │
-└──────┴──────┘
+┌───┬────┐
+│ X │ Y  │
+├───┼────┤
+│ 2 │ 20 │
+│ 3 │ 30 │
+│ 4 │ 20 │
+└───┴────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,11 +12,11 @@ Switched to knowledge graph: test_drop_current_n01t05
 > +test_data[(1, "data")]
 Inserted 1 fact(s) into 'test_data'.
 > ?test_data(X, Y)
-┌──────┬────────┐
-│ col0 │ col1   │
-├──────┼────────┤
-│    1 │ "data" │
-└──────┴────────┘
+┌───┬────────┐
+│ X │ Y      │
+├───┼────────┤
+│ 1 │ "data" │
+└───┴────────┘
 1 rows
 > .kg drop test_drop_current_n01t05
 Cannot drop current knowledge graph. Switch to another first.

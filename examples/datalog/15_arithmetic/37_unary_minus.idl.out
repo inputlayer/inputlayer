@@ -12,23 +12,23 @@ Switched to knowledge graph: test_unary_n15t37
 > +nums[(10,), (20,), (-5,)]
 Inserted 3 fact(s) into 'nums'.
 > negated(X, N) <- nums(X), N = 0 - X
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   -5 │    5 │
-│   10 │  -10 │
-│   20 │  -20 │
-└──────┴──────┘
+┌────┬─────┐
+│ X  │ Y   │
+├────┼─────┤
+│ -5 │   5 │
+│ 10 │ -10 │
+│ 20 │ -20 │
+└────┴─────┘
 3 rows
 (session: 1 rule(s))
 > ?negated(X, N)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│   -5 │    5 │
-│   10 │  -10 │
-│   20 │  -20 │
-└──────┴──────┘
+┌────┬─────┐
+│ X  │ N   │
+├────┼─────┤
+│ -5 │   5 │
+│ 10 │ -10 │
+│ 20 │ -20 │
+└────┴─────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

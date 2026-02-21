@@ -14,21 +14,21 @@ Inserted 3 fact(s) into 'products'.
 > +orders[(101, 1), (102, 1)]
 Inserted 2 fact(s) into 'orders'.
 > no_orders(ProdId, Name) <- products(ProdId, Name), !orders(_, ProdId)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    2 │ "Gadget" │
-│    3 │ "Gizmo"  │
-└──────┴──────────┘
+┌───┬──────────┐
+│ X │ Y        │
+├───┼──────────┤
+│ 2 │ "Gadget" │
+│ 3 │ "Gizmo"  │
+└───┴──────────┘
 2 rows
 (session: 1 rule(s))
 > ?no_orders(Id, N)
-┌──────┬──────────┐
-│ col0 │ col1     │
-├──────┼──────────┤
-│    2 │ "Gadget" │
-│    3 │ "Gizmo"  │
-└──────┴──────────┘
+┌────┬──────────┐
+│ Id │ N        │
+├────┼──────────┤
+│  2 │ "Gadget" │
+│  3 │ "Gizmo"  │
+└────┴──────────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

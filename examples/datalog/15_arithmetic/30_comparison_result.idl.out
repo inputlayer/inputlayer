@@ -12,36 +12,36 @@ Switched to knowledge graph: test_compare_n15t30
 > +pairs[(10, 5), (3, 7), (5, 5), (8, 2)]
 Inserted 4 fact(s) into 'pairs'.
 > first_bigger(A, B) <- pairs(A, B), A > B
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    8 │    2 │
-│   10 │    5 │
-└──────┴──────┘
+┌────┬───┐
+│ X  │ Y │
+├────┼───┤
+│  8 │ 2 │
+│ 10 │ 5 │
+└────┴───┘
 2 rows
 (session: 1 rule(s))
 > equal_vals(A, B) <- pairs(A, B), A = B
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 5 │ 5 │
+└───┴───┘
 1 rows
 (session: 2 rule(s))
 > ?first_bigger(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    8 │    2 │
-│   10 │    5 │
-└──────┴──────┘
+┌────┬───┐
+│ A  │ B │
+├────┼───┤
+│  8 │ 2 │
+│ 10 │ 5 │
+└────┴───┘
 2 rows
 > ?equal_vals(A, B)
-┌──────┬──────┐
-│ col0 │ col1 │
-├──────┼──────┤
-│    5 │    5 │
-└──────┴──────┘
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 5 │ 5 │
+└───┴───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

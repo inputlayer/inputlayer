@@ -18,19 +18,19 @@ Rule 'has_orders' registered.
 > +no_orders(CustId, Name) <- customers(CustId, Name), !orders(_, CustId)
 Rule 'no_orders' registered.
 > ?has_orders(Id, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    1 │ "Alice" │
-│    2 │ "Bob"   │
-└──────┴─────────┘
+┌────┬─────────┐
+│ Id │ Name    │
+├────┼─────────┤
+│  1 │ "Alice" │
+│  2 │ "Bob"   │
+└────┴─────────┘
 2 rows
 > ?no_orders(Id, Name)
-┌──────┬─────────┐
-│ col0 │ col1    │
-├──────┼─────────┤
-│    3 │ "Carol" │
-└──────┴─────────┘
+┌────┬─────────┐
+│ Id │ Name    │
+├────┼─────────┤
+│  3 │ "Carol" │
+└────┴─────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default

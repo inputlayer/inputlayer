@@ -16,13 +16,13 @@ Inserted 5 fact(s) into 'passed_exam'.
 > +has_exam(S) <- passed_exam(S, _)
 Rule 'has_exam' registered.
 > ?has_exam(S)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ S │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,23 +12,23 @@ Switched to knowledge graph: test_topk_basic_n14t45
 > +scores[("Alice", 95), ("Bob", 87), ("Carol", 92), ("Dave", 78), ("Eve", 99)]
 Inserted 5 fact(s) into 'scores'.
 > top_three(top_k<3, Name, Score:desc>) <- scores(Name, Score)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │   95 │
-│ "Carol" │   92 │
-│ "Eve"   │   99 │
-└─────────┴──────┘
+┌─────────┬────┐
+│ X       │ Y  │
+├─────────┼────┤
+│ "Alice" │ 95 │
+│ "Carol" │ 92 │
+│ "Eve"   │ 99 │
+└─────────┴────┘
 3 rows
 (session: 1 rule(s))
 > ?top_three(Name, Score)
-┌─────────┬──────┐
-│ col0    │ col1 │
-├─────────┼──────┤
-│ "Alice" │   95 │
-│ "Carol" │   92 │
-│ "Eve"   │   99 │
-└─────────┴──────┘
+┌─────────┬───────┐
+│ Name    │ Score │
+├─────────┼───────┤
+│ "Alice" │    95 │
+│ "Carol" │    92 │
+│ "Eve"   │    99 │
+└─────────┴───────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

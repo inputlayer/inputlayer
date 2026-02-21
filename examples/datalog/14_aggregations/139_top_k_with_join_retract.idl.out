@@ -16,36 +16,36 @@ Inserted 4 fact(s) into 'grade'.
 > +top_students(top_k<2, Name, Grade:desc>) <- student(Id, Name), grade(Id, Grade)
 Rule 'top_students' registered.
 > ?top_students(X, Y)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Alice"   │   95 │
-│ "Charlie" │   90 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ X         │ Y  │
+├───────────┼────┤
+│ "Alice"   │ 95 │
+│ "Charlie" │ 90 │
+└───────────┴────┘
 2 rows
 > -grade(3, 90)
 Deleted 1 facts from 'grade'.
 > +grade[(3, 99)]
 Inserted 1 fact(s) into 'grade'.
 > ?top_students(X, Y)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Alice"   │   95 │
-│ "Charlie" │   99 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ X         │ Y  │
+├───────────┼────┤
+│ "Alice"   │ 95 │
+│ "Charlie" │ 99 │
+└───────────┴────┘
 2 rows
 > -student(1, "Alice")
 Deleted 1 facts from 'student'.
 > -grade(1, 95)
 Deleted 1 facts from 'grade'.
 > ?top_students(X, Y)
-┌───────────┬──────┐
-│ col0      │ col1 │
-├───────────┼──────┤
-│ "Bob"     │   85 │
-│ "Charlie" │   99 │
-└───────────┴──────┘
+┌───────────┬────┐
+│ X         │ Y  │
+├───────────┼────┤
+│ "Bob"     │ 85 │
+│ "Charlie" │ 99 │
+└───────────┴────┘
 2 rows
 > .kg use default
 Switched to knowledge graph: default

@@ -12,19 +12,19 @@ Switched to knowledge graph: test_syntax_literals_n28t07
 > +int_values[(42), (-17), (0)]
 Inserted 3 fact(s) into 'int_values'.
 > ?int_values(X)
-┌──────┐
-│ col0 │
-├──────┤
-│  -17 │
-│    0 │
-│   42 │
-└──────┘
+┌─────┐
+│ X   │
+├─────┤
+│ -17 │
+│   0 │
+│  42 │
+└─────┘
 3 rows
 > +float_values[(3.14), (-0.5)]
 Inserted 2 fact(s) into 'float_values'.
 > ?float_values(X)
 ┌──────┐
-│ col0 │
+│ X    │
 ├──────┤
 │ -0.5 │
 │ 3.14 │
@@ -34,7 +34,7 @@ Inserted 2 fact(s) into 'float_values'.
 Inserted 2 fact(s) into 'string_values'.
 > ?string_values(X)
 ┌───────────────┐
-│ col0          │
+│ X             │
 ├───────────────┤
 │ "hello"       │
 │ "hello world" │
@@ -44,7 +44,7 @@ Inserted 2 fact(s) into 'string_values'.
 Inserted 2 fact(s) into 'vectors'.
 > ?vectors(X)
 ┌──────────────────────────────────────────┐
-│ col0                                     │
+│ X                                        │
 ├──────────────────────────────────────────┤
 │ [1.0, 2.0, 3.0]                          │
 │ [0.10000000149011612, 0.200000002980232… │
@@ -54,7 +54,7 @@ Inserted 2 fact(s) into 'vectors'.
 Inserted 2 fact(s) into 'location'.
 > ?location(Name, Lat, Lon)
 ┌───────┬──────┬────────┐
-│ col0  │ col1 │ col2   │
+│ Name  │ Lat  │ Lon    │
 ├───────┼──────┼────────┤
 │ "LA"  │ 34.0 │ -118.2 │
 │ "NYC" │ 40.7 │  -74.0 │

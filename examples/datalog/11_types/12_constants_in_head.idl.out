@@ -14,46 +14,46 @@ Inserted 3 fact(s) into 'data'.
 > +with_status(Id, Name, 200) <- data(Id, Name)
 Rule 'with_status' registered.
 > ?with_status(X, Y, Z)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "apple"  │  200 │
-│    2 │ "banana" │  200 │
-│    3 │ "cherry" │  200 │
-└──────┴──────────┴──────┘
+┌───┬──────────┬─────┐
+│ X │ Y        │ Z   │
+├───┼──────────┼─────┤
+│ 1 │ "apple"  │ 200 │
+│ 2 │ "banana" │ 200 │
+│ 3 │ "cherry" │ 200 │
+└───┴──────────┴─────┘
 3 rows
 > +with_weight(Id, Name, 1.5) <- data(Id, Name)
 Rule 'with_weight' registered.
 > ?with_weight(X, Y, Z)
-┌──────┬──────────┬──────┐
-│ col0 │ col1     │ col2 │
-├──────┼──────────┼──────┤
-│    1 │ "apple"  │  1.5 │
-│    2 │ "banana" │  1.5 │
-│    3 │ "cherry" │  1.5 │
-└──────┴──────────┴──────┘
+┌───┬──────────┬─────┐
+│ X │ Y        │ Z   │
+├───┼──────────┼─────┤
+│ 1 │ "apple"  │ 1.5 │
+│ 2 │ "banana" │ 1.5 │
+│ 3 │ "cherry" │ 1.5 │
+└───┴──────────┴─────┘
 3 rows
 > +with_category(Id, Name, "fruit") <- data(Id, Name)
 Rule 'with_category' registered.
 > ?with_category(X, Y, Z)
-┌──────┬──────────┬─────────┐
-│ col0 │ col1     │ col2    │
-├──────┼──────────┼─────────┤
-│    1 │ "apple"  │ "fruit" │
-│    2 │ "banana" │ "fruit" │
-│    3 │ "cherry" │ "fruit" │
-└──────┴──────────┴─────────┘
+┌───┬──────────┬─────────┐
+│ X │ Y        │ Z       │
+├───┼──────────┼─────────┤
+│ 1 │ "apple"  │ "fruit" │
+│ 2 │ "banana" │ "fruit" │
+│ 3 │ "cherry" │ "fruit" │
+└───┴──────────┴─────────┘
 3 rows
 > +full_record(Id, Name, 100, 2.5, "active") <- data(Id, Name)
 Rule 'full_record' registered.
 > ?full_record(A, B, C, D, E)
-┌──────┬──────────┬──────┬──────┬──────────┐
-│ col0 │ col1     │ col2 │ col3 │ col4     │
-├──────┼──────────┼──────┼──────┼──────────┤
-│    1 │ "apple"  │  100 │  2.5 │ "active" │
-│    2 │ "banana" │  100 │  2.5 │ "active" │
-│    3 │ "cherry" │  100 │  2.5 │ "active" │
-└──────┴──────────┴──────┴──────┴──────────┘
+┌───┬──────────┬─────┬─────┬──────────┐
+│ A │ B        │ C   │ D   │ E        │
+├───┼──────────┼─────┼─────┼──────────┤
+│ 1 │ "apple"  │ 100 │ 2.5 │ "active" │
+│ 2 │ "banana" │ 100 │ 2.5 │ "active" │
+│ 3 │ "cherry" │ 100 │ 2.5 │ "active" │
+└───┴──────────┴─────┴─────┴──────────┘
 3 rows
 > .kg use default
 Switched to knowledge graph: default

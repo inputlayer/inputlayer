@@ -13,7 +13,7 @@ Switched to knowledge graph: test_cousin_n09t40
 Inserted 5 fact(s) into 'parent'.
 > sibling(A, B) <- parent(P, A), parent(P, B), A != B
 ┌──────────┬──────────┐
-│ col0     │ col1     │
+│ X        │ Y        │
 ├──────────┼──────────┤
 │ "child1" │ "child2" │
 │ "child2" │ "child1" │
@@ -24,7 +24,7 @@ Inserted 5 fact(s) into 'parent'.
 (session: 1 rule(s))
 > cousin(A, B) <- parent(P1, A), parent(P2, B), sibling(P1, P2)
 ┌──────────┬──────────┐
-│ col0     │ col1     │
+│ X        │ Y        │
 ├──────────┼──────────┤
 │ "child1" │ "child3" │
 │ "child2" │ "child3" │
@@ -35,7 +35,7 @@ Inserted 5 fact(s) into 'parent'.
 (session: 2 rule(s))
 > ?sibling(A, B)
 ┌──────────┬──────────┐
-│ col0     │ col1     │
+│ A        │ B        │
 ├──────────┼──────────┤
 │ "child1" │ "child2" │
 │ "child2" │ "child1" │
@@ -45,7 +45,7 @@ Inserted 5 fact(s) into 'parent'.
 4 rows
 > ?cousin(A, B)
 ┌──────────┬──────────┐
-│ col0     │ col1     │
+│ A        │ B        │
 ├──────────┼──────────┤
 │ "child1" │ "child3" │
 │ "child2" │ "child3" │

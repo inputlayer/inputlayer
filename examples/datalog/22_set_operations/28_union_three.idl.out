@@ -22,14 +22,14 @@ Rule 'union_all' registered.
 > +union_all(X) <- set_c(X)
 Rule 'union_all' registered.
 > ?union_all(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+│ 4 │
+└───┘
 4 rows
 > .kg use default
 Switched to knowledge graph: default

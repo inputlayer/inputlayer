@@ -16,38 +16,38 @@ Rule 'reaches' registered.
 > +reaches(X, Z) <- edge(X, Y), reaches(Y, Z)
 Rule 'reaches' registered.
 > in_cycle(X) <- reaches(X, X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 (session: 1 rule(s))
 > ?in_cycle(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    1 │
-│    2 │
-│    3 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
 3 rows
 > not_in_cycle(X) <- edge(X, _), !reaches(X, X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 (session: 2 rule(s))
 > ?not_in_cycle(X)
-┌──────┐
-│ col0 │
-├──────┤
-│    4 │
-└──────┘
+┌───┐
+│ X │
+├───┤
+│ 4 │
+└───┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default
