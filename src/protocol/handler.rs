@@ -1946,6 +1946,7 @@ impl QueryJob {
 
         // Look up schema column names from the source relation (if available)
         let schema_columns: Option<Vec<String>> = source_relation.as_ref().and_then(|rel_name| {
+            let storage = self.storage.read();
             storage
                 .get_schema_in(&kg_name, rel_name)
                 .ok()
@@ -2205,6 +2206,7 @@ impl Handler {
 
         // Look up schema column names from the source relation (if available)
         let schema_columns: Option<Vec<String>> = source_relation.as_ref().and_then(|rel_name| {
+            let storage = self.storage.read();
             storage
                 .get_schema_in(&kg, rel_name)
                 .ok()

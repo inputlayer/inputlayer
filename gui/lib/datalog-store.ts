@@ -190,14 +190,28 @@ async function fetchViews(ws: WsClient): Promise<View[]> {
 
 /** Build a WebSocket URL from host/port */
 function buildWsUrl(host: string, port: number): string {
+  // Use the page's own host when connecting to the same server that serves the GUI
+  // to avoid cross-origin issues (e.g., 127.0.0.1 vs localhost)
+  if (typeof window !== "undefined" && window.location.port === String(port)) {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws"
+    return `${protocol}://${window.location.hostname}:${port}/ws`
+  }
   const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws"
   return `${protocol}://${host}:${port}/ws`
 }
 
 /** Health check via REST (quick server reachability test) */
 async function checkHealth(host: string, port: number): Promise<void> {
-  const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http"
-  const resp = await fetch(`${protocol}://${host}:${port}/health`)
+  // Use relative URL when connecting to the same server that serves the GUI
+  // to avoid cross-origin issues (e.g., 127.0.0.1 vs localhost)
+  let url: string
+  if (typeof window !== "undefined" && window.location.port === String(port)) {
+    url = "/health"
+  } else {
+    const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "https" : "http"
+    url = `${protocol}://${host}:${port}/health`
+  }
+  const resp = await fetch(url)
   if (!resp.ok) throw new Error(`Health check failed: ${resp.status}`)
 }
 
