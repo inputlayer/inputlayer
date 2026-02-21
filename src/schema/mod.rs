@@ -34,8 +34,9 @@ pub enum SchemaType {
     Bool,
     /// Unix timestamp in milliseconds
     Timestamp,
-    /// Vector of f32 values (embeddings)
-    Vector,
+    /// Vector of f32 values (embeddings).
+    /// `dim: Some(n)` enforces exact dimension; `dim: None` accepts any dimension.
+    Vector { dim: Option<usize> },
     /// Any type (no type constraint)
     Any,
     /// Named type alias (e.g., Email, Age)
@@ -52,7 +53,8 @@ impl SchemaType {
             SchemaType::String => DataType::String,
             SchemaType::Bool => DataType::Bool,
             SchemaType::Timestamp => DataType::Timestamp,
-            SchemaType::Vector => DataType::vector_any(),
+            SchemaType::Vector { dim: Some(n) } => DataType::vector_with_dim(*n),
+            SchemaType::Vector { dim: None } => DataType::vector_any(),
             SchemaType::Any => DataType::Null, // Null used as "any" marker
             SchemaType::Named(_) => DataType::String, // Named types resolve at validation time
         }
@@ -71,8 +73,10 @@ impl SchemaType {
             (SchemaType::Bool, Value::Bool(_)) => true,
             (SchemaType::Timestamp, Value::Timestamp(_)) => true,
             (SchemaType::Timestamp, Value::Int64(_)) => true, // Allow int as timestamp
-            (SchemaType::Vector, Value::Vector(_)) => true,
-            (SchemaType::Vector, Value::VectorInt8(_)) => true,
+            (SchemaType::Vector { dim: Some(n) }, Value::Vector(v)) => v.len() == *n,
+            (SchemaType::Vector { dim: Some(n) }, Value::VectorInt8(v)) => v.len() == *n,
+            (SchemaType::Vector { dim: None }, Value::Vector(_)) => true,
+            (SchemaType::Vector { dim: None }, Value::VectorInt8(_)) => true,
             (SchemaType::Any, _) => true,
             (SchemaType::Named(_), _) => true, // Named types need catalog lookup for full validation
             _ => false,
@@ -88,7 +92,7 @@ impl SchemaType {
             "string" | "str" | "text" => Some(SchemaType::String),
             "bool" | "boolean" => Some(SchemaType::Bool),
             "timestamp" | "time" | "datetime" => Some(SchemaType::Timestamp),
-            "vector" | "embedding" | "vec" => Some(SchemaType::Vector),
+            "vector" | "embedding" | "vec" => Some(SchemaType::Vector { dim: None }),
             "any" => Some(SchemaType::Any),
             _ => {
                 // Check if it's a valid identifier (potential type alias)
@@ -118,7 +122,8 @@ impl fmt::Display for SchemaType {
             SchemaType::String => write!(f, "string"),
             SchemaType::Bool => write!(f, "bool"),
             SchemaType::Timestamp => write!(f, "timestamp"),
-            SchemaType::Vector => write!(f, "vector"),
+            SchemaType::Vector { dim: None } => write!(f, "vector"),
+            SchemaType::Vector { dim: Some(n) } => write!(f, "vector({n})"),
             SchemaType::Any => write!(f, "any"),
             SchemaType::Named(name) => write!(f, "{name}"),
         }
@@ -372,9 +377,18 @@ mod tests {
             SchemaType::from_str("datetime"),
             Some(SchemaType::Timestamp)
         );
-        assert_eq!(SchemaType::from_str("vector"), Some(SchemaType::Vector));
-        assert_eq!(SchemaType::from_str("embedding"), Some(SchemaType::Vector));
-        assert_eq!(SchemaType::from_str("vec"), Some(SchemaType::Vector));
+        assert_eq!(
+            SchemaType::from_str("vector"),
+            Some(SchemaType::Vector { dim: None })
+        );
+        assert_eq!(
+            SchemaType::from_str("embedding"),
+            Some(SchemaType::Vector { dim: None })
+        );
+        assert_eq!(
+            SchemaType::from_str("vec"),
+            Some(SchemaType::Vector { dim: None })
+        );
         assert_eq!(SchemaType::from_str("any"), Some(SchemaType::Any));
     }
 
@@ -400,7 +414,11 @@ mod tests {
         assert_eq!(format!("{}", SchemaType::String), "string");
         assert_eq!(format!("{}", SchemaType::Bool), "bool");
         assert_eq!(format!("{}", SchemaType::Timestamp), "timestamp");
-        assert_eq!(format!("{}", SchemaType::Vector), "vector");
+        assert_eq!(format!("{}", SchemaType::Vector { dim: None }), "vector");
+        assert_eq!(
+            format!("{}", SchemaType::Vector { dim: Some(3) }),
+            "vector(3)"
+        );
         assert_eq!(format!("{}", SchemaType::Any), "any");
         assert_eq!(
             format!("{}", SchemaType::Named("Email".to_string())),
@@ -462,7 +480,8 @@ mod tests {
             SchemaType::Bool,
             SchemaType::Symbol,
             SchemaType::Timestamp,
-            SchemaType::Vector,
+            SchemaType::Vector { dim: None },
+            SchemaType::Vector { dim: Some(128) },
             SchemaType::Any,
             SchemaType::Named("Email".to_string()),
         ];

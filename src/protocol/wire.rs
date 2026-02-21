@@ -318,12 +318,15 @@ pub struct ResultMetadata {
     pub warnings: Vec<String>,
     /// Session ID that produced this result (if session-scoped)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<u64>,
+    pub session_id: Option<String>,
 }
 
 impl ResultMetadata {
     /// Create metadata from session query metadata
-    pub fn from_session(meta: &crate::session::QueryMetadata, session_id: u64) -> Option<Self> {
+    pub fn from_session(
+        meta: &crate::session::QueryMetadata,
+        session_id: &crate::session::SessionId,
+    ) -> Option<Self> {
         if !meta.has_ephemeral {
             return None;
         }
@@ -331,7 +334,7 @@ impl ResultMetadata {
             has_ephemeral: true,
             ephemeral_sources: meta.ephemeral_sources.clone(),
             warnings: meta.warnings.clone(),
-            session_id: Some(session_id),
+            session_id: Some(session_id.clone()),
         })
     }
 }
@@ -503,7 +506,7 @@ mod tests {
 
         // Clean session → no metadata
         let clean = QueryMetadata::default();
-        assert!(ResultMetadata::from_session(&clean, 1).is_none());
+        assert!(ResultMetadata::from_session(&clean, &"1".to_string()).is_none());
 
         // Dirty session → metadata with session_id
         let dirty = QueryMetadata {
@@ -511,9 +514,9 @@ mod tests {
             ephemeral_sources: vec!["edge".to_string()],
             warnings: vec!["test warning".to_string()],
         };
-        let meta = ResultMetadata::from_session(&dirty, 42).unwrap();
+        let meta = ResultMetadata::from_session(&dirty, &"42".to_string()).unwrap();
         assert!(meta.has_ephemeral);
-        assert_eq!(meta.session_id, Some(42));
+        assert_eq!(meta.session_id, Some("42".to_string()));
         assert_eq!(meta.ephemeral_sources, vec!["edge"]);
     }
 

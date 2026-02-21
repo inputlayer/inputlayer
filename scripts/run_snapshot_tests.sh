@@ -175,7 +175,11 @@ start_server() {
     if [[ "$clean_data" == "true" ]]; then
         rm -rf "$PROJECT_DIR/data"
     fi
-    SERVER_LOG="${TEMP_DIR}/server.log"
+    SERVER_LOG="${IL_SERVER_LOG:-${TEMP_DIR}/server.log}"
+    if [[ -n "${IL_SERVER_LOG:-}" ]]; then
+        : > "$SERVER_LOG"
+    fi
+    echo "Server log: $SERVER_LOG"
     "$SERVER_BIN" >>"$SERVER_LOG" 2>&1 &
     SERVER_PID=$!
     for i in $(seq 1 30); do
@@ -215,7 +219,7 @@ restart_server() {
 cleanup() {
     # Kill any lingering client processes
     pkill -f "inputlayer-client.*${SERVER_PORT}" 2>/dev/null || true
-    rm -rf "$TEMP_DIR"
+    # rm -rf "$TEMP_DIR"
     stop_server
 }
 trap cleanup EXIT

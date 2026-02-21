@@ -1,0 +1,12 @@
+// Test: .explain shows filter/predicate node in the plan
+.kg create test_explain_filter_n33t19
+.kg use test_explain_filter_n33t19
+
++score[(1, 95), (2, 72), (3, 88)]
+
+// Explain a query with a filter predicate
+.explain ?score(Id, S), S > 80
+
+// Cleanup
+.kg use default
+.kg drop test_explain_filter_n33t19

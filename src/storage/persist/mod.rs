@@ -141,6 +141,12 @@ impl FilePersist {
         persist.load_shards()?;
         persist.replay_wal()?;
 
+        // Clean up stale .archived and .new WAL files from previous runs
+        {
+            let wal = persist.wal.lock();
+            wal.cleanup_archives()?;
+        }
+
         Ok(persist)
     }
 
@@ -206,24 +212,35 @@ impl FilePersist {
         Ok(())
     }
 
-    /// Save shard metadata to disk
+    /// Save shard metadata to disk using atomic write-to-temp+rename.
+    ///
+    /// Writes to `{name}.json.tmp`, calls `sync_all()`, then renames to `{name}.json`.
+    /// Rename is atomic on POSIX, so the metadata file is always either the old
+    /// or new version — never a corrupt half-written state.
     fn save_shard_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
-        let path = self
-            .config
-            .path
-            .join("shards")
-            .join(format!("{}.json", sanitize_name(&meta.name)));
+        let dir = self.config.path.join("shards");
+        let final_path = dir.join(format!("{}.json", sanitize_name(&meta.name)));
+        let tmp_path = dir.join(format!("{}.json.tmp", sanitize_name(&meta.name)));
         let content = serde_json::to_string_pretty(meta)
             .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
-        if let Err(e) = fs::write(&path, &content) {
+
+        // Write to temp file
+        if let Err(e) = fs::write(&tmp_path, &content) {
             eprintln!(
                 "[persist] ERROR save_shard_meta: path={}, parent_exists={}, error={}",
-                path.display(),
-                path.parent().is_some_and(std::path::Path::exists),
+                tmp_path.display(),
+                tmp_path.parent().is_some_and(std::path::Path::exists),
                 e
             );
             return Err(e.into());
         }
+
+        // Sync to disk before rename
+        fs::File::open(&tmp_path)?.sync_all()?;
+
+        // Atomic rename
+        fs::rename(&tmp_path, &final_path)?;
+
         Ok(())
     }
 
@@ -354,13 +371,11 @@ impl PersistBackend for FilePersist {
             .collect();
         consolidate(&mut filtered);
 
-        // Remove old batch files
-        for batch_ref in &state.meta.batches {
-            let _ = fs::remove_file(&batch_ref.path);
-        }
-        state.meta.batches.clear();
+        // Remember old batch refs for cleanup after the new batch is durable
+        let old_batches: Vec<BatchRef> = state.meta.batches.drain(..).collect();
 
-        // Write new compacted batch if not empty
+        // Step 1: Write new compacted batch FIRST (crash-safe ordering)
+        // If we crash here, old batches still exist and metadata still points to them.
         if !filtered.is_empty() {
             let batch = Batch::new(filtered.clone());
             let (batch_id, path) = self.write_batch(&filtered)?;
@@ -374,9 +389,16 @@ impl PersistBackend for FilePersist {
             });
         }
 
-        // Update since frontier
+        // Step 2: Update metadata atomically (write-to-temp+rename in save_shard_meta)
+        // After this succeeds, metadata points to the new batch only.
         state.meta.advance_since(new_since);
         self.save_shard_meta(&state.meta)?;
+
+        // Step 3: Delete old batch files LAST (safe — metadata no longer references them)
+        // If we crash here, we have orphaned files but no data loss.
+        for batch_ref in &old_batches {
+            let _ = fs::remove_file(&batch_ref.path);
+        }
 
         Ok(())
     }
@@ -1197,5 +1219,151 @@ mod tests {
                 "Deleted shard should not be resurrected on restart"
             );
         }
+    }
+
+    // === Regression tests for production readiness fixes ===
+
+    /// P0-2: Verify compaction writes new batch BEFORE deleting old ones.
+    /// Simulates the crash-safe ordering: after compaction, data survives restart.
+    #[test]
+    fn test_compaction_crash_safe_ordering() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        // First instance: create shard, flush, compact
+        {
+            let config = PersistConfig {
+                path: path.clone(),
+                buffer_size: 100,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+
+            persist.ensure_shard("db:edge").unwrap();
+            persist
+                .append(
+                    "db:edge",
+                    &[
+                        Update::insert(Tuple::from_pair(1, 2), 10),
+                        Update::insert(Tuple::from_pair(3, 4), 20),
+                        Update::insert(Tuple::from_pair(5, 6), 30),
+                    ],
+                )
+                .unwrap();
+            persist.flush("db:edge").unwrap();
+
+            // Compact to time 15 (keeps times >= 15)
+            persist.compact("db:edge", 15).unwrap();
+        }
+
+        // Second instance: data should survive restart after compaction
+        {
+            let config = PersistConfig {
+                path,
+                buffer_size: 100,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+
+            let updates = persist.read("db:edge", 0).unwrap();
+            // Only times >= 15 should remain
+            assert!(updates.iter().all(|u| u.time >= 15));
+            assert_eq!(updates.len(), 2); // time 20 and 30
+        }
+    }
+
+    /// P0-3: Verify metadata uses atomic write (temp + rename).
+    /// After save_shard_meta, no .json.tmp files should remain.
+    #[test]
+    fn test_metadata_atomic_write_no_temp_files() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:test").unwrap();
+        persist
+            .append("db:test", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:test").unwrap();
+
+        // Check no .json.tmp files exist in shards directory
+        let shards_dir = _temp.path().join("shards");
+        let tmp_files: Vec<_> = fs::read_dir(&shards_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".json.tmp")))
+            .collect();
+        assert!(
+            tmp_files.is_empty(),
+            "No .json.tmp files should remain after atomic write"
+        );
+    }
+
+    /// P0-3: Verify metadata survives restart (atomic write is durable).
+    #[test]
+    fn test_metadata_durable_across_restart() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        // First instance: create shard and flush
+        {
+            let config = PersistConfig {
+                path: path.clone(),
+                buffer_size: 100,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+            persist.ensure_shard("db:meta_test").unwrap();
+            persist
+                .append(
+                    "db:meta_test",
+                    &[Update::insert(Tuple::from_pair(42, 99), 10)],
+                )
+                .unwrap();
+            persist.flush("db:meta_test").unwrap();
+        }
+
+        // Second instance: metadata and data should be intact
+        {
+            let config = PersistConfig {
+                path,
+                buffer_size: 100,
+                durability_mode: DurabilityMode::Immediate,
+            };
+            let persist = FilePersist::new(config).unwrap();
+            let info = persist.shard_info("db:meta_test").unwrap();
+            assert_eq!(info.batch_count, 1);
+
+            let updates = persist.read("db:meta_test", 0).unwrap();
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0].data, Tuple::from_pair(42, 99));
+        }
+    }
+
+    /// P1-7: Verify startup cleans up stale .archived WAL files.
+    #[test]
+    fn test_startup_cleans_archived_wal_files() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().to_path_buf();
+
+        // Create WAL dir with stale archive file
+        let wal_dir = path.join("wal");
+        fs::create_dir_all(&wal_dir).unwrap();
+        fs::write(wal_dir.join("wal_12345.archived"), "stale data").unwrap();
+
+        // Also create required directories for FilePersist
+        fs::create_dir_all(path.join("shards")).unwrap();
+        fs::create_dir_all(path.join("batches")).unwrap();
+
+        // Starting FilePersist should clean up archived files
+        let config = PersistConfig {
+            path: path.clone(),
+            buffer_size: 100,
+            durability_mode: DurabilityMode::Immediate,
+        };
+        let _persist = FilePersist::new(config).unwrap();
+
+        assert!(
+            !wal_dir.join("wal_12345.archived").exists(),
+            "Archived WAL files should be cleaned up on startup"
+        );
     }
 }

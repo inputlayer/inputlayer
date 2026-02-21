@@ -1,0 +1,13 @@
+// Test: .explain shows join node in the IR plan
+.kg create test_explain_join_n33t17
+.kg use test_explain_join_n33t17
+
++user[(1, "alice"), (2, "bob")]
++order[(101, 1), (102, 2)]
+
+// Explain a two-way join
+.explain ?user(UserId, Name), order(OrderId, UserId)
+
+// Cleanup
+.kg use default
+.kg drop test_explain_join_n33t17

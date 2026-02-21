@@ -1,0 +1,57 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_filter_n33t19
+Knowledge graph 'test_explain_filter_n33t19' created.
+Switched to knowledge graph: test_explain_filter_n33t19
+> .kg use test_explain_filter_n33t19
+Switched to knowledge graph: test_explain_filter_n33t19
+> +score[(1, 95), (2, 72), (3, 88)]
+Inserted 3 fact(s) into 'score'.
+> .explain ?score(Id, S), S > 80
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 1
+
+  Rule 1: __query__(Variable("Id"), Variable("S")) <- score(Variable("Id"), Variable("S")), Variable("S") > Constant(80)
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 2
+  Rules: 1
+
+  Rule 1 IR:
+    Filter(ColumnGtConst(1, 80))
+      Scan(score)[Id, S]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 2 -> 2 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Filter(ColumnGtConst(1, 80))
+      Scan(score)[Id, S]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_filter_n33t19
+Knowledge graph 'test_explain_filter_n33t19' dropped.

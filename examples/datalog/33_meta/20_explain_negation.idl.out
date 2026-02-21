@@ -1,0 +1,65 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Current knowledge graph: default
+
+> .kg create test_explain_neg_n33t20
+Knowledge graph 'test_explain_neg_n33t20' created.
+Switched to knowledge graph: test_explain_neg_n33t20
+> .kg use test_explain_neg_n33t20
+Switched to knowledge graph: test_explain_neg_n33t20
+> +employee[(1, "Alice"), (2, "Bob"), (3, "Carol")]
+Inserted 3 fact(s) into 'employee'.
+> +fired[(2,)]
+Inserted 1 fact(s) into 'fired'.
+> .explain ?employee(Id, Name), !fired(Id)
+Query Plan:
+═══════════════════════════════════════════════════════════
+                    PIPELINE TRACE                          
+═══════════════════════════════════════════════════════════
+
+┌---------------------------------------------------------┐
+| PARSING                                                 |
+`---------------------------------------------------------┘
+  Rules parsed: 1
+
+  Rule 1: __query__(Variable("Id"), Variable("Name")) <- employee(Variable("Id"), Variable("Name")), !fired(Variable("Id"))
+
+┌---------------------------------------------------------┐
+| IR CONSTRUCTION                                         |
+`---------------------------------------------------------┘
+  IR nodes: 3
+  Rules: 1
+
+  Rule 1 IR:
+    Antijoin[L:[0], R:[0]] -> [Id, Name]
+    |- Left:
+        Scan(employee)[Id, Name]
+    `- Right:
+        Scan(fired)[Id]
+
+┌---------------------------------------------------------┐
+| OPTIMIZATION                                            |
+`---------------------------------------------------------┘
+  IR nodes: 3 -> 3 (0 eliminated)
+
+  Rule 1 Optimized IR:
+    Antijoin[L:[0], R:[0]] -> [Id, Name]
+    |- Left:
+        Scan(employee)[Id, Name]
+    `- Right:
+        Scan(fired)[Id]
+
+═══════════════════════════════════════════════════════════
+
+
+Optimization passes:
+  - Join Planning (spanning tree reordering)
+  - SIP Rewriting (semijoin reduction)
+  - Subplan Sharing (common subexpression elimination)
+  - Basic Optimizations (identity elimination, filter simplification)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_explain_neg_n33t20
+Knowledge graph 'test_explain_neg_n33t20' dropped.

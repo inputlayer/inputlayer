@@ -18,6 +18,7 @@ use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::{info, warn};
 
 use super::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
 
@@ -108,27 +109,255 @@ pub enum PersistentNotification {
 /// can inject ephemeral facts/rules that combine with persistent data for queries.
 pub struct Handler {
     storage: Arc<RwLock<StorageEngine>>,
+    /// Cached copy of the engine configuration for fast access in hot paths.
+    config: Arc<crate::Config>,
     start_time: Instant,
-    query_count: AtomicU64,
-    insert_count: AtomicU64,
+    query_count: Arc<AtomicU64>,
+    insert_count: Arc<AtomicU64>,
     /// Session manager for ephemeral state
     sessions: SessionManager,
     /// Broadcast channel for persistent data change notifications.
     /// WebSocket connections subscribe to receive push updates.
     notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    /// Semaphore limiting concurrent DD computations.
+    /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
+    /// at the hardware thread count. Tokio workers queue via async `acquire()`.
+    query_semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+/// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
+/// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
+/// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
+struct QueryJob {
+    storage: Arc<RwLock<StorageEngine>>,
+    config: Arc<crate::Config>,
+    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    insert_count: Arc<AtomicU64>,
+    query_count: Arc<AtomicU64>,
+    start_time: Instant,
+}
+
+impl QueryJob {
+    fn inc_query_count(&self) {
+        self.query_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn total_queries(&self) -> u64 {
+        self.query_count.load(Ordering::Relaxed)
+    }
+
+    fn uptime_seconds(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
+    }
+
+    fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
+        if self
+            .notify_tx
+            .send(PersistentNotification::PersistentUpdate {
+                knowledge_graph: kg.to_string(),
+                relation: relation.to_string(),
+                operation: operation.to_string(),
+                count,
+            })
+            .is_err()
+        {
+            tracing::debug!("notify_persistent_update: no active subscribers");
+        }
+    }
+
+    fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
+        let storage = self.storage.read();
+
+        // Resolve column index from schema
+        let column_idx = {
+            let schema = storage
+                .get_schema_in(kg, &opts.relation)
+                .map_err(|e| e.to_string())?;
+            match schema {
+                Some(s) => s.column_index(&opts.column).ok_or_else(|| {
+                    format!(
+                        "Column '{}' not found in relation '{}'. Available: {:?}",
+                        opts.column,
+                        opts.relation,
+                        s.column_names()
+                    )
+                })?,
+                None => {
+                    return Err(format!(
+                        "No schema found for relation '{}'. Register a schema first.",
+                        opts.relation
+                    ));
+                }
+            }
+        };
+
+        // Validate index type
+        let index_type_str = opts.index_type.as_str();
+        if index_type_str != "hnsw" {
+            return Err(format!(
+                "Unsupported index type '{index_type_str}'. Currently only 'hnsw' is supported."
+            ));
+        }
+
+        // Parse distance metric
+        let metric = opts
+            .metric
+            .as_deref()
+            .unwrap_or("cosine")
+            .parse::<DistanceMetric>()
+            .map_err(|e| format!("Invalid metric: {e}"))?;
+
+        let hnsw_config = HnswConfig {
+            m: opts.m.unwrap_or(16),
+            ef_construction: opts.ef_construction.unwrap_or(200),
+            ef_search: opts.ef_search.unwrap_or(50),
+            metric,
+        };
+
+        let registered = RegisteredIndex {
+            name: opts.name.clone(),
+            relation: opts.relation.clone(),
+            column_idx,
+            column_name: opts.column.clone(),
+            index_type: IndexType::Hnsw(hnsw_config),
+        };
+
+        // Enable incremental engine and register index
+        storage
+            .with_kg_mut(kg, |kg_data| {
+                kg_data.enable_incremental().map_err(|e| e.to_string())?;
+                if let Some(dd) = kg_data.incremental() {
+                    dd.register_index(registered)
+                } else {
+                    Err("Failed to enable incremental engine".to_string())
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!(
+            "Index '{}' created on {}.{}.",
+            opts.name, opts.relation, opts.column
+        ))
+    }
+
+    fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.remove_index(name)
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
+        Ok(format!("Index '{name}' dropped."))
+    }
+
+    fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(None)
+                } else {
+                    Ok(vec![])
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    dd.get_index_stats(Some(name))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
+        let storage = self.storage.read();
+        storage
+            .with_kg_read(kg, |kg_data| {
+                if let Some(dd) = kg_data.incremental() {
+                    // Verify the index exists
+                    let stats = dd.get_index_stats(Some(name))?;
+                    if stats.is_empty() {
+                        return Err(format!("Index '{name}' not found"));
+                    }
+                    // Indexes are automatically rebuilt when their base relation
+                    // receives updates. Notify the base relation to trigger rebuild.
+                    Ok(format!(
+                        "Index '{name}' will be rebuilt on next data update."
+                    ))
+                } else {
+                    Err(format!("Index '{name}' not found (no incremental engine)"))
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn explain_query(
+        &self,
+        knowledge_graph: Option<String>,
+        query: String,
+    ) -> Result<(String, Vec<String>), String> {
+        let storage = self.storage.read();
+
+        let kg_name = if let Some(ref kg) = knowledge_graph {
+            storage
+                .ensure_knowledge_graph(kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            kg.clone()
+        } else {
+            storage
+                .current_knowledge_graph()
+                .ok_or("No knowledge graph selected")?
+                .to_string()
+        };
+
+        let trace = storage
+            .explain_query_on(&kg_name, &query)
+            .map_err(|e| format!("{e}"))?;
+
+        let optimizations = vec![
+            "Join Planning (spanning tree reordering)".to_string(),
+            "SIP Rewriting (semijoin reduction)".to_string(),
+            "Subplan Sharing (common subexpression elimination)".to_string(),
+            "Basic Optimizations (identity elimination, filter simplification)".to_string(),
+        ];
+
+        Ok((trace.format_trace(), optimizations))
+    }
 }
 
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
         let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let config = Arc::new(storage.config().clone());
+        let ncpu = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4);
+        // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
+        // The rest are available for CPU-bound DD computations via spawn_blocking.
+        let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
+        let compute_permits = ncpu - io_reserve;
         Self {
             storage: Arc::new(RwLock::new(storage)),
+            config,
             start_time: Instant::now(),
-            query_count: AtomicU64::new(0),
-            insert_count: AtomicU64::new(0),
+            query_count: Arc::new(AtomicU64::new(0)),
+            insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
             notify_tx,
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
         }
     }
 
@@ -142,14 +371,40 @@ impl Handler {
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
         let (notify_tx, _) = tokio::sync::broadcast::channel(4096);
+        let config = Arc::new(storage.config().clone());
+        let ncpu = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(4);
+        // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
+        let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
+        let compute_permits = ncpu - io_reserve;
         Self {
             storage: Arc::new(RwLock::new(storage)),
+            config,
             start_time: Instant::now(),
-            query_count: AtomicU64::new(0),
-            insert_count: AtomicU64::new(0),
+            query_count: Arc::new(AtomicU64::new(0)),
+            insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
             notify_tx,
+            query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
         }
+    }
+
+    /// Create a QueryJob with Arc-cloned fields for use in `spawn_blocking`.
+    fn make_query_job(&self) -> QueryJob {
+        QueryJob {
+            storage: Arc::clone(&self.storage),
+            config: Arc::clone(&self.config),
+            notify_tx: self.notify_tx.clone(),
+            insert_count: Arc::clone(&self.insert_count),
+            query_count: Arc::clone(&self.query_count),
+            start_time: self.start_time,
+        }
+    }
+
+    /// Get reference to the handler's configuration.
+    pub fn config(&self) -> &crate::Config {
+        &self.config
     }
 
     /// Subscribe to persistent data change notifications.
@@ -169,14 +424,18 @@ impl Handler {
         operation: &str,
         count: usize,
     ) {
-        let _ = self
+        if self
             .notify_tx
             .send(PersistentNotification::PersistentUpdate {
                 knowledge_graph: kg.to_string(),
                 relation: relation.to_string(),
                 operation: operation.to_string(),
                 count,
-            });
+            })
+            .is_err()
+        {
+            tracing::debug!("notify_persistent_update: no active subscribers");
+        }
     }
 
     /// Get the session manager.
@@ -196,7 +455,7 @@ impl Handler {
     }
 
     /// Close a session.
-    pub fn close_session(&self, session_id: SessionId) -> Result<(), String> {
+    pub fn close_session(&self, session_id: &SessionId) -> Result<(), String> {
         self.sessions.close_session(session_id)
     }
 
@@ -210,7 +469,29 @@ impl Handler {
         self.storage.read()
     }
 
-    /// Get mutable access to the storage engine (for HTTP handlers).
+    /// Try to acquire a read lock on the storage engine with a timeout.
+    /// Returns `None` if the lock cannot be acquired within the given duration.
+    /// Used by the health check to detect a degraded state (e.g. lock convoy).
+    pub fn try_get_storage(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Option<parking_lot::RwLockReadGuard<'_, StorageEngine>> {
+        self.storage.try_read_for(timeout)
+    }
+
+    /// Graceful shutdown: flush WAL and save metadata for all knowledge graphs.
+    pub fn shutdown(&self) {
+        eprintln!("Flushing WAL and saving metadata...");
+        if let Err(e) = self.storage.read().save_all() {
+            eprintln!("WARNING: Error during shutdown save: {e}");
+        }
+        eprintln!("Shutdown complete.");
+    }
+
+    /// Get mutable access to the storage engine.
+    ///
+    /// **Warning**: This acquires a write lock on the entire storage engine.
+    /// Only use in tests — production code should use `get_storage()` (read lock).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
     }
@@ -423,14 +704,102 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        let program_len = program.len();
+        let query_start = Instant::now();
+
+        // Input size validation (WI-07)
+        let perf = &self.config.storage.performance;
+        if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
+            return Err(format!(
+                "Query too large: {} bytes (max {})",
+                program.len(),
+                perf.max_query_size_bytes
+            ));
+        }
+
+        // Acquire a semaphore permit to bound concurrent DD computations at ncpu.
+        // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
+        // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
+        // `acquire_owned()` is an async wait — Tokio workers remain free while queued.
+        let wait_start = Instant::now();
+        let permit = Arc::clone(&self.query_semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| "Query semaphore closed (server shutting down)")?;
+        let queued_ms = wait_start.elapsed().as_millis() as u64;
+        if queued_ms > 0 {
+            info!(queued_ms, program_len, "query_semaphore_wait");
+        }
+
+        // Offload CPU-bound DD computation to the blocking thread pool.
+        // This keeps Tokio worker threads free for I/O and other async tasks.
+        let job = self.make_query_job();
+        let timeout_ms = self.config.storage.performance.query_timeout_ms;
+
+        // Cooperative cancellation flag: set on timeout so DD spin loops exit promptly.
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_flag_clone = Arc::clone(&cancel_flag);
+
+        // The permit is moved into the blocking task so it's released when DD finishes.
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
+            let result = job.execute(knowledge_graph, program);
+            crate::code_generator::set_query_cancel_flag(None);
+            drop(permit); // Explicit drop; semaphore slot returned here
+            result
+        });
+
+        if timeout_ms > 0 {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
+                    .await;
+            match result {
+                Ok(joined) => {
+                    let compute_ms = query_start.elapsed().as_millis() as u64;
+                    info!(program_len, compute_ms, "query_complete");
+                    joined.map_err(|e| format!("Query task panicked: {e}"))?
+                }
+                Err(_) => {
+                    // Signal the DD spin loop to stop
+                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    warn!(
+                        program_len,
+                        timeout_ms,
+                        elapsed_ms = query_start.elapsed().as_millis() as u64,
+                        "query_timeout"
+                    );
+                    Err("Query execution timed out".to_string())
+                }
+            }
+        } else {
+            let joined = blocking_task
+                .await
+                .map_err(|e| format!("Query task panicked: {e}"))?;
+            let compute_ms = query_start.elapsed().as_millis() as u64;
+            info!(program_len, compute_ms, "query_complete");
+            joined
+        }
+    }
+}
+
+impl QueryJob {
+    /// Execute a Datalog program synchronously on the current thread.
+    /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
+    /// so that Tokio worker threads are never blocked by DD computation.
+    fn execute(
+        self,
+        knowledge_graph: Option<String>,
+        program: String,
+    ) -> Result<QueryResult, String> {
         self.inc_query_count();
         let start = Instant::now();
+        let program_len = program.len();
+        info!(program_len, "query_job_start");
 
-        // Use READ lock  -  all operations use _on()/_into() variants with explicit KG name.
+        // Use READ lock — all operations use _on()/_into() variants with explicit KG name.
         // This allows concurrent queries to execute without blocking each other.
-        // Note: `storage` is `mut` because some meta commands (KgDrop, RuleClear)
-        // temporarily release the read lock to acquire a write lock.
-        let mut storage = self.storage.read();
+        // KgDrop and RuleClear use interior mutability, so no write lock is needed.
+        let storage = self.storage.read();
 
         // Determine target knowledge graph name
         let mut kg_name = if let Some(ref kg) = knowledge_graph {
@@ -453,6 +822,7 @@ impl Handler {
         // Parse every statement upfront. If ANY statement fails to parse,
         // reject the ENTIRE program with structured error info.
         // This prevents partial state from partial execution.
+        let parse_start = Instant::now();
         {
             let mut parse_errors: Vec<ValidationError> = Vec::new();
             let mut stmt_index: usize = 0;
@@ -470,6 +840,13 @@ impl Handler {
                 }
                 stmt_index += 1;
             }
+            let parse_ms = parse_start.elapsed().as_millis() as u64;
+            info!(
+                program_len,
+                statements = stmt_index,
+                parse_ms,
+                "query_parse_complete"
+            );
             if !parse_errors.is_empty() {
                 let errors_json = serde_json::to_string(&parse_errors).unwrap_or_default();
                 return Err(format!("{VALIDATION_ERROR_PREFIX}{errors_json}"));
@@ -490,6 +867,7 @@ impl Handler {
         // Parsed session rules for validation (arity/aggregation compatibility)
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
 
+        let stmt_exec_start = Instant::now();
         for line in program_text.lines() {
             let line = line.trim();
             if line.is_empty() {
@@ -549,6 +927,8 @@ impl Handler {
                                 // Convert all terms to Values and create Tuples
                                 let mut tuples: Vec<Tuple> = Vec::new();
                                 let mut conversion_error = None;
+                                let max_str_bytes =
+                                    self.config.storage.performance.max_string_value_bytes;
 
                                 for tuple_terms in &op.tuples {
                                     if tuple_terms.is_empty() {
@@ -557,6 +937,16 @@ impl Handler {
                                     let mut values: Vec<Value> = Vec::new();
                                     for term in tuple_terms {
                                         match term_to_value(term) {
+                                            Ok(Value::String(ref s))
+                                                if max_str_bytes > 0 && s.len() > max_str_bytes =>
+                                            {
+                                                conversion_error = Some(format!(
+                                                    "String value too long: {} bytes (max {})",
+                                                    s.len(),
+                                                    max_str_bytes
+                                                ));
+                                                break;
+                                            }
                                             Ok(v) => values.push(v),
                                             Err(e) => {
                                                 conversion_error = Some(e);
@@ -572,6 +962,19 @@ impl Handler {
 
                                 if let Some(err) = conversion_error {
                                     messages.push(err);
+                                    current_stmt.clear();
+                                    continue;
+                                }
+
+                                // Validate tuple count limit (WI-07)
+                                let max_tuples = self.config.storage.performance.max_insert_tuples;
+                                if max_tuples > 0 && tuples.len() > max_tuples {
+                                    messages.push(format!(
+                                        "Insert rejected for '{}': {} tuples exceeds max {}",
+                                        op.relation,
+                                        tuples.len(),
+                                        max_tuples
+                                    ));
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -595,13 +998,11 @@ impl Handler {
                                     .fetch_add(inserted as u64, Ordering::Relaxed);
                                 // Notify WebSocket subscribers of persistent data change
                                 if inserted > 0 {
-                                    let _ = self.notify_tx.send(
-                                        PersistentNotification::PersistentUpdate {
-                                            knowledge_graph: kg_name.clone(),
-                                            relation: op.relation.clone(),
-                                            operation: "insert".to_string(),
-                                            count: inserted,
-                                        },
+                                    self.notify_persistent_update(
+                                        &kg_name,
+                                        &op.relation,
+                                        "insert",
+                                        inserted,
                                     );
                                 }
                                 messages.push(format!(
@@ -669,13 +1070,11 @@ impl Handler {
                                                 )
                                                 .map_err(|e| e.to_string())?;
                                             if deleted_count > 0 {
-                                                let _ = self.notify_tx.send(
-                                                    PersistentNotification::PersistentUpdate {
-                                                        knowledge_graph: kg_name.clone(),
-                                                        relation: op.relation.clone(),
-                                                        operation: "delete".to_string(),
-                                                        count: deleted_count,
-                                                    },
+                                                self.notify_persistent_update(
+                                                    &kg_name,
+                                                    &op.relation,
+                                                    "delete",
+                                                    deleted_count,
                                                 );
                                             }
                                             messages.push(format!(
@@ -705,13 +1104,11 @@ impl Handler {
                                             }
                                         }
                                         if total_deleted > 0 {
-                                            let _ = self.notify_tx.send(
-                                                PersistentNotification::PersistentUpdate {
-                                                    knowledge_graph: kg_name.clone(),
-                                                    relation: op.relation.clone(),
-                                                    operation: "delete".to_string(),
-                                                    count: total_deleted,
-                                                },
+                                            self.notify_persistent_update(
+                                                &kg_name,
+                                                &op.relation,
+                                                "delete",
+                                                total_deleted,
                                             );
                                         }
                                         messages.push(format!(
@@ -828,13 +1225,11 @@ impl Handler {
                                         }
 
                                         if deleted > 0 {
-                                            let _ = self.notify_tx.send(
-                                                PersistentNotification::PersistentUpdate {
-                                                    knowledge_graph: kg_name.clone(),
-                                                    relation: op.relation.clone(),
-                                                    operation: "delete".to_string(),
-                                                    count: deleted,
-                                                },
+                                            self.notify_persistent_update(
+                                                &kg_name,
+                                                &op.relation,
+                                                "delete",
+                                                deleted,
                                             );
                                         }
                                         messages.push(format!(
@@ -854,6 +1249,17 @@ impl Handler {
                                 messages.push(format!("Rule '{}' registered.", rule.head.relation));
                             }
                             statement::Statement::SessionRule(rule) => {
+                                // Reject reserved '__' prefix to prevent shadowing internal relations.
+                                // The head relation may have a leading '~' (transient syntax marker),
+                                // so strip it before checking.
+                                let bare_name = rule.head.relation.trim_start_matches('~');
+                                if bare_name.starts_with("__") {
+                                    return Err(format!(
+                                        "Session rule '{}' uses reserved '__' prefix. Choose a different relation name.",
+                                        rule.head.relation
+                                    ));
+                                }
+
                                 // Validate session rule for safety constraints
                                 // (self-negation, head variable safety, range restriction)
                                 validate_rule(&rule, &rule.head.relation)?;
@@ -986,13 +1392,11 @@ impl Handler {
                                     .fetch_add(inserted as u64, Ordering::Relaxed);
 
                                 if deleted > 0 || inserted > 0 {
-                                    let _ = self.notify_tx.send(
-                                        PersistentNotification::PersistentUpdate {
-                                            knowledge_graph: kg_name.clone(),
-                                            relation: "multiple".to_string(),
-                                            operation: "update".to_string(),
-                                            count: deleted + inserted,
-                                        },
+                                    self.notify_persistent_update(
+                                        &kg_name,
+                                        "multiple",
+                                        "update",
+                                        deleted + inserted,
                                     );
                                 }
                                 messages.push(format!(
@@ -1022,8 +1426,10 @@ impl Handler {
                                         }
                                     }
                                     MetaCommand::KgCreate(name) => {
+                                        info!(kg = %name, "meta_kg_create_start");
                                         match storage.create_knowledge_graph(&name) {
                                             Ok(()) => {
+                                                info!(kg = %name, "meta_kg_create_ok");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
                                                 ));
@@ -1034,13 +1440,16 @@ impl Handler {
                                                 switched_kg_result = Some(name);
                                             }
                                             Err(e) => {
+                                                info!(kg = %name, error = %e, "meta_kg_create_err");
                                                 messages.push(format!("Create failed: {e}"));
                                             }
                                         }
                                     }
                                     MetaCommand::KgUse(name) => {
+                                        info!(kg = %name, "meta_kg_use_start");
                                         match storage.ensure_knowledge_graph(&name) {
                                             Ok(()) => {
+                                                info!(kg = %name, "meta_kg_use_ok");
                                                 messages.push(format!(
                                                     "Switched to knowledge graph: {name}"
                                                 ));
@@ -1048,6 +1457,7 @@ impl Handler {
                                                 switched_kg_result = Some(name);
                                             }
                                             Err(e) => {
+                                                info!(kg = %name, error = %e, "meta_kg_use_err");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' not found: {e}"
                                                 ));
@@ -1058,33 +1468,26 @@ impl Handler {
                                         if name == kg {
                                             messages.push("Cannot drop current knowledge graph. Switch to another first.".to_string());
                                         } else {
-                                            // Release read lock for Phase 1 (needs write lock)
-                                            drop(storage);
-
-                                            // Phase 1: Fast in-memory removal (under write lock, ~microseconds)
-                                            let drop_result = {
-                                                let mut storage_w = self.storage.write();
-                                                storage_w.prepare_drop_knowledge_graph(&name)
-                                            }; // write lock released immediately
-
-                                            match drop_result {
+                                            info!(kg = %name, "meta_kg_drop_start");
+                                            // Phase 1: Fast in-memory removal (~microseconds).
+                                            // Uses interior mutability (DashMap + RwLock), so no
+                                            // storage-level write lock is needed. This avoids
+                                            // the lock convoy that previously froze the server.
+                                            match storage.prepare_drop_knowledge_graph(&name) {
                                                 Ok(cleanup) => {
+                                                    info!(kg = %name, "meta_kg_drop_prepare_ok");
                                                     messages.push(format!(
                                                         "Knowledge graph '{name}' dropped."
                                                     ));
-                                                    // Phase 2: Slow file cleanup (NO storage lock held)
-                                                    let storage_ref = self.storage.read();
-                                                    storage_ref
-                                                        .finish_drop_knowledge_graph(cleanup);
-                                                    drop(storage_ref);
+                                                    // Phase 2: Slow file cleanup
+                                                    storage.finish_drop_knowledge_graph(cleanup);
+                                                    info!(kg = %name, "meta_kg_drop_finish_ok");
                                                 }
                                                 Err(e) => {
+                                                    info!(kg = %name, error = %e, "meta_kg_drop_err");
                                                     messages.push(format!("Drop failed: {e}"));
                                                 }
                                             }
-
-                                            // Re-acquire read lock
-                                            storage = self.storage.read();
                                         }
                                     }
 
@@ -1226,19 +1629,12 @@ impl Handler {
                                         }
                                     }
                                     MetaCommand::RuleClear(name) => {
-                                        // Need write lock
-                                        drop(storage);
-                                        {
-                                            let mut storage_w = self.storage.write();
-                                            match storage_w.clear_rule_in(kg, &name) {
-                                                Ok(()) => {
-                                                    messages
-                                                        .push(format!("Rule '{name}' cleared."));
-                                                }
-                                                Err(e) => messages.push(format!("Error: {e}")),
+                                        match storage.clear_rule_in(kg, &name) {
+                                            Ok(()) => {
+                                                messages.push(format!("Rule '{name}' cleared."));
                                             }
+                                            Err(e) => messages.push(format!("Error: {e}")),
                                         }
-                                        storage = self.storage.read();
                                     }
                                     MetaCommand::RuleEdit { .. } => {
                                         messages.push(
@@ -1322,19 +1718,34 @@ impl Handler {
 
                                     // === Index commands ===
                                     MetaCommand::IndexCreate(opts) => {
+                                        info!(index = %opts.name, "meta_index_create_start");
                                         match self.create_index(kg, &opts) {
-                                            Ok(msg) => messages.push(msg),
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Ok(msg) => {
+                                                info!(index = %opts.name, "meta_index_create_ok");
+                                                messages.push(msg);
+                                            }
+                                            Err(e) => {
+                                                info!(index = %opts.name, error = %e, "meta_index_create_err");
+                                                messages.push(format!("Index error: {e}"));
+                                            }
                                         }
                                     }
                                     MetaCommand::IndexDrop(name) => {
+                                        info!(index = %name, "meta_index_drop_start");
                                         match self.drop_index(kg, &name) {
-                                            Ok(msg) => messages.push(msg),
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Ok(msg) => {
+                                                info!(index = %name, "meta_index_drop_ok");
+                                                messages.push(msg);
+                                            }
+                                            Err(e) => {
+                                                info!(index = %name, error = %e, "meta_index_drop_err");
+                                                messages.push(format!("Index error: {e}"));
+                                            }
                                         }
                                     }
                                     MetaCommand::IndexList => match self.list_indexes(kg) {
                                         Ok(stats) => {
+                                            info!(count = stats.len(), "meta_index_list_ok");
                                             if stats.is_empty() {
                                                 messages.push("No indexes.".to_string());
                                             } else {
@@ -1348,11 +1759,16 @@ impl Handler {
                                                 }
                                             }
                                         }
-                                        Err(e) => messages.push(format!("Index error: {e}")),
+                                        Err(e) => {
+                                            info!(error = %e, "meta_index_list_err");
+                                            messages.push(format!("Index error: {e}"));
+                                        }
                                     },
                                     MetaCommand::IndexStats(name) => {
+                                        info!(index = %name, "meta_index_stats_start");
                                         match self.get_index_stats(kg, &name) {
                                             Ok(stats) => {
+                                                info!(index = %name, count = stats.len(), "meta_index_stats_ok");
                                                 for s in &stats {
                                                     messages.push(format!(
                                                         "Index '{}': relation={}, column={}, type={}, metric={}, vectors={}, tombstones={}, valid={}, dimension={}",
@@ -1400,9 +1816,20 @@ impl Handler {
                 current_stmt.clear();
             }
         }
+        let stmt_exec_ms = stmt_exec_start.elapsed().as_millis() as u64;
+        if stmt_exec_ms > 0 {
+            info!(
+                program_len,
+                stmt_exec_ms,
+                session_facts = session_fact_tuples.len(),
+                session_rules = session_rules.len(),
+                "query_statement_exec_complete"
+            );
+        }
 
         // Return messages if no query
         if !messages.is_empty() && query_to_execute.is_none() {
+            drop(storage); // Release storage lock — we no longer need it
             let rows: Vec<WireTuple> = messages
                 .iter()
                 .map(|msg| WireTuple {
@@ -1411,6 +1838,11 @@ impl Handler {
                 })
                 .collect();
             let total_count = rows.len();
+            info!(
+                program_len,
+                total_ms = start.elapsed().as_millis() as u64,
+                "query_job_complete_messages"
+            );
             return Ok(QueryResult {
                 rows,
                 schema: vec![ColumnDef {
@@ -1443,10 +1875,16 @@ impl Handler {
             format!("{rules_text}\n{query_program}")
         };
 
-        // Execute query with session facts using isolated execution
-        // Session facts are added to an ISOLATED COPY of the snapshot's data,
-        // providing request-scoped isolation. Concurrent queries cannot see
-        // each other's session facts.
+        // Get a snapshot of the KG data under the lock (O(1) Arc clone),
+        // then RELEASE the storage lock before the heavy DD computation.
+        // This prevents lock convoys: when another thread needs a write lock
+        // (e.g. .kg drop), parking_lot's write-preferring policy would otherwise
+        // block ALL new readers while waiting for long-running DD computations.
+        let snapshot = storage
+            .get_snapshot_for(&kg_name)
+            .map_err(|e| e.to_string())?;
+        drop(storage); // Release storage read lock BEFORE DD computation
+
         let debug_session = std::env::var("IL_DEBUG_SESSION").is_ok();
         if debug_session && !session_fact_tuples.is_empty() {
             eprintln!(
@@ -1458,19 +1896,27 @@ impl Handler {
             }
         }
 
-        // Use isolated execution - session facts are added to a CLONE, not the shared store
-        // This fixes the race condition where concurrent queries could see each other's session facts
-        let results = if session_fact_tuples.is_empty() {
-            // No session facts - use the regular query path
-            storage
-                .execute_query_with_rules_tuples_on(&kg_name, &query_program)
-                .map_err(|e| e.to_string())?
+        // Execute DD computation on the snapshot — completely lock-free.
+        // Session facts are added to an ISOLATED COPY, providing request-scoped isolation.
+        let query_exec_start = Instant::now();
+        let has_session_facts = !session_fact_tuples.is_empty();
+        let results = if !has_session_facts {
+            snapshot
+                .execute_with_rules_tuples(&query_program)
+                .map_err(|e| format!("Query execution failed: {e}"))?
         } else {
-            // Has session facts - use isolated execution
-            storage
-                .execute_query_with_session_facts_on(&kg_name, &query_program, session_fact_tuples)
-                .map_err(|e| e.to_string())?
+            snapshot
+                .execute_with_session_facts(&query_program, session_fact_tuples)
+                .map_err(|e| format!("Query execution failed: {e}"))?
         };
+        let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
+        info!(
+            program_len,
+            kg = %kg_name,
+            query_exec_ms,
+            has_session_facts,
+            "query_engine_exec_complete"
+        );
 
         // Convert Tuple results to WireTuple, supporting mixed types
         let rows: Vec<WireTuple> = results
@@ -1544,6 +1990,15 @@ impl Handler {
         let rows = apply_pagination(rows, query_limit, query_offset);
         let truncated = rows.len() < total_count;
 
+        info!(
+            program_len,
+            total_ms = start.elapsed().as_millis() as u64,
+            row_count = rows.len(),
+            total_count,
+            truncated,
+            "query_job_complete"
+        );
+
         Ok(QueryResult {
             rows,
             schema,
@@ -1554,7 +2009,9 @@ impl Handler {
             switched_kg: None,
         })
     }
+}
 
+impl Handler {
     /// Explain a query plan without executing it.
     ///
     /// Runs the full compilation pipeline (parse → IR → optimize) and returns
@@ -1602,7 +2059,7 @@ impl Handler {
     /// delegates directly to `query_program` with no overhead.
     pub async fn query_program_with_session(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
         // Touch session to prevent idle reaping during query execution
@@ -1644,30 +2101,76 @@ impl Handler {
 
         self.inc_query_count();
         let start = Instant::now();
-        let storage = self.storage.read();
 
-        storage
-            .ensure_knowledge_graph(&kg)
-            .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+        // Get snapshot under read lock, then RELEASE lock immediately.
+        // This prevents lock convoys: holding the lock during DD computation
+        // would block all mutations (the exact bug fixed in PR #12 for regular queries).
+        let snapshot = {
+            let storage = self.storage.read();
+            storage
+                .ensure_knowledge_graph(&kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            storage.get_snapshot_for(&kg).map_err(|e| e.to_string())?
+        }; // storage read lock released here
 
-        // Use isolated execution with session facts
-        let results = storage
-            .execute_query_with_session_facts_on(&kg, &combined_program, session_facts)
-            .map_err(|e| e.to_string())?;
+        // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
+        let permit = Arc::clone(&self.query_semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| "Query semaphore closed (server shutting down)")?;
 
-        // Per-tuple provenance: run the original query (without ephemeral rules)
-        // against persistent-only data to identify ephemeral contributions.
-        use crate::session::Provenance;
-        use std::collections::HashSet;
-        let baseline: HashSet<Tuple> = match storage
-            .execute_query_with_rules_tuples_on(&kg, &preprocessed)
-        {
-            Ok(tuples) => tuples.into_iter().collect(),
-            Err(e) => {
-                eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
-                HashSet::new()
+        let timeout_ms = self.config.storage.performance.query_timeout_ms;
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_flag_clone = Arc::clone(&cancel_flag);
+
+        // Offload CPU-bound DD computation to the blocking thread pool
+        let combined_program_clone = combined_program;
+        let preprocessed_clone = preprocessed;
+        let blocking_task = tokio::task::spawn_blocking(move || {
+            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
+
+            // Run session query on snapshot (lock-free)
+            let results = snapshot
+                .execute_with_session_facts(&combined_program_clone, session_facts)
+                .map_err(|e| format!("Query execution failed: {e}"))?;
+
+            // Per-tuple provenance: run the original query (without ephemeral rules)
+            // against persistent-only data to identify ephemeral contributions.
+            use std::collections::HashSet;
+            let baseline: HashSet<Tuple> = match snapshot
+                .execute_with_rules_tuples(&preprocessed_clone)
+            {
+                Ok(tuples) => tuples.into_iter().collect(),
+                Err(e) => {
+                    eprintln!("Warning: provenance baseline query failed: {e}. All tuples will be tagged as ephemeral.");
+                    HashSet::new()
+                }
+            };
+
+            crate::code_generator::set_query_cancel_flag(None);
+            drop(permit); // Release semaphore slot
+
+            Ok::<_, String>((results, baseline))
+        });
+
+        // Apply timeout if configured
+        let (results, baseline) = if timeout_ms > 0 {
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
+                .await
+            {
+                Ok(joined) => joined.map_err(|e| format!("Query task panicked: {e}"))?,
+                Err(_) => {
+                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Err("Query execution timed out".to_string());
+                }
             }
-        };
+        } else {
+            blocking_task
+                .await
+                .map_err(|e| format!("Query task panicked: {e}"))?
+        }?;
+
+        use crate::session::Provenance;
 
         // Convert results to wire format with per-tuple provenance
         let rows: Vec<WireTuple> = results
@@ -1688,8 +2191,6 @@ impl Handler {
                         Value::Timestamp(ts) => WireValue::Timestamp(*ts),
                     })
                     .collect();
-                // Tag provenance: if tuple exists in persistent baseline → Persistent,
-                // otherwise it was introduced by ephemeral data → Ephemeral
                 let prov = if baseline.contains(tuple) {
                     Provenance::Persistent
                 } else {
@@ -1778,7 +2279,7 @@ impl Handler {
     /// Returns the number of facts actually inserted (after dedup).
     pub fn session_insert_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -1788,7 +2289,7 @@ impl Handler {
     /// Retract ephemeral facts from a session.
     pub fn session_retract_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -1799,7 +2300,7 @@ impl Handler {
     /// Add an ephemeral rule to a session.
     pub fn session_add_rule(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         rule: crate::ast::Rule,
         rule_text: String,
     ) -> Result<(), String> {
@@ -1820,7 +2321,7 @@ impl Handler {
     /// - All other statements via `query_program()` or `query_program_with_session()`
     pub async fn execute_program(
         &self,
-        session_id: Option<SessionId>,
+        session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
@@ -1874,6 +2375,16 @@ impl Handler {
             if let Ok(ref stmt) = statement::parse_statement(trimmed) {
                 match stmt {
                     statement::Statement::SessionRule(rule) => {
+                        // Reject reserved '__' prefix to prevent shadowing internal relations.
+                        // Strip leading '~' (transient syntax marker) before checking.
+                        let bare_name = rule.head.relation.trim_start_matches('~');
+                        if bare_name.starts_with("__") {
+                            return Err(format!(
+                                "Session rule '{}' uses reserved '__' prefix. Choose a different relation name.",
+                                rule.head.relation
+                            ));
+                        }
+
                         // Validate rule safety (self-negation, head variable safety, etc.)
                         validate_rule(rule, &rule.head.relation)?;
 
@@ -1985,7 +2496,7 @@ impl Handler {
     }
 
     /// Handle `.session` list command
-    fn handle_session_list(&self, session_id: SessionId) -> Result<QueryResult, String> {
+    fn handle_session_list(&self, session_id: &SessionId) -> Result<QueryResult, String> {
         let mut messages = Vec::new();
         self.sessions.with_session(session_id, |session| {
             let has_facts = !session.ephemeral_facts().is_empty();
@@ -2041,7 +2552,7 @@ impl Handler {
     /// Handle `.session drop <index>` command
     fn handle_session_drop(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         index: usize,
     ) -> Result<QueryResult, String> {
         let inner_result: Result<String, String> =
@@ -2061,7 +2572,7 @@ impl Handler {
     /// Handle `.session drop <name>` command
     fn handle_session_drop_name(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         name: &str,
     ) -> Result<QueryResult, String> {
         let msg = self.sessions.with_session_mut(session_id, |session| {
@@ -2392,14 +2903,14 @@ mod tests {
     fn test_handler_create_and_close_session() {
         let (handler, _tmp) = handler_with_kg("sess_create_test");
         let session_id = handler.create_session("sess_create_test").unwrap();
-        assert!(session_id > 0);
-        handler.close_session(session_id).unwrap();
+        assert!(!session_id.is_empty());
+        handler.close_session(&session_id).unwrap();
     }
 
     #[test]
     fn test_handler_close_nonexistent_session() {
         let (handler, _tmp) = make_test_handler();
-        assert!(handler.close_session(999).is_err());
+        assert!(handler.close_session(&"nonexistent".to_string()).is_err());
     }
 
     #[test]
@@ -2408,7 +2919,7 @@ mod tests {
         let sid = handler.create_session("sess_insert_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])];
         handler
-            .session_insert_ephemeral(sid, "edge", tuples)
+            .session_insert_ephemeral(&sid, "edge", tuples)
             .unwrap();
     }
 
@@ -2418,9 +2929,11 @@ mod tests {
         let sid = handler.create_session("sess_retract_test").unwrap();
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         handler
-            .session_insert_ephemeral(sid, "r", tuples.clone())
+            .session_insert_ephemeral(&sid, "r", tuples.clone())
             .unwrap();
-        let retracted = handler.session_retract_ephemeral(sid, "r", tuples).unwrap();
+        let retracted = handler
+            .session_retract_ephemeral(&sid, "r", tuples)
+            .unwrap();
         assert_eq!(retracted, 1);
     }
 
@@ -2797,11 +3310,11 @@ mod tests {
         let sid = handler.create_session("sess_clean_q").unwrap();
         // Clean session uses fast path (delegates to query_program)
         let result = handler
-            .query_program_with_session(sid, "?sdata(X)".to_string())
+            .query_program_with_session(&sid, "?sdata(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -2813,22 +3326,22 @@ mod tests {
             .unwrap();
         let sid = handler.create_session("sess_eph_q").unwrap();
         handler
-            .session_insert_ephemeral(sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
+            .session_insert_ephemeral(&sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
             .unwrap();
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- data(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- data(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
     async fn test_query_program_with_session_invalid_id() {
         let (handler, _tmp) = make_test_handler();
         let result = handler
-            .query_program_with_session(99999, "?data(X)".to_string())
+            .query_program_with_session(&"99999".to_string(), "?data(X)".to_string())
             .await;
         assert!(result.is_err());
     }
@@ -2850,15 +3363,15 @@ mod tests {
         let rule_text = "doubled(X, Y) <- base(X), Y = X * 2";
         let rule = crate::parser::parse_rule(rule_text).unwrap();
         handler
-            .session_add_rule(sid, rule, rule_text.to_string())
+            .session_add_rule(&sid, rule, rule_text.to_string())
             .unwrap();
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
-            .query_program_with_session(sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
+            .query_program_with_session(&sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     // --- validate_tuples_against_schema tests ---
@@ -2988,7 +3501,7 @@ mod tests {
         // 4. Client A inserts ephemeral edge(1, 2)
         handler
             .session_insert_ephemeral(
-                client_a,
+                &client_a,
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
             )
@@ -2997,7 +3510,7 @@ mod tests {
         // 5. Client B inserts ephemeral edge(3, 4)
         handler
             .session_insert_ephemeral(
-                client_b,
+                &client_b,
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(3), Value::Int64(4)])],
             )
@@ -3005,7 +3518,7 @@ mod tests {
 
         // 6. Client A queries reachable → sees persistent (10,20) + ephemeral (1,2)
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- reachable(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(
@@ -3016,7 +3529,7 @@ mod tests {
 
         // 7. Client B queries reachable → sees persistent (10,20) + ephemeral (3,4)
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- reachable(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(
@@ -3058,8 +3571,8 @@ mod tests {
             "Without session, only the persistent edge(10,20) should produce reachable(10,20)"
         );
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3084,7 +3597,7 @@ mod tests {
         // Client A: link(1,2), link(2,3)
         handler
             .session_insert_ephemeral(
-                client_a,
+                &client_a,
                 "link",
                 vec![
                     Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
@@ -3096,7 +3609,7 @@ mod tests {
         // Client B: link(100,200) (completely different)
         handler
             .session_insert_ephemeral(
-                client_b,
+                &client_b,
                 "link",
                 vec![Tuple::new(vec![Value::Int64(100), Value::Int64(200)])],
             )
@@ -3104,14 +3617,14 @@ mod tests {
 
         // Client A → 2 path results
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B → 1 path result
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_b.rows.len(), 1);
@@ -3123,8 +3636,8 @@ mod tests {
             .unwrap();
         assert_eq!(result_none.rows.len(), 0);
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3142,11 +3655,11 @@ mod tests {
         let sid = handler.create_session(kg).unwrap();
         // Ephemeral fact
         handler
-            .session_insert_ephemeral(sid, "items", vec![Tuple::new(vec![Value::Int64(3)])])
+            .session_insert_ephemeral(&sid, "items", vec![Tuple::new(vec![Value::Int64(3)])])
             .unwrap();
 
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- items(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- items(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
@@ -3167,7 +3680,7 @@ mod tests {
         assert_eq!(persistent_count, 2, "2 tuples from persistent data");
         assert_eq!(ephemeral_count, 1, "1 tuple from ephemeral data");
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -3188,31 +3701,31 @@ mod tests {
         // Client A adds an ephemeral rule: path(X,Y) <- edge(X,Y)
         let rule_a = crate::parser::parse_rule("path(X, Y) <- edge(X, Y)").unwrap();
         handler
-            .session_add_rule(client_a, rule_a, "path(X, Y) <- edge(X, Y)".to_string())
+            .session_add_rule(&client_a, rule_a, "path(X, Y) <- edge(X, Y)".to_string())
             .unwrap();
 
         // Client B inserts a trivial ephemeral fact to make it "dirty"
         // (so it uses the slow path and doesn't delegate to query_program)
         handler
-            .session_insert_ephemeral(client_b, "marker", vec![Tuple::new(vec![Value::Int64(0)])])
+            .session_insert_ephemeral(&client_b, "marker", vec![Tuple::new(vec![Value::Int64(0)])])
             .unwrap();
 
         // Client A queries path → 2 results (from the ephemeral rule on persistent edges)
         let result_a = handler
-            .query_program_with_session(client_a, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B queries path → 0 results (no "path" rule in client B's scope)
         let result_b = handler
-            .query_program_with_session(client_b, "__q__(X, Y) <- path(X, Y)".to_string())
+            .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result_b.rows.len(), 0);
 
-        handler.close_session(client_a).unwrap();
-        handler.close_session(client_b).unwrap();
+        handler.close_session(&client_a).unwrap();
+        handler.close_session(&client_b).unwrap();
     }
 
     #[tokio::test]
@@ -3231,18 +3744,18 @@ mod tests {
 
         let sid = handler.create_session(kg).unwrap();
         handler
-            .session_insert_ephemeral(sid, "base", vec![Tuple::new(vec![Value::Int64(42)])])
+            .session_insert_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(42)])])
             .unwrap();
 
         // Query while session is active → 1 result
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- cleanup_rule(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- cleanup_rule(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 1);
 
         // Close session
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
 
         // Query without session → 0 results
         let result = handler
@@ -3278,7 +3791,7 @@ mod tests {
             // Each session queries for a different doc: session i queries for doc i%3+1
             handler
                 .session_insert_ephemeral(
-                    sid,
+                    &sid,
                     "query_embedding",
                     vec![Tuple::new(vec![Value::Int64(i % 3 + 1)])],
                 )
@@ -3287,7 +3800,7 @@ mod tests {
         }
 
         // Query all sessions sequentially (each is isolated)
-        for (i, &sid) in sessions.iter().enumerate() {
+        for (i, sid) in sessions.iter().enumerate() {
             let result = handler
                 .query_program_with_session(sid, "__q__(X) <- relevant(X)".to_string())
                 .await
@@ -3300,7 +3813,7 @@ mod tests {
         }
 
         // Cleanup
-        for sid in sessions {
+        for sid in &sessions {
             handler.close_session(sid).unwrap();
         }
     }
@@ -3319,7 +3832,7 @@ mod tests {
         let sid = handler.create_session(kg).unwrap();
         handler
             .session_insert_ephemeral(
-                sid,
+                &sid,
                 "item",
                 vec![
                     Tuple::new(vec![Value::Int64(1)]),
@@ -3331,24 +3844,24 @@ mod tests {
 
         // Query → 3 visible
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- visible(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
 
         // Retract item(2)
         handler
-            .session_retract_ephemeral(sid, "item", vec![Tuple::new(vec![Value::Int64(2)])])
+            .session_retract_ephemeral(&sid, "item", vec![Tuple::new(vec![Value::Int64(2)])])
             .unwrap();
 
         // Query → 2 visible
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- visible(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[tokio::test]
@@ -3363,11 +3876,11 @@ mod tests {
 
         let sid = handler.create_session(kg).unwrap();
         handler
-            .session_insert_ephemeral(sid, "src", vec![Tuple::new(vec![Value::Int64(1)])])
+            .session_insert_ephemeral(&sid, "src", vec![Tuple::new(vec![Value::Int64(1)])])
             .unwrap();
 
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- derived(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- derived(X)".to_string())
             .await
             .unwrap();
 
@@ -3380,7 +3893,7 @@ mod tests {
             "metadata should report 'src' as ephemeral source"
         );
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     // --- Notifications from mutations ---
@@ -3557,7 +4070,7 @@ mod tests {
         // Add ephemeral facts
         handler
             .session_insert_ephemeral(
-                sid,
+                &sid,
                 "base",
                 vec![
                     Tuple::new(vec![Value::Int64(20)]),
@@ -3568,31 +4081,34 @@ mod tests {
 
         // Query with session → 3 results
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 3);
 
         // Retract one ephemeral fact
         handler
-            .session_retract_ephemeral(sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
+            .session_retract_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
             .unwrap();
 
         // Query again → 2 results
         let result = handler
-            .query_program_with_session(sid, "__q__(X) <- base(X)".to_string())
+            .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(sid).unwrap();
+        handler.close_session(&sid).unwrap();
     }
 
     #[test]
     fn test_session_insert_invalid_session() {
         let (handler, _tmp) = make_test_handler();
-        let result =
-            handler.session_insert_ephemeral(99999, "rel", vec![Tuple::new(vec![Value::Int64(1)])]);
+        let result = handler.session_insert_ephemeral(
+            &"99999".to_string(),
+            "rel",
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
         assert!(result.is_err());
     }
 
@@ -3600,7 +4116,7 @@ mod tests {
     fn test_session_retract_invalid_session() {
         let (handler, _tmp) = make_test_handler();
         let result = handler.session_retract_ephemeral(
-            99999,
+            &"99999".to_string(),
             "rel",
             vec![Tuple::new(vec![Value::Int64(1)])],
         );
@@ -3852,7 +4368,7 @@ mod tests {
     #[test]
     fn test_handler_close_session_invalid() {
         let (handler, _tmp) = make_test_handler();
-        let result = handler.close_session(999999);
+        let result = handler.close_session(&"999999".to_string());
         assert!(result.is_err());
     }
 
@@ -4068,7 +4584,7 @@ mod tests {
 
         // Add a session rule
         let result = handler
-            .execute_program(Some(sid), None, "path(X, Y) <- edge(X, Y)".to_string())
+            .execute_program(Some(&sid), None, "path(X, Y) <- edge(X, Y)".to_string())
             .await
             .unwrap();
         assert!(result.rows[0].values[0]
@@ -4077,12 +4593,12 @@ mod tests {
             .contains("Session rule added"));
 
         // Verify session is now dirty (has rules)
-        let is_clean = handler.session_manager().is_session_clean(sid).unwrap();
+        let is_clean = handler.session_manager().is_session_clean(&sid).unwrap();
         assert!(!is_clean, "Session should be dirty after adding rule");
 
         // Query using the session rule — should return results
         let result = handler
-            .execute_program(Some(sid), None, "?path(X, Y)".to_string())
+            .execute_program(Some(&sid), None, "?path(X, Y)".to_string())
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
@@ -4108,13 +4624,13 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         handler
-            .execute_program(Some(sid), None, "+edge[(1,2)]".to_string())
+            .execute_program(Some(&sid), None, "+edge[(1,2)]".to_string())
             .await
             .unwrap();
 
         let reaped = handler.session_manager().reap_expired();
         assert_eq!(reaped, 0, "Session should remain alive after execute");
-        assert!(handler.session_manager().has_session(sid));
+        assert!(handler.session_manager().has_session(&sid));
 
         drop(tmp);
     }
@@ -4198,6 +4714,98 @@ mod tests {
         assert_eq!(errors.len(), 2, "Should report both parse errors");
         assert_eq!(errors[0].line, 1);
         assert_eq!(errors[1].line, 3);
+    }
+
+    // === Regression tests for production readiness fixes ===
+
+    /// P0-6 regression: try_get_storage returns None when write lock is held.
+    /// Ensures the health check can detect lock contention.
+    #[test]
+    fn test_try_get_storage_returns_none_when_write_locked() {
+        let (handler, _tmp) = make_test_handler();
+        let handler = Arc::new(handler);
+
+        // Hold a write lock from another thread for 2 seconds
+        let h2 = Arc::clone(&handler);
+        let lock_thread = std::thread::spawn(move || {
+            let _guard = h2.get_storage_mut();
+            std::thread::sleep(Duration::from_secs(2));
+        });
+
+        // Give the thread time to acquire the write lock
+        std::thread::sleep(Duration::from_millis(50));
+
+        // try_get_storage should fail quickly (10ms timeout)
+        let result = handler.try_get_storage(Duration::from_millis(10));
+        assert!(
+            result.is_none(),
+            "try_get_storage should return None when write lock is held"
+        );
+
+        lock_thread.join().unwrap();
+    }
+
+    /// P0-6 regression: Session IDs are unique UUIDs, not sequential integers.
+    /// Prevents session enumeration attacks.
+    #[test]
+    fn test_session_ids_are_unique_uuids() {
+        let (mut config, _tmp) = make_test_config();
+        config.storage.auto_create_knowledge_graphs = true;
+        let handler = Handler::from_config(config).unwrap();
+        let id1 = handler.create_session("default").unwrap();
+        let id2 = handler.create_session("default").unwrap();
+
+        assert_ne!(id1, id2, "Session IDs must be unique");
+        // UUID v4 format: 8-4-4-4-12 = 36 chars
+        assert_eq!(id1.len(), 36, "Session ID should be UUID format (36 chars)");
+        assert_eq!(id2.len(), 36, "Session ID should be UUID format (36 chars)");
+        assert!(id1.contains('-'), "Session ID should contain UUID dashes");
+        // Ensure not sequential
+        let id3 = handler.create_session("default").unwrap();
+        assert_ne!(id2, id3);
+        assert_ne!(id1, id3);
+    }
+
+    /// Shutdown regression: handler.shutdown() flushes data so it survives restart.
+    #[tokio::test]
+    async fn test_handler_shutdown_flushes_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().to_path_buf();
+
+        // Phase 1: Create handler, insert data, shutdown
+        {
+            let mut config = Config::default();
+            config.storage.data_dir = data_dir.clone();
+            config.storage.auto_create_knowledge_graphs = true;
+            let handler = Handler::from_config(config).unwrap();
+            handler
+                .query_program(
+                    Some("shutdown_kg".to_string()),
+                    "+persist_data[(1, 2), (3, 4)]".to_string(),
+                )
+                .await
+                .unwrap();
+            handler.shutdown();
+        }
+
+        // Phase 2: Reopen from same data_dir, verify data survived
+        {
+            let mut config = Config::default();
+            config.storage.data_dir = data_dir;
+            let handler = Handler::from_config(config).unwrap();
+            let result = handler
+                .query_program(
+                    Some("shutdown_kg".to_string()),
+                    "?persist_data(X, Y)".to_string(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                result.rows.len(),
+                2,
+                "Data should survive shutdown + restart"
+            );
+        }
     }
 }
 

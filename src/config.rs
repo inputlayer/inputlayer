@@ -66,6 +66,10 @@ pub struct StorageConfig {
     /// Performance settings
     #[serde(default)]
     pub performance: PerformanceConfig,
+
+    /// Maximum number of knowledge graphs allowed (0 = unlimited)
+    #[serde(default = "default_max_knowledge_graphs")]
+    pub max_knowledge_graphs: usize,
 }
 
 /// Persistence configuration (legacy)
@@ -183,6 +187,22 @@ pub struct PerformanceConfig {
     /// 0 = use all available CPU cores
     #[serde(default)]
     pub num_threads: usize,
+
+    /// Query execution timeout in milliseconds. 0 = no timeout.
+    #[serde(default = "default_query_timeout_ms")]
+    pub query_timeout_ms: u64,
+
+    /// Maximum query program size in bytes. 0 = no limit.
+    #[serde(default = "default_max_query_size_bytes")]
+    pub max_query_size_bytes: usize,
+
+    /// Maximum number of tuples in a single insert. 0 = no limit.
+    #[serde(default = "default_max_insert_tuples")]
+    pub max_insert_tuples: usize,
+
+    /// Maximum string value length in bytes. 0 = no limit.
+    #[serde(default = "default_max_string_value_bytes")]
+    pub max_string_value_bytes: usize,
 }
 
 /// Optimization configuration (re-use existing from lib.rs)
@@ -230,9 +250,13 @@ pub struct HttpConfig {
     #[serde(default = "default_http_port")]
     pub port: u16,
 
-    /// Allowed CORS origins (empty = allow all in dev mode)
+    /// Allowed CORS origins (empty = same-origin only, unless cors_allow_all is true)
     #[serde(default)]
     pub cors_origins: Vec<String>,
+
+    /// Explicitly allow all CORS origins (dev mode opt-in)
+    #[serde(default)]
+    pub cors_allow_all: bool,
 
     /// GUI static file serving configuration
     #[serde(default)]
@@ -241,6 +265,10 @@ pub struct HttpConfig {
     /// Authentication configuration
     #[serde(default)]
     pub auth: AuthConfig,
+
+    /// WebSocket idle timeout in milliseconds. 0 = disabled.
+    #[serde(default = "default_ws_idle_timeout_ms")]
+    pub ws_idle_timeout_ms: u64,
 }
 
 /// GUI static file serving configuration
@@ -283,6 +311,24 @@ fn default_async_io() -> bool {
 }
 fn default_true() -> bool {
     true
+}
+fn default_query_timeout_ms() -> u64 {
+    30_000
+}
+fn default_max_query_size_bytes() -> usize {
+    1_048_576 // 1 MB
+}
+fn default_max_insert_tuples() -> usize {
+    10_000
+}
+fn default_max_string_value_bytes() -> usize {
+    65_536 // 64 KB
+}
+fn default_max_knowledge_graphs() -> usize {
+    1000
+}
+fn default_ws_idle_timeout_ms() -> u64 {
+    300_000 // 5 minutes
 }
 fn default_log_level() -> String {
     "info".to_string()
@@ -348,7 +394,12 @@ impl Config {
                     batch_size: 1000,
                     async_io: true,
                     num_threads: 0,
+                    query_timeout_ms: 30_000,
+                    max_query_size_bytes: 1_048_576,
+                    max_insert_tuples: 10_000,
+                    max_string_value_bytes: 65_536,
                 },
+                max_knowledge_graphs: 1000,
             },
             optimization: OptimizationConfig {
                 enable_join_planning: true,
@@ -378,6 +429,10 @@ impl Default for PerformanceConfig {
             batch_size: default_batch_size(),
             async_io: default_async_io(),
             num_threads: 0, // 0 = use all available CPU cores
+            query_timeout_ms: default_query_timeout_ms(),
+            max_query_size_bytes: default_max_query_size_bytes(),
+            max_insert_tuples: default_max_insert_tuples(),
+            max_string_value_bytes: default_max_string_value_bytes(),
         }
     }
 }
@@ -398,8 +453,10 @@ impl Default for HttpConfig {
             host: default_http_host(),
             port: default_http_port(),
             cors_origins: Vec::new(),
+            cors_allow_all: false,
             gui: GuiConfig::default(),
             auth: AuthConfig::default(),
+            ws_idle_timeout_ms: default_ws_idle_timeout_ms(),
         }
     }
 }

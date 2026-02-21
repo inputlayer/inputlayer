@@ -60,6 +60,20 @@ Environment variables:
 | `INPUTLAYER_TEST_PORT` | 8080 | Server port for tests |
 | `INPUTLAYER_RESTART_INTERVAL` | 500 | Restart server every N tests (sequential mode) |
 
+## Server Tracing (Debug Logs to File)
+
+Enable structured server tracing logs (useful for diagnosing hangs/timeouts):
+
+```bash
+IL_TRACE=1 IL_TRACE_FILE=/tmp/inputlayer-trace.log ./scripts/run_snapshot_tests.sh
+```
+
+Optional:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IL_TRACE_JSON` | 0 | Set to `1` for JSON logs |
+| `IL_TRACE_LEVEL` | `trace` | Log level (e.g., `info`, `debug`, `trace`) |
+
 ### Affected-Only Tests
 
 `make test-affected` maps changed source files to relevant test categories and runs only those. Useful for fast feedback during development.

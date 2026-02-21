@@ -26,16 +26,43 @@ use differential_dataflow::operators::join::{Join, JoinCore};
 use differential_dataflow::operators::{Reduce, Threshold};
 use differential_dataflow::Collection;
 use parking_lot::Mutex;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use timely::dataflow::operators::{Inspect, Map, Probe, ToStream};
 use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
 use timely::order::Product;
+use tracing::info;
 
 use crate::temporal_ops;
 use crate::value::{Tuple, Value};
 use crate::vector_ops;
+
+// Thread-local cancellation flag for cooperative query timeout.
+// Set by Handler before DD computation, checked in spin loops.
+thread_local! {
+    static QUERY_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+/// Set the query cancellation flag for the current thread.
+/// Called from `spawn_blocking` before starting DD computation.
+pub fn set_query_cancel_flag(flag: Option<Arc<AtomicBool>>) {
+    QUERY_CANCEL.with(|cell| {
+        *cell.borrow_mut() = flag;
+    });
+}
+
+/// Check if the current query has been cancelled.
+fn is_query_cancelled() -> bool {
+    QUERY_CANCEL.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::Relaxed))
+    })
+}
 
 /// Iteration counter type for recursive scopes
 pub type Iter = u32;
@@ -166,6 +193,9 @@ impl CodeGenerator {
         // Execute DD computation
         timely::execute_directly(move |worker| {
             let mut probe = ProbeHandle::new();
+            let mut steps: u64 = 0;
+            let start = Instant::now();
+            let mut last_log = Instant::now();
 
             worker.dataflow::<(), _, _>(|scope| {
                 // Generate collection from IR
@@ -184,9 +214,26 @@ impl CodeGenerator {
 
             // Wait for computation to complete
             while !probe.done() {
+                if is_query_cancelled() {
+                    break;
+                }
                 worker.step();
+                std::thread::yield_now();
+                steps = steps.saturating_add(1);
+                if steps.is_multiple_of(1000) && last_log.elapsed().as_secs() >= 5 {
+                    info!(
+                        steps,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        "execution_progress"
+                    );
+                    last_log = Instant::now();
+                }
             }
         });
+
+        if is_query_cancelled() {
+            return Err("Query cancelled due to timeout".to_string());
+        }
 
         // Extract results from Arc<Mutex<>>
         // parking_lot::Mutex never poisons, so into_inner() returns the value directly
@@ -485,9 +532,17 @@ impl CodeGenerator {
 
             // Wait for computation to complete
             while !probe.done() {
+                if is_query_cancelled() {
+                    break;
+                }
                 worker.step();
+                std::thread::yield_now();
             }
         });
+
+        if is_query_cancelled() {
+            return Err("Query cancelled due to timeout".to_string());
+        }
 
         // Extract results
         // parking_lot::Mutex never poisons, so into_inner() returns the value directly
@@ -710,9 +765,17 @@ impl CodeGenerator {
 
             // Wait for computation to complete
             while !probe.done() {
+                if is_query_cancelled() {
+                    break;
+                }
                 worker.step();
+                std::thread::yield_now();
             }
         });
+
+        if is_query_cancelled() {
+            return Err("Query cancelled due to timeout".to_string());
+        }
 
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
@@ -1691,7 +1754,9 @@ impl CodeGenerator {
                 });
             });
             // Step until complete
-            while worker.step() {}
+            while worker.step() {
+                std::thread::yield_now();
+            }
         });
 
         // Safely extract results from Arc<Mutex<Vec<Tuple>>>
@@ -3238,9 +3303,17 @@ impl CodeGenerator {
 
             // Wait for computation to complete
             while !probe.done() {
+                if is_query_cancelled() {
+                    break;
+                }
                 worker.step();
+                std::thread::yield_now();
             }
         });
+
+        if is_query_cancelled() {
+            return Err("Query cancelled due to timeout".to_string());
+        }
 
         // Extract results
         // parking_lot::Mutex never poisons, so into_inner() returns the value directly
@@ -3351,9 +3424,17 @@ impl CodeGenerator {
 
             // Wait for computation to complete
             while !probe.done() {
+                if is_query_cancelled() {
+                    break;
+                }
                 worker.step();
+                std::thread::yield_now();
             }
         });
+
+        if is_query_cancelled() {
+            return Err("Query cancelled due to timeout".to_string());
+        }
 
         // Extract results
         // parking_lot::Mutex never poisons, so into_inner() returns the value directly
@@ -7541,5 +7622,61 @@ mod tests {
         let result = CodeGenerator::detect_transitive_closure_pattern(&base, &recursive, "tc");
         // Ternary relation → not a simple TC
         assert_eq!(result, None);
+    }
+
+    // === Regression tests for production readiness fixes ===
+
+    /// Regression: cooperative cancellation flag mechanism works correctly.
+    /// Ensures set_query_cancel_flag / is_query_cancelled communicate properly.
+    #[test]
+    fn test_query_cancel_flag_mechanism() {
+        // Initially no flag set — not cancelled
+        assert!(
+            !is_query_cancelled(),
+            "Should not be cancelled when no flag is set"
+        );
+
+        // Set a flag that is NOT triggered
+        let flag = Arc::new(AtomicBool::new(false));
+        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        assert!(
+            !is_query_cancelled(),
+            "Should not be cancelled when flag is false"
+        );
+
+        // Trigger the cancellation
+        flag.store(true, Ordering::Relaxed);
+        assert!(
+            is_query_cancelled(),
+            "Should be cancelled after flag is set to true"
+        );
+
+        // Clear the flag
+        set_query_cancel_flag(None);
+        assert!(
+            !is_query_cancelled(),
+            "Should not be cancelled after flag is cleared"
+        );
+    }
+
+    /// Regression: cancel flag can be set from another thread (simulating timeout handler).
+    #[test]
+    fn test_query_cancel_flag_cross_thread() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = Arc::clone(&flag);
+        set_query_cancel_flag(Some(flag));
+
+        // Simulate timeout handler setting flag from another thread
+        let handle = std::thread::spawn(move || {
+            flag_clone.store(true, Ordering::Relaxed);
+        });
+        handle.join().unwrap();
+
+        assert!(
+            is_query_cancelled(),
+            "Cancellation flag set from another thread should be visible"
+        );
+
+        set_query_cancel_flag(None);
     }
 }

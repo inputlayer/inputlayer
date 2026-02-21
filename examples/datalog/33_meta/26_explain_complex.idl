@@ -1,0 +1,14 @@
+// Test: .explain shows complex multi-join plan structure
+.kg create test_explain_complex_n33t26
+.kg use test_explain_complex_n33t26
+
++product[(1, "Widget"), (2, "Gadget")]
++sale[(101, 1, 50), (102, 2, 30)]
++order_item[(101, 201), (102, 201)]
+
+// Explain a three-way join query - should show multi-node plan tree
+.explain ?product(PId, Name), sale(SId, PId, Price), order_item(SId, CId)
+
+// Cleanup
+.kg use default
+.kg drop test_explain_complex_n33t26

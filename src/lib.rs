@@ -222,11 +222,8 @@ pub use storage::{
     save_to_csv_with_options, save_to_parquet, CsvOptions, StorageError, StorageResult,
 };
 
-// Re-export execution utilities (timeout, limits, caching)
-pub use execution::{
-    CacheEntry, CacheStats, CancelHandle, ExecutionConfig, ExecutionError, ExecutionResult,
-    MemoryTracker, QueryCache, QueryTimeout, ResourceError, ResourceLimits, TimeoutError,
-};
+// Re-export execution utilities (timeout)
+pub use execution::{CancelHandle, ExecutionError, ExecutionResult, QueryTimeout, TimeoutError};
 
 // Re-export optimization modules for extensibility
 pub use boolean_specialization::{BooleanSpecializer, SemiringAnnotation, SemiringType};
@@ -278,6 +275,8 @@ pub use recursion::{
 };
 
 use std::collections::HashMap;
+use std::time::Instant;
+use tracing::info;
 
 /// Configuration for advanced optimizations
 #[derive(Debug, Clone)]
@@ -1167,11 +1166,30 @@ impl DatalogEngine {
         if debug {
             eprintln!("DEBUG execute_tuples: starting");
         }
+        let exec_start = Instant::now();
+        let source_len = source.len();
+        info!(source_len, "engine_execute_start");
 
         // Parse, apply SIP rewriting, and build IR
+        let parse_start = Instant::now();
         self.parse(source)?;
+        let parse_ms = parse_start.elapsed().as_millis() as u64;
+        info!(source_len, parse_ms, "engine_parse_complete");
+
+        let sip_start = Instant::now();
         self.apply_sip_rewriting();
+        let sip_ms = sip_start.elapsed().as_millis() as u64;
+        info!(source_len, sip_ms, "engine_sip_complete");
+
+        let build_start = Instant::now();
         self.build_ir()?;
+        let build_ms = build_start.elapsed().as_millis() as u64;
+        info!(
+            source_len,
+            build_ms,
+            ir_nodes = self.ir_nodes.len(),
+            "engine_build_ir_complete"
+        );
 
         if debug {
             eprintln!(
@@ -1186,14 +1204,25 @@ impl DatalogEngine {
         let unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
+        let opt_start = Instant::now();
         self.optimize_ir()?;
+        let opt_ms = opt_start.elapsed().as_millis() as u64;
+        info!(source_len, opt_ms, "engine_optimize_complete");
 
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
         }
 
         // Execute shared views first (from subplan sharing optimization)
+        let shared_start = Instant::now();
         let mut accumulated_results = self.execute_shared_views()?;
+        let shared_ms = shared_start.elapsed().as_millis() as u64;
+        info!(
+            source_len,
+            shared_ms,
+            shared_views = self.shared_views.len(),
+            "engine_shared_views_complete"
+        );
 
         // Execute main rules in dependency order (topological sort)
         let execution_order = self.topological_sort_ir_nodes(&rule_heads);
@@ -1201,6 +1230,7 @@ impl DatalogEngine {
 
         for &i in &execution_order {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
+            let rule_start = Instant::now();
 
             // Create fresh CodeGenerator for each rule (avoids timely state issues)
             let mut codegen = CodeGenerator::new();
@@ -1229,10 +1259,26 @@ impl DatalogEngine {
 
             // Store results for subsequent rules
             if !head_name.is_empty() {
-                accumulated_results.insert(head_name, result);
+                accumulated_results.insert(head_name.clone(), result);
             }
+
+            let rule_ms = rule_start.elapsed().as_millis() as u64;
+            info!(
+                source_len,
+                rule_idx = i,
+                rule_head = %head_name,
+                rule_ms,
+                recursive = recursive_info.get(i).is_some_and(Option::is_some),
+                workers = self.num_workers,
+                "engine_rule_complete"
+            );
         }
 
+        info!(
+            source_len,
+            total_ms = exec_start.elapsed().as_millis() as u64,
+            "engine_execute_complete"
+        );
         Ok(last_result)
     }
 

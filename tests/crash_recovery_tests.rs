@@ -156,30 +156,26 @@ fn test_recovery_with_corrupted_wal_json() {
     fs::create_dir_all(path.join("shards")).unwrap();
     fs::create_dir_all(path.join("batches")).unwrap();
 
-    // Write corrupted WAL
+    // Write corrupted WAL (single line = last line, tolerated as truncated write)
     let wal_path = path.join("wal/current.wal");
     fs::write(&wal_path, "{ invalid json garbage }\n").unwrap();
 
-    // Recovery should fail gracefully with clear error
-    let result = FilePersist::new(PersistConfig {
+    // P0-5: A single corrupted line is the "last line" and is tolerated
+    // (simulates a crash mid-write). Recovery should succeed with no data.
+    let persist = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 10,
-
         durability_mode: DurabilityMode::Immediate,
     });
-
-    // Should return an error, not panic
-    match result {
-        Ok(_) => panic!("Corrupted WAL should return error"),
-        Err(e) => {
-            let err_msg = format!("{}", e);
-            assert!(
-                err_msg.contains("WAL") || err_msg.contains("parse"),
-                "Error should mention WAL or parsing: {}",
-                err_msg
-            );
-        }
-    }
+    assert!(
+        persist.is_ok(),
+        "Single corrupted WAL line (last line) should be tolerated"
+    );
+    let persist = persist.unwrap();
+    assert!(
+        persist.list_shards().unwrap().is_empty(),
+        "No shards should be recovered from corrupted-only WAL"
+    );
 }
 
 #[test]
@@ -196,22 +192,28 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
             .unwrap();
     }
 
-    // Append garbage to WAL
+    // Append garbage as last line of WAL (simulates crash mid-write)
     let wal_path = path.join("wal/current.wal");
     if wal_path.exists() {
         let mut file = fs::OpenOptions::new().append(true).open(&wal_path).unwrap();
         writeln!(file, "{{garbage not json}}").unwrap();
     }
 
-    // Recovery should fail - we don't skip corrupted entries
-    let result = FilePersist::new(PersistConfig {
+    // P0-5: Corrupted LAST line is tolerated (truncated write on crash).
+    // Valid entries before it should be recovered.
+    let persist = FilePersist::new(PersistConfig {
         path: path.clone(),
         buffer_size: 100,
-
         durability_mode: DurabilityMode::Immediate,
-    });
+    })
+    .expect("Recovery should succeed — corrupted last line is tolerated");
 
-    assert!(result.is_err(), "Corrupted WAL entry should cause error");
+    // The valid entry written before corruption should be recovered
+    let shards = persist.list_shards().unwrap();
+    assert!(
+        shards.contains(&"db:edge".to_string()),
+        "Valid shard should be recovered despite truncated last WAL entry"
+    );
 }
 
 #[test]

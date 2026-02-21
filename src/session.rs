@@ -44,8 +44,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-/// Unique session identifier
-pub type SessionId = u64;
+/// Unique session identifier (cryptographic UUID to prevent enumeration)
+pub type SessionId = String;
 
 /// Session manager configuration
 #[derive(Debug, Clone)]
@@ -346,11 +346,10 @@ impl Session {
 
 /// Manages all active sessions
 ///
-/// Thread-safe via internal RwLock. Sessions are identified by monotonically
-/// increasing u64 IDs. All operations are recorded in the audit log.
+/// Thread-safe via internal RwLock. Sessions are identified by cryptographic
+/// UUIDs to prevent enumeration attacks. All operations are recorded in the audit log.
 pub struct SessionManager {
     sessions: RwLock<HashMap<SessionId, Session>>,
-    next_id: AtomicU64,
     config: SessionConfig,
     audit: AuditLog,
 }
@@ -360,7 +359,6 @@ impl SessionManager {
     pub fn new(config: SessionConfig) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
             config,
             audit: AuditLog::default(),
         }
@@ -368,7 +366,7 @@ impl SessionManager {
 
     /// Create a new session bound to a knowledge graph
     ///
-    /// Returns the session ID, or an error if max sessions exceeded.
+    /// Returns the session ID (UUID), or an error if max sessions exceeded.
     pub fn create_session(&self, knowledge_graph: &str) -> Result<SessionId, String> {
         let mut sessions = self.sessions.write();
 
@@ -380,12 +378,12 @@ impl SessionManager {
             ));
         }
 
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let session = Session::new(id, knowledge_graph.to_string());
-        sessions.insert(id, session);
+        let id = uuid::Uuid::new_v4().to_string();
+        let session = Session::new(id.clone(), knowledge_graph.to_string());
+        sessions.insert(id.clone(), session);
 
         self.audit.record(AuditEvent::SessionCreated {
-            session_id: id,
+            session_id: id.clone(),
             knowledge_graph: knowledge_graph.to_string(),
             timestamp: Instant::now(),
         });
@@ -394,14 +392,14 @@ impl SessionManager {
     }
 
     /// Close and clean up a session
-    pub fn close_session(&self, id: SessionId) -> Result<(), String> {
+    pub fn close_session(&self, id: &SessionId) -> Result<(), String> {
         let mut sessions = self.sessions.write();
         sessions
-            .remove(&id)
+            .remove(id)
             .ok_or_else(|| format!("Session {id} not found"))?;
 
         self.audit.record(AuditEvent::SessionClosed {
-            session_id: id,
+            session_id: id.clone(),
             timestamp: Instant::now(),
         });
 
@@ -409,8 +407,8 @@ impl SessionManager {
     }
 
     /// Check if a session exists
-    pub fn has_session(&self, id: SessionId) -> bool {
-        self.sessions.read().contains_key(&id)
+    pub fn has_session(&self, id: &SessionId) -> bool {
+        self.sessions.read().contains_key(id)
     }
 
     /// Get the number of active sessions
@@ -419,25 +417,25 @@ impl SessionManager {
     }
 
     /// Execute a function with read access to a session
-    pub fn with_session<F, R>(&self, id: SessionId, f: F) -> Result<R, String>
+    pub fn with_session<F, R>(&self, id: &SessionId, f: F) -> Result<R, String>
     where
         F: FnOnce(&Session) -> R,
     {
         let sessions = self.sessions.read();
         let session = sessions
-            .get(&id)
+            .get(id)
             .ok_or_else(|| format!("Session {id} not found"))?;
         Ok(f(session))
     }
 
     /// Execute a function with write access to a session
-    pub fn with_session_mut<F, R>(&self, id: SessionId, f: F) -> Result<R, String>
+    pub fn with_session_mut<F, R>(&self, id: &SessionId, f: F) -> Result<R, String>
     where
         F: FnOnce(&mut Session) -> R,
     {
         let mut sessions = self.sessions.write();
         let session = sessions
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or_else(|| format!("Session {id} not found"))?;
         Ok(f(session))
     }
@@ -446,7 +444,7 @@ impl SessionManager {
     ///
     /// Call this for operations that represent genuine session activity
     /// but only require read access (e.g., query execution).
-    pub fn touch_session(&self, id: SessionId) -> Result<(), String> {
+    pub fn touch_session(&self, id: &SessionId) -> Result<(), String> {
         self.with_session_mut(id, Session::touch)
     }
 
@@ -454,7 +452,7 @@ impl SessionManager {
     /// Returns the number of facts actually inserted (after dedup).
     pub fn insert_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -467,7 +465,7 @@ impl SessionManager {
         })?;
 
         self.audit.record(AuditEvent::EphemeralInsert {
-            session_id,
+            session_id: session_id.clone(),
             relation: relation.to_string(),
             count: inserted,
             timestamp: Instant::now(),
@@ -479,7 +477,7 @@ impl SessionManager {
     /// Retract ephemeral facts from a session
     pub fn retract_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> Result<usize, String> {
@@ -493,7 +491,7 @@ impl SessionManager {
 
         if retracted > 0 {
             self.audit.record(AuditEvent::EphemeralRetract {
-                session_id,
+                session_id: session_id.clone(),
                 relation: relation.to_string(),
                 count: retracted,
                 timestamp: Instant::now(),
@@ -506,7 +504,7 @@ impl SessionManager {
     /// Add an ephemeral rule to a session
     pub fn add_ephemeral_rule(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         rule: Rule,
         rule_text: String,
     ) -> Result<(), String> {
@@ -517,7 +515,7 @@ impl SessionManager {
         })?;
 
         self.audit.record(AuditEvent::EphemeralRuleAdded {
-            session_id,
+            session_id: session_id.clone(),
             head_relation,
             timestamp: Instant::now(),
         });
@@ -526,31 +524,34 @@ impl SessionManager {
     }
 
     /// Get session facts for snapshot execution
-    pub fn get_session_facts(&self, session_id: SessionId) -> Result<Vec<(String, Tuple)>, String> {
+    pub fn get_session_facts(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<(String, Tuple)>, String> {
         self.with_session(session_id, Session::session_facts)
     }
 
     /// Check if a session is clean (no ephemeral state)
-    pub fn is_session_clean(&self, session_id: SessionId) -> Result<bool, String> {
+    pub fn is_session_clean(&self, session_id: &SessionId) -> Result<bool, String> {
         self.with_session(session_id, Session::is_clean)
     }
 
     /// Get the knowledge graph a session is bound to
-    pub fn session_kg(&self, session_id: SessionId) -> Result<String, String> {
+    pub fn session_kg(&self, session_id: &SessionId) -> Result<String, String> {
         self.with_session(session_id, |session| session.knowledge_graph.clone())
     }
 
     /// Get query metadata for a session
-    pub fn get_query_metadata(&self, session_id: SessionId) -> Result<QueryMetadata, String> {
+    pub fn get_query_metadata(&self, session_id: &SessionId) -> Result<QueryMetadata, String> {
         self.with_session(session_id, Session::build_query_metadata)
     }
 
     /// Clear all ephemeral state for a session (e.g., on KG switch)
-    pub fn clear_session(&self, session_id: SessionId) -> Result<(), String> {
+    pub fn clear_session(&self, session_id: &SessionId) -> Result<(), String> {
         self.with_session_mut(session_id, Session::clear)?;
 
         self.audit.record(AuditEvent::SessionCleared {
-            session_id,
+            session_id: session_id.clone(),
             timestamp: Instant::now(),
         });
 
@@ -561,7 +562,7 @@ impl SessionManager {
     ///
     /// Clears all ephemeral state per the design decision.
     /// Reads old KG and writes new KG atomically under a single write lock.
-    pub fn switch_kg(&self, session_id: SessionId, new_kg: &str) -> Result<(), String> {
+    pub fn switch_kg(&self, session_id: &SessionId, new_kg: &str) -> Result<(), String> {
         let from_kg = self.with_session_mut(session_id, |session| {
             let from = session.knowledge_graph.clone();
             session.clear();
@@ -570,7 +571,7 @@ impl SessionManager {
         })?;
 
         self.audit.record(AuditEvent::KgSwitched {
-            session_id,
+            session_id: session_id.clone(),
             from_kg,
             to_kg: new_kg.to_string(),
             timestamp: Instant::now(),
@@ -628,7 +629,7 @@ impl SessionManager {
 
     /// List all session IDs (sorted for deterministic output)
     pub fn list_sessions(&self) -> Vec<SessionId> {
-        let mut ids: Vec<SessionId> = self.sessions.read().keys().copied().collect();
+        let mut ids: Vec<SessionId> = self.sessions.read().keys().cloned().collect();
         ids.sort_unstable();
         ids
     }
@@ -641,13 +642,13 @@ impl SessionManager {
     /// Record a query-with-ephemeral audit event
     pub fn record_query_with_ephemeral(
         &self,
-        session_id: SessionId,
+        session_id: &SessionId,
         ephemeral_sources: Vec<String>,
         result_count: usize,
         execution_time_ms: u64,
     ) {
         self.audit.record(AuditEvent::QueryWithEphemeral {
-            session_id,
+            session_id: session_id.clone(),
             ephemeral_sources,
             result_count,
             execution_time_ms,
@@ -850,8 +851,8 @@ mod tests {
     fn test_create_session() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        assert!(id > 0);
-        assert!(mgr.has_session(id));
+        assert!(!id.is_empty());
+        assert!(mgr.has_session(&id));
         assert_eq!(mgr.session_count(), 1);
     }
 
@@ -871,17 +872,17 @@ mod tests {
     fn test_close_session() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        assert!(mgr.has_session(id));
+        assert!(mgr.has_session(&id));
 
-        mgr.close_session(id).unwrap();
-        assert!(!mgr.has_session(id));
+        mgr.close_session(&id).unwrap();
+        assert!(!mgr.has_session(&id));
         assert_eq!(mgr.session_count(), 0);
     }
 
     #[test]
     fn test_close_nonexistent_session() {
         let mgr = SessionManager::default();
-        assert!(mgr.close_session(999).is_err());
+        assert!(mgr.close_session(&"nonexistent".to_string()).is_err());
     }
 
     #[test]
@@ -903,7 +904,7 @@ mod tests {
     fn test_new_session_is_clean() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        assert!(mgr.is_session_clean(id).unwrap());
+        assert!(mgr.is_session_clean(&id).unwrap());
     }
 
     #[test]
@@ -911,10 +912,10 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
 
-        assert!(!mgr.is_session_clean(id).unwrap());
+        assert!(!mgr.is_session_clean(&id).unwrap());
     }
 
     #[test]
@@ -923,11 +924,11 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         let t = make_tuple(vec![1, 2]);
-        mgr.insert_ephemeral(id, "edge", vec![t.clone()]).unwrap();
-        assert!(!mgr.is_session_clean(id).unwrap());
+        mgr.insert_ephemeral(&id, "edge", vec![t.clone()]).unwrap();
+        assert!(!mgr.is_session_clean(&id).unwrap());
 
-        mgr.retract_ephemeral(id, "edge", vec![t]).unwrap();
-        assert!(mgr.is_session_clean(id).unwrap());
+        mgr.retract_ephemeral(&id, "edge", vec![t]).unwrap();
+        assert!(mgr.is_session_clean(&id).unwrap());
     }
 
     // === Ephemeral Facts ===
@@ -938,13 +939,13 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         mgr.insert_ephemeral(
-            id,
+            &id,
             "edge",
             vec![make_tuple(vec![1, 2]), make_tuple(vec![2, 3])],
         )
         .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 2);
     }
 
@@ -954,10 +955,10 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         let t = make_tuple(vec![1, 2]);
-        mgr.insert_ephemeral(id, "edge", vec![t.clone()]).unwrap();
-        mgr.insert_ephemeral(id, "edge", vec![t]).unwrap();
+        mgr.insert_ephemeral(&id, "edge", vec![t.clone()]).unwrap();
+        mgr.insert_ephemeral(&id, "edge", vec![t]).unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 1);
     }
 
@@ -968,13 +969,13 @@ mod tests {
 
         let t1 = make_tuple(vec![1, 2]);
         let t2 = make_tuple(vec![2, 3]);
-        mgr.insert_ephemeral(id, "edge", vec![t1.clone(), t2.clone()])
+        mgr.insert_ephemeral(&id, "edge", vec![t1.clone(), t2.clone()])
             .unwrap();
 
-        let retracted = mgr.retract_ephemeral(id, "edge", vec![t1]).unwrap();
+        let retracted = mgr.retract_ephemeral(&id, "edge", vec![t1]).unwrap();
         assert_eq!(retracted, 1);
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].1, t2);
     }
@@ -985,7 +986,7 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         let retracted = mgr
-            .retract_ephemeral(id, "edge", vec![make_tuple(vec![99, 99])])
+            .retract_ephemeral(&id, "edge", vec![make_tuple(vec![99, 99])])
             .unwrap();
         assert_eq!(retracted, 0);
     }
@@ -1014,10 +1015,10 @@ mod tests {
             })],
         };
 
-        mgr.add_ephemeral_rule(id, rule, "path(X, Y) <- edge(X, Y)".to_string())
+        mgr.add_ephemeral_rule(&id, rule, "path(X, Y) <- edge(X, Y)".to_string())
             .unwrap();
 
-        mgr.with_session(id, |session| {
+        mgr.with_session(&id, |session| {
             assert_eq!(session.ephemeral_rule_count(), 1);
             assert_eq!(session.rule_texts().len(), 1);
         })
@@ -1031,12 +1032,12 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
-        mgr.insert_ephemeral(id, "node", vec![make_tuple(vec![1]), make_tuple(vec![2])])
+        mgr.insert_ephemeral(&id, "node", vec![make_tuple(vec![1]), make_tuple(vec![2])])
             .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 3);
 
         // Check that both relations are represented
@@ -1052,13 +1053,13 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("kg1").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
-        assert!(!mgr.is_session_clean(id).unwrap());
+        assert!(!mgr.is_session_clean(&id).unwrap());
 
-        mgr.switch_kg(id, "kg2").unwrap();
-        assert!(mgr.is_session_clean(id).unwrap());
-        assert_eq!(mgr.session_kg(id).unwrap(), "kg2");
+        mgr.switch_kg(&id, "kg2").unwrap();
+        assert!(mgr.is_session_clean(&id).unwrap());
+        assert_eq!(mgr.session_kg(&id).unwrap(), "kg2");
     }
 
     // === Clear ===
@@ -1068,10 +1069,10 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
         mgr.add_ephemeral_rule(
-            id,
+            &id,
             crate::ast::Rule {
                 head: crate::ast::Atom {
                     relation: "test".to_string(),
@@ -1083,9 +1084,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!mgr.is_session_clean(id).unwrap());
-        mgr.clear_session(id).unwrap();
-        assert!(mgr.is_session_clean(id).unwrap());
+        assert!(!mgr.is_session_clean(&id).unwrap());
+        mgr.clear_session(&id).unwrap();
+        assert!(mgr.is_session_clean(&id).unwrap());
     }
 
     // === Query Metadata ===
@@ -1095,7 +1096,7 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        let metadata = mgr.get_query_metadata(id).unwrap();
+        let metadata = mgr.get_query_metadata(&id).unwrap();
         assert!(!metadata.has_ephemeral);
         assert!(metadata.ephemeral_sources.is_empty());
         assert!(metadata.warnings.is_empty());
@@ -1106,10 +1107,10 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
 
-        let metadata = mgr.get_query_metadata(id).unwrap();
+        let metadata = mgr.get_query_metadata(&id).unwrap();
         assert!(metadata.has_ephemeral);
         assert!(metadata.ephemeral_sources.contains(&"edge".to_string()));
         assert!(!metadata.warnings.is_empty());
@@ -1124,7 +1125,7 @@ mod tests {
         let _id2 = mgr.create_session("kg2").unwrap();
 
         mgr.insert_ephemeral(
-            id1,
+            &id1,
             "edge",
             vec![make_tuple(vec![1, 2]), make_tuple(vec![2, 3])],
         )
@@ -1184,13 +1185,13 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         let t = make_tuple(vec![1, 2]);
-        mgr.insert_ephemeral(id, "edge", vec![t.clone()]).unwrap();
-        mgr.retract_ephemeral(id, "edge", vec![t.clone()]).unwrap();
-        assert!(mgr.is_session_clean(id).unwrap());
+        mgr.insert_ephemeral(&id, "edge", vec![t.clone()]).unwrap();
+        mgr.retract_ephemeral(&id, "edge", vec![t.clone()]).unwrap();
+        assert!(mgr.is_session_clean(&id).unwrap());
 
-        mgr.insert_ephemeral(id, "edge", vec![t]).unwrap();
-        assert!(!mgr.is_session_clean(id).unwrap());
-        assert_eq!(mgr.get_session_facts(id).unwrap().len(), 1);
+        mgr.insert_ephemeral(&id, "edge", vec![t]).unwrap();
+        assert!(!mgr.is_session_clean(&id).unwrap());
+        assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 1);
     }
 
     // === List sessions ===
@@ -1212,7 +1213,7 @@ mod tests {
 
     #[test]
     fn test_detect_overshadowed_rules() {
-        let mut session = Session::new(1, "default".to_string());
+        let mut session = Session::new("test-1".to_string(), "default".to_string());
 
         // Add ephemeral rule for "path"
         session.add_ephemeral_rule(
@@ -1248,7 +1249,7 @@ mod tests {
 
     #[test]
     fn test_metadata_with_overshadow() {
-        let mut session = Session::new(1, "default".to_string());
+        let mut session = Session::new("test-1".to_string(), "default".to_string());
 
         session.add_ephemeral_rule(
             crate::ast::Rule {
@@ -1276,13 +1277,13 @@ mod tests {
 
         // Insert into a relation that doesn't exist in persistent store
         mgr.insert_ephemeral(
-            id,
+            &id,
             "query_embedding",
             vec![Tuple::new(vec![Value::vector(vec![1.0, 2.0, 3.0])])],
         )
         .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].0, "query_embedding");
     }
@@ -1297,8 +1298,9 @@ mod tests {
         let mut handles = vec![];
         for i in 0..10 {
             let mgr = Arc::clone(&mgr);
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
-                mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i])])
                     .unwrap();
             }));
         }
@@ -1307,7 +1309,7 @@ mod tests {
             h.join().unwrap();
         }
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 10);
     }
 
@@ -1320,14 +1322,14 @@ mod tests {
         let s2 = mgr.create_session("default").unwrap();
 
         // Insert different facts in each session
-        mgr.insert_ephemeral(s1, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&s1, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
-        mgr.insert_ephemeral(s2, "edge", vec![make_tuple(vec![3, 4])])
+        mgr.insert_ephemeral(&s2, "edge", vec![make_tuple(vec![3, 4])])
             .unwrap();
 
         // Each session sees only its own facts
-        let facts1 = mgr.get_session_facts(s1).unwrap();
-        let facts2 = mgr.get_session_facts(s2).unwrap();
+        let facts1 = mgr.get_session_facts(&s1).unwrap();
+        let facts2 = mgr.get_session_facts(&s2).unwrap();
 
         assert_eq!(facts1.len(), 1);
         assert_eq!(facts2.len(), 1);
@@ -1344,7 +1346,7 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
         assert_eq!(mgr.audit_log().len(), 1);
 
-        mgr.close_session(id).unwrap();
+        mgr.close_session(&id).unwrap();
         assert_eq!(mgr.audit_log().len(), 2);
 
         let events = mgr.audit_log().events();
@@ -1357,9 +1359,9 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
-        mgr.retract_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.retract_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
 
         let events = mgr.audit_log().events();
@@ -1381,7 +1383,7 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         // Retract something that doesn't exist → 0 retracted → no audit event
-        mgr.retract_ephemeral(id, "edge", vec![make_tuple(vec![99, 99])])
+        mgr.retract_ephemeral(&id, "edge", vec![make_tuple(vec![99, 99])])
             .unwrap();
 
         let events = mgr.audit_log().events();
@@ -1402,7 +1404,7 @@ mod tests {
             body: vec![],
         };
 
-        mgr.add_ephemeral_rule(id, rule, "path() <-".to_string())
+        mgr.add_ephemeral_rule(&id, rule, "path() <-".to_string())
             .unwrap();
 
         let events = mgr.audit_log().events();
@@ -1420,16 +1422,16 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("kg1").unwrap();
 
-        mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![1, 2])])
+        mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![1, 2])])
             .unwrap();
-        mgr.clear_session(id).unwrap();
+        mgr.clear_session(&id).unwrap();
 
         let events = mgr.audit_log().events();
         // SessionCreated + EphemeralInsert + SessionCleared
         assert_eq!(events.len(), 3);
         assert!(matches!(events[2], AuditEvent::SessionCleared { .. }));
 
-        mgr.switch_kg(id, "kg2").unwrap();
+        mgr.switch_kg(&id, "kg2").unwrap();
         let events = mgr.audit_log().events();
         // + KgSwitched
         assert_eq!(events.len(), 4);
@@ -1447,7 +1449,7 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.record_query_with_ephemeral(id, vec!["edge".to_string()], 5, 42);
+        mgr.record_query_with_ephemeral(&id, vec!["edge".to_string()], 5, 42);
 
         let events = mgr.audit_log().events();
         assert_eq!(events.len(), 2); // SessionCreated + QueryWithEphemeral
@@ -1471,7 +1473,7 @@ mod tests {
         let log = AuditLog::new(4);
         for i in 0..6 {
             log.record(AuditEvent::SessionCreated {
-                session_id: i,
+                session_id: i.to_string(),
                 knowledge_graph: "test".to_string(),
                 timestamp: Instant::now(),
             });
@@ -1485,9 +1487,9 @@ mod tests {
     fn test_audit_events_since() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        mgr.insert_ephemeral(id, "a", vec![make_tuple(vec![1])])
+        mgr.insert_ephemeral(&id, "a", vec![make_tuple(vec![1])])
             .unwrap();
-        mgr.insert_ephemeral(id, "b", vec![make_tuple(vec![2])])
+        mgr.insert_ephemeral(&id, "b", vec![make_tuple(vec![2])])
             .unwrap();
 
         // events_since(2) should return events after index 2
@@ -1503,7 +1505,7 @@ mod tests {
         // Record 4 events (fills buffer)
         for i in 0..4 {
             log.record(AuditEvent::SessionCreated {
-                session_id: i,
+                session_id: i.to_string(),
                 knowledge_graph: "test".to_string(),
                 timestamp: Instant::now(),
             });
@@ -1516,7 +1518,7 @@ mod tests {
         // Record 2 more events (triggers drain of oldest 2)
         for i in 4..6 {
             log.record(AuditEvent::SessionCreated {
-                session_id: i,
+                session_id: i.to_string(),
                 knowledge_graph: "test".to_string(),
                 timestamp: Instant::now(),
             });
@@ -1526,7 +1528,7 @@ mod tests {
         let since = log.events_since(checkpoint);
         assert_eq!(since.len(), 2);
         match &since[0] {
-            AuditEvent::SessionCreated { session_id, .. } => assert_eq!(*session_id, 4),
+            AuditEvent::SessionCreated { session_id, .. } => assert_eq!(session_id, "4"),
             other => panic!("Expected SessionCreated, got {other:?}"),
         }
     }
@@ -1536,7 +1538,7 @@ mod tests {
         let log = AuditLog::new(4);
         for i in 0..6 {
             log.record(AuditEvent::SessionCreated {
-                session_id: i,
+                session_id: i.to_string(),
                 knowledge_graph: "test".to_string(),
                 timestamp: Instant::now(),
             });
@@ -1552,7 +1554,7 @@ mod tests {
         // Fill past capacity to trigger drain
         for i in 0..6 {
             log.record(AuditEvent::SessionCreated {
-                session_id: i,
+                session_id: i.to_string(),
                 knowledge_graph: "test".to_string(),
                 timestamp: Instant::now(),
             });
@@ -1566,7 +1568,7 @@ mod tests {
 
         // After clear, new events should start from 0
         log.record(AuditEvent::SessionCreated {
-            session_id: 99,
+            session_id: "99".to_string(),
             knowledge_graph: "test".to_string(),
             timestamp: Instant::now(),
         });
@@ -1585,15 +1587,15 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         mgr.insert_ephemeral(
-            id,
+            &id,
             "edge",
             vec![make_tuple(vec![1, 2]), make_tuple(vec![2, 3])],
         )
         .unwrap();
-        mgr.insert_ephemeral(id, "node", vec![make_tuple(vec![1])])
+        mgr.insert_ephemeral(&id, "node", vec![make_tuple(vec![1])])
             .unwrap();
 
-        mgr.with_session(id, |s| {
+        mgr.with_session(&id, |s| {
             assert_eq!(s.ephemeral_fact_count(), 3);
             assert_eq!(s.ephemeral_rule_count(), 0);
         })
@@ -1608,14 +1610,14 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         // Insert into multiple relations
-        mgr.insert_ephemeral(id, "a", vec![make_tuple(vec![1])])
+        mgr.insert_ephemeral(&id, "a", vec![make_tuple(vec![1])])
             .unwrap();
-        mgr.insert_ephemeral(id, "b", vec![make_tuple(vec![2])])
+        mgr.insert_ephemeral(&id, "b", vec![make_tuple(vec![2])])
             .unwrap();
-        mgr.insert_ephemeral(id, "c", vec![make_tuple(vec![3])])
+        mgr.insert_ephemeral(&id, "c", vec![make_tuple(vec![3])])
             .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 3);
 
         let relations: std::collections::HashSet<String> =
@@ -1633,7 +1635,7 @@ mod tests {
     fn test_insert_ephemeral_empty_relation_name() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        let result = mgr.insert_ephemeral(id, "", vec![make_tuple(vec![1])]);
+        let result = mgr.insert_ephemeral(&id, "", vec![make_tuple(vec![1])]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
     }
@@ -1642,7 +1644,7 @@ mod tests {
     fn test_insert_ephemeral_whitespace_relation_name() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        let result = mgr.insert_ephemeral(id, "  ", vec![make_tuple(vec![1])]);
+        let result = mgr.insert_ephemeral(&id, "  ", vec![make_tuple(vec![1])]);
         assert!(result.is_err());
     }
 
@@ -1650,7 +1652,7 @@ mod tests {
     fn test_retract_ephemeral_empty_relation_name() {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
-        let result = mgr.retract_ephemeral(id, "", vec![make_tuple(vec![1])]);
+        let result = mgr.retract_ephemeral(&id, "", vec![make_tuple(vec![1])]);
         assert!(result.is_err());
     }
 
@@ -1662,14 +1664,14 @@ mod tests {
         let id = mgr.create_session("default").unwrap();
 
         // Insert in non-alphabetical order
-        mgr.insert_ephemeral(id, "zebra", vec![make_tuple(vec![1])])
+        mgr.insert_ephemeral(&id, "zebra", vec![make_tuple(vec![1])])
             .unwrap();
-        mgr.insert_ephemeral(id, "alpha", vec![make_tuple(vec![2])])
+        mgr.insert_ephemeral(&id, "alpha", vec![make_tuple(vec![2])])
             .unwrap();
-        mgr.insert_ephemeral(id, "middle", vec![make_tuple(vec![3])])
+        mgr.insert_ephemeral(&id, "middle", vec![make_tuple(vec![3])])
             .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         let relations: Vec<&str> = facts.iter().map(|(r, _)| r.as_str()).collect();
         assert_eq!(relations, vec!["alpha", "middle", "zebra"]);
     }
@@ -1679,12 +1681,12 @@ mod tests {
         let mgr = SessionManager::default();
         let id = mgr.create_session("default").unwrap();
 
-        mgr.insert_ephemeral(id, "zebra", vec![make_tuple(vec![1])])
+        mgr.insert_ephemeral(&id, "zebra", vec![make_tuple(vec![1])])
             .unwrap();
-        mgr.insert_ephemeral(id, "alpha", vec![make_tuple(vec![2])])
+        mgr.insert_ephemeral(&id, "alpha", vec![make_tuple(vec![2])])
             .unwrap();
 
-        let meta = mgr.get_query_metadata(id).unwrap();
+        let meta = mgr.get_query_metadata(&id).unwrap();
         assert_eq!(meta.ephemeral_sources, vec!["alpha", "zebra"]);
     }
 
@@ -1727,7 +1729,7 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 let id = mgr.create_session(&format!("kg{}", i % 5)).unwrap();
                 // Each session inserts its own facts
-                mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i])])
                     .unwrap();
                 id
             }));
@@ -1744,7 +1746,7 @@ mod tests {
         assert_eq!(mgr.session_count(), 100);
 
         // Verify each session has exactly 1 fact
-        for &id in &ids {
+        for id in &ids {
             let facts = mgr.get_session_facts(id).unwrap();
             assert_eq!(facts.len(), 1);
         }
@@ -1761,9 +1763,10 @@ mod tests {
         for i in 0..25 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
-                mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i])])
                     .unwrap();
             }));
         }
@@ -1771,10 +1774,11 @@ mod tests {
         for i in 0..25 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
                 // Try to retract (may or may not exist yet)
-                let _ = mgr.retract_ephemeral(id, "data", vec![make_tuple(vec![i])]);
+                let _ = mgr.retract_ephemeral(&id, "data", vec![make_tuple(vec![i])]);
             }));
         }
 
@@ -1783,7 +1787,7 @@ mod tests {
         }
 
         // No crash, session still accessible
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         // Facts count is non-deterministic due to race, but must be valid
         assert!(facts.len() <= 25);
     }
@@ -1798,20 +1802,20 @@ mod tests {
             let tuples: Vec<Tuple> = (0..100)
                 .map(|i| make_tuple(vec![batch * 100 + i]))
                 .collect();
-            mgr.insert_ephemeral(id, "big_relation", tuples).unwrap();
+            mgr.insert_ephemeral(&id, "big_relation", tuples).unwrap();
         }
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 1000);
 
         // Retract half
         let retract_tuples: Vec<Tuple> = (0..500).map(|i| make_tuple(vec![i])).collect();
         let retracted = mgr
-            .retract_ephemeral(id, "big_relation", retract_tuples)
+            .retract_ephemeral(&id, "big_relation", retract_tuples)
             .unwrap();
         assert_eq!(retracted, 500);
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 500);
     }
 
@@ -1828,13 +1832,13 @@ mod tests {
                 let id = mgr.create_session("default").unwrap();
                 // Each session inserts unique facts in unique relations
                 mgr.insert_ephemeral(
-                    id,
+                    &id,
                     &format!("rel_{i}"),
                     vec![make_tuple(vec![i * 100, i * 100 + 1])],
                 )
                 .unwrap();
                 // Also insert into shared relation with unique value
-                mgr.insert_ephemeral(id, "shared", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "shared", vec![make_tuple(vec![i])])
                     .unwrap();
                 id
             }));
@@ -1843,7 +1847,7 @@ mod tests {
         let ids: Vec<SessionId> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // Verify isolation: each session sees only its own facts
-        for (idx, &id) in ids.iter().enumerate() {
+        for (idx, id) in ids.iter().enumerate() {
             let facts = mgr.get_session_facts(id).unwrap();
             assert_eq!(facts.len(), 2, "Session {idx} should have exactly 2 facts");
 
@@ -1869,9 +1873,9 @@ mod tests {
             let mgr = Arc::clone(&mgr);
             handles.push(std::thread::spawn(move || {
                 let id = mgr.create_session("default").unwrap();
-                mgr.insert_ephemeral(id, "temp", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "temp", vec![make_tuple(vec![i])])
                     .unwrap();
-                mgr.close_session(id).unwrap();
+                mgr.close_session(&id).unwrap();
             }));
         }
 
@@ -1894,9 +1898,10 @@ mod tests {
         for i in 0..10 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
-                mgr.insert_ephemeral(id, &format!("rel_{i}"), vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, &format!("rel_{i}"), vec![make_tuple(vec![i])])
                     .unwrap();
             }));
         }
@@ -1905,10 +1910,11 @@ mod tests {
         for _ in 0..10 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
                 // Should never panic, even mid-write
-                let meta = mgr.get_query_metadata(id).unwrap();
+                let meta = mgr.get_query_metadata(&id).unwrap();
                 // has_ephemeral may or may not be true depending on timing
                 let _ = meta.has_ephemeral;
                 let _ = meta.warnings.len();
@@ -1926,11 +1932,11 @@ mod tests {
         let id = mgr.create_session("kg0").unwrap();
 
         for i in 0..100 {
-            mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i])])
+            mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i])])
                 .unwrap();
-            mgr.switch_kg(id, &format!("kg{}", (i + 1) % 5)).unwrap();
+            mgr.switch_kg(&id, &format!("kg{}", (i + 1) % 5)).unwrap();
             // After switch, session should be clean
-            assert!(mgr.is_session_clean(id).unwrap());
+            assert!(mgr.is_session_clean(&id).unwrap());
         }
     }
 
@@ -1942,11 +1948,11 @@ mod tests {
         // Insert same 100 facts 10 times each
         for _ in 0..10 {
             let tuples: Vec<Tuple> = (0..100).map(|i| make_tuple(vec![i])).collect();
-            mgr.insert_ephemeral(id, "data", tuples).unwrap();
+            mgr.insert_ephemeral(&id, "data", tuples).unwrap();
         }
 
         // Should be exactly 100 (deduped)
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 100);
     }
 
@@ -1958,18 +1964,18 @@ mod tests {
         // Insert into 200 different relations
         for i in 0..200 {
             mgr.insert_ephemeral(
-                id,
+                &id,
                 &format!("relation_{i}"),
                 vec![make_tuple(vec![i, i + 1])],
             )
             .unwrap();
         }
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 200);
 
         // Verify dirty with correct source count
-        let meta = mgr.get_query_metadata(id).unwrap();
+        let meta = mgr.get_query_metadata(&id).unwrap();
         assert!(meta.has_ephemeral);
         assert_eq!(meta.ephemeral_sources.len(), 200);
     }
@@ -1984,10 +1990,10 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 let id = mgr.create_session("default").unwrap();
                 for j in 0..5 {
-                    mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i * 5 + j])])
+                    mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i * 5 + j])])
                         .unwrap();
                 }
-                mgr.close_session(id).unwrap();
+                mgr.close_session(&id).unwrap();
             }));
         }
 
@@ -2007,7 +2013,7 @@ mod tests {
 
         // Add 50 ephemeral facts
         for i in 0..50 {
-            mgr.insert_ephemeral(id, "edge", vec![make_tuple(vec![i, i + 1])])
+            mgr.insert_ephemeral(&id, "edge", vec![make_tuple(vec![i, i + 1])])
                 .unwrap();
         }
 
@@ -2029,11 +2035,11 @@ mod tests {
                     ],
                 })],
             };
-            mgr.add_ephemeral_rule(id, rule, format!("derived_{i}(X, Y) <- edge(X, Y)"))
+            mgr.add_ephemeral_rule(&id, rule, format!("derived_{i}(X, Y) <- edge(X, Y)"))
                 .unwrap();
         }
 
-        mgr.with_session(id, |s| {
+        mgr.with_session(&id, |s| {
             assert_eq!(s.ephemeral_fact_count(), 50);
             assert_eq!(s.ephemeral_rule_count(), 10);
             assert!(!s.is_clean());
@@ -2041,7 +2047,7 @@ mod tests {
         .unwrap();
 
         // Verify metadata reflects both facts and rules
-        let meta = mgr.get_query_metadata(id).unwrap();
+        let meta = mgr.get_query_metadata(&id).unwrap();
         assert!(meta.has_ephemeral);
         assert!(meta.ephemeral_sources.contains(&"edge".to_string()));
     }
@@ -2054,18 +2060,18 @@ mod tests {
         let tuples: Vec<Tuple> = (0..100).map(|i| make_tuple(vec![i])).collect();
 
         // Insert all
-        mgr.insert_ephemeral(id, "data", tuples.clone()).unwrap();
-        assert_eq!(mgr.get_session_facts(id).unwrap().len(), 100);
+        mgr.insert_ephemeral(&id, "data", tuples.clone()).unwrap();
+        assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 100);
 
         // Retract all
-        let retracted = mgr.retract_ephemeral(id, "data", tuples.clone()).unwrap();
+        let retracted = mgr.retract_ephemeral(&id, "data", tuples.clone()).unwrap();
         assert_eq!(retracted, 100);
-        assert!(mgr.is_session_clean(id).unwrap());
+        assert!(mgr.is_session_clean(&id).unwrap());
 
         // Reinsert all
-        mgr.insert_ephemeral(id, "data", tuples).unwrap();
-        assert_eq!(mgr.get_session_facts(id).unwrap().len(), 100);
-        assert!(!mgr.is_session_clean(id).unwrap());
+        mgr.insert_ephemeral(&id, "data", tuples).unwrap();
+        assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 100);
+        assert!(!mgr.is_session_clean(&id).unwrap());
     }
 
     #[test]
@@ -2087,7 +2093,7 @@ mod tests {
         assert!(result.is_err());
 
         // Close one and create again
-        mgr.close_session(ids[0]).unwrap();
+        mgr.close_session(&ids[0]).unwrap();
         let new_id = mgr.create_session("default").unwrap();
         assert_ne!(new_id, ids[0]);
     }
@@ -2106,7 +2112,7 @@ mod tests {
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
                 let id = mgr.create_session("default").unwrap();
-                mgr.close_session(id).unwrap();
+                mgr.close_session(&id).unwrap();
             }));
         }
 
@@ -2119,10 +2125,10 @@ mod tests {
         for i in 0..10 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
-            let id = shared_ids[i];
+            let id = shared_ids[i].clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
-                mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![i as i64])])
+                mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i as i64])])
                     .unwrap();
             }));
         }
@@ -2131,10 +2137,10 @@ mod tests {
         for i in 0..10 {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
-            let id = shared_ids[i];
+            let id = shared_ids[i].clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
-                let _ = mgr.get_query_metadata(id);
+                let _ = mgr.get_query_metadata(&id);
             }));
         }
 
@@ -2159,7 +2165,7 @@ mod tests {
 
     #[test]
     fn stress_overshadow_detection_many_rules() {
-        let mut session = Session::new(1, "default".to_string());
+        let mut session = Session::new("test-1".to_string(), "default".to_string());
 
         // Add 50 ephemeral rules for different relations
         for i in 0..50 {
@@ -2210,9 +2216,10 @@ mod tests {
             })
             .collect();
 
-        mgr.insert_ephemeral(id, "query_embedding", tuples).unwrap();
+        mgr.insert_ephemeral(&id, "query_embedding", tuples)
+            .unwrap();
 
-        let facts = mgr.get_session_facts(id).unwrap();
+        let facts = mgr.get_session_facts(&id).unwrap();
         assert_eq!(facts.len(), 100);
 
         // Verify specific vector fact
@@ -2227,14 +2234,14 @@ mod tests {
 
         for cycle in 0..50 {
             // Insert facts
-            mgr.insert_ephemeral(id, "data", vec![make_tuple(vec![cycle, cycle + 1])])
+            mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![cycle, cycle + 1])])
                 .unwrap();
-            assert!(!mgr.is_session_clean(id).unwrap());
+            assert!(!mgr.is_session_clean(&id).unwrap());
 
             // Clear
-            mgr.clear_session(id).unwrap();
-            assert!(mgr.is_session_clean(id).unwrap());
-            assert_eq!(mgr.get_session_facts(id).unwrap().len(), 0);
+            mgr.clear_session(&id).unwrap();
+            assert!(mgr.is_session_clean(&id).unwrap());
+            assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 0);
         }
     }
 
@@ -2253,7 +2260,7 @@ mod tests {
                 barrier.wait();
 
                 // Each agent: insert query embedding, add rule, check metadata
-                mgr.insert_ephemeral(id, "query_embedding", vec![make_tuple(vec![i])])
+                mgr.insert_ephemeral(&id, "query_embedding", vec![make_tuple(vec![i])])
                     .unwrap();
 
                 let rule = crate::ast::Rule {
@@ -2266,14 +2273,14 @@ mod tests {
                         args: vec![crate::ast::Term::Variable("X".to_string())],
                     })],
                 };
-                mgr.add_ephemeral_rule(id, rule, "relevant(X) <- doc(X)".to_string())
+                mgr.add_ephemeral_rule(&id, rule, "relevant(X) <- doc(X)".to_string())
                     .unwrap();
 
-                let meta = mgr.get_query_metadata(id).unwrap();
+                let meta = mgr.get_query_metadata(&id).unwrap();
                 assert!(meta.has_ephemeral);
 
                 // Cleanup
-                mgr.close_session(id).unwrap();
+                mgr.close_session(&id).unwrap();
                 id
             }));
         }
