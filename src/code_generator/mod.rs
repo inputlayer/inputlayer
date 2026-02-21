@@ -101,23 +101,33 @@ impl ExecutionConfig {
 
 /// Executes IR trees using Differential Dataflow.
 pub struct CodeGenerator {
-    /// Input data for base relations
-    input_tuples: HashMap<String, Vec<Tuple>>,
+    /// Input data for base relations (Arc-wrapped for cheap cloning into DD closures).
+    /// Using Arc avoids deep-cloning potentially large datasets on every query.
+    input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
     /// Semiring annotations (debug tracing only).
     #[allow(dead_code)]
     semiring_annotations: Vec<crate::boolean_specialization::SemiringAnnotation>,
     /// Diff type dispatch: Boolean -> BooleanDiff(i8), Counting/Min/Max -> isize.
     semiring_type: SemiringType,
+    /// Maximum number of result rows (0 = unlimited).
+    /// Prevents OOM from queries returning unbounded result sets.
+    max_result_rows: usize,
 }
 
 impl CodeGenerator {
     /// Create a new code generator
     pub fn new() -> Self {
         CodeGenerator {
-            input_tuples: HashMap::new(),
+            input_tuples: Arc::new(HashMap::new()),
             semiring_annotations: Vec::new(),
             semiring_type: SemiringType::Counting, // safe default
+            max_result_rows: 0,                    // unlimited
         }
+    }
+
+    /// Set the maximum number of result rows (0 = unlimited).
+    pub fn set_max_result_rows(&mut self, max: usize) {
+        self.max_result_rows = max;
     }
 
     /// Set the semiring type for diff-type dispatch.
@@ -144,7 +154,12 @@ impl CodeGenerator {
 
     /// Add input data for a relation
     pub fn add_input(&mut self, relation: String, data: Vec<Tuple>) {
-        self.input_tuples.insert(relation, data);
+        Arc::make_mut(&mut self.input_tuples).insert(relation, data);
+    }
+
+    /// Set shared input data from an Arc (avoids deep clone for snapshot queries)
+    pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
+        self.input_tuples = data;
     }
 
     /// Add input data for a relation (alias for `add_input`)
@@ -189,6 +204,7 @@ impl CodeGenerator {
         // Clone data for move into closure
         let input_data = self.input_tuples.clone();
         let ir_clone = ir.clone();
+        let result_limit = self.max_result_rows;
 
         // Execute DD computation
         timely::execute_directly(move |worker| {
@@ -207,7 +223,10 @@ impl CodeGenerator {
                     .distinct_core::<R>()
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -455,6 +474,7 @@ impl CodeGenerator {
     ) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
+        let result_limit = self.max_result_rows;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -525,7 +545,10 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -651,6 +674,7 @@ impl CodeGenerator {
         let results_clone = Arc::clone(&results);
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
+        let result_limit = self.max_result_rows;
 
         if std::env::var("IL_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
@@ -679,7 +703,7 @@ impl CodeGenerator {
                     // - All base relations entered into the iterative scope
                     // - The recursive relation backed by the SemigroupVariable
                     let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
-                    for (name, tuples) in &input_data {
+                    for (name, tuples) in input_data.iter() {
                         let coll: Collection<_, Tuple, R> = Collection::new(
                             tuples
                                 .clone()
@@ -758,7 +782,10 @@ impl CodeGenerator {
                 result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -3227,6 +3254,7 @@ impl CodeGenerator {
     pub fn execute_transitive_closure_dd(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
         let results = Arc::new(Mutex::new(Vec::new()));
         let results_clone = Arc::clone(&results);
+        let result_limit = self.max_result_rows;
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -3296,7 +3324,10 @@ impl CodeGenerator {
                 tc_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -3359,6 +3390,7 @@ impl CodeGenerator {
 
         let source_data = sources.clone();
         let edge_data = edges.clone();
+        let result_limit = self.max_result_rows;
 
         // Execute DD computation with TRUE recursion
         timely::execute_directly(move |worker| {
@@ -3417,7 +3449,10 @@ impl CodeGenerator {
                 reach_result
                     .inner
                     .inspect(move |(data, _time, _diff)| {
-                        results_clone.lock().push(data.clone());
+                        let mut guard = results_clone.lock();
+                        if result_limit == 0 || guard.len() < result_limit {
+                            guard.push(data.clone());
+                        }
                     })
                     .probe_with(&mut probe);
             });
@@ -7678,5 +7713,114 @@ mod tests {
         );
 
         set_query_cancel_flag(None);
+    }
+
+    // === Regression tests for result set size limit ===
+
+    /// Verify max_result_rows=0 means unlimited (default behavior)
+    #[test]
+    fn test_result_limit_zero_means_unlimited() {
+        let mut codegen = CodeGenerator::new();
+        assert_eq!(codegen.max_result_rows, 0);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=100)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 100, "No limit should return all 100 rows");
+    }
+
+    /// Verify max_result_rows caps the number of returned rows
+    #[test]
+    fn test_result_limit_caps_output() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(10);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=100)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 10, "Should cap at max_result_rows=10");
+    }
+
+    /// Verify limit works when result count is below the limit
+    #[test]
+    fn test_result_limit_below_threshold() {
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(1000);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=5).map(|i| Tuple::new(vec![Value::Int64(i)])).collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 5, "Should return all 5 when limit is 1000");
+    }
+
+    /// Regression: set_shared_input() provides data via Arc without deep clone.
+    /// Verifies the Arc path produces correct query results.
+    #[test]
+    fn test_set_shared_input_produces_correct_results() {
+        let mut data = HashMap::new();
+        data.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+        let shared = Arc::new(data);
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_shared_input(Arc::clone(&shared));
+
+        let ir = IRNode::Scan {
+            relation: "edge".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(
+            results.len(),
+            2,
+            "set_shared_input should provide data for queries"
+        );
+    }
+
+    /// Regression: add_input after set_shared_input uses copy-on-write (Arc::make_mut).
+    /// The original Arc must not be mutated.
+    #[test]
+    fn test_add_input_after_shared_does_not_mutate_original() {
+        let mut data = HashMap::new();
+        data.insert(
+            "edge".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
+        );
+        let shared = Arc::new(data);
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_shared_input(Arc::clone(&shared));
+
+        // add_input triggers Arc::make_mut (copy-on-write)
+        codegen.add_input("node".to_string(), vec![Tuple::new(vec![Value::Int64(10)])]);
+
+        // Original Arc should still only have "edge"
+        assert_eq!(shared.len(), 1, "Original Arc must not be mutated");
+        assert!(shared.contains_key("edge"));
+        assert!(!shared.contains_key("node"));
     }
 }

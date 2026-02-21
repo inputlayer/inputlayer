@@ -275,6 +275,7 @@ pub use recursion::{
 };
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
 
@@ -348,6 +349,12 @@ pub struct DatalogEngine {
 
     /// Number of worker threads for parallel execution (1 = single-worker)
     num_workers: usize,
+
+    /// Maximum result rows returned per query (0 = unlimited)
+    max_result_rows: usize,
+
+    /// Arc-wrapped shared input data (set by snapshot for zero-copy query execution)
+    shared_input: Option<Arc<HashMap<String, Vec<Tuple>>>>,
 }
 
 impl DatalogEngine {
@@ -364,6 +371,8 @@ impl DatalogEngine {
             shared_views: HashMap::new(),
             semiring_annotations: Vec::new(),
             num_workers: 1,
+            max_result_rows: 0,
+            shared_input: None,
         }
     }
 
@@ -380,6 +389,8 @@ impl DatalogEngine {
             shared_views: HashMap::new(),
             semiring_annotations: Vec::new(),
             num_workers: 1,
+            max_result_rows: 0,
+            shared_input: None,
         }
     }
 
@@ -411,6 +422,16 @@ impl DatalogEngine {
     /// Set the optimization configuration
     pub fn set_config(&mut self, config: OptimizationConfig) {
         self.optimization_config = config;
+    }
+
+    /// Set maximum result rows (0 = unlimited)
+    pub fn set_max_result_rows(&mut self, max: usize) {
+        self.max_result_rows = max;
+    }
+
+    /// Set shared input data from Arc (avoids deep clone from snapshot)
+    pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
+        self.shared_input = Some(data);
     }
 
     /// Get the catalog
@@ -807,6 +828,7 @@ impl DatalogEngine {
     pub fn execute_ir_tuples(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
         // Create code generator
         let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(self.max_result_rows);
 
         // Set semiring type from boolean specialization analysis
         let semiring = boolean_specialization::compute_global_semiring(&self.semiring_annotations);
@@ -817,9 +839,13 @@ impl DatalogEngine {
             codegen.set_semiring_annotations(self.semiring_annotations.clone());
         }
 
-        // Load input tuples
-        for (relation, data) in &self.input_tuples {
-            codegen.add_input(relation.clone(), data.clone());
+        // Load input tuples — use shared Arc if available (avoids deep clone)
+        if let Some(ref shared) = self.shared_input {
+            codegen.set_shared_input(Arc::clone(shared));
+        } else {
+            for (relation, data) in &self.input_tuples {
+                codegen.add_input(relation.clone(), data.clone());
+            }
         }
 
         // Execute and return Tuples
@@ -1234,6 +1260,7 @@ impl DatalogEngine {
 
             // Create fresh CodeGenerator for each rule (avoids timely state issues)
             let mut codegen = CodeGenerator::new();
+            codegen.set_max_result_rows(self.max_result_rows);
             // Set per-rule semiring type from boolean specialization
             let semiring = self
                 .semiring_annotations
@@ -1307,6 +1334,7 @@ impl DatalogEngine {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
 
             let mut codegen = CodeGenerator::new();
+            codegen.set_max_result_rows(self.max_result_rows);
             // Set per-rule semiring type from boolean specialization
             let semiring = self
                 .semiring_annotations

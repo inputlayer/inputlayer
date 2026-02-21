@@ -50,6 +50,35 @@ pub async fn health(
     (http_status, Json(ApiResponse::success(health)))
 }
 
+/// Liveness probe: returns 200 if the process is alive.
+///
+/// Kubernetes liveness probes should hit this endpoint. It always returns 200
+/// and does NOT check storage accessibility (to avoid false restarts).
+pub async fn liveness() -> StatusCode {
+    StatusCode::OK
+}
+
+/// Readiness probe: returns 200 if the server can handle requests.
+///
+/// Checks that the storage engine is accessible (read lock can be acquired).
+/// Returns 503 if the server is not ready to handle requests.
+pub async fn readiness(Extension(handler): Extension<Arc<Handler>>) -> StatusCode {
+    let handler_clone = Arc::clone(&handler);
+    let storage_ok = tokio::task::spawn_blocking(move || {
+        handler_clone
+            .try_get_storage(std::time::Duration::from_secs(1))
+            .is_some()
+    })
+    .await
+    .unwrap_or(false);
+
+    if storage_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
 /// Server statistics endpoint
 ///
 /// Uses `spawn_blocking` because acquiring the storage read lock can block
@@ -208,6 +237,21 @@ mod tests {
         );
     }
 
+    /// P1: Liveness probe always returns 200 (even under load).
+    #[tokio::test]
+    async fn test_liveness_always_200() {
+        let status = liveness().await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// P1: Readiness probe returns 200 when storage is accessible.
+    #[tokio::test]
+    async fn test_readiness_returns_ok() {
+        let (handler, _tmp) = make_handler();
+        let status = readiness(Extension(handler)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
     /// P2-13 regression: Health check returns degraded/503 when storage lock is contended.
     /// This verifies the health check doesn't hang when a write lock blocks readers.
     #[tokio::test]
@@ -235,6 +279,33 @@ mod tests {
         assert_eq!(
             data.status, "degraded",
             "Status should be 'degraded' when lock is contended"
+        );
+
+        lock_thread.join().unwrap();
+    }
+
+    /// Regression: Readiness probe returns 503 when storage lock is contended.
+    /// Mirrors test_health_returns_degraded_when_storage_locked but for the /ready endpoint.
+    #[tokio::test]
+    async fn test_readiness_returns_503_when_storage_locked() {
+        let (handler, _tmp) = make_handler();
+
+        // Hold a write lock from another thread for 3 seconds
+        let h2 = Arc::clone(&handler);
+        let lock_thread = std::thread::spawn(move || {
+            let _guard = h2.get_storage_mut();
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        });
+
+        // Give the thread time to acquire the write lock
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Readiness should return 503 when lock is contended
+        let status = readiness(Extension(handler)).await;
+        assert_eq!(
+            status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Readiness should return 503 when storage lock is contended"
         );
 
         lock_thread.join().unwrap();

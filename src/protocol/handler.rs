@@ -797,7 +797,8 @@ impl QueryJob {
         // Use READ lock — all operations use _on()/_into() variants with explicit KG name.
         // This allows concurrent queries to execute without blocking each other.
         // KgDrop and RuleClear use interior mutability, so no write lock is needed.
-        let storage = self.storage.read();
+        // `mut` is needed because MetaCommand::Compact releases and re-acquires the lock.
+        let mut storage = self.storage.read();
 
         // Determine target knowledge graph name
         let mut kg_name = if let Some(ref kg) = knowledge_graph {
@@ -1682,10 +1683,28 @@ impl QueryJob {
                                         messages.push(format!("  Total queries: {queries}"));
                                         messages.push(format!("  Knowledge graphs: {}", kgs.len()));
                                     }
-                                    MetaCommand::Compact => match storage.compact_all() {
-                                        Ok(()) => messages.push("Compaction complete.".to_string()),
-                                        Err(e) => messages.push(format!("Compaction error: {e}")),
-                                    },
+                                    MetaCommand::Compact => {
+                                        // Release storage read lock BEFORE heavy I/O.
+                                        // compact_all() performs disk I/O (rewrite batch files,
+                                        // sync, save metadata). Holding the read lock during this
+                                        // blocks all writes due to parking_lot's write-preferring
+                                        // policy, causing a server freeze.
+                                        drop(storage);
+                                        let compact_result = {
+                                            let s = self.storage.read();
+                                            s.compact_all()
+                                        }; // read lock released here, before push
+                                           // Re-acquire for any subsequent statements
+                                        storage = self.storage.read();
+                                        match compact_result {
+                                            Ok(()) => {
+                                                messages.push("Compaction complete.".to_string());
+                                            }
+                                            Err(e) => {
+                                                messages.push(format!("Compaction error: {e}"));
+                                            }
+                                        }
+                                    }
 
                                     // === Explain command ===
                                     MetaCommand::Explain(query) => {

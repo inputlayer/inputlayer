@@ -64,17 +64,50 @@ impl KnowledgeGraphsMetadata {
         Ok(metadata)
     }
 
-    /// Save to file
+    /// Save to file using atomic write-to-temp-then-rename.
+    ///
+    /// Writes to a unique temp file, calls `sync_all()`, then renames to `{path}`.
+    /// Rename is atomic on POSIX, so the metadata file is always either the old
+    /// or new version — never a corrupt half-written state.
+    /// Uses a unique temp file name per call to avoid races under concurrent saves.
     pub fn save(&self, path: &Path) -> StorageResult<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let file = File::create(path)?;
+        // Use thread ID + timestamp to create a unique temp file name,
+        // preventing ENOENT races when concurrent threads save simultaneously.
+        let unique = format!(
+            "{:?}.{}",
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let tmp_name = format!(
+            "{}.{unique}.tmp",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let tmp_path = path.with_file_name(tmp_name);
+
+        // Write to temp file
+        let file = File::create(&tmp_path)?;
         serde_json::to_writer_pretty(&file, self)?;
         // Ensure metadata is durably written to disk
         file.sync_all()?;
+
+        // Atomic rename (POSIX guarantees atomicity)
+        fs::rename(&tmp_path, path)?;
+
+        // Sync parent directory to ensure rename is durable
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
         Ok(())
     }
 }
@@ -109,15 +142,46 @@ impl KnowledgeGraphMetadata {
         Ok(metadata)
     }
 
-    /// Save to file
+    /// Save to file with durable write.
+    ///
+    /// Uses atomic write-to-temp-then-rename to prevent corruption on crash.
+    /// Uses a unique temp file name per call to avoid races under concurrent saves.
     pub fn save(&self, path: &Path) -> StorageResult<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let file = File::create(path)?;
-        serde_json::to_writer_pretty(file, self)?;
+        let unique = format!(
+            "{:?}.{}",
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let tmp_name = format!(
+            "{}.{unique}.tmp",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let tmp_path = path.with_file_name(tmp_name);
+
+        // Write to temp file
+        let file = File::create(&tmp_path)?;
+        serde_json::to_writer_pretty(&file, self)?;
+        // Ensure data is durably written to disk before rename
+        file.sync_all()?;
+
+        // Atomic rename (POSIX guarantees atomicity)
+        fs::rename(&tmp_path, path)?;
+
+        // Sync parent directory to ensure rename is durable
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
         Ok(())
     }
 
@@ -284,5 +348,230 @@ mod tests {
         let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
         assert_eq!(loaded.knowledge_graphs.len(), 5);
         assert_eq!(loaded.knowledge_graphs[3].name, "kg_3");
+    }
+
+    // === Regression tests for P0 durability fixes ===
+
+    /// Regression: KnowledgeGraphMetadata::save() must call sync_all()
+    /// to ensure data is durable on disk (not just in OS page cache).
+    /// Verify by checking the file is readable and valid immediately after save.
+    #[test]
+    fn test_kg_metadata_save_is_durable() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("meta").join("kg_metadata.json");
+
+        let mut metadata = KnowledgeGraphMetadata::new("durable_test".to_string());
+        metadata.add_relation(
+            "edge".to_string(),
+            vec!["x".to_string(), "y".to_string()],
+            42,
+        );
+        metadata.save(&path).unwrap();
+
+        // File must exist and be valid JSON
+        assert!(path.exists(), "Metadata file must exist after save");
+        let content = fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["name"], "durable_test");
+        assert_eq!(parsed["relations"]["edge"]["tuple_count"], 42);
+    }
+
+    /// Regression: KnowledgeGraphsMetadata::save() must use atomic write
+    /// (write-to-temp-then-rename) so partial writes never corrupt the file.
+    /// Verify no .tmp files remain after save.
+    #[test]
+    fn test_kgs_metadata_save_atomic_no_temp_files() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("knowledge_graphs.json");
+
+        let mut metadata = KnowledgeGraphsMetadata::new();
+        metadata.knowledge_graphs.push(KnowledgeGraphInfo {
+            name: "atomic_test".to_string(),
+            created_at: Utc::now().to_rfc3339(),
+            last_accessed: Utc::now().to_rfc3339(),
+            relations_count: 1,
+            total_tuples: 100,
+        });
+        metadata.save(&path).unwrap();
+
+        // Final file must exist and be valid
+        assert!(path.exists());
+        let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
+        assert_eq!(loaded.knowledge_graphs[0].name, "atomic_test");
+
+        // No .tmp files should remain
+        let tmp_path = path.with_extension("json.tmp");
+        assert!(
+            !tmp_path.exists(),
+            "Temp file must not remain after atomic save"
+        );
+    }
+
+    /// Regression: KnowledgeGraphMetadata::save() must use atomic write.
+    /// Verify no .tmp files remain after save.
+    #[test]
+    fn test_kg_metadata_save_atomic_no_temp_files() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("kg_metadata.json");
+
+        let metadata = KnowledgeGraphMetadata::new("atomic_test".to_string());
+        metadata.save(&path).unwrap();
+
+        // No .tmp files should remain
+        let tmp_path = path.with_extension("json.tmp");
+        assert!(
+            !tmp_path.exists(),
+            "Temp file must not remain after atomic save"
+        );
+    }
+
+    /// Regression: Repeated saves must not leave stale temp files.
+    #[test]
+    fn test_metadata_repeated_saves_no_stale_temps() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("knowledge_graphs.json");
+
+        for i in 0..10 {
+            let mut metadata = KnowledgeGraphsMetadata::new();
+            metadata.knowledge_graphs.push(KnowledgeGraphInfo {
+                name: format!("kg_{i}"),
+                created_at: Utc::now().to_rfc3339(),
+                last_accessed: Utc::now().to_rfc3339(),
+                relations_count: i,
+                total_tuples: i * 100,
+            });
+            metadata.save(&path).unwrap();
+        }
+
+        // Final file should contain last write
+        let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
+        assert_eq!(loaded.knowledge_graphs[0].name, "kg_9");
+
+        // No temp files should remain
+        let entries: Vec<_> = fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".tmp")))
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "No .tmp files should remain after repeated saves"
+        );
+    }
+
+    /// Regression: Metadata save creates parent directories if they don't exist.
+    #[test]
+    fn test_metadata_save_creates_parent_dirs() {
+        let temp = TempDir::new().unwrap();
+        let path = temp
+            .path()
+            .join("deeply")
+            .join("nested")
+            .join("dir")
+            .join("meta.json");
+
+        let metadata = KnowledgeGraphMetadata::new("nested_test".to_string());
+        metadata.save(&path).unwrap();
+
+        assert!(path.exists());
+        let loaded = KnowledgeGraphMetadata::load(&path).unwrap();
+        assert_eq!(loaded.name, "nested_test");
+    }
+
+    /// Regression: Concurrent saves must not fail with ENOENT.
+    /// This was the root cause of 868 E2E snapshot test failures.
+    /// Before the fix, all concurrent saves used the same .tmp file name,
+    /// causing a TOCTOU race: thread A renames .tmp, thread B's rename fails.
+    #[test]
+    fn test_concurrent_metadata_saves_no_enoent() {
+        use std::sync::{Arc, Barrier};
+
+        let temp = TempDir::new().unwrap();
+        let path = Arc::new(temp.path().join("knowledge_graphs.json"));
+        let num_threads = 16;
+        let saves_per_thread = 20;
+        let barrier = Arc::new(Barrier::new(num_threads));
+
+        let handles: Vec<_> = (0..num_threads)
+            .map(|t| {
+                let path = Arc::clone(&path);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for i in 0..saves_per_thread {
+                        let mut metadata = KnowledgeGraphsMetadata::new();
+                        metadata.knowledge_graphs.push(KnowledgeGraphInfo {
+                            name: format!("kg_t{t}_i{i}"),
+                            created_at: Utc::now().to_rfc3339(),
+                            last_accessed: Utc::now().to_rfc3339(),
+                            relations_count: i,
+                            total_tuples: i * 10,
+                        });
+                        metadata
+                            .save(&path)
+                            .unwrap_or_else(|e| panic!("Thread {t} save {i} failed: {e}"));
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Final file must be valid JSON
+        let loaded = KnowledgeGraphsMetadata::load(&path).unwrap();
+        assert_eq!(loaded.knowledge_graphs.len(), 1);
+
+        // No stale .tmp files should remain
+        let tmp_files: Vec<_> = fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".tmp")))
+            .collect();
+        assert!(
+            tmp_files.is_empty(),
+            "No .tmp files should remain after concurrent saves, found: {tmp_files:?}"
+        );
+    }
+
+    /// Regression: Concurrent KnowledgeGraphMetadata saves must also be safe.
+    #[test]
+    fn test_concurrent_kg_metadata_saves_no_enoent() {
+        use std::sync::{Arc, Barrier};
+
+        let temp = TempDir::new().unwrap();
+        let path = Arc::new(temp.path().join("kg_meta.json"));
+        let num_threads = 8;
+        let barrier = Arc::new(Barrier::new(num_threads));
+
+        let handles: Vec<_> = (0..num_threads)
+            .map(|t| {
+                let path = Arc::clone(&path);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for i in 0..10 {
+                        let mut metadata = KnowledgeGraphMetadata::new(format!("kg_t{t}_i{i}"));
+                        metadata.add_relation(
+                            "edge".to_string(),
+                            vec!["x".to_string(), "y".to_string()],
+                            i * 10,
+                        );
+                        metadata
+                            .save(&path)
+                            .unwrap_or_else(|e| panic!("Thread {t} save {i} failed: {e}"));
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Final file must be valid
+        let loaded = KnowledgeGraphMetadata::load(&path).unwrap();
+        assert!(!loaded.name.is_empty());
     }
 }

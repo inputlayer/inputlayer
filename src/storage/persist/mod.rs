@@ -400,6 +400,11 @@ impl PersistBackend for FilePersist {
             let _ = fs::remove_file(&batch_ref.path);
         }
 
+        // Sync batches directory to ensure deletions are durable
+        if !old_batches.is_empty() {
+            sync_directory(&self.config.path.join("batches"));
+        }
+
         Ok(())
     }
 
@@ -488,6 +493,8 @@ impl PersistBackend for FilePersist {
             .join(format!("{}.json", sanitize_name(shard)));
         if meta_path.exists() {
             let _ = fs::remove_file(&meta_path);
+            // Sync shards directory to ensure metadata deletion is durable
+            sync_directory(&self.config.path.join("shards"));
         }
 
         // Step 3: Selective WAL filter — remove only this shard's entries
@@ -499,10 +506,16 @@ impl PersistBackend for FilePersist {
 
         // Step 4: Delete batch files (no lock needed)
         if let Some(state) = removed_state {
+            let mut deleted_any = false;
             for batch_ref in &state.meta.batches {
                 if batch_ref.path.exists() {
                     let _ = fs::remove_file(&batch_ref.path);
+                    deleted_any = true;
                 }
+            }
+            // Sync batches directory to ensure file deletions are durable
+            if deleted_any {
+                sync_directory(&self.config.path.join("batches"));
             }
         }
 
@@ -692,6 +705,17 @@ fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
     }
 
     Ok(updates)
+}
+
+/// Sync a directory to ensure metadata operations (rename, unlink) are durable.
+///
+/// On POSIX systems, file deletion and rename are only guaranteed durable
+/// after the parent directory inode is fsynced. Without this, a crash can
+/// "resurrect" deleted files or roll back renames.
+fn sync_directory(dir: &std::path::Path) {
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
 }
 
 /// Sanitize a shard name for use as a filename
@@ -1365,5 +1389,158 @@ mod tests {
             !wal_dir.join("wal_12345.archived").exists(),
             "Archived WAL files should be cleaned up on startup"
         );
+    }
+
+    // === Regression tests for P0 durability: directory fsync after deletions ===
+
+    /// Regression: After delete_shard, metadata file must be removed from disk.
+    /// Verifies the shard .json file is durably deleted (not resurrectable on crash).
+    #[test]
+    fn test_delete_shard_metadata_file_removed() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        // Verify shard metadata file exists
+        let meta_path = _temp.path().join("shards").join("db_edge.json");
+        assert!(
+            meta_path.exists(),
+            "Shard metadata file must exist before deletion"
+        );
+
+        persist.delete_shard("db:edge").unwrap();
+
+        // Metadata file must be removed
+        assert!(
+            !meta_path.exists(),
+            "Shard metadata file must be deleted after delete_shard"
+        );
+    }
+
+    /// Regression: After delete_shard, batch files must be removed from disk.
+    #[test]
+    fn test_delete_shard_batch_files_removed() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+        for i in 0..3 {
+            persist
+                .append(
+                    "db:edge",
+                    &[Update::insert(Tuple::from_pair(i, i + 1), i as u64)],
+                )
+                .unwrap();
+        }
+        persist.flush("db:edge").unwrap();
+
+        // Verify batch files exist
+        let batches_dir = _temp.path().join("batches");
+        let batch_count_before = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert!(
+            batch_count_before > 0,
+            "Batch files must exist before deletion"
+        );
+
+        persist.delete_shard("db:edge").unwrap();
+
+        // All batch files for this shard must be gone
+        let batch_count_after = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert_eq!(
+            batch_count_after, 0,
+            "All batch files must be deleted after delete_shard"
+        );
+    }
+
+    /// Regression: Compaction must delete old batch files and leave only new compacted one.
+    #[test]
+    fn test_compaction_deletes_old_batch_files() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:edge").unwrap();
+
+        // Create multiple flushes to generate multiple batch files
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        persist
+            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
+            .unwrap();
+        persist.flush("db:edge").unwrap();
+
+        let batches_dir = _temp.path().join("batches");
+        let batch_count_before = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert!(
+            batch_count_before >= 2,
+            "Should have at least 2 batch files before compaction"
+        );
+
+        // Compact
+        persist.compact("db:edge", 0).unwrap();
+
+        let batch_count_after = fs::read_dir(&batches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "parquet"))
+            .count();
+        assert_eq!(
+            batch_count_after, 1,
+            "Only one compacted batch file should remain after compaction"
+        );
+
+        // Data must still be intact
+        let updates = persist.read("db:edge", 0).unwrap();
+        assert_eq!(updates.len(), 2);
+    }
+
+    /// Regression: save_shard_meta uses atomic write-to-temp-then-rename.
+    /// No .tmp files should remain after save.
+    #[test]
+    fn test_shard_meta_atomic_write() {
+        let (_temp, persist) = create_test_persist();
+
+        persist.ensure_shard("db:atomic_test").unwrap();
+        persist
+            .append(
+                "db:atomic_test",
+                &[Update::insert(Tuple::from_pair(1, 2), 10)],
+            )
+            .unwrap();
+        persist.flush("db:atomic_test").unwrap();
+
+        // Verify no .tmp files in shards dir
+        let shards_dir = _temp.path().join("shards");
+        let tmp_files: Vec<_> = fs::read_dir(&shards_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".json.tmp")))
+            .collect();
+        assert!(
+            tmp_files.is_empty(),
+            "No .json.tmp files should remain after atomic shard meta write"
+        );
+
+        // Verify the final metadata file is valid
+        let meta_path = shards_dir.join("db_atomic_test.json");
+        assert!(meta_path.exists());
+        let content = fs::read_to_string(&meta_path).unwrap();
+        let _: ShardMeta = serde_json::from_str(&content).unwrap();
     }
 }
