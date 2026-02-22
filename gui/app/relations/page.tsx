@@ -39,7 +39,10 @@ export default function RelationsPage() {
       }
     }
     if (selectedView) {
-      if (!views.find(v => v.name === selectedView.name)) {
+      const updatedView = views.find(v => v.name === selectedView.name)
+      if (updatedView) {
+        if (updatedView !== selectedView) setSelectedView(updatedView)
+      } else {
         setSelectedView(null)
       }
     }
@@ -99,7 +102,12 @@ export default function RelationsPage() {
           {/* Detail panel */}
           <div className="flex-1 overflow-hidden h-full">
             {selectedRelation && <RelationDetailPanel relation={selectedRelation} />}
-            {selectedView && <ViewDetailPanel view={selectedView} relations={relations} />}
+            {selectedView && <ViewDetailPanel view={selectedView} relations={relations} onNavigate={(name) => {
+              const rel = relations.find(r => r.name === name)
+              if (rel) { setSelectedRelation(rel); setSelectedView(null); return }
+              const v = views.find(v => v.name === name)
+              if (v) { setSelectedView(v); setSelectedRelation(null) }
+            }} />}
             {!selectedRelation && !selectedView && (
               <div className="flex h-full items-center justify-center bg-muted/10">
                 <div className="text-center">

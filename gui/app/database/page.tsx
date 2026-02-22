@@ -46,7 +46,6 @@ export default function KnowledgeGraphPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [newKgName, setNewKgName] = useState("")
-  const [newKgDescription, setNewKgDescription] = useState("")
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [kgToDelete, setKgToDelete] = useState<KnowledgeGraph | null>(null)
@@ -75,7 +74,6 @@ export default function KnowledgeGraphPage() {
     try {
       await createKnowledgeGraph(newKgName.trim())
       setNewKgName("")
-      setNewKgDescription("")
       setCreateDialogOpen(false)
     } catch (err) {
       console.error("Failed to create knowledge graph:", err)
@@ -118,7 +116,7 @@ export default function KnowledgeGraphPage() {
             <div>
               <h1 className="text-lg font-semibold">Knowledge Graph Management</h1>
               <p className="text-xs text-muted-foreground">
-                Create, manage, and monitor your knowledge graphs
+                Create and manage your knowledge graphs
               </p>
             </div>
           </div>
@@ -160,16 +158,8 @@ export default function KnowledgeGraphPage() {
                       onChange={(e) => setNewKgName(e.target.value)}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Use lowercase letters, numbers, and underscores
+                      Must start with a letter or underscore. Letters, numbers, and underscores only.
                     </p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Description (optional)</label>
-                    <Input
-                      placeholder="A brief description..."
-                      value={newKgDescription}
-                      onChange={(e) => setNewKgDescription(e.target.value)}
-                    />
                   </div>
                 </div>
                 <DialogFooter>

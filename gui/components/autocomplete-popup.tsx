@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState, useLayoutEffect } from "react"
 import { cn } from "@/lib/utils"
 import type { CompletionItem, CompletionKind } from "@/lib/autocomplete"
 import { Database, FunctionSquare, Sigma, Hash, Type, Terminal, Eye } from "lucide-react"
@@ -30,8 +30,10 @@ export function AutocompletePopup({
   onSelect,
   onSetSelected,
 }: AutocompletePopupProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const selectedRef = useRef<HTMLDivElement>(null)
+  const [flipped, setFlipped] = useState(false)
 
   // Scroll selected item into view
   useEffect(() => {
@@ -40,15 +42,30 @@ export function AutocompletePopup({
     }
   }, [selectedIndex])
 
+  // Check if popup overflows parent and flip above cursor if needed
+  useLayoutEffect(() => {
+    if (!containerRef.current) return
+    const parent = containerRef.current.offsetParent as HTMLElement | null
+    if (!parent) return
+    const parentHeight = parent.clientHeight
+    const popupHeight = containerRef.current.offsetHeight
+    setFlipped(position.top + popupHeight > parentHeight && position.top - popupHeight > 0)
+  }, [position, items.length])
+
   if (items.length === 0) return null
+
+  const top = flipped ? position.top - (containerRef.current?.offsetHeight ?? 300) - 24 : position.top
 
   return (
     <div
+      ref={containerRef}
       className="absolute z-50 min-w-[280px] max-w-[400px] rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
       style={{
-        top: `${position.top}px`,
+        top: `${top}px`,
         left: `${position.left}px`,
       }}
+      role="listbox"
+      id="autocomplete-listbox"
     >
       <div
         ref={listRef}
@@ -58,16 +75,20 @@ export function AutocompletePopup({
           const config = KIND_CONFIG[item.kind]
           const Icon = config.icon
           const isSelected = index === selectedIndex
+          const itemId = `autocomplete-option-${index}`
 
           return (
             <div
               key={`${item.kind}-${item.label}-${index}`}
+              id={itemId}
               ref={isSelected ? selectedRef : undefined}
+              role="option"
+              aria-selected={isSelected}
               className={cn(
                 "flex cursor-pointer items-center gap-2 px-2 py-1 text-sm",
                 isSelected
-                  ? "bg-fuchsia-500/20 text-foreground"
-                  : "hover:bg-fuchsia-500/15"
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/50"
               )}
               onMouseDown={(e) => {
                 e.preventDefault() // Prevent textarea blur
@@ -78,6 +99,9 @@ export function AutocompletePopup({
               <Icon className={cn("h-3.5 w-3.5 shrink-0", config.className)} />
               <span className="font-mono text-xs font-medium truncate">
                 {item.label}
+                {item.isSession && (
+                  <span className="ml-1 text-amber-500" title="session">~</span>
+                )}
               </span>
               {item.detail && (
                 <span className="ml-auto text-[10px] text-muted-foreground truncate max-w-[160px]">

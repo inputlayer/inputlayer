@@ -50,6 +50,25 @@
   --success-foreground: oklch(1 0 0);
   --warning: oklch(0.75 0.16 75);
   --warning-foreground: oklch(0.2 0.02 75);
+
+  /* Syntax highlighting (light) */
+  --syn-comment: oklch(0.55 0.02 260);
+  --syn-string: oklch(0.45 0.16 145);
+  --syn-meta: oklch(0.48 0.2 310);
+  --syn-query: oklch(0.48 0.2 195);
+  --syn-arrow: oklch(0.48 0.2 310);
+  --syn-operator: oklch(0.48 0.2 195);
+  --syn-negation: oklch(0.52 0.2 25);
+  --syn-comparison: oklch(0.52 0.18 25);
+  --syn-number: oklch(0.48 0.16 195);
+  --syn-aggregate: oklch(0.52 0.2 80);
+  --syn-builtin: oklch(0.52 0.18 80);
+  --syn-keyword: oklch(0.48 0.2 280);
+  --syn-variable: oklch(0.48 0.16 250);
+  --syn-identifier: oklch(0.2 0.02 260);
+  --syn-body-id: oklch(0.42 0.14 195);
+  --syn-arith: oklch(0.52 0.18 25);
+  --syn-punct: oklch(0.55 0.02 260);
 }
 
 .dark {
@@ -97,6 +116,25 @@
   --success-foreground: oklch(0.1 0 0);
   --warning: oklch(0.78 0.14 75);
   --warning-foreground: oklch(0.2 0.02 75);
+
+  /* Syntax highlighting (dark) — matches ANSI colors from src/syntax/mod.rs */
+  --syn-comment: oklch(0.55 0.02 260);
+  --syn-string: oklch(0.72 0.16 145);
+  --syn-meta: oklch(0.75 0.18 310);
+  --syn-query: oklch(0.78 0.16 195);
+  --syn-arrow: oklch(0.75 0.18 310);
+  --syn-operator: oklch(0.78 0.16 195);
+  --syn-negation: oklch(0.72 0.2 25);
+  --syn-comparison: oklch(0.68 0.18 25);
+  --syn-number: oklch(0.78 0.14 195);
+  --syn-aggregate: oklch(0.82 0.16 80);
+  --syn-builtin: oklch(0.78 0.14 80);
+  --syn-keyword: oklch(0.72 0.18 280);
+  --syn-variable: oklch(0.78 0.14 250);
+  --syn-identifier: oklch(0.95 0.01 260);
+  --syn-body-id: oklch(0.78 0.14 195);
+  --syn-arith: oklch(0.68 0.18 25);
+  --syn-punct: oklch(0.55 0.02 260);
 }
 
 @theme inline {
@@ -174,3 +212,28 @@
     background: var(--muted-foreground);
   }
 }
+
+/* Syntax highlighting classes */
+/* Selection highlight for the transparent-text textarea */
+.editor-textarea::selection {
+  background: oklch(0.65 0.18 195 / 0.3);
+  color: transparent;
+}
+
+.syn-comment    { color: var(--syn-comment); font-style: italic; }
+.syn-string     { color: var(--syn-string); }
+.syn-meta       { color: var(--syn-meta); font-weight: 600; }
+.syn-query      { color: var(--syn-query); font-weight: 600; }
+.syn-arrow      { color: var(--syn-arrow); font-weight: 600; }
+.syn-operator   { color: var(--syn-operator); font-weight: 600; }
+.syn-negation   { color: var(--syn-negation); font-weight: 600; }
+.syn-comparison { color: var(--syn-comparison); }
+.syn-number     { color: var(--syn-number); }
+.syn-aggregate  { color: var(--syn-aggregate); font-weight: 600; }
+.syn-builtin    { color: var(--syn-builtin); }
+.syn-keyword    { color: var(--syn-keyword); font-weight: 600; }
+.syn-variable   { color: var(--syn-variable); }
+.syn-identifier { color: var(--syn-identifier); }
+.syn-body-id    { color: var(--syn-body-id); }
+.syn-arith      { color: var(--syn-arith); }
+.syn-punct      { color: var(--syn-punct); }

@@ -189,6 +189,7 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_execute_program(
             Some(&sid),
             Some("default".to_string()),
             "~__hidden(X) <- data(X)".to_string(),
+            None,
         )
         .await;
     assert!(

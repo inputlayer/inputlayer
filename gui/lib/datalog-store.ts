@@ -4,11 +4,13 @@ import { create } from "zustand"
 import { toast } from "sonner"
 import { WsClient, WsError } from "./ws-client"
 import type { WsNotificationMessage } from "./ws-types"
-import { parseKgList, parseRelList, parseRuleList, parseRuleDefinition, generateVariables } from "./ws-parsers"
+import { parseKgList, parseRelList, parseRuleList, parseRuleDefinition, parseDependenciesFromDefinition, parseRuleClauses, parseSessionNames, generateVariables } from "./ws-parsers"
 
 // LocalStorage keys
 const STORAGE_KEY_CONNECTION = "inputlayer_connection"
 const STORAGE_KEY_SELECTED_KG = "inputlayer_selected_kg"
+const STORAGE_KEY_EDITOR = "inputlayer_editor_content"
+const STORAGE_KEY_HISTORY = "inputlayer_query_history"
 
 export interface DatalogConnection {
   id: string
@@ -32,8 +34,10 @@ export interface Relation {
   arity: number
   tupleCount: number
   columns: string[]
+  columnTypes: string[]
   data: (string | number | boolean | null)[][]
   isView: boolean
+  isSession: boolean
 }
 
 export interface View {
@@ -43,6 +47,8 @@ export interface View {
   arity: number
   dependencies: string[]
   computationSteps: ComputationStep[]
+  explainPlan: string
+  isSession: boolean
 }
 
 export interface ComputationStep {
@@ -51,6 +57,12 @@ export interface ComputationStep {
   inputs: string[]
   output: string
   description: string
+}
+
+export interface ValidationError {
+  line: number
+  statement_index: number
+  error: string
 }
 
 export interface QueryResult {
@@ -62,12 +74,21 @@ export interface QueryResult {
   timestamp: Date
   status: "success" | "error"
   error?: string
+  validationErrors?: ValidationError[]
+  truncated?: boolean
+  totalCount?: number
+  warnings?: string[]
+  rowProvenance?: string[]
+  hasEphemeral?: boolean
+  ephemeralSources?: string[]
 }
 
 interface StoredConnection {
   host: string
   port: number
   name: string
+  username: string
+  // Password is intentionally NOT persisted — never store credentials in localStorage
 }
 
 interface DatalogStore {
@@ -77,9 +98,13 @@ interface DatalogStore {
   relations: Relation[]
   views: View[]
   queryHistory: QueryResult[]
+  editorContent: string
   isInitialized: boolean
+  isRestoringSession: boolean
   isRefreshing: boolean
+  queryCancelRef: (() => void) | null
 
+  setEditorContent: (content: string) => void
   setConnection: (connection: DatalogConnection | null) => void
   setKnowledgeGraphs: (knowledgeGraphs: KnowledgeGraph[]) => void
   selectKnowledgeGraph: (knowledgeGraph: KnowledgeGraph | null) => void
@@ -88,10 +113,12 @@ interface DatalogStore {
   addQueryToHistory: (queryResult: QueryResult) => void
 
   // API actions
-  connect: (host: string, port: number, name: string) => Promise<void>
+  connect: (host: string, port: number, name: string, username: string, password: string) => Promise<void>
   disconnect: () => void
   loadKnowledgeGraph: (kgName: string) => Promise<void>
   executeQuery: (query: string) => Promise<QueryResult>
+  executeInternalQuery: (query: string) => Promise<QueryResult>
+  cancelCurrentQuery: () => void
   loadRelationData: (relationName: string) => Promise<Relation | null>
   loadViewData: (viewName: string) => Promise<View | null>
   explainQuery: (query: string) => Promise<string>
@@ -105,10 +132,28 @@ interface DatalogStore {
 
 // ── localStorage helpers ────────────────────────────────────────────────────
 
-function saveConnectionToStorage(host: string, port: number, name: string) {
+function safeLsSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // QuotaExceededError or SecurityError — silently ignore
+  }
+}
+
+function saveConnectionToStorage(host: string, port: number, name: string, username: string) {
   if (typeof window === "undefined") return
-  const stored: StoredConnection = { host, port, name }
-  localStorage.setItem(STORAGE_KEY_CONNECTION, JSON.stringify(stored))
+  const stored: StoredConnection = { host, port, name, username }
+  safeLsSet(STORAGE_KEY_CONNECTION, JSON.stringify(stored))
+}
+
+function isStoredConnection(v: unknown): v is StoredConnection {
+  return (
+    typeof v === "object" && v !== null &&
+    typeof (v as StoredConnection).host === "string" &&
+    typeof (v as StoredConnection).port === "number" &&
+    typeof (v as StoredConnection).name === "string" &&
+    typeof (v as StoredConnection).username === "string"
+  )
 }
 
 function getConnectionFromStorage(): StoredConnection | null {
@@ -116,7 +161,8 @@ function getConnectionFromStorage(): StoredConnection | null {
   const stored = localStorage.getItem(STORAGE_KEY_CONNECTION)
   if (!stored) return null
   try {
-    return JSON.parse(stored) as StoredConnection
+    const parsed: unknown = JSON.parse(stored)
+    return isStoredConnection(parsed) ? parsed : null
   } catch {
     return null
   }
@@ -124,7 +170,7 @@ function getConnectionFromStorage(): StoredConnection | null {
 
 function saveSelectedKgToStorage(kgName: string) {
   if (typeof window === "undefined") return
-  localStorage.setItem(STORAGE_KEY_SELECTED_KG, kgName)
+  safeLsSet(STORAGE_KEY_SELECTED_KG, kgName)
 }
 
 function getSelectedKgFromStorage(): string | null {
@@ -136,6 +182,15 @@ function clearStorage() {
   if (typeof window === "undefined") return
   localStorage.removeItem(STORAGE_KEY_CONNECTION)
   localStorage.removeItem(STORAGE_KEY_SELECTED_KG)
+  localStorage.removeItem(STORAGE_KEY_EDITOR)
+}
+
+const KG_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+function validateKgName(name: string): void {
+  if (!KG_NAME_RE.test(name)) {
+    throw new Error(`Invalid knowledge graph name "${name}". Names must start with a letter or underscore and contain only alphanumeric characters and underscores.`)
+  }
 }
 
 // ── WS client singleton ────────────────────────────────────────────────────
@@ -169,8 +224,10 @@ async function fetchRelations(ws: WsClient): Promise<Relation[]> {
     arity: r.arity,
     tupleCount: r.tupleCount,
     columns: r.columns,
+    columnTypes: r.columnTypes,
     data: [],
     isView: false,
+    isSession: false,
   }))
 }
 
@@ -182,9 +239,11 @@ async function fetchViews(ws: WsClient): Promise<View[]> {
     id: `v${i + 1}`,
     name: r.name,
     definition: "",
-    arity: r.clauseCount, // will be refined when loading view data
+    arity: 0, // will be set from parsed definition in loadViewData()
     dependencies: [],
     computationSteps: [],
+    explainPlan: "",
+    isSession: false,
   }))
 }
 
@@ -212,7 +271,10 @@ async function checkHealth(host: string, port: number): Promise<void> {
     url = `${protocol}://${host}:${port}/health`
   }
   const resp = await fetch(url)
-  if (!resp.ok) throw new Error(`Health check failed: ${resp.status}`)
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "")
+    throw new Error(`Health check failed: ${resp.status}${body ? ` — ${body}` : ""}`)
+  }
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────
@@ -224,25 +286,76 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
   relations: [],
   views: [],
   queryHistory: [],
+  editorContent: "",
   isInitialized: false,
+  isRestoringSession: false,
   isRefreshing: false,
+  queryCancelRef: null,
 
+  setEditorContent: (content) => {
+    set({ editorContent: content })
+    if (typeof window !== "undefined") safeLsSet(STORAGE_KEY_EDITOR, content)
+  },
   setConnection: (connection) => set({ connection }),
   setKnowledgeGraphs: (knowledgeGraphs) => set({ knowledgeGraphs }),
   selectKnowledgeGraph: (knowledgeGraph) => set({ selectedKnowledgeGraph: knowledgeGraph }),
   setRelations: (relations) => set({ relations }),
   setViews: (views) => set({ views }),
   addQueryToHistory: (queryResult) =>
-    set((state) => ({
-      queryHistory: [queryResult, ...state.queryHistory.slice(0, 49)],
-    })),
+    set((state) => {
+      // Remove previous consecutive duplicate (same query text) to avoid clutter
+      const prev = state.queryHistory
+      const rest = prev.length > 0 && prev[0].query === queryResult.query ? prev.slice(1) : prev
+      const newHistory = [queryResult, ...rest.slice(0, 49)]
+      // Persist lightweight history to localStorage
+      try {
+        const serialized = newHistory.slice(0, 50).map((h) => ({
+          id: h.id,
+          query: h.query,
+          status: h.status,
+          executionTime: h.executionTime,
+          timestamp: h.timestamp instanceof Date ? h.timestamp.toISOString() : h.timestamp,
+          error: h.error,
+        }))
+        safeLsSet(STORAGE_KEY_HISTORY, JSON.stringify(serialized))
+      } catch { /* ignore quota errors */ }
+      return { queryHistory: newHistory }
+    }),
 
   initFromStorage: async () => {
     if (get().isInitialized) return
     set({ isInitialized: true })
 
+    // Restore editor content and history from localStorage
+    if (typeof window !== "undefined") {
+      const savedEditor = localStorage.getItem(STORAGE_KEY_EDITOR)
+      if (savedEditor) set({ editorContent: savedEditor })
+
+      try {
+        const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY)
+        if (savedHistory) {
+          const parsed = JSON.parse(savedHistory) as Array<{
+            id: string; query: string; status: string; executionTime: number; timestamp: string; error?: string
+          }>
+          const history: QueryResult[] = parsed.map((h) => ({
+            id: h.id,
+            query: h.query,
+            data: [],
+            columns: [],
+            executionTime: h.executionTime,
+            timestamp: new Date(h.timestamp),
+            status: h.status as "success" | "error",
+            error: h.error,
+          }))
+          set({ queryHistory: history })
+        }
+      } catch { /* ignore corrupted history */ }
+    }
+
     const stored = getConnectionFromStorage()
     if (!stored) return
+
+    set({ isRestoringSession: true })
 
     set({ connection: { id: "1", name: stored.name, host: stored.host, port: stored.port, status: "connecting" } })
 
@@ -252,7 +365,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       const savedKgName = getSelectedKgFromStorage()
       const kg = savedKgName || "default"
 
-      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg })
+      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg, username: stored.username, password: "" })
       await ws.connect()
       wsClient = ws
 
@@ -297,23 +410,30 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         }
         // Debounced full refresh
         if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer)
-        refreshDebounceTimer = setTimeout(() => get().refreshCurrentKnowledgeGraph(), 500)
+        refreshDebounceTimer = setTimeout(() => {
+          refreshDebounceTimer = null
+          if (wsClient) get().refreshCurrentKnowledgeGraph()
+        }, 500)
       })
+
+      set({ isRestoringSession: false })
     } catch (error) {
       console.error("Failed to restore session:", error)
+      if (stateUnsubscribe) { stateUnsubscribe(); stateUnsubscribe = null }
+      if (notificationUnsubscribe) { notificationUnsubscribe(); notificationUnsubscribe = null }
       clearStorage()
       if (wsClient) { wsClient.disconnect(); wsClient = null }
-      set({ connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
+      set({ isRestoringSession: false, connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
     }
   },
 
-  connect: async (host, port, name) => {
+  connect: async (host, port, name, username, password) => {
     set({ connection: { id: "1", name, host, port, status: "connecting" } })
 
     try {
       await checkHealth(host, port)
 
-      const ws = new WsClient({ url: buildWsUrl(host, port), kg: "default" })
+      const ws = new WsClient({ url: buildWsUrl(host, port), kg: "default", username, password })
       await ws.connect()
       wsClient = ws
 
@@ -325,7 +445,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         }
       })
 
-      saveConnectionToStorage(host, port, name)
+      saveConnectionToStorage(host, port, name, username)
 
       const knowledgeGraphs = await fetchKnowledgeGraphs(ws)
 
@@ -357,7 +477,10 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
           }))
         }
         if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer)
-        refreshDebounceTimer = setTimeout(() => get().refreshCurrentKnowledgeGraph(), 500)
+        refreshDebounceTimer = setTimeout(() => {
+          refreshDebounceTimer = null
+          if (wsClient) get().refreshCurrentKnowledgeGraph()
+        }, 500)
       })
     } catch (error) {
       console.error("Connection failed:", error)
@@ -386,25 +509,32 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       // Switch KG on the server session
       await wsClient.execute(`.kg use ${kgName}`)
 
-      // Fetch relations and views
-      const [relations, views] = await Promise.all([
+      // Fetch relations, views, and session info
+      const [relations, views, sessionResult] = await Promise.all([
         fetchRelations(wsClient),
         fetchViews(wsClient),
+        wsClient.execute(".session").catch(() => null),
       ])
 
-      // Mark relations that are also views
+      // Mark relations that are also views or session-derived
       const viewNames = new Set(views.map((v) => v.name))
-      const relationsWithViewFlag = relations.map((r) => ({
+      const sessionNames = sessionResult ? new Set(parseSessionNames(sessionResult)) : new Set<string>()
+      const relationsWithFlags = relations.map((r) => ({
         ...r,
         isView: viewNames.has(r.name),
+        isSession: sessionNames.has(r.name),
+      }))
+      const viewsWithFlags = views.map((v) => ({
+        ...v,
+        isSession: sessionNames.has(v.name),
       }))
 
       saveSelectedKgToStorage(kgName)
 
       set({
         selectedKnowledgeGraph: { ...kg, relationsCount: relations.length, viewsCount: views.length },
-        relations: relationsWithViewFlag,
-        views,
+        relations: relationsWithFlags,
+        views: viewsWithFlags,
       })
     } catch (error) {
       console.error("Failed to load knowledge graph:", error)
@@ -419,17 +549,24 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
     set({ isRefreshing: true })
 
     try {
-      const [knowledgeGraphs, relations, views] = await Promise.all([
+      const [knowledgeGraphs, relations, views, sessionResult] = await Promise.all([
         fetchKnowledgeGraphs(wsClient),
         fetchRelations(wsClient),
         fetchViews(wsClient),
+        wsClient.execute(".session").catch(() => null),
       ])
 
       const updatedKg = knowledgeGraphs.find((k) => k.name === kg.name)
       const viewNames = new Set(views.map((v) => v.name))
-      const relationsWithViewFlag = relations.map((r) => ({
+      const sessionNames = sessionResult ? new Set(parseSessionNames(sessionResult)) : new Set<string>()
+      const relationsWithFlags = relations.map((r) => ({
         ...r,
         isView: viewNames.has(r.name),
+        isSession: sessionNames.has(r.name),
+      }))
+      const viewsWithFlags = views.map((v) => ({
+        ...v,
+        isSession: sessionNames.has(v.name),
       }))
 
       set({
@@ -437,13 +574,21 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         selectedKnowledgeGraph: updatedKg
           ? { ...updatedKg, relationsCount: relations.length, viewsCount: views.length }
           : kg,
-        relations: relationsWithViewFlag,
-        views,
+        relations: relationsWithFlags,
+        views: viewsWithFlags,
         isRefreshing: false,
       })
     } catch (error) {
       console.error("Failed to refresh knowledge graph:", error)
       set({ isRefreshing: false })
+    }
+  },
+
+  cancelCurrentQuery: () => {
+    const cancel = get().queryCancelRef
+    if (cancel) {
+      cancel()
+      set({ queryCancelRef: null })
     }
   },
 
@@ -465,8 +610,25 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
     const start = Date.now()
 
+    // Set up cancellation
+    let cancelled = false
+    set({ queryCancelRef: () => { cancelled = true } })
+
     try {
       const response = await wsClient.execute(query)
+
+      if (cancelled) {
+        return {
+          id: crypto.randomUUID(),
+          query,
+          data: [],
+          columns: [],
+          executionTime: Date.now() - start,
+          timestamp: new Date(),
+          status: "error",
+          error: "Query cancelled",
+        }
+      }
 
       const result: QueryResult = {
         id: crypto.randomUUID(),
@@ -476,12 +638,29 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         executionTime: response.execution_time_ms,
         timestamp: new Date(),
         status: "success",
+        truncated: response.truncated || undefined,
+        totalCount: response.total_count,
+        warnings: response.metadata?.warnings,
+        rowProvenance: response.row_provenance,
+        hasEphemeral: response.metadata?.has_ephemeral,
+        ephemeralSources: response.metadata?.ephemeral_sources,
       }
       get().addQueryToHistory(result)
+      set({ queryCancelRef: null })
+
+      // Immediate refresh after mutations so navigating away shows fresh data
+      const trimmed = query.trim()
+      if (trimmed.startsWith("+") || trimmed.startsWith("-") ||
+          trimmed.includes("<-") || trimmed.startsWith(".")) {
+        get().refreshCurrentKnowledgeGraph()  // fire-and-forget
+      }
+
       return result
     } catch (error) {
+      set({ queryCancelRef: null })
       const executionTime = Date.now() - start
       const errorMessage = error instanceof WsError ? error.message : String(error)
+      const validationErrors = error instanceof WsError ? error.validationErrors : undefined
 
       const errorResult: QueryResult = {
         id: crypto.randomUUID(),
@@ -492,9 +671,53 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         timestamp: new Date(),
         status: "error",
         error: errorMessage,
+        validationErrors,
       }
       get().addQueryToHistory(errorResult)
       return errorResult
+    }
+  },
+
+  executeInternalQuery: async (query: string): Promise<QueryResult> => {
+    if (!wsClient) {
+      return {
+        id: crypto.randomUUID(),
+        query,
+        data: [],
+        columns: [],
+        executionTime: 0,
+        timestamp: new Date(),
+        status: "error",
+        error: "Not connected",
+      }
+    }
+
+    const start = Date.now()
+    try {
+      const response = await wsClient.execute(query)
+      return {
+        id: crypto.randomUUID(),
+        query,
+        data: response.rows as (string | number | boolean | null)[][],
+        columns: response.columns,
+        executionTime: response.execution_time_ms,
+        timestamp: new Date(),
+        status: "success",
+        rowProvenance: response.row_provenance,
+        hasEphemeral: response.metadata?.has_ephemeral,
+        ephemeralSources: response.metadata?.ephemeral_sources,
+      }
+    } catch (error) {
+      return {
+        id: crypto.randomUUID(),
+        query,
+        data: [],
+        columns: [],
+        executionTime: Date.now() - start,
+        timestamp: new Date(),
+        status: "error",
+        error: error instanceof WsError ? error.message : String(error),
+      }
     }
   },
 
@@ -510,7 +733,9 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       const response = await wsClient.execute(query)
 
       // Prefer schema column names over generic query-result columns (col0, col1, ...)
+      const responseArity = response.rows.length > 0 ? (response.rows[0] as unknown[]).length : relation.arity
       const hasSchemaColumns = relation.columns.length > 0
+        && relation.columns.length === responseArity
         && !relation.columns.every((c, i) => c === `col${i}`)
       const updated: Relation = {
         ...relation,
@@ -536,12 +761,39 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
     try {
       // Fetch rule definition
-      const defResult = await wsClient.execute(`.rule show ${viewName}`)
+      const defResult = await wsClient.execute(`.rule def ${viewName}`)
       const definition = parseRuleDefinition(defResult)
+      const dependencies = parseDependenciesFromDefinition(definition, viewName)
+
+      // Build computation steps from parsed clauses
+      const clauses = parseRuleClauses(definition)
+      const computationSteps: ComputationStep[] = clauses.map((clause, i) => ({
+        id: `step_${i}`,
+        operation: `Clause ${i + 1}`,
+        inputs: clause.body,
+        output: clause.head,
+        description: `${clause.head}(...) <- ${clause.body.join(", ")}(...)`,
+      }))
+
+      // Derive arity from the first clause head (more reliable than clauseCount)
+      const arity = clauses.length > 0 ? clauses[0].headArity : view.arity
+
+      // Fetch explain plan (best-effort)
+      let explainPlan = ""
+      try {
+        const vars = generateVariables(arity > 0 ? arity : 2)
+        explainPlan = await get().explainQuery(`?${viewName}(${vars.join(", ")})`)
+      } catch {
+        // explain may fail for views with no data or complex recursive views
+      }
 
       const updated: View = {
         ...view,
         definition,
+        dependencies,
+        computationSteps,
+        explainPlan,
+        arity,
       }
 
       set((state) => ({
@@ -562,6 +814,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
   createKnowledgeGraph: async (name: string): Promise<void> => {
     if (!wsClient) throw new Error("Not connected")
+    validateKgName(name)
     await wsClient.execute(`.kg create ${name}`)
     // Refresh KG list
     const knowledgeGraphs = await fetchKnowledgeGraphs(wsClient)
@@ -570,6 +823,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
   deleteKnowledgeGraph: async (name: string): Promise<void> => {
     if (!wsClient) throw new Error("Not connected")
+    validateKgName(name)
     await wsClient.execute(`.kg drop ${name}`)
     // Refresh KG list
     const knowledgeGraphs = await fetchKnowledgeGraphs(wsClient)

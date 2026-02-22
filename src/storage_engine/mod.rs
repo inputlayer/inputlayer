@@ -1467,6 +1467,42 @@ impl StorageEngine {
         Ok(relations)
     }
 
+    /// List relations with typed metadata for a specific knowledge graph.
+    /// Returns (name, Vec<(column_name, type_name)>, tuple_count).
+    /// When a typed schema is declared, uses the declared type; otherwise defaults to "any".
+    pub fn list_relations_with_typed_metadata_in(
+        &self,
+        kg: &str,
+    ) -> StorageResult<Vec<(String, Vec<(String, String)>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        let relations: Vec<(String, Vec<(String, String)>, usize)> = db
+            .metadata
+            .relations
+            .iter()
+            .map(|(name, meta)| {
+                let typed_columns = if let Some(schema) = db.schema_catalog.get(name) {
+                    schema
+                        .columns
+                        .iter()
+                        .map(|c| (c.name.clone(), c.data_type.to_string()))
+                        .collect()
+                } else {
+                    meta.schema
+                        .iter()
+                        .map(|col_name| (col_name.clone(), "any".to_string()))
+                        .collect()
+                };
+                (name.clone(), typed_columns, meta.tuple_count)
+            })
+            .collect();
+        Ok(relations)
+    }
+
     /// Load all knowledge graphs from persist layer
     ///
     /// Recovery process:

@@ -11,7 +11,18 @@ export interface WsPingRequest {
   type: "ping"
 }
 
-export type WsClientMessage = WsExecuteRequest | WsPingRequest
+export interface WsLoginRequest {
+  type: "login"
+  username: string
+  password: string
+}
+
+export interface WsAuthenticateRequest {
+  type: "authenticate"
+  api_key: string
+}
+
+export type WsClientMessage = WsExecuteRequest | WsPingRequest | WsLoginRequest | WsAuthenticateRequest
 
 // ── Server → Client ─────────────────────────────────────────────────────────
 
@@ -19,6 +30,19 @@ export interface WsConnectedMessage {
   type: "connected"
   session_id: number
   knowledge_graph: string
+}
+
+export interface WsAuthenticatedMessage {
+  type: "authenticated"
+  session_id: string
+  knowledge_graph: string
+  version: string
+  role: string
+}
+
+export interface WsAuthErrorMessage {
+  type: "auth_error"
+  message: string
 }
 
 export interface WsResultMessage {
@@ -67,6 +91,8 @@ export interface WsNotificationMessage {
 
 export type WsServerMessage =
   | WsConnectedMessage
+  | WsAuthenticatedMessage
+  | WsAuthErrorMessage
   | WsResultMessage
   | WsErrorMessage
   | WsPongMessage

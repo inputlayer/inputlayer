@@ -2,6 +2,7 @@ Connecting to server at http://127.0.0.1:8080...
 Connected!
 
 Server status: healthy
+Authenticated as: admin
 Current knowledge graph: default
 
 > .kg create test_rel_cmd_n01t03
@@ -15,8 +16,8 @@ Inserted 2 fact(s) into 'users'.
 Inserted 2 fact(s) into 'products'.
 > .rel
 Relations:
-  products (arity: 3)
-  users (arity: 2)
+  products (arity: 3, columns: [col0: any, col1: any, col2: any], tuples: 2)
+  users (arity: 2, columns: [col0: any, col1: any], tuples: 2)
 > .rel users
 Relation: users
 ┌───┬─────────┐
@@ -41,9 +42,9 @@ Schema for 'orders' registered with 3 columns (persistent)
 Inserted 2 fact(s) into 'orders'.
 > .rel
 Relations:
-  orders (arity: 3)
-  products (arity: 3)
-  users (arity: 2)
+  orders (arity: 3, columns: [id: int, user_id: int, product_id: int], tuples: 2)
+  products (arity: 3, columns: [col0: any, col1: any, col2: any], tuples: 2)
+  users (arity: 2, columns: [col0: any, col1: any], tuples: 2)
 > .rel orders
 Relation: orders
 ┌────┬─────────┬────────────┐

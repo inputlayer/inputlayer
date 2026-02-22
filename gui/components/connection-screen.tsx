@@ -7,27 +7,58 @@ import { Server, Loader2, Database, User, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
 import { useDatalogStore } from "@/lib/datalog-store"
-import Image from "next/image"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { Logo } from "@/components/logo"
 
 export function ConnectionScreen() {
-  const [host, setHost] = useState("localhost")
-  const [port, setPort] = useState("8080")
+  const [host, setHost] = useState(() => {
+    if (typeof window === "undefined") return "localhost"
+    try {
+      const stored = localStorage.getItem("inputlayer_connection")
+      if (stored) { const p = JSON.parse(stored); return p.host || "localhost" }
+    } catch {}
+    return "localhost"
+  })
+  const [port, setPort] = useState(() => {
+    if (typeof window === "undefined") return "8080"
+    try {
+      const stored = localStorage.getItem("inputlayer_connection")
+      if (stored) { const p = JSON.parse(stored); return String(p.port || 8080) }
+    } catch {}
+    return "8080"
+  })
   const [database, setDatabase] = useState("")
-  const [username, setUsername] = useState("")
+  const [username, setUsername] = useState(() => {
+    if (typeof window === "undefined") return ""
+    try {
+      const stored = localStorage.getItem("inputlayer_connection")
+      if (stored) { const p = JSON.parse(stored); return p.username || "" }
+    } catch {}
+    return ""
+  })
   const [password, setPassword] = useState("")
   const [isConnecting, setIsConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [portError, setPortError] = useState<string | null>(null)
 
   const { connect } = useDatalogStore()
 
   const handleConnect = async () => {
+    const portNum = parseInt(port)
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      setPortError("Port must be between 1 and 65535")
+      return
+    }
+    setPortError(null)
     setIsConnecting(true)
     setError(null)
     try {
-      await connect(host, Number.parseInt(port), database || "default")
+      await connect(host, portNum, database || "default", username, password)
     } catch (e) {
-      setError("Failed to connect. Please check your connection details.")
+      const msg = e instanceof Error ? e.message : "Failed to connect. Please check your connection details."
+      setError(msg)
     } finally {
       setIsConnecting(false)
     }
@@ -41,17 +72,13 @@ export function ConnectionScreen() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
           <div className="mb-4">
-            <Image
-              src="/logo.png"
-              alt="InputLayer"
-              width={200}
-              height={60}
-              className="h-12 w-auto dark:invert"
-              priority
-            />
+            <Logo size="lg" />
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground">Connect to a Datalog server to get started</p>
         </div>
@@ -88,17 +115,20 @@ export function ConnectionScreen() {
                 <Input
                   id="port"
                   type="number"
+                  min={1}
+                  max={65535}
                   value={port}
-                  onChange={(e) => setPort(e.target.value)}
+                  onChange={(e) => { setPort(e.target.value); setPortError(null) }}
                   placeholder="8080"
-                  className="h-10"
+                  className={cn("h-10", portError && "border-destructive")}
                 />
+                {portError && <p className="text-[10px] text-destructive mt-1">{portError}</p>}
               </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="database" className="text-xs font-medium text-muted-foreground">
-                Database
+                Knowledge Graph
               </Label>
               <div className="relative">
                 <Database className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -106,7 +136,7 @@ export function ConnectionScreen() {
                   id="database"
                   value={database}
                   onChange={(e) => setDatabase(e.target.value)}
-                  placeholder="my_database"
+                  placeholder="default"
                   className="h-10 pl-10"
                 />
               </div>
@@ -115,7 +145,7 @@ export function ConnectionScreen() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="username" className="text-xs font-medium text-muted-foreground">
-                  Username
+                  Username <span className="text-muted-foreground/50">(optional)</span>
                 </Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -130,7 +160,7 @@ export function ConnectionScreen() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-xs font-medium text-muted-foreground">
-                  Password
+                  Password <span className="text-muted-foreground/50">(optional)</span>
                 </Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -139,7 +169,7 @@ export function ConnectionScreen() {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder=""
                     className="h-10 pl-10"
                   />
                 </div>

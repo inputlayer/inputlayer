@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileCode, Network, Database, Settings, HelpCircle } from "lucide-react"
+import { FileCode, Network, Database } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 const mainNavItems = [
@@ -13,8 +13,6 @@ const mainNavItems = [
 
 const bottomNavItems = [
   { title: "Database", href: "/database", icon: Database },
-  { title: "Settings", href: "/settings", icon: Settings },
-  { title: "Help", href: "/help", icon: HelpCircle },
 ]
 
 export function SidebarNav() {
@@ -34,6 +32,7 @@ export function SidebarNav() {
                 <TooltipTrigger asChild>
                   <Link
                     href={item.href}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "flex h-10 w-10 items-center justify-center rounded-lg transition-all",
                       isActive
@@ -61,6 +60,7 @@ export function SidebarNav() {
                 <TooltipTrigger asChild>
                   <Link
                     href={item.href}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "flex h-10 w-10 items-center justify-center rounded-lg transition-all",
                       isActive

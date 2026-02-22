@@ -7,6 +7,7 @@ export interface CompletionItem {
   kind: CompletionKind
   detail?: string
   insertText: string
+  isSession?: boolean
 }
 
 // Built-in functions from src/ast/mod.rs BuiltinFunc enum
@@ -201,8 +202,65 @@ function arityToVars(arity: number): string[] {
 }
 
 /**
+ * Find the start of the current Datalog statement in the text before the cursor.
+ * A statement ends with `.` NOT between digits (to skip decimal numbers like 3.14).
+ */
+function findStatementStart(text: string, cursorPos: number): number {
+  const before = text.substring(0, cursorPos)
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (before[i] === ".") {
+      const digitBefore = i > 0 && before[i - 1] >= "0" && before[i - 1] <= "9"
+      const digitAfter = i + 1 < before.length && before[i + 1] >= "0" && before[i + 1] <= "9"
+      if (digitBefore && digitAfter) continue
+      return i + 1
+    }
+  }
+  return 0
+}
+
+/**
+ * Check if the cursor is in a rule body (after `<-` in the current statement).
+ */
+function isInRuleBody(text: string, cursorPos: number): boolean {
+  const stmtStart = findStatementStart(text, cursorPos)
+  return text.substring(stmtStart, cursorPos).includes("<-")
+}
+
+/**
+ * Extract the variable names from the head of the current rule.
+ * Given `path(X, Y) <- edge(`, returns ["X", "Y"].
+ * Returns null if not in a rule or can't parse the head.
+ */
+function extractHeadVars(text: string, cursorPos: number): string[] | null {
+  const stmtStart = findStatementStart(text, cursorPos)
+  const stmt = text.substring(stmtStart, cursorPos)
+  const arrowIdx = stmt.indexOf("<-")
+  if (arrowIdx === -1) return null
+  const head = stmt.substring(0, arrowIdx)
+  // Parse head: "  name(Var1, Var2, ...)"
+  const headMatch = head.match(/\w+\s*\(([^)]*)\)/)
+  if (!headMatch) return null
+  const args = headMatch[1].split(",").map(a => a.trim()).filter(a => a.length > 0)
+  // Only return if they look like variables (start with uppercase)
+  if (args.every(a => /^[A-Z]/.test(a))) return args
+  return null
+}
+
+/**
+ * Choose the best variable names for a body atom suggestion.
+ * Priority: head vars (if arity matches) > column-derived > generic A,B,C
+ */
+function chooseVars(arity: number, headVars: string[] | null, columns: string[]): string[] {
+  if (headVars && headVars.length === arity) return headVars
+  if (columns.length === arity && !isGenericColumns(columns)) return columns.map(colToVariable)
+  return arityToVars(arity)
+}
+
+/**
  * When cursor is right after `(`, look back for a relation/view name and
- * suggest the full argument template (column-derived variables or generic A,B,C).
+ * suggest the full argument template.
+ * In rule body: uses head vars if arity matches, else column-derived, else generic.
+ * In query/head: uses column-derived names or generic.
  */
 function getParenArgSuggestion(
   text: string,
@@ -224,18 +282,17 @@ function getParenArgSuggestion(
   if (!name) return null
 
   // Check if there's already content right after `(` (don't suggest if args already present)
-  // Only look at the immediate next char, not all remaining text (which may span multiple lines)
   const nextChar = cursorPos < text.length ? text[cursorPos] : ""
   const hasArgsAlready = nextChar !== "" && nextChar !== ")" && nextChar !== " " && nextChar !== "\n" && nextChar !== "\t"
   if (hasArgsAlready) return null
 
   const closeParen = nextChar === ")" ? "" : ")"
+  const inBody = isInRuleBody(text, cursorPos)
+  const headVars = inBody ? extractHeadVars(text, cursorPos) : null
 
   const rel = relations.find((r) => r.name === name)
   if (rel) {
-    const vars = rel.columns.length > 0 && !isGenericColumns(rel.columns)
-      ? rel.columns.map(colToVariable)
-      : arityToVars(rel.arity)
+    const vars = chooseVars(rel.arity, headVars, rel.columns)
     const template = vars.join(", ")
     return {
       items: [{
@@ -250,7 +307,7 @@ function getParenArgSuggestion(
 
   const view = views.find((v) => v.name === name)
   if (view && view.arity > 0) {
-    const vars = arityToVars(view.arity)
+    const vars = chooseVars(view.arity, headVars, [])
     const template = vars.join(", ")
     return {
       items: [{
@@ -322,9 +379,10 @@ export function getCompletions(
   if (isOperatorPrefix) {
     for (const rel of relations) {
       const hasRealColumns = rel.columns.length > 0 && !isGenericColumns(rel.columns)
-      const detail = hasRealColumns
+      let detail = hasRealColumns
         ? `(${rel.columns.join(", ")}) — ${rel.tupleCount} rows`
         : `arity ${rel.arity} — ${rel.tupleCount} rows`
+      if (rel.isSession) detail += " (session)"
       const vars = hasRealColumns
         ? `(${rel.columns.map(colToVariable).join(", ")})`
         : ""
@@ -333,34 +391,50 @@ export function getCompletions(
         kind: "relation",
         detail,
         insertText: rel.name + vars,
+        isSession: rel.isSession,
       })
     }
     for (const view of views) {
       const vars = view.arity > 0
         ? `(${Array.from({ length: view.arity }, (_, i) => String.fromCharCode(65 + i)).join(", ")})`
         : ""
+      let detail = view.arity > 0 ? `view — arity ${view.arity}` : "view"
+      if (view.isSession) detail += " (session)"
       items.push({
         label: view.name,
         kind: "view",
-        detail: view.arity > 0 ? `view — arity ${view.arity}` : "view",
+        detail,
         insertText: view.name + vars,
+        isSession: view.isSession,
       })
     }
     return { items, startIndex: cursorPos }
   }
 
+  // Detect if we're in a rule body to append arguments to completions
+  const inBody = isInRuleBody(text, cursorPos)
+  const headVars = inBody ? extractHeadVars(text, cursorPos) : null
+
   // Relations
   for (const rel of relations) {
     if (rel.name.toLowerCase().startsWith(lowerPrefix)) {
       const hasReal = rel.columns.length > 0 && !isGenericColumns(rel.columns)
-      const detail = hasReal
+      let detail = hasReal
         ? `(${rel.columns.join(", ")}) — ${rel.tupleCount} rows`
         : `arity ${rel.arity} — ${rel.tupleCount} rows`
+      if (rel.isSession) detail += " (session)"
+      // In rule body: append arguments so completing "edge" inserts "edge(X, Y)"
+      let insertText = rel.name
+      if (inBody) {
+        const vars = chooseVars(rel.arity, headVars, rel.columns)
+        insertText = `${rel.name}(${vars.join(", ")})`
+      }
       items.push({
         label: rel.name,
         kind: "relation",
         detail,
-        insertText: rel.name,
+        insertText,
+        isSession: rel.isSession,
       })
     }
   }
@@ -368,11 +442,19 @@ export function getCompletions(
   // Views
   for (const view of views) {
     if (view.name.toLowerCase().startsWith(lowerPrefix)) {
+      let detail = "view"
+      if (view.isSession) detail += " (session)"
+      let insertText = view.name
+      if (inBody && view.arity > 0) {
+        const vars = chooseVars(view.arity, headVars, [])
+        insertText = `${view.name}(${vars.join(", ")})`
+      }
       items.push({
         label: view.name,
         kind: "view",
-        detail: "view",
-        insertText: view.name,
+        detail,
+        insertText,
+        isSession: view.isSession,
       })
     }
   }

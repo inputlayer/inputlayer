@@ -3,16 +3,17 @@
 import { type ReactNode, useEffect } from "react"
 import { useDatalogStore } from "@/lib/datalog-store"
 import { ConnectionScreen } from "@/components/connection-screen"
+import { SplashScreen } from "@/components/splash-screen"
 import { Header } from "@/components/header"
 import { SidebarNav } from "@/components/sidebar-nav"
-import { Loader2 } from "lucide-react"
+import { ErrorBoundary } from "@/components/error-boundary"
 
 interface AppShellProps {
   children: ReactNode
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { connection, isInitialized, initFromStorage } = useDatalogStore()
+  const { connection, isInitialized, isRestoringSession, initFromStorage } = useDatalogStore()
 
   // Try to restore session from localStorage on mount
   useEffect(() => {
@@ -20,30 +21,31 @@ export function AppShell({ children }: AppShellProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Show loading state while initializing
-  if (!isInitialized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Restoring session...</p>
-        </div>
-      </div>
-    )
+  // Show splash while initializing or restoring a saved session
+  if (!isInitialized || isRestoringSession) {
+    return <SplashScreen />
   }
 
-  // Show connection screen if not connected
-  if (!connection || connection.status !== "connected") {
+  // Show connection screen if disconnected (no active connection)
+  if (!connection || connection.status === "disconnected") {
     return <ConnectionScreen />
   }
 
+  // Show splash during connecting/reconnecting states
+  if (connection.status === "connecting" || connection.status === "reconnecting") {
+    const msg = connection.status === "reconnecting" ? "Reconnecting..." : "Connecting..."
+    return <SplashScreen status={msg} />
+  }
+
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <SidebarNav />
-        <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
+    <ErrorBoundary>
+      <div className="flex h-screen flex-col bg-background">
+        <Header />
+        <div className="flex flex-1 overflow-hidden">
+          <SidebarNav />
+          <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   )
 }

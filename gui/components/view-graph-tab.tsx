@@ -28,8 +28,12 @@ interface Edge {
 export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const nodesRef = useRef<Node[]>([])
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -115,9 +119,15 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
     })
 
     if (view.computationSteps.length > 0) {
+      // Connect last step to output view node
       edges.push({
         from: view.computationSteps[view.computationSteps.length - 1].id,
         to: view.id,
+      })
+    } else if (view.dependencies.length > 0) {
+      // Fallback: no computation steps but have dependencies — draw direct edges
+      view.dependencies.forEach((dep) => {
+        edges.push({ from: dep, to: view.id })
       })
     }
 
@@ -125,9 +135,9 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
     ctx.fillStyle = colors.background
     ctx.fillRect(0, 0, width, height)
 
-    // Apply zoom
+    // Apply zoom and pan
     ctx.save()
-    ctx.translate(width / 2, height / 2)
+    ctx.translate(width / 2 + pan.x, height / 2 + pan.y)
     ctx.scale(zoom, zoom)
     ctx.translate(-width / 2, -height / 2)
 
@@ -217,9 +227,9 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
 
     ctx.restore()
 
-    // Store nodes for hover
-    ;(canvas as unknown as { __nodes: Node[] }).__nodes = nodes
-  }, [view, relations, hoveredNode, resolvedTheme, mounted, zoom])
+    // Store nodes for hover detection
+    nodesRef.current = nodes
+  }, [view, relations, hoveredNode, resolvedTheme, mounted, zoom, pan])
 
   useEffect(() => {
     drawGraph()
@@ -238,22 +248,47 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
   }, [drawGraph])
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Handle drag-to-pan
+    if (dragging) {
+      const dx = e.clientX - dragStartRef.current.x
+      const dy = e.clientY - dragStartRef.current.y
+      setPan({ x: dragStartRef.current.panX + dx, y: dragStartRef.current.panY + dy })
+      return
+    }
+
     const canvas = canvasRef.current
-    if (!canvas) return
+    const container = containerRef.current
+    if (!canvas || !container) return
 
-    const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const canvasRect = canvas.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    const screenX = e.clientX - canvasRect.left
+    const screenY = e.clientY - canvasRect.top
+    const width = containerRect.width
+    const height = containerRect.height
 
-    const nodes = (canvas as unknown as { __nodes?: Node[] }).__nodes || []
+    // Inverse the zoom+pan transform
+    const nodeX = (screenX - width / 2 - pan.x) / zoom + width / 2
+    const nodeY = (screenY - height / 2 - pan.y) / zoom + height / 2
+
+    const nodes = nodesRef.current
     const hovered = nodes.find((node) => {
       const nodeWidth = Math.max(100, node.label.length * 10 + 32) / 2
-      const dx = Math.abs(x - node.x)
-      const dy = Math.abs(y - node.y)
-      return dx < nodeWidth * zoom && dy < 24 * zoom
+      const dx = Math.abs(nodeX - node.x)
+      const dy = Math.abs(nodeY - node.y)
+      return dx < nodeWidth && dy < 24
     })
 
     setHoveredNode(hovered?.id || null)
+  }
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setDragging(true)
+    dragStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }
+  }
+
+  const handleMouseUp = () => {
+    setDragging(false)
   }
 
   if (!mounted) {
@@ -268,10 +303,17 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
     <div className="relative h-full" ref={containerRef}>
       <canvas
         ref={canvasRef}
-        className="h-full w-full cursor-crosshair"
+        className={`h-full w-full ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+        role="img"
+        aria-label={`Rule dependency graph for ${view.name}`}
+        tabIndex={0}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredNode(null)}
-      />
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => { setHoveredNode(null); setDragging(false) }}
+      >
+        Dependency graph: {view.name} depends on {view.dependencies.join(", ") || "no other relations"}
+      </canvas>
 
       {/* Zoom controls */}
       <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm p-1">
@@ -283,7 +325,7 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
           <ZoomIn className="h-3.5 w-3.5" />
         </Button>
         <div className="w-px h-4 bg-border mx-1" />
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setZoom(1)}>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>
           <Maximize2 className="h-3.5 w-3.5" />
         </Button>
       </div>

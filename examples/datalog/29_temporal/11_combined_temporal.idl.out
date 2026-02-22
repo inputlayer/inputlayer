@@ -2,6 +2,7 @@ Connecting to server at http://127.0.0.1:8080...
 Connected!
 
 Server status: healthy
+Authenticated as: admin
 Current knowledge graph: default
 
 > .kg create test_combined_temporal_n29t11

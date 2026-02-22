@@ -61,6 +61,16 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum WsRequest {
+    /// Authenticate with an API key
+    Authenticate {
+        api_key: String,
+    },
+    /// Authenticate with username and password
+    #[allow(dead_code)]
+    Login {
+        username: String,
+        password: String,
+    },
     Execute {
         program: String,
     },
@@ -72,10 +82,23 @@ enum WsRequest {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum WsResponse {
+    /// Legacy: Sent by older servers without auth
     Connected {
         #[allow(dead_code)]
         session_id: String,
         knowledge_graph: String,
+    },
+    /// Sent after successful authentication
+    Authenticated {
+        #[allow(dead_code)]
+        session_id: String,
+        knowledge_graph: String,
+        #[allow(dead_code)]
+        role: String,
+    },
+    /// Authentication failed
+    AuthError {
+        message: String,
     },
     Result {
         columns: Vec<String>,
@@ -128,9 +151,9 @@ struct WsClient {
 }
 
 impl WsClient {
-    /// Connect to the WebSocket endpoint, wait for the Connected message,
+    /// Connect to the WebSocket endpoint, authenticate with an API key,
     /// and spawn a background reader task.
-    async fn connect(ws_url: &str) -> Result<(Self, WsResponse), String> {
+    async fn connect(ws_url: &str, api_key: &str) -> Result<(Self, WsResponse), String> {
         let (ws_stream, _) = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             tokio_tungstenite::connect_async(ws_url),
@@ -139,19 +162,37 @@ impl WsClient {
         .map_err(|_| "WebSocket connection timeout (10s)".to_string())?
         .map_err(|e| format!("WebSocket connection failed: {e}"))?;
 
-        let (sender, mut receiver) = ws_stream.split();
+        let (mut sender, mut receiver) = ws_stream.split();
 
-        // Wait for the Connected message before spawning background reader
+        // Send authenticate message
+        let auth_req = WsRequest::Authenticate {
+            api_key: api_key.to_string(),
+        };
+        let auth_text =
+            serde_json::to_string(&auth_req).map_err(|e| format!("Serialize error: {e}"))?;
+        sender
+            .send(tungstenite::Message::Text(auth_text))
+            .await
+            .map_err(|e| format!("Failed to send auth message: {e}"))?;
+
+        // Wait for Authenticated or AuthError response
         let connected = loop {
-            match receiver.next().await {
-                Some(Ok(tungstenite::Message::Text(text))) => {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), receiver.next()).await {
+                Ok(Some(Ok(tungstenite::Message::Text(text)))) => {
                     let resp: WsResponse = serde_json::from_str(&text)
-                        .map_err(|e| format!("Failed to parse Connected message: {e}"))?;
-                    break resp;
+                        .map_err(|e| format!("Failed to parse auth response: {e}"))?;
+                    match &resp {
+                        WsResponse::Authenticated { .. } => break resp,
+                        WsResponse::AuthError { message } => {
+                            return Err(format!("Authentication failed: {message}"));
+                        }
+                        _ => continue, // skip unexpected messages
+                    }
                 }
-                Some(Ok(_)) => continue, // skip non-text frames
-                Some(Err(e)) => return Err(format!("WebSocket error: {e}")),
-                None => return Err("Connection closed before Connected message".to_string()),
+                Ok(Some(Ok(_))) => continue, // skip non-text frames
+                Ok(Some(Err(e))) => return Err(format!("WebSocket error: {e}")),
+                Ok(None) => return Err("Connection closed before authentication".to_string()),
+                Err(_) => return Err("Authentication timeout (10s)".to_string()),
             }
         };
 
@@ -284,6 +325,7 @@ struct Args {
     repl: bool,
     server: String,
     display_limit: Option<usize>,
+    api_key: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -293,6 +335,7 @@ fn parse_args() -> Args {
         repl: false,
         server: "http://127.0.0.1:8080".to_string(),
         display_limit: None,
+        api_key: None,
     };
 
     let mut i = 1;
@@ -317,6 +360,15 @@ fn parse_args() -> Args {
                     i += 2;
                 } else {
                     eprintln!("Error: --server requires a URL");
+                    std::process::exit(1);
+                }
+            }
+            "--api-key" | "-k" => {
+                if i + 1 < args.len() {
+                    result.api_key = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --api-key requires a key value");
                     std::process::exit(1);
                 }
             }
@@ -350,6 +402,11 @@ fn parse_args() -> Args {
         }
     }
 
+    // Fall back to INPUTLAYER_API_KEY env var if --api-key not provided
+    if result.api_key.is_none() {
+        result.api_key = env::var("INPUTLAYER_API_KEY").ok();
+    }
+
     result
 }
 
@@ -360,6 +417,7 @@ fn print_usage() {
     println!("  inputlayer-client [OPTIONS] [SCRIPT.idl]");
     println!();
     println!("OPTIONS:");
+    println!("  -k, --api-key <KEY>   API key for authentication (or set INPUTLAYER_API_KEY)");
     println!("  -s, --script <FILE>   Execute a Datalog script file");
     println!("  -r, --repl            Open REPL after script execution");
     println!("      --server <URL>    Server URL (default: http://127.0.0.1:8080)");
@@ -368,10 +426,13 @@ fn print_usage() {
     );
     println!("  -h, --help            Show this help message");
     println!();
+    println!("ENVIRONMENT:");
+    println!("  INPUTLAYER_API_KEY    API key (alternative to --api-key flag)");
+    println!();
     println!("EXAMPLES:");
-    println!("  inputlayer-client                              # Connect to local server");
+    println!("  inputlayer-client -k <api-key>                    # Connect with API key");
     println!("  inputlayer-client --server http://10.0.0.5:8080   # Connect to remote server");
-    println!("  inputlayer-client script.idl                   # Execute script");
+    println!("  inputlayer-client script.idl                      # Execute script");
 }
 
 // ── Main ────────────────────────────────────────────────────────
@@ -379,6 +440,15 @@ fn print_usage() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args();
+
+    // API key is required for authentication
+    let api_key = match &args.api_key {
+        Some(key) => key.clone(),
+        None => {
+            eprintln!("Error: API key required. Use --api-key <KEY> or set INPUTLAYER_API_KEY.");
+            std::process::exit(1);
+        }
+    };
 
     println!("Connecting to server at {}...", args.server);
 
@@ -424,14 +494,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("Server status: {}", health_data.status);
 
-    // Connect via WebSocket (retry up to 3 times under load)
+    // Connect via WebSocket and authenticate (retry up to 3 times under load)
     let ws_url = http_to_ws_url(http_base);
     let mut ws_result = None;
     for attempt in 0..3 {
-        match WsClient::connect(&ws_url).await {
+        match WsClient::connect(&ws_url, &api_key).await {
             Ok(pair) => {
                 ws_result = Some(pair);
                 break;
+            }
+            Err(e) if e.contains("Authentication failed") => {
+                // Auth errors are not retryable
+                return Err(e.into());
             }
             Err(e) if attempt < 2 => {
                 eprintln!("WebSocket retry ({attempt}): {e}");
@@ -443,6 +517,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ws_client, connected) = ws_result.ok_or("WebSocket connection failed after retries")?;
 
     let current_kg = match &connected {
+        WsResponse::Authenticated {
+            knowledge_graph,
+            role,
+            ..
+        } => {
+            println!("Authenticated as: {role}");
+            println!("Current knowledge graph: {knowledge_graph}");
+            Some(knowledge_graph.clone())
+        }
+        // Backward compat with older servers
         WsResponse::Connected {
             knowledge_graph, ..
         } => {
@@ -1324,6 +1408,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ws_request_authenticate_serialize() {
+        let req = WsRequest::Authenticate {
+            api_key: "test-key-123".to_string(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains(r#""type":"authenticate""#));
+        assert!(json.contains(r#""api_key":"test-key-123""#));
+    }
+
+    #[test]
     fn test_ws_request_ping_serialize() {
         let req = WsRequest::Ping;
         let json = serde_json::to_string(&req).unwrap();
@@ -1331,6 +1425,29 @@ mod tests {
     }
 
     // WsResponse deserialization tests
+    #[test]
+    fn test_ws_response_authenticated_deserialize() {
+        let json = r#"{"type":"authenticated","session_id":"42","knowledge_graph":"default","version":"0.1","role":"admin"}"#;
+        let resp: WsResponse = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            resp,
+            WsResponse::Authenticated {
+                ref role,
+                ref knowledge_graph,
+                ..
+            } if role == "admin" && knowledge_graph == "default"
+        ));
+    }
+
+    #[test]
+    fn test_ws_response_auth_error_deserialize() {
+        let json = r#"{"type":"auth_error","message":"Invalid credentials"}"#;
+        let resp: WsResponse = serde_json::from_str(json).unwrap();
+        assert!(
+            matches!(resp, WsResponse::AuthError { message } if message == "Invalid credentials")
+        );
+    }
+
     #[test]
     fn test_ws_response_connected_deserialize() {
         let json = r#"{"type":"connected","session_id":"42","knowledge_graph":"default"}"#;

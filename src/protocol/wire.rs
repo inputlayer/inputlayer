@@ -63,6 +63,22 @@ pub enum WireValue {
 }
 
 impl WireValue {
+    /// Convert a `Value` (storage layer) to a `WireValue` (protocol layer).
+    pub fn from_value(v: &crate::value::Value) -> Self {
+        use crate::value::Value;
+        match v {
+            Value::Int32(n) => WireValue::Int32(*n),
+            Value::Int64(n) => WireValue::Int64(*n),
+            Value::Float64(f) => WireValue::Float64(*f),
+            Value::String(s) => WireValue::String(s.to_string()),
+            Value::Vector(vec) => WireValue::Vector(vec.as_ref().clone()),
+            Value::VectorInt8(vec) => WireValue::VectorInt8(vec.as_ref().clone()),
+            Value::Bool(b) => WireValue::Bool(*b),
+            Value::Null => WireValue::Null,
+            Value::Timestamp(ts) => WireValue::Timestamp(*ts),
+        }
+    }
+
     pub fn data_type(&self) -> WireDataType {
         match self {
             WireValue::Null => WireDataType::Int64, // Default null type

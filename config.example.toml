@@ -120,13 +120,16 @@ enabled = true
 static_dir = "./gui/dist"
 
 [http.auth]
-# Enable JWT-based authentication
-# When disabled, all API endpoints are public
-enabled = false
+# Authentication is always enabled. On first boot, an admin user is created
+# with a password from one of these sources (checked in order):
+#   1. INPUTLAYER_ADMIN_PASSWORD environment variable
+#   2. bootstrap_admin_password config value below
+#   3. Auto-generated random password (printed to stderr)
+#
+# A bootstrap API key is also created and printed to stderr on first boot.
+# Use it with the CLI: inputlayer-client --api-key <key>
 
-# JWT signing secret
-# IMPORTANT: Change this in production!
-jwt_secret = "change-me-in-production"
+# bootstrap_admin_password = "your-secure-password"
 
 # Session timeout in seconds (default: 24 hours)
 session_timeout_secs = 86400

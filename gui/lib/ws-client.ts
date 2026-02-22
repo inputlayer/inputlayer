@@ -1,5 +1,5 @@
 import type {
-  WsConnectedMessage,
+  WsAuthenticatedMessage,
   WsResultMessage,
   WsErrorMessage,
   WsNotificationMessage,
@@ -12,6 +12,10 @@ export interface WsClientConfig {
   url: string
   /** Knowledge graph to bind to (default: "default") */
   kg?: string
+  /** Username for login authentication */
+  username?: string
+  /** Password for login authentication */
+  password?: string
   /** Auto-reconnect on unexpected close (default: true) */
   autoReconnect?: boolean
   /** Max reconnect attempts (default: 10) */
@@ -40,8 +44,9 @@ export type ConnectionStateHandler = (state: ConnectionState, kg?: string) => vo
 
 export class WsClient {
   private ws: WebSocket | null = null
-  private sessionId: number | null = null
+  private sessionId: string | null = null
   private knowledgeGraph = "default"
+  private userRole = ""
   private state: ConnectionState = "disconnected"
   private pendingQueue: PendingRequest[] = []
   private notificationHandlers = new Set<NotificationHandler>()
@@ -53,6 +58,8 @@ export class WsClient {
 
   private readonly url: string
   private readonly kg: string
+  private readonly username: string
+  private readonly password: string
   private readonly autoReconnect: boolean
   private readonly maxReconnectAttempts: number
   private readonly reconnectDelayMs: number
@@ -60,13 +67,15 @@ export class WsClient {
   constructor(config: WsClientConfig) {
     this.url = config.url
     this.kg = config.kg ?? "default"
+    this.username = config.username ?? ""
+    this.password = config.password ?? ""
     this.autoReconnect = config.autoReconnect ?? true
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 10
     this.reconnectDelayMs = config.reconnectDelayMs ?? 1000
   }
 
-  /** Connect to the WebSocket server. Resolves when `connected` message received. */
-  connect(): Promise<WsConnectedMessage> {
+  /** Connect to the WebSocket server, authenticate, and resolve when ready. */
+  connect(): Promise<WsAuthenticatedMessage> {
     return new Promise((resolve, reject) => {
       if (this.ws) {
         this.ws.close()
@@ -79,10 +88,15 @@ export class WsClient {
       const wsUrl = `${this.url}?kg=${encodeURIComponent(this.kg)}`
       const ws = new WebSocket(wsUrl)
 
-      let connected = false
+      let authenticated = false
 
       ws.onopen = () => {
-        // Wait for the `connected` message
+        // Send login message immediately after connection
+        ws.send(JSON.stringify({
+          type: "login",
+          username: this.username,
+          password: this.password,
+        }))
       }
 
       ws.onmessage = (event) => {
@@ -93,14 +107,25 @@ export class WsClient {
           return
         }
 
-        if (!connected && msg.type === "connected") {
-          connected = true
-          this.sessionId = msg.session_id
-          this.knowledgeGraph = msg.knowledge_graph
-          this.reconnectAttempts = 0
-          this.setState("connected", this.knowledgeGraph)
-          this.startPing()
-          resolve(msg)
+        if (!authenticated) {
+          if (msg.type === "authenticated") {
+            authenticated = true
+            this.sessionId = msg.session_id
+            this.knowledgeGraph = msg.knowledge_graph
+            this.userRole = msg.role
+            this.reconnectAttempts = 0
+            this.setState("connected", this.knowledgeGraph)
+            this.startPing()
+            resolve(msg)
+            return
+          }
+          if (msg.type === "auth_error") {
+            this.setState("disconnected")
+            ws.close()
+            reject(new Error(msg.message))
+            return
+          }
+          // Ignore other messages before auth
           return
         }
 
@@ -108,7 +133,7 @@ export class WsClient {
       }
 
       ws.onerror = () => {
-        if (!connected) {
+        if (!authenticated) {
           this.setState("disconnected")
           reject(new Error("WebSocket connection failed"))
         }
@@ -124,9 +149,9 @@ export class WsClient {
         }
         this.pendingQueue = []
 
-        if (!connected) {
+        if (!authenticated) {
           this.setState("disconnected")
-          reject(new Error("WebSocket connection closed before connected"))
+          reject(new Error("WebSocket connection closed before authentication"))
           return
         }
 
@@ -142,14 +167,38 @@ export class WsClient {
   }
 
   /** Execute a Datalog program or meta command. Returns the result. */
-  execute(program: string): Promise<WsResultMessage> {
+  execute(program: string, timeoutMs = 30000): Promise<WsResultMessage> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error("WebSocket not connected"))
         return
       }
 
-      this.pendingQueue.push({ resolve, reject })
+      let settled = false
+      const timer = timeoutMs > 0 ? setTimeout(() => {
+        if (!settled) {
+          settled = true
+          // Remove from pending queue
+          const idx = this.pendingQueue.findIndex((p) => p.resolve === wrappedResolve)
+          if (idx !== -1) this.pendingQueue.splice(idx, 1)
+          reject(new Error(`Query timed out after ${timeoutMs / 1000}s`))
+        }
+      }, timeoutMs) : null
+
+      const wrappedResolve = (msg: WsResultMessage) => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        resolve(msg)
+      }
+      const wrappedReject = (err: Error) => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        reject(err)
+      }
+
+      this.pendingQueue.push({ resolve: wrappedResolve, reject: wrappedReject })
       this.ws.send(JSON.stringify({ type: "execute", program }))
     })
   }
@@ -189,12 +238,16 @@ export class WsClient {
     return this.state
   }
 
-  getSessionId(): number | null {
+  getSessionId(): string | null {
     return this.sessionId
   }
 
   getKnowledgeGraph(): string {
     return this.knowledgeGraph
+  }
+
+  getRole(): string {
+    return this.userRole
   }
 
   // ── Private ─────────────────────────────────────────────────────────────
