@@ -165,13 +165,17 @@ export function tokenize(input: string): Token[] {
     const text = m[0]
     const kind = classify(text, inBody)
 
-    // Track head vs body: after `<-` we're in the body until a new line
-    // starts with a statement prefix (?, +, -, ~, .) or is a blank line.
+    // Track head vs body: after `<-` we're in the body until a newline
+    // that is NOT followed by indentation (continuation).
     if (kind === "arrow") {
       inBody = true
     } else if (kind === "whitespace" && text.includes("\n")) {
-      // Newline resets to head context (next line may be a new statement)
-      inBody = false
+      // Only reset to head context if the text after the last newline
+      // has no leading indentation — indented lines are continuations.
+      const afterLastNL = text.substring(text.lastIndexOf("\n") + 1)
+      if (!/[ \t]/.test(afterLastNL)) {
+        inBody = false
+      }
     }
 
     tokens.push({ kind, text })

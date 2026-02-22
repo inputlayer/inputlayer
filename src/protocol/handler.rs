@@ -1494,13 +1494,17 @@ impl QueryJob {
                 .to_string()
         };
 
-        // Strip comment lines
-        let program_text = strip_comments(&program);
+        // Strip comment lines, then join indented continuation lines so that
+        // multi-line rules (e.g., rule body on indented next line) become single
+        // logical lines for the statement-per-line parser.
+        let program_text = join_continuation_lines(&strip_comments(&program));
 
         // Phase 1: Parse-all-first validation.
         // Parse every statement upfront. If ANY statement fails to parse,
         // reject the ENTIRE program with structured error info.
         // This prevents partial state from partial execution.
+        // Note: join_continuation_lines() already merged indented continuation
+        // lines into single logical lines, so line-by-line parsing is correct.
         let parse_start = Instant::now();
         {
             let mut parse_errors: Vec<ValidationError> = Vec::new();
@@ -3602,6 +3606,41 @@ fn strip_comments(program: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Join continuation lines in a program.
+///
+/// A continuation line starts with whitespace (spaces/tabs) and is appended
+/// to the previous non-empty line. This supports multi-line rules like:
+///
+/// ```text
+/// reachable(X, Y) <-
+///   edge(X, Y).
+/// ```
+///
+/// which becomes: `reachable(X, Y) <- edge(X, Y).`
+///
+/// Lines starting at column 0 are treated as new statements and are never
+/// merged with the previous line.
+fn join_continuation_lines(program: &str) -> String {
+    let mut result: Vec<String> = Vec::new();
+    for line in program.lines() {
+        if line.trim().is_empty() {
+            result.push(String::new());
+            continue;
+        }
+        // Continuation: non-empty line that starts with whitespace
+        if line.starts_with(|c: char| c.is_whitespace()) && !result.is_empty() {
+            // Find the last non-empty line to append to
+            if let Some(last) = result.iter_mut().rev().find(|l| !l.is_empty()) {
+                last.push(' ');
+                last.push_str(line.trim());
+                continue;
+            }
+        }
+        result.push(line.to_string());
+    }
+    result.join("\n")
 }
 
 /// Format a rule as Datalog text (uses Rule's Display impl)
@@ -5811,6 +5850,104 @@ mod tests {
         assert_eq!(errors.len(), 2, "Should report both parse errors");
         assert_eq!(errors[0].line, 1);
         assert_eq!(errors[1].line, 3);
+    }
+
+    // === Multi-line statement (continuation line) tests ===
+
+    #[test]
+    fn test_join_continuation_lines_from_strip_comments() {
+        // Exact input that strip_comments produces for the multiline test
+        let stripped = strip_comments(
+            "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <-\n  edge(X, Y).\n?reachable(X, Y)",
+        );
+        let joined = join_continuation_lines(&stripped);
+        assert_eq!(
+            joined, "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <- edge(X, Y).\n?reachable(X, Y)",
+            "Joined output: {:?}",
+            joined,
+        );
+    }
+
+    #[test]
+    fn test_join_continuation_lines_basic() {
+        let input = "reachable(X, Y) <-\n  edge(X, Y).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Y) <- edge(X, Y).");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_multiple_continuations() {
+        let input = "reachable(X, Z) <-\n  reachable(X, Y),\n  edge(Y, Z).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Z) <- reachable(X, Y), edge(Y, Z).");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_no_continuations() {
+        let input = "+edge[(1,2)]\n+edge[(3,4)]";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "+edge[(1,2)]\n+edge[(3,4)]");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_mixed() {
+        let input = "+edge[(1,2)]\nreachable(X, Y) <-\n  edge(X, Y).\n?reachable(X, Y)";
+        let result = join_continuation_lines(input);
+        assert_eq!(
+            result,
+            "+edge[(1,2)]\nreachable(X, Y) <- edge(X, Y).\n?reachable(X, Y)"
+        );
+    }
+
+    #[test]
+    fn test_join_continuation_lines_empty_lines_preserved() {
+        let input = "+edge[(1,2)]\n\n+edge[(3,4)]";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "+edge[(1,2)]\n\n+edge[(3,4)]");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_tab_indent() {
+        let input = "reachable(X, Y) <-\n\tedge(X, Y).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Y) <- edge(X, Y).");
+    }
+
+    #[tokio::test]
+    async fn test_multiline_rule_executes_correctly() {
+        let (handler, _tmp) = handler_with_kg("multiline");
+        // Insert data, define a multi-line rule, then query
+        let program =
+            "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <-\n  edge(X, Y)\n?reachable(X, Y)"
+                .to_string();
+        let result = handler
+            .query_program(Some("multiline".to_string()), program)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Multi-line rule program should succeed: {}",
+            result.as_ref().unwrap_err()
+        );
+        let qr = result.unwrap();
+        assert_eq!(qr.rows.len(), 2, "Should return 2 reachable pairs");
+    }
+
+    #[tokio::test]
+    async fn test_multiline_rule_with_multiple_body_atoms() {
+        let (handler, _tmp) = handler_with_kg("multiline2");
+        let program =
+            "+edge[(1,2)]\n+edge[(2,3)]\npath(X, Z) <-\n  edge(X, Y),\n  edge(Y, Z)\n?path(X, Z)"
+                .to_string();
+        let result = handler
+            .query_program(Some("multiline2".to_string()), program)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Multi-line rule with multiple body atoms should succeed: {}",
+            result.as_ref().unwrap_err()
+        );
+        let qr = result.unwrap();
+        assert_eq!(qr.rows.len(), 1, "Should return path(1,3)");
     }
 
     // === Regression tests for production readiness fixes ===

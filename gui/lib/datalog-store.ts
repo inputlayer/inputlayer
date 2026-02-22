@@ -11,6 +11,8 @@ const STORAGE_KEY_CONNECTION = "inputlayer_connection"
 const STORAGE_KEY_SELECTED_KG = "inputlayer_selected_kg"
 const STORAGE_KEY_EDITOR = "inputlayer_editor_content"
 const STORAGE_KEY_HISTORY = "inputlayer_query_history"
+// sessionStorage key — survives page refresh but cleared on tab close (security)
+const SESSION_KEY_PASSWORD = "inputlayer_session_pw"
 
 export interface DatalogConnection {
   id: string
@@ -88,7 +90,8 @@ interface StoredConnection {
   port: number
   name: string
   username: string
-  // Password is intentionally NOT persisted — never store credentials in localStorage
+  // Password stored in sessionStorage (not localStorage) — survives page refresh
+  // but is cleared when the tab/browser closes for security.
 }
 
 interface DatalogStore {
@@ -136,14 +139,16 @@ function safeLsSet(key: string, value: string) {
   try {
     localStorage.setItem(key, value)
   } catch {
-    // QuotaExceededError or SecurityError — silently ignore
+    // Quota or security error — ignore
   }
 }
 
-function saveConnectionToStorage(host: string, port: number, name: string, username: string) {
+function saveConnectionToStorage(host: string, port: number, name: string, username: string, password: string) {
   if (typeof window === "undefined") return
   const stored: StoredConnection = { host, port, name, username }
   safeLsSet(STORAGE_KEY_CONNECTION, JSON.stringify(stored))
+  // Password in sessionStorage — survives page refresh, cleared on tab close
+  try { sessionStorage.setItem(SESSION_KEY_PASSWORD, password) } catch {}
 }
 
 function isStoredConnection(v: unknown): v is StoredConnection {
@@ -156,13 +161,15 @@ function isStoredConnection(v: unknown): v is StoredConnection {
   )
 }
 
-function getConnectionFromStorage(): StoredConnection | null {
+function getConnectionFromStorage(): (StoredConnection & { password: string }) | null {
   if (typeof window === "undefined") return null
-  const stored = localStorage.getItem(STORAGE_KEY_CONNECTION)
-  if (!stored) return null
+  const raw = localStorage.getItem(STORAGE_KEY_CONNECTION)
+  if (!raw) return null
   try {
-    const parsed: unknown = JSON.parse(stored)
-    return isStoredConnection(parsed) ? parsed : null
+    const parsed: unknown = JSON.parse(raw)
+    if (!isStoredConnection(parsed)) return null
+    const password = sessionStorage.getItem(SESSION_KEY_PASSWORD) ?? ""
+    return { ...parsed, password }
   } catch {
     return null
   }
@@ -183,6 +190,7 @@ function clearStorage() {
   localStorage.removeItem(STORAGE_KEY_CONNECTION)
   localStorage.removeItem(STORAGE_KEY_SELECTED_KG)
   localStorage.removeItem(STORAGE_KEY_EDITOR)
+  try { sessionStorage.removeItem(SESSION_KEY_PASSWORD) } catch {}
 }
 
 const KG_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
@@ -324,20 +332,22 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
   initFromStorage: async () => {
     if (get().isInitialized) return
-    set({ isInitialized: true })
 
-    // Restore editor content and history from localStorage
+    // Read ALL localStorage data BEFORE any set() calls to avoid intermediate renders
+    let savedEditor: string | null = null
+    let savedHistory: QueryResult[] = []
+    let stored: (StoredConnection & { password: string }) | null = null
+
     if (typeof window !== "undefined") {
-      const savedEditor = localStorage.getItem(STORAGE_KEY_EDITOR)
-      if (savedEditor) set({ editorContent: savedEditor })
+      savedEditor = localStorage.getItem(STORAGE_KEY_EDITOR)
 
       try {
-        const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY)
-        if (savedHistory) {
-          const parsed = JSON.parse(savedHistory) as Array<{
+        const rawHistory = localStorage.getItem(STORAGE_KEY_HISTORY)
+        if (rawHistory) {
+          const parsed = JSON.parse(rawHistory) as Array<{
             id: string; query: string; status: string; executionTime: number; timestamp: string; error?: string
           }>
-          const history: QueryResult[] = parsed.map((h) => ({
+          savedHistory = parsed.map((h) => ({
             id: h.id,
             query: h.query,
             data: [],
@@ -347,17 +357,25 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
             status: h.status as "success" | "error",
             error: h.error,
           }))
-          set({ queryHistory: history })
         }
       } catch { /* ignore corrupted history */ }
+
+      stored = getConnectionFromStorage()
     }
 
-    const stored = getConnectionFromStorage()
+    // Single atomic set: isInitialized + isRestoringSession + connection + editor + history
+    // This prevents intermediate renders that would flash the ConnectionScreen.
+    set({
+      isInitialized: true,
+      ...(savedEditor ? { editorContent: savedEditor } : {}),
+      ...(savedHistory.length > 0 ? { queryHistory: savedHistory } : {}),
+      ...(stored ? {
+        isRestoringSession: true,
+        connection: { id: "1", name: stored.name, host: stored.host, port: stored.port, status: "connecting" as const },
+      } : {}),
+    })
+
     if (!stored) return
-
-    set({ isRestoringSession: true })
-
-    set({ connection: { id: "1", name: stored.name, host: stored.host, port: stored.port, status: "connecting" } })
 
     try {
       await checkHealth(stored.host, stored.port)
@@ -365,7 +383,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       const savedKgName = getSelectedKgFromStorage()
       const kg = savedKgName || "default"
 
-      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg, username: stored.username, password: "" })
+      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg, username: stored.username, password: stored.password })
       await ws.connect()
       wsClient = ws
 
@@ -421,7 +439,8 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       console.error("Failed to restore session:", error)
       if (stateUnsubscribe) { stateUnsubscribe(); stateUnsubscribe = null }
       if (notificationUnsubscribe) { notificationUnsubscribe(); notificationUnsubscribe = null }
-      clearStorage()
+      // Don't clear storage on transient failures — the user can retry on next refresh.
+      // Storage is only cleared on explicit disconnect.
       if (wsClient) { wsClient.disconnect(); wsClient = null }
       set({ isRestoringSession: false, connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
     }
@@ -445,7 +464,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         }
       })
 
-      saveConnectionToStorage(host, port, name, username)
+      saveConnectionToStorage(host, port, name, username, password)
 
       const knowledgeGraphs = await fetchKnowledgeGraphs(ws)
 

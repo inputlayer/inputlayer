@@ -54,10 +54,19 @@ export function classifyLines(text: string): (StatementType | null)[] {
       continue
     }
 
-    // Continuation line: indented and doesn't start a new statement
-    // (starts with whitespace and lowercase letter, comma, or closing paren)
-    // But NOT if it's a comment — indented comments stay as comments
-    if (leadingWhitespace > 0 && parentType && /^[a-z_,)]/.test(trimmed) && !trimmed.startsWith("//")) {
+    // Continuation line: indented and doesn't start a new statement.
+    // Any indented line that doesn't begin with a statement prefix is a continuation.
+    if (
+      leadingWhitespace > 0 &&
+      parentType &&
+      !trimmed.startsWith("+") &&
+      !trimmed.startsWith("-") &&
+      !trimmed.startsWith("?") &&
+      !trimmed.startsWith(".") &&
+      !trimmed.startsWith("~") &&
+      !trimmed.startsWith("//") &&
+      !trimmed.startsWith("/*")
+    ) {
       result.push(parentType)
       continue
     }
