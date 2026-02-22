@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
-import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { View, Relation } from "@/lib/datalog-store"
+import { useDatalogStore } from "@/lib/datalog-store"
+import { highlightToHtml } from "@/lib/syntax-highlight"
 import { ViewDataTab } from "@/components/view-data-tab"
 import { ViewGraphTab } from "@/components/view-graph-tab"
 import { ViewPerformanceTab } from "@/components/view-performance-tab"
@@ -14,11 +16,34 @@ import { ViewPerformanceTab } from "@/components/view-performance-tab"
 interface ViewDetailPanelProps {
   view: View
   relations: Relation[]
+  onNavigate?: (name: string) => void
 }
 
-export function ViewDetailPanel({ view, relations }: ViewDetailPanelProps) {
+export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanelProps) {
+  const { loadViewData } = useDatalogStore()
   const [copied, setCopied] = useState(false)
   const [activeTab, setActiveTab] = useState("data")
+  const [loading, setLoading] = useState(false)
+  const [loadingSlow, setLoadingSlow] = useState(false)
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+
+  const handleRefresh = useCallback(async () => {
+    setLoading(true)
+    setLoadingSlow(false)
+    slowTimerRef.current = setTimeout(() => setLoadingSlow(true), 5000)
+    try {
+      await loadViewData(view.name)
+    } finally {
+      clearTimeout(slowTimerRef.current)
+      setLoading(false)
+      setLoadingSlow(false)
+    }
+  }, [loadViewData, view.name])
+
+  // Load view data (definition, dependencies, etc.) when a view is selected
+  useEffect(() => {
+    handleRefresh()
+  }, [handleRefresh])
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(view.definition)
@@ -47,15 +72,31 @@ export function ViewDetailPanel({ view, relations }: ViewDetailPanelProps) {
           </div>
           <div>
             <h2 className="font-semibold font-mono">{view.name}</h2>
-            <p className="text-xs text-muted-foreground">Computed View • {view.dependencies.length} dependencies</p>
+            <p className="text-xs text-muted-foreground">
+              Rule{view.arity > 0 && <> • Arity {view.arity}</>} • {view.dependencies.length} {view.dependencies.length === 1 ? "dependency" : "dependencies"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleCopy} className="h-8 gap-1.5 bg-transparent">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="h-8 gap-1.5 bg-transparent"
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleCopy} className="h-8 gap-1.5 bg-transparent" disabled={!view.definition}>
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             Copy
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} className="h-8 gap-1.5 bg-transparent">
+          <Button variant="outline" size="sm" onClick={handleExport} className="h-8 gap-1.5 bg-transparent" disabled={!view.definition}>
             <Download className="h-3.5 w-3.5" />
             Export
           </Button>
@@ -68,9 +109,20 @@ export function ViewDetailPanel({ view, relations }: ViewDetailPanelProps) {
           <Code className="h-3.5 w-3.5 text-muted-foreground" />
           <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Definition</h3>
         </div>
-        <pre className="font-mono text-sm text-foreground bg-muted/30 rounded-md px-3 py-2 overflow-x-auto">
-          {view.definition}
-        </pre>
+        {loading && !view.definition ? (
+          <pre className="font-mono text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
+            {loadingSlow ? "Loading is taking longer than expected..." : "Loading definition..."}
+          </pre>
+        ) : view.definition ? (
+          <pre
+            className="font-mono text-sm bg-[var(--code-bg)] rounded-md px-3 py-2 overflow-x-auto whitespace-pre-wrap leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: highlightToHtml(view.definition) }}
+          />
+        ) : (
+          <pre className="font-mono text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
+            No definition available
+          </pre>
+        )}
       </div>
 
       {/* Dependencies */}
@@ -78,7 +130,12 @@ export function ViewDetailPanel({ view, relations }: ViewDetailPanelProps) {
         <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Dependencies</h3>
         <div className="flex flex-wrap gap-2">
           {view.dependencies.map((dep) => (
-            <Badge key={dep} variant="secondary" className="gap-1.5 font-mono text-xs">
+            <Badge
+              key={dep}
+              variant="secondary"
+              className={cn("gap-1.5 font-mono text-xs", onNavigate && "cursor-pointer hover:bg-secondary/80 transition-colors")}
+              onClick={() => onNavigate?.(dep)}
+            >
               <div className="h-1.5 w-1.5 rounded-full bg-chart-1" />
               {dep}
             </Badge>

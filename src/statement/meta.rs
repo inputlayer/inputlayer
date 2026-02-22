@@ -63,6 +63,28 @@ pub enum MetaCommand {
         path: String,
         mode: LoadMode,
     },
+
+    // User management commands
+    UserList,
+    UserCreate {
+        username: String,
+        password: String,
+        role: String,
+    },
+    UserDrop(String),
+    UserPassword {
+        username: String,
+        password: String,
+    },
+    UserRole {
+        username: String,
+        role: String,
+    },
+
+    // API key management commands
+    ApiKeyCreate(String), // label
+    ApiKeyList,
+    ApiKeyRevoke(String), // label
 }
 
 /// Options for creating an index
@@ -136,6 +158,8 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "help" | "?" => Ok(MetaCommand::Help),
         "quit" | "exit" | "q" => Ok(MetaCommand::Quit),
         "load" => parse_load_command(&parts),
+        "user" => parse_user_command(&parts),
+        "apikey" => parse_apikey_command(&parts),
         _ => Err(format!("Unknown meta command: .{}", parts[0])),
     }
 }
@@ -516,6 +540,86 @@ fn parse_relation_column(spec: &str) -> Result<(String, String), String> {
     Ok((relation, column))
 }
 
+fn parse_user_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    if parts.len() < 2 {
+        return Err("Usage: .user list | .user create <username> <password> <role> | .user drop <username> | .user password <username> <password> | .user role <username> <role>".to_string());
+    }
+    match parts[1].to_lowercase().as_str() {
+        "list" => Ok(MetaCommand::UserList),
+        "create" => {
+            if parts.len() < 5 {
+                Err("Usage: .user create <username> <password> <role>".to_string())
+            } else {
+                Ok(MetaCommand::UserCreate {
+                    username: parts[2].to_string(),
+                    password: parts[3].to_string(),
+                    role: parts[4].to_string(),
+                })
+            }
+        }
+        "drop" => {
+            if parts.len() < 3 {
+                Err("Usage: .user drop <username>".to_string())
+            } else {
+                Ok(MetaCommand::UserDrop(parts[2].to_string()))
+            }
+        }
+        "password" => {
+            if parts.len() < 4 {
+                Err("Usage: .user password <username> <new_password>".to_string())
+            } else {
+                Ok(MetaCommand::UserPassword {
+                    username: parts[2].to_string(),
+                    password: parts[3].to_string(),
+                })
+            }
+        }
+        "role" => {
+            if parts.len() < 4 {
+                Err("Usage: .user role <username> <new_role>".to_string())
+            } else {
+                Ok(MetaCommand::UserRole {
+                    username: parts[2].to_string(),
+                    role: parts[3].to_string(),
+                })
+            }
+        }
+        _ => Err(format!(
+            "Unknown user subcommand: '{}'. Use: list, create, drop, password, role",
+            parts[1]
+        )),
+    }
+}
+
+fn parse_apikey_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    if parts.len() < 2 {
+        return Err(
+            "Usage: .apikey list | .apikey create <label> | .apikey revoke <label>".to_string(),
+        );
+    }
+    match parts[1].to_lowercase().as_str() {
+        "list" => Ok(MetaCommand::ApiKeyList),
+        "create" => {
+            if parts.len() < 3 {
+                Err("Usage: .apikey create <label>".to_string())
+            } else {
+                Ok(MetaCommand::ApiKeyCreate(parts[2].to_string()))
+            }
+        }
+        "revoke" => {
+            if parts.len() < 3 {
+                Err("Usage: .apikey revoke <label>".to_string())
+            } else {
+                Ok(MetaCommand::ApiKeyRevoke(parts[2].to_string()))
+            }
+        }
+        _ => Err(format!(
+            "Unknown apikey subcommand: '{}'. Use: list, create, revoke",
+            parts[1]
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -859,5 +963,107 @@ mod tests {
         let result = parse_meta_command(".session drop");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Usage"));
+    }
+
+    // User management command tests
+    #[test]
+    fn test_parse_user_list() {
+        let cmd = parse_meta_command(".user list").unwrap();
+        assert!(matches!(cmd, MetaCommand::UserList));
+    }
+
+    #[test]
+    fn test_parse_user_create() {
+        let cmd = parse_meta_command(".user create bob secret123 editor").unwrap();
+        if let MetaCommand::UserCreate {
+            username,
+            password,
+            role,
+        } = cmd
+        {
+            assert_eq!(username, "bob");
+            assert_eq!(password, "secret123");
+            assert_eq!(role, "editor");
+        } else {
+            panic!("Expected UserCreate");
+        }
+    }
+
+    #[test]
+    fn test_parse_user_create_missing_args() {
+        let result = parse_meta_command(".user create bob");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Usage"));
+    }
+
+    #[test]
+    fn test_parse_user_drop() {
+        let cmd = parse_meta_command(".user drop bob").unwrap();
+        if let MetaCommand::UserDrop(name) = cmd {
+            assert_eq!(name, "bob");
+        } else {
+            panic!("Expected UserDrop");
+        }
+    }
+
+    #[test]
+    fn test_parse_user_password() {
+        let cmd = parse_meta_command(".user password bob newpass").unwrap();
+        if let MetaCommand::UserPassword { username, password } = cmd {
+            assert_eq!(username, "bob");
+            assert_eq!(password, "newpass");
+        } else {
+            panic!("Expected UserPassword");
+        }
+    }
+
+    #[test]
+    fn test_parse_user_role() {
+        let cmd = parse_meta_command(".user role bob admin").unwrap();
+        if let MetaCommand::UserRole { username, role } = cmd {
+            assert_eq!(username, "bob");
+            assert_eq!(role, "admin");
+        } else {
+            panic!("Expected UserRole");
+        }
+    }
+
+    #[test]
+    fn test_parse_user_missing_subcommand() {
+        let result = parse_meta_command(".user");
+        assert!(result.is_err());
+    }
+
+    // API key command tests
+    #[test]
+    fn test_parse_apikey_list() {
+        let cmd = parse_meta_command(".apikey list").unwrap();
+        assert!(matches!(cmd, MetaCommand::ApiKeyList));
+    }
+
+    #[test]
+    fn test_parse_apikey_create() {
+        let cmd = parse_meta_command(".apikey create my-key").unwrap();
+        if let MetaCommand::ApiKeyCreate(label) = cmd {
+            assert_eq!(label, "my-key");
+        } else {
+            panic!("Expected ApiKeyCreate");
+        }
+    }
+
+    #[test]
+    fn test_parse_apikey_revoke() {
+        let cmd = parse_meta_command(".apikey revoke old-key").unwrap();
+        if let MetaCommand::ApiKeyRevoke(label) = cmd {
+            assert_eq!(label, "old-key");
+        } else {
+            panic!("Expected ApiKeyRevoke");
+        }
+    }
+
+    #[test]
+    fn test_parse_apikey_missing_subcommand() {
+        let result = parse_meta_command(".apikey");
+        assert!(result.is_err());
     }
 }

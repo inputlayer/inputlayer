@@ -319,23 +319,21 @@ pub struct GuiConfig {
 /// Authentication configuration for HTTP API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
-    /// Enable authentication (API key or JWT)
+    /// Initial admin password (set via INPUTLAYER_ADMIN_PASSWORD env var or config).
+    /// If unset on first boot, a random password is generated and printed to stderr.
     #[serde(default)]
-    pub enabled: bool,
-
-    /// API keys that grant full access. Empty = no API key auth.
-    /// When auth is enabled and api_keys is non-empty, requests must include
-    /// `Authorization: Bearer <key>` header with a matching key.
-    #[serde(default)]
-    pub api_keys: Vec<String>,
-
-    /// JWT signing secret (MUST be changed in production)
-    #[serde(default = "default_jwt_secret")]
-    pub jwt_secret: String,
+    pub bootstrap_admin_password: Option<String>,
 
     /// Session timeout in seconds (default: 24 hours)
     #[serde(default = "default_session_timeout")]
     pub session_timeout_secs: u64,
+
+    /// Path to persist generated credentials (admin password + API key).
+    /// Default: `.inputlayer-credentials.toml` in the working directory.
+    /// Credentials are generated on first boot and reused across restarts,
+    /// even when the data directory is wiped.
+    #[serde(default)]
+    pub credentials_file: Option<PathBuf>,
 }
 
 /// Rate limiting configuration
@@ -416,9 +414,6 @@ fn default_http_port() -> u16 {
 }
 fn default_gui_static_dir() -> String {
     "./gui/dist".to_string()
-}
-fn default_jwt_secret() -> String {
-    uuid::Uuid::new_v4().to_string()
 }
 fn default_session_timeout() -> u64 {
     86400
@@ -646,10 +641,9 @@ impl Default for GuiConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         AuthConfig {
-            enabled: false,
-            api_keys: Vec::new(),
-            jwt_secret: default_jwt_secret(),
+            bootstrap_admin_password: None,
             session_timeout_secs: default_session_timeout(),
+            credentials_file: None,
         }
     }
 }
@@ -727,10 +721,8 @@ mod tests {
     #[test]
     fn test_default_auth_config() {
         let auth = AuthConfig::default();
-        assert!(!auth.enabled);
+        assert!(auth.bootstrap_admin_password.is_none());
         assert_eq!(auth.session_timeout_secs, 86400);
-        // JWT secret should be a UUID
-        assert!(!auth.jwt_secret.is_empty());
     }
 
     #[test]
@@ -806,21 +798,12 @@ mod tests {
         assert_eq!(json, "\"async\"");
     }
 
-    #[test]
-    fn test_auth_jwt_secret_is_unique() {
-        let auth1 = AuthConfig::default();
-        let auth2 = AuthConfig::default();
-        // Each call generates a new UUID
-        assert_ne!(auth1.jwt_secret, auth2.jwt_secret);
-    }
-
     // === Regression tests for P1 security config ===
 
     #[test]
-    fn test_default_auth_has_no_api_keys() {
+    fn test_default_auth_has_no_bootstrap_password() {
         let auth = AuthConfig::default();
-        assert!(!auth.enabled);
-        assert!(auth.api_keys.is_empty());
+        assert!(auth.bootstrap_admin_password.is_none());
     }
 
     #[test]
@@ -840,15 +823,13 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_with_api_keys() {
+    fn test_auth_with_bootstrap_password() {
         let auth = AuthConfig {
-            enabled: true,
-            api_keys: vec!["key1".to_string(), "key2".to_string()],
-            jwt_secret: "secret".to_string(),
+            bootstrap_admin_password: Some("secret123".to_string()),
             session_timeout_secs: 3600,
+            credentials_file: None,
         };
-        assert!(auth.enabled);
-        assert_eq!(auth.api_keys.len(), 2);
+        assert_eq!(auth.bootstrap_admin_password.as_deref(), Some("secret123"));
     }
 
     #[test]

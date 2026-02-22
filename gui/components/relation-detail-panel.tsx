@@ -1,11 +1,13 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2 } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2, FileJson } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { downloadBlob } from "@/lib/ui-utils"
+import { toast } from "sonner"
 import type { Relation } from "@/lib/datalog-store"
 import { useDatalogStore } from "@/lib/datalog-store"
 
@@ -20,21 +22,19 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
   const [sortColumn, setSortColumn] = useState<number | null>(null)
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
   const [loading, setLoading] = useState(false)
-  const [currentData, setCurrentData] = useState<(string | number | boolean)[][]>(relation.data)
+  const [currentData, setCurrentData] = useState<(string | number | boolean | null)[][]>(relation.data)
   const [currentColumns, setCurrentColumns] = useState<string[]>(relation.columns)
+  const [currentTupleCount, setCurrentTupleCount] = useState(relation.tupleCount)
+  const [page, setPage] = useState(0)
+  const pageSize = 100
 
   // Update local state when relation prop changes
   useEffect(() => {
     setCurrentData(relation.data)
     setCurrentColumns(relation.columns)
-  }, [relation.data, relation.columns])
-
-  // Load data on mount if not already loaded
-  useEffect(() => {
-    if (currentData.length === 0 && relation.tupleCount > 0) {
-      handleRefresh()
-    }
-  }, [relation.name])
+    setCurrentTupleCount(relation.tupleCount)
+    setPage(0)
+  }, [relation.data, relation.columns, relation.tupleCount])
 
   const handleRefresh = useCallback(async () => {
     setLoading(true)
@@ -43,58 +43,92 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
       if (updated) {
         setCurrentData(updated.data)
         setCurrentColumns(updated.columns)
+        setCurrentTupleCount(updated.tupleCount)
       }
     } finally {
       setLoading(false)
     }
   }, [loadRelationData, relation.name])
 
+  // Load data and reset UI state when switching relations
+  useEffect(() => {
+    setFilter("")
+    setSortColumn(null)
+    setSortDirection("asc")
+    setPage(0)
+    handleRefresh()
+  }, [handleRefresh])
+
   const handleCopy = async () => {
     const text = [currentColumns.join("\t"), ...currentData.map((row) => row.join("\t"))].join("\n")
     await navigator.clipboard.writeText(text)
     setCopied(true)
+    toast.success("Copied to clipboard")
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleExport = () => {
+  const handleExportCsv = () => {
     if (currentData.length === 0) return
 
+    const escapeCell = (v: unknown) => {
+      const s = v === null ? "" : String(v)
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s
+    }
     const csvContent = [
-      currentColumns.join(","),
-      ...currentData.map((row) => row.map((cell) => JSON.stringify(cell)).join(",")),
+      currentColumns.map(escapeCell).join(","),
+      ...currentData.map((row) => row.map(escapeCell).join(",")),
     ].join("\n")
 
-    const blob = new Blob([csvContent], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${relation.name}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(csvContent, "text/csv", `${relation.name}.csv`)
+  }
+
+  const handleExportJson = () => {
+    if (currentData.length === 0) return
+    const rows = currentData.map((row) => {
+      const obj: Record<string, string | number | boolean | null> = {}
+      currentColumns.forEach((col, i) => { obj[col] = row[i] })
+      return obj
+    })
+    downloadBlob(JSON.stringify(rows, null, 2), "application/json", `${relation.name}.json`)
   }
 
   const handleSort = (colIndex: number) => {
     if (sortColumn === colIndex) {
-      setSortDirection((d) => (d === "asc" ? "desc" : "asc"))
+      // Cycle: asc → desc → none
+      if (sortDirection === "asc") {
+        setSortDirection("desc")
+      } else {
+        setSortColumn(null)
+        setSortDirection("asc")
+      }
     } else {
       setSortColumn(colIndex)
       setSortDirection("asc")
     }
   }
 
-  const filteredData = currentData.filter((row) =>
-    row.some((cell) => String(cell).toLowerCase().includes(filter.toLowerCase())),
+  const filteredData = useMemo(() =>
+    currentData.filter((row) =>
+      row.some((cell) => String(cell).toLowerCase().includes(filter.toLowerCase())),
+    ),
+    [currentData, filter]
   )
 
-  const sortedData =
+  const sortedData = useMemo(() =>
     sortColumn !== null
       ? [...filteredData].sort((a, b) => {
-          const aVal = a[sortColumn]
-          const bVal = b[sortColumn]
+          const aVal = a[sortColumn] ?? ""
+          const bVal = b[sortColumn] ?? ""
           const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0
           return sortDirection === "asc" ? cmp : -cmp
         })
-      : filteredData
+      : filteredData,
+    [filteredData, sortColumn, sortDirection]
+  )
+
+  const totalPages = Math.max(1, Math.ceil(sortedData.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const displayData = sortedData.slice(safePage * pageSize, (safePage + 1) * pageSize)
 
   return (
     <div className="flex h-full flex-col">
@@ -131,12 +165,22 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleExport}
+            onClick={handleExportCsv}
             disabled={currentData.length === 0}
             className="h-8 gap-1.5 bg-transparent"
           >
             <Download className="h-3.5 w-3.5" />
-            Export
+            CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportJson}
+            disabled={currentData.length === 0}
+            className="h-8 gap-1.5 bg-transparent"
+          >
+            <FileJson className="h-3.5 w-3.5" />
+            JSON
           </Button>
         </div>
       </div>
@@ -144,14 +188,11 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
       {/* Schema */}
       <div className="border-b border-border/50 p-4">
         <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Schema</h3>
-        <div className="flex flex-wrap gap-2">
-          {currentColumns.map((col, index) => (
-            <Badge key={`${col}-${index}`} variant="secondary" className="gap-1.5 font-mono text-xs">
-              <span className="text-muted-foreground">{index}:</span>
-              {col}
-            </Badge>
-          ))}
-        </div>
+        <code className="font-mono text-sm text-foreground">
+          {relation.name}({currentColumns.map((col, i) =>
+            `${col}: ${relation.columnTypes?.[i] || 'any'}`
+          ).join(', ')})
+        </code>
       </div>
 
       {/* Stats bar */}
@@ -163,17 +204,25 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
           </span>
           <span className="flex items-center gap-1.5">
             <Rows3 className="h-3.5 w-3.5" />
-            {relation.tupleCount.toLocaleString()} tuples
+            {currentTupleCount.toLocaleString()} tuples
           </span>
         </div>
-        <div className="relative w-48">
-          <Filter className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Filter data..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="h-7 pl-8 text-xs"
-          />
+        <div className="flex items-center gap-2">
+          {filter && (
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {filteredData.length} match{filteredData.length !== 1 ? "es" : ""}
+            </span>
+          )}
+          <div className="relative w-48">
+            <Filter className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Filter data..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="h-7 pl-8 text-xs"
+              aria-label="Filter relation data"
+            />
+          </div>
         </div>
       </div>
 
@@ -189,28 +238,35 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
                 <th
                   key={`${col}-${index}`}
                   onClick={() => handleSort(index)}
-                  className="cursor-pointer border-b border-r border-border/50 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted last:border-r-0"
+                  className="cursor-pointer border-b border-r border-border/50 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted last:border-r-0"
                 >
                   <div className="flex items-center gap-1">
                     {col}
                     <ArrowUpDown className={cn("h-3 w-3", sortColumn === index ? "text-primary" : "opacity-30")} />
                   </div>
+                  {relation.columnTypes?.[index] && (
+                    <span className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/50">
+                      {relation.columnTypes[index]}
+                    </span>
+                  )}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {sortedData.map((row, rowIndex) => (
+            {displayData.map((row, rowIndex) => (
               <tr key={rowIndex} className="group transition-colors hover:bg-muted/50">
                 <td className="border-b border-r border-border/30 px-3 py-2 text-center font-mono text-[10px] text-muted-foreground">
-                  {rowIndex + 1}
+                  {safePage * pageSize + rowIndex + 1}
                 </td>
                 {row.map((cell, cellIndex) => (
                   <td
                     key={cellIndex}
                     className="border-b border-r border-border/30 px-3 py-2 font-mono text-xs last:border-r-0"
                   >
-                    {typeof cell === "boolean" ? (
+                    {cell === null ? (
+                      <span className="italic text-muted-foreground/50">null</span>
+                    ) : typeof cell === "boolean" ? (
                       <Badge
                         variant="outline"
                         className={cn(
@@ -221,7 +277,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
                         {cell.toString()}
                       </Badge>
                     ) : typeof cell === "number" ? (
-                      <span className="text-chart-4">{cell}</span>
+                      <span className="text-[var(--code-variable)]">{cell}</span>
                     ) : (
                       <span>{String(cell)}</span>
                     )}
@@ -233,12 +289,34 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
         </table>
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-border/50 bg-muted/30 px-4 py-2">
+      {/* Footer with pagination */}
+      <div className="flex items-center justify-between border-t border-border/50 bg-muted/30 px-4 py-2">
         <p className="text-[10px] text-muted-foreground">
-          Showing {sortedData.length} of {relation.tupleCount.toLocaleString()} tuples
-          {filter && ` (filtered)`}
+          {sortedData.length === 0
+            ? (filter ? "No matching rows" : "No rows")
+            : <>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, sortedData.length)} of {sortedData.length} rows
+              {sortedData.length < currentTupleCount && ` (${currentTupleCount.toLocaleString()} total)`}
+              {filter && ` (filtered)`}</>}
         </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(0)}>
+              First
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+              Prev
+            </Button>
+            <span className="text-[10px] text-muted-foreground px-1">
+              {safePage + 1} / {totalPages}
+            </span>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+              Next
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>
+              Last
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

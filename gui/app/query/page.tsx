@@ -1,20 +1,21 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { AppShell } from "@/components/app-shell"
 import { QueryEditorPanel } from "@/components/query-editor-panel"
 import { QueryResultsPanel } from "@/components/query-results-panel"
 import { QuerySidebar } from "@/components/query-sidebar"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { useDatalogStore } from "@/lib/datalog-store"
-import { InputLayerClient } from "@inputlayer/api-client"
-import { Zap } from "lucide-react"
+import type { QueryResult, ValidationError } from "@/lib/datalog-store"
+import { Zap, AlertTriangle, PanelRightClose, PanelRightOpen, GripHorizontal } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
-export interface QueryResult {
-  data: (string | number | boolean)[][]
-  columns: string[]
-  executionTime: number
-  query: string
-  timestamp: Date
+export type { QueryResult }
+
+export interface StructuredError {
+  message: string
+  validationErrors?: ValidationError[]
 }
 
 export interface ExplainResult {
@@ -23,16 +24,31 @@ export interface ExplainResult {
   query: string
 }
 
-const client = new InputLayerClient({ baseUrl: "/api/v1" })
+function useSidebarOpen() {
+  const [open, setOpen] = useState(() => {
+    if (typeof window === "undefined") return true
+    const stored = localStorage.getItem("il-sidebar-open")
+    return stored !== "false"
+  })
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev
+      try { localStorage.setItem("il-sidebar-open", String(next)) } catch {}
+      return next
+    })
+  }, [])
+  return [open, toggle] as const
+}
 
 export default function QueryPage() {
-  const { selectedKnowledgeGraph, executeQuery } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeQuery, explainQuery, setEditorContent, cancelCurrentQuery } = useDatalogStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [explainResult, setExplainResult] = useState<ExplainResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [isExplaining, setIsExplaining] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<StructuredError | null>(null)
   const [activeQuery, setActiveQuery] = useState("")
+  const [sidebarOpen, toggleSidebar] = useSidebarOpen()
 
   const handleExecuteQuery = useCallback(
     async (query: string) => {
@@ -45,19 +61,16 @@ export default function QueryPage() {
         const result = await executeQuery(query)
 
         if (result.status === "error") {
-          setError(result.error || "Query execution failed")
+          setError({
+            message: result.error || "Query execution failed",
+            validationErrors: result.validationErrors,
+          })
           setQueryResult(null)
         } else {
-          setQueryResult({
-            data: result.data,
-            columns: result.columns,
-            executionTime: result.executionTime,
-            query: result.query,
-            timestamp: result.timestamp,
-          })
+          setQueryResult(result)
         }
       } catch (err) {
-        setError(String(err))
+        setError({ message: String(err) })
         setQueryResult(null)
       }
 
@@ -69,7 +82,7 @@ export default function QueryPage() {
   const handleExplainQuery = useCallback(
     async (query: string) => {
       if (!selectedKnowledgeGraph) {
-        setError("No knowledge graph selected")
+        setError({ message: "No knowledge graph selected" })
         return
       }
 
@@ -79,25 +92,27 @@ export default function QueryPage() {
       setQueryResult(null) // Clear results when explaining
 
       try {
-        const result = await client.query.explain({
-          query,
-          knowledgeGraph: selectedKnowledgeGraph.name,
-        })
+        const plan = await explainQuery(query)
 
         setExplainResult({
-          plan: result.plan,
-          optimizations: result.optimizations,
+          plan,
+          optimizations: [],
           query,
         })
       } catch (err) {
         console.error("Explain failed:", err)
-        setError(err instanceof Error ? err.message : "Failed to explain query")
+        setError({ message: err instanceof Error ? err.message : "Failed to explain query" })
         setExplainResult(null)
       }
 
       setIsExplaining(false)
     },
-    [selectedKnowledgeGraph],
+    [selectedKnowledgeGraph, explainQuery],
+  )
+
+  const errorLines = useMemo(
+    () => new Set(error?.validationErrors?.map((e) => e.line) ?? []),
+    [error],
   )
 
   return (
@@ -112,20 +127,39 @@ export default function QueryPage() {
               <span className="text-xs font-medium">Query Editor</span>
             </div>
             {selectedKnowledgeGraph && <span className="text-xs text-muted-foreground">{selectedKnowledgeGraph.name}</span>}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSidebar}
+              className="h-7 w-7 p-0 ml-auto"
+              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            >
+              {sidebarOpen ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
+            </Button>
           </div>
 
-          <div className="flex flex-1 flex-col overflow-hidden">
-            {/* Editor takes ~40% */}
-            <div className="h-[280px] flex-shrink-0 border-b border-border/50">
+          {!selectedKnowledgeGraph && (
+            <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+              <span>No knowledge graph selected — select one from the header to run queries</span>
+            </div>
+          )}
+
+          <ResizablePanelGroup direction="vertical" className="flex-1">
+            <ResizablePanel defaultSize={38} minSize={15} className="overflow-hidden">
               <QueryEditorPanel
                 onExecute={handleExecuteQuery}
                 onExplain={handleExplainQuery}
+                onCancel={cancelCurrentQuery}
                 isExecuting={isExecuting}
                 isExplaining={isExplaining}
+                errorLines={errorLines}
               />
-            </div>
-            {/* Results take remaining space */}
-            <div className="min-h-0 flex-1 overflow-hidden">
+            </ResizablePanel>
+            <ResizableHandle className="relative border-t border-b border-border/50 bg-muted/30 hover:bg-primary/10 transition-colors data-[resize-handle-active]:bg-primary/20">
+              <GripHorizontal className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/40" />
+            </ResizableHandle>
+            <ResizablePanel defaultSize={62} minSize={20} className="overflow-hidden">
               <QueryResultsPanel
                 result={queryResult}
                 explainResult={explainResult}
@@ -134,13 +168,15 @@ export default function QueryPage() {
                 isExplaining={isExplaining}
                 activeQuery={activeQuery}
               />
-            </div>
-          </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
 
-        <aside className="h-full w-72 flex-shrink-0 border-l border-border/50 bg-muted/20">
-          <QuerySidebar onSelectQuery={handleExecuteQuery} />
-        </aside>
+        {sidebarOpen && (
+          <aside className="h-full w-72 flex-shrink-0 border-l border-border/50 bg-muted/20">
+            <QuerySidebar onSelectQuery={handleExecuteQuery} onLoadQuery={setEditorContent} />
+          </aside>
+        )}
       </div>
     </AppShell>
   )

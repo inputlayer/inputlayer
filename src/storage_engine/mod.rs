@@ -1413,7 +1413,8 @@ impl StorageEngine {
         self.get_relation_metadata_in(db_name, name)
     }
 
-    /// Get relation metadata for a specific knowledge graph
+    /// Get relation metadata for a specific knowledge graph.
+    /// Prefers column names from the schema catalog when available.
     pub fn get_relation_metadata_in(
         &self,
         kg: &str,
@@ -1426,13 +1427,19 @@ impl StorageEngine {
 
         let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
-            Ok(Some((rel_meta.schema.clone(), rel_meta.tuple_count)))
+            let columns = if let Some(schema) = db.schema_catalog.get(name) {
+                schema.columns.iter().map(|c| c.name.clone()).collect()
+            } else {
+                rel_meta.schema.clone()
+            };
+            Ok(Some((columns, rel_meta.tuple_count)))
         } else {
             Ok(None)
         }
     }
 
-    /// List relations with metadata for a specific knowledge graph
+    /// List relations with metadata for a specific knowledge graph.
+    /// Prefers column names from the schema catalog when available.
     pub fn list_relations_with_metadata(
         &self,
         kg: &str,
@@ -1447,7 +1454,51 @@ impl StorageEngine {
             .metadata
             .relations
             .iter()
-            .map(|(name, meta)| (name.clone(), meta.schema.clone(), meta.tuple_count))
+            .map(|(name, meta)| {
+                // Use schema catalog column names if a typed schema was declared
+                let columns = if let Some(schema) = db.schema_catalog.get(name) {
+                    schema.columns.iter().map(|c| c.name.clone()).collect()
+                } else {
+                    meta.schema.clone()
+                };
+                (name.clone(), columns, meta.tuple_count)
+            })
+            .collect();
+        Ok(relations)
+    }
+
+    /// List relations with typed metadata for a specific knowledge graph.
+    /// Returns (name, Vec<(column_name, type_name)>, tuple_count).
+    /// When a typed schema is declared, uses the declared type; otherwise defaults to "any".
+    pub fn list_relations_with_typed_metadata_in(
+        &self,
+        kg: &str,
+    ) -> StorageResult<Vec<(String, Vec<(String, String)>, usize)>> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let db = db.read();
+        let relations: Vec<(String, Vec<(String, String)>, usize)> = db
+            .metadata
+            .relations
+            .iter()
+            .map(|(name, meta)| {
+                let typed_columns = if let Some(schema) = db.schema_catalog.get(name) {
+                    schema
+                        .columns
+                        .iter()
+                        .map(|c| (c.name.clone(), c.data_type.to_string()))
+                        .collect()
+                } else {
+                    meta.schema
+                        .iter()
+                        .map(|col_name| (col_name.clone(), "any".to_string()))
+                        .collect()
+                };
+                (name.clone(), typed_columns, meta.tuple_count)
+            })
             .collect();
         Ok(relations)
     }

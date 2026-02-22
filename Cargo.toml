@@ -71,9 +71,10 @@ reqwest = { version = "0.12", features = ["json"] }
 tower = "0.5"
 tower-http = { version = "0.5", features = ["cors", "fs", "limit"] }
 
-# Authentication (commented out — will be needed when auth is implemented)
-# jsonwebtoken = "9"
-# argon2 = "0.5"
+# Authentication
+argon2 = "0.5"
+sha2 = "0.10"
+rand = "0.8"
 
 # Additional utilities for HTTP API
 uuid = { version = "1", features = ["v4", "serde"] }
