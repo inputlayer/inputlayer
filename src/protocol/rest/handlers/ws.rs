@@ -628,6 +628,10 @@ fn default_kg() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum GlobalWsRequest {
+    /// Authenticate with username and password
+    Login { username: String, password: String },
+    /// Authenticate with an API key
+    Authenticate { api_key: String },
     /// Execute any Datalog statement or meta command as raw text
     Execute { program: String },
     /// Keep-alive ping
@@ -638,12 +642,15 @@ enum GlobalWsRequest {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum GlobalWsResponse {
-    /// Sent immediately after connection, confirming session creation
-    Connected {
+    /// Sent after successful authentication
+    Authenticated {
         session_id: String,
         knowledge_graph: String,
         version: String,
+        role: String,
     },
+    /// Authentication failed
+    AuthError { message: String },
     /// Query/command result
     Result {
         columns: Vec<String>,
@@ -758,13 +765,115 @@ pub async fn global_websocket(
         }))
 }
 
-/// Handle a global WebSocket connection with auto-session lifecycle.
+/// Handle a global WebSocket connection with auth loop + message loop.
 async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, kg: String) {
+    use crate::auth::AuthIdentity;
+
     let (mut sender, mut receiver) = socket.split();
 
     info!(kg = %kg, "ws_connection_start");
 
-    // Auto-create session
+    // ── Auth Loop: wait for Login or Authenticate ────────────────────────
+    let auth_timeout = std::time::Duration::from_secs(30);
+    let auth_deadline = tokio::time::Instant::now() + auth_timeout;
+    let auth_identity: AuthIdentity;
+
+    loop {
+        let msg = tokio::select! {
+            () = tokio::time::sleep_until(auth_deadline) => {
+                let err = GlobalWsResponse::AuthError {
+                    message: "Authentication timeout (30s)".to_string(),
+                };
+                if let Ok(json) = serde_json::to_string(&err) {
+                    let _ = sender.send(Message::Text(json)).await;
+                }
+                let _ = sender.send(Message::Close(None)).await;
+                return;
+            }
+            msg = receiver.next() => msg,
+        };
+
+        match msg {
+            Some(Ok(Message::Text(text))) => {
+                let request: GlobalWsRequest = match serde_json::from_str(&text) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let err = GlobalWsResponse::AuthError {
+                            message: "Invalid message format. Send login or authenticate."
+                                .to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&err) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
+                        continue;
+                    }
+                };
+
+                match request {
+                    GlobalWsRequest::Login { username, password } => {
+                        match handler.authenticate_user(&username, &password) {
+                            Ok(identity) => {
+                                auth_identity = identity;
+                                break;
+                            }
+                            Err(e) => {
+                                warn!(username = %username, "ws_login_failed");
+                                let err = GlobalWsResponse::AuthError { message: e };
+                                if let Ok(json) = serde_json::to_string(&err) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                continue; // Allow retry
+                            }
+                        }
+                    }
+                    GlobalWsRequest::Authenticate { api_key } => {
+                        match handler.authenticate_api_key(&api_key) {
+                            Ok(identity) => {
+                                auth_identity = identity;
+                                break;
+                            }
+                            Err(e) => {
+                                warn!("ws_apikey_auth_failed");
+                                let err = GlobalWsResponse::AuthError { message: e };
+                                if let Ok(json) = serde_json::to_string(&err) {
+                                    let _ = sender.send(Message::Text(json)).await;
+                                }
+                                continue; // Allow retry
+                            }
+                        }
+                    }
+                    GlobalWsRequest::Execute { .. } | GlobalWsRequest::Ping => {
+                        let err = GlobalWsResponse::AuthError {
+                            message: "Authentication required. Send login or authenticate first."
+                                .to_string(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&err) {
+                            let _ = sender.send(Message::Text(json)).await;
+                        }
+                        continue;
+                    }
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                let _ = sender.send(Message::Close(None)).await;
+                return;
+            }
+            Some(Err(e)) => {
+                warn!(error = %e, "ws_auth_protocol_error");
+                return;
+            }
+            _ => continue,
+        }
+    }
+
+    // ── Authenticated: create session ────────────────────────────────────
+    info!(
+        kg = %kg,
+        username = %auth_identity.username,
+        role = %auth_identity.role,
+        "ws_authenticated"
+    );
+
     let session_id = match handler.create_session(&kg) {
         Ok(id) => {
             let stats = handler.session_stats();
@@ -785,13 +894,14 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
         }
     };
 
-    // Send Connected message
-    let connected = GlobalWsResponse::Connected {
+    // Send Authenticated message
+    let authenticated = GlobalWsResponse::Authenticated {
         session_id: session_id.clone(),
         knowledge_graph: kg,
         version: env!("CARGO_PKG_VERSION").to_string(),
+        role: auth_identity.role.to_string(),
     };
-    if let Ok(json) = serde_json::to_string(&connected) {
+    if let Ok(json) = serde_json::to_string(&authenticated) {
         if sender.send(Message::Text(json)).await.is_err() {
             if let Err(e) = handler.close_session(&session_id) {
                 tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
@@ -909,7 +1019,7 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        let response = process_global_ws_message(&handler, &session_id, &text)
+                        let response = process_global_ws_message(&handler, &session_id, &text, &auth_identity)
                             .instrument(span)
                             .await;
                         let json = match serde_json::to_string(&response) {
@@ -1038,6 +1148,7 @@ async fn process_global_ws_message(
     handler: &Arc<Handler>,
     session_id: &str,
     text: &str,
+    auth: &crate::auth::AuthIdentity,
 ) -> GlobalWsResponse {
     let request: GlobalWsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
@@ -1052,9 +1163,16 @@ async fn process_global_ws_message(
 
     match request {
         GlobalWsRequest::Execute { program } => {
-            handle_global_execute(handler, session_id, program).await
+            handle_global_execute(handler, session_id, program, auth).await
         }
         GlobalWsRequest::Ping => GlobalWsResponse::Pong,
+        // Login/Authenticate after already authenticated is a no-op
+        GlobalWsRequest::Login { .. } | GlobalWsRequest::Authenticate { .. } => {
+            GlobalWsResponse::Error {
+                message: "Already authenticated".to_string(),
+                validation_errors: None,
+            }
+        }
     }
 }
 
@@ -1063,6 +1181,7 @@ async fn handle_global_execute(
     handler: &Arc<Handler>,
     session_id: &str,
     program: String,
+    auth: &crate::auth::AuthIdentity,
 ) -> GlobalWsResponse {
     let start = std::time::Instant::now();
     let program_len = program.len();
@@ -1079,7 +1198,7 @@ async fn handle_global_execute(
     // DD runs on blocking threads — no extra spawn_blocking layer needed here.
     let sid = session_id.to_string();
     let result = handler
-        .execute_program(Some(&sid), None, program.clone())
+        .execute_program(Some(&sid), None, program.clone(), Some(auth))
         .await;
     let elapsed = start.elapsed();
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
@@ -1284,16 +1403,18 @@ mod tests {
     }
 
     #[test]
-    fn test_global_ws_response_connected_serialize() {
-        let resp = GlobalWsResponse::Connected {
+    fn test_global_ws_response_authenticated_serialize() {
+        let resp = GlobalWsResponse::Authenticated {
             session_id: "42".to_string(),
             knowledge_graph: "default".to_string(),
             version: "0.1.0".to_string(),
+            role: "admin".to_string(),
         };
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"connected\""));
+        assert!(json.contains("\"type\":\"authenticated\""));
         assert!(json.contains("\"session_id\":\"42\""));
         assert!(json.contains("\"knowledge_graph\":\"default\""));
+        assert!(json.contains("\"role\":\"admin\""));
     }
 
     #[test]

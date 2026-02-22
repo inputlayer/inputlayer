@@ -28,6 +28,7 @@ use differential_dataflow::Collection;
 use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -62,6 +63,17 @@ fn is_query_cancelled() -> bool {
             .as_ref()
             .is_some_and(|f| f.load(Ordering::Relaxed))
     })
+}
+
+/// Extract a human-readable message from a panic payload.
+fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "Unknown error in dataflow computation".to_string()
+    }
 }
 
 /// Tolerance for float equality comparisons in filters and joins.
@@ -213,49 +225,62 @@ impl CodeGenerator {
         let ir_clone = ir.clone();
         let result_limit = self.max_result_rows;
 
-        // Execute DD computation
-        timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::new();
-            let mut steps: u64 = 0;
-            let start = Instant::now();
-            let mut last_log = Instant::now();
+        // Execute DD computation with panic safety — DD bugs (e.g. merge_batcher
+        // out-of-bounds) should produce an error, not crash the server.
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
+                let mut steps: u64 = 0;
+                let start = Instant::now();
+                let mut last_log = Instant::now();
 
-            worker.dataflow::<(), _, _>(|scope| {
-                // Generate collection from IR
-                let collection =
-                    Self::generate_collection_tuples::<_, R>(scope, &ir_clone, &input_data, None);
-
-                // distinct_core::<R> gives set semantics while preserving diff type R
-                collection
-                    .distinct_core::<R>()
-                    .inner
-                    .inspect(move |(data, _time, _diff)| {
-                        let mut guard = results_clone.lock();
-                        if result_limit == 0 || guard.len() < result_limit {
-                            guard.push(data.clone());
-                        }
-                    })
-                    .probe_with(&mut probe);
-            });
-
-            // Wait for computation to complete
-            while !probe.done() {
-                if is_query_cancelled() {
-                    break;
-                }
-                worker.step();
-                std::thread::yield_now();
-                steps = steps.saturating_add(1);
-                if steps.is_multiple_of(1000) && last_log.elapsed().as_secs() >= 5 {
-                    info!(
-                        steps,
-                        elapsed_ms = start.elapsed().as_millis() as u64,
-                        "execution_progress"
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Generate collection from IR
+                    let collection = Self::generate_collection_tuples::<_, R>(
+                        scope,
+                        &ir_clone,
+                        &input_data,
+                        None,
                     );
-                    last_log = Instant::now();
+
+                    // distinct_core::<R> gives set semantics while preserving diff type R
+                    collection
+                        .distinct_core::<R>()
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                            }
+                        })
+                        .probe_with(&mut probe);
+                });
+
+                // Wait for computation to complete
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
+                    steps = steps.saturating_add(1);
+                    if steps.is_multiple_of(1000) && last_log.elapsed().as_secs() >= 5 {
+                        info!(
+                            steps,
+                            elapsed_ms = start.elapsed().as_millis() as u64,
+                            "execution_progress"
+                        );
+                        last_log = Instant::now();
+                    }
                 }
-            }
-        });
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
 
         if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());
@@ -282,29 +307,33 @@ impl CodeGenerator {
         };
 
         // Partition inputs into base cases and recursive cases
-        let (base_indices, recursive_indices) = if let Some((_, base, rec)) =
+        let (base_inputs, recursive_inputs) = if let Some((_, base_idx, rec_idx)) =
             Self::detect_recursive_union_for_relation(inputs, Some(recursive_rel))
         {
             if std::env::var("IL_DEBUG").is_ok() {
                 eprintln!(
-                    "DEBUG: recursive fixpoint: base_indices={base:?}, recursive_indices={rec:?}"
+                    "DEBUG: recursive fixpoint: base_indices={base_idx:?}, recursive_indices={rec_idx:?}"
                 );
             }
+            let base: Vec<IRNode> = base_idx.iter().map(|&i| inputs[i].clone()).collect();
+            let rec: Vec<IRNode> = rec_idx.iter().map(|&i| inputs[i].clone()).collect();
             (base, rec)
         } else {
+            // ALL inputs reference the recursive relation (e.g. edge(X,Y) <- edge(X,Y)
+            // plus edge(X,Y) <- edge(X,Z), edge(Z,Y)). Use existing base facts as the
+            // implicit base case via a Scan node, and treat all inputs as recursive.
             if std::env::var("IL_DEBUG").is_ok() {
                 eprintln!(
-                    "DEBUG: falling back to single_pass - detect_recursive_union returned None"
+                    "DEBUG: all inputs reference '{recursive_rel}' — using base facts as implicit base case"
                 );
             }
-            return self.execute(ir);
+            let base = vec![IRNode::Scan {
+                relation: recursive_rel.to_string(),
+                schema: Vec::new(),
+            }];
+            let rec: Vec<IRNode> = inputs.clone();
+            (base, rec)
         };
-
-        let base_inputs: Vec<IRNode> = base_indices.iter().map(|&i| inputs[i].clone()).collect();
-        let recursive_inputs: Vec<IRNode> = recursive_indices
-            .iter()
-            .map(|&i| inputs[i].clone())
-            .collect();
 
         // Try to detect if this is a simple transitive closure pattern
         // If so, use the optimized DD iterative implementation
@@ -497,78 +526,86 @@ impl CodeGenerator {
         let edge_data = edges.clone();
 
         // Execute DD computation with TRUE recursion using .iterative()
-        timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
 
-            worker.dataflow::<(), _, _>(|scope| {
-                // Load edge data as base collection
-                let edge_collection: Collection<_, Tuple, R> = Collection::new(
-                    edge_data
-                        .clone()
-                        .to_stream(scope)
-                        .map(|x| (x, (), R::one())),
-                );
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Load edge data as base collection
+                    let edge_collection: Collection<_, Tuple, R> = Collection::new(
+                        edge_data
+                            .clone()
+                            .to_stream(scope)
+                            .map(|x| (x, (), R::one())),
+                    );
 
-                // Use iterative scope for efficient semi-naive recursion
-                let tc_result = scope.iterative::<Iter, _, _>(|inner| {
-                    // Create SemigroupVariable for transitive closure
-                    let variable: SemigroupVariable<_, Tuple, R> =
-                        SemigroupVariable::new(inner, Product::new((), 1));
+                    // Use iterative scope for efficient semi-naive recursion
+                    let tc_result = scope.iterative::<Iter, _, _>(|inner| {
+                        // Create SemigroupVariable for transitive closure
+                        let variable: SemigroupVariable<_, Tuple, R> =
+                            SemigroupVariable::new(inner, Product::new((), 1));
 
-                    // Enter edge collection into iterative scope
-                    let edges_in_scope = edge_collection.enter(inner);
+                        // Enter edge collection into iterative scope
+                        let edges_in_scope = edge_collection.enter(inner);
 
-                    // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
-                    // Key tc by second column (y) for join with edge(y, z)
-                    let tc_keyed = variable.map(|tuple| {
-                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        let y = tuple.get(1).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![y]), x) // Key by y, value is x
+                        // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
+                        // Key tc by second column (y) for join with edge(y, z)
+                        let tc_keyed = variable.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), x) // Key by y, value is x
+                        });
+
+                        // Key edges by first column (y) for join
+                        let edges_keyed = edges_in_scope.map(|tuple| {
+                            let y = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let z = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), z) // Key by y, value is z
+                        });
+
+                        // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
+                        let recursive = tc_keyed
+                            .join(&edges_keyed)
+                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+
+                        // Combine base case and recursive case
+                        let next = edges_in_scope.concat(&recursive).distinct_core::<R>();
+
+                        // Set variable for next iteration
+                        variable.set(&next);
+
+                        // Leave scope with final result
+                        next.leave()
                     });
 
-                    // Key edges by first column (y) for join
-                    let edges_keyed = edges_in_scope.map(|tuple| {
-                        let y = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        let z = tuple.get(1).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![y]), z) // Key by y, value is z
-                    });
-
-                    // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
-                    let recursive = tc_keyed
-                        .join(&edges_keyed)
-                        .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
-
-                    // Combine base case and recursive case
-                    let next = edges_in_scope.concat(&recursive).distinct_core::<R>();
-
-                    // Set variable for next iteration
-                    variable.set(&next);
-
-                    // Leave scope with final result
-                    next.leave()
+                    // Capture results
+                    tc_result
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                            }
+                        })
+                        .probe_with(&mut probe);
                 });
 
-                // Capture results
-                tc_result
-                    .inner
-                    .inspect(move |(data, _time, _diff)| {
-                        let mut guard = results_clone.lock();
-                        if result_limit == 0 || guard.len() < result_limit {
-                            guard.push(data.clone());
-                        }
-                    })
-                    .probe_with(&mut probe);
-            });
-
-            // Wait for computation to complete
-            while !probe.done() {
-                if is_query_cancelled() {
-                    break;
+                // Wait for computation to complete
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
                 }
-                worker.step();
-                std::thread::yield_now();
-            }
-        });
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
 
         if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());
@@ -692,120 +729,132 @@ impl CodeGenerator {
             }
         }
 
-        timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
 
-            worker.dataflow::<(), _, _>(|scope| {
-                // Generate base case collection from static input data
-                let base_collection =
-                    Self::generate_collection_tuples::<_, R>(scope, &base_ir, &input_data, None);
-
-                // Use DD's iterative scope for proper semi-naive fixpoint evaluation
-                let result = scope.iterative::<Iter, _, _>(|inner| {
-                    // Create SemigroupVariable for the recursive relation
-                    let variable: SemigroupVariable<_, Tuple, R> =
-                        SemigroupVariable::new(inner, Product::new((), 1));
-
-                    // Build live collections map:
-                    // - All base relations entered into the iterative scope
-                    // - The recursive relation backed by the SemigroupVariable
-                    let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
-                    for (name, tuples) in input_data.iter() {
-                        let coll: Collection<_, Tuple, R> = Collection::new(
-                            tuples
-                                .clone()
-                                .to_stream(inner)
-                                .map(|x| (x, Product::default(), R::one())),
-                        );
-                        live.insert(name.clone(), coll);
-                    }
-                    // Override the recursive relation with the SemigroupVariable
-                    live.insert(rec_rel.clone(), (*variable).clone());
-
-                    // Generate recursive body using live collections
-                    // The code generator will use the SemigroupVariable's collection
-                    // when scanning the recursive relation.
-                    // Pass input_data so antijoin's eager collection can read base relations.
-                    let recursive_result = Self::generate_collection_tuples::<_, R>(
-                        inner,
-                        &recursive_ir,
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Generate base case collection from static input data
+                    let base_collection = Self::generate_collection_tuples::<_, R>(
+                        scope,
+                        &base_ir,
                         &input_data,
-                        Some(&live),
+                        None,
                     );
 
-                    // Enter base case into iterative scope
-                    let base_in_scope = base_collection.enter(inner);
+                    // Use DD's iterative scope for proper semi-naive fixpoint evaluation
+                    let result = scope.iterative::<Iter, _, _>(|inner| {
+                        // Create SemigroupVariable for the recursive relation
+                        let variable: SemigroupVariable<_, Tuple, R> =
+                            SemigroupVariable::new(inner, Product::new((), 1));
 
-                    // Combine base + recursive results
-                    let combined = base_in_scope.concat(&recursive_result);
+                        // Build live collections map:
+                        // - All base relations entered into the iterative scope
+                        // - The recursive relation backed by the SemigroupVariable
+                        let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
+                        for (name, tuples) in input_data.iter() {
+                            let coll: Collection<_, Tuple, R> = Collection::new(
+                                tuples
+                                    .clone()
+                                    .to_stream(inner)
+                                    .map(|x| (x, Product::default(), R::one())),
+                            );
+                            live.insert(name.clone(), coll);
+                        }
+                        // Override the recursive relation with the SemigroupVariable
+                        live.insert(rec_rel.clone(), (*variable).clone());
 
-                    // Apply deduplication strategy based on aggregation mode
-                    let next = if let Some((ref group_by, agg_col, is_min)) = agg_in_loop {
-                        // Min/Max aggregation-in-loop: instead of distinct(), apply
-                        // reduce() with min/max logic. This prunes non-optimal paths
-                        // at each iteration, reducing intermediate data volume.
-                        let group_by = group_by.clone();
-                        combined
-                            .map(move |tuple| {
-                                let key: Vec<Value> = group_by
-                                    .iter()
-                                    .map(|&i| tuple.get(i).cloned().unwrap_or(Value::Null))
-                                    .collect();
-                                (Tuple::new(key), tuple)
-                            })
-                            .reduce(move |_key, input, output| {
-                                // Find the tuple with min/max value at agg_col
-                                let best = if is_min {
-                                    input.iter().min_by(|(a, _), (b, _)| {
-                                        let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
-                                        let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
-                                        va.cmp(&vb)
-                                    })
-                                } else {
-                                    input.iter().max_by(|(a, _), (b, _)| {
-                                        let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
-                                        let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
-                                        va.cmp(&vb)
-                                    })
-                                };
-                                if let Some((tuple, _count)) = best {
-                                    output.push(((*tuple).clone(), R::one()));
-                                }
-                            })
-                            .map(|(_key, tuple)| tuple)
-                    } else {
-                        // Standard deduplication with distinct
-                        combined.distinct_core::<R>()
-                    };
+                        // Generate recursive body using live collections
+                        // The code generator will use the SemigroupVariable's collection
+                        // when scanning the recursive relation.
+                        // Pass input_data so antijoin's eager collection can read base relations.
+                        let recursive_result = Self::generate_collection_tuples::<_, R>(
+                            inner,
+                            &recursive_ir,
+                            &input_data,
+                            Some(&live),
+                        );
 
-                    // Set variable for next iteration
-                    variable.set(&next);
+                        // Enter base case into iterative scope
+                        let base_in_scope = base_collection.enter(inner);
 
-                    // Leave scope with final result
-                    next.leave()
+                        // Combine base + recursive results
+                        let combined = base_in_scope.concat(&recursive_result);
+
+                        // Apply deduplication strategy based on aggregation mode
+                        let next = if let Some((ref group_by, agg_col, is_min)) = agg_in_loop {
+                            // Min/Max aggregation-in-loop: instead of distinct(), apply
+                            // reduce() with min/max logic. This prunes non-optimal paths
+                            // at each iteration, reducing intermediate data volume.
+                            let group_by = group_by.clone();
+                            combined
+                                .map(move |tuple| {
+                                    let key: Vec<Value> = group_by
+                                        .iter()
+                                        .map(|&i| tuple.get(i).cloned().unwrap_or(Value::Null))
+                                        .collect();
+                                    (Tuple::new(key), tuple)
+                                })
+                                .reduce(move |_key, input, output| {
+                                    // Find the tuple with min/max value at agg_col
+                                    let best = if is_min {
+                                        input.iter().min_by(|(a, _), (b, _)| {
+                                            let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
+                                            let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
+                                            va.cmp(&vb)
+                                        })
+                                    } else {
+                                        input.iter().max_by(|(a, _), (b, _)| {
+                                            let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
+                                            let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
+                                            va.cmp(&vb)
+                                        })
+                                    };
+                                    if let Some((tuple, _count)) = best {
+                                        output.push(((*tuple).clone(), R::one()));
+                                    }
+                                })
+                                .map(|(_key, tuple)| tuple)
+                        } else {
+                            // Standard deduplication with distinct
+                            combined.distinct_core::<R>()
+                        };
+
+                        // Set variable for next iteration
+                        variable.set(&next);
+
+                        // Leave scope with final result
+                        next.leave()
+                    });
+
+                    // Capture results
+                    result
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                            }
+                        })
+                        .probe_with(&mut probe);
                 });
 
-                // Capture results
-                result
-                    .inner
-                    .inspect(move |(data, _time, _diff)| {
-                        let mut guard = results_clone.lock();
-                        if result_limit == 0 || guard.len() < result_limit {
-                            guard.push(data.clone());
-                        }
-                    })
-                    .probe_with(&mut probe);
-            });
-
-            // Wait for computation to complete
-            while !probe.done() {
-                if is_query_cancelled() {
-                    break;
+                // Wait for computation to complete
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
                 }
-                worker.step();
-                std::thread::yield_now();
-            }
-        });
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
 
         if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());
@@ -1772,26 +1821,36 @@ impl CodeGenerator {
         let node_clone = node.clone();
         let input_data_clone = input_data.clone();
 
-        timely::execute_directly(move |worker| {
-            worker.dataflow::<(), _, _>(|scope| {
-                let coll = Self::generate_collection_tuples::<_, isize>(
-                    scope,
-                    &node_clone,
-                    &input_data_clone,
-                    None,
-                );
-                let results_ref = Arc::clone(&results_clone);
-                coll.inner.inspect(move |(tuple, _time, diff)| {
-                    if *diff > 0 {
-                        results_ref.lock().push(tuple.clone());
-                    }
+        let dd_result = catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                worker.dataflow::<(), _, _>(|scope| {
+                    let coll = Self::generate_collection_tuples::<_, isize>(
+                        scope,
+                        &node_clone,
+                        &input_data_clone,
+                        None,
+                    );
+                    let results_ref = Arc::clone(&results_clone);
+                    coll.inner.inspect(move |(tuple, _time, diff)| {
+                        if *diff > 0 {
+                            results_ref.lock().push(tuple.clone());
+                        }
+                    });
                 });
+                // Step until complete
+                while worker.step() {
+                    std::thread::yield_now();
+                }
             });
-            // Step until complete
-            while worker.step() {
-                std::thread::yield_now();
-            }
-        });
+        }));
+
+        if let Err(e) = dd_result {
+            tracing::error!(
+                error = %format_panic_payload(e),
+                "Antijoin subquery panicked"
+            );
+            return Vec::new();
+        }
 
         // Safely extract results from Arc<Mutex<Vec<Tuple>>>
         match Arc::try_unwrap(results) {
@@ -3300,77 +3359,85 @@ impl CodeGenerator {
         let edge_data = edges.clone();
 
         // Execute DD computation with TRUE recursion
-        timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
 
-            worker.dataflow::<(), _, _>(|scope| {
-                // Load edge data as base collection
-                let edge_collection: Collection<_, Tuple, isize> =
-                    Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Load edge data as base collection
+                    let edge_collection: Collection<_, Tuple, isize> =
+                        Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
 
-                // Use iterative scope for recursion
-                let tc_result = scope.iterative::<Iter, _, _>(|inner| {
-                    // Create SemigroupVariable for transitive closure
-                    let variable: SemigroupVariable<_, Tuple, isize> =
-                        SemigroupVariable::new(inner, Product::new((), 1));
+                    // Use iterative scope for recursion
+                    let tc_result = scope.iterative::<Iter, _, _>(|inner| {
+                        // Create SemigroupVariable for transitive closure
+                        let variable: SemigroupVariable<_, Tuple, isize> =
+                            SemigroupVariable::new(inner, Product::new((), 1));
 
-                    // Enter edge collection into iterative scope
-                    let edges_in_scope = edge_collection.enter(inner);
+                        // Enter edge collection into iterative scope
+                        let edges_in_scope = edge_collection.enter(inner);
 
-                    // Base case: tc(x, y) <- edge(x, y)
-                    // (already have edges in scope)
+                        // Base case: tc(x, y) <- edge(x, y)
+                        // (already have edges in scope)
 
-                    // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
-                    // Key tc by second column (y) for join with edge(y, z)
-                    let tc_keyed = variable.map(|tuple| {
-                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        let y = tuple.get(1).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![y]), x) // Key by y, value is x
+                        // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
+                        // Key tc by second column (y) for join with edge(y, z)
+                        let tc_keyed = variable.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), x) // Key by y, value is x
+                        });
+
+                        // Key edges by first column (y) for join
+                        let edges_keyed = edges_in_scope.map(|tuple| {
+                            let y = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let z = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), z) // Key by y, value is z
+                        });
+
+                        // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
+                        let recursive = tc_keyed
+                            .join(&edges_keyed)
+                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+
+                        // Combine base case and recursive case
+                        let next = edges_in_scope.concat(&recursive).distinct();
+
+                        // Set variable for next iteration
+                        variable.set(&next);
+
+                        // Leave scope with final result
+                        next.leave()
                     });
 
-                    // Key edges by first column (y) for join
-                    let edges_keyed = edges_in_scope.map(|tuple| {
-                        let y = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        let z = tuple.get(1).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![y]), z) // Key by y, value is z
-                    });
-
-                    // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
-                    let recursive = tc_keyed
-                        .join(&edges_keyed)
-                        .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
-
-                    // Combine base case and recursive case
-                    let next = edges_in_scope.concat(&recursive).distinct();
-
-                    // Set variable for next iteration
-                    variable.set(&next);
-
-                    // Leave scope with final result
-                    next.leave()
+                    // Capture results
+                    tc_result
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                            }
+                        })
+                        .probe_with(&mut probe);
                 });
 
-                // Capture results
-                tc_result
-                    .inner
-                    .inspect(move |(data, _time, _diff)| {
-                        let mut guard = results_clone.lock();
-                        if result_limit == 0 || guard.len() < result_limit {
-                            guard.push(data.clone());
-                        }
-                    })
-                    .probe_with(&mut probe);
-            });
-
-            // Wait for computation to complete
-            while !probe.done() {
-                if is_query_cancelled() {
-                    break;
+                // Wait for computation to complete
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
                 }
-                worker.step();
-                std::thread::yield_now();
-            }
-        });
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
 
         if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());
@@ -3423,79 +3490,87 @@ impl CodeGenerator {
         let result_limit = self.max_result_rows;
 
         // Execute DD computation with TRUE recursion
-        timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::new();
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
 
-            worker.dataflow::<(), _, _>(|scope| {
-                // Load source and edge collections
-                let source_collection: Collection<_, Tuple, isize> =
-                    Collection::new(source_data.clone().to_stream(scope).map(|x| (x, (), 1)));
-                let edge_collection: Collection<_, Tuple, isize> =
-                    Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Load source and edge collections
+                    let source_collection: Collection<_, Tuple, isize> =
+                        Collection::new(source_data.clone().to_stream(scope).map(|x| (x, (), 1)));
+                    let edge_collection: Collection<_, Tuple, isize> =
+                        Collection::new(edge_data.clone().to_stream(scope).map(|x| (x, (), 1)));
 
-                // Use iterative scope for recursion
-                let reach_result = scope.iterative::<Iter, _, _>(|inner| {
-                    // Create SemigroupVariable for reachable nodes
-                    let variable: SemigroupVariable<_, Tuple, isize> =
-                        SemigroupVariable::new(inner, Product::new((), 1));
+                    // Use iterative scope for recursion
+                    let reach_result = scope.iterative::<Iter, _, _>(|inner| {
+                        // Create SemigroupVariable for reachable nodes
+                        let variable: SemigroupVariable<_, Tuple, isize> =
+                            SemigroupVariable::new(inner, Product::new((), 1));
 
-                    // Enter collections into iterative scope
-                    let sources_in_scope = source_collection.enter(inner);
-                    let edges_in_scope = edge_collection.enter(inner);
+                        // Enter collections into iterative scope
+                        let sources_in_scope = source_collection.enter(inner);
+                        let edges_in_scope = edge_collection.enter(inner);
 
-                    // Base case: reach(x) <- source(x)
-                    // (sources_in_scope is the base case)
+                        // Base case: reach(x) <- source(x)
+                        // (sources_in_scope is the base case)
 
-                    // Recursive case: reach(y) <- reach(x), edge(x, y)
-                    // Key reach by its value (x) for join with edge(x, y)
-                    let reach_keyed = variable.map(|tuple| {
-                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![x.clone()]), x) // Key and value are both x
+                        // Recursive case: reach(y) <- reach(x), edge(x, y)
+                        // Key reach by its value (x) for join with edge(x, y)
+                        let reach_keyed = variable.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![x.clone()]), x) // Key and value are both x
+                        });
+
+                        // Key edges by first column (x) for join
+                        let edges_keyed = edges_in_scope.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![x]), y) // Key by x, value is y
+                        });
+
+                        // Join: reach(x) JOIN edge(x, y) -> reach(y)
+                        let recursive = reach_keyed
+                            .join(&edges_keyed)
+                            .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
+
+                        // Combine base case and recursive case
+                        let next = sources_in_scope.concat(&recursive).distinct();
+
+                        // Set variable for next iteration
+                        variable.set(&next);
+
+                        // Leave scope with final result
+                        next.leave()
                     });
 
-                    // Key edges by first column (x) for join
-                    let edges_keyed = edges_in_scope.map(|tuple| {
-                        let x = tuple.get(0).cloned().unwrap_or(Value::Null);
-                        let y = tuple.get(1).cloned().unwrap_or(Value::Null);
-                        (Tuple::new(vec![x]), y) // Key by x, value is y
-                    });
-
-                    // Join: reach(x) JOIN edge(x, y) -> reach(y)
-                    let recursive = reach_keyed
-                        .join(&edges_keyed)
-                        .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
-
-                    // Combine base case and recursive case
-                    let next = sources_in_scope.concat(&recursive).distinct();
-
-                    // Set variable for next iteration
-                    variable.set(&next);
-
-                    // Leave scope with final result
-                    next.leave()
+                    // Capture results
+                    reach_result
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                            }
+                        })
+                        .probe_with(&mut probe);
                 });
 
-                // Capture results
-                reach_result
-                    .inner
-                    .inspect(move |(data, _time, _diff)| {
-                        let mut guard = results_clone.lock();
-                        if result_limit == 0 || guard.len() < result_limit {
-                            guard.push(data.clone());
-                        }
-                    })
-                    .probe_with(&mut probe);
-            });
-
-            // Wait for computation to complete
-            while !probe.done() {
-                if is_query_cancelled() {
-                    break;
+                // Wait for computation to complete
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
                 }
-                worker.step();
-                std::thread::yield_now();
-            }
-        });
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
 
         if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());

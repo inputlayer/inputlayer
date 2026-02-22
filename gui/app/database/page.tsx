@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { AppShell } from "@/components/app-shell"
 import { useDatalogStore, type KnowledgeGraph } from "@/lib/datalog-store"
-import { InputLayerClient } from "@inputlayer/api-client"
 import {
   Database,
   Plus,
@@ -40,16 +39,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 
-const client = new InputLayerClient({ baseUrl: "/api/v1" })
-
 export default function KnowledgeGraphPage() {
-  const { knowledgeGraphs, setKnowledgeGraphs, selectedKnowledgeGraph, loadKnowledgeGraph } = useDatalogStore()
+  const { knowledgeGraphs, setKnowledgeGraphs, selectedKnowledgeGraph, loadKnowledgeGraph, createKnowledgeGraph, deleteKnowledgeGraph, refreshCurrentKnowledgeGraph } = useDatalogStore()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [newKgName, setNewKgName] = useState("")
-  const [newKgDescription, setNewKgDescription] = useState("")
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [kgToDelete, setKgToDelete] = useState<KnowledgeGraph | null>(null)
@@ -58,22 +54,14 @@ export default function KnowledgeGraphPage() {
     setLoading(true)
     setError(null)
     try {
-      const result = await client.knowledgeGraphs.list()
-      const kgs: KnowledgeGraph[] = result.knowledgeGraphs.map((kg, idx) => ({
-        id: String(idx + 1),
-        name: kg.name,
-        description: kg.description,
-        relationsCount: kg.relationsCount,
-        viewsCount: kg.viewsCount,
-      }))
-      setKnowledgeGraphs(kgs)
+      await refreshCurrentKnowledgeGraph()
     } catch (err) {
       console.error("Failed to load knowledge graphs:", err)
       setError(err instanceof Error ? err.message : "Failed to load knowledge graphs")
     } finally {
       setLoading(false)
     }
-  }, [setKnowledgeGraphs])
+  }, [refreshCurrentKnowledgeGraph])
 
   useEffect(() => {
     loadKnowledgeGraphs()
@@ -84,14 +72,9 @@ export default function KnowledgeGraphPage() {
 
     setCreating(true)
     try {
-      await client.knowledgeGraphs.create({
-        name: newKgName.trim(),
-        description: newKgDescription.trim() || undefined,
-      })
+      await createKnowledgeGraph(newKgName.trim())
       setNewKgName("")
-      setNewKgDescription("")
       setCreateDialogOpen(false)
-      await loadKnowledgeGraphs()
     } catch (err) {
       console.error("Failed to create knowledge graph:", err)
       setError(err instanceof Error ? err.message : "Failed to create knowledge graph")
@@ -105,10 +88,9 @@ export default function KnowledgeGraphPage() {
 
     setDeleting(true)
     try {
-      await client.knowledgeGraphs.delete(kgToDelete.name)
+      await deleteKnowledgeGraph(kgToDelete.name)
       setDeleteDialogOpen(false)
       setKgToDelete(null)
-      await loadKnowledgeGraphs()
     } catch (err) {
       console.error("Failed to delete knowledge graph:", err)
       setError(err instanceof Error ? err.message : "Failed to delete knowledge graph")
@@ -134,7 +116,7 @@ export default function KnowledgeGraphPage() {
             <div>
               <h1 className="text-lg font-semibold">Knowledge Graph Management</h1>
               <p className="text-xs text-muted-foreground">
-                Create, manage, and monitor your knowledge graphs
+                Create and manage your knowledge graphs
               </p>
             </div>
           </div>
@@ -176,16 +158,8 @@ export default function KnowledgeGraphPage() {
                       onChange={(e) => setNewKgName(e.target.value)}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Use lowercase letters, numbers, and underscores
+                      Must start with a letter or underscore. Letters, numbers, and underscores only.
                     </p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Description (optional)</label>
-                    <Input
-                      placeholder="A brief description..."
-                      value={newKgDescription}
-                      onChange={(e) => setNewKgDescription(e.target.value)}
-                    />
                   </div>
                 </div>
                 <DialogFooter>

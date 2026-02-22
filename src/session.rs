@@ -321,19 +321,23 @@ impl Session {
         sources.sort();
         metadata.ephemeral_sources = sources;
 
-        // Add warnings
+        // Add info messages
         if !self.ephemeral_facts.is_empty() {
+            let n = self.ephemeral_facts.len();
             metadata.warnings.push(format!(
-                "Query results may include ephemeral data from {} relation(s): {}",
-                self.ephemeral_facts.len(),
+                "Results include session data from {} {}: {}",
+                n,
+                if n == 1 { "relation" } else { "relations" },
                 metadata.ephemeral_sources.join(", ")
             ));
         }
 
         if !self.ephemeral_rules.is_empty() {
+            let n = self.ephemeral_rules.len();
             metadata.warnings.push(format!(
-                "Query uses {} ephemeral rule(s)",
-                self.ephemeral_rules.len()
+                "Results use {} session {}",
+                n,
+                if n == 1 { "rule" } else { "rules" }
             ));
         }
 
@@ -341,7 +345,7 @@ impl Session {
         let overshadowed = self.detect_overshadowed_rules(persistent_rule_heads);
         if !overshadowed.is_empty() {
             metadata.warnings.push(format!(
-                "Ephemeral rules overshadow persistent rules for: {}",
+                "Session rules override persistent rules for: {}",
                 overshadowed.join(", ")
             ));
         }
@@ -1309,7 +1313,7 @@ mod tests {
         let metadata = session
             .build_query_metadata_with_persistent(&["path".to_string(), "other".to_string()]);
         assert!(metadata.has_ephemeral);
-        assert!(metadata.warnings.iter().any(|w| w.contains("overshadow")));
+        assert!(metadata.warnings.iter().any(|w| w.contains("override")));
     }
 
     // === Session-local relations (no schema required) ===

@@ -139,14 +139,12 @@ enabled = false
 static_dir = "./gui/dist"
 
 # -----------------------------------------------------------------------------
-# Authentication
+# Authentication (always enabled)
 # -----------------------------------------------------------------------------
 [http.auth]
-# Enable JWT-based authentication
-enabled = false
-
-# JWT signing secret (CHANGE THIS IN PRODUCTION!)
-jwt_secret = "change-me-in-production"
+# On first boot, an admin user and bootstrap API key are created.
+# Set a known password, or omit to auto-generate one (printed to stderr).
+# bootstrap_admin_password = "your-secure-password"
 
 # Session timeout in seconds (default: 24 hours)
 session_timeout_secs = 86400
@@ -168,6 +166,10 @@ export INPUTLAYER_STORAGE__PERSIST__BUFFER_SIZE=50000
 # HTTP Server
 export INPUTLAYER_HTTP__ENABLED=true
 export INPUTLAYER_HTTP__PORT=9090
+
+# Authentication
+export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only)
+export INPUTLAYER_API_KEY=your-api-key                  # CLI client authentication
 
 # Logging
 export INPUTLAYER_LOGGING__LEVEL=debug
@@ -221,8 +223,8 @@ host = "0.0.0.0"
 port = 8080
 
 [http.auth]
-enabled = true
-jwt_secret = "your-secure-secret-here"
+# Set a known admin password for production deployments
+bootstrap_admin_password = "your-secure-password-here"
 ```
 
 ### High-Throughput Ingestion

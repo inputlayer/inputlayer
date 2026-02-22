@@ -42,3 +42,5 @@ rfcs/
 proposals/
 
 .gback/
+
+.inputlayer-credentials.toml

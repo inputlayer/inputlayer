@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
-import { Network, Eye, Search, X, ChevronRight, Rows3, GitBranch } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Network, Eye, Search, X, ChevronRight, Rows3 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { EmptyState } from "@/components/empty-state"
+import { useDebounce } from "@/hooks/use-debounce"
 import type { Relation, View } from "@/lib/datalog-store"
 
 interface RelationsExplorerProps {
@@ -25,13 +27,20 @@ export function RelationsExplorer({
   onSelectView,
 }: RelationsExplorerProps) {
   const [search, setSearch] = useState("")
+  const debouncedSearch = useDebounce(search, 150)
   const [expandedSections, setExpandedSections] = useState({
     relations: true,
     views: true,
   })
 
-  const filteredRelations = relations.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()))
-  const filteredViews = views.filter((v) => v.name.toLowerCase().includes(search.toLowerCase()))
+  const filteredRelations = useMemo(() =>
+    relations.filter((r) => r.name.toLowerCase().includes(debouncedSearch.toLowerCase())),
+    [relations, debouncedSearch]
+  )
+  const filteredViews = useMemo(() =>
+    views.filter((v) => v.name.toLowerCase().includes(debouncedSearch.toLowerCase())),
+    [views, debouncedSearch]
+  )
 
   const toggleSection = (section: "relations" | "views") => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }))
@@ -39,11 +48,6 @@ export function RelationsExplorer({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="border-b border-border/50 p-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Explorer</h2>
-      </div>
-
       {/* Search */}
       <div className="border-b border-border/50 p-2">
         <div className="relative">
@@ -53,6 +57,7 @@ export function RelationsExplorer({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 pl-8 pr-8 text-xs"
+            aria-label="Filter relations and views"
           />
           {search && (
             <button
@@ -67,10 +72,16 @@ export function RelationsExplorer({
 
       {/* Tree */}
       <div className="flex-1 overflow-auto scrollbar-thin p-2">
+        {/* Empty state when filter matches nothing */}
+        {debouncedSearch && filteredRelations.length === 0 && filteredViews.length === 0 && (
+          <EmptyState icon={Search} title="No matches" subtitle="Try a different filter" />
+        )}
+
         {/* Relations section */}
         <div className="mb-2">
           <button
             onClick={() => toggleSection("relations")}
+            aria-expanded={expandedSections.relations}
             className="flex w-full items-center gap-1 rounded px-1 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ChevronRight
@@ -98,6 +109,11 @@ export function RelationsExplorer({
                 >
                   <Network className="h-3.5 w-3.5 flex-shrink-0 text-chart-1" />
                   <span className="flex-1 truncate font-mono text-xs">{relation.name}</span>
+                  {relation.isSession && (
+                    <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                      session
+                    </Badge>
+                  )}
                   <span className="flex-shrink-0 text-[10px] text-muted-foreground">{relation.arity}</span>
                 </button>
               ))}
@@ -109,11 +125,12 @@ export function RelationsExplorer({
         <div>
           <button
             onClick={() => toggleSection("views")}
+            aria-expanded={expandedSections.views}
             className="flex w-full items-center gap-1 rounded px-1 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", expandedSections.views && "rotate-90")} />
             <Eye className="h-3.5 w-3.5 text-accent" />
-            Computed Views
+            Rules
             <Badge variant="secondary" className="ml-auto text-[10px] px-1.5">
               {filteredViews.length}
             </Badge>
@@ -132,7 +149,12 @@ export function RelationsExplorer({
                 >
                   <Eye className="h-3.5 w-3.5 flex-shrink-0 text-chart-2" />
                   <span className="flex-1 truncate font-mono text-xs">{view.name}</span>
-                  <GitBranch className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                  {view.isSession && (
+                    <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                      session
+                    </Badge>
+                  )}
+                  <span className="flex-shrink-0 text-[10px] text-muted-foreground">{view.arity > 0 ? view.arity : ""}</span>
                 </button>
               ))}
             </div>

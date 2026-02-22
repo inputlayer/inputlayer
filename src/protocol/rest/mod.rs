@@ -53,11 +53,12 @@ async fn connection_limit_middleware(
     }
 }
 
-/// Middleware: API key authentication.
-/// Checks for `Authorization: Bearer <key>` header.
-/// Skips auth for /health and /live endpoints (probes must work unauthenticated).
+/// Middleware: API key authentication via `_internal` KG.
+/// Checks for `Authorization: Bearer <key>` header and validates against stored API keys.
+/// Skips auth for /health, /live, /ready endpoints and WebSocket upgrades
+/// (WS has its own auth flow).
 async fn auth_middleware(
-    Extension(api_keys): Extension<ApiKeys>,
+    Extension(handler): Extension<Arc<Handler>>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
@@ -67,9 +68,8 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    let keys = &api_keys.0;
-    if keys.is_empty() {
-        // No API keys configured — auth not enforced
+    // WebSocket endpoints handle their own auth flow (Login/Authenticate messages)
+    if path == "/ws" || path.starts_with("/sessions/") {
         return next.run(req).await;
     }
 
@@ -77,7 +77,7 @@ async fn auth_middleware(
     if let Some(auth_header) = req.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if keys.iter().any(|k| k == token) {
+                if handler.authenticate_api_key(token).is_ok() {
                     return next.run(req).await;
                 }
             }
@@ -86,9 +86,6 @@ async fn auth_middleware(
 
     (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response()
 }
-
-#[derive(Clone)]
-struct ApiKeys(Arc<Vec<String>>);
 
 /// Newtype wrapper for WebSocket-specific connection semaphore.
 /// Distinct from the general HTTP connection semaphore.
@@ -150,20 +147,16 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .route("/ws", get(ws::global_websocket))
         .route("/sessions/:id/ws", get(ws::session_websocket))
         .route("/api/asyncapi.yaml", get(asyncapi_yaml))
-        .route("/api/ws-docs", get(asyncapi_docs))
-        .layer(Extension(handler));
+        .route("/api/ws-docs", get(asyncapi_docs));
 
-    // Apply authentication middleware (if enabled)
-    // Note: Extension must be the OUTER layer (applied last) so the middleware can extract it.
-    // In Axum, .layer(A).layer(B) means B wraps A, so B runs first.
-    if config.auth.enabled && !config.auth.api_keys.is_empty() {
-        let api_keys = ApiKeys(Arc::new(config.auth.api_keys.clone()));
-        app = app
-            .layer(middleware::from_fn(auth_middleware))
-            .layer(Extension(api_keys.clone()));
-    } else {
-        app = app.layer(Extension(ApiKeys(Arc::new(Vec::new()))));
-    }
+    // Apply authentication middleware.
+    // Auth is always required — API keys are validated against the _internal KG.
+    // Health/live/ready endpoints and WebSocket paths bypass auth.
+    // NOTE: Layer ordering matters! In Axum, .layer(A).layer(B) means B runs first.
+    // Auth middleware needs Extension<Handler>, so Extension must be the OUTER layer.
+    app = app
+        .layer(middleware::from_fn(auth_middleware))
+        .layer(Extension(handler));
 
     // Apply connection limit middleware using Semaphore for atomic check-and-acquire
     let conn_semaphore: Option<Arc<tokio::sync::Semaphore>> =
@@ -242,17 +235,6 @@ pub async fn start_http_server(
         }
     });
 
-    // Warn if binding to a public interface without authentication
-    let is_public = config.host == "0.0.0.0" || config.host == "::";
-    if is_public && !config.auth.enabled {
-        warn!(
-            host = %config.host,
-            "Server binding to a public interface WITHOUT authentication. \
-             All endpoints are publicly accessible. \
-             Set [http.auth] enabled = true for production."
-        );
-    }
-
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
     println!("HTTP server listening on: http://{addr}");
@@ -310,13 +292,22 @@ mod tests {
         config.storage.auto_create_knowledge_graphs = true;
         config.storage.data_dir = tmp.path().to_path_buf();
         config.http.gui.enabled = false;
-        (Arc::new(Handler::from_config(config).unwrap()), tmp)
+        let handler = Arc::new(Handler::from_config(config).unwrap());
+        handler.bootstrap_auth();
+        (handler, tmp)
     }
 
-    fn make_config_with_auth(keys: Vec<String>) -> HttpConfig {
+    /// Create a handler with an API key for auth tests.
+    /// Returns (handler, api_key, tmpdir).
+    fn make_handler_with_api_key() -> (Arc<Handler>, String, tempfile::TempDir) {
+        let (handler, tmp) = make_handler();
+        let result = handler.handle_apikey_create("test-key", "admin").unwrap();
+        let api_key = result.rows[0].values[1].as_str().unwrap().to_string();
+        (handler, api_key, tmp)
+    }
+
+    fn make_default_config() -> HttpConfig {
         let mut config = HttpConfig::default();
-        config.auth.enabled = true;
-        config.auth.api_keys = keys;
         config.gui.enabled = false;
         config
     }
@@ -330,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn test_router_health_with_middleware_does_not_500() {
         let (handler, _tmp) = make_handler();
-        let config = HttpConfig::default();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -345,11 +336,11 @@ mod tests {
         );
     }
 
-    /// Regression: Router with auth enabled must not 500 on /health (auth bypass).
+    /// Regression: Router with auth must not 500 on /health (auth bypass).
     #[tokio::test]
     async fn test_router_health_bypasses_auth() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["secret123".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -363,8 +354,8 @@ mod tests {
     /// Regression: /live bypasses auth (liveness probe must always work).
     #[tokio::test]
     async fn test_router_live_bypasses_auth() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["secret123".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder().uri("/live").body(Body::empty()).unwrap();
@@ -375,8 +366,8 @@ mod tests {
     /// Regression: /ready bypasses auth (readiness probe must always work).
     #[tokio::test]
     async fn test_router_ready_bypasses_auth() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["secret123".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -389,16 +380,16 @@ mod tests {
 
     // === API Key Auth Middleware Tests ===
 
-    /// Auth: Valid Bearer token is accepted.
+    /// Auth: Valid Bearer API key is accepted.
     #[tokio::test]
     async fn test_auth_valid_key_accepted() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["my-secret-key".to_string()]);
+        let (handler, api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
             .uri("/metrics")
-            .header("authorization", "Bearer my-secret-key")
+            .header("authorization", format!("Bearer {api_key}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -412,8 +403,8 @@ mod tests {
     /// Auth: Invalid Bearer token is rejected with 401.
     #[tokio::test]
     async fn test_auth_invalid_key_rejected() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["correct-key".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -428,8 +419,8 @@ mod tests {
     /// Auth: Missing Authorization header is rejected with 401.
     #[tokio::test]
     async fn test_auth_missing_header_rejected() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["my-key".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -443,8 +434,8 @@ mod tests {
     /// Auth: Non-Bearer auth scheme is rejected.
     #[tokio::test]
     async fn test_auth_non_bearer_scheme_rejected() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["my-key".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -456,31 +447,20 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
-    /// Auth: No keys configured means auth is not enforced.
-    #[tokio::test]
-    async fn test_auth_disabled_when_no_keys() {
-        let (handler, _tmp) = make_handler();
-        let config = HttpConfig::default(); // no auth enabled
-        let app = create_router(handler, &config);
-
-        let req = Request::builder()
-            .uri("/metrics")
-            .body(Body::empty())
-            .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK, "No keys = no auth enforced");
-    }
-
-    /// Auth: Multiple valid keys - any one should work.
+    /// Auth: Multiple valid keys — any one should work.
     #[tokio::test]
     async fn test_auth_multiple_keys_any_valid() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["key-alpha".to_string(), "key-beta".to_string()]);
+        let (handler, _key1, _tmp) = make_handler_with_api_key();
+        // Create a second key
+        let result = handler.handle_apikey_create("key-2", "admin").unwrap();
+        let key2 = result.rows[0].values[1].as_str().unwrap().to_string();
+
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()
             .uri("/metrics")
-            .header("authorization", "Bearer key-beta")
+            .header("authorization", format!("Bearer {key2}"))
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -493,9 +473,8 @@ mod tests {
     #[tokio::test]
     async fn test_connection_limit_zero_means_unlimited() {
         let (handler, _tmp) = make_handler();
-        let mut config = HttpConfig::default();
+        let mut config = make_default_config();
         config.rate_limit.max_connections = 0;
-        config.gui.enabled = false;
         let app = create_router(handler, &config);
 
         let req = Request::builder()
@@ -511,9 +490,8 @@ mod tests {
     #[tokio::test]
     async fn test_connection_limit_middleware_extracts_extension() {
         let (handler, _tmp) = make_handler();
-        let mut config = HttpConfig::default();
+        let mut config = make_default_config();
         config.rate_limit.max_connections = 1000;
-        config.gui.enabled = false;
         let app = create_router(handler, &config);
 
         // Should work fine with limit=1000 (not exceeded)
@@ -532,8 +510,8 @@ mod tests {
     /// Auth: 401 status is returned for unauthenticated requests to protected endpoints.
     #[tokio::test]
     async fn test_auth_rejection_returns_401_on_protected_endpoint() {
-        let (handler, _tmp) = make_handler();
-        let config = make_config_with_auth(vec!["secret".to_string()]);
+        let (handler, _api_key, _tmp) = make_handler_with_api_key();
+        let config = make_default_config();
         let app = create_router(handler, &config);
 
         let req = Request::builder()

@@ -27,17 +27,26 @@ export default function RelationsPage() {
     }
   }, [selectedKnowledgeGraph?.name]) // Only refresh when KG changes, not on every render
 
-  // Clear selection when relations/views list changes (e.g., after refresh)
+  // Keep selection in sync with store data (e.g., after loadRelationData updates tupleCount/columns)
   useEffect(() => {
-    // If the selected relation no longer exists, clear it
-    if (selectedRelation && !relations.find(r => r.id === selectedRelation.id)) {
-      setSelectedRelation(null)
+    if (selectedRelation) {
+      const updated = relations.find(r => r.name === selectedRelation.name)
+      if (updated) {
+        // Only update if data actually changed to avoid unnecessary re-renders
+        if (updated !== selectedRelation) setSelectedRelation(updated)
+      } else {
+        setSelectedRelation(null)
+      }
     }
-    // If the selected view no longer exists, clear it
-    if (selectedView && !views.find(v => v.id === selectedView.id)) {
-      setSelectedView(null)
+    if (selectedView) {
+      const updatedView = views.find(v => v.name === selectedView.name)
+      if (updatedView) {
+        if (updatedView !== selectedView) setSelectedView(updatedView)
+      } else {
+        setSelectedView(null)
+      }
     }
-  }, [relations, views, selectedRelation, selectedView])
+  }, [relations, views])
 
   return (
     <AppShell>
@@ -93,7 +102,12 @@ export default function RelationsPage() {
           {/* Detail panel */}
           <div className="flex-1 overflow-hidden h-full">
             {selectedRelation && <RelationDetailPanel relation={selectedRelation} />}
-            {selectedView && <ViewDetailPanel view={selectedView} relations={relations} />}
+            {selectedView && <ViewDetailPanel view={selectedView} relations={relations} onNavigate={(name) => {
+              const rel = relations.find(r => r.name === name)
+              if (rel) { setSelectedRelation(rel); setSelectedView(null); return }
+              const v = views.find(v => v.name === name)
+              if (v) { setSelectedView(v); setSelectedRelation(null) }
+            }} />}
             {!selectedRelation && !selectedView && (
               <div className="flex h-full items-center justify-center bg-muted/10">
                 <div className="text-center">

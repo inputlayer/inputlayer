@@ -489,6 +489,652 @@ impl Handler {
         info!("Shutdown complete.");
     }
 
+    // ── Auth / RBAC ─────────────────────────────────────────────────────────
+
+    /// Bootstrap the `_internal` knowledge graph with an admin user if it doesn't exist.
+    /// Called once on server startup. Creates the `_internal` KG and inserts an admin
+    /// user if the `users` relation is empty.
+    pub fn bootstrap_auth(&self) {
+        use crate::auth;
+        use crate::value::Value;
+
+        let storage = self.storage.read();
+
+        // Create _internal KG if it doesn't exist
+        if storage.ensure_knowledge_graph(auth::INTERNAL_KG).is_err() {
+            // Try explicit create if ensure fails (auto_create might be off)
+            if let Err(e) = storage.create_knowledge_graph(auth::INTERNAL_KG) {
+                // Already exists is fine
+                if !format!("{e}").contains("already exists") {
+                    warn!(error = %e, "Failed to create _internal KG");
+                    return;
+                }
+            }
+        }
+
+        // Check if users relation already has data
+        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to get _internal snapshot");
+                return;
+            }
+        };
+
+        let has_users = snapshot
+            .input_tuples
+            .get("users")
+            .is_some_and(|t| !t.is_empty());
+
+        if has_users {
+            info!("Auth bootstrap: admin user already exists");
+            return;
+        }
+
+        // Resolve credentials file path
+        let credentials_path = self
+            .config
+            .http
+            .auth
+            .credentials_file
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from(".inputlayer-credentials.toml"));
+
+        // Try to load persisted credentials
+        let persisted = auth::PersistedCredentials::load(&credentials_path);
+
+        // Determine admin password: env var > config > persisted file > generate new
+        let env_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD").ok();
+        let env_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty());
+
+        let (password, api_key, is_new_credentials) =
+            if env_password.is_some() || env_api_key.is_some() {
+                // Env vars take priority — use them (with fallback to persisted/generated for the other)
+                let pw = env_password
+                    .or_else(|| persisted.as_ref().map(|p| p.admin_password.clone()))
+                    .or_else(|| self.config.http.auth.bootstrap_admin_password.clone())
+                    .unwrap_or_else(auth::generate_api_key);
+                let key = env_api_key
+                    .or_else(|| persisted.as_ref().map(|p| p.api_key.clone()))
+                    .unwrap_or_else(auth::generate_api_key);
+                (pw, key, persisted.is_none())
+            } else if let Some(creds) = persisted {
+                // Reuse persisted credentials
+                info!(
+                    "Auth bootstrap: reusing credentials from {}",
+                    credentials_path.display()
+                );
+                (creds.admin_password, creds.api_key, false)
+            } else {
+                // First boot: generate new credentials
+                let pw = self
+                    .config
+                    .http
+                    .auth
+                    .bootstrap_admin_password
+                    .clone()
+                    .unwrap_or_else(auth::generate_api_key);
+                let key = auth::generate_api_key();
+                (pw, key, true)
+            };
+
+        // Persist credentials to file (if newly generated)
+        if is_new_credentials {
+            let to_persist = auth::PersistedCredentials {
+                admin_password: password.clone(),
+                api_key: api_key.clone(),
+            };
+            match to_persist.save(&credentials_path) {
+                Ok(()) => {
+                    info!(
+                        "Auth bootstrap: credentials saved to {}",
+                        credentials_path.display()
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        path = %credentials_path.display(),
+                        "Failed to save credentials file"
+                    );
+                }
+            }
+
+            // Print credentials to stderr on first boot
+            eprintln!();
+            eprintln!("=== INITIAL ADMIN PASSWORD (save this!) ===");
+            eprintln!("{password}");
+            eprintln!("============================================");
+            eprintln!();
+            eprintln!("=== INITIAL API KEY (for CLI access) ===");
+            eprintln!("{api_key}");
+            eprintln!("========================================");
+            eprintln!();
+            eprintln!("Usage:  inputlayer-client --api-key {api_key}");
+            eprintln!("   or:  export INPUTLAYER_API_KEY={api_key}");
+            eprintln!();
+            eprintln!("Credentials persisted to: {}", credentials_path.display());
+            eprintln!("Delete this file to generate new credentials on next boot.");
+            eprintln!();
+        }
+
+        let hash = auth::hash_password(&password);
+
+        // Insert admin user: (username, password_hash, role)
+        let tuple = crate::value::Tuple::new(vec![
+            Value::string("admin"),
+            Value::string(&hash),
+            Value::string("admin"),
+        ]);
+
+        if let Err(e) = storage.insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple]) {
+            warn!(error = %e, "Failed to insert admin user");
+            return;
+        }
+        info!("Auth bootstrap: admin user created");
+
+        // Insert bootstrap API key
+        let key_hash = auth::hash_api_key(&api_key);
+        let key_tuple = crate::value::Tuple::new(vec![
+            Value::string("bootstrap"), // label
+            Value::string(&key_hash),   // key_hash
+            Value::string("admin"),     // owner
+        ]);
+        if let Err(e) = storage.insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![key_tuple]) {
+            warn!(error = %e, "Failed to insert bootstrap API key");
+        } else {
+            info!("Auth bootstrap: API key 'bootstrap' created for admin");
+        }
+    }
+
+    /// Authenticate a user by username and password.
+    /// Returns `AuthIdentity` on success, error message on failure.
+    pub fn authenticate_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<crate::auth::AuthIdentity, String> {
+        use crate::auth;
+        use std::str::FromStr;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|_| "Authentication service unavailable".to_string())?;
+        drop(storage);
+
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+
+        for tuple in users {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(u), Some(h), Some(r)) =
+                    (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
+                {
+                    if u == username {
+                        if auth::verify_password(password, h) {
+                            let role = auth::Role::from_str(r)?;
+                            return Ok(auth::AuthIdentity {
+                                username: username.to_string(),
+                                role,
+                            });
+                        }
+                        return Err("Invalid credentials".to_string());
+                    }
+                }
+            }
+        }
+
+        Err("Invalid credentials".to_string())
+    }
+
+    /// Authenticate an API key.
+    /// Returns `AuthIdentity` on success, error message on failure.
+    pub fn authenticate_api_key(&self, key: &str) -> Result<crate::auth::AuthIdentity, String> {
+        use crate::auth;
+        use std::str::FromStr;
+
+        let key_hash = auth::hash_api_key(key);
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|_| "Authentication service unavailable".to_string())?;
+        drop(storage);
+
+        let empty_vec = Vec::new();
+        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
+
+        for tuple in api_keys {
+            let vals = tuple.values();
+            // api_keys: (label, key_hash, username)
+            if vals.len() >= 3 {
+                if let (Some(hash), Some(uname)) = (vals[1].as_str(), vals[2].as_str()) {
+                    if hash == key_hash {
+                        // Look up user's role
+                        let empty_users = Vec::new();
+                        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_users);
+                        for user_tuple in users {
+                            let uvals = user_tuple.values();
+                            if uvals.len() >= 3 {
+                                if let (Some(u), Some(r)) = (uvals[0].as_str(), uvals[2].as_str()) {
+                                    if u == uname {
+                                        let role = auth::Role::from_str(r)?;
+                                        return Ok(auth::AuthIdentity {
+                                            username: uname.to_string(),
+                                            role,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        return Err("API key owner not found".to_string());
+                    }
+                }
+            }
+        }
+
+        Err("Invalid API key".to_string())
+    }
+
+    // ── User CRUD ───────────────────────────────────────────────────────────
+
+    /// List all users (returns username and role, never the hash).
+    pub fn handle_user_list(&self) -> Result<QueryResult, String> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+        drop(storage);
+
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+
+        let mut rows = Vec::new();
+        for tuple in users {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                rows.push(WireTuple {
+                    values: vec![
+                        WireValue::from_value(&vals[0]), // username
+                        WireValue::from_value(&vals[2]), // role
+                    ],
+                    provenance: None,
+                });
+            }
+        }
+
+        let total_count = rows.len();
+        Ok(QueryResult {
+            rows,
+            schema: vec![
+                ColumnDef {
+                    name: "username".to_string(),
+                    data_type: WireDataType::String,
+                },
+                ColumnDef {
+                    name: "role".to_string(),
+                    data_type: WireDataType::String,
+                },
+            ],
+            total_count,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+        })
+    }
+
+    /// Create a new user.
+    pub fn handle_user_create(
+        &self,
+        username: &str,
+        password: &str,
+        role_str: &str,
+    ) -> Result<QueryResult, String> {
+        use crate::auth;
+        use crate::value::Value;
+        use std::str::FromStr;
+
+        // Validate role
+        let _role = auth::Role::from_str(role_str)?;
+
+        // Check user doesn't already exist
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        let users = snapshot.input_tuples.get("users");
+        if let Some(users) = users {
+            for tuple in users {
+                if let Some(u) = tuple.values().first().and_then(|v| v.as_str()) {
+                    if u == username {
+                        return Err(format!("User '{username}' already exists"));
+                    }
+                }
+            }
+        }
+
+        let hash = auth::hash_password(password);
+        let tuple = crate::value::Tuple::new(vec![
+            Value::string(username),
+            Value::string(&hash),
+            Value::string(role_str),
+        ]);
+
+        storage
+            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
+            .map_err(|e| format!("Failed to create user: {e}"))?;
+
+        Ok(self.message_result(&format!(
+            "User '{username}' created with role '{role_str}'."
+        )))
+    }
+
+    /// Drop a user.
+    pub fn handle_user_drop(&self, username: &str) -> Result<QueryResult, String> {
+        use crate::auth;
+
+        if username == "admin" {
+            return Err("Cannot drop the 'admin' user".to_string());
+        }
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        // Find user tuple to delete
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+        let mut found = None;
+        for tuple in users {
+            if let Some(u) = tuple.values().first().and_then(|v| v.as_str()) {
+                if u == username {
+                    found = Some(tuple.clone());
+                    break;
+                }
+            }
+        }
+
+        let tuple = found.ok_or_else(|| format!("User '{username}' not found"))?;
+
+        storage
+            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])
+            .map_err(|e| format!("Failed to drop user: {e}"))?;
+
+        // Also revoke all API keys owned by this user
+        if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
+            let to_delete: Vec<_> = api_keys
+                .iter()
+                .filter(|t| {
+                    t.values()
+                        .get(2)
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|u| u == username)
+                })
+                .cloned()
+                .collect();
+            if !to_delete.is_empty() {
+                let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "api_keys", to_delete);
+            }
+        }
+
+        Ok(self.message_result(&format!("User '{username}' dropped.")))
+    }
+
+    /// Change a user's password.
+    pub fn handle_user_password(
+        &self,
+        username: &str,
+        new_password: &str,
+    ) -> Result<QueryResult, String> {
+        use crate::auth;
+        use crate::value::Value;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        // Find existing user
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+        let mut old_tuple = None;
+        let mut role_str = String::new();
+        for tuple in users {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let Some(u) = vals[0].as_str() {
+                    if u == username {
+                        role_str = vals[2].as_str().unwrap_or("viewer").to_string();
+                        old_tuple = Some(tuple.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        let old = old_tuple.ok_or_else(|| format!("User '{username}' not found"))?;
+        let new_hash = auth::hash_password(new_password);
+        let new_tuple = crate::value::Tuple::new(vec![
+            Value::string(username),
+            Value::string(&new_hash),
+            Value::string(&role_str),
+        ]);
+
+        storage
+            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
+            .map_err(|e| format!("Failed to update password: {e}"))?;
+        storage
+            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
+            .map_err(|e| format!("Failed to update password: {e}"))?;
+
+        Ok(self.message_result(&format!("Password updated for '{username}'.")))
+    }
+
+    /// Change a user's role.
+    pub fn handle_user_role(&self, username: &str, new_role: &str) -> Result<QueryResult, String> {
+        use crate::auth;
+        use crate::value::Value;
+        use std::str::FromStr;
+
+        // Validate role
+        let _role = auth::Role::from_str(new_role)?;
+
+        if username == "admin" && new_role != "admin" {
+            return Err("Cannot change the 'admin' user's role".to_string());
+        }
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        // Find existing user
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+        let mut old_tuple = None;
+        let mut hash_str = String::new();
+        for tuple in users {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let Some(u) = vals[0].as_str() {
+                    if u == username {
+                        hash_str = vals[1].as_str().unwrap_or("").to_string();
+                        old_tuple = Some(tuple.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        let old = old_tuple.ok_or_else(|| format!("User '{username}' not found"))?;
+        let new_tuple = crate::value::Tuple::new(vec![
+            Value::string(username),
+            Value::string(&hash_str),
+            Value::string(new_role),
+        ]);
+
+        storage
+            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
+            .map_err(|e| format!("Failed to update role: {e}"))?;
+        storage
+            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
+            .map_err(|e| format!("Failed to update role: {e}"))?;
+
+        Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))
+    }
+
+    // ── API Key CRUD ────────────────────────────────────────────────────────
+
+    /// Create a new API key. Returns the plaintext key (shown only once).
+    pub fn handle_apikey_create(&self, label: &str, owner: &str) -> Result<QueryResult, String> {
+        use crate::auth;
+        use crate::value::Value;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        // Check label uniqueness
+        if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
+            for tuple in api_keys {
+                if let Some(l) = tuple.values().first().and_then(|v| v.as_str()) {
+                    if l == label {
+                        return Err(format!("API key with label '{label}' already exists"));
+                    }
+                }
+            }
+        }
+
+        let plaintext_key = auth::generate_api_key();
+        let key_hash = auth::hash_api_key(&plaintext_key);
+
+        // api_keys: (label, key_hash, username)
+        let tuple = crate::value::Tuple::new(vec![
+            Value::string(label),
+            Value::string(&key_hash),
+            Value::string(owner),
+        ]);
+
+        storage
+            .insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![tuple])
+            .map_err(|e| format!("Failed to create API key: {e}"))?;
+
+        // Return the plaintext key (shown only once)
+        Ok(QueryResult {
+            rows: vec![WireTuple {
+                values: vec![
+                    WireValue::String(label.to_string()),
+                    WireValue::String(plaintext_key),
+                ],
+                provenance: None,
+            }],
+            schema: vec![
+                ColumnDef {
+                    name: "label".to_string(),
+                    data_type: WireDataType::String,
+                },
+                ColumnDef {
+                    name: "api_key".to_string(),
+                    data_type: WireDataType::String,
+                },
+            ],
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+        })
+    }
+
+    /// List all API keys (label and owner, never the hash).
+    pub fn handle_apikey_list(&self) -> Result<QueryResult, String> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+        drop(storage);
+
+        let empty_vec = Vec::new();
+        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
+
+        let mut rows = Vec::new();
+        for tuple in api_keys {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                rows.push(WireTuple {
+                    values: vec![
+                        WireValue::from_value(&vals[0]), // label
+                        WireValue::from_value(&vals[2]), // username (owner)
+                    ],
+                    provenance: None,
+                });
+            }
+        }
+
+        let total_count = rows.len();
+        Ok(QueryResult {
+            rows,
+            schema: vec![
+                ColumnDef {
+                    name: "label".to_string(),
+                    data_type: WireDataType::String,
+                },
+                ColumnDef {
+                    name: "owner".to_string(),
+                    data_type: WireDataType::String,
+                },
+            ],
+            total_count,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+        })
+    }
+
+    /// Revoke an API key by label.
+    pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, String> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        let empty_vec = Vec::new();
+        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
+
+        let mut found = None;
+        for tuple in api_keys {
+            if let Some(l) = tuple.values().first().and_then(|v| v.as_str()) {
+                if l == label {
+                    found = Some(tuple.clone());
+                    break;
+                }
+            }
+        }
+
+        let tuple = found.ok_or_else(|| format!("API key '{label}' not found"))?;
+
+        storage
+            .delete_tuples_from(auth::INTERNAL_KG, "api_keys", vec![tuple])
+            .map_err(|e| format!("Failed to revoke API key: {e}"))?;
+
+        Ok(self.message_result(&format!("API key '{label}' revoked.")))
+    }
+
     /// Get mutable access to the storage engine.
     ///
     /// **Warning**: This acquires a write lock on the entire storage engine.
@@ -848,13 +1494,17 @@ impl QueryJob {
                 .to_string()
         };
 
-        // Strip comment lines
-        let program_text = strip_comments(&program);
+        // Strip comment lines, then join indented continuation lines so that
+        // multi-line rules (e.g., rule body on indented next line) become single
+        // logical lines for the statement-per-line parser.
+        let program_text = join_continuation_lines(&strip_comments(&program));
 
         // Phase 1: Parse-all-first validation.
         // Parse every statement upfront. If ANY statement fails to parse,
         // reject the ENTIRE program with structured error info.
         // This prevents partial state from partial execution.
+        // Note: join_continuation_lines() already merged indented continuation
+        // lines into single logical lines, so line-by-line parsing is correct.
         let parse_start = Instant::now();
         {
             let mut parse_errors: Vec<ValidationError> = Vec::new();
@@ -1447,7 +2097,11 @@ impl QueryJob {
                                         messages.push(format!("Current knowledge graph: {kg}"));
                                     }
                                     MetaCommand::KgList => {
-                                        let kgs = storage.list_knowledge_graphs();
+                                        let kgs: Vec<_> = storage
+                                            .list_knowledge_graphs()
+                                            .into_iter()
+                                            .filter(|name| name != crate::auth::INTERNAL_KG)
+                                            .collect();
                                         if kgs.is_empty() {
                                             messages.push("No knowledge graphs found.".to_string());
                                         } else {
@@ -1526,7 +2180,7 @@ impl QueryJob {
 
                                     // === Relation commands ===
                                     MetaCommand::RelList => {
-                                        match storage.list_relations_with_metadata(kg) {
+                                        match storage.list_relations_with_typed_metadata_in(kg) {
                                             Ok(relations) => {
                                                 if relations.is_empty() {
                                                     messages.push(
@@ -1537,10 +2191,15 @@ impl QueryJob {
                                                     let mut sorted = relations;
                                                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
                                                     messages.push("Relations:".to_string());
-                                                    for (name, schema, _count) in &sorted {
+                                                    for (name, typed_cols, count) in &sorted {
+                                                        let cols = typed_cols
+                                                            .iter()
+                                                            .map(|(n, t)| format!("{n}: {t}"))
+                                                            .collect::<Vec<_>>()
+                                                            .join(", ");
                                                         messages.push(format!(
-                                                            "  {name} (arity: {})",
-                                                            schema.len()
+                                                            "  {name} (arity: {}, columns: [{cols}], tuples: {count})",
+                                                            typed_cols.len()
                                                         ));
                                                     }
                                                 }
@@ -1850,6 +2509,21 @@ impl QueryJob {
                                         );
                                     }
 
+                                    // === User & API key management (handled by execute_program) ===
+                                    MetaCommand::UserList
+                                    | MetaCommand::UserCreate { .. }
+                                    | MetaCommand::UserDrop(_)
+                                    | MetaCommand::UserPassword { .. }
+                                    | MetaCommand::UserRole { .. }
+                                    | MetaCommand::ApiKeyCreate(_)
+                                    | MetaCommand::ApiKeyList
+                                    | MetaCommand::ApiKeyRevoke(_) => {
+                                        messages.push(
+                                            "User/API key commands require a WebSocket connection with admin privileges."
+                                                .to_string(),
+                                        );
+                                    }
+
                                     // === Client-only commands ===
                                     MetaCommand::Help
                                     | MetaCommand::Quit
@@ -1915,7 +2589,6 @@ impl QueryJob {
         let order_by = transform.order_by;
         let query_limit = transform.limit;
         let query_offset = transform.offset;
-
         // Prepend session rules to the query program
         let query_program = if session_rules.is_empty() {
             query_program
@@ -2152,7 +2825,6 @@ impl Handler {
         let order_by = transform.order_by;
         let query_limit = transform.limit;
         let query_offset = transform.offset;
-
         // Build combined program: ephemeral rules + preprocessed query
         // Keep `preprocessed` for the persistent-only baseline (provenance diff)
         let combined_program = if rule_texts.is_empty() {
@@ -2437,9 +3109,10 @@ impl Handler {
         self.sessions.stats()
     }
 
-    /// Execute a program with optional session context.
+    /// Execute a program with optional session context and auth identity.
     ///
     /// This is the unified entry point for the WebSocket protocol. It handles:
+    /// - Authorization checks (when `auth` is `Some`)
     /// - Session commands (when `session_id` is `Some`)
     /// - KG switching with session binding updates
     /// - All other statements via `query_program()` or `query_program_with_session()`
@@ -2448,6 +3121,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
+        auth: Option<&crate::auth::AuthIdentity>,
     ) -> Result<QueryResult, String> {
         // Input size validation (protects parsing and downstream handlers)
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
@@ -2460,6 +3134,28 @@ impl Handler {
         }
 
         let trimmed = program.trim();
+
+        // Authorization check: if auth is provided, validate the statement
+        if let Some(identity) = auth {
+            if let Ok(ref stmt) = statement::parse_statement(trimmed) {
+                crate::auth::authorize_statement(&identity.role, stmt)?;
+            }
+        }
+
+        // Protect _internal KG from direct access
+        if let Ok(ref stmt) = statement::parse_statement(trimmed) {
+            match stmt {
+                statement::Statement::Meta(
+                    statement::MetaCommand::KgUse(name) | statement::MetaCommand::KgDrop(name),
+                ) if name == crate::auth::INTERNAL_KG => {
+                    return Err(format!(
+                        "Access denied: '{}' is a system knowledge graph",
+                        crate::auth::INTERNAL_KG
+                    ));
+                }
+                _ => {}
+            }
+        }
 
         // Any session-bound activity should keep the session alive.
         if let Some(sid) = session_id {
@@ -2497,6 +3193,39 @@ impl Handler {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
                         return self.handle_session_drop_name(sid, name);
                     }
+
+                    // User & API key management (handled directly, not via query_program)
+                    MetaCommand::UserList => {
+                        return self.handle_user_list();
+                    }
+                    MetaCommand::UserCreate {
+                        username,
+                        password,
+                        role,
+                    } => {
+                        return self.handle_user_create(username, password, role);
+                    }
+                    MetaCommand::UserDrop(username) => {
+                        return self.handle_user_drop(username);
+                    }
+                    MetaCommand::UserPassword { username, password } => {
+                        return self.handle_user_password(username, password);
+                    }
+                    MetaCommand::UserRole { username, role } => {
+                        return self.handle_user_role(username, role);
+                    }
+                    MetaCommand::ApiKeyCreate(label) => {
+                        let owner =
+                            auth.map_or_else(|| "admin".to_string(), |a| a.username.clone());
+                        return self.handle_apikey_create(label, &owner);
+                    }
+                    MetaCommand::ApiKeyList => {
+                        return self.handle_apikey_list();
+                    }
+                    MetaCommand::ApiKeyRevoke(label) => {
+                        return self.handle_apikey_revoke(label);
+                    }
+
                     _ => {} // handled by query_program
                 }
             }
@@ -2877,6 +3606,41 @@ fn strip_comments(program: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Join continuation lines in a program.
+///
+/// A continuation line starts with whitespace (spaces/tabs) and is appended
+/// to the previous non-empty line. This supports multi-line rules like:
+///
+/// ```text
+/// reachable(X, Y) <-
+///   edge(X, Y).
+/// ```
+///
+/// which becomes: `reachable(X, Y) <- edge(X, Y).`
+///
+/// Lines starting at column 0 are treated as new statements and are never
+/// merged with the previous line.
+fn join_continuation_lines(program: &str) -> String {
+    let mut result: Vec<String> = Vec::new();
+    for line in program.lines() {
+        if line.trim().is_empty() {
+            result.push(String::new());
+            continue;
+        }
+        // Continuation: non-empty line that starts with whitespace
+        if line.starts_with(|c: char| c.is_whitespace()) && !result.is_empty() {
+            // Find the last non-empty line to append to
+            if let Some(last) = result.iter_mut().rev().find(|l| !l.is_empty()) {
+                last.push(' ');
+                last.push_str(line.trim());
+                continue;
+            }
+        }
+        result.push(line.to_string());
+    }
+    result.join("\n")
 }
 
 /// Format a rule as Datalog text (uses Rule's Display impl)
@@ -4941,6 +5705,7 @@ mod tests {
                 None,
                 Some("exec_prog_sr".to_string()),
                 "+edge[(1,2), (2,3)]".to_string(),
+                None,
             )
             .await
             .unwrap();
@@ -4950,7 +5715,12 @@ mod tests {
 
         // Add a session rule
         let result = handler
-            .execute_program(Some(&sid), None, "path(X, Y) <- edge(X, Y)".to_string())
+            .execute_program(
+                Some(&sid),
+                None,
+                "path(X, Y) <- edge(X, Y)".to_string(),
+                None,
+            )
             .await
             .unwrap();
         assert!(result.rows[0].values[0]
@@ -4964,7 +5734,7 @@ mod tests {
 
         // Query using the session rule — should return results
         let result = handler
-            .execute_program(Some(&sid), None, "?path(X, Y)".to_string())
+            .execute_program(Some(&sid), None, "?path(X, Y)".to_string(), None)
             .await
             .unwrap();
         assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
@@ -4990,7 +5760,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         handler
-            .execute_program(Some(&sid), None, "+edge[(1,2)]".to_string())
+            .execute_program(Some(&sid), None, "+edge[(1,2)]".to_string(), None)
             .await
             .unwrap();
 
@@ -5080,6 +5850,104 @@ mod tests {
         assert_eq!(errors.len(), 2, "Should report both parse errors");
         assert_eq!(errors[0].line, 1);
         assert_eq!(errors[1].line, 3);
+    }
+
+    // === Multi-line statement (continuation line) tests ===
+
+    #[test]
+    fn test_join_continuation_lines_from_strip_comments() {
+        // Exact input that strip_comments produces for the multiline test
+        let stripped = strip_comments(
+            "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <-\n  edge(X, Y).\n?reachable(X, Y)",
+        );
+        let joined = join_continuation_lines(&stripped);
+        assert_eq!(
+            joined, "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <- edge(X, Y).\n?reachable(X, Y)",
+            "Joined output: {:?}",
+            joined,
+        );
+    }
+
+    #[test]
+    fn test_join_continuation_lines_basic() {
+        let input = "reachable(X, Y) <-\n  edge(X, Y).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Y) <- edge(X, Y).");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_multiple_continuations() {
+        let input = "reachable(X, Z) <-\n  reachable(X, Y),\n  edge(Y, Z).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Z) <- reachable(X, Y), edge(Y, Z).");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_no_continuations() {
+        let input = "+edge[(1,2)]\n+edge[(3,4)]";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "+edge[(1,2)]\n+edge[(3,4)]");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_mixed() {
+        let input = "+edge[(1,2)]\nreachable(X, Y) <-\n  edge(X, Y).\n?reachable(X, Y)";
+        let result = join_continuation_lines(input);
+        assert_eq!(
+            result,
+            "+edge[(1,2)]\nreachable(X, Y) <- edge(X, Y).\n?reachable(X, Y)"
+        );
+    }
+
+    #[test]
+    fn test_join_continuation_lines_empty_lines_preserved() {
+        let input = "+edge[(1,2)]\n\n+edge[(3,4)]";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "+edge[(1,2)]\n\n+edge[(3,4)]");
+    }
+
+    #[test]
+    fn test_join_continuation_lines_tab_indent() {
+        let input = "reachable(X, Y) <-\n\tedge(X, Y).";
+        let result = join_continuation_lines(input);
+        assert_eq!(result, "reachable(X, Y) <- edge(X, Y).");
+    }
+
+    #[tokio::test]
+    async fn test_multiline_rule_executes_correctly() {
+        let (handler, _tmp) = handler_with_kg("multiline");
+        // Insert data, define a multi-line rule, then query
+        let program =
+            "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <-\n  edge(X, Y)\n?reachable(X, Y)"
+                .to_string();
+        let result = handler
+            .query_program(Some("multiline".to_string()), program)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Multi-line rule program should succeed: {}",
+            result.as_ref().unwrap_err()
+        );
+        let qr = result.unwrap();
+        assert_eq!(qr.rows.len(), 2, "Should return 2 reachable pairs");
+    }
+
+    #[tokio::test]
+    async fn test_multiline_rule_with_multiple_body_atoms() {
+        let (handler, _tmp) = handler_with_kg("multiline2");
+        let program =
+            "+edge[(1,2)]\n+edge[(2,3)]\npath(X, Z) <-\n  edge(X, Y),\n  edge(Y, Z)\n?path(X, Z)"
+                .to_string();
+        let result = handler
+            .query_program(Some("multiline2".to_string()), program)
+            .await;
+        assert!(
+            result.is_ok(),
+            "Multi-line rule with multiple body atoms should succeed: {}",
+            result.as_ref().unwrap_err()
+        );
+        let qr = result.unwrap();
+        assert_eq!(qr.rows.len(), 1, "Should return path(1,3)");
     }
 
     // === Regression tests for production readiness fixes ===
@@ -5250,6 +6118,172 @@ mod tests {
     fn test_extract_column_names_all_constants() {
         let names = extract_column_names_from_query("?facts(1, 2)", 2);
         assert_eq!(names, vec!["1", "2"]);
+    }
+
+    // ── Meta-command handler tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_handler_meta_rel_list() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+edge[(1, 2), (3, 4)]".to_string())
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(None, ".rel".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("edge"), "should list the edge relation");
+        assert!(text.contains("arity:"), "should show arity");
+        assert!(text.contains("columns:"), "should show columns");
+        assert!(text.contains("tuples:"), "should show tuple count");
+        // Verify typed format: column entries should contain ":"
+        // e.g. "col0: any" in the columns list
+        assert!(
+            text.contains(": any") || text.contains(": int") || text.contains(": string"),
+            "columns should include type annotations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handler_meta_rel_list_with_typed_schema() {
+        let (handler, _tmp) = make_test_handler();
+        // Declare a typed schema, then insert data
+        handler
+            .query_program(None, "+person(id: int, name: string)".to_string())
+            .await
+            .unwrap();
+        handler
+            .query_program(None, "+person[(1, \"alice\")]".to_string())
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(None, ".rel".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("id: int"),
+            "should show typed column 'id: int', got: {text}"
+        );
+        assert!(
+            text.contains("name: string"),
+            "should show typed column 'name: string', got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handler_meta_rule_list() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+edge[(1, 2)]".to_string())
+            .await
+            .unwrap();
+        handler
+            .query_program(
+                None,
+                "+path(X, Y) <- edge(X, Y)\n+path(X, Z) <- edge(X, Y), path(Y, Z)".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(None, ".rule list".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("path"), "should list the 'path' rule");
+        assert!(
+            text.contains("2 clause"),
+            "should show 2 clauses, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handler_meta_rule_def() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+edge[(1, 2)]".to_string())
+            .await
+            .unwrap();
+        handler
+            .query_program(
+                None,
+                "+path(X, Y) <- edge(X, Y)\n+path(X, Z) <- edge(X, Y), path(Y, Z)".to_string(),
+            )
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(None, ".rule def path".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("path"), "definition should mention 'path'");
+        assert!(
+            text.contains("edge"),
+            "definition should reference 'edge' relation"
+        );
+        assert!(text.contains("<-"), "definition should show rule arrows");
+    }
+
+    #[tokio::test]
+    async fn test_handler_meta_kg_list() {
+        let (handler, _tmp) = make_test_handler();
+        let result = handler
+            .query_program(None, ".kg list".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("default"),
+            "should list the default KG, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handler_meta_explain() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+edge[(1, 2), (3, 4)]".to_string())
+            .await
+            .unwrap();
+        let result = handler
+            .query_program(None, ".explain ?edge(X, Y)".to_string())
+            .await
+            .unwrap();
+        let text = result
+            .rows
+            .iter()
+            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Explain should produce some plan output
+        assert!(!text.is_empty(), "explain should produce non-empty output");
     }
 }
 

@@ -10,7 +10,8 @@ export default function HomePage() {
   useEffect(() => {
     // Redirect to query editor as the default page
     router.replace("/query")
-  }, [router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Show loading while redirecting
   return (

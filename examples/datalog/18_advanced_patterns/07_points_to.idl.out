@@ -2,6 +2,7 @@ Connecting to server at http://127.0.0.1:8080...
 Connected!
 
 Server status: healthy
+Authenticated as: admin
 Current knowledge graph: default
 
 > .kg create test_points_to_n18t07
@@ -22,13 +23,15 @@ Rule 'pt' registered.
 > +pt(X, Z) <- load(X, P), pt(P, H), pt(H, Z)
 Rule 'pt' registered.
 > ?pt(X, Y)
-┌───┬─────┐
-│ X │ Y   │
-├───┼─────┤
-│ 1 │ 101 │
-│ 2 │ 102 │
-└───┴─────┘
-2 rows
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│   1 │ 101 │
+│   2 │ 102 │
+│   3 │ 102 │
+│ 101 │ 102 │
+└─────┴─────┘
+4 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_points_to_n18t07

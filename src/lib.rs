@@ -132,6 +132,9 @@ pub mod config; // Configuration system
 pub mod storage; // Storage formats (Parquet, metadata)
 pub mod storage_engine; // Multi-knowledge-graph storage engine
 
+// Authentication & RBAC
+pub mod auth; // Role-based access control, password/key hashing
+
 // Network Protocol (RPC)
 pub mod protocol; // InputLayer RPC protocol (server/client)
 

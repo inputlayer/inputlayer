@@ -16,6 +16,11 @@ SERVER_PORT="${INPUTLAYER_TEST_PORT:-8080}"
 SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
 CLIENT_SERVER_URL="${SERVER_URL}"
 
+# Auth: bootstrap API key for test harness
+BOOTSTRAP_API_KEY="test-snapshot-api-key-$(openssl rand -hex 16)"
+export INPUTLAYER_BOOTSTRAP_API_KEY="$BOOTSTRAP_API_KEY"
+export INPUTLAYER_API_KEY="$BOOTSTRAP_API_KEY"
+
 # Parallelism: use all CPUs
 NCPU=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 PARALLEL_JOBS=${INPUTLAYER_TEST_PARALLEL:-$NCPU}
@@ -58,6 +63,7 @@ normalize_output() {
         grep -v "^Executing script:" | \
         grep -v "^Connecting to server" | \
         grep -v "^Connected!" | \
+        grep -v "^Authenticated as:" | \
         grep -v "^Server status:" | \
         grep -v "^Current knowledge graph:" | \
         grep -v "^warning:" | \

@@ -131,19 +131,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             config.storage.persist.durability_mode
         );
     }
-    if !config.http.auth.enabled || config.http.auth.api_keys.is_empty() {
-        eprintln!(
-            "WARNING: Authentication is DISABLED. \
-             All endpoints are publicly accessible. \
-             Set [http.auth] enabled = true with api_keys for production."
-        );
-    }
+    // Auth is now always required via WebSocket (login/authenticate).
+    // REST auth is validated via Bearer token against _internal KG.
 
     // Create handler
     let handler = Arc::new(Handler::from_config(config).map_err(|e| {
         eprintln!("ERROR: Failed to initialize InputLayer: {e}");
         Box::<dyn std::error::Error + Send + Sync>::from(e.clone())
     })?);
+
+    // Bootstrap auth: create _internal KG and admin user if needed
+    handler.bootstrap_auth();
 
     println!("Storage engine initialized");
     println!();

@@ -1,7 +1,7 @@
 "use client"
 
 import type { View } from "@/lib/datalog-store"
-import { GitBranch, Code, Info, Eye } from "lucide-react"
+import { GitBranch, Code, Eye, FileText } from "lucide-react"
 
 interface ViewPerformanceTabProps {
   view: View
@@ -9,22 +9,12 @@ interface ViewPerformanceTabProps {
 
 export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
   // Derive what we can from view metadata
-  const definitionLines = view.definition.split("\n").length
+  const clauseCount = view.computationSteps.length
   const isRecursive = view.dependencies.includes(view.name)
   const dependencyCount = view.dependencies.length
 
   return (
     <div className="h-full overflow-auto p-4 space-y-6">
-      {/* Info banner */}
-      <div className="rounded-lg border border-border/50 bg-muted/10 px-4 py-3">
-        <div className="flex items-center gap-2 text-sm">
-          <Info className="h-4 w-4 text-muted-foreground" />
-          <span className="text-muted-foreground">
-            Detailed performance metrics are computed on-demand during query execution.
-          </span>
-        </div>
-      </div>
-
       {/* View Analysis cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-border/50 bg-muted/20 p-4">
@@ -41,10 +31,10 @@ export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
         <div className="rounded-lg border border-border/50 bg-muted/20 p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-2">
             <Code className="h-4 w-4" />
-            <span className="text-xs font-medium uppercase tracking-wider">Definition Size</span>
+            <span className="text-xs font-medium uppercase tracking-wider">Clauses</span>
           </div>
-          <p className="text-2xl font-bold tabular-nums">{definitionLines}</p>
-          <p className="text-xs text-muted-foreground mt-1">{definitionLines === 1 ? "line" : "lines"}</p>
+          <p className="text-2xl font-bold tabular-nums">{clauseCount}</p>
+          <p className="text-xs text-muted-foreground mt-1">{clauseCount === 1 ? "clause" : "clauses"}</p>
         </div>
 
         <div className="rounded-lg border border-border/50 bg-muted/20 p-4">
@@ -54,7 +44,7 @@ export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
           </div>
           <p className="text-2xl font-bold">{isRecursive ? "Recursive" : "Standard"}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {isRecursive ? "Self-referential view" : "Non-recursive view"}
+            {isRecursive ? "Self-referential rule" : "Non-recursive rule"}
           </p>
         </div>
       </div>
@@ -64,7 +54,7 @@ export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
         <div className="rounded-lg border border-border/50">
           <div className="border-b border-border/50 px-4 py-3">
             <h3 className="text-sm font-medium">Dependency Analysis</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Relations this view depends on</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Relations this rule depends on</p>
           </div>
           <div className="p-4">
             <div className="flex flex-wrap gap-2">
@@ -87,11 +77,29 @@ export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
         </div>
       )}
 
+      {/* Query Plan */}
+      {view.explainPlan && (
+        <div className="rounded-lg border border-border/50">
+          <div className="border-b border-border/50 px-4 py-3">
+            <h3 className="text-sm font-medium">Query Plan</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Execution plan from the query optimizer</p>
+          </div>
+          <div className="p-4">
+            <pre className="rounded-md bg-muted/30 p-3 font-mono text-xs text-foreground overflow-x-auto whitespace-pre-wrap">
+              {view.explainPlan}
+            </pre>
+          </div>
+        </div>
+      )}
+
       {/* Definition preview */}
       <div className="rounded-lg border border-border/50">
         <div className="border-b border-border/50 px-4 py-3">
-          <h3 className="text-sm font-medium">View Definition</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Datalog rules defining this view</p>
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-medium">Rule Definition</h3>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Datalog clauses defining this rule</p>
         </div>
         <div className="p-4">
           <pre className="rounded-md bg-muted/30 p-3 font-mono text-xs text-foreground overflow-x-auto">
