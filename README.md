@@ -3,133 +3,84 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-**Reasoning context graph for AI agents.**
+**A incremental deductive knowledge graph for AI agents.**
 
-Vector search finds what's similar. InputLayer finds what follows. InputLayer is the only platform where skills, memory, and planning all live in the same reasoning engine. Every decision is explainable via rule traces. Experience compounds via pheromone trails and value functions that update incrementally. And the developer API stays clean — 4 lines to first value, ~20 lines for a full planning loop.
-
----
-
-## The Shellfish Problem
-
-Imagine you have an AI travel agent. Over past conversations, it's built up hundreds of memories about the user  - travel preferences, food likes, work history, health information, hobbies, family details.
-
-Now the user says: **"Recommend me some restaurants in Tokyo."**
-
-Before answering, the agent needs to pull relevant context from its memory. It embeds the user's message and does a vector search over all stored memories, ranked by similarity. The top 10 go into the LLM prompt.
-
-The results make intuitive sense: memories about past trips to Japan, restaurant preferences, and food opinions rank near the top  - they're in the same semantic neighborhood as "restaurants in Tokyo." Travel and dining content sounds like travel and dining queries.
-
-But the user's **shellfish allergy** is nowhere near the top 10. It's a piece of health information. In embedding space, medical conditions live in a completely different neighborhood from restaurant recommendations. The allergy might as well be about blood pressure medication as far as the embeddings are concerned  - it just doesn't sound like a restaurant query.
-
-So the agent never sees it. It recommends a crab kaiseki place. The user ends up in a hospital.
-
-**The allergy is the most important context here.** Japanese cuisine  - especially in Tokyo  - heavily features shellfish: crab, shrimp, lobster, oysters. But that connection goes through world knowledge, not through vector similarity:
-
-```
-Tokyo restaurants → Japanese cuisine → shellfish is a staple → user has shellfish allergy
-```
-
-No embedding model will make a medical condition rank highly against a restaurant query. They're in different semantic domains. The relevance comes from a **chain of relationships**  - and that's a reasoning problem, not a search problem.
-
-Here's how InputLayer handles it. First, the data:
-
-```datalog
-+user_memory[
-    ("m1", "loves_sushi", "User loves sushi", [0.91, 0.12, 0.03]),
-    ("m2", "shellfish_allergy", "Severe shellfish allergy", [0.22, 0.05, 0.88]),
-    ("m3", "visited_paris", "Visited Paris last year", [0.45, 0.67, 0.11])
-]
-
-+related_to[("sushi", "japanese_cuisine"), ("shellfish", "japanese_cuisine"),
-            ("japanese_cuisine", "tokyo")]
-
-+memory_topic[("m1", "sushi"), ("m2", "shellfish"), ("m3", "paris")]
-```
-
-Then rules that follow those relationships:
-
-```datalog
-// Direct: memories about topics related to the destination
-+trip_relevant(MemId, Text, "direct") <-
-    user_memory(MemId, _, Text, _),
-    memory_topic(MemId, Topic),
-    related_to(Topic, "tokyo")
-
-// Transitive: memories connected THROUGH an intermediate topic
-+trip_relevant(MemId, Text, "inferred") <-
-    user_memory(MemId, _, Text, _),
-    memory_topic(MemId, Topic),
-    related_to(Topic, Bridge),
-    related_to(Bridge, "tokyo")
-```
-
-```datalog
-?trip_relevant(Id, Text, How)
-```
-
-| Id | Text | How |
-|----|------|-----|
-| m1 | User loves sushi | direct |
-| m2 | Severe shellfish allergy | inferred |
-
-The allergy was never tagged as trip-relevant. Nobody inserted it as a result. The engine followed shellfish → japanese\_cuisine → tokyo and derived it from the rules.
+You give it facts. You give it rules. It figures out everything that logically follows - including things you never explicitly stored.
 
 ---
 
-## What is this thing
+## How it works
 
-InputLayer is a deductive context graph. You give it facts and rules, and it figures out everything that logically follows. It's built on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), so when your data changes, only the affected results recompute  - not the whole thing.
+You tell InputLayer that Alice is Bob's parent and Bob is Charlie's parent:
 
-It also has a built-in HNSW vector index, so you can do similarity search and logical reasoning in the same query. You don't need to glue Pinecone and Neo4j together and hope they agree.
-
-The query language is Datalog. If you've used SQL, the basics take about 10 minutes to pick up. If you've used Prolog, you already know it.
-
+```datalog
++parent("Alice", "Bob")
++parent("Bob", "Charlie")
++parent("Bob", "Diana")
 ```
-facts + rules → derived facts (updated incrementally)
+
+You write a rule - if X is a parent of Y, and Y is a parent of Z, then X is a grandparent of Z:
+
+```datalog
++grandparent(X, Z) <- parent(X, Y), parent(Y, Z)
++sibling(X, Y) <- parent(P, X), parent(P, Y), X != Y
 ```
+
+Now ask:
+
+```datalog
+?grandparent(X, Y)
+```
+
+| X | Y |
+|---|---|
+| Alice | Charlie |
+| Alice | Diana |
+
+```datalog
+?sibling(X, Y)
+```
+
+| X | Y |
+|---|---|
+| Charlie | Diana |
+| Diana | Charlie |
+
+You inserted 3 facts. Nobody inserted grandparents. Nobody inserted siblings. InputLayer **derived** them from the rules. That's deduction - the database produces facts that were never put in.
+
+Add a new fact - `+parent("Charlie", "Eve")` - and InputLayer instantly derives that Alice is Eve's great-grandparent through the existing rules. No new code. No re-processing everything. Only the affected results update - that's [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) under the hood.
 
 ---
 
-## How It Compares
+## Why this matters for AI agents
+
+AI agents today retrieve context by searching for memories that **look like** the current question. That works when the answer resembles the question. It fails - silently - when it doesn't.
+
+- You ask for **dinner recommendations in Tokyo**. The agent finds your sushi preferences and past trips to Japan. It misses your **shellfish allergy** - because medical info doesn't look like a restaurant query. It books a crab place.
+
+- Your doctor prescribes a **new medication**. Your health assistant checks for side effects. It misses that it **interacts with a drug you already take** - because "current medications" doesn't look like "is this drug safe?"
+
+The critical context is always connected to the question through a **chain of facts**, not surface resemblance. Finding it requires reasoning, not search.
+
+InputLayer gives your agent a reasoning layer between raw memory and the LLM. Instead of hoping the right context lands in the top-K search results, the agent defines *what counts as relevant* with rules - and gets back exactly that.
+
+- **Structured memory.** Follow chains of relationships to surface context that search alone misses.
+- **Built-in policies.** Access control, confidentiality, data filtering - part of the query, not an afterthought.
+- **Multi-hop expansion.** Found 10 relevant documents? Find everything they cite. Two lines.
+- **Hybrid reasoning.** Vector similarity, graph traversal, and logical rules in a single query.
+
+---
+
+## How it compares
 
 | Capability | Vector DBs | Graph DBs | SQL | **InputLayer** |
 |---|---|---|---|---|
-| Vector Similarity | native | plugin | -- | **native** |
-| Graph Traversal | -- | native | CTEs | **native** |
-| Rule-Based Inference | -- | -- | -- | **native** |
-| Incremental Updates | -- | -- | some | **native** |
-| Recursive Reasoning | -- | Cypher paths | recursive CTEs | **natural recursion** |
-| Explainable Retrieval | -- | paths | -- | **rule traces** |
-
----
-
-## Use Cases
-
-**Agent memory.** The shellfish problem above. Your agent has context scattered across hundreds of memories and the relevant pieces aren't semantically close to the query. Rules let you follow chains of relationships to surface what matters.
-
-**Access control baked into the query.** Instead of filtering results after retrieval, you write the policy as a rule. Who can see what is part of the computation, not a middleware layer that might disagree.
-
-```datalog
-+accessible_doc(User, Doc, Score) <-
-    document(Doc, Embedding),
-    !confidential(Doc),
-    has_permission(User, Doc),
-    query_embedding(User, QEmb),
-    Score = cosine(Embedding, QEmb),
-    Score > 0.5
-```
-
-**Multi-hop expansion.** You found 10 relevant documents. Now find documents cited by those documents. That's two lines of Datalog, not a pipeline of API calls.
-
-**Temporal weighting.** Combine semantic similarity with time decay in the same rule. Recent context matters more  - express that as logic, not post-processing.
-
----
-
-## When to Use Something Else
-
-If all you need is similarity search, use Pinecone or pgvector. If you need transactions, use Postgres. If you need stream processing, use Materialize or Flink.
-
-InputLayer sits between your data and your LLM. It's the reasoning layer  - it figures out what to retrieve. It complements your existing stack, doesn't replace it.
+| Vector similarity | native | plugin | - | **native** |
+| Graph traversal | - | native | CTEs | **native** |
+| Rule-based inference | - | - | - | **native** |
+| Recursive reasoning | - | Cypher paths | recursive CTEs | **natural recursion** |
+| Incremental updates | - | - | some | **native** |
+| Explainable retrieval | - | paths | - | **rule traces** |
 
 ---
 
@@ -146,7 +97,7 @@ InputLayer sits between your data and your LLM. It's the reasoning layer  - it f
 
 ---
 
-## Getting Started
+## Getting started
 
 ```bash
 # Build from source
@@ -159,12 +110,9 @@ cargo build --release
 
 # WebSocket server
 ./target/release/inputlayer-server --port 8080
-# WebSocket endpoint: ws://localhost:8080/ws
-# AsyncAPI docs: http://localhost:8080/api/ws-docs
-# AsyncAPI YAML: http://localhost:8080/api/asyncapi.yaml
 ```
 
-See the [documentation](docs/) for guides, syntax reference, and the full function library.
+The query language is Datalog. If you've used SQL, the basics take about 10 minutes. If you've used Prolog, you already know it.
 
 ---
 
@@ -172,9 +120,8 @@ See the [documentation](docs/) for guides, syntax reference, and the full functi
 
 - [ ] Python SDK
 - [ ] Docker image
-- [ ] LangChain integration
-- [ ] Hybrid search (BM25 + vector)
-- [ ] Provenance API -- trace any result back through the rules that derived it
+- [ ] LangChain / LlamaIndex integration
+- [ ] Provenance API - trace any result back through the rules that derived it
 - [ ] Confidence propagation through reasoning chains
 
 ---
@@ -188,6 +135,10 @@ See the [documentation](docs/) for guides, syntax reference, and the full functi
 - [Built-in Functions](docs/reference/functions.md)
 - [Architecture](docs/internals/architecture.md)
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-Apache 2.0 -- see [LICENSE](LICENSE).
+Apache 2.0 - see [LICENSE](LICENSE).
