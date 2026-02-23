@@ -16,18 +16,23 @@ info:
 
     ## Connection
 
-    Connect to `ws://<host>:<port>/ws?kg=<name>` where `kg` is the initial
-    knowledge graph to bind to (defaults to "default").
+    Connect to `ws://<host>:<port>/ws?kg=<name>&last_seq=<n>` where `kg` is the initial
+    knowledge graph to bind to (defaults to "default") and `last_seq` is an optional
+    sequence number for notification replay on reconnect.
 
-    On successful connection, the server sends a `connected` message with the
-    auto-created session ID.
+    After WebSocket upgrade, the client must authenticate before any other operation.
+    Send a `login` message (username/password) or an `authenticate` message (API key).
+    On success the server responds with `authenticated`; on failure with `auth_error`.
 
     ## Message Flow
 
-    1. Client connects → Server sends `connected`
-    2. Client sends `execute` messages → Server responds with `result` or `error`
-    3. Server may send `notification` messages when persistent data changes
-    4. Client disconnects → Server auto-closes session
+    1. Client connects → must authenticate first
+    2. Client sends `login` or `authenticate` → Server responds with `authenticated` or `auth_error`
+    3. If `last_seq` was provided, server replays missed notifications
+    4. Client sends `execute` messages → Server responds with `result` or `error`
+    5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
+    6. Server may push `notification` messages when persistent data changes
+    7. Client disconnects → Server auto-closes session
 
     ## Raw Text Protocol
 
@@ -58,17 +63,37 @@ channels:
       kg:
         description: Knowledge graph to bind to on connect
         default: default
+      last_seq:
+        description: |
+          Sequence number for notification replay on reconnect.
+          When provided, the server replays all buffered notifications with seq > last_seq
+          before normal operation resumes. Useful for clients that disconnect and want to
+          catch up on missed changes without a full refresh.
     messages:
-      # Client → Server
+      # Client → Server (auth)
+      login:
+        $ref: '#/components/messages/Login'
+      authenticate:
+        $ref: '#/components/messages/Authenticate'
+      # Client → Server (operations)
       execute:
         $ref: '#/components/messages/Execute'
       ping:
         $ref: '#/components/messages/Ping'
-      # Server → Client
-      connected:
-        $ref: '#/components/messages/Connected'
+      # Server → Client (auth)
+      authenticated:
+        $ref: '#/components/messages/Authenticated'
+      auth_error:
+        $ref: '#/components/messages/AuthError'
+      # Server → Client (results)
       result:
         $ref: '#/components/messages/Result'
+      result_start:
+        $ref: '#/components/messages/ResultStart'
+      result_chunk:
+        $ref: '#/components/messages/ResultChunk'
+      result_end:
+        $ref: '#/components/messages/ResultEnd'
       error:
         $ref: '#/components/messages/Error'
       pong:
@@ -77,6 +102,28 @@ channels:
         $ref: '#/components/messages/Notification'
 
 operations:
+  login:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Authenticate with username and password
+    description: |
+      Must be the first message after WebSocket upgrade. The server responds with
+      `authenticated` on success or `auth_error` on failure.
+    messages:
+      - $ref: '#/channels/ws/messages/login'
+
+  authenticate:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Authenticate with an API key
+    description: |
+      Alternative to `login` for programmatic access. The server responds with
+      `authenticated` on success or `auth_error` on failure.
+    messages:
+      - $ref: '#/channels/ws/messages/authenticate'
+
   execute:
     action: send
     channel:
@@ -95,8 +142,11 @@ operations:
 
       **Meta commands:**
       - `.kg list` / `.kg create <name>` / `.kg use <name>` / `.kg drop <name>` — KG management
-      - `.rel` / `.rel <name>` — List relations / describe relation
+      - `.kg acl list` / `.kg acl grant <kg> <user> <role>` / `.kg acl revoke <kg> <user>` — Access control
+      - `.user list` / `.user create` / `.user drop` / `.user password` / `.user role` — User management
+      - `.rel` / `.rel <name>` / `.rel drop <name>` — List / describe / drop relations
       - `.rule list` / `.rule show <name>` / `.rule drop <name>` — Rule management
+      - `.rule drop prefix <prefix>` — Drop rules by prefix
       - `.rule remove <name> <index>` — Remove specific rule clause
       - `.session list` / `.session clear` — Session management
       - `.index list` / `.index create ...` / `.index drop <name>` — Index management
@@ -116,14 +166,25 @@ operations:
     messages:
       - $ref: '#/channels/ws/messages/ping'
 
-  onConnected:
+  onAuthenticated:
     action: receive
     channel:
       $ref: '#/channels/ws'
-    summary: Connection confirmation with session ID
-    description: Sent immediately after WebSocket upgrade. Contains the auto-created session ID and initial knowledge graph.
+    summary: Authentication success
+    description: |
+      Sent after a successful `login` or `authenticate` message.
+      Contains the session ID, initial knowledge graph, server version, and user role.
     messages:
-      - $ref: '#/channels/ws/messages/connected'
+      - $ref: '#/channels/ws/messages/authenticated'
+
+  onAuthError:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Authentication failure
+    description: Sent when a `login` or `authenticate` message fails. The client may retry.
+    messages:
+      - $ref: '#/channels/ws/messages/auth_error'
 
   onResult:
     action: receive
@@ -140,6 +201,38 @@ operations:
     summary: Error response
     messages:
       - $ref: '#/channels/ws/messages/error'
+
+  onResultStart:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Start of a streamed result
+    description: |
+      Sent instead of `result` when the serialized result exceeds 1 MB.
+      Contains metadata and column names. Followed by one or more `result_chunk`
+      messages, then a `result_end` message.
+    messages:
+      - $ref: '#/channels/ws/messages/result_start'
+
+  onResultChunk:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Chunk of streamed result rows
+    description: |
+      Contains up to 500 rows per chunk. Chunks are numbered sequentially
+      starting from 0 via `chunk_index`.
+    messages:
+      - $ref: '#/channels/ws/messages/result_chunk'
+
+  onResultEnd:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: End of a streamed result
+    description: Signals that all chunks have been sent. Contains final row and chunk counts.
+    messages:
+      - $ref: '#/channels/ws/messages/result_end'
 
   onPong:
     action: receive
@@ -178,13 +271,37 @@ components:
       payload:
         $ref: '#/components/schemas/PingRequest'
 
-    Connected:
-      name: connected
-      title: Connected
-      summary: Connection established with auto-created session
+    Login:
+      name: login
+      title: Login
+      summary: Authenticate with username and password
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/ConnectedResponse'
+        $ref: '#/components/schemas/LoginRequest'
+
+    Authenticate:
+      name: authenticate
+      title: Authenticate
+      summary: Authenticate with an API key
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthenticateRequest'
+
+    Authenticated:
+      name: authenticated
+      title: Authenticated
+      summary: Authentication succeeded
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthenticatedResponse'
+
+    AuthError:
+      name: auth_error
+      title: Auth Error
+      summary: Authentication failed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AuthErrorResponse'
 
     Result:
       name: result
@@ -201,6 +318,30 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ErrorResponse'
+
+    ResultStart:
+      name: result_start
+      title: Result Start
+      summary: Start of a streamed result (for results > 1 MB)
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ResultStartResponse'
+
+    ResultChunk:
+      name: result_chunk
+      title: Result Chunk
+      summary: Chunk of streamed result rows
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ResultChunkResponse'
+
+    ResultEnd:
+      name: result_end
+      title: Result End
+      summary: End of streamed result
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ResultEndResponse'
 
     Pong:
       name: pong
@@ -255,27 +396,89 @@ components:
       examples:
         - type: ping
 
-    ConnectedResponse:
+    LoginRequest:
+      type: object
+      required:
+        - type
+        - username
+        - password
+      properties:
+        type:
+          type: string
+          const: login
+        username:
+          type: string
+          description: User's username
+        password:
+          type: string
+          description: User's password
+      examples:
+        - type: login
+          username: admin
+          password: secret
+
+    AuthenticateRequest:
+      type: object
+      required:
+        - type
+        - api_key
+      properties:
+        type:
+          type: string
+          const: authenticate
+        api_key:
+          type: string
+          description: API key for programmatic access
+      examples:
+        - type: authenticate
+          api_key: "il_key_abc123..."
+
+    AuthenticatedResponse:
       type: object
       required:
         - type
         - session_id
         - knowledge_graph
+        - version
+        - role
       properties:
         type:
           type: string
-          const: connected
+          const: authenticated
         session_id:
-          type: integer
-          format: int64
+          type: string
           description: Auto-created session ID
         knowledge_graph:
           type: string
           description: Initial knowledge graph the session is bound to
+        version:
+          type: string
+          description: Server version string
+        role:
+          type: string
+          description: Authenticated user's role (admin, writer, reader)
       examples:
-        - type: connected
-          session_id: 42
+        - type: authenticated
+          session_id: "42"
           knowledge_graph: default
+          version: "0.1.0"
+          role: admin
+
+    AuthErrorResponse:
+      type: object
+      required:
+        - type
+        - message
+      properties:
+        type:
+          type: string
+          const: auth_error
+        message:
+          type: string
+          description: Human-readable authentication error
+      examples:
+        - type: auth_error
+          message: "Invalid username or password"
 
     ResultResponse:
       type: object
@@ -370,6 +573,95 @@ components:
         - type: error
           message: "Knowledge graph 'missing' not found"
 
+    ResultStartResponse:
+      type: object
+      required:
+        - type
+        - columns
+        - total_count
+        - truncated
+        - execution_time_ms
+      properties:
+        type:
+          type: string
+          const: result_start
+        columns:
+          type: array
+          items:
+            type: string
+          description: Column names from the result schema
+        total_count:
+          type: integer
+          description: Total number of rows across all chunks
+        truncated:
+          type: boolean
+          description: Whether the result was truncated
+        execution_time_ms:
+          type: integer
+          format: int64
+          description: Execution time in milliseconds
+        metadata:
+          $ref: '#/components/schemas/SessionQueryMetadata'
+        switched_kg:
+          type: string
+          description: Present when the command switched the session's knowledge graph
+      examples:
+        - type: result_start
+          columns: ["id", "name", "score"]
+          total_count: 50000
+          truncated: false
+          execution_time_ms: 120
+
+    ResultChunkResponse:
+      type: object
+      required:
+        - type
+        - rows
+        - chunk_index
+      properties:
+        type:
+          type: string
+          const: result_chunk
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+          description: Result rows in this chunk (up to 500 rows per chunk)
+        row_provenance:
+          type: array
+          items:
+            type: string
+          description: Per-row provenance for this chunk
+        chunk_index:
+          type: integer
+          description: 0-based chunk sequence number
+      examples:
+        - type: result_chunk
+          rows: [[1, "alice", 95], [2, "bob", 87]]
+          chunk_index: 0
+
+    ResultEndResponse:
+      type: object
+      required:
+        - type
+        - row_count
+        - chunk_count
+      properties:
+        type:
+          type: string
+          const: result_end
+        row_count:
+          type: integer
+          description: Total number of rows sent across all chunks
+        chunk_count:
+          type: integer
+          description: Number of chunks that were sent
+      examples:
+        - type: result_end
+          row_count: 50000
+          chunk_count: 100
+
     PongResponse:
       type: object
       required:
@@ -385,38 +677,83 @@ components:
       type: object
       required:
         - type
-        - event
-        - knowledge_graph
-        - relation
-        - operation
-        - count
+        - seq
+        - timestamp_ms
+      discriminator: type
+      description: |
+        Push notification for data/schema/rule/KG changes. The `type` field
+        discriminates the event kind. All notifications carry a monotonically
+        increasing `seq` number for replay on reconnect (see `last_seq` query param).
       properties:
         type:
           type: string
-          const: notification
-        event:
+          enum: [persistent_update, rule_change, kg_change, schema_change]
+          description: Event type discriminator
+        seq:
+          type: integer
+          format: int64
+          description: Monotonically increasing sequence number (1-based)
+        timestamp_ms:
+          type: integer
+          format: int64
+          description: Server timestamp in milliseconds since Unix epoch
+        session_id:
           type: string
-          description: Event type (currently always "persistent_update")
+          description: Session that triggered the change (if applicable)
         knowledge_graph:
           type: string
           description: Knowledge graph where the change occurred
+
+        # persistent_update fields
         relation:
           type: string
-          description: Relation that was modified
+          description: "Relation that was modified (persistent_update only)"
         operation:
           type: string
-          enum: [insert, delete]
-          description: Type of data operation
+          description: |
+            Type of operation. Values depend on event type:
+            - persistent_update: "insert", "delete"
+            - rule_change: "registered", "removed", "dropped"
+            - kg_change: "created", "dropped"
+            - schema_change: "created", "dropped"
         count:
           type: integer
-          description: Number of tuples affected
+          description: "Number of tuples affected (persistent_update only)"
+
+        # rule_change fields
+        rule_name:
+          type: string
+          description: "Name of the rule (rule_change only)"
+
+        # schema_change fields
+        entity:
+          type: string
+          description: "Name of the schema entity (schema_change only)"
       examples:
-        - type: notification
-          event: persistent_update
+        - type: persistent_update
           knowledge_graph: default
           relation: edge
           operation: insert
           count: 5
+          seq: 42
+          timestamp_ms: 1708732800000
+        - type: rule_change
+          knowledge_graph: default
+          rule_name: reachable
+          operation: registered
+          seq: 43
+          timestamp_ms: 1708732801000
+        - type: kg_change
+          knowledge_graph: analytics
+          operation: created
+          seq: 44
+          timestamp_ms: 1708732802000
+        - type: schema_change
+          knowledge_graph: default
+          entity: users
+          operation: created
+          seq: 45
+          timestamp_ms: 1708732803000
 
     ValidationError:
       type: object

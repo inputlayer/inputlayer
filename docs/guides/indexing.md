@@ -161,7 +161,7 @@ After many insertions/deletions, an index may become fragmented. Rebuild to opti
 
 ## Using Indexes in Queries
 
-Indexes are used automatically when you perform vector similarity searches. The query optimizer detects when an index can accelerate a query.
+Indexes are used automatically when you perform vector similarity searches. The query optimizer detects when an index can accelerate a query. You can also invoke the HNSW index directly using the `hnsw_nearest` builtin.
 
 ### Automatic Index Usage
 
@@ -177,6 +177,53 @@ query_vec([0.11, 0.21, 0.29])
 
 ?similar(Id, Title, Dist)
 ```
+
+### Explicit HNSW Search with `hnsw_nearest`
+
+The `hnsw_nearest` builtin queries an HNSW index directly, returning the k nearest neighbors with their distances.
+
+**Syntax:**
+```datalog
+hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar)
+hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
+```
+
+**Parameters:**
+| Parameter | Description |
+|-----------|-------------|
+| `index_name` | Name of the HNSW index (string literal) |
+| `QueryVec` | Query vector — a variable bound to a vector value, or a vector literal |
+| `K` | Number of nearest neighbors to return (integer, >= 1) |
+| `IdVar` | Output variable bound to the ID of each neighbor |
+| `DistVar` | Output variable bound to the distance to each neighbor |
+| `EfSearch` | Optional search beam width override (higher = better recall, slower) |
+
+**Example — basic nearest neighbor search:**
+```datalog
+?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Distance)
+```
+
+**Example — using a query vector from a relation:**
+```datalog
+?query_embedding(QV), hnsw_nearest("doc_emb_idx", QV, 5, Id, Dist)
+```
+
+**Example — joining results with the base relation:**
+```datalog
+?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist),
+  documents(Id, Title, _)
+```
+
+**Example — with custom ef_search for higher recall:**
+```datalog
+?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist, 200)
+```
+
+**Notes:**
+- The index must exist and be valid; use `.index stats <name>` to check.
+- `IdVar` returns the integer ID (first column) of the indexed relation's matching rows.
+- `DistVar` returns the distance in the metric configured for the index (cosine, euclidean, dot, or manhattan).
+- The optional `EfSearch` parameter overrides the index's default `ef_search` for this query only.
 
 ### Index Selection
 

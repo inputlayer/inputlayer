@@ -61,6 +61,83 @@ Delete a knowledge graph and all its data.
 
 **Warning:** This permanently deletes all relations, rules, and data.
 
+## Access Control Commands
+
+### `.kg acl list [kg_name]`
+
+List access control entries for a knowledge graph. If no name is given, lists ACLs for the current KG.
+
+```
+.kg acl list
+.kg acl list analytics
+```
+
+### `.kg acl grant <kg> <user> <role>`
+
+Grant a user access to a knowledge graph with a specific role.
+
+```
+.kg acl grant analytics alice reader
+.kg acl grant shared_data bob writer
+```
+
+**Roles:** `reader`, `writer`, `admin`
+
+### `.kg acl revoke <kg> <user>`
+
+Revoke a user's access to a knowledge graph.
+
+```
+.kg acl revoke analytics alice
+```
+
+## User Management Commands
+
+### `.user list`
+
+List all users and their roles.
+
+```
+.user list
+```
+
+### `.user create <username> <password> <role>`
+
+Create a new user with the given password and role.
+
+```
+.user create alice s3cret reader
+.user create bob hunter2 admin
+```
+
+**Roles:** `reader`, `writer`, `admin`
+
+### `.user drop <username>`
+
+Delete a user.
+
+```
+.user drop alice
+```
+
+### `.user password <username> <new_password>`
+
+Change a user's password.
+
+```
+.user password alice new-s3cret
+```
+
+### `.user role <username> <new_role>`
+
+Change a user's role.
+
+```
+.user role alice admin
+```
+
+---
+
 ## Relation Commands
 
 ### `.rel`
@@ -78,6 +155,16 @@ Relations:
   person (25 rows)
   department (5 rows)
 ```
+
+### `.rel drop <name>`
+
+Delete a relation and all its data, schema, and associated rules.
+
+```
+.rel drop old_events
+```
+
+**Warning:** This permanently deletes the relation, its schema, and any rules that define it. A `schema_change` notification is emitted.
 
 ### `.rel <name>`
 
@@ -162,6 +249,16 @@ Delete a rule entirely (removes all clauses).
 ```
 .rule drop reachable
 ```
+
+### `.rule drop prefix <prefix>`
+
+Delete all rules whose names start with the given prefix.
+
+```
+.rule drop prefix temp_
+```
+
+**Note:** An empty prefix is rejected to prevent accidentally dropping all rules.
 
 ### `.rule remove <name> <index>`
 
@@ -320,6 +417,16 @@ Rules: 3
 Session rules: 2
 Data directory: ./data
 ```
+
+### `.clear prefix <prefix>`
+
+Clear all facts from relations whose names start with the given prefix.
+
+```
+.clear prefix temp_
+```
+
+**Note:** An empty prefix is rejected. This clears data only — schemas and rules are preserved.
 
 ### `.compact`
 

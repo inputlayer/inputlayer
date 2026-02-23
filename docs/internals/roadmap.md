@@ -129,11 +129,19 @@ To add a new built-in function:
 ### v0.1.0 (Current)
 - 55 builtin functions (vector, temporal, math, string, LSH, quantization)
 - Functions work in rule heads via computed head variables
-- HNSW index infrastructure (`IndexManager`)
+- HNSW vector indexes with full Datalog query integration (`hnsw_nearest` builtin)
 - Count distinct aggregate (`count_distinct`)
 - TopK, TopKThreshold, WithinRadius aggregates
-- 1567 unit tests + 1109 snapshot tests (as of 2026-02-08)
-- WebSocket API (AsyncAPI-documented)
+- 3,085 unit tests + 1,119 snapshot tests = 4,204 total (as of 2026-02-24)
+- WebSocket API with auth, streaming results, and notification replay (AsyncAPI-documented)
+- Production hardening complete (55/55 issues):
+  - Multi-user authentication and ACL system
+  - Rate limiting (per-connection WS, per-IP HTTP)
+  - Auto-compaction for DD-native persist layer
+  - Lock-free DD queries via storage snapshots
+  - Streaming result transport for large results (>1 MB)
+  - Relation drop, rule drop by prefix, clear by prefix
+  - TLS deployment support
 - WAL-based persistence with configurable durability
 - Basic Datalog operations
 - Persistent and session rules

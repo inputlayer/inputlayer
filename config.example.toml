@@ -4,21 +4,21 @@
 #
 # Environment variable overrides:
 #   INPUTLAYER_STORAGE__DATA_DIR=/custom/path
-#   INPUTLAYER_STORAGE__DEFAULT_DATABASE=mydb
+#   INPUTLAYER_STORAGE__DEFAULT_KNOWLEDGE_GRAPH=mykg
 #   INPUTLAYER_STORAGE__PERSISTENCE__FORMAT=csv
 
 [storage]
-# Base directory for all database storage
+# Base directory for all knowledge graph storage
 # Production example: "/var/lib/inputlayer/data"
 # Development example: "./data"
 data_dir = "./data"
 
-# Default database (created on startup if missing)
-default_database = "default"
+# Default knowledge graph (created on startup if missing)
+default_knowledge_graph = "default"
 
-# Automatically create databases if they don't exist
+# Automatically create knowledge graphs if they don't exist
 # Set to true for development, false for production
-auto_create_databases = false
+auto_create_knowledge_graphs = false
 
 [storage.persistence]
 # Storage format options:
@@ -40,8 +40,32 @@ compression = "snappy"
 auto_save_interval = 0
 
 # Enable write-ahead logging (WAL) for crash recovery
-# Note: Not yet implemented
-enable_wal = false
+enable_wal = true
+
+# -----------------------------------------------------------------------------
+# DD-Native Persist Layer (Recommended)
+# -----------------------------------------------------------------------------
+[storage.persist]
+# Enable the DD-native persistence layer
+enabled = true
+
+# Buffer size before flushing to disk (number of updates)
+buffer_size = 10000
+
+# Durability mode: immediate, batched, async
+# - immediate: Sync to disk on each write (safest, slowest)
+# - batched: Periodic sync (balanced performance/safety)
+# - async: Fire-and-forget (fastest, may lose recent data on crash)
+durability_mode = "immediate"
+
+# Compaction window: retain this many historical versions (0 = keep all)
+compaction_window = 0
+
+# Auto-compact when a shard accumulates this many batch files (0 = disabled)
+auto_compact_threshold = 10
+
+# How often to check for auto-compaction, in seconds (0 = disabled)
+auto_compact_interval_secs = 300
 
 [storage.performance]
 # Initial capacity for in-memory hash maps
@@ -52,8 +76,16 @@ initial_capacity = 10000
 batch_size = 1000
 
 # Enable async I/O for storage operations
-# Note: Not yet implemented
 async_io = true
+
+# Number of worker threads (0 = use all CPU cores)
+num_threads = 0
+
+# Maximum rows returned per query result (0 = unlimited)
+max_result_rows = 100000
+
+# Maximum query cost budget (0 = unlimited)
+max_query_cost = 0
 
 [optimization]
 # Enable join spanning tree planning
@@ -133,3 +165,16 @@ static_dir = "./gui/dist"
 
 # Session timeout in seconds (default: 24 hours)
 session_timeout_secs = 86400
+
+# -----------------------------------------------------------------------------
+# Rate Limiting
+# -----------------------------------------------------------------------------
+[http.rate_limit]
+# Maximum WebSocket messages per second per connection (0 = unlimited)
+ws_max_messages_per_sec = 1000
+
+# Maximum HTTP requests per second per IP address (0 = unlimited)
+per_ip_max_rps = 0
+
+# Notification ring buffer size for reconnect replay
+notification_buffer_size = 4096
