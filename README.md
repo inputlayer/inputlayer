@@ -7,28 +7,6 @@
 
 Vector search finds what's similar. InputLayer finds what follows. InputLayer is the only platform where skills, memory, and planning all live in the same reasoning engine. Every decision is explainable via rule traces. Experience compounds via pheromone trails and value functions that update incrementally. And the developer API stays clean — 4 lines to first value, ~20 lines for a full planning loop.
 
-```python
-from inputlayer import InputLayer
-from inputlayer.ontologies import ACO, AgentMemory
-from inputlayer.skill_packs import web_navigation, e_commerce
-
-il = InputLayer()
-agent = il.agent("shopper", ontology=[ACO, AgentMemory])
-agent.install_skills(web_navigation)
-agent.install_skills(e_commerce)
-
-agent.start_episode(goal="Buy a nickel-finish nightstand under $140")
-for step in range(30):
-    snapshot = agent.observe(url=page.url, dom_text=page.accessibility.snapshot())
-    plan = agent.plan(goal="Buy a nickel-finish nightstand under $140", observation=snapshot)
-    execute(plan)  # your browser automation
-    reward, done = evaluate(page)
-    agent.step(plan=plan, result={"url": page.url}, reward=reward, done=done)
-    if done: break
-agent.end_episode()
-# Pheromone trails now guide future episodes toward successful paths
-```
-
 ---
 
 ## The Shellfish Problem

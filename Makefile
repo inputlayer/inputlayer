@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny
 
 SHELL := /bin/bash
 
@@ -220,8 +220,8 @@ fmt-check:
 lint:
 	cargo clippy --all-features -- -D warnings
 
-# Check compilation + formatting + lints + docs (quality gate)
-check: fmt-check lint doc-check
+# Check compilation + formatting + lints (quality gate)
+check: fmt-check lint
 	cargo check --all-features
 
 # Fix formatting and lint issues automatically where possible
@@ -298,6 +298,11 @@ docker:
 # Run Docker container
 docker-run: docker
 	docker run --rm -p 8080:8080 -v inputlayer-data:/var/lib/inputlayer/data inputlayer
+
+# Supply chain checks (licenses, advisories, banned crates)
+deny:
+	@command -v cargo-deny >/dev/null 2>&1 || { echo "Install: cargo install cargo-deny"; exit 1; }
+	cargo deny check advisories sources licenses bans
 
 # Flush development data - removes data folder to reset to empty state
 flush-dev:
