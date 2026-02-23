@@ -56,7 +56,7 @@ pub struct AuthIdentity {
 // ── Password Hashing (argon2id) ─────────────────────────────────────────────
 
 /// Hash a password using argon2id with a random salt.
-pub fn hash_password(password: &str) -> String {
+pub fn hash_password(password: &str) -> Result<String, String> {
     use argon2::{
         password_hash::{rand_core::OsRng, SaltString},
         Argon2, PasswordHasher,
@@ -65,8 +65,8 @@ pub fn hash_password(password: &str) -> String {
     let argon2 = Argon2::default();
     argon2
         .hash_password(password.as_bytes(), &salt)
-        .expect("argon2 hashing should not fail")
-        .to_string()
+        .map(|h| h.to_string())
+        .map_err(|e| format!("Password hashing failed: {e}"))
 }
 
 /// Verify a password against an argon2id hash.
@@ -120,11 +120,138 @@ impl PersistedCredentials {
         toml::from_str(&contents).ok()
     }
 
-    /// Save credentials to a TOML file.
+    /// Save credentials to a TOML file with restricted permissions (0600 on Unix).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let contents =
             toml::to_string_pretty(self).map_err(|e| std::io::Error::other(e.to_string()))?;
-        std::fs::write(path, contents)
+        std::fs::write(path, &contents)?;
+
+        // Restrict file permissions to owner-only on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms)?;
+        }
+
+        Ok(())
+    }
+}
+
+// ── Per-KG Authorization (ACLs) ─────────────────────────────────────────────
+
+/// Per-KG role controlling access to a specific knowledge graph.
+/// Separate from the global `Role` — both must pass for an operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KgRole {
+    /// Full control: read, write, schema, drop, grant/revoke access
+    Owner,
+    /// Write access: read, write, schema modifications
+    Editor,
+    /// Read-only access: queries only
+    Viewer,
+}
+
+impl fmt::Display for KgRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KgRole::Owner => write!(f, "owner"),
+            KgRole::Editor => write!(f, "editor"),
+            KgRole::Viewer => write!(f, "viewer"),
+        }
+    }
+}
+
+impl FromStr for KgRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "owner" => Ok(KgRole::Owner),
+            "editor" => Ok(KgRole::Editor),
+            "viewer" => Ok(KgRole::Viewer),
+            _ => Err(format!(
+                "Unknown KG role '{s}'. Valid roles: owner, editor, viewer"
+            )),
+        }
+    }
+}
+
+/// Check whether a KG role permits a given statement on that KG.
+/// Called AFTER the global `authorize_statement()` check passes.
+pub fn authorize_kg_operation(kg_role: &KgRole, stmt: &Statement) -> Result<(), String> {
+    match kg_role {
+        KgRole::Owner => Ok(()), // Owner can do everything on their KG
+        KgRole::Editor => authorize_kg_editor(stmt),
+        KgRole::Viewer => authorize_kg_viewer(stmt),
+    }
+}
+
+fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
+    match stmt {
+        Statement::Query(_)
+        | Statement::Insert(_)
+        | Statement::Delete(_)
+        | Statement::Update(_)
+        | Statement::PersistentRule(_)
+        | Statement::SessionRule(_)
+        | Statement::Fact(_)
+        | Statement::SchemaDecl(_)
+        | Statement::TypeDecl(_)
+        | Statement::DeleteRelationOrRule(_) => Ok(()),
+
+        Statement::Meta(cmd) => match cmd {
+            MetaCommand::KgDrop(_) => {
+                Err("Permission denied: only KG owners can drop this knowledge graph".to_string())
+            }
+            MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
+                Err("Permission denied: only KG owners can manage ACLs".to_string())
+            }
+            _ => Ok(()),
+        },
+    }
+}
+
+fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
+    match stmt {
+        Statement::Query(_) | Statement::SessionRule(_) => Ok(()),
+
+        Statement::Insert(_)
+        | Statement::Delete(_)
+        | Statement::Update(_)
+        | Statement::PersistentRule(_)
+        | Statement::Fact(_)
+        | Statement::SchemaDecl(_)
+        | Statement::TypeDecl(_)
+        | Statement::DeleteRelationOrRule(_) => {
+            Err("Permission denied: you have viewer access to this knowledge graph".to_string())
+        }
+
+        Statement::Meta(cmd) => match cmd {
+            MetaCommand::KgShow
+            | MetaCommand::KgList
+            | MetaCommand::KgUse(_)
+            | MetaCommand::RelList
+            | MetaCommand::RelDescribe(_)
+            | MetaCommand::RuleList
+            | MetaCommand::RuleQuery(_)
+            | MetaCommand::RuleShowDef(_)
+            | MetaCommand::SessionList
+            | MetaCommand::SessionClear
+            | MetaCommand::SessionDrop(_)
+            | MetaCommand::SessionDropName(_)
+            | MetaCommand::IndexList
+            | MetaCommand::IndexStats(_)
+            | MetaCommand::Explain(_)
+            | MetaCommand::Status
+            | MetaCommand::Help
+            | MetaCommand::Quit
+            | MetaCommand::KgAclList(_) => Ok(()),
+            _ => {
+                Err("Permission denied: you have viewer access to this knowledge graph".to_string())
+            }
+        },
     }
 }
 
@@ -198,6 +325,12 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         // Read-only system commands
         MetaCommand::Explain(_) | MetaCommand::Status | MetaCommand::Help | MetaCommand::Quit => {
             Ok(())
+        }
+
+        // KG ACL commands — editors can list ACLs but not modify
+        MetaCommand::KgAclList(_) => Ok(()),
+        MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
+            Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
         }
 
         // Admin-only commands
@@ -303,6 +436,12 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::ApiKeyCreate(_) | MetaCommand::ApiKeyList | MetaCommand::ApiKeyRevoke(_) => {
             Err("Permission denied: only admins can manage API keys".to_string())
         }
+
+        // KG ACL — viewers can list but not modify
+        MetaCommand::KgAclList(_) => Ok(()),
+        MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
+            Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
+        }
     }
 }
 
@@ -335,15 +474,15 @@ mod tests {
 
     #[test]
     fn test_hash_and_verify_password() {
-        let hash = hash_password("mypassword");
+        let hash = hash_password("mypassword").unwrap();
         assert!(verify_password("mypassword", &hash));
         assert!(!verify_password("wrongpassword", &hash));
     }
 
     #[test]
     fn test_hash_password_unique_salts() {
-        let h1 = hash_password("same");
-        let h2 = hash_password("same");
+        let h1 = hash_password("same").unwrap();
+        let h2 = hash_password("same").unwrap();
         assert_ne!(h1, h2); // Different salts
         assert!(verify_password("same", &h1));
         assert!(verify_password("same", &h2));
@@ -497,6 +636,113 @@ mod tests {
                 "Editor should be denied: {s}"
             );
         }
+    }
+
+    // ── KG Role tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_kg_role_display() {
+        assert_eq!(KgRole::Owner.to_string(), "owner");
+        assert_eq!(KgRole::Editor.to_string(), "editor");
+        assert_eq!(KgRole::Viewer.to_string(), "viewer");
+    }
+
+    #[test]
+    fn test_kg_role_from_str() {
+        assert_eq!(KgRole::from_str("owner").unwrap(), KgRole::Owner);
+        assert_eq!(KgRole::from_str("EDITOR").unwrap(), KgRole::Editor);
+        assert_eq!(KgRole::from_str("Viewer").unwrap(), KgRole::Viewer);
+        assert!(KgRole::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn test_kg_owner_can_do_everything() {
+        use crate::statement::parse_statement;
+        let stmts = vec![
+            "?edge(X, Y)",
+            "+edge(1, 2)",
+            "-edge(1, 2)",
+            ".kg drop test",
+            ".rel drop edges",
+        ];
+        for s in stmts {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_kg_operation(&KgRole::Owner, &stmt).is_ok(),
+                "KG Owner should be allowed: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_kg_editor_cannot_drop_or_manage_acls() {
+        use crate::statement::parse_statement;
+        let denied = vec![".kg drop mykg"];
+        for s in denied {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_kg_operation(&KgRole::Editor, &stmt).is_err(),
+                "KG Editor should be denied: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_kg_editor_can_write() {
+        use crate::statement::parse_statement;
+        let allowed = vec!["?edge(X, Y)", "+edge(1, 2)", "-edge(1, 2)", ".rel"];
+        for s in allowed {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_kg_operation(&KgRole::Editor, &stmt).is_ok(),
+                "KG Editor should be allowed: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_kg_viewer_cannot_write() {
+        use crate::statement::parse_statement;
+        let denied = vec!["+edge(1, 2)", "-edge(1, 2)", ".rel drop edges"];
+        for s in denied {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_kg_operation(&KgRole::Viewer, &stmt).is_err(),
+                "KG Viewer should be denied: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_kg_viewer_can_read() {
+        use crate::statement::parse_statement;
+        let allowed = vec!["?edge(X, Y)", ".rel", ".rule"];
+        for s in allowed {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_kg_operation(&KgRole::Viewer, &stmt).is_ok(),
+                "KG Viewer should be allowed: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_acl_commands_parsing() {
+        use crate::statement::parse_statement;
+        // List
+        let stmt = parse_statement(".kg acl list mykg").unwrap();
+        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
+
+        // Grant
+        let stmt = parse_statement(".kg acl grant mykg bob editor").unwrap();
+        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
+        assert!(authorize_statement(&Role::Editor, &stmt).is_err());
+        assert!(authorize_statement(&Role::Viewer, &stmt).is_err());
+
+        // Revoke
+        let stmt = parse_statement(".kg acl revoke mykg bob").unwrap();
+        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
+        assert!(authorize_statement(&Role::Editor, &stmt).is_err());
     }
 
     #[test]

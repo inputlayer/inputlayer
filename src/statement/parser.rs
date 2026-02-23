@@ -202,7 +202,8 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     // String constant
     if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
         let inner = &input[1..input.len() - 1];
-        return Ok(Term::StringConstant(inner.to_string()));
+        let processed = process_string_escapes(inner);
+        return Ok(Term::StringConstant(processed));
     }
 
     // Integer constant
@@ -309,6 +310,11 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                 }
 
                 // Standard aggregates with single variable parameter
+                // Reject multi-variable aggregates like sum<X, Y> — only one variable allowed
+                if params.contains(',') {
+                    return None;
+                }
+
                 if let Some(first_char) = params.chars().next() {
                     if first_char.is_uppercase() || first_char == '_' {
                         let agg_func = match func_lower.as_str() {
@@ -388,6 +394,33 @@ pub fn split_by_comma(input: &str) -> Vec<String> {
         result.push(current);
     }
 
+    result
+}
+
+/// Process escape sequences in a string literal.
+///
+/// Supports: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (quote).
+/// Unknown escape sequences are passed through literally (e.g., `\x` → `\x`).
+fn process_string_escapes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(ch);
+        }
+    }
     result
 }
 
