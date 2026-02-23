@@ -60,6 +60,20 @@ pub struct KnowledgeGraphSnapshot {
 
     /// Maximum result rows returned per query (0 = unlimited)
     pub max_result_rows: usize,
+
+    /// Maximum query cost score (0 = unlimited)
+    pub max_query_cost: u64,
+
+    /// Optional HNSW search function for resolving nearest-neighbor queries.
+    /// Wrapped in Arc for cheap cloning. Signature:
+    /// `(index_name, query_vector, k, ef_search) -> Vec<(tuple_id, distance)>`
+    pub hnsw_search_fn: Option<
+        Arc<
+            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 impl KnowledgeGraphSnapshot {
@@ -115,6 +129,8 @@ impl KnowledgeGraphSnapshot {
             materialized_relations: Arc::new(materialized_names),
             rule_prefix: Arc::new(prefix),
             max_result_rows: 0,
+            max_query_cost: 0,
+            hnsw_search_fn: None,
         }
     }
 
@@ -149,8 +165,10 @@ impl KnowledgeGraphSnapshot {
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
         engine.input_tuples.clone_from(&self.input_tuples);
         engine.set_shared_input(Arc::clone(&self.input_tuples));
+        self.configure_hnsw(&mut engine);
         engine.execute(program)
     }
 
@@ -174,6 +192,8 @@ impl KnowledgeGraphSnapshot {
         engine.set_shared_input(Arc::clone(&self.input_tuples));
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        self.configure_hnsw(&mut engine);
         engine.execute_tuples(program)
     }
 
@@ -228,6 +248,8 @@ impl KnowledgeGraphSnapshot {
         let mut engine = DatalogEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        self.configure_hnsw(&mut engine);
 
         // Copy-on-write: only clone relation vectors that receive session facts.
         // Relations without session facts share the same underlying data via Arc.
@@ -275,6 +297,14 @@ impl KnowledgeGraphSnapshot {
             "snapshot_execute_with_session_facts"
         );
         result
+    }
+
+    /// Configure HNSW search on a DatalogEngine if available.
+    fn configure_hnsw(&self, engine: &mut DatalogEngine) {
+        if let Some(ref search_fn) = self.hnsw_search_fn {
+            let f = Arc::clone(search_fn);
+            engine.set_hnsw_search_fn(Box::new(move |idx, query, k, ef| f(idx, query, k, ef)));
+        }
     }
 
     /// Get the number of relations in this snapshot

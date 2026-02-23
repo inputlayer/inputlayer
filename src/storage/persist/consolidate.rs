@@ -271,6 +271,67 @@ mod tests {
     }
 
     #[test]
+    fn test_consolidate_to_current_full_cancel() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::delete(Tuple::from_pair(1, 2), 20),
+        ];
+        consolidate_to_current(&mut updates);
+        assert!(
+            updates.is_empty(),
+            "Insert + delete at different times should cancel to zero"
+        );
+    }
+
+    #[test]
+    fn test_consolidate_preserves_negative_multiplicity() {
+        let updates = vec![Update {
+            data: Tuple::from_pair(1, 2),
+            time: 10,
+            diff: -3,
+        }];
+        let with_mult = to_tuples_with_multiplicity(&updates);
+        assert_eq!(with_mult.len(), 1);
+        assert_eq!(with_mult[0].1, -3);
+        // to_tuples should filter this out since diff < 0
+        let tuples = to_tuples(&updates);
+        assert!(tuples.is_empty());
+    }
+
+    #[test]
+    fn test_consolidate_large_batch() {
+        let mut updates: Vec<Update> = (0..1000)
+            .map(|i| Update::insert(Tuple::from_pair(i % 10, i), 10))
+            .collect();
+        consolidate(&mut updates);
+        // All have unique data (different i values), so all 1000 should remain
+        assert_eq!(updates.len(), 1000);
+    }
+
+    #[test]
+    fn test_consolidate_idempotent() {
+        let mut updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 10),
+        ];
+        consolidate(&mut updates);
+        let first_pass = updates.clone();
+        consolidate(&mut updates);
+        assert_eq!(updates, first_pass, "Consolidation should be idempotent");
+    }
+
+    #[test]
+    fn test_filter_since_zero() {
+        let updates = vec![
+            Update::insert(Tuple::from_pair(1, 2), 0),
+            Update::insert(Tuple::from_pair(3, 4), 5),
+        ];
+        let filtered = filter_since(&updates, 0);
+        assert_eq!(filtered.len(), 2, "Since 0 should include all updates");
+    }
+
+    #[test]
     fn test_to_tuples_returns_tuple_type() {
         let updates = vec![
             Update {
