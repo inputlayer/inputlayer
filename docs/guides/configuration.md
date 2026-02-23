@@ -70,6 +70,12 @@ durability_mode = "immediate"
 # Compaction window: retain this many historical versions (0 = keep all)
 compaction_window = 0
 
+# Auto-compact when a shard accumulates this many batch files (0 = disabled)
+auto_compact_threshold = 10
+
+# How often to check for auto-compaction, in seconds (0 = disabled)
+auto_compact_interval_secs = 300
+
 # -----------------------------------------------------------------------------
 # Performance Tuning
 # -----------------------------------------------------------------------------
@@ -85,6 +91,12 @@ async_io = true
 
 # Number of worker threads (0 = use all CPU cores)
 num_threads = 0
+
+# Maximum rows returned per query result (0 = unlimited)
+max_result_rows = 100000
+
+# Maximum query cost budget (0 = unlimited)
+max_query_cost = 0
 
 # =============================================================================
 # QUERY OPTIMIZATION
@@ -148,6 +160,19 @@ static_dir = "./gui/dist"
 
 # Session timeout in seconds (default: 24 hours)
 session_timeout_secs = 86400
+
+# =============================================================================
+# RATE LIMITING
+# =============================================================================
+[http.rate_limit]
+# Maximum WebSocket messages per second per connection (0 = unlimited)
+ws_max_messages_per_sec = 1000
+
+# Maximum HTTP requests per second per IP address (0 = unlimited)
+per_ip_max_rps = 0
+
+# Notification ring buffer size for reconnect replay
+notification_buffer_size = 4096
 ```
 
 ## Environment Variables
@@ -170,6 +195,12 @@ export INPUTLAYER_HTTP__PORT=9090
 # Authentication
 export INPUTLAYER_ADMIN_PASSWORD=your-secure-password   # Admin password (first boot only)
 export INPUTLAYER_API_KEY=your-api-key                  # CLI client authentication
+
+# Performance limits
+export INPUTLAYER_STORAGE__PERFORMANCE__MAX_RESULT_ROWS=50000
+
+# Rate limiting
+export INPUTLAYER_HTTP__RATE_LIMIT__WS_MAX_MESSAGES_PER_SEC=500
 
 # Logging
 export INPUTLAYER_LOGGING__LEVEL=debug
@@ -225,6 +256,10 @@ port = 8080
 [http.auth]
 # Set a known admin password for production deployments
 bootstrap_admin_password = "your-secure-password-here"
+
+[http.rate_limit]
+ws_max_messages_per_sec = 500
+per_ip_max_rps = 100
 ```
 
 ### High-Throughput Ingestion
