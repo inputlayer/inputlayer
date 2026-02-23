@@ -15,6 +15,7 @@ pub enum MetaCommand {
     // Relation commands
     RelList,
     RelDescribe(String),
+    RelDrop(String),
 
     // Rule commands (persistent derived relations)
     RuleList,
@@ -199,6 +200,12 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
 fn parse_rel_command(parts: &[&str]) -> Result<MetaCommand, String> {
     if parts.len() == 1 {
         Ok(MetaCommand::RelList)
+    } else if parts[1].to_lowercase() == "drop" {
+        if parts.len() < 3 {
+            Err("Usage: .rel drop <name>".to_string())
+        } else {
+            Ok(MetaCommand::RelDrop(parts[2].to_string()))
+        }
     } else {
         Ok(MetaCommand::RelDescribe(parts[1].to_string()))
     }

@@ -829,6 +829,27 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Failed to drop rule: {e}")))
     }
 
+    /// Drop a relation entirely from a specific knowledge graph.
+    ///
+    /// Removes all data, metadata, schema, and any associated rules.
+    /// Also cleans up the persist shard for the relation.
+    pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<()> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let mut db = db.write();
+        db.drop_relation(name)
+            .map_err(|e| StorageError::Other(format!("Failed to drop relation: {e}")))?;
+
+        // Clean up persist shard (fire-and-forget — WAL + batch files)
+        let shard = format!("{kg}:{name}");
+        let _ = self.persist.delete_shard(&shard);
+
+        Ok(())
+    }
+
     /// Drop all rules matching a prefix from a specific knowledge graph.
     /// Returns the list of dropped rule names.
     pub fn drop_rules_by_prefix_in(&self, kg: &str, prefix: &str) -> StorageResult<Vec<String>> {
@@ -2348,6 +2369,39 @@ impl KnowledgeGraph {
             if let Err(e) = dd.remove_rule(name) {
                 eprintln!("Warning: failed to remove rule from IncrementalEngine: {e}");
             }
+        }
+
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// Drop a relation entirely: data, metadata, schema, and any associated rules.
+    pub fn drop_relation(&mut self, name: &str) -> Result<(), String> {
+        // Check the relation exists (in metadata or as data)
+        let has_metadata = self.metadata.relations.contains_key(name);
+        let has_data = self.engine.input_tuples.contains_key(name);
+        let has_rule = self.rule_catalog.exists(name);
+        let has_schema = self.schema_catalog.get(name).is_some();
+
+        if !has_metadata && !has_data && !has_rule && !has_schema {
+            return Err(format!("Relation '{name}' not found."));
+        }
+
+        // 1. Remove data from engine
+        self.engine.input_tuples.remove(name);
+
+        // 2. Remove from metadata
+        self.metadata.relations.remove(name);
+
+        // 3. Remove schema
+        self.schema_catalog.remove(name);
+
+        // 4. Drop any associated rules (ignore error if no rules)
+        let _ = self.rule_catalog.drop(name);
+
+        // 5. Remove from IncrementalEngine (both base data and rule)
+        if let Some(ref dd) = self.incremental {
+            let _ = dd.remove_rule(name);
         }
 
         self.publish_snapshot();
