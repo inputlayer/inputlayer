@@ -356,8 +356,22 @@ pub struct DatalogEngine {
     /// Maximum result rows returned per query (0 = unlimited)
     max_result_rows: usize,
 
+    /// Maximum query cost score (0 = unlimited). Queries exceeding this
+    /// are rejected before DD execution.
+    max_query_cost: u64,
+
     /// Arc-wrapped shared input data (set by snapshot for zero-copy query execution)
     shared_input: Option<Arc<HashMap<String, Vec<Tuple>>>>,
+
+    /// Optional HNSW search function for resolving HnswScan IR nodes before DD execution.
+    /// Signature: (index_name, query_vector, k, ef_search) -> Vec<(tuple_id, distance)>
+    hnsw_search_fn: Option<
+        Box<
+            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 impl DatalogEngine {
@@ -375,7 +389,9 @@ impl DatalogEngine {
             semiring_annotations: Vec::new(),
             num_workers: 1,
             max_result_rows: 0,
+            max_query_cost: 0,
             shared_input: None,
+            hnsw_search_fn: None,
         }
     }
 
@@ -393,7 +409,9 @@ impl DatalogEngine {
             semiring_annotations: Vec::new(),
             num_workers: 1,
             max_result_rows: 0,
+            max_query_cost: 0,
             shared_input: None,
+            hnsw_search_fn: None,
         }
     }
 
@@ -432,9 +450,29 @@ impl DatalogEngine {
         self.max_result_rows = max;
     }
 
+    /// Set maximum query cost score (0 = unlimited)
+    pub fn set_max_query_cost(&mut self, max: u64) {
+        self.max_query_cost = max;
+    }
+
     /// Set shared input data from Arc (avoids deep clone from snapshot)
     pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
         self.shared_input = Some(data);
+    }
+
+    /// Set the HNSW search callback for resolving nearest-neighbor queries.
+    ///
+    /// The callback is invoked for each `HnswScan` IR node during query execution.
+    /// Results are injected as base facts before DD computation begins.
+    pub fn set_hnsw_search_fn(
+        &mut self,
+        f: Box<
+            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
+                + Send
+                + Sync,
+        >,
+    ) {
+        self.hnsw_search_fn = Some(f);
     }
 
     /// Get the catalog
@@ -1185,6 +1223,136 @@ impl DatalogEngine {
         }
     }
 
+    /// Resolve all HnswScan nodes in the IR tree.
+    ///
+    /// For each HnswScan, executes the HNSW search via the registered callback,
+    /// injects the results as a synthetic base relation, and replaces the
+    /// HnswScan node with a Scan over that relation.
+    fn resolve_hnsw_scans(&mut self) -> Result<(), String> {
+        let search_fn = match &self.hnsw_search_fn {
+            Some(f) => f,
+            None => {
+                // No search function registered — check if any HnswScan nodes exist
+                let has_hnsw = self.ir_nodes.iter().any(Self::contains_hnsw_scan);
+                if has_hnsw {
+                    return Err(
+                        "Query contains hnsw_nearest() but no HNSW index is available".into(),
+                    );
+                }
+                return Ok(());
+            }
+        };
+
+        let mut counter = 0usize;
+        for ir in &mut self.ir_nodes {
+            Self::resolve_hnsw_in_node(ir, search_fn, &mut self.input_tuples, &mut counter)?;
+        }
+
+        // Update shared_input if we injected any results
+        if counter > 0 {
+            if let Some(ref mut shared) = self.shared_input {
+                // Re-create shared input with the new synthetic relations
+                *shared = Arc::new(self.input_tuples.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check if an IR tree contains any HnswScan nodes
+    fn contains_hnsw_scan(ir: &IRNode) -> bool {
+        match ir {
+            IRNode::HnswScan { .. } => true,
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::Aggregate { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => Self::contains_hnsw_scan(input),
+            IRNode::Join { left, right, .. }
+            | IRNode::Antijoin { left, right, .. }
+            | IRNode::JoinFlatMap { left, right, .. } => {
+                Self::contains_hnsw_scan(left) || Self::contains_hnsw_scan(right)
+            }
+            IRNode::Union { inputs } => inputs.iter().any(Self::contains_hnsw_scan),
+            IRNode::Scan { .. } => false,
+        }
+    }
+
+    /// Recursively resolve HnswScan nodes within an IR tree.
+    ///
+    /// Replaces each HnswScan with a Scan over a synthetic relation containing
+    /// the search results (id, distance) as base tuples.
+    fn resolve_hnsw_in_node(
+        ir: &mut IRNode,
+        search_fn: &dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>,
+        input_tuples: &mut HashMap<String, Vec<Tuple>>,
+        counter: &mut usize,
+    ) -> Result<(), String> {
+        match ir {
+            IRNode::HnswScan {
+                index_name,
+                query,
+                k,
+                ef_search,
+                output_schema,
+            } => {
+                // Extract query vector from the IR expression
+                let query_vec = match query {
+                    ir::IRExpression::VectorLiteral(v) => v.clone(),
+                    _ => {
+                        return Err(
+                            "hnsw_nearest: only literal vector queries are supported".into()
+                        );
+                    }
+                };
+
+                // Execute the HNSW search
+                let results = search_fn(index_name, &query_vec, *k, *ef_search)?;
+
+                // Convert results to tuples and inject as a synthetic relation
+                let synthetic_name = format!("__hnsw_result_{counter}__");
+                *counter += 1;
+
+                let tuples: Vec<Tuple> = results
+                    .into_iter()
+                    .map(|(id, dist)| Tuple::new(vec![Value::Int64(id), Value::Float64(dist)]))
+                    .collect();
+
+                input_tuples.insert(synthetic_name.clone(), tuples);
+
+                // Replace HnswScan with Scan over the synthetic relation
+                *ir = IRNode::Scan {
+                    relation: synthetic_name,
+                    schema: output_schema.clone(),
+                };
+
+                Ok(())
+            }
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::Aggregate { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => {
+                Self::resolve_hnsw_in_node(input, search_fn, input_tuples, counter)
+            }
+            IRNode::Join { left, right, .. }
+            | IRNode::Antijoin { left, right, .. }
+            | IRNode::JoinFlatMap { left, right, .. } => {
+                Self::resolve_hnsw_in_node(left, search_fn, input_tuples, counter)?;
+                Self::resolve_hnsw_in_node(right, search_fn, input_tuples, counter)
+            }
+            IRNode::Union { inputs } => {
+                for input in inputs {
+                    Self::resolve_hnsw_in_node(input, search_fn, input_tuples, counter)?;
+                }
+                Ok(())
+            }
+            IRNode::Scan { .. } => Ok(()),
+        }
+    }
+
     /// Execute the full pipeline returning tuples of arbitrary arity
     ///
     /// This is the main entry point for queries that may return non-binary tuples.
@@ -1240,6 +1408,34 @@ impl DatalogEngine {
 
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
+        }
+
+        // Resolve HNSW nearest-neighbor scans before DD execution (#20).
+        // HnswScan nodes are replaced with Scan nodes over injected result relations.
+        self.resolve_hnsw_scans()?;
+
+        // Query cost check (#47): reject queries exceeding configured cost threshold
+        if self.max_query_cost > 0 {
+            let total_cost: u64 = self.ir_nodes.iter().map(IRNode::estimate_cost).sum();
+            // Add recursion multiplier for recursive queries
+            let recursion_multiplier = recursive_info.iter().filter(|r| r.is_some()).count() as u64;
+            let adjusted_cost = if recursion_multiplier > 0 {
+                total_cost.saturating_mul(10 * recursion_multiplier)
+            } else {
+                total_cost
+            };
+            if adjusted_cost > self.max_query_cost {
+                return Err(format!(
+                    "Query too complex: estimated cost {} exceeds maximum {} (reduce joins, recursion, or aggregations)",
+                    adjusted_cost, self.max_query_cost
+                ));
+            }
+            info!(
+                source_len,
+                query_cost = adjusted_cost,
+                max_cost = self.max_query_cost,
+                "engine_cost_check_pass"
+            );
         }
 
         // Execute shared views first (from subplan sharing optimization)
@@ -2417,5 +2613,124 @@ mod tests {
         engine.add_fact("edge", vec![(1, 2)]);
         let trace = engine.explain("result(X, Y) <- edge(X, Y)").unwrap();
         assert!(trace.ast.is_some());
+    }
+
+    // === HNSW Datalog integration tests (#20) ===
+
+    #[test]
+    fn test_hnsw_nearest_query_with_search_fn() {
+        let mut engine = DatalogEngine::new();
+
+        // Register a mock HNSW search function
+        engine.set_hnsw_search_fn(Box::new(
+            |index_name: &str, _query: &[f32], k: usize, _ef: Option<usize>| {
+                assert_eq!(index_name, "test_idx");
+                // Return k fake results
+                Ok((0..k as i64).map(|i| (i + 1, (i as f64) * 0.1)).collect())
+            },
+        ));
+
+        let results = engine
+            .execute_tuples(
+                r#"result(Id, Dist) <- hnsw_nearest("test_idx", [1.0, 2.0], 3, Id, Dist)"#,
+            )
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        // Check first result: id=1, dist=0.0
+        assert_eq!(results[0].get(0), Some(&Value::Int64(1)));
+        assert_eq!(results[0].get(1), Some(&Value::Float64(0.0)));
+        // Check third result: id=3, dist=0.2
+        assert_eq!(results[2].get(0), Some(&Value::Int64(3)));
+        assert_eq!(results[2].get(1), Some(&Value::Float64(0.2)));
+    }
+
+    #[test]
+    fn test_hnsw_nearest_joins_with_base_relation() {
+        let mut engine = DatalogEngine::new();
+
+        // Base relation: doc(id, title)
+        engine.add_tuple(
+            "doc",
+            Tuple::new(vec![Value::Int64(1), Value::string("alpha")]),
+        );
+        engine.add_tuple(
+            "doc",
+            Tuple::new(vec![Value::Int64(2), Value::string("beta")]),
+        );
+        engine.add_tuple(
+            "doc",
+            Tuple::new(vec![Value::Int64(3), Value::string("gamma")]),
+        );
+
+        // Mock HNSW returns ids 1 and 3
+        engine.set_hnsw_search_fn(Box::new(
+            |_idx: &str, _q: &[f32], _k: usize, _ef: Option<usize>| {
+                Ok(vec![(1_i64, 0.1), (3_i64, 0.3)])
+            },
+        ));
+
+        // Query joins HNSW results with doc table
+        let results = engine
+            .execute_tuples(
+                r#"result(Title, Dist) <- hnsw_nearest("idx", [0.5, 0.5], 2, Id, Dist), doc(Id, Title)"#,
+            )
+            .unwrap();
+
+        // Should match doc ids 1 and 3
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_hnsw_nearest_no_search_fn_errors() {
+        let mut engine = DatalogEngine::new();
+
+        // No HNSW search function registered — should error
+        let result =
+            engine.execute_tuples(r#"result(Id, Dist) <- hnsw_nearest("idx", [1.0], 3, Id, Dist)"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("hnsw_nearest"));
+    }
+
+    #[test]
+    fn test_hnsw_nearest_index_not_found_errors() {
+        let mut engine = DatalogEngine::new();
+
+        // Search function that returns error for unknown index
+        engine.set_hnsw_search_fn(Box::new(
+            |index_name: &str, _q: &[f32], _k: usize, _ef: Option<usize>| {
+                Err(format!("Index '{index_name}' not found"))
+            },
+        ));
+
+        let result = engine.execute_tuples(
+            r#"result(Id, Dist) <- hnsw_nearest("nonexistent", [1.0], 3, Id, Dist)"#,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_hnsw_nearest_empty_results() {
+        let mut engine = DatalogEngine::new();
+
+        engine.set_hnsw_search_fn(Box::new(
+            |_idx: &str, _q: &[f32], _k: usize, _ef: Option<usize>| Ok(vec![]),
+        ));
+
+        let results = engine
+            .execute_tuples(r#"result(Id, Dist) <- hnsw_nearest("idx", [1.0, 2.0], 5, Id, Dist)"#)
+            .unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_no_hnsw_in_query_no_search_fn_is_ok() {
+        let mut engine = DatalogEngine::new();
+        engine.add_fact("edge", vec![(1, 2), (2, 3)]);
+
+        // No HNSW search function, but query doesn't use hnsw_nearest — should be fine
+        let results = engine.execute_tuples("result(X, Y) <- edge(X, Y)").unwrap();
+        assert_eq!(results.len(), 2);
     }
 }

@@ -453,6 +453,40 @@ impl IRNode {
         }
     }
 
+    /// Estimate the computational cost of executing this IR subtree.
+    ///
+    /// Cost is a unitless score that approximates relative computational
+    /// complexity. Higher costs indicate more expensive operations:
+    /// - Scan: 10 (base cost of reading a relation)
+    /// - Filter/Map/Distinct: pass-through (child cost + small overhead)
+    /// - Join: product of child costs (cartesian product risk)
+    /// - Aggregate: 2× child cost (hash grouping)
+    /// - Antijoin: sum of child costs + overhead
+    /// - HnswScan: fixed cost based on k
+    ///
+    /// Returns 0 for trivially cheap operations.
+    pub fn estimate_cost(&self) -> u64 {
+        match self {
+            IRNode::Scan { .. } => 10,
+            IRNode::Map { input, .. } | IRNode::FlatMap { input, .. } => input.estimate_cost() + 1,
+            IRNode::Filter { input, .. } => input.estimate_cost() + 1,
+            IRNode::Distinct { input } => input.estimate_cost() + 5,
+            IRNode::Compute { input, .. } => input.estimate_cost() + 1,
+            IRNode::Join { left, right, .. } | IRNode::JoinFlatMap { left, right, .. } => {
+                let lc = left.estimate_cost();
+                let rc = right.estimate_cost();
+                // Joins multiply costs (worst case: cartesian product)
+                lc.saturating_mul(rc).max(lc + rc)
+            }
+            IRNode::Antijoin { left, right, .. } => {
+                left.estimate_cost() + right.estimate_cost() + 10
+            }
+            IRNode::Union { inputs } => inputs.iter().map(IRNode::estimate_cost).sum::<u64>() + 1,
+            IRNode::Aggregate { input, .. } => input.estimate_cost().saturating_mul(2),
+            IRNode::HnswScan { k, .. } => (*k as u64) * 10 + 50,
+        }
+    }
+
     /// Pretty print the IR tree for debugging
     pub fn pretty_print(&self, indent: usize) -> String {
         let prefix = "  ".repeat(indent);
@@ -2059,5 +2093,143 @@ mod tests {
 
         assert!(!output_0.starts_with("  "));
         assert!(output_2.starts_with("    ")); // 2 * 2 spaces
+    }
+
+    // === Query cost estimation tests (#47) ===
+
+    #[test]
+    fn test_cost_scan() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        assert_eq!(scan.estimate_cost(), 10);
+    }
+
+    #[test]
+    fn test_cost_filter_marginal() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let filtered = IRNode::Filter {
+            input: Box::new(scan),
+            predicate: Predicate::ColumnEqConst(0, 1),
+        };
+        assert_eq!(filtered.estimate_cost(), 11); // scan(10) + 1
+    }
+
+    #[test]
+    fn test_cost_join_multiplicative() {
+        let left = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let right = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["y".to_string()],
+        };
+        let join = IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        // 10 * 10 = 100
+        assert_eq!(join.estimate_cost(), 100);
+    }
+
+    #[test]
+    fn test_cost_triple_join() {
+        let a = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let b = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["y".to_string()],
+        };
+        let c = IRNode::Scan {
+            relation: "c".to_string(),
+            schema: vec!["z".to_string()],
+        };
+        let join_ab = IRNode::Join {
+            left: Box::new(a),
+            right: Box::new(b),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let join_abc = IRNode::Join {
+            left: Box::new(join_ab),
+            right: Box::new(c),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+        };
+        // (10*10) * 10 = 1000
+        assert_eq!(join_abc.estimate_cost(), 1000);
+    }
+
+    #[test]
+    fn test_cost_aggregate() {
+        let scan = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        let agg = IRNode::Aggregate {
+            input: Box::new(scan),
+            group_by: vec![0],
+            aggregations: vec![(AggregateFunction::Count, 1)],
+            output_schema: vec!["x".to_string(), "count".to_string()],
+        };
+        assert_eq!(agg.estimate_cost(), 20); // 10 * 2
+    }
+
+    #[test]
+    fn test_cost_antijoin() {
+        let left = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let right = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["y".to_string()],
+        };
+        let antijoin = IRNode::Antijoin {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![0],
+            right_keys: vec![0],
+            output_schema: vec!["x".to_string()],
+        };
+        assert_eq!(antijoin.estimate_cost(), 30); // 10 + 10 + 10
+    }
+
+    #[test]
+    fn test_cost_union() {
+        let a = IRNode::Scan {
+            relation: "a".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let b = IRNode::Scan {
+            relation: "b".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        let union = IRNode::Union { inputs: vec![a, b] };
+        assert_eq!(union.estimate_cost(), 21); // 10 + 10 + 1
+    }
+
+    #[test]
+    fn test_cost_hnsw_scan() {
+        let hnsw = IRNode::HnswScan {
+            index_name: "idx".to_string(),
+            query: IRExpression::Column(0),
+            k: 10,
+            ef_search: None,
+            output_schema: vec!["id".to_string(), "dist".to_string()],
+        };
+        assert_eq!(hnsw.estimate_cost(), 150); // 10 * 10 + 50
     }
 }
