@@ -79,6 +79,11 @@ impl PersistWal {
         self.append_inner(shard, update, false)
     }
 
+    /// Compute CRC32 checksum of a byte slice and return as 8-char hex string.
+    fn crc32_hex(data: &[u8]) -> String {
+        format!("{:08x}", crc32fast::hash(data))
+    }
+
     /// Internal append implementation
     fn append_inner(&mut self, shard: &str, update: &Update, flush: bool) -> StorageResult<()> {
         let entry = WalEntry {
@@ -90,7 +95,9 @@ impl PersistWal {
         let json = serde_json::to_string(&entry)
             .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
 
-        writeln!(writer, "{json}")?;
+        // Write format: "<crc32hex>:<json>"
+        let checksum = Self::crc32_hex(json.as_bytes());
+        writeln!(writer, "{checksum}:{json}")?;
         if flush {
             writer.flush()?;
             // sync_all() forces data to disk (not just OS page cache).
@@ -159,14 +166,45 @@ impl PersistWal {
 
         let mut skipped = 0usize;
         for (i, line) in lines.iter().enumerate() {
-            match serde_json::from_str::<WalEntry>(line) {
+            // Parse line format: "<crc32hex>:<json>" (new) or plain "<json>" (legacy)
+            let (json_str, expected_crc) = if line.len() > 9 && line.as_bytes()[8] == b':' {
+                let (hex_part, rest) = line.split_at(8);
+                let json_part = &rest[1..]; // skip the ':'
+                                            // Validate hex characters
+                if hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+                    (json_part, Some(hex_part))
+                } else {
+                    // Not a checksum prefix — treat whole line as legacy JSON
+                    (line.as_str(), None)
+                }
+            } else {
+                (line.as_str(), None)
+            };
+
+            // Verify CRC32 if present
+            if let Some(expected) = expected_crc {
+                let actual = Self::crc32_hex(json_str.as_bytes());
+                if actual != expected {
+                    tracing::warn!(
+                        line = i + 1,
+                        file = %self.current_file.display(),
+                        expected_crc = expected,
+                        actual_crc = %actual,
+                        "Skipping WAL entry with CRC32 mismatch (bit-rot or corruption)"
+                    );
+                    skipped += 1;
+                    continue;
+                }
+            }
+
+            match serde_json::from_str::<WalEntry>(json_str) {
                 Ok(entry) => entries.push(entry),
                 Err(e) => {
-                    eprintln!(
-                        "[wal] WARNING: Skipping corrupt WAL entry on line {} of {}: {}",
-                        i + 1,
-                        self.current_file.display(),
-                        e
+                    tracing::warn!(
+                        line = i + 1,
+                        file = %self.current_file.display(),
+                        error = %e,
+                        "Skipping corrupt WAL entry"
                     );
                     skipped += 1;
                 }
@@ -174,10 +212,11 @@ impl PersistWal {
         }
 
         if skipped > 0 {
-            eprintln!(
-                "[wal] WARNING: Skipped {skipped} corrupt WAL entry/entries in {}. Recovered {} valid entries.",
-                self.current_file.display(),
-                entries.len()
+            tracing::warn!(
+                skipped,
+                recovered = entries.len(),
+                file = %self.current_file.display(),
+                "WAL recovery: skipped corrupt entries — possible data loss"
             );
         }
 
@@ -259,7 +298,8 @@ impl PersistWal {
             for entry in &surviving {
                 let json = serde_json::to_string(entry)
                     .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
-                writeln!(writer, "{json}")?;
+                let checksum = Self::crc32_hex(json.as_bytes());
+                writeln!(writer, "{checksum}:{json}")?;
             }
             writer.flush()?;
             writer.get_ref().sync_all()?;
@@ -747,6 +787,79 @@ mod tests {
             archived.is_empty(),
             "clear() should not create .archived files"
         );
+    }
+
+    /// Verify CRC32 checksum validation: bit-flipped entry should be skipped.
+    #[test]
+    fn test_wal_crc32_detects_bitrot() {
+        let temp = TempDir::new().unwrap();
+        let wal_dir = temp.path().to_path_buf();
+        let wal_file = wal_dir.join("current.wal");
+
+        // Write valid entries with checksums
+        {
+            let mut wal = PersistWal::new(wal_dir.clone()).unwrap();
+            wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+                .unwrap();
+            wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
+                .unwrap();
+        }
+
+        // Corrupt the JSON part of the first line (flip a character) while keeping the CRC intact
+        {
+            let content = fs::read_to_string(&wal_file).unwrap();
+            let mut line_vec: Vec<&str> = content.lines().collect();
+            assert!(line_vec.len() >= 2);
+            // Replace the first line with same CRC but corrupted JSON
+            let first_line = line_vec[0].to_string();
+            let corrupted = first_line.replacen("edge", "XXXX", 1);
+            line_vec[0] = &corrupted;
+            fs::write(&wal_file, line_vec.join("\n") + "\n").unwrap();
+        }
+
+        // Recovery should detect CRC mismatch and skip the corrupted entry
+        let wal = PersistWal::new(wal_dir).unwrap();
+        let entries = wal.read_all().unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            "Corrupted entry should be skipped, only 1 valid entry remains"
+        );
+        assert_eq!(entries[0].shard, "db:node");
+    }
+
+    /// Verify backward compatibility: legacy lines without CRC prefix are accepted.
+    #[test]
+    fn test_wal_legacy_lines_without_crc() {
+        let temp = TempDir::new().unwrap();
+        let wal_dir = temp.path().to_path_buf();
+        let wal_file = wal_dir.join("current.wal");
+        fs::create_dir_all(&wal_dir).unwrap();
+
+        // Write a legacy-format line (plain JSON, no CRC prefix)
+        {
+            use std::io::Write;
+            let entry = WalEntry {
+                shard: "db:legacy".to_string(),
+                update: Update::insert(Tuple::from_pair(1, 2), 10),
+            };
+            let json = serde_json::to_string(&entry).unwrap();
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .open(&wal_file)
+                .unwrap();
+            writeln!(file, "{json}").unwrap();
+        }
+
+        let wal = PersistWal::new(wal_dir).unwrap();
+        let entries = wal.read_all().unwrap();
+        assert_eq!(
+            entries.len(),
+            1,
+            "Legacy line without CRC should be accepted"
+        );
+        assert_eq!(entries[0].shard, "db:legacy");
     }
 
     /// P0-1: Verify sync() calls fsync (data readable from new instance).

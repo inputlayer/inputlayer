@@ -190,6 +190,15 @@ impl FilePersist {
                     StorageError::Other(format!("Failed to parse shard metadata: {e}"))
                 })?;
 
+                // Validate format version
+                if meta.version > batch::SHARD_META_VERSION {
+                    return Err(StorageError::Other(format!(
+                        "Shard '{}' has format version {} but this server only supports up to version {}. \
+                         Please upgrade the server or downgrade the data.",
+                        meta.name, meta.version, batch::SHARD_META_VERSION
+                    )));
+                }
+
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
                     if let Ok(id) = batch.id.parse::<u64>() {
@@ -198,6 +207,28 @@ impl FilePersist {
                             self.next_batch_id.store(id + 1, Ordering::Relaxed);
                         }
                     }
+                }
+
+                // Validate batch files exist and are readable (#6)
+                let mut valid_batches = Vec::new();
+                let mut removed_count = 0usize;
+                for batch_ref in &meta.batches {
+                    if batch_ref.path.exists() {
+                        valid_batches.push(batch_ref.clone());
+                    } else {
+                        tracing::warn!(
+                            shard = %meta.name,
+                            batch_id = %batch_ref.id,
+                            path = %batch_ref.path.display(),
+                            "Batch file missing — removing stale reference"
+                        );
+                        removed_count += 1;
+                    }
+                }
+                let mut meta = meta;
+                if removed_count > 0 {
+                    meta.batches = valid_batches;
+                    meta.total_updates = meta.batches.iter().map(|b| b.len).sum();
                 }
 
                 shards.insert(
@@ -305,10 +336,16 @@ impl FilePersist {
         }
 
         // Sync to disk before rename
-        fs::File::open(&tmp_path)?.sync_all()?;
+        if let Err(e) = fs::File::open(&tmp_path).and_then(|f| f.sync_all()) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
 
         // Atomic rename
-        fs::rename(&tmp_path, &final_path)?;
+        if let Err(e) = fs::rename(&tmp_path, &final_path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
 
         Ok(())
     }
@@ -700,19 +737,35 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
     // is never left in a corrupt half-written state.
     let tmp_path = path.with_extension("parquet.tmp");
 
-    let file = fs::File::create(&tmp_path)?;
+    let file = match fs::File::create(&tmp_path) {
+        Ok(f) => f,
+        Err(e) => {
+            // ENOSPC or permission error — no temp file to clean up
+            return Err(StorageError::Other(format!(
+                "Failed to create batch file '{}': {e}",
+                tmp_path.display()
+            )));
+        }
+    };
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
         .build();
 
-    let mut writer =
-        ArrowWriter::try_new(file, full_schema, Some(props)).map_err(StorageError::Parquet)?;
+    // Helper: clean up temp file on any write error (ENOSPC, etc.)
+    let write_result = (|| -> StorageResult<()> {
+        let mut writer =
+            ArrowWriter::try_new(file, full_schema, Some(props)).map_err(StorageError::Parquet)?;
+        writer.write(&batch).map_err(StorageError::Parquet)?;
+        writer.close().map_err(StorageError::Parquet)?;
+        fs::File::open(&tmp_path)?.sync_all()?;
+        Ok(())
+    })();
 
-    writer.write(&batch).map_err(StorageError::Parquet)?;
-    writer.close().map_err(StorageError::Parquet)?;
-
-    // Ensure data is durably written to disk before rename
-    fs::File::open(&tmp_path)?.sync_all()?;
+    if let Err(e) = write_result {
+        // Clean up partial temp file so it doesn't consume disk space
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
 
     // Atomic rename (POSIX guarantees atomicity)
     fs::rename(&tmp_path, path)?;
