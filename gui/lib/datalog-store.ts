@@ -127,6 +127,8 @@ interface DatalogStore {
   explainQuery: (query: string) => Promise<string>
   createKnowledgeGraph: (name: string) => Promise<void>
   deleteKnowledgeGraph: (name: string) => Promise<void>
+  deleteRelation: (name: string) => Promise<void>
+  dropRule: (name: string, isSession: boolean) => Promise<void>
 
   // Persistence and refresh
   initFromStorage: () => Promise<void>
@@ -852,5 +854,18 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
     } else {
       set({ knowledgeGraphs })
     }
+  },
+
+  deleteRelation: async (name: string): Promise<void> => {
+    if (!wsClient) throw new Error("Not connected")
+    await wsClient.execute(`.rel drop ${name}`)
+    await get().refreshCurrentKnowledgeGraph()
+  },
+
+  dropRule: async (name: string, isSession: boolean): Promise<void> => {
+    if (!wsClient) throw new Error("Not connected")
+    const command = isSession ? `.session drop ${name}` : `.rule drop ${name}`
+    await wsClient.execute(command)
+    await get().refreshCurrentKnowledgeGraph()
   },
 }))

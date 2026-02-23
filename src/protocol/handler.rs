@@ -2242,6 +2242,16 @@ impl QueryJob {
                                         }
                                     }
 
+                                    MetaCommand::RelDrop(name) => {
+                                        match storage.drop_relation_in(kg, &name) {
+                                            Ok(()) => {
+                                                messages
+                                                    .push(format!("Relation '{name}' dropped."));
+                                            }
+                                            Err(e) => messages.push(format!("Error: {e}")),
+                                        }
+                                    }
+
                                     // === Rule commands ===
                                     MetaCommand::RuleList => match storage.list_rules_in(kg) {
                                         Ok(rules) => {
