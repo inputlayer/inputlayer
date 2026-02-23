@@ -65,6 +65,16 @@ fn is_query_cancelled() -> bool {
     })
 }
 
+/// Signal cancellation on the current thread's cancel flag.
+/// Used by max_result_rows enforcement to stop DD computation early (#2).
+fn signal_query_cancel() {
+    QUERY_CANCEL.with(|cell| {
+        if let Some(flag) = cell.borrow().as_ref() {
+            flag.store(true, Ordering::Relaxed);
+        }
+    });
+}
+
 /// Extract a human-readable message from a panic payload.
 fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
@@ -251,6 +261,9 @@ impl CodeGenerator {
                             let mut guard = results_clone.lock();
                             if result_limit == 0 || guard.len() < result_limit {
                                 guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
                             }
                         })
                         .probe_with(&mut probe);
@@ -283,7 +296,11 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            // If we hit the result limit, the cancel was self-triggered — return results
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
         }
 
         // Extract results from Arc<Mutex<>>
@@ -585,6 +602,9 @@ impl CodeGenerator {
                             let mut guard = results_clone.lock();
                             if result_limit == 0 || guard.len() < result_limit {
                                 guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
                             }
                         })
                         .probe_with(&mut probe);
@@ -608,7 +628,11 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            // If we hit the result limit, the cancel was self-triggered — return results
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
         }
 
         // Extract results
@@ -834,6 +858,9 @@ impl CodeGenerator {
                             let mut guard = results_clone.lock();
                             if result_limit == 0 || guard.len() < result_limit {
                                 guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
                             }
                         })
                         .probe_with(&mut probe);
@@ -857,7 +884,11 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            // If we hit the result limit, the cancel was self-triggered — return results
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
         }
 
         let final_results = Arc::try_unwrap(results)
@@ -3417,6 +3448,9 @@ impl CodeGenerator {
                             let mut guard = results_clone.lock();
                             if result_limit == 0 || guard.len() < result_limit {
                                 guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
                             }
                         })
                         .probe_with(&mut probe);
@@ -3440,7 +3474,11 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            // If we hit the result limit, the cancel was self-triggered — return results
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
         }
 
         // Extract results
@@ -3550,6 +3588,9 @@ impl CodeGenerator {
                             let mut guard = results_clone.lock();
                             if result_limit == 0 || guard.len() < result_limit {
                                 guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
                             }
                         })
                         .probe_with(&mut probe);
@@ -3573,7 +3614,11 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            // If we hit the result limit, the cancel was self-triggered — return results
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
         }
 
         // Extract results
@@ -8090,6 +8135,72 @@ mod tests {
         };
         let results = codegen.execute(&ir).unwrap();
         assert_eq!(results.len(), 5, "Should return all 5 when limit is 1000");
+    }
+
+    /// Verify that hitting max_result_rows signals cancel but returns results (not error).
+    /// This tests the early-termination path: DD computation stops when limit is reached.
+    #[test]
+    fn test_result_limit_signals_cancel_returns_ok() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let flag = Arc::new(AtomicBool::new(false));
+        set_query_cancel_flag(Some(Arc::clone(&flag)));
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(5);
+        codegen.add_input(
+            "data".to_string(),
+            (1..=100)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        // Must succeed (not Err) even though cancel flag gets set by limit enforcement
+        let results = codegen.execute(&ir).unwrap();
+        assert_eq!(results.len(), 5, "Should return exactly max_result_rows");
+        // Cancel flag should have been set by the inspect callback
+        assert!(
+            flag.load(Ordering::Relaxed),
+            "Cancel flag should be set when result limit is reached"
+        );
+
+        // Clean up thread-local
+        set_query_cancel_flag(None);
+    }
+
+    /// Verify that timeout cancellation (external) still returns an error even when
+    /// result_limit is set but not yet reached.
+    #[test]
+    fn test_timeout_cancel_returns_error_with_result_limit() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let flag = Arc::new(AtomicBool::new(true)); // pre-cancelled
+        set_query_cancel_flag(Some(Arc::clone(&flag)));
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(10_000); // much higher than data size
+        codegen.add_input(
+            "data".to_string(),
+            (1..=5).map(|i| Tuple::new(vec![Value::Int64(i)])).collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string()],
+        };
+        // 5 results < 10_000 limit → this is a real timeout, should error
+        let result = codegen.execute(&ir);
+        assert!(
+            result.is_err(),
+            "Should return timeout error when cancel is external"
+        );
+        assert!(result.unwrap_err().contains("timeout"));
+
+        set_query_cancel_flag(None);
     }
 
     /// Regression: set_shared_input() provides data via Arc without deep clone.
