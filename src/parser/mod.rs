@@ -147,6 +147,9 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
             let atom_str = part.trim_start_matches('!').trim();
             let atom = parse_atom(atom_str)?;
             body.push(BodyPredicate::Negated(atom));
+        } else if let Some(hnsw) = try_parse_hnsw_nearest(part)? {
+            // HNSW nearest neighbor search
+            body.push(hnsw);
         } else if let Some(comparison) = try_parse_comparison(part)? {
             // Comparison predicate (X = Y, X < 5, etc.)
             body.push(comparison);
@@ -195,14 +198,97 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
     Ok(None)
 }
 
+/// Try to parse an hnsw_nearest() body predicate.
+///
+/// Syntax: `hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar)`
+/// Or with optional ef_search: `hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)`
+///
+/// - `index_name`: string literal naming the HNSW index
+/// - `QueryVec`: variable bound to a vector, or a vector literal `[1.0, 2.0]`
+/// - `K`: integer literal for number of neighbors
+/// - `IdVar`: variable to bind result IDs
+/// - `DistVar`: variable to bind distances
+/// - `EfSearch` (optional): integer literal for ef_search override
+fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
+    let s = s.trim();
+    if !s.starts_with("hnsw_nearest(") || !s.ends_with(')') {
+        return Ok(None);
+    }
+
+    let inner = &s["hnsw_nearest(".len()..s.len() - 1];
+    let args = split_args_respecting_angles(inner);
+
+    if args.len() < 5 || args.len() > 6 {
+        return Err(format!(
+            "hnsw_nearest requires 5-6 arguments (index, query, k, id_var, dist_var [, ef_search]), got {}",
+            args.len()
+        ));
+    }
+
+    // Arg 0: index name (string literal)
+    let index_str = args[0].trim();
+    if !index_str.starts_with('"') || !index_str.ends_with('"') || index_str.len() < 2 {
+        return Err("hnsw_nearest: first argument must be a string literal (index name)".into());
+    }
+    let index_name = index_str[1..index_str.len() - 1].to_string();
+
+    // Arg 1: query vector (variable or vector literal)
+    let query = parse_term(args[1].trim())?;
+
+    // Arg 2: k (integer)
+    let k_str = args[2].trim();
+    let k: usize = k_str
+        .parse()
+        .map_err(|_| format!("hnsw_nearest: k must be a positive integer, got '{k_str}'"))?;
+    if k == 0 {
+        return Err("hnsw_nearest: k must be >= 1".into());
+    }
+
+    // Arg 3: id_var (must be a variable)
+    let id_var = args[3].trim().to_string();
+    if !id_var.starts_with(|c: char| c.is_uppercase()) {
+        return Err(format!(
+            "hnsw_nearest: id_var must be a variable (uppercase), got '{id_var}'"
+        ));
+    }
+
+    // Arg 4: distance_var (must be a variable)
+    let distance_var = args[4].trim().to_string();
+    if !distance_var.starts_with(|c: char| c.is_uppercase()) {
+        return Err(format!(
+            "hnsw_nearest: distance_var must be a variable (uppercase), got '{distance_var}'"
+        ));
+    }
+
+    // Arg 5 (optional): ef_search override
+    let ef_search = if args.len() == 6 {
+        let ef_str = args[5].trim();
+        Some(ef_str.parse::<usize>().map_err(|_| {
+            format!("hnsw_nearest: ef_search must be a positive integer, got '{ef_str}'")
+        })?)
+    } else {
+        None
+    };
+
+    Ok(Some(BodyPredicate::HnswNearest {
+        index_name,
+        query,
+        k,
+        id_var,
+        distance_var,
+        ef_search,
+    }))
+}
+
 /// Find an operator outside parentheses
 fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
     let mut paren_depth: i32 = 0;
-    let chars: Vec<char> = s.chars().collect();
+    // Use char_indices to get byte offsets for safe string slicing
+    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
     let op_chars: Vec<char> = op.chars().collect();
 
-    for i in 0..chars.len() {
-        match chars[i] {
+    for i in 0..char_indices.len() {
+        match char_indices[i].1 {
             '(' => paren_depth += 1,
             // Clamp to 0 to handle malformed input with extra closing parens
             ')' => paren_depth = (paren_depth - 1).max(0),
@@ -213,13 +299,14 @@ fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
             // Check if operator matches at this position
             let mut matches = true;
             for (j, &op_char) in op_chars.iter().enumerate() {
-                if i + j >= chars.len() || chars[i + j] != op_char {
+                if i + j >= char_indices.len() || char_indices[i + j].1 != op_char {
                     matches = false;
                     break;
                 }
             }
             if matches {
-                return Some(i);
+                // Return the byte offset (not char index)
+                return Some(char_indices[i].0);
             }
         }
     }
@@ -619,25 +706,26 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
 
     // Find the rightmost + or - at the top level (outside parentheses)
     // We go right-to-left to ensure left-associativity
+    // Use char_indices for correct byte offsets with multi-byte Unicode
     let mut paren_depth: i32 = 0;
-    let chars: Vec<char> = s.chars().collect();
+    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
 
-    for i in (0..chars.len()).rev() {
-        let ch = chars[i];
+    for ci in (0..char_indices.len()).rev() {
+        let (byte_pos, ch) = char_indices[ci];
         match ch {
             ')' => paren_depth += 1,
             // Clamp to 0 to handle malformed input (iterating backwards)
             '(' => paren_depth = (paren_depth - 1).max(0),
             '+' if paren_depth == 0 => {
                 // Skip scientific notation: e+ or E+
-                if i >= 2
-                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                if ci >= 2
+                    && (char_indices[ci - 1].1 == 'e' || char_indices[ci - 1].1 == 'E')
+                    && (char_indices[ci - 2].1.is_ascii_digit() || char_indices[ci - 2].1 == '.')
                 {
                     continue;
                 }
-                let left = &s[..i];
-                let right = &s[i + 1..];
+                let left = &s[..byte_pos];
+                let right = &s[byte_pos + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Add,
@@ -646,24 +734,24 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
                     });
                 }
             }
-            '-' if paren_depth == 0 && i > 0 => {
+            '-' if paren_depth == 0 && ci > 0 => {
                 // Skip scientific notation: e- or E-
-                if i >= 2
-                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                if ci >= 2
+                    && (char_indices[ci - 1].1 == 'e' || char_indices[ci - 1].1 == 'E')
+                    && (char_indices[ci - 2].1.is_ascii_digit() || char_indices[ci - 2].1 == '.')
                 {
                     continue;
                 }
                 // Check it's binary minus (not unary) by looking for alphanumeric before it
                 // Skip whitespace to find the previous significant character
-                let mut j = i - 1;
-                while j > 0 && chars[j].is_whitespace() {
+                let mut j = ci - 1;
+                while j > 0 && char_indices[j].1.is_whitespace() {
                     j -= 1;
                 }
-                let prev = chars[j];
+                let prev = char_indices[j].1;
                 if prev.is_alphanumeric() || prev == ')' || prev == '_' {
-                    let left = &s[..i];
-                    let right = &s[i + 1..];
+                    let left = &s[..byte_pos];
+                    let right = &s[byte_pos + 1..];
                     if !left.is_empty() && !right.is_empty() {
                         return Ok(ArithExpr::Binary {
                             op: ArithOp::Sub,
@@ -686,17 +774,18 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
     let s = s.trim();
 
     let mut paren_depth: i32 = 0;
-    let chars: Vec<char> = s.chars().collect();
+    // Use char_indices for correct byte offsets with multi-byte Unicode
+    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
 
-    for i in (0..chars.len()).rev() {
-        let ch = chars[i];
+    for ci in (0..char_indices.len()).rev() {
+        let (byte_pos, ch) = char_indices[ci];
         match ch {
             ')' => paren_depth += 1,
             // Clamp to 0 to handle malformed input (iterating backwards)
             '(' => paren_depth = (paren_depth - 1).max(0),
             '*' if paren_depth == 0 => {
-                let left = &s[..i];
-                let right = &s[i + 1..];
+                let left = &s[..byte_pos];
+                let right = &s[byte_pos + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mul,
@@ -706,8 +795,8 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 }
             }
             '/' if paren_depth == 0 => {
-                let left = &s[..i];
-                let right = &s[i + 1..];
+                let left = &s[..byte_pos];
+                let right = &s[byte_pos + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Div,
@@ -717,8 +806,8 @@ fn parse_mul_div(s: &str) -> Result<ArithExpr, String> {
                 }
             }
             '%' if paren_depth == 0 => {
-                let left = &s[..i];
-                let right = &s[i + 1..];
+                let left = &s[..byte_pos];
+                let right = &s[byte_pos + 1..];
                 if !left.is_empty() && !right.is_empty() {
                     return Ok(ArithExpr::Binary {
                         op: ArithOp::Mod,
@@ -1668,5 +1757,90 @@ mod tests {
         assert_eq!(rule.head.args.len(), 2); // Player, top_k<3, Points:desc>
         assert_eq!(rule.head.effective_arity(), 2); // Player + Points
         assert!(rule.head.has_aggregates());
+    }
+
+    // === HNSW nearest neighbor parsing tests ===
+
+    #[test]
+    fn test_parse_hnsw_nearest_vector_literal() {
+        let rule = parse_rule(
+            r#"result(Id, Dist) <- hnsw_nearest("doc_idx", [1.0, 2.0, 3.0], 5, Id, Dist)"#,
+        )
+        .unwrap();
+        assert_eq!(rule.head.relation, "result");
+        assert_eq!(rule.body.len(), 1);
+        match &rule.body[0] {
+            BodyPredicate::HnswNearest {
+                index_name,
+                query,
+                k,
+                id_var,
+                distance_var,
+                ef_search,
+            } => {
+                assert_eq!(index_name, "doc_idx");
+                assert!(matches!(query, Term::VectorLiteral(_)));
+                assert_eq!(*k, 5);
+                assert_eq!(id_var, "Id");
+                assert_eq!(distance_var, "Dist");
+                assert!(ef_search.is_none());
+            }
+            other => panic!("Expected HnswNearest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hnsw_nearest_variable_query() {
+        let rule = parse_rule(
+            r#"result(Id, Dist) <- embedding(X, Vec), hnsw_nearest("idx", Vec, 10, Id, Dist)"#,
+        )
+        .unwrap();
+        assert_eq!(rule.body.len(), 2);
+        assert!(rule.body[0].is_positive());
+        match &rule.body[1] {
+            BodyPredicate::HnswNearest {
+                index_name,
+                query,
+                k,
+                ..
+            } => {
+                assert_eq!(index_name, "idx");
+                assert!(matches!(query, Term::Variable(v) if v == "Vec"));
+                assert_eq!(*k, 10);
+            }
+            other => panic!("Expected HnswNearest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hnsw_nearest_with_ef_search() {
+        let rule =
+            parse_rule(r#"result(Id, Dist) <- hnsw_nearest("idx", [0.5, 0.5], 3, Id, Dist, 200)"#)
+                .unwrap();
+        match &rule.body[0] {
+            BodyPredicate::HnswNearest { ef_search, k, .. } => {
+                assert_eq!(*k, 3);
+                assert_eq!(*ef_search, Some(200));
+            }
+            other => panic!("Expected HnswNearest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_hnsw_nearest_errors() {
+        // Wrong number of args
+        assert!(parse_rule(r#"r(X) <- hnsw_nearest("idx", [1.0], 5, X)"#).is_err());
+
+        // Non-string index name
+        assert!(parse_rule(r#"r(X, D) <- hnsw_nearest(idx, [1.0], 5, X, D)"#).is_err());
+
+        // k = 0
+        assert!(parse_rule(r#"r(X, D) <- hnsw_nearest("idx", [1.0], 0, X, D)"#).is_err());
+
+        // Non-variable id_var
+        assert!(parse_rule(r#"r(X, D) <- hnsw_nearest("idx", [1.0], 5, 42, D)"#).is_err());
+
+        // Non-variable distance_var
+        assert!(parse_rule(r#"r(X, D) <- hnsw_nearest("idx", [1.0], 5, X, 3.14)"#).is_err());
     }
 }

@@ -1102,6 +1102,25 @@ impl Rule {
             .flat_map(BodyPredicate::variables)
             .collect();
 
+        // HnswNearest binds id_var and distance_var (and query if it's a variable)
+        for pred in &self.body {
+            if let BodyPredicate::HnswNearest {
+                query,
+                id_var,
+                distance_var,
+                ..
+            } = pred
+            {
+                vars.insert(id_var.clone());
+                vars.insert(distance_var.clone());
+                if let Term::Variable(v) = query {
+                    // Query variable is consumed (must be bound elsewhere), not produced
+                    // Don't add it here — it must be bound by a positive atom
+                    let _ = v;
+                }
+            }
+        }
+
         // Also include variables bound by assignments and equalities.
         // Uses fixed-point iteration since variable binding can propagate through equalities:
         // e.g., if X is bound and Y = X, then Y is bound.

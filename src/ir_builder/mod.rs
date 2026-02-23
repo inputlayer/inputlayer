@@ -136,6 +136,40 @@ impl IRBuilder {
                 }
 
                 scans.push(scan);
+            } else if let BodyPredicate::HnswNearest {
+                index_name,
+                query,
+                k,
+                id_var,
+                distance_var,
+                ef_search,
+            } = pred
+            {
+                // Convert the query Term to an IRExpression
+                let ir_query = match query {
+                    Term::VectorLiteral(v) => crate::ir::IRExpression::VectorLiteral(
+                        v.iter().map(|f| *f as f32).collect(),
+                    ),
+                    Term::Variable(name) => {
+                        // Variable query — will be resolved at execution time.
+                        // Store as a string constant placeholder containing the variable name.
+                        // The pre-DD resolution phase will handle binding.
+                        crate::ir::IRExpression::StringConstant(name.clone())
+                    }
+                    _ => {
+                        return Err(format!(
+                            "hnsw_nearest: query must be a variable or vector literal, got {query:?}"
+                        ));
+                    }
+                };
+
+                scans.push(IRNode::HnswScan {
+                    index_name: index_name.clone(),
+                    query: ir_query,
+                    k: *k,
+                    ef_search: *ef_search,
+                    output_schema: vec![id_var.clone(), distance_var.clone()],
+                });
             }
         }
 
@@ -3331,5 +3365,86 @@ mod tests {
             &schema,
         );
         assert!(result.is_err());
+    }
+
+    // === HNSW nearest neighbor IR building tests ===
+
+    #[test]
+    fn test_hnsw_nearest_vector_literal_to_ir() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::parser::parse_rule(
+            r#"result(Id, Dist) <- hnsw_nearest("doc_idx", [1.0, 2.0], 5, Id, Dist)"#,
+        )
+        .unwrap();
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // The IR should contain an HnswScan → Map (for projection)
+        // or just HnswScan if output_schema matches
+        match &ir {
+            crate::ir::IRNode::HnswScan {
+                index_name,
+                k,
+                ef_search,
+                output_schema,
+                query,
+            } => {
+                assert_eq!(index_name, "doc_idx");
+                assert_eq!(*k, 5);
+                assert!(ef_search.is_none());
+                assert_eq!(output_schema, &["Id", "Dist"]);
+                assert!(matches!(query, crate::ir::IRExpression::VectorLiteral(_)));
+            }
+            // The optimizer may wrap it in a Map for projection
+            crate::ir::IRNode::Map { input, .. } => {
+                assert!(matches!(**input, crate::ir::IRNode::HnswScan { .. }));
+            }
+            other => panic!("Expected HnswScan or Map(HnswScan), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_hnsw_nearest_variable_query_to_ir() {
+        let mut catalog = make_catalog();
+        catalog.register_relation(
+            "embedding".to_string(),
+            vec!["X".to_string(), "Vec".to_string()],
+        );
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::parser::parse_rule(
+            r#"result(Id, Dist) <- embedding(X, Vec), hnsw_nearest("idx", Vec, 3, Id, Dist)"#,
+        )
+        .unwrap();
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // Should produce a Join between Scan(embedding) and HnswScan
+        // The exact shape depends on optimization, but it should compile
+        assert!(!ir.output_schema().is_empty());
+    }
+
+    #[test]
+    fn test_hnsw_nearest_with_ef_search_to_ir() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        let rule = crate::parser::parse_rule(
+            r#"result(Id, Dist) <- hnsw_nearest("idx", [0.5, 0.5], 3, Id, Dist, 200)"#,
+        )
+        .unwrap();
+
+        let ir = builder.build_ir(&rule).unwrap();
+        // Drill into possible Map wrapper
+        let hnsw = match &ir {
+            crate::ir::IRNode::HnswScan { .. } => &ir,
+            crate::ir::IRNode::Map { input, .. } => input.as_ref(),
+            other => panic!("Unexpected IR: {other:?}"),
+        };
+        if let crate::ir::IRNode::HnswScan { ef_search, .. } = hnsw {
+            assert_eq!(*ef_search, Some(200));
+        } else {
+            panic!("Expected HnswScan");
+        }
     }
 }

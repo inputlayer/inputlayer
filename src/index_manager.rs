@@ -166,6 +166,19 @@ pub trait Index: Send + Sync {
 
     /// Get the vector dimension (0 if empty)
     fn dimension(&self) -> usize;
+
+    /// Insert multiple vectors at once (#17).
+    /// Default implementation calls `insert()` for each. HNSW overrides this
+    /// to defer the graph rebuild until after all inserts, avoiding O(N^2 log N) cost.
+    fn insert_batch(&mut self, entries: &[(TupleId, Vec<f32>)]) -> Result<(), String> {
+        for (id, vec) in entries {
+            self.insert(*id, vec)?;
+        }
+        Ok(())
+    }
+
+    /// Downcast to concrete type for persistence operations.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Index registration metadata
@@ -288,6 +301,10 @@ impl Index for IndexWrapper {
 
     fn dimension(&self) -> usize {
         self.0.dimension()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -520,6 +537,168 @@ impl IndexManager {
     pub fn valid_count(&self) -> usize {
         self.materialized.values().filter(|m| m.valid).count()
     }
+
+    // ── Index Persistence ───────────────────────────────────────────────
+
+    /// Save all registered and materialized HNSW indexes to disk.
+    /// Each index is saved as a subdirectory under `base_dir/indexes/`.
+    pub fn save_indexes(&self, base_dir: &std::path::Path) -> Result<(), String> {
+        use crate::hnsw_index::HnswIndex;
+
+        let indexes_dir = base_dir.join("indexes");
+
+        // Save registered index metadata
+        let mut registrations: Vec<serde_json::Value> = Vec::new();
+        for (name, reg) in &self.indexes {
+            let index_type_str = match &reg.index_type {
+                IndexType::Hnsw(config) => serde_json::json!({
+                    "type": "hnsw",
+                    "m": config.m,
+                    "ef_construction": config.ef_construction,
+                    "ef_search": config.ef_search,
+                    "metric": format!("{:?}", config.metric).to_lowercase()
+                }),
+            };
+            registrations.push(serde_json::json!({
+                "name": name,
+                "relation": reg.relation,
+                "column_idx": reg.column_idx,
+                "column_name": reg.column_name,
+                "index_type": index_type_str
+            }));
+        }
+
+        if registrations.is_empty() {
+            // No indexes to save — clean up any stale index dir
+            if indexes_dir.exists() {
+                let _ = std::fs::remove_dir_all(&indexes_dir);
+            }
+            return Ok(());
+        }
+
+        std::fs::create_dir_all(&indexes_dir)
+            .map_err(|e| format!("Failed to create indexes dir: {e}"))?;
+
+        // Save registration metadata
+        let meta_json = serde_json::to_string_pretty(&registrations)
+            .map_err(|e| format!("Failed to serialize index metadata: {e}"))?;
+        std::fs::write(indexes_dir.join("registrations.json"), meta_json)
+            .map_err(|e| format!("Failed to write index metadata: {e}"))?;
+
+        // Save materialized index data
+        for (name, mat) in &self.materialized {
+            if !mat.valid {
+                continue; // Skip invalid indexes
+            }
+            // Downcast to HnswIndex for save
+            if let Some(hnsw) = mat.index_arc.as_any().downcast_ref::<HnswIndex>() {
+                let index_dir = indexes_dir.join(name);
+                hnsw.save(&index_dir)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load registered indexes from disk and rebuild materialized HNSW structures.
+    /// Returns the number of indexes loaded.
+    pub fn load_indexes(&mut self, base_dir: &std::path::Path) -> Result<usize, String> {
+        use crate::hnsw_index::HnswIndex;
+
+        let indexes_dir = base_dir.join("indexes");
+        let reg_path = indexes_dir.join("registrations.json");
+
+        if !reg_path.exists() {
+            return Ok(0);
+        }
+
+        let meta_json = std::fs::read_to_string(&reg_path)
+            .map_err(|e| format!("Failed to read index metadata: {e}"))?;
+        let registrations: Vec<serde_json::Value> = serde_json::from_str(&meta_json)
+            .map_err(|e| format!("Failed to parse index metadata: {e}"))?;
+
+        let mut loaded = 0;
+        for reg in &registrations {
+            let name = reg["name"]
+                .as_str()
+                .ok_or("Missing index name")?
+                .to_string();
+            let relation = reg["relation"]
+                .as_str()
+                .ok_or("Missing relation")?
+                .to_string();
+            let column_idx = reg["column_idx"].as_u64().ok_or("Missing column_idx")? as usize;
+            let column_name = reg["column_name"]
+                .as_str()
+                .ok_or("Missing column_name")?
+                .to_string();
+
+            let it = &reg["index_type"];
+            let metric = match it["metric"].as_str().unwrap_or("euclidean") {
+                "cosine" => DistanceMetric::Cosine,
+                "dotproduct" | "dot_product" => DistanceMetric::DotProduct,
+                "manhattan" => DistanceMetric::Manhattan,
+                _ => DistanceMetric::Euclidean,
+            };
+            let config = HnswConfig {
+                m: it["m"].as_u64().unwrap_or(16) as usize,
+                ef_construction: it["ef_construction"].as_u64().unwrap_or(100) as usize,
+                ef_search: it["ef_search"].as_u64().unwrap_or(32) as usize,
+                metric,
+            };
+
+            let index_type = IndexType::Hnsw(config);
+
+            // Register the index
+            let registered = RegisteredIndex {
+                name: name.clone(),
+                relation: relation.clone(),
+                column_idx,
+                column_name,
+                index_type,
+            };
+            if self.register_index(registered).is_err() {
+                continue; // Already registered (e.g., duplicate)
+            }
+
+            // Load materialized data if available
+            let index_dir = indexes_dir.join(&name);
+            if HnswIndex::persisted_exists(&index_dir) {
+                match HnswIndex::load(&index_dir) {
+                    Ok(hnsw) => {
+                        let tuple_count = hnsw.len();
+                        let mat = MaterializedIndex::new(
+                            Box::new(hnsw),
+                            std::collections::HashMap::new(),
+                            tuple_count,
+                        );
+                        self.materialized.insert(name.clone(), mat);
+                        loaded += 1;
+                        tracing::info!(
+                            index = name,
+                            relation,
+                            tuple_count,
+                            "hnsw_index_loaded_from_persist"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            index = name,
+                            error = %e,
+                            "hnsw_index_load_failed"
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(loaded)
+    }
+
+    /// Get all registered indexes (for persistence).
+    pub fn registered_indexes(&self) -> &HashMap<String, RegisteredIndex> {
+        &self.indexes
+    }
 }
 
 impl std::fmt::Debug for IndexManager {
@@ -619,6 +798,10 @@ mod tests {
 
         fn dimension(&self) -> usize {
             self.vectors.values().next().map(|v| v.len()).unwrap_or(0)
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 
