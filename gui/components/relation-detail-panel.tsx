@@ -1,13 +1,23 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2, FileJson } from "lucide-react"
+import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2, FileJson, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { downloadBlob } from "@/lib/ui-utils"
 import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { Relation } from "@/lib/datalog-store"
 import { useDatalogStore } from "@/lib/datalog-store"
 
@@ -16,8 +26,10 @@ interface RelationDetailPanelProps {
 }
 
 export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
-  const { loadRelationData } = useDatalogStore()
+  const { loadRelationData, deleteRelation } = useDatalogStore()
   const [copied, setCopied] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [filter, setFilter] = useState("")
   const [sortColumn, setSortColumn] = useState<number | null>(null)
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
@@ -182,6 +194,50 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
             <FileJson className="h-3.5 w-3.5" />
             JSON
           </Button>
+          <div className="w-px h-5 bg-border/50" />
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={isDeleting}
+            className="h-8 gap-1.5"
+          >
+            {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Delete
+          </Button>
+          <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open) setShowDeleteConfirm(false) }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete relation</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to delete &ldquo;{relation.name}&rdquo;? All {currentTupleCount.toLocaleString()} tuples, schema definitions, and any associated rules will be permanently removed. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    setIsDeleting(true)
+                    try {
+                      await deleteRelation(relation.name)
+                      toast.success(`Relation "${relation.name}" deleted`)
+                    } catch (e) {
+                      const msg = e instanceof Error ? e.message : "Failed to delete relation"
+                      toast.error(msg)
+                    } finally {
+                      setIsDeleting(false)
+                      setShowDeleteConfirm(false)
+                    }
+                  }}
+                  disabled={isDeleting}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 

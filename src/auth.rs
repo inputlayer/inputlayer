@@ -169,6 +169,7 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         // Editors can view and manipulate relations/rules
         MetaCommand::RelList
         | MetaCommand::RelDescribe(_)
+        | MetaCommand::RelDrop(_)
         | MetaCommand::RuleList
         | MetaCommand::RuleQuery(_)
         | MetaCommand::RuleShowDef(_)
@@ -252,6 +253,11 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         | MetaCommand::RuleList
         | MetaCommand::RuleQuery(_)
         | MetaCommand::RuleShowDef(_) => Ok(()),
+
+        // Viewers cannot drop relations
+        MetaCommand::RelDrop(_) => {
+            Err("Permission denied: viewers cannot drop relations".to_string())
+        }
 
         // Viewers cannot modify rules
         MetaCommand::RuleDrop(_)

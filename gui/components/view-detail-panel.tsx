@@ -1,11 +1,22 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2 } from "lucide-react"
+import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { View, Relation } from "@/lib/datalog-store"
 import { useDatalogStore } from "@/lib/datalog-store"
 import { highlightToHtml } from "@/lib/syntax-highlight"
@@ -20,8 +31,10 @@ interface ViewDetailPanelProps {
 }
 
 export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanelProps) {
-  const { loadViewData } = useDatalogStore()
+  const { loadViewData, dropRule } = useDatalogStore()
   const [copied, setCopied] = useState(false)
+  const [showDropConfirm, setShowDropConfirm] = useState(false)
+  const [isDropping, setIsDropping] = useState(false)
   const [activeTab, setActiveTab] = useState("data")
   const [loading, setLoading] = useState(false)
   const [loadingSlow, setLoadingSlow] = useState(false)
@@ -100,6 +113,50 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
             <Download className="h-3.5 w-3.5" />
             Export
           </Button>
+          <div className="w-px h-5 bg-border/50" />
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setShowDropConfirm(true)}
+            disabled={isDropping}
+            className="h-8 gap-1.5"
+          >
+            {isDropping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Drop Rule
+          </Button>
+          <AlertDialog open={showDropConfirm} onOpenChange={(open) => { if (!open) setShowDropConfirm(false) }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Drop rule</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to drop rule &ldquo;{view.name}&rdquo;? All clauses will be removed and derived data will no longer be computed. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isDropping}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    setIsDropping(true)
+                    try {
+                      await dropRule(view.name, view.isSession)
+                      toast.success(`Dropped rule "${view.name}"`)
+                    } catch (e) {
+                      const msg = e instanceof Error ? e.message : "Failed to drop rule"
+                      toast.error(msg)
+                    } finally {
+                      setIsDropping(false)
+                      setShowDropConfirm(false)
+                    }
+                  }}
+                  disabled={isDropping}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {isDropping ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Drop
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
