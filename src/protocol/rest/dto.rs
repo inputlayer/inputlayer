@@ -63,7 +63,7 @@ pub struct SessionStatsDto {
 }
 
 /// Provenance metadata in session query response (used by WS handler)
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SessionQueryMetadataDto {
     pub has_ephemeral: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]

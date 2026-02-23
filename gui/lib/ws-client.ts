@@ -1,6 +1,8 @@
 import type {
   WsAuthenticatedMessage,
   WsResultMessage,
+  WsResultStartMessage,
+  WsResultChunkMessage,
   WsErrorMessage,
   WsNotificationMessage,
   WsServerMessage,
@@ -42,6 +44,18 @@ type PendingRequest = {
 export type NotificationHandler = (notification: WsNotificationMessage) => void
 export type ConnectionStateHandler = (state: ConnectionState, kg?: string) => void
 
+/** State for accumulating a streamed result */
+interface StreamingState {
+  columns: string[]
+  totalCount: number
+  truncated: boolean
+  executionTimeMs: number
+  metadata?: WsResultStartMessage["metadata"]
+  switchedKg?: string
+  rows: (string | number | boolean | null)[][]
+  rowProvenance: string[]
+}
+
 export class WsClient {
   private ws: WebSocket | null = null
   private sessionId: string | null = null
@@ -55,6 +69,8 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private intentionalClose = false
   private pingInterval: ReturnType<typeof setInterval> | null = null
+  /** Active streaming accumulation (null when not streaming) */
+  private streamingState: StreamingState | null = null
 
   private readonly url: string
   private readonly kg: string
@@ -265,7 +281,63 @@ export class WsClient {
         }
         break
       }
+      // ── Streaming result protocol ──────────────────────────────
+      case "result_start": {
+        this.streamingState = {
+          columns: msg.columns,
+          totalCount: msg.total_count,
+          truncated: msg.truncated,
+          executionTimeMs: msg.execution_time_ms,
+          metadata: msg.metadata,
+          switchedKg: msg.switched_kg,
+          rows: [],
+          rowProvenance: [],
+        }
+        break
+      }
+      case "result_chunk": {
+        if (this.streamingState) {
+          this.streamingState.rows.push(...msg.rows)
+          if (msg.row_provenance) {
+            this.streamingState.rowProvenance.push(...msg.row_provenance)
+          }
+        }
+        break
+      }
+      case "result_end": {
+        if (this.streamingState) {
+          const s = this.streamingState
+          this.streamingState = null
+
+          // Track KG switches
+          if (s.switchedKg) {
+            this.knowledgeGraph = s.switchedKg
+          }
+
+          // Assemble synthetic WsResultMessage and resolve pending request
+          const assembled: WsResultMessage = {
+            type: "result",
+            columns: s.columns,
+            rows: s.rows,
+            row_count: s.rows.length,
+            total_count: s.totalCount,
+            truncated: s.truncated,
+            execution_time_ms: s.executionTimeMs,
+            row_provenance: s.rowProvenance.length > 0 ? s.rowProvenance : undefined,
+            metadata: s.metadata,
+            switched_kg: s.switchedKg,
+          }
+          const pending = this.pendingQueue.shift()
+          if (pending) {
+            pending.resolve(assembled)
+          }
+        }
+        break
+      }
+      // ── End streaming ──────────────────────────────────────────
       case "error": {
+        // If we were streaming, abort and reject
+        this.streamingState = null
         const pending = this.pendingQueue.shift()
         if (pending) {
           pending.reject(new WsError(msg))

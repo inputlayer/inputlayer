@@ -1,0 +1,228 @@
+openapi: 3.1.0
+info:
+  title: InputLayer REST API
+  version: 0.1.0
+  description: |
+    REST endpoints for InputLayer — a streaming deductive knowledge graph database.
+    All data operations use the WebSocket `/ws` endpoint (see asyncapi.yaml).
+    REST endpoints provide health checks, metrics, and documentation.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: http://localhost:8080/v1
+    description: Versioned API prefix (identical routes)
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: |
+        Verifies storage engine accessibility by acquiring a read lock within 1 second.
+        Returns "degraded" (503) if the lock cannot be acquired.
+      tags: [Operations]
+      security: []
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Server is degraded (storage lock contended)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /live:
+    get:
+      summary: Liveness probe
+      description: Always returns 200 if the process is alive. Use for Kubernetes liveness probes.
+      tags: [Operations]
+      security: []
+      responses:
+        "200":
+          description: Process is alive
+
+  /ready:
+    get:
+      summary: Readiness probe
+      description: Returns 200 if storage is accessible (read lock acquired). Returns 503 otherwise.
+      tags: [Operations]
+      security: []
+      responses:
+        "200":
+          description: Server is ready to handle requests
+        "503":
+          description: Server is not ready
+
+  /metrics:
+    get:
+      summary: Server statistics (JSON)
+      description: Returns server statistics in JSON format.
+      tags: [Observability]
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Server statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "401":
+          description: Unauthorized
+
+  /metrics/prometheus:
+    get:
+      summary: Prometheus metrics
+      description: |
+        Exports server metrics in Prometheus text exposition format (v0.0.4).
+        Scrape this endpoint with a Prometheus server.
+      tags: [Observability]
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP inputlayer_uptime_seconds Server uptime in seconds.
+                  # TYPE inputlayer_uptime_seconds gauge
+                  inputlayer_uptime_seconds 42
+                  # HELP inputlayer_queries_total Total queries executed.
+                  # TYPE inputlayer_queries_total counter
+                  inputlayer_queries_total 100
+        "401":
+          description: Unauthorized
+
+  /ws:
+    get:
+      summary: Global WebSocket endpoint
+      description: |
+        WebSocket endpoint for all data operations. Requires authentication
+        via Login or Authenticate message after connection.
+        See asyncapi.yaml for the full WebSocket protocol specification.
+      tags: [Data]
+      parameters:
+        - name: kg
+          in: query
+          schema:
+            type: string
+            default: default
+          description: Knowledge graph to bind to
+        - name: last_seq
+          in: query
+          schema:
+            type: integer
+            format: uint64
+          description: Last notification sequence number for replay on reconnect
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+
+  /api/asyncapi.yaml:
+    get:
+      summary: AsyncAPI specification
+      description: Raw AsyncAPI YAML specification for the WebSocket protocol.
+      tags: [Documentation]
+      security: []
+      responses:
+        "200":
+          description: AsyncAPI YAML
+          content:
+            text/yaml:
+              schema:
+                type: string
+
+  /api/ws-docs:
+    get:
+      summary: WebSocket API documentation
+      description: Self-contained HTML page documenting the WebSocket API protocol.
+      tags: [Documentation]
+      security: []
+      responses:
+        "200":
+          description: HTML documentation page
+          content:
+            text/html:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: API key from .inputlayer-credentials.toml
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [healthy, degraded]
+            version:
+              type: string
+              example: "0.1.0"
+            uptime_secs:
+              type: integer
+              format: uint64
+
+    StatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            knowledge_graphs:
+              type: integer
+            relations:
+              type: integer
+            views:
+              type: integer
+            memory_usage_bytes:
+              type: integer
+              format: uint64
+            query_count:
+              type: integer
+              format: uint64
+            uptime_secs:
+              type: integer
+              format: uint64
+            sessions:
+              type: object
+              properties:
+                total:
+                  type: integer
+                clean:
+                  type: integer
+                dirty:
+                  type: integer
+                total_ephemeral_facts:
+                  type: integer
+                total_ephemeral_rules:
+                  type: integer
+
+tags:
+  - name: Operations
+    description: Health checks and probes
+  - name: Observability
+    description: Metrics and monitoring
+  - name: Data
+    description: Data operations (via WebSocket)
+  - name: Documentation
+    description: API documentation
