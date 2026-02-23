@@ -116,6 +116,32 @@ enum WsResponse {
         #[serde(default)]
         switched_kg: Option<String>,
     },
+    /// Streaming: header with schema and metadata (large results)
+    ResultStart {
+        columns: Vec<String>,
+        #[allow(dead_code)]
+        total_count: usize,
+        #[allow(dead_code)]
+        truncated: bool,
+        execution_time_ms: u64,
+        #[serde(default)]
+        switched_kg: Option<String>,
+    },
+    /// Streaming: a batch of rows
+    ResultChunk {
+        rows: Vec<Vec<serde_json::Value>>,
+        #[allow(dead_code)]
+        row_provenance: Vec<String>,
+        #[allow(dead_code)]
+        chunk_index: usize,
+    },
+    /// Streaming: end marker after all chunks
+    ResultEnd {
+        #[allow(dead_code)]
+        row_count: usize,
+        #[allow(dead_code)]
+        chunk_count: usize,
+    },
     Error {
         message: String,
     },
@@ -127,6 +153,50 @@ enum WsResponse {
         relation: String,
         operation: String,
         count: usize,
+    },
+    /// Persistent data change notification
+    #[allow(dead_code)]
+    PersistentUpdate {
+        knowledge_graph: String,
+        relation: String,
+        operation: String,
+        count: usize,
+        #[serde(default)]
+        timestamp_ms: u64,
+        #[serde(default)]
+        seq: u64,
+    },
+    /// Rule change notification
+    #[allow(dead_code)]
+    RuleChange {
+        knowledge_graph: String,
+        rule_name: String,
+        operation: String,
+        #[serde(default)]
+        timestamp_ms: u64,
+        #[serde(default)]
+        seq: u64,
+    },
+    /// Knowledge graph change notification
+    #[allow(dead_code)]
+    KgChange {
+        knowledge_graph: String,
+        operation: String,
+        #[serde(default)]
+        timestamp_ms: u64,
+        #[serde(default)]
+        seq: u64,
+    },
+    /// Schema change notification
+    #[allow(dead_code)]
+    SchemaChange {
+        knowledge_graph: String,
+        entity: String,
+        operation: String,
+        #[serde(default)]
+        timestamp_ms: u64,
+        #[serde(default)]
+        seq: u64,
     },
 }
 
@@ -148,6 +218,7 @@ type WsSink = futures_util::stream::SplitSink<
 struct WsClient {
     sender: WsSink,
     msg_rx: tokio::sync::mpsc::UnboundedReceiver<WsMessage>,
+    timeout_secs: u64,
 }
 
 impl WsClient {
@@ -233,7 +304,14 @@ impl WsClient {
             let _ = msg_tx.send(WsMessage::Closed);
         });
 
-        Ok((Self { sender, msg_rx }, connected))
+        Ok((
+            Self {
+                sender,
+                msg_rx,
+                timeout_secs: 120, // default, overridden after construction
+            },
+            connected,
+        ))
     }
 
     /// Send an execute message to the server.
@@ -249,15 +327,45 @@ impl WsClient {
     }
 
     /// Receive the next non-notification response. Notifications are silently skipped.
-    /// Times out after 120 seconds to prevent hanging under server load.
+    /// Times out after the configured timeout to prevent hanging under server load.
+    ///
+    /// If the server streams a large result (result_start / result_chunk / result_end),
+    /// this method transparently accumulates all chunks and returns a single synthetic
+    /// `WsResponse::Result` to the caller.
     async fn recv_response(&mut self) -> Result<WsResponse, String> {
-        let timeout = std::time::Duration::from_secs(120);
+        let timeout = std::time::Duration::from_secs(self.timeout_secs);
         loop {
             match tokio::time::timeout(timeout, self.msg_rx.recv()).await {
                 Ok(Some(WsMessage::Response(resp))) => {
-                    if matches!(&resp, WsResponse::Notification { .. }) {
+                    if matches!(
+                        &resp,
+                        WsResponse::Notification { .. }
+                            | WsResponse::PersistentUpdate { .. }
+                            | WsResponse::RuleChange { .. }
+                            | WsResponse::KgChange { .. }
+                            | WsResponse::SchemaChange { .. }
+                    ) {
                         // Skip notifications — they'll be displayed by the REPL idle loop
                         continue;
+                    }
+                    // Handle streaming: accumulate chunks into a single Result
+                    if let WsResponse::ResultStart {
+                        columns,
+                        total_count,
+                        truncated,
+                        execution_time_ms,
+                        switched_kg,
+                    } = resp
+                    {
+                        return self
+                            .accumulate_streamed_result(
+                                columns,
+                                total_count,
+                                truncated,
+                                execution_time_ms,
+                                switched_kg,
+                            )
+                            .await;
                     }
                     return Ok(resp);
                 }
@@ -265,7 +373,66 @@ impl WsClient {
                 Ok(Some(WsMessage::Closed) | None) => {
                     return Err("WebSocket connection closed".to_string())
                 }
-                Err(_) => return Err("Response timeout (120s)".to_string()),
+                Err(_) => return Err(format!("Response timeout ({}s)", self.timeout_secs)),
+            }
+        }
+    }
+
+    /// Accumulate streamed result chunks after receiving a `result_start`.
+    /// Returns a synthetic `WsResponse::Result` with all rows combined.
+    async fn accumulate_streamed_result(
+        &mut self,
+        columns: Vec<String>,
+        total_count: usize,
+        truncated: bool,
+        execution_time_ms: u64,
+        switched_kg: Option<String>,
+    ) -> Result<WsResponse, String> {
+        let timeout = std::time::Duration::from_secs(self.timeout_secs);
+        let mut all_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut all_provenance: Vec<String> = Vec::new();
+
+        loop {
+            match tokio::time::timeout(timeout, self.msg_rx.recv()).await {
+                Ok(Some(WsMessage::Response(resp))) => match resp {
+                    WsResponse::ResultChunk {
+                        rows,
+                        row_provenance,
+                        ..
+                    } => {
+                        all_rows.extend(rows);
+                        all_provenance.extend(row_provenance);
+                    }
+                    WsResponse::ResultEnd { .. } => {
+                        let row_count = all_rows.len();
+                        return Ok(WsResponse::Result {
+                            columns,
+                            rows: all_rows,
+                            row_count,
+                            total_count,
+                            truncated,
+                            execution_time_ms,
+                            row_provenance: all_provenance,
+                            switched_kg,
+                        });
+                    }
+                    WsResponse::Error { message } => {
+                        return Err(format!("Error during streaming: {message}"));
+                    }
+                    // Skip notifications during streaming
+                    _ => continue,
+                },
+                Ok(Some(WsMessage::Error(e))) => return Err(e),
+                Ok(Some(WsMessage::Closed) | None) => {
+                    return Err("Connection closed during streaming".to_string())
+                }
+                Err(_) => {
+                    return Err(format!(
+                        "Streaming timeout ({}s) — received {} rows so far",
+                        self.timeout_secs,
+                        all_rows.len()
+                    ))
+                }
             }
         }
     }
@@ -326,6 +493,7 @@ struct Args {
     server: String,
     display_limit: Option<usize>,
     api_key: Option<String>,
+    timeout_secs: u64,
 }
 
 fn parse_args() -> Args {
@@ -336,6 +504,7 @@ fn parse_args() -> Args {
         server: "http://127.0.0.1:8080".to_string(),
         display_limit: None,
         api_key: None,
+        timeout_secs: 120,
     };
 
     let mut i = 1;
@@ -384,6 +553,18 @@ fn parse_args() -> Args {
                     std::process::exit(1);
                 }
             }
+            "--timeout" | "-t" => {
+                if i + 1 < args.len() {
+                    result.timeout_secs = args[i + 1].parse().unwrap_or_else(|_| {
+                        eprintln!("Error: --timeout requires a number (seconds)");
+                        std::process::exit(1);
+                    });
+                    i += 2;
+                } else {
+                    eprintln!("Error: --timeout requires a number (seconds)");
+                    std::process::exit(1);
+                }
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -424,6 +605,7 @@ fn print_usage() {
     println!(
         "  -l, --limit <N>       Max rows to display (0 = unlimited, default: 50 REPL, 0 script)"
     );
+    println!("  -t, --timeout <SECS>  Response timeout in seconds (default: 120)");
     println!("  -h, --help            Show this help message");
     println!();
     println!("ENVIRONMENT:");
@@ -514,7 +696,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => return Err(format!("WebSocket connection failed: {e}").into()),
         }
     }
-    let (ws_client, connected) = ws_result.ok_or("WebSocket connection failed after retries")?;
+    let (mut ws_client, connected) =
+        ws_result.ok_or("WebSocket connection failed after retries")?;
 
     let current_kg = match &connected {
         WsResponse::Authenticated {
@@ -544,6 +727,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_col_width: 40,
         show_timing: !is_script,
     };
+
+    // Apply timeout from CLI args
+    ws_client.timeout_secs = args.timeout_secs;
 
     let mut state = ReplState {
         ws: ws_client,
@@ -613,6 +799,18 @@ fn execute_script<'a>(
     path: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
+        // Check file size before reading to prevent OOM on large files
+        const MAX_SCRIPT_SIZE: u64 = 100 * 1024 * 1024; // 100 MB
+        let metadata =
+            fs::metadata(path).map_err(|e| format!("Failed to read script '{path}': {e}"))?;
+        if metadata.len() > MAX_SCRIPT_SIZE {
+            return Err(format!(
+                "Script file '{path}' is too large ({} bytes, max {} bytes)",
+                metadata.len(),
+                MAX_SCRIPT_SIZE
+            ));
+        }
+
         let content =
             fs::read_to_string(path).map_err(|e| format!("Failed to read script '{path}': {e}"))?;
 

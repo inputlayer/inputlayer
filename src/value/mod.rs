@@ -305,6 +305,16 @@ impl Value {
         }
     }
 
+    /// Get as f32 vector, converting from VectorInt8 if needed (#48).
+    /// Returns owned Vec since VectorInt8 requires conversion.
+    pub fn to_float_vector(&self) -> Option<Vec<f32>> {
+        match self {
+            Value::Vector(v) => Some(v.as_ref().clone()),
+            Value::VectorInt8(v) => Some(v.iter().map(|&x| x as f32).collect()),
+            _ => None,
+        }
+    }
+
     /// Try to get as timestamp (milliseconds since Unix epoch)
     /// Also accepts Int64 for flexibility in temporal operations
     pub fn as_timestamp(&self) -> Option<i64> {
