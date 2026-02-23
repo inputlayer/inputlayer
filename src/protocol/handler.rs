@@ -97,7 +97,55 @@ pub enum PersistentNotification {
         relation: String,
         operation: String,
         count: usize,
+        /// Epoch milliseconds when the change occurred (#40)
+        timestamp_ms: u64,
+        /// Session that triggered the change (None for API-key or system operations)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        /// Monotonic sequence number for dedup on reconnect (#39)
+        seq: u64,
     },
+    /// A rule was registered or removed (#16)
+    RuleChange {
+        knowledge_graph: String,
+        rule_name: String,
+        /// "registered" or "removed" or "dropped"
+        operation: String,
+        timestamp_ms: u64,
+        /// Monotonic sequence number for dedup on reconnect (#39)
+        seq: u64,
+    },
+    /// A knowledge graph was created or dropped (#16)
+    KgChange {
+        knowledge_graph: String,
+        /// "created" or "dropped"
+        operation: String,
+        timestamp_ms: u64,
+        /// Monotonic sequence number for dedup on reconnect (#39)
+        seq: u64,
+    },
+    /// A schema change occurred (index created/dropped, relation dropped) (#16)
+    SchemaChange {
+        knowledge_graph: String,
+        entity: String,
+        /// "created" or "dropped"
+        operation: String,
+        timestamp_ms: u64,
+        /// Monotonic sequence number for dedup on reconnect (#39)
+        seq: u64,
+    },
+}
+
+impl PersistentNotification {
+    /// Get the sequence number of this notification.
+    pub fn seq(&self) -> u64 {
+        match self {
+            Self::PersistentUpdate { seq, .. }
+            | Self::RuleChange { seq, .. }
+            | Self::KgChange { seq, .. }
+            | Self::SchemaChange { seq, .. } => *seq,
+        }
+    }
 }
 
 /// Thread-safe wrapper around StorageEngine for concurrent API calls.
@@ -121,6 +169,29 @@ pub struct Handler {
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Monotonic sequence counter for notification dedup (#39).
+    notification_seq: Arc<AtomicU64>,
+    /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
+    notification_buffer:
+        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+}
+
+/// Current epoch milliseconds.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Set the sequence number on a notification (all variants have a `seq` field).
+fn set_notification_seq(notif: &mut PersistentNotification, seq: u64) {
+    match notif {
+        PersistentNotification::PersistentUpdate { seq: s, .. }
+        | PersistentNotification::RuleChange { seq: s, .. }
+        | PersistentNotification::KgChange { seq: s, .. }
+        | PersistentNotification::SchemaChange { seq: s, .. } => *s = seq,
+    }
 }
 
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
@@ -133,6 +204,9 @@ struct QueryJob {
     insert_count: Arc<AtomicU64>,
     query_count: Arc<AtomicU64>,
     start_time: Instant,
+    notification_seq: Arc<AtomicU64>,
+    notification_buffer:
+        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
 }
 
 impl QueryJob {
@@ -148,19 +222,74 @@ impl QueryJob {
         self.start_time.elapsed().as_secs()
     }
 
-    fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
-        if self
-            .notify_tx
-            .send(PersistentNotification::PersistentUpdate {
-                knowledge_graph: kg.to_string(),
-                relation: relation.to_string(),
-                operation: operation.to_string(),
-                count,
-            })
-            .is_err()
+    /// Assign a seq number, buffer, and broadcast a notification.
+    fn send_notification(&self, mut notif: PersistentNotification) {
+        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        set_notification_seq(&mut notif, seq);
         {
-            tracing::debug!("notify_persistent_update: no active subscribers");
+            let mut buf = self.notification_buffer.lock();
+            buf.push_back(notif.clone());
+            // Keep buffer bounded to broadcast channel capacity (notification_buffer_size)
+            let max_buf = self.config.http.rate_limit.notification_buffer_size;
+            while buf.len() > max_buf {
+                buf.pop_front();
+            }
         }
+        if self.notify_tx.send(notif).is_err() {
+            tracing::debug!("send_notification: no active subscribers");
+        }
+    }
+
+    fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
+        self.notify_persistent_update_with_session(kg, relation, operation, count, None);
+    }
+
+    fn notify_persistent_update_with_session(
+        &self,
+        kg: &str,
+        relation: &str,
+        operation: &str,
+        count: usize,
+        session_id: Option<String>,
+    ) {
+        self.send_notification(PersistentNotification::PersistentUpdate {
+            knowledge_graph: kg.to_string(),
+            relation: relation.to_string(),
+            operation: operation.to_string(),
+            count,
+            timestamp_ms: now_ms(),
+            session_id,
+            seq: 0, // placeholder — set by send_notification
+        });
+    }
+
+    fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
+        self.send_notification(PersistentNotification::RuleChange {
+            knowledge_graph: kg.to_string(),
+            rule_name: rule_name.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
+    }
+
+    fn notify_kg_change(&self, kg: &str, operation: &str) {
+        self.send_notification(PersistentNotification::KgChange {
+            knowledge_graph: kg.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
+    }
+
+    fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
+        self.send_notification(PersistentNotification::SchemaChange {
+            knowledge_graph: kg.to_string(),
+            entity: entity.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
     }
 
     fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
@@ -205,10 +334,28 @@ impl QueryJob {
             .parse::<DistanceMetric>()
             .map_err(|e| format!("Invalid metric: {e}"))?;
 
+        let m = opts.m.unwrap_or(16);
+        let ef_construction = opts.ef_construction.unwrap_or(200);
+        let ef_search = opts.ef_search.unwrap_or(50);
+
+        // Validate HNSW parameters to prevent crashes
+        if m < 2 {
+            return Err(format!("HNSW parameter m must be >= 2, got {m}"));
+        }
+        if m > 256 {
+            return Err(format!("HNSW parameter m must be <= 256, got {m}"));
+        }
+        if ef_construction < 1 {
+            return Err("HNSW parameter ef_construction must be >= 1".to_string());
+        }
+        if ef_search < 1 {
+            return Err("HNSW parameter ef_search must be >= 1".to_string());
+        }
+
         let hnsw_config = HnswConfig {
-            m: opts.m.unwrap_or(16),
-            ef_construction: opts.ef_construction.unwrap_or(200),
-            ef_search: opts.ef_search.unwrap_or(50),
+            m,
+            ef_construction,
+            ef_search,
             metric,
         };
 
@@ -357,6 +504,10 @@ impl Handler {
             sessions: SessionManager::default(),
             notify_tx,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            notification_seq: Arc::new(AtomicU64::new(0)),
+            notification_buffer: Arc::new(parking_lot::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
         }
     }
 
@@ -388,6 +539,10 @@ impl Handler {
             sessions: SessionManager::new(session_config),
             notify_tx,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            notification_seq: Arc::new(AtomicU64::new(0)),
+            notification_buffer: Arc::new(parking_lot::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
         }
     }
 
@@ -400,6 +555,8 @@ impl Handler {
             insert_count: Arc::clone(&self.insert_count),
             query_count: Arc::clone(&self.query_count),
             start_time: self.start_time,
+            notification_seq: Arc::clone(&self.notification_seq),
+            notification_buffer: Arc::clone(&self.notification_buffer),
         }
     }
 
@@ -416,6 +573,23 @@ impl Handler {
         self.notify_tx.subscribe()
     }
 
+    /// Assign a seq number, buffer, and broadcast a notification.
+    fn send_notification(&self, mut notif: PersistentNotification) {
+        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        set_notification_seq(&mut notif, seq);
+        {
+            let mut buf = self.notification_buffer.lock();
+            buf.push_back(notif.clone());
+            let max_buf = self.config.http.rate_limit.notification_buffer_size;
+            while buf.len() > max_buf {
+                buf.pop_front();
+            }
+        }
+        if self.notify_tx.send(notif).is_err() {
+            tracing::debug!("send_notification: no active subscribers");
+        }
+    }
+
     /// Send a persistent data change notification.
     /// No-op if there are no active subscribers.
     pub fn notify_persistent_update(
@@ -425,18 +599,57 @@ impl Handler {
         operation: &str,
         count: usize,
     ) {
-        if self
-            .notify_tx
-            .send(PersistentNotification::PersistentUpdate {
-                knowledge_graph: kg.to_string(),
-                relation: relation.to_string(),
-                operation: operation.to_string(),
-                count,
-            })
-            .is_err()
-        {
-            tracing::debug!("notify_persistent_update: no active subscribers");
-        }
+        self.send_notification(PersistentNotification::PersistentUpdate {
+            knowledge_graph: kg.to_string(),
+            relation: relation.to_string(),
+            operation: operation.to_string(),
+            count,
+            timestamp_ms: now_ms(),
+            session_id: None,
+            seq: 0,
+        });
+    }
+
+    /// Send a rule change notification.
+    pub fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
+        self.send_notification(PersistentNotification::RuleChange {
+            knowledge_graph: kg.to_string(),
+            rule_name: rule_name.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
+    }
+
+    /// Send a knowledge graph change notification.
+    pub fn notify_kg_change(&self, kg: &str, operation: &str) {
+        self.send_notification(PersistentNotification::KgChange {
+            knowledge_graph: kg.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
+    }
+
+    /// Send a schema change notification.
+    pub fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
+        self.send_notification(PersistentNotification::SchemaChange {
+            knowledge_graph: kg.to_string(),
+            entity: entity.to_string(),
+            operation: operation.to_string(),
+            timestamp_ms: now_ms(),
+            seq: 0,
+        });
+    }
+
+    /// Get buffered notifications with sequence number > `since_seq`.
+    /// Returns notifications in order. Used for replay on WS reconnect (#39).
+    pub fn get_notifications_since(&self, since_seq: u64) -> Vec<PersistentNotification> {
+        let buf = self.notification_buffer.lock();
+        buf.iter()
+            .filter(|n| n.seq() > since_seq)
+            .cloned()
+            .collect()
     }
 
     /// Get the session manager.
@@ -602,11 +815,7 @@ impl Handler {
                 }
             }
 
-            // Print credentials to stderr on first boot
-            eprintln!();
-            eprintln!("=== INITIAL ADMIN PASSWORD (save this!) ===");
-            eprintln!("{password}");
-            eprintln!("============================================");
+            // Print API key (needed for first login) but NOT the password
             eprintln!();
             eprintln!("=== INITIAL API KEY (for CLI access) ===");
             eprintln!("{api_key}");
@@ -615,12 +824,21 @@ impl Handler {
             eprintln!("Usage:  inputlayer-client --api-key {api_key}");
             eprintln!("   or:  export INPUTLAYER_API_KEY={api_key}");
             eprintln!();
-            eprintln!("Credentials persisted to: {}", credentials_path.display());
+            eprintln!(
+                "Admin password and API key persisted to: {}",
+                credentials_path.display()
+            );
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }
 
-        let hash = auth::hash_password(&password);
+        let hash = match auth::hash_password(&password) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("ERROR: Failed to hash admin password: {e}");
+                return;
+            }
+        };
 
         // Insert admin user: (username, password_hash, role)
         let tuple = crate::value::Tuple::new(vec![
@@ -677,17 +895,24 @@ impl Handler {
                     if u == username {
                         if auth::verify_password(password, h) {
                             let role = auth::Role::from_str(r)?;
+                            tracing::info!(
+                                username,
+                                role = %role,
+                                "audit_auth_login_success"
+                            );
                             return Ok(auth::AuthIdentity {
                                 username: username.to_string(),
                                 role,
                             });
                         }
+                        tracing::warn!(username, "audit_auth_login_failed");
                         return Err("Invalid credentials".to_string());
                     }
                 }
             }
         }
 
+        tracing::warn!(username, "audit_auth_login_unknown_user");
         Err("Invalid credentials".to_string())
     }
 
@@ -723,6 +948,11 @@ impl Handler {
                                 if let (Some(u), Some(r)) = (uvals[0].as_str(), uvals[2].as_str()) {
                                     if u == uname {
                                         let role = auth::Role::from_str(r)?;
+                                        tracing::info!(
+                                            username = uname,
+                                            role = %role,
+                                            "audit_auth_apikey_success"
+                                        );
                                         return Ok(auth::AuthIdentity {
                                             username: uname.to_string(),
                                             role,
@@ -731,12 +961,14 @@ impl Handler {
                                 }
                             }
                         }
+                        tracing::warn!(username = uname, "audit_auth_apikey_owner_not_found");
                         return Err("API key owner not found".to_string());
                     }
                 }
             }
         }
 
+        tracing::warn!("audit_auth_apikey_invalid");
         Err("Invalid API key".to_string())
     }
 
@@ -821,7 +1053,7 @@ impl Handler {
             }
         }
 
-        let hash = auth::hash_password(password);
+        let hash = auth::hash_password(password)?;
         let tuple = crate::value::Tuple::new(vec![
             Value::string(username),
             Value::string(&hash),
@@ -832,6 +1064,7 @@ impl Handler {
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(|e| format!("Failed to create user: {e}"))?;
 
+        tracing::info!(username, role = role_str, "audit_user_created");
         Ok(self.message_result(&format!(
             "User '{username}' created with role '{role_str}'."
         )))
@@ -886,6 +1119,7 @@ impl Handler {
             }
         }
 
+        tracing::info!(username, "audit_user_dropped");
         Ok(self.message_result(&format!("User '{username}' dropped.")))
     }
 
@@ -922,7 +1156,7 @@ impl Handler {
         }
 
         let old = old_tuple.ok_or_else(|| format!("User '{username}' not found"))?;
-        let new_hash = auth::hash_password(new_password);
+        let new_hash = auth::hash_password(new_password)?;
         let new_tuple = crate::value::Tuple::new(vec![
             Value::string(username),
             Value::string(&new_hash),
@@ -936,6 +1170,7 @@ impl Handler {
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
             .map_err(|e| format!("Failed to update password: {e}"))?;
 
+        tracing::info!(username, "audit_user_password_changed");
         Ok(self.message_result(&format!("Password updated for '{username}'.")))
     }
 
@@ -1029,6 +1264,7 @@ impl Handler {
             .insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to create API key: {e}"))?;
 
+        tracing::info!(label, owner, "audit_apikey_created");
         // Return the plaintext key (shown only once)
         Ok(QueryResult {
             rows: vec![WireTuple {
@@ -1132,7 +1368,193 @@ impl Handler {
             .delete_tuples_from(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to revoke API key: {e}"))?;
 
+        tracing::info!(label, "audit_apikey_revoked");
         Ok(self.message_result(&format!("API key '{label}' revoked.")))
+    }
+
+    // ── KG ACL management ─────────────────────────────────────────────────
+
+    /// Get a user's effective KG role for a specific knowledge graph.
+    /// Admins are implicitly owners of all KGs.
+    /// Returns None if the user has no access.
+    pub fn get_kg_role_for_user(
+        &self,
+        kg_name: &str,
+        username: &str,
+        global_role: &crate::auth::Role,
+    ) -> Option<crate::auth::KgRole> {
+        use crate::auth;
+
+        // Admins are implicit owners of all KGs
+        if *global_role == auth::Role::Admin {
+            return Some(auth::KgRole::Owner);
+        }
+
+        let storage = self.storage.read();
+        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+
+        let empty_vec = Vec::new();
+        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
+
+        // Find matching ACL: kg_acls(kg_name, username, role)
+        for tuple in acls {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(kg), Some(user), Some(role)) =
+                    (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
+                {
+                    if kg == kg_name && user == username {
+                        return role.parse::<auth::KgRole>().ok();
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// List ACL entries for a knowledge graph.
+    pub fn handle_kg_acl_list(&self, kg_name: &str) -> Result<String, String> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        let empty_vec = Vec::new();
+        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
+
+        let mut entries = Vec::new();
+        for tuple in acls {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(kg), Some(user), Some(role)) =
+                    (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
+                {
+                    if kg == kg_name {
+                        entries.push(format!("  {user}: {role}"));
+                    }
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            Ok(format!(
+                "No ACL entries for '{kg_name}'. Admins have implicit owner access."
+            ))
+        } else {
+            Ok(format!(
+                "ACL entries for '{kg_name}':\n{}",
+                entries.join("\n")
+            ))
+        }
+    }
+
+    /// Grant a user access to a knowledge graph.
+    pub fn handle_kg_acl_grant(
+        &self,
+        kg_name: &str,
+        username: &str,
+        role: &str,
+    ) -> Result<String, String> {
+        use crate::auth;
+        use crate::Tuple;
+        use crate::Value;
+
+        // Validate role
+        let _kg_role: auth::KgRole = role
+            .parse()
+            .map_err(|_| format!("Invalid KG role '{role}'. Valid: owner, editor, viewer"))?;
+
+        let storage = self.storage.read();
+
+        // Verify KG exists
+        storage
+            .get_snapshot_for(kg_name)
+            .map_err(|_| format!("Knowledge graph '{kg_name}' not found"))?;
+
+        // Remove existing ACL for this user+kg (if any)
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        let empty_vec = Vec::new();
+        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
+
+        let mut to_remove = Vec::new();
+        for tuple in acls {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(kg), Some(user)) = (vals[0].as_str(), vals[1].as_str()) {
+                    if kg == kg_name && user == username {
+                        to_remove.push(tuple.clone());
+                    }
+                }
+            }
+        }
+
+        if !to_remove.is_empty() {
+            storage
+                .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
+                .map_err(|e| format!("Failed to update ACL: {e}"))?;
+        }
+
+        // Insert new ACL entry
+        let tuple = Tuple::new(vec![
+            Value::String(kg_name.to_string().into()),
+            Value::String(username.to_string().into()),
+            Value::String(role.to_lowercase().into()),
+        ]);
+        storage
+            .insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple])
+            .map_err(|e| format!("Failed to grant ACL: {e}"))?;
+
+        tracing::info!(kg = kg_name, user = username, role, "audit_kg_acl_granted");
+        Ok(format!(
+            "Granted '{role}' access on '{kg_name}' to '{username}'."
+        ))
+    }
+
+    /// Revoke a user's access to a knowledge graph.
+    pub fn handle_kg_acl_revoke(&self, kg_name: &str, username: &str) -> Result<String, String> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(|e| format!("Auth storage error: {e}"))?;
+
+        let empty_vec = Vec::new();
+        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
+
+        let mut to_remove = Vec::new();
+        for tuple in acls {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(kg), Some(user)) = (vals[0].as_str(), vals[1].as_str()) {
+                    if kg == kg_name && user == username {
+                        to_remove.push(tuple.clone());
+                    }
+                }
+            }
+        }
+
+        if to_remove.is_empty() {
+            return Err(format!(
+                "No ACL entry found for user '{username}' on '{kg_name}'"
+            ));
+        }
+
+        storage
+            .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
+            .map_err(|e| format!("Failed to revoke ACL: {e}"))?;
+
+        tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
+        Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
     }
 
     /// Get mutable access to the storage engine.
@@ -1243,10 +1665,28 @@ impl Handler {
             .parse::<DistanceMetric>()
             .map_err(|e| format!("Invalid metric: {e}"))?;
 
+        let m = opts.m.unwrap_or(16);
+        let ef_construction = opts.ef_construction.unwrap_or(200);
+        let ef_search = opts.ef_search.unwrap_or(50);
+
+        // Validate HNSW parameters to prevent crashes
+        if m < 2 {
+            return Err(format!("HNSW parameter m must be >= 2, got {m}"));
+        }
+        if m > 256 {
+            return Err(format!("HNSW parameter m must be <= 256, got {m}"));
+        }
+        if ef_construction < 1 {
+            return Err("HNSW parameter ef_construction must be >= 1".to_string());
+        }
+        if ef_search < 1 {
+            return Err("HNSW parameter ef_search must be >= 1".to_string());
+        }
+
         let hnsw_config = HnswConfig {
-            m: opts.m.unwrap_or(16),
-            ef_construction: opts.ef_construction.unwrap_or(200),
-            ef_search: opts.ef_search.unwrap_or(50),
+            m,
+            ef_construction,
+            ef_search,
             metric,
         };
 
@@ -1929,6 +2369,11 @@ impl QueryJob {
                                 storage
                                     .register_rule_in(&kg_name, &rule_def)
                                     .map_err(|e| e.to_string())?;
+                                self.notify_rule_change(
+                                    &kg_name,
+                                    &rule.head.relation,
+                                    "registered",
+                                );
                                 messages.push(format!("Rule '{}' registered.", rule.head.relation));
                             }
                             statement::Statement::SessionRule(rule) => {
@@ -2117,6 +2562,7 @@ impl QueryJob {
                                         match storage.create_knowledge_graph(&name) {
                                             Ok(()) => {
                                                 info!(kg = %name, "meta_kg_create_ok");
+                                                self.notify_kg_change(&name, "created");
                                                 messages.push(format!(
                                                     "Knowledge graph '{name}' created."
                                                 ));
@@ -2169,6 +2615,7 @@ impl QueryJob {
                                                     // Phase 2: Slow file cleanup
                                                     storage.finish_drop_knowledge_graph(cleanup);
                                                     info!(kg = %name, "meta_kg_drop_finish_ok");
+                                                    self.notify_kg_change(&name, "dropped");
                                                 }
                                                 Err(e) => {
                                                     info!(kg = %name, error = %e, "meta_kg_drop_err");
@@ -2245,6 +2692,7 @@ impl QueryJob {
                                     MetaCommand::RelDrop(name) => {
                                         match storage.drop_relation_in(kg, &name) {
                                             Ok(()) => {
+                                                self.notify_schema_change(kg, &name, "dropped");
                                                 messages
                                                     .push(format!("Relation '{name}' dropped."));
                                             }
@@ -2276,6 +2724,7 @@ impl QueryJob {
                                     MetaCommand::RuleDrop(name) => {
                                         match storage.drop_rule_in(kg, &name) {
                                             Ok(()) => {
+                                                self.notify_rule_change(kg, &name, "dropped");
                                                 messages.push(format!("Rule '{name}' dropped."));
                                             }
                                             Err(e) => messages
@@ -2530,6 +2979,16 @@ impl QueryJob {
                                     | MetaCommand::ApiKeyRevoke(_) => {
                                         messages.push(
                                             "User/API key commands require a WebSocket connection with admin privileges."
+                                                .to_string(),
+                                        );
+                                    }
+
+                                    // === KG ACL commands ===
+                                    MetaCommand::KgAclList(_)
+                                    | MetaCommand::KgAclGrant { .. }
+                                    | MetaCommand::KgAclRevoke { .. } => {
+                                        messages.push(
+                                            "KG ACL commands require a WebSocket connection with admin or owner privileges."
                                                 .to_string(),
                                         );
                                     }
@@ -3167,6 +3626,51 @@ impl Handler {
             }
         }
 
+        // Per-KG authorization: check if user has access to the target KG
+        if let Some(identity) = auth {
+            if identity.role != crate::auth::Role::Admin {
+                if let Ok(ref stmt) = statement::parse_statement(trimmed) {
+                    // Determine which KG the operation targets
+                    let target_kg = match stmt {
+                        statement::Statement::Meta(
+                            statement::MetaCommand::KgDrop(name)
+                            | statement::MetaCommand::KgUse(name),
+                        ) => Some(name.as_str()),
+                        statement::Statement::Meta(
+                            statement::MetaCommand::KgAclGrant { ref kg_name, .. }
+                            | statement::MetaCommand::KgAclRevoke { ref kg_name, .. },
+                        ) => Some(kg_name.as_str()),
+                        statement::Statement::Meta(statement::MetaCommand::KgAclList(
+                            ref kg_opt,
+                        )) => kg_opt.as_deref(),
+                        // For KG create and list, skip KG-level check (global role check suffices)
+                        statement::Statement::Meta(
+                            statement::MetaCommand::KgCreate(_)
+                            | statement::MetaCommand::KgList
+                            | statement::MetaCommand::KgShow
+                            | statement::MetaCommand::Help
+                            | statement::MetaCommand::Quit
+                            | statement::MetaCommand::Status,
+                        ) => None,
+                        // All other statements operate on the current KG
+                        _ => knowledge_graph.as_deref(),
+                    };
+
+                    if let Some(kg) = target_kg {
+                        if let Some(kg_role) =
+                            self.get_kg_role_for_user(kg, &identity.username, &identity.role)
+                        {
+                            crate::auth::authorize_kg_operation(&kg_role, stmt)?;
+                        } else {
+                            return Err(format!(
+                                "Access denied: you have no access to knowledge graph '{kg}'"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         // Any session-bound activity should keep the session alive.
         if let Some(sid) = session_id {
             self.sessions.touch_session(sid)?;
@@ -3234,6 +3738,34 @@ impl Handler {
                     }
                     MetaCommand::ApiKeyRevoke(label) => {
                         return self.handle_apikey_revoke(label);
+                    }
+
+                    // KG ACL management
+                    MetaCommand::KgAclList(ref kg_filter) => {
+                        let effective_kg = kg_filter
+                            .as_deref()
+                            .or(knowledge_graph.as_deref())
+                            .unwrap_or("default");
+                        return self
+                            .handle_kg_acl_list(effective_kg)
+                            .map(|msg| self.message_result(&msg));
+                    }
+                    MetaCommand::KgAclGrant {
+                        ref kg_name,
+                        ref username,
+                        ref role,
+                    } => {
+                        return self
+                            .handle_kg_acl_grant(kg_name, username, role)
+                            .map(|msg| self.message_result(&msg));
+                    }
+                    MetaCommand::KgAclRevoke {
+                        ref kg_name,
+                        ref username,
+                    } => {
+                        return self
+                            .handle_kg_acl_revoke(kg_name, username)
+                            .map(|msg| self.message_result(&msg));
                     }
 
                     _ => {} // handled by query_program
@@ -3973,6 +4505,7 @@ mod tests {
                 relation,
                 operation,
                 count,
+                ..
             }) => {
                 assert_eq!(knowledge_graph, "test_kg");
                 assert_eq!(relation, "edge");
@@ -4001,6 +4534,64 @@ mod tests {
 
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());
+    }
+
+    #[test]
+    fn test_notification_seq_increments() {
+        let (storage, _tmp) = make_test_storage();
+        let handler = Handler::new(storage);
+        let mut rx = handler.subscribe_notifications();
+
+        handler.notify_persistent_update("kg", "a", "insert", 1);
+        handler.notify_persistent_update("kg", "b", "insert", 2);
+        handler.notify_kg_change("kg2", "created");
+
+        let n1 = rx.try_recv().unwrap();
+        let n2 = rx.try_recv().unwrap();
+        let n3 = rx.try_recv().unwrap();
+        assert_eq!(n1.seq(), 1);
+        assert_eq!(n2.seq(), 2);
+        assert_eq!(n3.seq(), 3);
+    }
+
+    #[test]
+    fn test_get_notifications_since() {
+        let (storage, _tmp) = make_test_storage();
+        let handler = Handler::new(storage);
+
+        handler.notify_persistent_update("kg", "a", "insert", 1);
+        handler.notify_persistent_update("kg", "b", "insert", 2);
+        handler.notify_kg_change("kg", "created");
+
+        // Get all since seq 0 (all notifications)
+        let all = handler.get_notifications_since(0);
+        assert_eq!(all.len(), 3);
+
+        // Get only since seq 2
+        let since2 = handler.get_notifications_since(2);
+        assert_eq!(since2.len(), 1);
+        assert_eq!(since2[0].seq(), 3);
+
+        // Get since last — should be empty
+        let none = handler.get_notifications_since(3);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn test_notification_buffer_bounded() {
+        let (storage, _tmp) = make_test_storage();
+        let handler = Handler::new(storage);
+        let buf_size = handler.config().http.rate_limit.notification_buffer_size;
+
+        // Send more notifications than buffer size
+        for i in 0..(buf_size + 10) {
+            handler.notify_persistent_update("kg", &format!("r{i}"), "insert", 1);
+        }
+
+        let all = handler.get_notifications_since(0);
+        assert_eq!(all.len(), buf_size);
+        // First notification in buffer should be seq 11 (oldest 10 evicted)
+        assert_eq!(all[0].seq(), 11);
     }
 
     // --- query_program tests ---
@@ -4158,6 +4749,55 @@ mod tests {
         let result = handler.explain_query(None, "?edge(X, Y)".to_string());
         // No current KG selected → error
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_explain_query_join() {
+        let (handler, _tmp) = handler_with_kg("explain_join_kg");
+        let result = handler.explain_query(
+            Some("explain_join_kg".to_string()),
+            "__q__(X, Z) <- edge(X, Y), edge(Y, Z)".to_string(),
+        );
+        assert!(result.is_ok(), "explain join failed: {:?}", result.err());
+        let (trace, _) = result.unwrap();
+        assert!(!trace.is_empty());
+    }
+
+    #[test]
+    fn test_explain_query_recursive() {
+        let (handler, _tmp) = handler_with_kg("explain_rec_kg");
+        let result = handler.explain_query(
+            Some("explain_rec_kg".to_string()),
+            "__q__(X, Y) <- edge(X, Y)".to_string(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_explain_query_nonexistent_kg() {
+        let (storage, _tmp) = make_test_storage();
+        let handler = Handler::new(storage);
+        let result = handler.explain_query(
+            Some("nonexistent_kg".to_string()),
+            "__q__(X, Y) <- edge(X, Y)".to_string(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[test]
+    fn test_explain_query_returns_optimization_list() {
+        let (handler, _tmp) = handler_with_kg("explain_opt_kg");
+        let (_, optimizations) = handler
+            .explain_query(
+                Some("explain_opt_kg".to_string()),
+                "__q__(X, Y) <- edge(X, Y)".to_string(),
+            )
+            .unwrap();
+        assert!(optimizations.len() >= 4);
+        assert!(optimizations.iter().any(|o| o.contains("Join Planning")));
+        assert!(optimizations.iter().any(|o| o.contains("SIP")));
+        assert!(optimizations.iter().any(|o| o.contains("Subplan Sharing")));
     }
 
     // --- query_program edge case tests ---
@@ -5270,10 +5910,16 @@ mod tests {
             relation: "edge".to_string(),
             operation: "insert".to_string(),
             count: 5,
+            timestamp_ms: 1700000000000,
+            session_id: None,
+            seq: 1,
         };
         let json = serde_json::to_string(&notif).unwrap();
         assert!(json.contains("persistent_update"));
         assert!(json.contains("\"count\":5"));
+        assert!(json.contains("\"timestamp_ms\":1700000000000"));
+        // session_id should be omitted when None (skip_serializing_if)
+        assert!(!json.contains("session_id"));
     }
 
     // --- extract_predicate_vars tests ---

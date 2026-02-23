@@ -33,6 +33,7 @@ use std::path::PathBuf;
 
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub storage: StorageConfig,
     pub optimization: OptimizationConfig,
@@ -44,6 +45,7 @@ pub struct Config {
 
 /// Storage engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Base directory for all knowledge graph storage
     pub data_dir: PathBuf,
@@ -74,6 +76,7 @@ pub struct StorageConfig {
 
 /// Persistence configuration (legacy)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PersistenceConfig {
     /// Storage format (parquet, csv, bincode)
     pub format: StorageFormat,
@@ -92,6 +95,7 @@ pub struct PersistenceConfig {
 
 /// DD-native persist layer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PersistLayerConfig {
     /// Enable the DD-native persist layer
     #[serde(default = "default_true")]
@@ -113,6 +117,15 @@ pub struct PersistLayerConfig {
     /// Prevents unbounded WAL growth and slow startup replay. 0 = unlimited.
     #[serde(default = "default_max_wal_size_bytes")]
     pub max_wal_size_bytes: u64,
+
+    /// Auto-compaction: maximum number of batch files per shard before triggering
+    /// background compaction. 0 = disabled (manual `.compact` only).
+    #[serde(default = "default_auto_compact_threshold")]
+    pub auto_compact_threshold: usize,
+
+    /// Auto-compaction check interval in seconds. 0 = disabled.
+    #[serde(default = "default_auto_compact_interval_secs")]
+    pub auto_compact_interval_secs: u64,
 }
 
 fn default_buffer_size() -> usize {
@@ -123,6 +136,14 @@ fn default_max_wal_size_bytes() -> u64 {
     67_108_864 // 64 MB
 }
 
+fn default_auto_compact_threshold() -> usize {
+    10 // Compact when a shard has 10+ batch files
+}
+
+fn default_auto_compact_interval_secs() -> u64 {
+    300 // Check every 5 minutes
+}
+
 impl Default for PersistLayerConfig {
     fn default() -> Self {
         PersistLayerConfig {
@@ -131,6 +152,8 @@ impl Default for PersistLayerConfig {
             durability_mode: DurabilityMode::Immediate,
             compaction_window: 0,
             max_wal_size_bytes: default_max_wal_size_bytes(),
+            auto_compact_threshold: default_auto_compact_threshold(),
+            auto_compact_interval_secs: default_auto_compact_interval_secs(),
         }
     }
 }
@@ -180,6 +203,7 @@ pub enum DurabilityMode {
 
 /// Performance tuning options
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PerformanceConfig {
     /// Initial capacity for in-memory collections
     #[serde(default = "default_initial_capacity")]
@@ -222,10 +246,17 @@ pub struct PerformanceConfig {
     /// are logged at WARN level. 0 = disabled.
     #[serde(default = "default_slow_query_log_ms")]
     pub slow_query_log_ms: u64,
+
+    /// Maximum query cost score. Queries exceeding this are rejected before
+    /// execution. Cost is estimated from the IR tree (joins, aggregations,
+    /// negation, recursion). 0 = no limit.
+    #[serde(default)]
+    pub max_query_cost: u64,
 }
 
 /// Optimization configuration (re-use existing from lib.rs)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OptimizationConfig {
     /// NOTE: Disabled by default - code generator only supports 2-tuples
     #[serde(default)]
@@ -244,6 +275,7 @@ pub struct OptimizationConfig {
 
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
     /// Log level (trace, debug, info, warn, error)
     #[serde(default = "default_log_level")]
@@ -256,6 +288,7 @@ pub struct LoggingConfig {
 
 /// HTTP server configuration for WebSocket API and GUI
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HttpConfig {
     /// Enable HTTP server (WebSocket API + optional GUI)
     #[serde(default)]
@@ -306,6 +339,7 @@ pub struct HttpConfig {
 
 /// GUI static file serving configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GuiConfig {
     /// Enable GUI dashboard serving
     #[serde(default)]
@@ -318,6 +352,7 @@ pub struct GuiConfig {
 
 /// Authentication configuration for HTTP API
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Initial admin password (set via INPUTLAYER_ADMIN_PASSWORD env var or config).
     /// If unset on first boot, a random password is generated and printed to stderr.
@@ -338,6 +373,7 @@ pub struct AuthConfig {
 
 /// Rate limiting configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RateLimitConfig {
     /// Maximum concurrent connections (0 = unlimited)
     #[serde(default = "default_max_connections")]
@@ -358,6 +394,10 @@ pub struct RateLimitConfig {
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
+
+    /// Maximum HTTP requests per second per IP address (0 = unlimited) (#27)
+    #[serde(default = "default_per_ip_max_rps")]
+    pub per_ip_max_rps: u32,
 }
 
 // Default value functions
@@ -433,6 +473,9 @@ fn default_ws_max_lifetime_secs() -> u64 {
 fn default_notification_buffer_size() -> usize {
     4096
 }
+fn default_per_ip_max_rps() -> u32 {
+    0 // unlimited by default
+}
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
@@ -442,6 +485,7 @@ impl Default for RateLimitConfig {
             ws_max_messages_per_sec: default_ws_max_messages_per_sec(),
             ws_max_lifetime_secs: default_ws_max_lifetime_secs(),
             notification_buffer_size: default_notification_buffer_size(),
+            per_ip_max_rps: default_per_ip_max_rps(),
         }
     }
 }
@@ -561,6 +605,7 @@ impl Config {
                     max_string_value_bytes: 65_536,
                     max_result_rows: 100_000,
                     slow_query_log_ms: 5000,
+                    max_query_cost: 0,
                 },
                 max_knowledge_graphs: 1000,
             },
@@ -596,8 +641,9 @@ impl Default for PerformanceConfig {
             max_query_size_bytes: default_max_query_size_bytes(),
             max_insert_tuples: default_max_insert_tuples(),
             max_string_value_bytes: default_max_string_value_bytes(),
-            max_result_rows: 0, // 0 = no limit
+            max_result_rows: 100_000, // match Config::default()
             slow_query_log_ms: default_slow_query_log_ms(),
+            max_query_cost: 0, // 0 = unlimited
         }
     }
 }
@@ -741,6 +787,8 @@ mod tests {
         assert_eq!(persist.buffer_size, 10000);
         assert_eq!(persist.durability_mode, DurabilityMode::Immediate);
         assert_eq!(persist.compaction_window, 0);
+        assert_eq!(persist.auto_compact_threshold, 10);
+        assert_eq!(persist.auto_compact_interval_secs, 300);
     }
 
     #[test]

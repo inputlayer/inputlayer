@@ -605,4 +605,78 @@ mod tests {
             panic!("Expected Load with Merge, got {:?}", stmt);
         }
     }
+
+    // === Property-based parser tests (#54) ===
+
+    mod proptest_parser {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Parser must never panic on arbitrary input.
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::SourceParallel("proptest-regressions"))),
+                .. ProptestConfig::default()
+            })]
+            #[test]
+            fn parse_statement_never_panics(input in "\\PC{0,200}") {
+                // We don't care about the result — just that it doesn't panic
+                let _ = parse_statement(&input);
+            }
+
+            /// Valid relation names should always be accepted by the parser.
+            #[test]
+            fn valid_relation_names_accepted(name in "[a-z][a-z0-9_]{0,20}") {
+                let input = format!("+{name}(1, 2)");
+                let result = parse_statement(&input);
+                // Should either succeed or give a meaningful error (not panic)
+                match result {
+                    Ok(_) => {} // Good
+                    Err(e) => {
+                        // Error messages should not be empty
+                        prop_assert!(!e.is_empty());
+                    }
+                }
+            }
+
+            /// Queries with valid variable names should parse or give a meaningful error.
+            #[test]
+            fn valid_queries_parse(
+                rel in "[a-z][a-z0-9_]{0,10}",
+                var1 in "[A-Z][A-Za-z0-9]{0,5}",
+                var2 in "[A-Z][A-Za-z0-9]{0,5}"
+            ) {
+                let input = format!("?{rel}({var1}, {var2})");
+                let result = parse_statement(&input);
+                match result {
+                    Ok(Statement::Query(_)) => {} // Expected
+                    Ok(_) => {} // Some other valid parse — fine
+                    Err(e) => {
+                        prop_assert!(!e.is_empty());
+                    }
+                }
+            }
+
+            /// Meta commands starting with . should never panic.
+            #[test]
+            fn meta_commands_never_panic(cmd in "\\.[a-z ]{0,50}") {
+                let _ = parse_statement(&cmd);
+            }
+
+            /// Integer constants should parse in insert statements.
+            #[test]
+            fn integer_inserts_parse(val in -1000i64..1000i64) {
+                let input = format!("+test_rel({val})");
+                let result = parse_statement(&input);
+                prop_assert!(result.is_ok(), "Failed to parse: {input}, error: {result:?}");
+            }
+
+            /// String constants should parse without panic.
+            #[test]
+            fn string_inserts_no_panic(s in "[a-zA-Z0-9 ]{0,30}") {
+                let input = format!("+str_rel(\"{s}\")");
+                let _ = parse_statement(&input);
+            }
+        }
+    }
 }

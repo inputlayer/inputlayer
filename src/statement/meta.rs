@@ -3,7 +3,7 @@
 //! Meta commands are dot-prefixed: .kg, .rel, .rule, .session, etc.
 
 /// Meta commands for knowledge graph/relation/rule management
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum MetaCommand {
     // Knowledge graph commands
     KgShow,
@@ -86,6 +86,104 @@ pub enum MetaCommand {
     ApiKeyCreate(String), // label
     ApiKeyList,
     ApiKeyRevoke(String), // label
+
+    // KG ACL management commands
+    KgAclList(Option<String>), // .kg acl list [kg_name] — list ACLs (for specific KG or current)
+    KgAclGrant {
+        kg_name: String,
+        username: String,
+        role: String,
+    }, // .kg acl grant <kg> <user> <role>
+    KgAclRevoke {
+        kg_name: String,
+        username: String,
+    }, // .kg acl revoke <kg> <user>
+}
+
+/// Custom Debug implementation that redacts sensitive fields (passwords).
+impl std::fmt::Debug for MetaCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UserCreate { username, role, .. } => f
+                .debug_struct("UserCreate")
+                .field("username", username)
+                .field("password", &"[REDACTED]")
+                .field("role", role)
+                .finish(),
+            Self::UserPassword { username, .. } => f
+                .debug_struct("UserPassword")
+                .field("username", username)
+                .field("password", &"[REDACTED]")
+                .finish(),
+            // For all other variants, use default formatting
+            other => write!(f, "{}", format_meta_debug(other)),
+        }
+    }
+}
+
+/// Format non-sensitive MetaCommand variants for Debug output.
+fn format_meta_debug(cmd: &MetaCommand) -> String {
+    match cmd {
+        MetaCommand::KgShow => "KgShow".to_string(),
+        MetaCommand::KgList => "KgList".to_string(),
+        MetaCommand::KgCreate(s) => format!("KgCreate({s:?})"),
+        MetaCommand::KgUse(s) => format!("KgUse({s:?})"),
+        MetaCommand::KgDrop(s) => format!("KgDrop({s:?})"),
+        MetaCommand::RelList => "RelList".to_string(),
+        MetaCommand::RelDescribe(s) => format!("RelDescribe({s:?})"),
+        MetaCommand::RelDrop(s) => format!("RelDrop({s:?})"),
+        MetaCommand::RuleList => "RuleList".to_string(),
+        MetaCommand::RuleQuery(s) => format!("RuleQuery({s:?})"),
+        MetaCommand::RuleShowDef(s) => format!("RuleShowDef({s:?})"),
+        MetaCommand::RuleDrop(s) => format!("RuleDrop({s:?})"),
+        MetaCommand::RuleDropPrefix(s) => format!("RuleDropPrefix({s:?})"),
+        MetaCommand::RuleEdit {
+            name,
+            index,
+            rule_text,
+        } => format!("RuleEdit {{ name: {name:?}, index: {index}, rule_text: {rule_text:?} }}"),
+        MetaCommand::RuleClear(s) => format!("RuleClear({s:?})"),
+        MetaCommand::RuleRemove { name, index } => {
+            format!("RuleRemove {{ name: {name:?}, index: {index} }}")
+        }
+        MetaCommand::SessionList => "SessionList".to_string(),
+        MetaCommand::SessionClear => "SessionClear".to_string(),
+        MetaCommand::SessionDrop(n) => format!("SessionDrop({n})"),
+        MetaCommand::SessionDropName(s) => format!("SessionDropName({s:?})"),
+        MetaCommand::IndexList => "IndexList".to_string(),
+        MetaCommand::IndexCreate(opts) => format!("IndexCreate({opts:?})"),
+        MetaCommand::IndexDrop(s) => format!("IndexDrop({s:?})"),
+        MetaCommand::IndexStats(s) => format!("IndexStats({s:?})"),
+        MetaCommand::IndexRebuild(s) => format!("IndexRebuild({s:?})"),
+        MetaCommand::ClearPrefix(s) => format!("ClearPrefix({s:?})"),
+        MetaCommand::Compact => "Compact".to_string(),
+        MetaCommand::Status => "Status".to_string(),
+        MetaCommand::Explain(s) => format!("Explain({s:?})"),
+        MetaCommand::Help => "Help".to_string(),
+        MetaCommand::Quit => "Quit".to_string(),
+        MetaCommand::Load { path, mode } => {
+            format!("Load {{ path: {path:?}, mode: {mode:?} }}")
+        }
+        MetaCommand::UserList => "UserList".to_string(),
+        MetaCommand::UserCreate { .. } => unreachable!("handled above"),
+        MetaCommand::UserDrop(s) => format!("UserDrop({s:?})"),
+        MetaCommand::UserPassword { .. } => unreachable!("handled above"),
+        MetaCommand::UserRole { username, role } => {
+            format!("UserRole {{ username: {username:?}, role: {role:?} }}")
+        }
+        MetaCommand::ApiKeyCreate(s) => format!("ApiKeyCreate({s:?})"),
+        MetaCommand::ApiKeyList => "ApiKeyList".to_string(),
+        MetaCommand::ApiKeyRevoke(s) => format!("ApiKeyRevoke({s:?})"),
+        MetaCommand::KgAclList(kg) => format!("KgAclList({kg:?})"),
+        MetaCommand::KgAclGrant {
+            kg_name,
+            username,
+            role,
+        } => format!("KgAclGrant {{ kg: {kg_name:?}, user: {username:?}, role: {role:?} }}"),
+        MetaCommand::KgAclRevoke { kg_name, username } => {
+            format!("KgAclRevoke {{ kg: {kg_name:?}, user: {username:?} }}")
+        }
+    }
 }
 
 /// Options for creating an index
@@ -192,8 +290,55 @@ fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
                     Ok(MetaCommand::KgDrop(parts[2].to_string()))
                 }
             }
+            "acl" => parse_kg_acl_command(parts),
             _ => Err(format!("Unknown kg subcommand: {}", parts[1])),
         }
+    }
+}
+
+fn parse_kg_acl_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    // .kg acl → error (need subcommand)
+    // .kg acl list → list ACLs for current KG
+    // .kg acl list <kg> → list ACLs for specific KG
+    // .kg acl grant <kg> <user> <role> → grant access
+    // .kg acl revoke <kg> <user> → revoke access
+    if parts.len() < 3 {
+        return Err("Usage: .kg acl list [kg_name] | .kg acl grant <kg> <user> <role> | .kg acl revoke <kg> <user>".to_string());
+    }
+    match parts[2].to_lowercase().as_str() {
+        "list" => {
+            let kg = if parts.len() >= 4 {
+                Some(parts[3].to_string())
+            } else {
+                None
+            };
+            Ok(MetaCommand::KgAclList(kg))
+        }
+        "grant" => {
+            if parts.len() < 6 {
+                Err("Usage: .kg acl grant <kg_name> <username> <role>".to_string())
+            } else {
+                Ok(MetaCommand::KgAclGrant {
+                    kg_name: parts[3].to_string(),
+                    username: parts[4].to_string(),
+                    role: parts[5].to_string(),
+                })
+            }
+        }
+        "revoke" => {
+            if parts.len() < 5 {
+                Err("Usage: .kg acl revoke <kg_name> <username>".to_string())
+            } else {
+                Ok(MetaCommand::KgAclRevoke {
+                    kg_name: parts[3].to_string(),
+                    username: parts[4].to_string(),
+                })
+            }
+        }
+        _ => Err(format!(
+            "Unknown acl subcommand: {}. Use: list, grant, revoke",
+            parts[2]
+        )),
     }
 }
 
@@ -222,6 +367,8 @@ fn parse_rule_command(parts: &[&str], input: &str) -> Result<MetaCommand, String
         } else if parts[2].to_lowercase() == "prefix" {
             if parts.len() < 4 {
                 Err("Usage: .rule drop prefix <prefix>".to_string())
+            } else if parts[3].is_empty() {
+                Err("Rule drop prefix cannot be empty (would drop ALL rules)".to_string())
             } else {
                 Ok(MetaCommand::RuleDropPrefix(parts[3].to_string()))
             }
@@ -661,6 +808,57 @@ mod tests {
         } else {
             panic!("Expected KgUse");
         }
+    }
+
+    #[test]
+    fn test_parse_kg_acl_list() {
+        let cmd = parse_meta_command(".kg acl list").unwrap();
+        assert!(matches!(cmd, MetaCommand::KgAclList(None)));
+
+        let cmd = parse_meta_command(".kg acl list mykg").unwrap();
+        if let MetaCommand::KgAclList(Some(kg)) = cmd {
+            assert_eq!(kg, "mykg");
+        } else {
+            panic!("Expected KgAclList(Some)");
+        }
+    }
+
+    #[test]
+    fn test_parse_kg_acl_grant() {
+        let cmd = parse_meta_command(".kg acl grant mykg alice editor").unwrap();
+        if let MetaCommand::KgAclGrant {
+            kg_name,
+            username,
+            role,
+        } = cmd
+        {
+            assert_eq!(kg_name, "mykg");
+            assert_eq!(username, "alice");
+            assert_eq!(role, "editor");
+        } else {
+            panic!("Expected KgAclGrant");
+        }
+    }
+
+    #[test]
+    fn test_parse_kg_acl_revoke() {
+        let cmd = parse_meta_command(".kg acl revoke mykg bob").unwrap();
+        if let MetaCommand::KgAclRevoke { kg_name, username } = cmd {
+            assert_eq!(kg_name, "mykg");
+            assert_eq!(username, "bob");
+        } else {
+            panic!("Expected KgAclRevoke");
+        }
+    }
+
+    #[test]
+    fn test_parse_kg_acl_errors() {
+        assert!(parse_meta_command(".kg acl").is_err());
+        assert!(parse_meta_command(".kg acl grant").is_err());
+        assert!(parse_meta_command(".kg acl grant mykg").is_err());
+        assert!(parse_meta_command(".kg acl revoke").is_err());
+        assert!(parse_meta_command(".kg acl revoke mykg").is_err());
+        assert!(parse_meta_command(".kg acl unknown").is_err());
     }
 
     #[test]
