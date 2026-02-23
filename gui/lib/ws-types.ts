@@ -89,6 +89,31 @@ export interface WsNotificationMessage {
   count: number
 }
 
+// ── Streaming result types ──────────────────────────────────────────────────
+
+export interface WsResultStartMessage {
+  type: "result_start"
+  columns: string[]
+  total_count: number
+  truncated: boolean
+  execution_time_ms: number
+  metadata?: WsResultMetadata
+  switched_kg?: string
+}
+
+export interface WsResultChunkMessage {
+  type: "result_chunk"
+  rows: (string | number | boolean | null)[][]
+  row_provenance?: string[]
+  chunk_index: number
+}
+
+export interface WsResultEndMessage {
+  type: "result_end"
+  row_count: number
+  chunk_count: number
+}
+
 export type WsServerMessage =
   | WsConnectedMessage
   | WsAuthenticatedMessage
@@ -97,6 +122,9 @@ export type WsServerMessage =
   | WsErrorMessage
   | WsPongMessage
   | WsNotificationMessage
+  | WsResultStartMessage
+  | WsResultChunkMessage
+  | WsResultEndMessage
 
 // ── Connection state ────────────────────────────────────────────────────────
 

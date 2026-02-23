@@ -44,6 +44,14 @@ use crate::protocol::rest::WsSemaphore;
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
 
+/// Threshold in bytes: results whose single-message JSON exceeds this are
+/// streamed as `result_start` / `result_chunk` / `result_end` messages.
+/// Below this threshold, the classic single `result` message is used.
+const STREAMING_THRESHOLD: usize = 1024 * 1024; // 1 MB
+
+/// Maximum number of rows per `result_chunk` message.
+const STREAMING_CHUNK_ROWS: usize = 500;
+
 /// Incoming WebSocket message from client
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -86,14 +94,6 @@ enum WsResponse {
         message: String,
     },
     Pong,
-    /// Push notification when persistent data changes
-    Notification {
-        event: String,
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-    },
 }
 
 /// Upgrade to a session-scoped WebSocket connection for real-time bidirectional communication.
@@ -257,6 +257,10 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
         None
     };
 
+    // Server-initiated heartbeat: send ping every 30s to detect dead connections
+    let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    heartbeat_interval.tick().await; // consume the immediate first tick
+
     loop {
         // Check connection lifetime
         if let Some(max_lt) = max_lifetime {
@@ -359,10 +363,16 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                     _ => {} // Ignore binary, ping/pong handled by axum
                 }
             }
+            // Server-initiated heartbeat ping
+            _ = heartbeat_interval.tick() => {
+                if sender.send(Message::Ping(Vec::new())).await.is_err() {
+                    break; // Connection dead
+                }
+            }
             // Push notification from persistent data changes
             notification = notify_rx.recv() => {
                 match notification {
-                    Ok(PersistentNotification::PersistentUpdate { knowledge_graph, relation, operation, count }) => {
+                    Ok(ref notif) => {
                         // Get current session KG (may have changed via switch_kg)
                         let session_kg = match handler
                             .session_manager()
@@ -381,16 +391,18 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                                 break;
                             }
                         };
+                        // Extract the KG name from any notification variant
+                        let notif_kg = match notif {
+                            PersistentNotification::PersistentUpdate { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::RuleChange { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::KgChange { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::SchemaChange { knowledge_graph, .. } => knowledge_graph,
+                        };
                         // Only forward notifications for this session's knowledge graph
-                        if knowledge_graph == session_kg {
-                            let ws_msg = WsResponse::Notification {
-                                event: "persistent_update".to_string(),
-                                knowledge_graph,
-                                relation,
-                                operation,
-                                count,
-                            };
-                            if let Ok(json) = serde_json::to_string(&ws_msg) {
+                        // (KgChange notifications are always forwarded — they affect the KG list)
+                        let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
+                        if *notif_kg == session_kg || is_kg_change {
+                            if let Ok(json) = serde_json::to_string(&notif) {
                                 if sender.send(Message::Text(json)).await.is_err() {
                                     break;
                                 }
@@ -618,6 +630,10 @@ pub struct WsConnectParams {
     /// Knowledge graph to bind to (defaults to "default")
     #[serde(default = "default_kg")]
     pub kg: String,
+    /// Last notification sequence number seen by the client.
+    /// If provided, the server replays buffered notifications with seq > last_seq on connect (#39).
+    #[serde(default)]
+    pub last_seq: Option<u64>,
 }
 
 fn default_kg() -> String {
@@ -651,7 +667,7 @@ enum GlobalWsResponse {
     },
     /// Authentication failed
     AuthError { message: String },
-    /// Query/command result
+    /// Query/command result (single message for small results)
     Result {
         columns: Vec<String>,
         rows: Vec<Vec<serde_json::Value>>,
@@ -666,6 +682,29 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
     },
+    /// Streaming: header sent before row chunks (large results)
+    ResultStart {
+        columns: Vec<String>,
+        total_count: usize,
+        truncated: bool,
+        execution_time_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<SessionQueryMetadataDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        switched_kg: Option<String>,
+    },
+    /// Streaming: a batch of rows
+    ResultChunk {
+        rows: Vec<Vec<serde_json::Value>>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        row_provenance: Vec<String>,
+        chunk_index: usize,
+    },
+    /// Streaming: final message after all chunks
+    ResultEnd {
+        row_count: usize,
+        chunk_count: usize,
+    },
     /// Error response
     Error {
         message: String,
@@ -674,14 +713,6 @@ enum GlobalWsResponse {
     },
     /// Pong response to keep-alive ping
     Pong,
-    /// Push notification when persistent data changes
-    Notification {
-        event: String,
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-    },
 }
 
 /// Global WebSocket endpoint with auto-session lifecycle.
@@ -759,14 +790,19 @@ pub async fn global_websocket(
         .on_upgrade(move |socket| {
             let permit = ws_permit;
             async move {
-                handle_global_ws_connection(socket, handler, params.kg).await;
+                handle_global_ws_connection(socket, handler, params.kg, params.last_seq).await;
                 drop(permit);
             }
         }))
 }
 
 /// Handle a global WebSocket connection with auth loop + message loop.
-async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, kg: String) {
+async fn handle_global_ws_connection(
+    socket: WebSocket,
+    handler: Arc<Handler>,
+    kg: String,
+    last_seq: Option<u64>,
+) {
     use crate::auth::AuthIdentity;
 
     let (mut sender, mut receiver) = socket.split();
@@ -914,6 +950,46 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let mut notify_rx = handler.subscribe_notifications();
     let mut request_seq: u64 = 0;
 
+    // Replay missed notifications on reconnect (#39)
+    if let Some(since_seq) = last_seq {
+        let missed = handler.get_notifications_since(since_seq);
+        if !missed.is_empty() {
+            let session_kg = handler
+                .session_manager()
+                .with_session(&session_id, |s| s.knowledge_graph.clone())
+                .unwrap_or_default();
+            debug!(session_id = %session_id, missed_count = missed.len(), since_seq, "ws_replaying_missed_notifications");
+            for notif in &missed {
+                // Apply same KG filtering as live notifications
+                let notif_kg = match notif {
+                    PersistentNotification::PersistentUpdate {
+                        knowledge_graph, ..
+                    } => knowledge_graph,
+                    PersistentNotification::RuleChange {
+                        knowledge_graph, ..
+                    } => knowledge_graph,
+                    PersistentNotification::KgChange {
+                        knowledge_graph, ..
+                    } => knowledge_graph,
+                    PersistentNotification::SchemaChange {
+                        knowledge_graph, ..
+                    } => knowledge_graph,
+                };
+                let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
+                if *notif_kg == session_kg || is_kg_change {
+                    if let Ok(json) = serde_json::to_string(notif) {
+                        if sender.send(Message::Text(json)).await.is_err() {
+                            if let Err(e) = handler.close_session(&session_id) {
+                                tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Cumulative notification lag — disconnect if subscriber falls too far behind
     let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
     let mut total_lagged: u64 = 0;
@@ -940,6 +1016,10 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
     let mut rate_window_start = std::time::Instant::now();
     let mut rate_window_count: u32 = 0;
+
+    // Server-initiated heartbeat: send ping every 30s to detect dead connections
+    let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    heartbeat_interval.tick().await; // consume the immediate first tick
 
     loop {
         // Compute remaining idle time for this iteration
@@ -1019,36 +1099,12 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        let response = process_global_ws_message(&handler, &session_id, &text, &auth_identity)
-                            .instrument(span)
-                            .await;
-                        let json = match serde_json::to_string(&response) {
-                            Ok(j) => j,
-                            Err(e) => {
-                                tracing::error!(error = %e, "Failed to serialize GlobalWsResponse");
-                                let err = GlobalWsResponse::Error {
-                                    message: "Internal server error".to_string(),
-                                    validation_errors: None,
-                                };
-                                serde_json::to_string(&err).unwrap_or_else(|_| {
-                                    r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
-                                })
-                            }
-                        };
-                        // Guard against oversized WS frames
-                        let json = if json.len() > MAX_MESSAGE_SIZE {
-                            warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
-                            let err = GlobalWsResponse::Error {
-                                message: format!("Result too large ({} bytes, max {})", json.len(), MAX_MESSAGE_SIZE),
-                                validation_errors: None,
-                            };
-                            serde_json::to_string(&err).unwrap_or_else(|_| {
-                                r#"{"type":"error","message":"Result too large"}"#.to_string()
-                            })
-                        } else {
-                            json
-                        };
-                        if sender.send(Message::Text(json)).await.is_err() {
+                        let send_ok = process_and_send_global_ws_message(
+                            &handler, &session_id, &text, &auth_identity, &mut sender,
+                        )
+                        .instrument(span)
+                        .await;
+                        if !send_ok {
                             break;
                         }
                     }
@@ -1067,10 +1123,16 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                     _ => {}
                 }
             }
+            // Server-initiated heartbeat ping
+            _ = heartbeat_interval.tick() => {
+                if sender.send(Message::Ping(Vec::new())).await.is_err() {
+                    break; // Connection dead
+                }
+            }
             // Push notification
             notification = notify_rx.recv() => {
                 match notification {
-                    Ok(PersistentNotification::PersistentUpdate { knowledge_graph, relation, operation, count }) => {
+                    Ok(ref notif) => {
                         let session_kg = match handler
                             .session_manager()
                             .with_session(&session_id, |s| s.knowledge_graph.clone())
@@ -1078,15 +1140,15 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
                             Ok(kg) => kg,
                             Err(_) => break,
                         };
-                        if knowledge_graph == session_kg {
-                            let ws_msg = GlobalWsResponse::Notification {
-                                event: "persistent_update".to_string(),
-                                knowledge_graph,
-                                relation,
-                                operation,
-                                count,
-                            };
-                            if let Ok(json) = serde_json::to_string(&ws_msg) {
+                        let notif_kg = match notif {
+                            PersistentNotification::PersistentUpdate { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::RuleChange { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::KgChange { knowledge_graph, .. } => knowledge_graph,
+                            PersistentNotification::SchemaChange { knowledge_graph, .. } => knowledge_graph,
+                        };
+                        let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
+                        if *notif_kg == session_kg || is_kg_change {
+                            if let Ok(json) = serde_json::to_string(&notif) {
                                 if sender.send(Message::Text(json)).await.is_err() {
                                     break;
                                 }
@@ -1143,46 +1205,113 @@ async fn handle_global_ws_connection(socket: WebSocket, handler: Arc<Handler>, k
     }
 }
 
-/// Process a single global WebSocket message
-async fn process_global_ws_message(
+/// Helper: serialize a `GlobalWsResponse` and send it. Returns `false` if the
+/// send fails (connection dead).
+async fn send_global_response(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    response: &GlobalWsResponse,
+    session_id: &str,
+) -> bool {
+    let json = match serde_json::to_string(response) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to serialize GlobalWsResponse");
+            let err = GlobalWsResponse::Error {
+                message: "Internal server error".to_string(),
+                validation_errors: None,
+            };
+            serde_json::to_string(&err).unwrap_or_else(|_| {
+                r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
+            })
+        }
+    };
+    // Guard against oversized WS frames (shouldn't happen for streamed chunks,
+    // but protects against non-streamed single messages)
+    let json = if json.len() > MAX_MESSAGE_SIZE {
+        warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+        let err = GlobalWsResponse::Error {
+            message: format!(
+                "Result too large ({} bytes, max {})",
+                json.len(),
+                MAX_MESSAGE_SIZE
+            ),
+            validation_errors: None,
+        };
+        serde_json::to_string(&err)
+            .unwrap_or_else(|_| r#"{"type":"error","message":"Result too large"}"#.to_string())
+    } else {
+        json
+    };
+    sender.send(Message::Text(json)).await.is_ok()
+}
+
+/// Process a single global WebSocket message and send the response(s).
+/// Returns `true` if the connection is still alive, `false` if it should close.
+///
+/// For Execute messages, this may stream multiple messages (result_start /
+/// result_chunk / result_end) when the result is large. Non-execute messages
+/// always send a single response.
+async fn process_and_send_global_ws_message(
     handler: &Arc<Handler>,
     session_id: &str,
     text: &str,
     auth: &crate::auth::AuthIdentity,
-) -> GlobalWsResponse {
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+) -> bool {
     let request: GlobalWsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
         Err(e) => {
             tracing::debug!(error = %e, "Invalid GlobalWsRequest message");
-            return GlobalWsResponse::Error {
-                message: "Invalid message format".to_string(),
-                validation_errors: None,
-            };
+            return send_global_response(
+                sender,
+                &GlobalWsResponse::Error {
+                    message: "Invalid message format".to_string(),
+                    validation_errors: None,
+                },
+                session_id,
+            )
+            .await;
         }
     };
 
     match request {
         GlobalWsRequest::Execute { program } => {
-            handle_global_execute(handler, session_id, program, auth).await
+            send_global_execute(handler, session_id, program, auth, sender).await
         }
-        GlobalWsRequest::Ping => GlobalWsResponse::Pong,
+        GlobalWsRequest::Ping => {
+            send_global_response(sender, &GlobalWsResponse::Pong, session_id).await
+        }
         // Login/Authenticate after already authenticated is a no-op
         GlobalWsRequest::Login { .. } | GlobalWsRequest::Authenticate { .. } => {
-            GlobalWsResponse::Error {
-                message: "Already authenticated".to_string(),
-                validation_errors: None,
-            }
+            send_global_response(
+                sender,
+                &GlobalWsResponse::Error {
+                    message: "Already authenticated".to_string(),
+                    validation_errors: None,
+                },
+                session_id,
+            )
+            .await
         }
     }
 }
 
-/// Handle an Execute message on the global WebSocket
-async fn handle_global_execute(
+/// Handle an Execute message on the global WebSocket.
+///
+/// For small results (< STREAMING_THRESHOLD bytes when serialized), sends a
+/// single `result` message. For large results, streams the data as:
+/// 1. `result_start` — schema, metadata, totals
+/// 2. `result_chunk` (×N) — batches of up to STREAMING_CHUNK_ROWS rows
+/// 3. `result_end` — row_count + chunk_count summary
+///
+/// Returns `true` if connection still alive, `false` to close.
+async fn send_global_execute(
     handler: &Arc<Handler>,
     session_id: &str,
     program: String,
     auth: &crate::auth::AuthIdentity,
-) -> GlobalWsResponse {
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+) -> bool {
     let start = std::time::Instant::now();
     let program_len = program.len();
     let program_preview = program.lines().next().unwrap_or("").trim();
@@ -1192,10 +1321,6 @@ async fn handle_global_execute(
         program_preview = %program_preview,
         "ws_execute_start"
     );
-    // query_program() inside execute_program() already offloads DD computation to
-    // spawn_blocking internally (with a semaphore limiting concurrency to ncpu).
-    // Calling execute_program() directly keeps Tokio workers free for I/O while
-    // DD runs on blocking threads — no extra spawn_blocking layer needed here.
     let sid = session_id.to_string();
     let result = handler
         .execute_program(Some(&sid), None, program.clone(), Some(auth))
@@ -1218,6 +1343,7 @@ async fn handle_global_execute(
         ok = result.is_ok(),
         "ws_execute_end"
     );
+
     match result {
         Ok(response) => {
             let row_provenance: Vec<String> = response
@@ -1245,33 +1371,131 @@ async fn handle_global_execute(
                 warnings: m.warnings,
             });
 
-            GlobalWsResponse::Result {
-                columns,
-                rows,
+            // Build the single-message response to check its size
+            let single_response = GlobalWsResponse::Result {
+                columns: columns.clone(),
+                rows: rows.clone(),
                 row_count,
                 total_count: response.total_count,
                 truncated: response.truncated,
                 execution_time_ms: response.execution_time_ms,
-                row_provenance,
-                metadata,
-                switched_kg: response.switched_kg,
+                row_provenance: row_provenance.clone(),
+                metadata: metadata.clone(),
+                switched_kg: response.switched_kg.clone(),
+            };
+
+            // Check serialized size to decide: single message vs streaming
+            let single_json = match serde_json::to_string(&single_response) {
+                Ok(j) => j,
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to serialize result");
+                    return send_global_response(
+                        sender,
+                        &GlobalWsResponse::Error {
+                            message: "Internal server error".to_string(),
+                            validation_errors: None,
+                        },
+                        session_id,
+                    )
+                    .await;
+                }
+            };
+
+            if single_json.len() <= STREAMING_THRESHOLD {
+                // Small result: send as single message (backward compatible)
+                if single_json.len() > MAX_MESSAGE_SIZE {
+                    warn!(session_id = %session_id, size = single_json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+                    return send_global_response(
+                        sender,
+                        &GlobalWsResponse::Error {
+                            message: format!(
+                                "Result too large ({} bytes, max {})",
+                                single_json.len(),
+                                MAX_MESSAGE_SIZE
+                            ),
+                            validation_errors: None,
+                        },
+                        session_id,
+                    )
+                    .await;
+                }
+                sender.send(Message::Text(single_json)).await.is_ok()
+            } else {
+                // Large result: stream as chunks
+                info!(
+                    session_id,
+                    row_count,
+                    json_size = single_json.len(),
+                    "ws_streaming_result"
+                );
+                drop(single_json); // free memory
+
+                // 1. Send result_start header
+                let start_msg = GlobalWsResponse::ResultStart {
+                    columns,
+                    total_count: response.total_count,
+                    truncated: response.truncated,
+                    execution_time_ms: response.execution_time_ms,
+                    metadata,
+                    switched_kg: response.switched_kg,
+                };
+                if !send_global_response(sender, &start_msg, session_id).await {
+                    return false;
+                }
+
+                // 2. Send row chunks
+                let mut chunk_index: usize = 0;
+                let mut row_iter = rows.into_iter();
+                let mut prov_iter = row_provenance.into_iter();
+                loop {
+                    let chunk_rows: Vec<Vec<serde_json::Value>> =
+                        row_iter.by_ref().take(STREAMING_CHUNK_ROWS).collect();
+                    if chunk_rows.is_empty() {
+                        break;
+                    }
+                    let chunk_prov: Vec<String> =
+                        prov_iter.by_ref().take(chunk_rows.len()).collect();
+                    let chunk_msg = GlobalWsResponse::ResultChunk {
+                        rows: chunk_rows,
+                        row_provenance: chunk_prov,
+                        chunk_index,
+                    };
+                    if !send_global_response(sender, &chunk_msg, session_id).await {
+                        return false;
+                    }
+                    chunk_index += 1;
+                }
+
+                // 3. Send result_end
+                let end_msg = GlobalWsResponse::ResultEnd {
+                    row_count,
+                    chunk_count: chunk_index,
+                };
+                send_global_response(sender, &end_msg, session_id).await
             }
         }
         Err(e) => {
             // Check for structured validation errors
-            if let Some(json_str) = e.strip_prefix(VALIDATION_ERROR_PREFIX) {
+            let response = if let Some(json_str) = e.strip_prefix(VALIDATION_ERROR_PREFIX) {
                 if let Ok(errors) = serde_json::from_str::<Vec<ValidationError>>(json_str) {
                     let count = errors.len();
-                    return GlobalWsResponse::Error {
+                    GlobalWsResponse::Error {
                         message: format!("Program has {count} parse error(s)"),
                         validation_errors: Some(errors),
-                    };
+                    }
+                } else {
+                    GlobalWsResponse::Error {
+                        message: e,
+                        validation_errors: None,
+                    }
                 }
-            }
-            GlobalWsResponse::Error {
-                message: e,
-                validation_errors: None,
-            }
+            } else {
+                GlobalWsResponse::Error {
+                    message: e,
+                    validation_errors: None,
+                }
+            };
+            send_global_response(sender, &response, session_id).await
         }
     }
 }
@@ -1358,28 +1582,15 @@ mod tests {
     }
 
     #[test]
-    fn test_ws_response_notification_serialize() {
-        let resp = WsResponse::Notification {
-            event: "persistent_update".to_string(),
-            knowledge_graph: "test_kg".to_string(),
-            relation: "edge".to_string(),
-            operation: "insert".to_string(),
-            count: 5,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"notification\""));
-        assert!(json.contains("\"event\":\"persistent_update\""));
-        assert!(json.contains("\"relation\":\"edge\""));
-        assert!(json.contains("\"count\":5"));
-    }
-
-    #[test]
     fn test_persistent_notification_serialize() {
         let notif = PersistentNotification::PersistentUpdate {
             knowledge_graph: "kg1".to_string(),
             relation: "users".to_string(),
             operation: "insert".to_string(),
             count: 3,
+            timestamp_ms: 1700000000000,
+            session_id: Some("sess-123".to_string()),
+            seq: 1,
         };
         let json = serde_json::to_string(&notif).unwrap();
         assert!(json.contains("\"type\":\"persistent_update\""));
@@ -1474,20 +1685,6 @@ mod tests {
     }
 
     #[test]
-    fn test_global_ws_response_notification_serialize() {
-        let resp = GlobalWsResponse::Notification {
-            event: "persistent_update".to_string(),
-            knowledge_graph: "test_kg".to_string(),
-            relation: "edge".to_string(),
-            operation: "insert".to_string(),
-            count: 3,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"notification\""));
-        assert!(json.contains("\"count\":3"));
-    }
-
-    #[test]
     fn test_ws_connect_params_default() {
         let params: WsConnectParams = serde_json::from_str("{}").unwrap();
         assert_eq!(params.kg, "default");
@@ -1497,6 +1694,20 @@ mod tests {
     fn test_ws_connect_params_custom_kg() {
         let params: WsConnectParams = serde_json::from_str(r#"{"kg": "my_graph"}"#).unwrap();
         assert_eq!(params.kg, "my_graph");
+    }
+
+    #[test]
+    fn test_ws_connect_params_last_seq() {
+        let params: WsConnectParams =
+            serde_json::from_str(r#"{"kg": "test", "last_seq": 42}"#).unwrap();
+        assert_eq!(params.kg, "test");
+        assert_eq!(params.last_seq, Some(42));
+    }
+
+    #[test]
+    fn test_ws_connect_params_last_seq_omitted() {
+        let params: WsConnectParams = serde_json::from_str(r#"{"kg": "test"}"#).unwrap();
+        assert_eq!(params.last_seq, None);
     }
 
     #[test]
@@ -1525,5 +1736,101 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"error\""));
         assert!(!json.contains("validation_errors"));
+    }
+
+    // === Streaming result protocol tests ===
+
+    #[test]
+    fn test_global_ws_response_result_start_serialize() {
+        let resp = GlobalWsResponse::ResultStart {
+            columns: vec!["x".to_string(), "y".to_string()],
+            total_count: 10_000,
+            truncated: false,
+            execution_time_ms: 42,
+            metadata: None,
+            switched_kg: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result_start\""));
+        assert!(json.contains("\"total_count\":10000"));
+        assert!(json.contains("\"columns\":[\"x\",\"y\"]"));
+        // Optional fields omitted when None
+        assert!(!json.contains("metadata"));
+        assert!(!json.contains("switched_kg"));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_chunk_serialize() {
+        let resp = GlobalWsResponse::ResultChunk {
+            rows: vec![
+                vec![serde_json::json!(1), serde_json::json!("a")],
+                vec![serde_json::json!(2), serde_json::json!("b")],
+            ],
+            row_provenance: vec!["persistent".to_string(), "ephemeral".to_string()],
+            chunk_index: 3,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result_chunk\""));
+        assert!(json.contains("\"chunk_index\":3"));
+        assert!(json.contains("\"row_provenance\""));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_chunk_empty_provenance() {
+        let resp = GlobalWsResponse::ResultChunk {
+            rows: vec![vec![serde_json::json!(1)]],
+            row_provenance: vec![],
+            chunk_index: 0,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result_chunk\""));
+        // Empty provenance should be omitted
+        assert!(!json.contains("row_provenance"));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_end_serialize() {
+        let resp = GlobalWsResponse::ResultEnd {
+            row_count: 5000,
+            chunk_count: 10,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result_end\""));
+        assert!(json.contains("\"row_count\":5000"));
+        assert!(json.contains("\"chunk_count\":10"));
+    }
+
+    #[test]
+    fn test_streaming_threshold_constants() {
+        // Verify exact values (prevents accidental changes)
+        assert_eq!(STREAMING_THRESHOLD, 1024 * 1024); // 1 MB
+        assert_eq!(STREAMING_CHUNK_ROWS, 500);
+        // Sanity: streaming threshold must be well below max message size
+        let ratio = MAX_MESSAGE_SIZE / STREAMING_THRESHOLD;
+        assert!(
+            ratio >= 2,
+            "threshold should be at most half of max message size, got ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn test_global_ws_response_result_start_with_metadata() {
+        let resp = GlobalWsResponse::ResultStart {
+            columns: vec!["col0".to_string()],
+            total_count: 100,
+            truncated: true,
+            execution_time_ms: 10,
+            metadata: Some(SessionQueryMetadataDto {
+                has_ephemeral: true,
+                ephemeral_sources: vec!["edge".to_string()],
+                warnings: vec![],
+            }),
+            switched_kg: Some("new_kg".to_string()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"result_start\""));
+        assert!(json.contains("\"truncated\":true"));
+        assert!(json.contains("\"metadata\""));
+        assert!(json.contains("\"switched_kg\":\"new_kg\""));
     }
 }
