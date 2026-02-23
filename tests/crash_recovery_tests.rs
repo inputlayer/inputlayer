@@ -421,12 +421,22 @@ fn test_read_with_missing_batch_file() {
         }
     }
 
-    // Re-create persist and try to read
+    // Re-create persist — load_shards() detects missing batch files and removes stale refs
     let persist = create_test_persist_with_config(path.clone(), 100);
     let result = persist.read("db:edge", 0);
 
-    // Should return error for missing batch file
-    assert!(result.is_err(), "Missing batch file should return error");
+    // With #6 (batch file validation on startup), missing batch files are detected during
+    // load_shards() and their references are removed. The shard still exists but has no
+    // batch files, so read returns empty data (not an error).
+    assert!(
+        result.is_ok(),
+        "Read should succeed after stale batch refs are cleaned up"
+    );
+    let updates = result.unwrap();
+    assert!(
+        updates.is_empty(),
+        "No data should remain after batch file was deleted and stale ref removed"
+    );
 }
 
 // Recovery After Disk Full

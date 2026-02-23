@@ -106,6 +106,8 @@ pub struct KnowledgeGraph {
     num_workers: usize,
     /// Maximum result rows per query (0 = unlimited)
     max_result_rows: usize,
+    /// Maximum query cost score (0 = unlimited)
+    max_query_cost: u64,
 }
 
 impl StorageEngine {
@@ -216,6 +218,7 @@ impl StorageEngine {
                 let mut kg =
                     KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
                 kg.max_result_rows = self.config.storage.performance.max_result_rows;
+                kg.max_query_cost = self.config.storage.performance.max_query_cost;
 
                 vacant.insert(Arc::new(RwLock::new(kg)));
             }
@@ -731,6 +734,20 @@ impl StorageEngine {
         // Sync to disk
         self.persist.sync()?;
 
+        // Save HNSW indexes for this knowledge graph (#19)
+        if let Some(kg_arc) = self.knowledge_graphs.get(name) {
+            let kg = kg_arc.read();
+            if let Some(ref dd) = kg.incremental {
+                let idx_mgr = dd.index_manager();
+                let idx_guard = idx_mgr.lock();
+                if idx_guard.index_count() > 0 {
+                    if let Err(e) = idx_guard.save_indexes(&kg.data_dir) {
+                        tracing::warn!(kg = name, error = %e, "failed_to_save_indexes");
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -754,6 +771,33 @@ impl StorageEngine {
         self.save_knowledge_graphs_metadata()?;
 
         Ok(())
+    }
+
+    /// Compact only shards that exceed the batch file threshold.
+    /// Returns the number of shards compacted.
+    pub fn compact_if_needed(&self, threshold: usize) -> StorageResult<usize> {
+        if threshold == 0 {
+            return Ok(0);
+        }
+        let mut compacted = 0;
+        for shard_name in self.persist.list_shards()? {
+            let info = self.persist.shard_info(&shard_name)?;
+            if info.batch_count >= threshold {
+                tracing::info!(
+                    shard = %shard_name,
+                    batch_count = info.batch_count,
+                    threshold,
+                    "auto_compact_shard"
+                );
+                self.persist.compact(&shard_name, 0)?;
+                compacted += 1;
+            }
+        }
+        if compacted > 0 {
+            self.persist.sync()?;
+            self.save_knowledge_graphs_metadata()?;
+        }
+        Ok(compacted)
     }
 
     /// Flush all buffers to disk without full compaction (legacy compatibility)
@@ -1677,6 +1721,7 @@ impl StorageEngine {
             incremental: None,
             num_workers,
             max_result_rows: self.config.storage.performance.max_result_rows,
+            max_query_cost: self.config.storage.performance.max_query_cost,
         })
     }
 
@@ -1927,6 +1972,7 @@ impl KnowledgeGraph {
             incremental: None,
             num_workers,
             max_result_rows: 0,
+            max_query_cost: 0,
         }
     }
 
@@ -1952,6 +1998,26 @@ impl KnowledgeGraph {
                         .map_err(StorageError::IncrementalEngineError)?;
                 }
             }
+
+            // Load persisted HNSW indexes (#19)
+            let idx_mgr = dd.index_manager();
+            let mut guard = idx_mgr.lock();
+            match guard.load_indexes(&self.data_dir) {
+                Ok(count) if count > 0 => {
+                    tracing::info!(
+                        kg = %self.name, loaded = count,
+                        "hnsw_indexes_restored_from_persist"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        kg = %self.name, error = %e,
+                        "hnsw_index_restore_failed"
+                    );
+                }
+                _ => {}
+            }
+            drop(guard);
 
             self.incremental = Some(dd);
         }
@@ -2009,6 +2075,9 @@ impl KnowledgeGraph {
             // Create AND publish snapshot while still holding the lock
             // This ensures no concurrent invalidation can occur between
             // reading materializations and making them visible to readers.
+            // Build HNSW search closure if any indexes are materialized
+            let hnsw_fn = self.build_hnsw_search_fn();
+
             let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
                 input_tuples,
                 rules,
@@ -2016,6 +2085,8 @@ impl KnowledgeGraph {
                 materialized_names,
             );
             new_snapshot.max_result_rows = self.max_result_rows;
+            new_snapshot.max_query_cost = self.max_query_cost;
+            new_snapshot.hnsw_search_fn = hnsw_fn;
             self.snapshot.store(Arc::new(new_snapshot));
 
             // Lock drops here AFTER publication - this is the fix for TOCTOU
@@ -2028,6 +2099,7 @@ impl KnowledgeGraph {
                 HashSet::new(),
             );
             new_snapshot.max_result_rows = self.max_result_rows;
+            new_snapshot.max_query_cost = self.max_query_cost;
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -2037,6 +2109,44 @@ impl KnowledgeGraph {
             snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
             "snapshot_publish_complete"
         );
+    }
+
+    /// Build an HNSW search closure that captures the IndexManager Arc.
+    ///
+    /// Returns `None` if no IncrementalEngine or no materialized indexes exist.
+    fn build_hnsw_search_fn(
+        &self,
+    ) -> Option<
+        Arc<
+            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
+                + Send
+                + Sync,
+        >,
+    > {
+        let dd = self.incremental.as_ref()?;
+        let idx_mgr = dd.index_manager();
+
+        // Check if there are any indexes
+        {
+            let guard = idx_mgr.lock();
+            if guard.index_count() == 0 {
+                return None;
+            }
+        }
+
+        Some(Arc::new(
+            move |index_name: &str, query: &[f32], k: usize, ef: Option<usize>| {
+                let guard = idx_mgr.lock();
+                let mat = guard.get_materialized(index_name).ok_or_else(|| {
+                    format!("HNSW index '{index_name}' not found or not materialized")
+                })?;
+                let results = mat.index.search(query, k, ef);
+                Ok(results
+                    .into_iter()
+                    .map(|(id, dist)| (id as i64, dist))
+                    .collect())
+            },
+        ))
     }
 
     /// Get the current snapshot for lock-free reads
@@ -5562,5 +5672,71 @@ mod tests {
             .execute_query_tuples_on("unlim_kg", "result(X, Y) <- data(X, Y)")
             .unwrap();
         assert_eq!(result.len(), 5, "max_result_rows=0 should return all rows");
+    }
+
+    // === Query cost scoring tests (#47) ===
+
+    #[test]
+    fn test_max_query_cost_rejects_expensive_query() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.performance.max_query_cost = 5; // Very low threshold
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("cost_kg").unwrap();
+        storage
+            .insert_into("cost_kg", "edge", vec![(1, 2), (2, 3)])
+            .unwrap();
+
+        // A simple query should cost 10+ (scan alone costs 10), so it will be rejected
+        let result = storage.execute_query_tuples_on("cost_kg", "result(X, Y) <- edge(X, Y)");
+        assert!(
+            result.is_err(),
+            "Query should be rejected when cost exceeds threshold"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("Query too complex"),
+            "Error should mention complexity: {err}"
+        );
+    }
+
+    #[test]
+    fn test_max_query_cost_zero_means_unlimited() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.performance.max_query_cost = 0; // Unlimited
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("nocost_kg").unwrap();
+        storage.insert_into("nocost_kg", "a", vec![(1, 2)]).unwrap();
+        storage.insert_into("nocost_kg", "b", vec![(2, 3)]).unwrap();
+
+        // Join query — should succeed with unlimited cost
+        let result =
+            storage.execute_query_tuples_on("nocost_kg", "result(X, Y, Z) <- a(X, Y), b(Y, Z)");
+        assert!(
+            result.is_ok(),
+            "Query should succeed with max_query_cost=0 (unlimited)"
+        );
+    }
+
+    #[test]
+    fn test_max_query_cost_allows_simple_query() {
+        let temp = TempDir::new().unwrap();
+        let mut config = create_test_config(temp.path().to_path_buf());
+        config.storage.performance.max_query_cost = 1_000_000; // High threshold
+        let storage = StorageEngine::new(config).unwrap();
+
+        storage.create_knowledge_graph("simple_kg").unwrap();
+        storage
+            .insert_into("simple_kg", "data", vec![(1, 10), (2, 20)])
+            .unwrap();
+
+        let result = storage.execute_query_tuples_on("simple_kg", "result(X, Y) <- data(X, Y)");
+        assert!(
+            result.is_ok(),
+            "Simple query should be under high cost threshold"
+        );
     }
 }

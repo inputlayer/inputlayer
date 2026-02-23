@@ -113,12 +113,20 @@ pub struct BatchRef {
     pub len: usize,
 }
 
+/// Current shard metadata format version.
+/// Increment when making breaking changes to ShardMeta serialization.
+pub const SHARD_META_VERSION: u32 = 1;
+
 /// Shard metadata - represents a persistent Time-Varying Collection.
 ///
 /// A shard corresponds to a single relation in a database.
 /// The naming convention is "{database}:{relation}".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardMeta {
+    /// Format version for forward/backward compatibility.
+    /// Absent in legacy files (pre-v1); defaults to 1 on deserialization.
+    #[serde(default = "default_version")]
+    pub version: u32,
     /// Shard name (format: "{db}:{relation}")
     pub name: String,
     /// References to all batch files for this shard
@@ -132,10 +140,15 @@ pub struct ShardMeta {
     pub total_updates: usize,
 }
 
+fn default_version() -> u32 {
+    1
+}
+
 impl ShardMeta {
     /// Create a new empty shard
     pub fn new(name: String) -> Self {
         ShardMeta {
+            version: SHARD_META_VERSION,
             name,
             batches: Vec::new(),
             since: 0,
