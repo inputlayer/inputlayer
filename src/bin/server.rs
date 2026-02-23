@@ -69,13 +69,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Load configuration
     let mut config = if let Some(ref config_path) = cli.config {
+        // Explicit config path: fail hard if missing or invalid
+        if !config_path.exists() {
+            eprintln!("ERROR: Config file not found: {}", config_path.display());
+            std::process::exit(1);
+        }
         Config::from_file(config_path.to_str().unwrap_or("config.toml")).unwrap_or_else(|e| {
             eprintln!(
-                "WARNING: Failed to load config from {}: {e}",
+                "ERROR: Failed to parse config from {}: {e}",
                 config_path.display()
             );
-            println!("Using default configuration");
-            Config::default()
+            std::process::exit(1);
         })
     } else {
         Config::load().unwrap_or_else(|_| {

@@ -155,6 +155,147 @@ pub async fn stats(
     Ok(Json(ApiResponse::success(stats)))
 }
 
+/// Prometheus metrics endpoint (#12).
+///
+/// Exports server metrics in Prometheus text exposition format.
+/// Scrape at `/metrics/prometheus` with a Prometheus server.
+pub async fn prometheus_metrics(
+    Extension(handler): Extension<Arc<Handler>>,
+) -> Result<
+    (
+        StatusCode,
+        [(axum::http::HeaderName, axum::http::HeaderValue); 1],
+        String,
+    ),
+    RestError,
+> {
+    let timeout_secs = handler.config().http.stats_timeout_secs.max(1);
+    let body = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(move || {
+            let storage = handler.get_storage();
+            let kgs = storage.list_knowledge_graphs();
+            let knowledge_graphs = kgs.len();
+
+            let mut total_relations = 0usize;
+            let mut total_views = 0usize;
+            let mut total_tuples: u64 = 0;
+            for kg_name in &kgs {
+                if let Ok(relations) = storage.list_relations_in(kg_name) {
+                    total_relations += relations.len();
+                    for rel_name in &relations {
+                        if let Ok(Some((_schema, count))) =
+                            storage.get_relation_metadata_in(kg_name, rel_name)
+                        {
+                            total_tuples += count as u64;
+                        }
+                    }
+                }
+                if let Ok(rules) = storage.list_rules_in(kg_name) {
+                    total_views += rules.len();
+                }
+            }
+            let estimated_memory = total_tuples.saturating_mul(64);
+            drop(storage);
+
+            let session_stats = handler.session_stats();
+            let query_count = handler.total_queries();
+            let uptime = handler.uptime_seconds();
+
+            let mut out = String::with_capacity(1024);
+            out.push_str("# HELP inputlayer_uptime_seconds Server uptime in seconds.\n");
+            out.push_str("# TYPE inputlayer_uptime_seconds gauge\n");
+            out.push_str(&format!("inputlayer_uptime_seconds {uptime}\n"));
+
+            out.push_str("# HELP inputlayer_queries_total Total queries executed.\n");
+            out.push_str("# TYPE inputlayer_queries_total counter\n");
+            out.push_str(&format!("inputlayer_queries_total {query_count}\n"));
+
+            out.push_str("# HELP inputlayer_knowledge_graphs Number of knowledge graphs.\n");
+            out.push_str("# TYPE inputlayer_knowledge_graphs gauge\n");
+            out.push_str(&format!("inputlayer_knowledge_graphs {knowledge_graphs}\n"));
+
+            out.push_str("# HELP inputlayer_relations_total Total base relations.\n");
+            out.push_str("# TYPE inputlayer_relations_total gauge\n");
+            out.push_str(&format!("inputlayer_relations_total {total_relations}\n"));
+
+            out.push_str("# HELP inputlayer_views_total Total derived views (rules).\n");
+            out.push_str("# TYPE inputlayer_views_total gauge\n");
+            out.push_str(&format!("inputlayer_views_total {total_views}\n"));
+
+            out.push_str("# HELP inputlayer_tuples_total Total stored tuples.\n");
+            out.push_str("# TYPE inputlayer_tuples_total gauge\n");
+            out.push_str(&format!("inputlayer_tuples_total {total_tuples}\n"));
+
+            out.push_str("# HELP inputlayer_memory_usage_bytes Estimated memory usage in bytes.\n");
+            out.push_str("# TYPE inputlayer_memory_usage_bytes gauge\n");
+            out.push_str(&format!(
+                "inputlayer_memory_usage_bytes {estimated_memory}\n"
+            ));
+
+            out.push_str("# HELP inputlayer_sessions_total Active sessions.\n");
+            out.push_str("# TYPE inputlayer_sessions_total gauge\n");
+            out.push_str(&format!(
+                "inputlayer_sessions_total {}\n",
+                session_stats.total_sessions
+            ));
+
+            out.push_str("# HELP inputlayer_sessions_clean Clean sessions.\n");
+            out.push_str("# TYPE inputlayer_sessions_clean gauge\n");
+            out.push_str(&format!(
+                "inputlayer_sessions_clean {}\n",
+                session_stats.clean_sessions
+            ));
+
+            out.push_str("# HELP inputlayer_sessions_dirty Dirty sessions.\n");
+            out.push_str("# TYPE inputlayer_sessions_dirty gauge\n");
+            out.push_str(&format!(
+                "inputlayer_sessions_dirty {}\n",
+                session_stats.dirty_sessions
+            ));
+
+            out.push_str(
+                "# HELP inputlayer_ephemeral_facts Total ephemeral facts across sessions.\n",
+            );
+            out.push_str("# TYPE inputlayer_ephemeral_facts gauge\n");
+            out.push_str(&format!(
+                "inputlayer_ephemeral_facts {}\n",
+                session_stats.total_ephemeral_facts
+            ));
+
+            out.push_str(
+                "# HELP inputlayer_ephemeral_rules Total ephemeral rules across sessions.\n",
+            );
+            out.push_str("# TYPE inputlayer_ephemeral_rules gauge\n");
+            out.push_str(&format!(
+                "inputlayer_ephemeral_rules {}\n",
+                session_stats.total_ephemeral_rules
+            ));
+
+            out
+        }),
+    )
+    .await
+    .map_err(|_| {
+        RestError::internal(format!(
+            "Metrics computation timed out after {timeout_secs}s"
+        ))
+    })?
+    .map_err(|e| {
+        tracing::warn!(error = %e, "Metrics computation failed");
+        RestError::internal("Metrics computation failed".to_string())
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+        )],
+        body,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +464,30 @@ mod tests {
         );
 
         lock_thread.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_prometheus_metrics_format() {
+        let (handler, _tmp) = make_handler();
+        let (status, _headers, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("# HELP inputlayer_uptime_seconds"));
+        assert!(body.contains("# TYPE inputlayer_uptime_seconds gauge"));
+        assert!(body.contains("inputlayer_queries_total 0"));
+        assert!(body.contains("inputlayer_knowledge_graphs"));
+        assert!(body.contains("inputlayer_sessions_total 0"));
+    }
+
+    #[tokio::test]
+    async fn test_prometheus_metrics_after_query() {
+        let (handler, _tmp) = make_handler();
+        handler
+            .query_program(None, "+prom_test[(1, 2)]".to_string())
+            .await
+            .unwrap();
+        let (status, _headers, body) = prometheus_metrics(Extension(handler)).await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("inputlayer_queries_total 1"));
+        assert!(body.contains("inputlayer_tuples_total"));
     }
 }

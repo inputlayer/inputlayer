@@ -126,6 +126,12 @@ pub struct Session {
     pub created_at: Instant,
     /// When the session was last accessed
     pub last_accessed: Instant,
+    /// Number of in-flight queries using this session (#41).
+    /// Reaper skips sessions with in_use_count > 0 to prevent mid-query deletion.
+    pub in_use_count: u32,
+    /// Whether a WebSocket connection is currently attached (#14).
+    /// Prevents two WS connections from interleaving on the same session.
+    pub ws_attached: bool,
 }
 
 impl Session {
@@ -139,6 +145,8 @@ impl Session {
             ephemeral_rule_texts: Vec::new(),
             created_at: now,
             last_accessed: now,
+            in_use_count: 0,
+            ws_attached: false,
         }
     }
 
@@ -458,6 +466,41 @@ impl SessionManager {
         self.with_session_mut(id, Session::touch)
     }
 
+    /// Mark a session as in-use (query in flight). Prevents reaper from deleting it (#41).
+    pub fn mark_in_use(&self, id: &SessionId) -> Result<(), String> {
+        self.with_session_mut(id, |s| {
+            s.in_use_count = s.in_use_count.saturating_add(1);
+            s.touch();
+        })
+    }
+
+    /// Release an in-use guard on a session.
+    pub fn release_in_use(&self, id: &SessionId) {
+        let _ = self.with_session_mut(id, |s| {
+            s.in_use_count = s.in_use_count.saturating_sub(1);
+        });
+    }
+
+    /// Attach a WebSocket connection to a session (#14).
+    /// Returns an error if a WS is already attached.
+    pub fn attach_ws(&self, id: &SessionId) -> Result<(), String> {
+        self.with_session_mut(id, |s| {
+            if s.ws_attached {
+                Err("Session already has an active WebSocket connection".to_string())
+            } else {
+                s.ws_attached = true;
+                Ok(())
+            }
+        })?
+    }
+
+    /// Detach a WebSocket connection from a session.
+    pub fn detach_ws(&self, id: &SessionId) {
+        let _ = self.with_session_mut(id, |s| {
+            s.ws_attached = false;
+        });
+    }
+
     /// Insert ephemeral facts into a session.
     /// Returns the number of facts actually inserted (after dedup).
     pub fn insert_ephemeral(
@@ -638,7 +681,12 @@ impl SessionManager {
         let now = Instant::now();
         let mut sessions = self.sessions.write();
         let before = sessions.len();
-        sessions.retain(|_, session| now.duration_since(session.last_accessed) < timeout);
+        sessions.retain(|_, session| {
+            // Never reap sessions with in-flight queries (#41) or attached WS connections
+            session.in_use_count > 0
+                || session.ws_attached
+                || now.duration_since(session.last_accessed) < timeout
+        });
         let reaped = before - sessions.len();
 
         if reaped > 0 {

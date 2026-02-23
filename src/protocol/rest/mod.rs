@@ -62,14 +62,15 @@ async fn auth_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    // Health/liveness probes are always public
+    // Health/liveness probes are always public (both root and /v1/ prefixed)
     let path = req.uri().path();
-    if path == "/health" || path == "/live" || path == "/ready" {
+    let effective_path = path.strip_prefix("/v1").unwrap_or(path);
+    if effective_path == "/health" || effective_path == "/live" || effective_path == "/ready" {
         return next.run(req).await;
     }
 
     // WebSocket endpoints handle their own auth flow (Login/Authenticate messages)
-    if path == "/ws" || path.starts_with("/sessions/") {
+    if effective_path == "/ws" || effective_path.starts_with("/sessions/") {
         return next.run(req).await;
     }
 
@@ -87,6 +88,86 @@ async fn auth_middleware(
     (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response()
 }
 
+/// Middleware: Add `X-API-Version` header to all responses (#25).
+async fn api_version_middleware(req: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    response.headers_mut().insert(
+        "x-api-version",
+        axum::http::HeaderValue::from_static(concat!("v", env!("CARGO_PKG_VERSION"))),
+    );
+    response
+}
+
+/// Per-IP rate limiter state (#27).
+/// Uses a simple sliding window: (window_start, request_count).
+#[derive(Clone)]
+pub struct IpRateLimiter {
+    map: Arc<dashmap::DashMap<std::net::IpAddr, (std::time::Instant, u32)>>,
+    max_rps: u32,
+}
+
+impl IpRateLimiter {
+    fn new(max_rps: u32) -> Self {
+        Self {
+            map: Arc::new(dashmap::DashMap::new()),
+            max_rps,
+        }
+    }
+
+    /// Returns true if the request should be allowed.
+    fn check(&self, ip: std::net::IpAddr) -> bool {
+        if self.max_rps == 0 {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        let mut entry = self.map.entry(ip).or_insert((now, 0));
+        let (window_start, count) = entry.value_mut();
+        if now.duration_since(*window_start).as_secs() >= 1 {
+            // Reset window
+            *window_start = now;
+            *count = 1;
+            true
+        } else if *count < self.max_rps {
+            *count += 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Middleware: Per-IP rate limiting (#27).
+async fn ip_rate_limit_middleware(
+    Extension(limiter): Extension<IpRateLimiter>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if limiter.max_rps == 0 {
+        return next.run(req).await;
+    }
+
+    // Extract client IP from X-Forwarded-For, X-Real-IP, or ConnectInfo
+    let ip = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .and_then(|s| s.trim().parse::<std::net::IpAddr>().ok())
+        .or_else(|| {
+            req.headers()
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<std::net::IpAddr>().ok())
+        })
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+
+    if limiter.check(ip) {
+        next.run(req).await
+    } else {
+        (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded").into_response()
+    }
+}
+
 /// Newtype wrapper for WebSocket-specific connection semaphore.
 /// Distinct from the general HTTP connection semaphore.
 #[derive(Clone)]
@@ -95,12 +176,20 @@ pub struct WsSemaphore(pub Option<Arc<tokio::sync::Semaphore>>);
 /// Embedded AsyncAPI spec (from docs/spec/asyncapi.yaml)
 const ASYNCAPI_YAML: &str = include_str!("../../../docs/spec/asyncapi.yaml");
 
+/// Embedded OpenAPI spec (#30)
+const OPENAPI_YAML: &str = include_str!("../../../docs/spec/openapi.yaml");
+
 /// Serve the raw AsyncAPI YAML spec
 async fn asyncapi_yaml() -> impl IntoResponse {
     (
         [("content-type", "text/yaml; charset=utf-8")],
         ASYNCAPI_YAML,
     )
+}
+
+/// Serve the OpenAPI YAML spec (#30)
+async fn openapi_yaml() -> impl IntoResponse {
+    ([("content-type", "text/yaml; charset=utf-8")], OPENAPI_YAML)
 }
 
 /// Serve a self-contained HTML page documenting the WebSocket API protocol
@@ -138,16 +227,23 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         None
     };
 
-    // Main router with top-level health/metrics and WebSocket routes
-    let mut app = Router::new()
+    // Versioned API routes (available at both / and /v1/ for backward compatibility)
+    let api_routes = Router::new()
         .route("/health", get(admin::health))
         .route("/live", get(admin::liveness))
         .route("/ready", get(admin::readiness))
         .route("/metrics", get(admin::stats))
+        .route("/metrics/prometheus", get(admin::prometheus_metrics))
         .route("/ws", get(ws::global_websocket))
         .route("/sessions/:id/ws", get(ws::session_websocket))
         .route("/api/asyncapi.yaml", get(asyncapi_yaml))
+        .route("/api/openapi.yaml", get(openapi_yaml))
         .route("/api/ws-docs", get(asyncapi_docs));
+
+    // Mount routes at root (backward compat) and /v1/ prefix (#25)
+    let mut app = Router::new()
+        .merge(api_routes.clone())
+        .nest("/v1", api_routes);
 
     // Apply authentication middleware.
     // Auth is always required — API keys are validated against the _internal KG.
@@ -188,6 +284,15 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
 
     // Enforce HTTP request body size limit (16 MB, matching WebSocket MAX_MESSAGE_SIZE)
     app = app.layer(RequestBodyLimitLayer::new(16 * 1024 * 1024));
+
+    // Add X-API-Version header to all responses (#25)
+    app = app.layer(middleware::from_fn(api_version_middleware));
+
+    // Per-IP rate limiting (#27)
+    let ip_limiter = IpRateLimiter::new(config.rate_limit.per_ip_max_rps);
+    app = app
+        .layer(middleware::from_fn(ip_rate_limit_middleware))
+        .layer(Extension(ip_limiter));
 
     // Serve GUI static files if enabled
     if config.gui.enabled {
@@ -234,6 +339,49 @@ pub async fn start_http_server(
             }
         }
     });
+
+    // Spawn background auto-compaction task (if enabled)
+    let compact_interval = handler.config().storage.persist.auto_compact_interval_secs;
+    let compact_threshold = handler.config().storage.persist.auto_compact_threshold;
+    if compact_interval > 0 && compact_threshold > 0 {
+        let compact_handler = Arc::clone(&handler);
+        let mut compact_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(compact_interval));
+            // Skip the first immediate tick
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let threshold = compact_threshold;
+                        let h = Arc::clone(&compact_handler);
+                        let result = tokio::task::spawn_blocking(move || {
+                            let storage = h.get_storage();
+                            storage.compact_if_needed(threshold)
+                        })
+                        .await;
+                        match result {
+                            Ok(Ok(count)) if count > 0 => {
+                                info!(shards_compacted = count, "auto_compact_complete");
+                            }
+                            Ok(Err(e)) => {
+                                warn!(error = %e, "auto_compact_error");
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "auto_compact_task_panicked");
+                            }
+                            _ => {} // count == 0, nothing to compact
+                        }
+                    }
+                    _ = compact_shutdown.changed() => {
+                        info!("auto_compact_shutdown");
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
