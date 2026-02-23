@@ -177,6 +177,64 @@ async fn test_query_within_timeout_succeeds() {
     );
 }
 
+// === #39: Notification Dedup Tests ===
+
+#[tokio::test]
+async fn test_notification_seq_monotonic() {
+    let (handler, _tmp) = create_test_handler();
+    let mut rx = handler.subscribe_notifications();
+    handler.notify_persistent_update("default", "a", "insert", 1);
+    handler.notify_persistent_update("default", "b", "insert", 2);
+    let n1 = rx.try_recv().unwrap();
+    let n2 = rx.try_recv().unwrap();
+    assert!(
+        n1.seq() < n2.seq(),
+        "Sequence numbers should be monotonically increasing"
+    );
+}
+
+#[tokio::test]
+async fn test_get_notifications_since_returns_missed() {
+    let (handler, _tmp) = create_test_handler();
+    handler.notify_persistent_update("default", "a", "insert", 1);
+    handler.notify_persistent_update("default", "b", "insert", 2);
+    handler.notify_persistent_update("default", "c", "insert", 3);
+
+    let missed = handler.get_notifications_since(1);
+    assert_eq!(missed.len(), 2, "Should return 2 notifications after seq 1");
+    assert_eq!(missed[0].seq(), 2);
+    assert_eq!(missed[1].seq(), 3);
+}
+
+#[tokio::test]
+async fn test_get_notifications_since_empty_when_caught_up() {
+    let (handler, _tmp) = create_test_handler();
+    handler.notify_persistent_update("default", "a", "insert", 1);
+    let missed = handler.get_notifications_since(1);
+    assert!(
+        missed.is_empty(),
+        "Should be empty when caught up to latest seq"
+    );
+}
+
+// === #14: Session Exclusivity Tests ===
+
+#[tokio::test]
+async fn test_session_ws_attach_detach() {
+    let (handler, _tmp) = create_test_handler();
+    let sid = handler.create_session("default").unwrap();
+
+    // Attach should succeed
+    assert!(handler.session_manager().attach_ws(&sid).is_ok());
+
+    // Second attach should fail (exclusive)
+    assert!(handler.session_manager().attach_ws(&sid).is_err());
+
+    // Detach then re-attach should succeed
+    handler.session_manager().detach_ws(&sid);
+    assert!(handler.session_manager().attach_ws(&sid).is_ok());
+}
+
 #[tokio::test]
 async fn test_query_timeout_config_is_accessible_via_handler() {
     let temp = TempDir::new().unwrap();
@@ -188,4 +246,25 @@ async fn test_query_timeout_config_is_accessible_via_handler() {
         handler.config().storage.performance.query_timeout_ms,
         12_345
     );
+}
+
+// === #47: Query Cost Scoring Config Tests ===
+
+#[test]
+fn test_max_query_cost_default_is_unlimited() {
+    let config = Config::default();
+    assert_eq!(
+        config.storage.performance.max_query_cost, 0,
+        "Default max_query_cost should be 0 (unlimited)"
+    );
+}
+
+#[test]
+fn test_max_query_cost_custom_value_stored() {
+    let temp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    config.storage.performance.max_query_cost = 500_000;
+    let handler = Handler::from_config(config).unwrap();
+    assert_eq!(handler.config().storage.performance.max_query_cost, 500_000);
 }
