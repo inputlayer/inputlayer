@@ -401,7 +401,7 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
         </div>
       </div>
 
-      {/* Warning-level messages (amber — overrides, overshadowing) */}
+      {/* Warning-level messages (amber - overrides, overshadowing) */}
       {warnMessages.length > 0 && (
         <div className="border-b border-border/50">
           {warnMessages.map((warning, i) => (
@@ -413,7 +413,7 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
         </div>
       )}
 
-      {/* Info-level messages (blue/neutral — session data presence) */}
+      {/* Info-level messages (blue/neutral - session data presence) */}
       {infoMessages.length > 0 && (
         <div className="border-b border-border/50">
           {infoMessages.map((msg, i) => (
@@ -430,7 +430,7 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
         <div className="flex items-center gap-2 border-b border-border/50 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
           <AlertTriangle className="h-3 w-3 flex-shrink-0" />
           <span>
-            Results truncated — showing {result.data.length.toLocaleString()}{result.totalCount != null ? ` of ${result.totalCount.toLocaleString()}` : ""} rows
+            Results truncated - showing {result.data.length.toLocaleString()}{result.totalCount != null ? ` of ${result.totalCount.toLocaleString()}` : ""} rows
           </span>
         </div>
       )}

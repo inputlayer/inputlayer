@@ -426,7 +426,7 @@ Clear all facts from relations whose names start with the given prefix.
 .clear prefix temp_
 ```
 
-**Note:** An empty prefix is rejected. This clears data only — schemas and rules are preserved.
+**Note:** An empty prefix is rejected. This clears data only - schemas and rules are preserved.
 
 ### `.compact`
 

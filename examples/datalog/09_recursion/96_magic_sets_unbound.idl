@@ -1,0 +1,19 @@
+// Test: Magic Sets - Unbound Query Not Rewritten
+// Description: Unbound ?reach(X, Y) should produce full transitive closure (no magic rewrite)
+
+.kg create test_magic_ub_n09t96
+.kg use test_magic_ub_n09t96
+
+// Simple chain: 1->2->3
++edge[(1,2), (2,3)]
+
+// Transitive closure
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
+// Unbound query - full TC, no magic sets applied
+?reach(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop test_magic_ub_n09t96

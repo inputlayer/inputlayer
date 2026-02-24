@@ -1540,7 +1540,7 @@ mod tests {
 
     #[test]
     fn test_is_recursive_rule_with_indirect() {
-        // path(X, Y) <- edge(X, Y) — NOT recursive (head not in body)
+        // path(X, Y) <- edge(X, Y) - NOT recursive (head not in body)
         let rule = Rule::new_simple(
             Atom::new(
                 "path".to_string(),

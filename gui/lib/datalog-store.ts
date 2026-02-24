@@ -11,7 +11,7 @@ const STORAGE_KEY_CONNECTION = "inputlayer_connection"
 const STORAGE_KEY_SELECTED_KG = "inputlayer_selected_kg"
 const STORAGE_KEY_EDITOR = "inputlayer_editor_content"
 const STORAGE_KEY_HISTORY = "inputlayer_query_history"
-// sessionStorage key — survives page refresh but cleared on tab close (security)
+// sessionStorage key - survives page refresh but cleared on tab close (security)
 const SESSION_KEY_PASSWORD = "inputlayer_session_pw"
 
 export interface DatalogConnection {
@@ -90,7 +90,7 @@ interface StoredConnection {
   port: number
   name: string
   username: string
-  // Password stored in sessionStorage (not localStorage) — survives page refresh
+  // Password stored in sessionStorage (not localStorage) - survives page refresh
   // but is cleared when the tab/browser closes for security.
 }
 
@@ -141,7 +141,7 @@ function safeLsSet(key: string, value: string) {
   try {
     localStorage.setItem(key, value)
   } catch {
-    // Quota or security error — ignore
+    // Quota or security error - ignore
   }
 }
 
@@ -149,7 +149,7 @@ function saveConnectionToStorage(host: string, port: number, name: string, usern
   if (typeof window === "undefined") return
   const stored: StoredConnection = { host, port, name, username }
   safeLsSet(STORAGE_KEY_CONNECTION, JSON.stringify(stored))
-  // Password in sessionStorage — survives page refresh, cleared on tab close
+  // Password in sessionStorage - survives page refresh, cleared on tab close
   try { sessionStorage.setItem(SESSION_KEY_PASSWORD, password) } catch {}
 }
 
@@ -283,7 +283,7 @@ async function checkHealth(host: string, port: number): Promise<void> {
   const resp = await fetch(url)
   if (!resp.ok) {
     const body = await resp.text().catch(() => "")
-    throw new Error(`Health check failed: ${resp.status}${body ? ` — ${body}` : ""}`)
+    throw new Error(`Health check failed: ${resp.status}${body ? ` - ${body}` : ""}`)
   }
 }
 
@@ -441,7 +441,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       console.error("Failed to restore session:", error)
       if (stateUnsubscribe) { stateUnsubscribe(); stateUnsubscribe = null }
       if (notificationUnsubscribe) { notificationUnsubscribe(); notificationUnsubscribe = null }
-      // Don't clear storage on transient failures — the user can retry on next refresh.
+      // Don't clear storage on transient failures - the user can retry on next refresh.
       // Storage is only cleared on explicit disconnect.
       if (wsClient) { wsClient.disconnect(); wsClient = null }
       set({ isRestoringSession: false, connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })

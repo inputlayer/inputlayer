@@ -125,7 +125,7 @@ export function ViewGraphTab({ view, relations }: ViewGraphTabProps) {
         to: view.id,
       })
     } else if (view.dependencies.length > 0) {
-      // Fallback: no computation steps but have dependencies — draw direct edges
+      // Fallback: no computation steps but have dependencies - draw direct edges
       view.dependencies.forEach((dep) => {
         edges.push({ from: dep, to: view.id })
       })

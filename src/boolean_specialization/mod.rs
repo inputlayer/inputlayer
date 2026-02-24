@@ -1354,7 +1354,7 @@ mod tests {
         });
         assert_eq!(a.semiring, SemiringType::Boolean);
 
-        // Antijoin — left is NOT already Distinct; must not panic, wraps left in Distinct
+        // Antijoin - left is NOT already Distinct; must not panic, wraps left in Distinct
         let (node, a) = s.specialize(IRNode::Antijoin {
             left: Box::new(make_join(make_scan("R"), make_scan("S"))),
             right: Box::new(make_scan("T")),
@@ -1369,7 +1369,7 @@ mod tests {
             "Antijoin left must be wrapped in Distinct for Boolean semiring"
         );
 
-        // Antijoin — left is already Distinct; must not double-wrap
+        // Antijoin - left is already Distinct; must not double-wrap
         let (node2, _) = s.specialize(IRNode::Antijoin {
             left: Box::new(IRNode::Distinct {
                 input: Box::new(make_scan("R")),

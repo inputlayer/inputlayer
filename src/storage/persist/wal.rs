@@ -144,7 +144,7 @@ impl PersistWal {
     ///
     /// Tolerates corrupt or truncated lines by logging a warning and skipping
     /// them. This makes WAL recovery resilient to partial writes (crash mid-write)
-    /// AND bit-rot or other corruption — the system recovers as many valid
+    /// AND bit-rot or other corruption - the system recovers as many valid
     /// entries as possible rather than refusing to start.
     pub fn read_all(&self) -> StorageResult<Vec<WalEntry>> {
         if !self.current_file.exists() {
@@ -174,7 +174,7 @@ impl PersistWal {
                 if hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
                     (json_part, Some(hex_part))
                 } else {
-                    // Not a checksum prefix — treat whole line as legacy JSON
+                    // Not a checksum prefix - treat whole line as legacy JSON
                     (line.as_str(), None)
                 }
             } else {
@@ -216,7 +216,7 @@ impl PersistWal {
                 skipped,
                 recovered = entries.len(),
                 file = %self.current_file.display(),
-                "WAL recovery: skipped corrupt entries — possible data loss"
+                "WAL recovery: skipped corrupt entries - possible data loss"
             );
         }
 
@@ -267,7 +267,7 @@ impl PersistWal {
     ///
     /// Uses atomic write-to-new+rename: surviving entries are written to
     /// `current.wal.new`, synced to disk, then atomically renamed to `current.wal`.
-    /// This guarantees that either the old or new WAL exists at all times —
+    /// This guarantees that either the old or new WAL exists at all times -
     /// a crash at any point cannot lose other shards' data.
     pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
         let entries = self.read_all()?;
@@ -306,7 +306,7 @@ impl PersistWal {
         }
 
         // Atomic rename: replaces old WAL with the new one.
-        // On POSIX, rename is atomic — either the old or new file is visible.
+        // On POSIX, rename is atomic - either the old or new file is visible.
         fs::rename(&new_file, &self.current_file)?;
 
         self.entries_written = surviving.len();
@@ -314,7 +314,7 @@ impl PersistWal {
     }
 
     /// Remove stale .archived WAL files left over from previous runs.
-    /// Called during startup — if we reached this point, recovery succeeded
+    /// Called during startup - if we reached this point, recovery succeeded
     /// and archived files are no longer needed.
     pub fn cleanup_archives(&self) -> StorageResult<()> {
         if !self.wal_dir.exists() {
@@ -539,7 +539,7 @@ mod tests {
         wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
             .unwrap();
 
-        // Remove entries for a shard that doesn't exist — should be a no-op
+        // Remove entries for a shard that doesn't exist - should be a no-op
         wal.remove_shard_entries("nonexistent").unwrap();
 
         let entries = wal.read_all().unwrap();
@@ -583,10 +583,10 @@ mod tests {
             let mut wal = PersistWal::new(path.clone()).unwrap();
             wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
                 .unwrap();
-            // Drop without explicit sync — append() should have already synced
+            // Drop without explicit sync - append() should have already synced
         }
 
-        // Read from a fresh WAL instance — data must be there
+        // Read from a fresh WAL instance - data must be there
         {
             let wal = PersistWal::new(path).unwrap();
             let entries = wal.read_all().unwrap();
@@ -631,7 +631,7 @@ mod tests {
 
         wal.remove_shard_entries("db:edge").unwrap();
 
-        // No .archived files should exist — we use atomic rename now
+        // No .archived files should exist - we use atomic rename now
         let archived_files: Vec<_> = fs::read_dir(temp.path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -694,7 +694,7 @@ mod tests {
             writeln!(file, r#"{{"shard":"db:edge","upd"#).unwrap();
         }
 
-        // Recovery should succeed — truncated last line is skipped
+        // Recovery should succeed - truncated last line is skipped
         let wal = PersistWal::new(wal_dir).unwrap();
         let entries = wal.read_all().unwrap();
         assert_eq!(entries.len(), 2, "Should recover 2 valid entries");

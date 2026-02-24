@@ -101,7 +101,7 @@ const KEYWORDS: CompletionItem[] = [
   { label: "<-", kind: "keyword", detail: "rule arrow", insertText: "<-" },
 ]
 
-// Meta commands (dot commands) — work via WebSocket execute
+// Meta commands (dot commands) - work via WebSocket execute
 const META_COMMANDS: CompletionItem[] = [
   // Knowledge graph commands
   { label: ".kg", kind: "meta", detail: "show current knowledge graph", insertText: ".kg" },
@@ -114,7 +114,7 @@ const META_COMMANDS: CompletionItem[] = [
   // Rule commands
   { label: ".rule", kind: "meta", detail: "list all rules", insertText: ".rule" },
   { label: ".rule list", kind: "meta", detail: "list all rules", insertText: ".rule list" },
-  { label: ".rule def", kind: "meta", detail: ".rule def <name> — show definition", insertText: ".rule def " },
+  { label: ".rule def", kind: "meta", detail: ".rule def <name> - show definition", insertText: ".rule def " },
   { label: ".rule drop", kind: "meta", detail: ".rule drop <name>", insertText: ".rule drop " },
   { label: ".rule drop prefix", kind: "meta", detail: ".rule drop prefix <p>", insertText: ".rule drop prefix " },
   { label: ".rule edit", kind: "meta", detail: ".rule edit <name> <idx> <rule>", insertText: ".rule edit " },
@@ -136,7 +136,7 @@ const META_COMMANDS: CompletionItem[] = [
   // System commands
   { label: ".compact", kind: "meta", detail: "compact storage", insertText: ".compact" },
   { label: ".status", kind: "meta", detail: "show system status", insertText: ".status" },
-  { label: ".explain", kind: "meta", detail: ".explain <query> — show plan", insertText: ".explain " },
+  { label: ".explain", kind: "meta", detail: ".explain <query> - show plan", insertText: ".explain " },
   { label: ".load", kind: "meta", detail: ".load <file> [--replace|--merge]", insertText: ".load " },
   { label: ".help", kind: "meta", detail: "show help", insertText: ".help" },
 ]
@@ -333,7 +333,7 @@ export function getCompletions(
   views: View[],
   forceShow = false
 ): { items: CompletionItem[]; startIndex: number } {
-  // Meta commands — check first since they use full-line context, not just current word
+  // Meta commands - check first since they use full-line context, not just current word
   const metaCtx = extractMetaContext(text, cursorPos)
   if (metaCtx) {
     const metaLower = metaCtx.metaPrefix.toLowerCase()
@@ -380,8 +380,8 @@ export function getCompletions(
     for (const rel of relations) {
       const hasRealColumns = rel.columns.length > 0 && !isGenericColumns(rel.columns)
       let detail = hasRealColumns
-        ? `(${rel.columns.join(", ")}) — ${rel.tupleCount} rows`
-        : `arity ${rel.arity} — ${rel.tupleCount} rows`
+        ? `(${rel.columns.join(", ")}) - ${rel.tupleCount} rows`
+        : `arity ${rel.arity} - ${rel.tupleCount} rows`
       if (rel.isSession) detail += " (session)"
       const vars = hasRealColumns
         ? `(${rel.columns.map(colToVariable).join(", ")})`
@@ -398,7 +398,7 @@ export function getCompletions(
       const vars = view.arity > 0
         ? `(${Array.from({ length: view.arity }, (_, i) => String.fromCharCode(65 + i)).join(", ")})`
         : ""
-      let detail = view.arity > 0 ? `view — arity ${view.arity}` : "view"
+      let detail = view.arity > 0 ? `view - arity ${view.arity}` : "view"
       if (view.isSession) detail += " (session)"
       items.push({
         label: view.name,
@@ -420,8 +420,8 @@ export function getCompletions(
     if (rel.name.toLowerCase().startsWith(lowerPrefix)) {
       const hasReal = rel.columns.length > 0 && !isGenericColumns(rel.columns)
       let detail = hasReal
-        ? `(${rel.columns.join(", ")}) — ${rel.tupleCount} rows`
-        : `arity ${rel.arity} — ${rel.tupleCount} rows`
+        ? `(${rel.columns.join(", ")}) - ${rel.tupleCount} rows`
+        : `arity ${rel.arity} - ${rel.tupleCount} rows`
       if (rel.isSession) detail += " (session)"
       // In rule body: append arguments so completing "edge" inserts "edge(X, Y)"
       let insertText = rel.name

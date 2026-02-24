@@ -19,7 +19,7 @@
 // Add more facts while rule is gone
 +data[(4, 40)]
 
-// Re-add rule — should pick up ALL current facts
+// Re-add rule - should pick up ALL current facts
 +total(sum<V>) <- data(_, V)
 
 ?total(X)

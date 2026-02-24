@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_json_to_value_default_string_limit_64kb() {
-        // Default limit is 64KB — a 100KB string should fail
+        // Default limit is 64KB - a 100KB string should fail
         let s = "x".repeat(100_000);
         let result = json_to_value(&serde_json::json!(s));
         assert!(result.is_err());

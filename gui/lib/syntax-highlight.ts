@@ -86,7 +86,7 @@ const TOKEN_REGEX = new RegExp(
     /\/\/[^\n]*/.source,
     // String literal (with escapes)
     /"(?:[^"\\]|\\.)*(?:"|$)/.source,
-    // Meta commands (dot-prefix) — must precede punctuation
+    // Meta commands (dot-prefix) - must precede punctuation
     /\.(?:kg\s+(?:create|list|use|drop)|rel|rule\s+(?:list|drop|remove|def|clear|edit|query)|session\s+(?:clear|drop)|index\s+(?:list|create|drop|stats|rebuild)|user\s+(?:list|create|drop|password|role)|apikey\s+(?:create|list|revoke)|kg|rule|session|index|user|apikey|load|compact|status|help|quit|exit|explain|\?|q)\b/.source,
     // Rule arrow
     /<-/.source,
@@ -171,7 +171,7 @@ export function tokenize(input: string): Token[] {
       inBody = true
     } else if (kind === "whitespace" && text.includes("\n")) {
       // Only reset to head context if the text after the last newline
-      // has no leading indentation — indented lines are continuations.
+      // has no leading indentation - indented lines are continuations.
       const afterLastNL = text.substring(text.lastIndexOf("\n") + 1)
       if (!/[ \t]/.test(afterLastNL)) {
         inBody = false

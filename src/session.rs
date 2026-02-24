@@ -2440,7 +2440,7 @@ mod tests {
         let mgr = SessionManager::new(config);
         let id = mgr.create_session("default").unwrap();
 
-        // Insert 3 facts — OK
+        // Insert 3 facts - OK
         mgr.insert_ephemeral(
             &id,
             "edge",
@@ -2452,7 +2452,7 @@ mod tests {
         )
         .unwrap();
 
-        // Insert 3 more — exceeds limit of 5
+        // Insert 3 more - exceeds limit of 5
         let result = mgr.insert_ephemeral(
             &id,
             "edge",
@@ -2479,7 +2479,7 @@ mod tests {
         let mgr = SessionManager::new(config);
         let id = mgr.create_session("default").unwrap();
 
-        // Insert many facts — should succeed with 0 (unlimited)
+        // Insert many facts - should succeed with 0 (unlimited)
         let tuples: Vec<Tuple> = (0..1000).map(|i| make_tuple(vec![i])).collect();
         mgr.insert_ephemeral(&id, "data", tuples).unwrap();
         assert_eq!(mgr.get_session_facts(&id).unwrap().len(), 1000);
@@ -2503,7 +2503,7 @@ mod tests {
             body: vec![],
         };
 
-        // Add 2 rules — OK
+        // Add 2 rules - OK
         mgr.add_ephemeral_rule(&id, make_rule("r1"), "r1() <-".to_string())
             .unwrap();
         mgr.add_ephemeral_rule(&id, make_rule("r2"), "r2() <-".to_string())

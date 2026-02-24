@@ -68,7 +68,7 @@ impl KnowledgeGraphsMetadata {
     ///
     /// Writes to a unique temp file, calls `sync_all()`, then renames to `{path}`.
     /// Rename is atomic on POSIX, so the metadata file is always either the old
-    /// or new version — never a corrupt half-written state.
+    /// or new version - never a corrupt half-written state.
     /// Uses a unique temp file name per call to avoid races under concurrent saves.
     pub fn save(&self, path: &Path) -> StorageResult<()> {
         // Ensure parent directory exists

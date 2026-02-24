@@ -296,6 +296,7 @@ fn test_optimization_config() {
         enable_sip_rewriting: true,
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
+        enable_magic_sets: false,
     };
 
     let engine = DatalogEngine::with_config(config.clone());

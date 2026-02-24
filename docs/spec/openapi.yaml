@@ -3,7 +3,7 @@ info:
   title: InputLayer REST API
   version: 0.1.0
   description: |
-    REST endpoints for InputLayer — a streaming deductive knowledge graph database.
+    REST endpoints for InputLayer - a streaming deductive knowledge graph database.
     All data operations use the WebSocket `/ws` endpoint (see asyncapi.yaml).
     REST endpoints provide health checks, metrics, and documentation.
 

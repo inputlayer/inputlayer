@@ -259,7 +259,7 @@ impl QueryJob {
             count,
             timestamp_ms: now_ms(),
             session_id,
-            seq: 0, // placeholder — set by send_notification
+            seq: 0, // placeholder - set by send_notification
         });
     }
 
@@ -764,7 +764,7 @@ impl Handler {
 
         let (password, api_key, is_new_credentials) =
             if env_password.is_some() || env_api_key.is_some() {
-                // Env vars take priority — use them (with fallback to persisted/generated for the other)
+                // Env vars take priority - use them (with fallback to persisted/generated for the other)
                 let pw = env_password
                     .or_else(|| persisted.as_ref().map(|p| p.admin_password.clone()))
                     .or_else(|| self.config.http.auth.bootstrap_admin_password.clone())
@@ -1560,7 +1560,7 @@ impl Handler {
     /// Get mutable access to the storage engine.
     ///
     /// **Warning**: This acquires a write lock on the entire storage engine.
-    /// Only use in tests — production code should use `get_storage()` (read lock).
+    /// Only use in tests - production code should use `get_storage()` (read lock).
     pub fn get_storage_mut(&self) -> parking_lot::RwLockWriteGuard<'_, StorageEngine> {
         self.storage.write()
     }
@@ -1807,7 +1807,7 @@ impl Handler {
         // Acquire a semaphore permit to bound concurrent DD computations at ncpu.
         // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
         // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
-        // `acquire_owned()` is an async wait — Tokio workers remain free while queued.
+        // `acquire_owned()` is an async wait - Tokio workers remain free while queued.
         // Timeout after 30s to reject requests when server is overloaded.
         let wait_start = Instant::now();
         let permit = match tokio::time::timeout(
@@ -1914,7 +1914,7 @@ impl QueryJob {
         let program_len = program.len();
         info!(program_len, "query_job_start");
 
-        // Use READ lock — all operations use _on()/_into() variants with explicit KG name.
+        // Use READ lock - all operations use _on()/_into() variants with explicit KG name.
         // This allows concurrent queries to execute without blocking each other.
         // KgDrop and RuleClear use interior mutability, so no write lock is needed.
         // `mut` is needed because MetaCommand::Compact releases and re-acquires the lock.
@@ -2750,7 +2750,7 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::RuleQuery(name) => {
-                                        // Execute as a query — delegate to query path
+                                        // Execute as a query - delegate to query path
                                         let query_text = format!("?{name}(X, Y)");
                                         query_to_execute = Some(query_text);
                                     }
@@ -3022,7 +3022,7 @@ impl QueryJob {
 
         // Return messages if no query
         if !messages.is_empty() && query_to_execute.is_none() {
-            drop(storage); // Release storage lock — we no longer need it
+            drop(storage); // Release storage lock - we no longer need it
             let rows: Vec<WireTuple> = messages
                 .iter()
                 .map(|msg| WireTuple {
@@ -3092,7 +3092,7 @@ impl QueryJob {
             }
         }
 
-        // Execute DD computation on the snapshot — completely lock-free.
+        // Execute DD computation on the snapshot - completely lock-free.
         // Session facts are added to an ISOLATED COPY, providing request-scoped isolation.
         let query_exec_start = Instant::now();
         let has_session_facts = !session_fact_tuples.is_empty();
@@ -3350,7 +3350,7 @@ impl Handler {
             {
                 Ok(tuples) => tuples.into_iter().collect(),
                 Err(e) => {
-                    warn!(error = %e, "Provenance baseline query failed — all tuples tagged as ephemeral");
+                    warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
                     HashSet::new()
                 }
             };
@@ -4075,7 +4075,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
                 Term::VectorLiteral(_) => {
                     // Vector literals can't be used in comparison constraints
                     // (parser doesn't support [1,2,3] in comparison context).
-                    // Use a fresh variable — returns all rows for this position.
+                    // Use a fresh variable - returns all rows for this position.
                     let t = format!("_v{i}");
                     head_vars.push(t.clone());
                     t
@@ -4572,7 +4572,7 @@ mod tests {
         assert_eq!(since2.len(), 1);
         assert_eq!(since2[0].seq(), 3);
 
-        // Get since last — should be empty
+        // Get since last - should be empty
         let none = handler.get_notifications_since(3);
         assert!(none.is_empty());
     }
@@ -6174,7 +6174,7 @@ mod tests {
     #[test]
     fn test_handler_notify_persistent_update() {
         let (handler, _tmp) = make_test_handler();
-        // Should not panic — fire and forget notification
+        // Should not panic - fire and forget notification
         handler.notify_persistent_update("kg", "rel", "insert", 5);
     }
 
@@ -6263,7 +6263,7 @@ mod tests {
         ];
         let sorted = sort_rows(rows.clone(), &[]);
         assert_eq!(sorted.len(), 2);
-        // No sorting applied — same order
+        // No sorting applied - same order
         assert_eq!(sorted[0].values[0], WireValue::Int64(2));
     }
 
@@ -6388,7 +6388,7 @@ mod tests {
         let is_clean = handler.session_manager().is_session_clean(&sid).unwrap();
         assert!(!is_clean, "Session should be dirty after adding rule");
 
-        // Query using the session rule — should return results
+        // Query using the session rule - should return results
         let result = handler
             .execute_program(Some(&sid), None, "?path(X, Y)".to_string(), None)
             .await
@@ -6967,7 +6967,7 @@ fn extract_term_vars(term: &Term, vars: &mut Vec<String>) {
                 extract_term_vars(field_term, vars);
             }
         }
-        // Constants, placeholders, aggregates, vectors — no variables to extract
+        // Constants, placeholders, aggregates, vectors - no variables to extract
         _ => {}
     }
 }
@@ -6984,7 +6984,7 @@ fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
             extract_arith_vars(left, vars);
             extract_arith_vars(right, vars);
         }
-        // Constants — no variables
+        // Constants - no variables
         crate::ast::ArithExpr::Constant(_) | crate::ast::ArithExpr::FloatConstant(_) => {}
     }
 }
@@ -7088,7 +7088,7 @@ fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<
         crate::ast::BodyPredicate::Negated(_) => {
             // Do NOT extract variables from negated atoms into the query head.
             // A variable that appears only in a negated body atom is "unsafe"
-            // in Datalog — it cannot be safely projected into the head.
+            // in Datalog - it cannot be safely projected into the head.
         }
         crate::ast::BodyPredicate::Comparison(left, _, right) => {
             extract_term_vars(left, head_vars);

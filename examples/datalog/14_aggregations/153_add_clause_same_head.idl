@@ -11,7 +11,7 @@
 
 ?reach(X, Y)
 
-// ADD second clause — NOT a replacement
+// ADD second clause - NOT a replacement
 +reach(X, Y) <- shortcut(X, Y)
 
 // Should return 4 rows (union of both clauses)

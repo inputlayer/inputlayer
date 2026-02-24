@@ -151,7 +151,7 @@ impl IRBuilder {
                         v.iter().map(|f| *f as f32).collect(),
                     ),
                     Term::Variable(name) => {
-                        // Variable query — will be resolved at execution time.
+                        // Variable query - will be resolved at execution time.
                         // Store as a string constant placeholder containing the variable name.
                         // The pre-DD resolution phase will handle binding.
                         crate::ir::IRExpression::StringConstant(name.clone())

@@ -88,7 +88,7 @@ pub enum MetaCommand {
     ApiKeyRevoke(String), // label
 
     // KG ACL management commands
-    KgAclList(Option<String>), // .kg acl list [kg_name] — list ACLs (for specific KG or current)
+    KgAclList(Option<String>), // .kg acl list [kg_name] - list ACLs (for specific KG or current)
     KgAclGrant {
         kg_name: String,
         username: String,

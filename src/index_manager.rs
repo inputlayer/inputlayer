@@ -569,7 +569,7 @@ impl IndexManager {
         }
 
         if registrations.is_empty() {
-            // No indexes to save — clean up any stale index dir
+            // No indexes to save - clean up any stale index dir
             if indexes_dir.exists() {
                 let _ = std::fs::remove_dir_all(&indexes_dir);
             }

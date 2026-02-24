@@ -8,7 +8,7 @@
 
 +nearby(within_radius<1.0, Id, D:asc>) <- point(Id, D)
 
-// Initial: 1(0.1), 2(0.5) — 3(1.5) is outside
+// Initial: 1(0.1), 2(0.5) - 3(1.5) is outside
 ?nearby(X, Y)
 
 // Move point 3 within radius

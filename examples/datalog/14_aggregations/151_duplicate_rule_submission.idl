@@ -1,5 +1,5 @@
 // Test: Duplicate rule submission (idempotency)
-// Description: Submit exact same rule twice — should be silently ignored
+// Description: Submit exact same rule twice - should be silently ignored
 
 .kg create test_dup_rule_n14t151
 .kg use test_dup_rule_n14t151

@@ -1,0 +1,25 @@
+// Test: Magic Sets - Transitive Closure with Bound First Arg
+// Description: Tests that ?reach(1, Y) correctly uses magic sets to restrict computation
+
+.kg create test_magic_tc_n09t95
+.kg use test_magic_tc_n09t95
+
+// Chain graph: 1->2->3->4->5, plus a disconnected component 10->11->12
++edge[(1,2), (2,3), (3,4), (4,5), (10,11), (11,12)]
+
+// Transitive closure
++reach(X, Y) <- edge(X, Y)
++reach(X, Z) <- reach(X, Y), edge(Y, Z)
+
+// Bound query: only nodes reachable from 1
+?reach(1, Y)
+
+// Bound query: from node 10 (disconnected)
+?reach(10, Y)
+
+// Point query: is node 4 reachable from 1?
+?reach(1, 4)
+
+// Cleanup
+.kg use default
+.kg drop test_magic_tc_n09t95

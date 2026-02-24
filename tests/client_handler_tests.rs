@@ -671,7 +671,7 @@ async fn test_conditional_delete_empty_condition_touches_nothing() {
         .await
         .unwrap();
 
-    // 'banned' relation is empty — nothing should be deleted
+    // 'banned' relation is empty - nothing should be deleted
     handler
         .query_program(None, "-data(X) <- banned(X)".to_string())
         .await
@@ -698,7 +698,7 @@ async fn test_conditional_delete_nonexistent_relation_is_noop() {
         .await
         .unwrap();
 
-    // Relation 'ghost' doesn't exist — should be a no-op
+    // Relation 'ghost' doesn't exist - should be a no-op
     let result = handler
         .query_program(None, "-items(X) <- ghost(X)".to_string())
         .await;
@@ -747,7 +747,7 @@ async fn test_update_success_replaces_correctly() {
             // rows is non-negative by type (usize), just check query succeeded
         }
         Err(e) => {
-            // Update syntax may not be fully implemented yet — that's acceptable
+            // Update syntax may not be fully implemented yet - that's acceptable
             // Just verify it doesn't panic
             assert!(
                 !e.contains("panic") && !e.contains("index out of bounds"),
@@ -761,7 +761,7 @@ async fn test_update_success_replaces_correctly() {
 async fn test_update_empty_source_is_noop() {
     let (handler, _tmp) = create_test_handler();
 
-    // 'ghost' relation doesn't exist — update should be a no-op
+    // 'ghost' relation doesn't exist - update should be a no-op
     let result = handler
         .query_program(
             None,

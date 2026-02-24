@@ -87,7 +87,7 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
   // Statement type classification (Phase 2)
   const lineTypes = useMemo(() => classifyLines(query), [query])
 
-  // Cursor position tracking — reads from textarea.value directly to avoid stale closures
+  // Cursor position tracking - reads from textarea.value directly to avoid stale closures
   const updateCursorInfo = useCallback(() => {
     if (!textareaRef.current) return
     const ta = textareaRef.current

@@ -2,7 +2,7 @@
 .kg create test_sip_empty_n80t04
 .kg use test_sip_empty_n80t04
 
-// users is populated, orders is empty — join should produce no results
+// users is populated, orders is empty - join should produce no results
 +user[(1, "alice"), (2, "bob")]
 
 // Query join against empty relation

@@ -141,7 +141,7 @@ export default function QueryPage() {
           {!selectedKnowledgeGraph && (
             <div className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle className="h-3 w-3 flex-shrink-0" />
-              <span>No knowledge graph selected — select one from the header to run queries</span>
+              <span>No knowledge graph selected - select one from the header to run queries</span>
             </div>
           )}
 

@@ -795,7 +795,7 @@ mod tests {
 
     // === Regression tests for production readiness fixes ===
 
-    /// P1-8: Verify COW semantics — only relations with session facts are cloned.
+    /// P1-8: Verify COW semantics - only relations with session facts are cloned.
     /// The original snapshot's data must remain untouched after session query.
     #[test]
     fn test_session_facts_cow_does_not_modify_snapshot() {

@@ -10,7 +10,7 @@
 
 ?top_score(N, G)
 
-// Add second clause with different filter — user expects "update"
+// Add second clause with different filter - user expects "update"
 +top_score(Name, max<Grade>) <- score(Name, Grade), Grade > 65
 
 // Gets UNION: both clauses contribute
