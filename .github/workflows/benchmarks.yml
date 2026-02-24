@@ -10,12 +10,14 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   BENCH_MAX_NODES: 1000
+  CARGO_BUILD_JOBS: "2"
 
 jobs:
   benchmark:
     name: Run Benchmarks
+    if: contains(github.event.pull_request.labels.*.name, 'bench')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +35,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-bench-
 
-      - name: Run production benchmarks
-        run: cargo bench --bench production_benchmarks 2>&1 | tee bench_raw.txt
+      - name: Build benchmarks
+        run: cargo bench --bench production_benchmarks --no-run
+
+      - name: Run benchmarks
+        run: cargo bench --bench production_benchmarks -- "magic_sets|multi_hop|three_way" 2>&1 | tee bench_raw.txt
 
       - name: Build benchmark comment
         run: |
