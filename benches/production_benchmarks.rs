@@ -1,12 +1,17 @@
 //! Production benchmark suite for InputLayer.
 //!
-//! Tests at realistic scales (1K–100K+ tuples) across 6 groups:
+//! Tests at realistic scales (1K–100K+ tuples) across 10 groups:
 //! 1. Graph Reachability - Transitive Closure (compare: Soufflé, Neo4j)
-//! 2. Incremental Update Propagation (compare: Materialize)
-//! 3. Multi-hop Deduction - README Example (unique to InputLayer)
-//! 4. Analytical 3-Way Join (compare: DuckDB)
-//! 5. HNSW Vector Search (compare: Qdrant, Pinecone)
-//! 6. Persistence Round-Trip (WAL + Recovery)
+//! 2. Magic Sets - Bound Recursive Queries
+//! 3. Incremental Update Propagation (compare: Materialize)
+//! 4. Multi-hop Deduction - README Example (unique to InputLayer)
+//! 5. Analytical 3-Way Join (compare: DuckDB)
+//! 6. HNSW Vector Search (compare: Qdrant, Pinecone)
+//! 7. Incremental vs From-Scratch (head-to-head DD comparison)
+//! 8. Delta Scaling (linear delta cost)
+//! 9. Incremental Retraction (fact deletion propagation)
+//! 10. Incremental Aggregation (derived aggregates update)
+//! 11. Persistence Round-Trip (WAL + Recovery)
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::{protocol::handler::Handler, Config, DurabilityMode};
@@ -619,6 +624,277 @@ fn bench_persistence(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// 7. Incremental vs From-Scratch (head-to-head comparison)
+// ---------------------------------------------------------------------------
+
+fn bench_incremental_vs_scratch(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("incremental_vs_scratch");
+    group.sample_size(10);
+
+    let nodes = 500u32;
+    let base_edges = 1_000u32;
+    let delta = 100u32;
+
+    let base_insert = generate_random_graph(nodes, base_edges, 42);
+    // Combine base + delta for the from-scratch path
+    let full_insert = generate_random_graph(nodes, base_edges + delta, 42);
+
+    // Path A: Incremental — load base, materialize, insert delta, re-query (timed)
+    group.bench_function("incremental_100_edges", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for i in 0..iters {
+                let (handler, _tmp) = make_bench_handler();
+                rt.block_on(async {
+                    handler
+                        .query_program(None, base_insert.clone())
+                        .await
+                        .unwrap();
+                    handler
+                        .query_program(None, "+reach(X, Y) <- edge(X, Y)".into())
+                        .await
+                        .unwrap();
+                    handler
+                        .query_program(None, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)".into())
+                        .await
+                        .unwrap();
+                    // Force initial materialization
+                    handler
+                        .query_program(None, "?reach(X, Y)".into())
+                        .await
+                        .unwrap();
+
+                    // Insert delta edges
+                    let delta_edges = generate_incremental_edges(nodes, delta, 999 + i);
+                    handler.query_program(None, delta_edges).await.unwrap();
+                });
+                let start = Instant::now();
+                rt.block_on(handler.query_program(None, "?reach(X, Y)".into()))
+                    .unwrap();
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    // Path B: From scratch — load all edges + rules, materialize (timed)
+    group.bench_function("from_scratch_full", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                let (handler, _tmp) = make_bench_handler();
+                rt.block_on(async {
+                    handler
+                        .query_program(None, full_insert.clone())
+                        .await
+                        .unwrap();
+                    handler
+                        .query_program(None, "+reach(X, Y) <- edge(X, Y)".into())
+                        .await
+                        .unwrap();
+                    handler
+                        .query_program(None, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)".into())
+                        .await
+                        .unwrap();
+                });
+                let start = Instant::now();
+                rt.block_on(handler.query_program(None, "?reach(X, Y)".into()))
+                    .unwrap();
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// 8. Delta Scaling (linear delta cost)
+// ---------------------------------------------------------------------------
+
+fn bench_delta_scaling(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("delta_scaling");
+    group.sample_size(10);
+
+    let nodes = 500u32;
+    let base_edges = 1_000u32;
+    let base_insert = generate_random_graph(nodes, base_edges, 42);
+
+    for delta_count in [1u32, 10, 100, 500] {
+        let label = format!("delta_{delta_count}");
+
+        group.bench_function(BenchmarkId::new("requery", &label), |b| {
+            let base = base_insert.clone();
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for i in 0..iters {
+                    let (handler, _tmp) = make_bench_handler();
+                    rt.block_on(async {
+                        handler.query_program(None, base.clone()).await.unwrap();
+                        handler
+                            .query_program(None, "+reach(X, Y) <- edge(X, Y)".into())
+                            .await
+                            .unwrap();
+                        handler
+                            .query_program(None, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)".into())
+                            .await
+                            .unwrap();
+                        handler
+                            .query_program(None, "?reach(X, Y)".into())
+                            .await
+                            .unwrap();
+
+                        let delta = generate_incremental_edges(nodes, delta_count, 5000 + i);
+                        handler.query_program(None, delta).await.unwrap();
+                    });
+                    let start = Instant::now();
+                    rt.block_on(handler.query_program(None, "?reach(X, Y)".into()))
+                        .unwrap();
+                    total += start.elapsed();
+                }
+                total
+            });
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// 9. Incremental Retraction (fact deletion propagation)
+// ---------------------------------------------------------------------------
+
+fn bench_incremental_retraction(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("incremental_retraction");
+    group.sample_size(10);
+
+    let nodes = 500u32;
+    let base_edges = 1_000u32;
+    let base_insert = generate_random_graph(nodes, base_edges, 42);
+
+    for delete_count in [10u32, 50, 100] {
+        let label = format!("delete_{delete_count}");
+
+        group.bench_function(BenchmarkId::new("requery", &label), |b| {
+            let base = base_insert.clone();
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let (handler, _tmp) = make_bench_handler();
+                    rt.block_on(async {
+                        handler.query_program(None, base.clone()).await.unwrap();
+                        handler
+                            .query_program(None, "+reach(X, Y) <- edge(X, Y)".into())
+                            .await
+                            .unwrap();
+                        handler
+                            .query_program(None, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)".into())
+                            .await
+                            .unwrap();
+                        handler
+                            .query_program(None, "?reach(X, Y)".into())
+                            .await
+                            .unwrap();
+
+                        // Delete edges using deterministic seed
+                        let mut rng = StdRng::seed_from_u64(77);
+                        let mut deletes = Vec::new();
+                        for _ in 0..delete_count {
+                            let s = rng.gen_range(1..=nodes);
+                            let d = rng.gen_range(1..=nodes);
+                            deletes.push(format!("-edge({s}, {d})"));
+                        }
+                        for del in deletes {
+                            handler.query_program(None, del).await.unwrap();
+                        }
+                    });
+                    let start = Instant::now();
+                    rt.block_on(handler.query_program(None, "?reach(X, Y)".into()))
+                        .unwrap();
+                    total += start.elapsed();
+                }
+                total
+            });
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// 10. Incremental Aggregation (derived aggregates update)
+// ---------------------------------------------------------------------------
+
+fn bench_incremental_aggregation(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let mut group = c.benchmark_group("incremental_aggregation");
+    group.sample_size(10);
+
+    let base_employees = 10_000u32;
+    let departments = 100u32;
+
+    fn generate_employees(count: u32, depts: u32, seed: u64, id_offset: u32) -> String {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let tuples: Vec<String> = (1..=count)
+            .map(|i| {
+                let dept = rng.gen_range(1..=depts);
+                let salary = rng.gen_range(30_000..=150_000_i64);
+                format!("({}, {dept}, {salary})", id_offset + i)
+            })
+            .collect();
+        format!("+employee[{}]", tuples.join(", "))
+    }
+
+    let base = generate_employees(base_employees, departments, 42, 0);
+
+    for delta_count in [10u32, 100, 1000] {
+        let label = format!("add_{delta_count}_employees");
+
+        group.bench_function(BenchmarkId::new("sum_requery", &label), |b| {
+            let base = base.clone();
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for i in 0..iters {
+                    let (handler, _tmp) = make_bench_handler();
+                    rt.block_on(async {
+                        handler.query_program(None, base.clone()).await.unwrap();
+                        handler
+                            .query_program(
+                                None,
+                                "+dept_total(Dept, sum<Salary>) <- employee(_, Dept, Salary)"
+                                    .into(),
+                            )
+                            .await
+                            .unwrap();
+                        handler
+                            .query_program(None, "?dept_total(X, Y)".into())
+                            .await
+                            .unwrap();
+
+                        // Insert new employees with offset IDs to avoid duplicates
+                        let delta = generate_employees(
+                            delta_count,
+                            departments,
+                            5000 + i as u64,
+                            base_employees,
+                        );
+                        handler.query_program(None, delta).await.unwrap();
+                    });
+                    let start = Instant::now();
+                    rt.block_on(handler.query_program(None, "?dept_total(X, Y)".into()))
+                        .unwrap();
+                    total += start.elapsed();
+                }
+                total
+            });
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // Criterion config & main
 // ---------------------------------------------------------------------------
 
@@ -628,7 +904,9 @@ criterion_group! {
         .measurement_time(Duration::from_secs(15))
         .warm_up_time(Duration::from_secs(5))
         .sample_size(20);
-    targets = bench_transitive_closure, bench_magic_sets, bench_incremental_updates,
+    targets = bench_incremental_vs_scratch, bench_delta_scaling,
+              bench_incremental_retraction, bench_incremental_aggregation,
+              bench_transitive_closure, bench_magic_sets, bench_incremental_updates,
               bench_multi_hop_deduction, bench_three_way_join,
               bench_vector_search, bench_persistence
 }
