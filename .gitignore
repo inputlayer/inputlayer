@@ -44,3 +44,12 @@ proposals/
 .gback/
 
 .inputlayer-credentials.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
