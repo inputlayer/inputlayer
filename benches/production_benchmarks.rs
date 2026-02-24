@@ -194,15 +194,26 @@ fn format_vector(v: &[f32]) -> String {
 // 1. Graph Reachability — Transitive Closure
 // ---------------------------------------------------------------------------
 
+/// Benchmark graph sizes. Set `BENCH_MAX_NODES=1000` to cap the largest graph
+/// (useful in CI where memory is limited). Default: all sizes up to 2000 nodes.
+fn bench_graph_sizes() -> Vec<(u32, u32)> {
+    let max_nodes: u32 = std::env::var("BENCH_MAX_NODES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2_000);
+    vec![(500, 1_000), (1_000, 2_000), (2_000, 4_000)]
+        .into_iter()
+        .filter(|(n, _)| *n <= max_nodes)
+        .collect()
+}
+
 fn bench_transitive_closure(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     let mut group = c.benchmark_group("transitive_closure");
     group.sample_size(10);
 
-    // (nodes, edges) — sparse graphs to keep TC tractable
-    // Dense random graphs produce O(N²) reachable pairs; we keep edge/node ratio low.
-    let sizes: Vec<(u32, u32)> = vec![(500, 1_000), (1_000, 2_000), (2_000, 4_000)];
+    let sizes = bench_graph_sizes();
 
     for (nodes, edges) in sizes {
         let (handler, _tmp) = make_bench_handler();
@@ -239,8 +250,7 @@ fn bench_magic_sets(c: &mut Criterion) {
     let mut group = c.benchmark_group("magic_sets");
     group.sample_size(10);
 
-    // Sparse random graphs — same sizes as TC benchmark
-    let sizes: Vec<(u32, u32)> = vec![(500, 1_000), (1_000, 2_000), (2_000, 4_000)];
+    let sizes = bench_graph_sizes();
 
     for (nodes, edges) in sizes {
         let label = format!("{nodes}n_{edges}e");

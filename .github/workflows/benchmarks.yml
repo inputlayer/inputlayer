@@ -9,6 +9,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  BENCH_MAX_NODES: 1000
 
 jobs:
   benchmark:
@@ -38,23 +39,20 @@ jobs:
       - name: Build benchmark comment
         run: |
           python3 <<'PYEOF' > bench_comment.md
-          import re, sys
+          import re
 
           lines = open("bench_raw.txt").readlines()
 
-          # Parse Criterion output into (name, estimate, lower, upper, change_pct, change_note)
           benchmarks = []
           current_name = None
           current_time = None
 
           for line in lines:
-              # Benchmark name lines look like: "group/subgroup/params"
               name_match = re.match(r'^(\w[\w/_ ]+\w)\s*$', line.rstrip())
               if name_match:
                   current_name = name_match.group(1).strip()
                   continue
 
-              # time line: "time:   [1.234 ms 2.345 ms 3.456 ms]"
               time_match = re.search(
                   r'time:\s+\[([0-9.]+\s+\w+)\s+([0-9.]+\s+\w+)\s+([0-9.]+\s+\w+)\]',
                   line
@@ -70,7 +68,6 @@ jobs:
                   }
                   continue
 
-              # change line: "change: [-1.23% +0.45% +2.34%] (p = 0.12 > 0.05)"
               change_match = re.search(
                   r'change:\s+\[.*?([+-]?[0-9.]+%)\s+([+-]?[0-9.]+%)\s+([+-]?[0-9.]+%).*?\]',
                   line
@@ -79,7 +76,6 @@ jobs:
                   current_time["change"] = change_match.group(2)
                   continue
 
-              # Performance note
               perf_match = re.search(r'(Performance has \w+|Change within noise|No change)', line)
               if perf_match and current_time:
                   note = perf_match.group(1)
@@ -93,19 +89,16 @@ jobs:
                   current_time = None
                   current_name = None
 
-          # If last benchmark had no perf note, still capture it
           if current_time:
               benchmarks.append(current_time)
 
-          # Build markdown
           out = []
           out.append("## Benchmark Results\n")
 
-          # Key metrics table (magic sets)
           key = [b for b in benchmarks if "magic_sets" in b["name"]]
           if key:
               out.append("### Magic Sets (Bound Recursive Queries)\n")
-              out.append("| Benchmark | Time | vs. baseline |")
+              out.append("| Benchmark | Time | vs. previous |")
               out.append("|-----------|------|-------------|")
               for b in key:
                   icon = {"improved": "\u2705", "regressed": "\u274c", "~same": "\u2796"}.get(b["note"], "")
@@ -113,12 +106,11 @@ jobs:
                   out.append(f'| `{b["name"]}` | **{b["estimate"]}** | {change_str} |')
               out.append("")
 
-          # All other benchmarks
           other = [b for b in benchmarks if "magic_sets" not in b["name"]]
           if other:
               out.append("<details>")
               out.append("<summary>All other benchmarks</summary>\n")
-              out.append("| Benchmark | Time | vs. baseline |")
+              out.append("| Benchmark | Time | vs. previous |")
               out.append("|-----------|------|-------------|")
               for b in other:
                   icon = {"improved": "\u2705", "regressed": "\u274c", "~same": "\u2796"}.get(b["note"], "")
@@ -127,7 +119,6 @@ jobs:
               out.append("")
               out.append("</details>")
 
-          # Regressions warning
           regressions = [b for b in benchmarks if b["note"] == "regressed"]
           if regressions:
               out.append("")
