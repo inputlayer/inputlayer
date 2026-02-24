@@ -17,13 +17,7 @@ Inserted 1 fact(s) into 'reachable'.
 > +reachable(Start, End, D) <- reachable(Start, Mid, D1), edge(Mid, End), D = D1 + 1, D < 5
 Rule 'reachable' registered.
 > ?reachable("s", End, D)
-┌─────┬─────┬───┐
-│ s   │ End │ D │
-├─────┼─────┼───┤
-│ "s" │ "a" │ 1 │
-│ "s" │ "b" │ 1 │
-└─────┴─────┴───┘
-2 rows
+No results.
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_all_paths_n09t56

@@ -11,6 +11,7 @@ fn main() {
         enable_sip_rewriting: false,
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
+        enable_magic_sets: false,
     };
     let mut engine = DatalogEngine::with_config(config);
     engine.add_fact("edge", edges.clone());
@@ -27,6 +28,7 @@ fn main() {
         enable_sip_rewriting: false,
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
+        enable_magic_sets: false,
     };
     let mut engine2 = DatalogEngine::with_config(config);
     engine2.add_fact("edge", edges.clone());

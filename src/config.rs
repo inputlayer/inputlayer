@@ -271,6 +271,10 @@ pub struct OptimizationConfig {
 
     #[serde(default = "default_true")]
     pub enable_boolean_specialization: bool,
+
+    /// Magic Sets demand-driven rewriting for recursive queries
+    #[serde(default = "default_true")]
+    pub enable_magic_sets: bool,
 }
 
 /// Logging configuration
@@ -614,6 +618,7 @@ impl Config {
                 enable_sip_rewriting: true,
                 enable_subplan_sharing: true,
                 enable_boolean_specialization: true,
+                enable_magic_sets: true,
             },
             logging: LoggingConfig {
                 level: "info".to_string(),

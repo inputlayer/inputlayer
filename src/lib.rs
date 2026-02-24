@@ -118,6 +118,7 @@ mod boolean_specialization; // Semiring selection
 pub mod code_generator; // IR -> Differential Dataflow execution
 mod ir_builder; // AST -> IR construction
 mod join_planning; // Join order optimization
+mod magic_sets; // Magic Sets demand-driven rewriting for recursive queries
 mod optimizer; // Basic IR optimizations
 pub mod parser; // Datalog parsing & AST construction
 pub mod rule_catalog; // Rule catalog for persistent rules
@@ -296,6 +297,11 @@ pub struct OptimizationConfig {
 
     /// Enable boolean specialization (semiring selection)
     pub enable_boolean_specialization: bool,
+
+    /// Enable Magic Sets transformation for recursive queries with bound arguments.
+    /// Restricts fixpoint computation to only demanded tuples when query has constants.
+    /// Example: `?reach(1, Y)` only computes reachability from node 1, not the full TC.
+    pub enable_magic_sets: bool,
 }
 
 impl Default for OptimizationConfig {
@@ -313,6 +319,7 @@ impl Default for OptimizationConfig {
             // The shared views are executed before main rules to materialize their data.
             enable_subplan_sharing: true,
             enable_boolean_specialization: true,
+            enable_magic_sets: true,
         }
     }
 }
@@ -662,6 +669,76 @@ impl DatalogEngine {
             }
 
             // Re-run safety check and recursion detection on the rewritten program
+            self.has_recursion = recursion::has_recursion(&rewritten);
+            self.strata = recursion::stratify(&rewritten);
+            self.program = Some(rewritten);
+        }
+    }
+
+    /// Apply Magic Sets transformation for recursive queries with bound arguments.
+    ///
+    /// Rewrites recursive rules so that the fixpoint computation is restricted to
+    /// only the tuples demanded by the query's constant bindings. For example,
+    /// `?reach(1, Y)` will only compute reachability from node 1.
+    fn apply_magic_sets(&mut self) {
+        if !self.optimization_config.enable_magic_sets {
+            return;
+        }
+        if let Some(program) = &self.program {
+            let recursive_rels = magic_sets::find_recursive_relations(program);
+            if recursive_rels.is_empty() {
+                return;
+            }
+
+            let bindings =
+                magic_sets::MagicSetRewriter::detect_query_bindings(program, &recursive_rels);
+            if bindings.is_empty() {
+                return;
+            }
+
+            let (rewritten, magic_seeds) =
+                magic_sets::MagicSetRewriter::rewrite_program(program, &bindings);
+
+            let debug = std::env::var("IL_DEBUG").is_ok();
+            if debug {
+                eprintln!(
+                    "DEBUG Magic Sets: rewrote {} relations, {} magic seeds",
+                    bindings.len(),
+                    magic_seeds.len()
+                );
+                for (name, tuples) in &magic_seeds {
+                    eprintln!("  seed {name}: {} tuples", tuples.len());
+                }
+                for (i, rule) in rewritten.rules.iter().enumerate() {
+                    let head_args = rule
+                        .head
+                        .args
+                        .iter()
+                        .map(|a| format!("{a:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let body_str = rule
+                        .body
+                        .iter()
+                        .map(|p| format!("{p:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "DEBUG Magic Sets rule[{i}]: {}({head_args}) <- {body_str}",
+                        rule.head.relation,
+                    );
+                }
+            }
+
+            // Inject magic seed facts into input_tuples
+            for (magic_rel, seed_tuples) in magic_seeds {
+                self.input_tuples
+                    .entry(magic_rel)
+                    .or_default()
+                    .extend(seed_tuples);
+            }
+
+            // Re-run recursion detection on rewritten program
             self.has_recursion = recursion::has_recursion(&rewritten);
             self.strata = recursion::stratify(&rewritten);
             self.program = Some(rewritten);
@@ -1378,6 +1455,11 @@ impl DatalogEngine {
         let sip_ms = sip_start.elapsed().as_millis() as u64;
         info!(source_len, sip_ms, "engine_sip_complete");
 
+        let magic_start = Instant::now();
+        self.apply_magic_sets();
+        let magic_ms = magic_start.elapsed().as_millis() as u64;
+        info!(source_len, magic_ms, "engine_magic_sets_complete");
+
         let build_start = Instant::now();
         self.build_ir()?;
         let build_ms = build_start.elapsed().as_millis() as u64;
@@ -1909,6 +1991,7 @@ mod tests {
             enable_sip_rewriting: false,
             enable_subplan_sharing: false,
             enable_boolean_specialization: false,
+            enable_magic_sets: false,
         };
         let engine = DatalogEngine::with_config(config.clone());
         assert!(!engine.config().enable_join_planning);
@@ -1925,6 +2008,7 @@ mod tests {
             enable_sip_rewriting: true,
             enable_subplan_sharing: true,
             enable_boolean_specialization: true,
+            enable_magic_sets: true,
         };
         engine.set_config(config);
         assert!(!engine.config().enable_join_planning);
@@ -2351,6 +2435,7 @@ mod tests {
             enable_sip_rewriting: false,
             enable_subplan_sharing: false,
             enable_boolean_specialization: false,
+            enable_magic_sets: false,
         };
         let mut engine = DatalogEngine::with_config(config);
         engine.add_tuples(
@@ -2732,5 +2817,182 @@ mod tests {
         // No HNSW search function, but query doesn't use hnsw_nearest — should be fine
         let results = engine.execute_tuples("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    // ====== Magic Sets Integration Tests ======
+
+    #[test]
+    fn test_magic_sets_tc_chain() {
+        // Linear chain: 1→2→3→...→20
+        let mut engine = DatalogEngine::new();
+        let edges: Vec<Tuple> = (1..20)
+            .map(|i| Tuple::new(vec![Value::Int64(i), Value::Int64(i + 1)]))
+            .collect();
+        engine.add_tuples("edge", edges);
+
+        // Query reach(1, Y) — should find 19 reachable nodes
+        let program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let results = engine.execute_tuples(program).unwrap();
+        assert_eq!(results.len(), 19);
+    }
+
+    #[test]
+    fn test_magic_sets_tc_matches_unbound() {
+        // Verify magic sets produces same results as unbound query (just filtered)
+        let mut engine = DatalogEngine::new();
+        let edges = vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            Tuple::new(vec![Value::Int64(3), Value::Int64(4)]),
+            Tuple::new(vec![Value::Int64(4), Value::Int64(5)]),
+            Tuple::new(vec![Value::Int64(10), Value::Int64(11)]),
+        ];
+        engine.add_tuples("edge", edges.clone());
+
+        // Unbound query: all pairs
+        let unbound_program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(X, Y) <- reach(X, Y)";
+        let all_results = engine.execute_tuples(unbound_program).unwrap();
+
+        // Filter manually for X=1
+        let expected: Vec<_> = all_results
+            .iter()
+            .filter(|t| t.get(0) == Some(&Value::Int64(1)))
+            .cloned()
+            .collect();
+
+        // Bound query: reach(1, Y)
+        let mut engine2 = DatalogEngine::new();
+        engine2.add_tuples("edge", edges);
+        let bound_program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let bound_results = engine2.execute_tuples(bound_program).unwrap();
+
+        // Same count (column 1 values should match)
+        assert_eq!(bound_results.len(), expected.len());
+        let mut bound_ys: Vec<_> = bound_results
+            .iter()
+            .map(|t| t.get(1).cloned().unwrap())
+            .collect();
+        let mut expected_ys: Vec<_> = expected
+            .iter()
+            .map(|t| t.get(1).cloned().unwrap())
+            .collect();
+        bound_ys.sort();
+        expected_ys.sort();
+        assert_eq!(bound_ys, expected_ys);
+    }
+
+    #[test]
+    fn test_magic_sets_disabled() {
+        // With magic sets disabled, bound query still works (just slower)
+        let config = OptimizationConfig {
+            enable_magic_sets: false,
+            ..Default::default()
+        };
+        let mut engine = DatalogEngine::with_config(config);
+        let edges = vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+        ];
+        engine.add_tuples("edge", edges);
+
+        let program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let results = engine.execute_tuples(program).unwrap();
+        assert_eq!(results.len(), 2); // 1→2, 1→3
+    }
+
+    #[test]
+    fn test_magic_sets_unbound_unchanged() {
+        // Unbound query should not be rewritten
+        let mut engine = DatalogEngine::new();
+        let edges = vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+        ];
+        engine.add_tuples("edge", edges);
+
+        let program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(X, Y) <- reach(X, Y)";
+        let results = engine.execute_tuples(program).unwrap();
+        // Full TC: (1,2), (1,3), (2,3)
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_magic_sets_both_bound() {
+        // ?reach(1, 3) — point query. Magic sets restricts to reach(1, *),
+        // the _c1 = 3 filter is applied post-hoc by the __query__ rule.
+        let mut engine = DatalogEngine::new();
+        let edges = vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            Tuple::new(vec![Value::Int64(3), Value::Int64(4)]),
+        ];
+        engine.add_tuples("edge", edges);
+
+        let program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(_c0, _c1) <- reach(_c0, _c1), _c0 = 1, _c1 = 3";
+        let results = engine.execute_tuples(program).unwrap();
+        assert_eq!(results.len(), 1); // Only (1, 3)
+    }
+
+    #[test]
+    fn test_magic_sets_string_constants() {
+        // Recursive relation with string keys
+        let mut engine = DatalogEngine::new();
+        engine.add_tuples(
+            "link",
+            vec![
+                Tuple::new(vec![
+                    Value::String(std::sync::Arc::from("a")),
+                    Value::String(std::sync::Arc::from("b")),
+                ]),
+                Tuple::new(vec![
+                    Value::String(std::sync::Arc::from("b")),
+                    Value::String(std::sync::Arc::from("c")),
+                ]),
+            ],
+        );
+
+        let program = "\
+            reach(X, Y) <- link(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), link(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = \"a\"";
+        let results = engine.execute_tuples(program).unwrap();
+        assert_eq!(results.len(), 2); // a→b, a→c
+    }
+
+    #[test]
+    fn test_magic_sets_with_sip() {
+        // Both SIP and Magic Sets active — no conflicts
+        let mut engine = DatalogEngine::new();
+        let edges = vec![
+            Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+            Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            Tuple::new(vec![Value::Int64(3), Value::Int64(4)]),
+        ];
+        engine.add_tuples("edge", edges);
+
+        let program = "\
+            reach(X, Y) <- edge(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let results = engine.execute_tuples(program).unwrap();
+        assert_eq!(results.len(), 3); // 1→2, 1→3, 1→4
     }
 }
